@@ -693,17 +693,32 @@ class SyncService {
 
       logger.info(`Found ${tickets.length} tickets in this week (filtered from ${allTickets.length} total)`);
 
-      // Step 2: Sync tickets to database
+      // Step 2: Transform tickets and map technician IDs
+      logger.info('Transforming tickets and mapping technician IDs...');
+      const transformedTickets = tickets
+        .map(fsTicket => transformTicket(fsTicket))
+        .filter(t => t !== null);
+
+      // Get all technicians to build ID mapping (CRITICAL: ensures tickets link to technicians)
+      const technicians = await technicianRepository.getAllActive();
+      const fsIdToInternalId = new Map(
+        technicians.map(tech => [Number(tech.freshserviceId), tech.id])
+      );
+      logger.info(`Built technician ID map for ${technicians.length} technicians`);
+
+      // Map FreshService responder IDs to internal technician IDs
+      const ticketsWithTechIds = mapTechnicianIds(transformedTickets, fsIdToInternalId);
+
+      // Upsert tickets to database
       const syncedTicketIds = new Set();
-      for (const fsTicket of tickets) {
+      for (const ticket of ticketsWithTechIds) {
         try {
-          const transformedTicket = transformTicket(fsTicket);
-          await ticketRepository.upsert(transformedTicket);
-          syncedTicketIds.add(fsTicket.id); // Track successfully synced tickets
+          await ticketRepository.upsert(ticket);
+          syncedTicketIds.add(ticket.freshserviceTicketId); // Track successfully synced tickets
           ticketsSynced++;
         } catch (error) {
           const errorMsg = String(error.message || error);
-          logger.warn(`Failed to sync ticket ${fsTicket.id}: ${errorMsg}`);
+          logger.warn(`Failed to sync ticket ${ticket.freshserviceTicketId}: ${errorMsg}`);
           failureCount++;
         }
       }

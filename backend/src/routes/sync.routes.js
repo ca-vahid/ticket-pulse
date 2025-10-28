@@ -5,6 +5,7 @@ import syncService from '../services/syncService.js';
 import scheduledSyncService from '../services/scheduledSyncService.js';
 import syncLogRepository from '../services/syncLogRepository.js';
 import logger from '../utils/logger.js';
+import { sseManager } from './sse.routes.js';
 
 const router = express.Router();
 
@@ -188,13 +189,9 @@ router.post(
     const result = await syncService.syncWeek({ startDate, endDate });
 
     // Broadcast sync completion to all SSE clients
-    const sseManager = await import('../services/sseManager.js').then(m => m.default);
-    sseManager.broadcast({
-      type: 'sync-completed',
-      data: {
-        syncType: 'week',
-        result,
-      },
+    sseManager.broadcast('sync-completed', {
+      syncType: 'week',
+      result,
     });
 
     res.json({

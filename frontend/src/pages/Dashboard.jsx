@@ -249,11 +249,17 @@ export default function Dashboard() {
               setSyncStatus('success');
               setSyncMessage('Background sync completed successfully!');
 
-              // Refresh dashboard
+              // Refresh dashboard - use appropriate fetch based on view mode
               addSyncLog('Refreshing dashboard data...', 'info');
-              const dateStr = selectedDate.toISOString().split('T')[0];
-              const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
-              await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+              if (viewMode === 'weekly') {
+                const weekStartStr = formatDateLocal(selectedWeek);
+                const weekResponse = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
+                setWeeklyData(weekResponse.data);
+              } else {
+                const dateStr = selectedDate.toISOString().split('T')[0];
+                const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
+                await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+              }
               addSyncLog('Dashboard data refreshed', 'success');
 
               setTimeout(() => {
@@ -302,12 +308,18 @@ export default function Dashboard() {
         setSyncStatus('success');
         setSyncMessage(`Sync completed! Synced ${techCount} technicians and ${ticketCount} tickets.`);
 
-        // Refresh the dashboard data
+        // Refresh the dashboard data - use appropriate fetch based on view mode
         console.log('[SYNC] Refreshing dashboard data...');
         addSyncLog('Refreshing dashboard data...', 'info');
-        const dateStr = formatDateLocal(selectedDate);
-        const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
-        await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+        if (viewMode === 'weekly') {
+          const weekStartStr = formatDateLocal(selectedWeek);
+          const weekResponse = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
+          setWeeklyData(weekResponse.data);
+        } else {
+          const dateStr = formatDateLocal(selectedDate);
+          const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
+          await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+        }
         addSyncLog('Dashboard data refreshed successfully', 'success');
 
         // Hide success message after 5 seconds
@@ -329,7 +341,16 @@ export default function Dashboard() {
         addSyncLog(`Warning: Unexpected sync status: ${latestSync?.status || 'unknown'}`, 'warn');
         setSyncStatus('success');
         setSyncMessage('Sync completed.');
-        await fetchDashboard('America/Los_Angeles', formatDateLocal(selectedDate));
+
+        // Refresh dashboard - use appropriate fetch based on view mode
+        if (viewMode === 'weekly') {
+          const weekStartStr = formatDateLocal(selectedWeek);
+          const weekResponse = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
+          setWeeklyData(weekResponse.data);
+        } else {
+          await fetchDashboard('America/Los_Angeles', formatDateLocal(selectedDate));
+        }
+
         setTimeout(() => {
           setSyncStatus(null);
           setRefreshing(false);
@@ -356,7 +377,7 @@ export default function Dashboard() {
         setRefreshing(false);
       }, 5000);
     }
-  }, [selectedDate, fetchDashboard]);
+  }, [selectedDate, selectedWeek, viewMode, fetchDashboard, formatDateLocal, setWeeklyData]);
 
   const handleSyncWeek = useCallback(async () => {
     console.log('[SYNC WEEK] Starting week sync process...');
@@ -404,11 +425,17 @@ export default function Dashboard() {
         setSyncStatus('success');
         setSyncMessage(`Week sync completed! ${response.data.ticketsSynced || 0} tickets synced.`);
 
-        // Refresh dashboard
+        // Refresh dashboard - use appropriate fetch based on view mode
         addSyncLog('Refreshing dashboard data...', 'info');
-        const dateStr = formatDateLocal(selectedDate);
-        const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
-        await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+        if (viewMode === 'weekly') {
+          const weekStartStr = formatDateLocal(selectedWeek);
+          const weekResponse = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
+          setWeeklyData(weekResponse.data);
+        } else {
+          const dateStr = formatDateLocal(selectedDate);
+          const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
+          await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+        }
         addSyncLog('Dashboard data refreshed', 'success');
 
         setTimeout(() => {
@@ -430,7 +457,7 @@ export default function Dashboard() {
         setRefreshing(false);
       }, 5000);
     }
-  }, [selectedDate, fetchDashboard, formatDateLocal]);
+  }, [selectedDate, selectedWeek, viewMode, fetchDashboard, formatDateLocal, setWeeklyData]);
 
   const handleLogout = async () => {
     await logout();
