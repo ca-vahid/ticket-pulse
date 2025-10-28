@@ -165,6 +165,7 @@ The weekly view provides comprehensive insights into ticket distribution across 
 ## Documentation
 
 - [CLAUDE.md](./CLAUDE.md) - Complete architecture guide
+- [CHANGELOG.md](./CHANGELOG.md) - Recent improvements and bug fixes
 - [docs/product.md](./docs/product.md) - Product requirements (PRD)
 - [docs/todo.md](./docs/todo.md) - Development task list
 

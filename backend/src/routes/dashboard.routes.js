@@ -118,9 +118,56 @@ router.get(
     const monday = new Date(selectedDate);
     monday.setDate(selectedDate.getDate() - currentDay);
 
+    // Calculate week range
+    const weekStart = new Date(monday);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(monday);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+
+    logger.debug(`Fetching weekly stats: ${weekStart.toISOString()} to ${weekEnd.toISOString()}`);
+
+    // Fetch all tickets in the week range (by either createdAt or firstAssignedAt)
+    // This matches the statsCalculator logic exactly
+    const { PrismaClient} = await import('@prisma/client');
+    const prisma = new PrismaClient();
+
+    const tickets = await prisma.ticket.findMany({
+      where: {
+        OR: [
+          {
+            createdAt: {
+              gte: weekStart,
+              lte: weekEnd,
+            },
+          },
+          {
+            firstAssignedAt: {
+              gte: weekStart,
+              lte: weekEnd,
+            },
+          },
+        ],
+        // Only count tickets assigned to active technicians
+        assignedTech: {
+          isActive: true,
+        },
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        firstAssignedAt: true,
+      },
+    });
+
+    await prisma.$disconnect();
+
+    logger.debug(`Found ${tickets.length} tickets in week range`);
+
     const dailyCounts = [];
 
-    // Get ticket counts for each day of the week (Monday to Sunday)
+    // Count tickets for each day using firstAssignedAt with createdAt fallback
+    // This matches statsCalculator.js logic exactly (lines 206-209)
     for (let i = 0; i < 7; i++) {
       const date = new Date(monday);
       date.setDate(monday.getDate() + i);
@@ -128,26 +175,13 @@ router.get(
       const result = getTodayRange(timezone, date);
       const { start, end } = result;
 
-      // Query tickets created on this date
-      // IMPORTANT: Only count tickets assigned to active technicians
-      // to match the main dashboard stats calculation
-      const { PrismaClient} = await import('@prisma/client');
-      const prisma = new PrismaClient();
-
-      const count = await prisma.ticket.count({
-        where: {
-          createdAt: {
-            gte: start,
-            lte: end,
-          },
-          // Only count tickets assigned to active technicians
-          assignedTech: {
-            isActive: true,
-          },
-        },
-      });
-
-      await prisma.$disconnect();
+      // Use same logic as statsCalculator: prefer firstAssignedAt, fallback to createdAt
+      const count = tickets.filter(ticket => {
+        const assignDate = ticket.firstAssignedAt
+          ? new Date(ticket.firstAssignedAt)
+          : new Date(ticket.createdAt);
+        return assignDate >= start && assignDate <= end;
+      }).length;
 
       dailyCounts.push({
         date: date.toISOString().split('T')[0],

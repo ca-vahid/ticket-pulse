@@ -62,6 +62,249 @@ class SyncService {
     }
   }
 
+  // ========================================
+  // CORE SYNC METHODS (Private - Single Source of Truth)
+  // ========================================
+
+  /**
+   * Transform FreshService tickets and map to internal technician IDs
+   * CRITICAL: This is the SINGLE SOURCE OF TRUTH for technician ID mapping
+   *
+   * @param {Array} fsTickets - Raw FreshService tickets
+   * @returns {Promise<Array>} Tickets with assignedTechId populated
+   * @private
+   */
+  async _prepareTicketsForDatabase(fsTickets) {
+    if (!Array.isArray(fsTickets) || fsTickets.length === 0) {
+      return [];
+    }
+
+    // Step 1: Transform tickets to our format
+    const transformedTickets = transformTickets(fsTickets);
+    logger.debug(`Transformed ${transformedTickets.length} tickets`);
+
+    // Step 2: Get all active technicians to build ID mapping
+    const technicians = await technicianRepository.getAllActive();
+    const fsIdToInternalId = new Map(
+      technicians.map(tech => [Number(tech.freshserviceId), tech.id])
+    );
+    logger.debug(`Built technician ID map for ${technicians.length} technicians`);
+
+    // Step 3: Map FreshService responder IDs to internal technician IDs
+    const ticketsWithTechIds = mapTechnicianIds(transformedTickets, fsIdToInternalId);
+
+    logger.info(`Prepared ${ticketsWithTechIds.length} tickets for database (mapped to ${technicians.length} technicians)`);
+    return ticketsWithTechIds;
+  }
+
+  /**
+   * Fetch and analyze ticket activities with configurable rate limiting
+   *
+   * @param {Object} client - FreshService API client
+   * @param {Array} tickets - Raw FreshService tickets or ticket objects with id/freshserviceTicketId
+   * @param {Object} options - Configuration options
+   * @param {number} options.concurrency - Number of parallel requests (default: 1 for sequential)
+   * @param {number} options.batchDelay - Delay in ms between batches (default: 1100)
+   * @param {Function} options.ticketFilter - Filter function (ticket) => boolean
+   * @param {Map} options.existingTicketsMap - Map of existing tickets to skip if they have analysis
+   * @returns {Promise<Map>} Map of ticketId → { isSelfPicked, assignedBy, firstAssignedAt }
+   * @private
+   */
+  async _analyzeTicketActivities(client, tickets, options = {}) {
+    const {
+      concurrency = 1,
+      batchDelay = 1100,
+      ticketFilter = null,
+      existingTicketsMap = new Map(),
+    } = options;
+
+    if (!Array.isArray(tickets) || tickets.length === 0) {
+      return new Map();
+    }
+
+    // Filter tickets if needed
+    let ticketsToAnalyze = tickets;
+    if (ticketFilter) {
+      ticketsToAnalyze = tickets.filter(ticketFilter);
+    }
+
+    logger.info(`Analyzing ${ticketsToAnalyze.length} tickets (concurrency: ${concurrency}, delay: ${batchDelay}ms)`);
+
+    const analysisMap = new Map();
+    let processedCount = 0;
+    let errorCount = 0;
+
+    // Process function for a single ticket
+    const processTicket = async (ticket, index) => {
+      // Calculate delay based on batch (for rate limiting)
+      const delayMs = Math.floor(index / concurrency) * batchDelay;
+      if (delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+
+      try {
+        // Extract ticket ID (handle both raw FS tickets and transformed tickets)
+        const ticketId = ticket.id || ticket.freshserviceTicketId;
+
+        // Fetch activities from FreshService
+        const activities = await client.fetchTicketActivities(Number(ticketId));
+
+        if (activities && activities.length > 0) {
+          // Analyze activities to determine assignment details
+          const analysis = analyzeTicketActivities(activities);
+          analysisMap.set(ticketId.toString(), analysis);
+          processedCount++;
+
+          logger.debug(`Ticket ${ticketId}: isSelfPicked=${analysis.isSelfPicked}, assignedBy=${analysis.assignedBy}`);
+        }
+
+        return { success: true, ticketId };
+      } catch (error) {
+        errorCount++;
+        const ticketId = ticket.id || ticket.freshserviceTicketId;
+
+        // Only log non-500 errors (500s are expected for some tickets)
+        if (!String(error).includes('500')) {
+          logger.warn(`Failed to analyze ticket ${ticketId}: ${error.message || error}`);
+        }
+
+        return { success: false, ticketId, error };
+      }
+    };
+
+    // Process all tickets (Promise.all handles both sequential and parallel)
+    await Promise.all(
+      ticketsToAnalyze.map((ticket, index) => processTicket(ticket, index))
+    );
+
+    logger.info(`Activity analysis complete: ${processedCount} analyzed, ${errorCount} errors`);
+    return analysisMap;
+  }
+
+  /**
+   * Update tickets with activity analysis results
+   *
+   * @param {Map} analysisMap - Map of ticketId → { isSelfPicked, assignedBy, firstAssignedAt }
+   * @returns {Promise<number>} Count of updated tickets
+   * @private
+   */
+  async _updateTicketsWithAnalysis(analysisMap) {
+    if (!analysisMap || analysisMap.size === 0) {
+      return 0;
+    }
+
+    const { PrismaClient } = await import('@prisma/client');
+    const prisma = new PrismaClient();
+    let updatedCount = 0;
+
+    try {
+      // Batch update tickets
+      for (const [ticketId, analysis] of analysisMap.entries()) {
+        try {
+          await prisma.ticket.update({
+            where: { freshserviceTicketId: BigInt(ticketId) },
+            data: {
+              firstAssignedAt: analysis.firstAssignedAt,
+              isSelfPicked: analysis.isSelfPicked,
+              assignedBy: analysis.assignedBy,
+            },
+          });
+          updatedCount++;
+        } catch (error) {
+          logger.warn(`Failed to update ticket ${ticketId} with analysis: ${error.message || error}`);
+        }
+      }
+
+      logger.info(`Updated ${updatedCount} tickets with activity analysis`);
+      return updatedCount;
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+
+  /**
+   * Batch upsert tickets to database
+   *
+   * @param {Array} tickets - Prepared tickets (with assignedTechId)
+   * @returns {Promise<number>} Count of synced tickets
+   * @private
+   */
+  async _upsertTickets(tickets) {
+    if (!Array.isArray(tickets) || tickets.length === 0) {
+      return 0;
+    }
+
+    let syncedCount = 0;
+
+    for (const ticket of tickets) {
+      try {
+        await ticketRepository.upsert(ticket);
+        syncedCount++;
+      } catch (error) {
+        const ticketId = ticket.freshserviceTicketId || ticket.id;
+        logger.warn(`Failed to upsert ticket ${ticketId}: ${error.message || error}`);
+      }
+    }
+
+    logger.info(`Upserted ${syncedCount}/${tickets.length} tickets`);
+    return syncedCount;
+  }
+
+  /**
+   * Build FreshService API filters based on sync type and parameters
+   *
+   * @param {Object} params - Sync parameters
+   * @param {string} params.syncType - 'incremental', 'full', or 'week'
+   * @param {boolean} params.fullSync - Force full sync (for incremental type)
+   * @param {number} params.daysToSync - Days to sync back (default: 30)
+   * @param {string} params.weekStart - Week start date (YYYY-MM-DD)
+   * @param {string} params.weekEnd - Week end date (YYYY-MM-DD)
+   * @returns {Promise<Object>} FreshService API filters { updated_since, include }
+   * @private
+   */
+  async _buildSyncFilters(params) {
+    const {
+      syncType = 'incremental',
+      fullSync = false,
+      daysToSync = 30,
+      weekStart = null,
+      weekEnd = null,
+    } = params;
+
+    const filters = {
+      include: 'requester,stats',
+    };
+
+    if (syncType === 'week' && weekStart) {
+      // Week sync: use week start date
+      filters.updated_since = new Date(weekStart + 'T00:00:00Z').toISOString();
+    } else if (syncType === 'full' || fullSync) {
+      // Full sync: go back N days
+      const historicalDate = new Date();
+      historicalDate.setDate(historicalDate.getDate() - daysToSync);
+      filters.updated_since = historicalDate.toISOString();
+    } else {
+      // Incremental sync: use last successful sync time
+      const latestSync = await syncLogRepository.getLatestSuccessful();
+
+      if (latestSync && latestSync.completedAt) {
+        // Add 5-minute buffer to avoid missing tickets
+        filters.updated_since = new Date(latestSync.completedAt.getTime() - 5 * 60 * 1000).toISOString();
+      } else {
+        // No previous sync, fallback to full sync
+        const historicalDate = new Date();
+        historicalDate.setDate(historicalDate.getDate() - daysToSync);
+        filters.updated_since = historicalDate.toISOString();
+      }
+    }
+
+    return filters;
+  }
+
+  // ========================================
+  // END CORE SYNC METHODS
+  // ========================================
+
   /**
    * Sync technicians from FreshService
    * @returns {Promise<number>} Number of technicians synced
@@ -120,6 +363,9 @@ class SyncService {
 
   /**
    * Sync tickets from FreshService
+   *
+   * REFACTORED: Now uses core private methods for consistency and maintainability
+   *
    * @param {Object} options - Sync options
    * @returns {Promise<number>} Number of tickets synced
    */
@@ -129,61 +375,26 @@ class SyncService {
       this.progress.currentStepNumber = 2;
       logger.info('Starting ticket sync');
       const client = await this._initializeClient();
-      const syncConfig = await settingsRepository.getSyncConfig();
 
-      // Determine time range for sync
-      let updatedSince;
-      const daysToSync = options.daysToSync || 30; // Default to 30 days if not specified
-
-      if (options.fullSync) {
-        // Full sync: fetch historical data based on daysToSync parameter
-        const historicalDate = new Date();
-        historicalDate.setDate(historicalDate.getDate() - daysToSync);
-        updatedSince = historicalDate;
-        logger.info(`Performing full sync (last ${daysToSync} days)`);
-      } else {
-        // Incremental sync: fetch only tickets updated since last successful sync
-        const latestSync = await syncLogRepository.getLatestSuccessful();
-
-        if (latestSync && latestSync.completedAt) {
-          // Add a 5-minute buffer to avoid missing tickets due to clock skew
-          updatedSince = new Date(latestSync.completedAt.getTime() - 5 * 60 * 1000);
-          logger.info(`Performing incremental sync (since ${updatedSince.toISOString()})`);
-        } else {
-          // No previous sync, do full sync with default date range
-          const historicalDate = new Date();
-          historicalDate.setDate(historicalDate.getDate() - daysToSync);
-          updatedSince = historicalDate;
-          logger.info(`No previous sync found, performing full sync (last ${daysToSync} days)`);
-        }
-      }
-
-      // Fetch tickets updated since the determined time
-      const filters = {
-        updated_since: updatedSince.toISOString(),
-        include: 'requester,stats', // Include requester details and time stats in the response
-      };
+      // Step 1: Use _buildSyncFilters() to determine time range
+      const filters = await this._buildSyncFilters({
+        syncType: options.fullSync ? 'full' : 'incremental',
+        fullSync: options.fullSync,
+        daysToSync: options.daysToSync || 30,
+      });
 
       if (options.status) {
         filters.status = options.status;
       }
 
+      // Step 2: Fetch tickets from FreshService
       const fsTickets = await client.fetchTickets(filters);
       logger.info(`Fetched ${fsTickets.length} tickets from FreshService`);
 
-      // Transform tickets to our format
-      const transformedTickets = transformTickets(fsTickets);
+      // Step 3: Use _prepareTicketsForDatabase() for transform + mapping
+      const ticketsWithTechIds = await this._prepareTicketsForDatabase(fsTickets);
 
-      // Get all technicians to build ID mapping
-      const technicians = await technicianRepository.getAllActive();
-      const fsIdToInternalId = new Map(
-        technicians.map(tech => [Number(tech.freshserviceId), tech.id])
-      );
-
-      // Map FreshService responder IDs to internal technician IDs
-      const ticketsWithTechIds = mapTechnicianIds(transformedTickets, fsIdToInternalId);
-
-      // OPTIMIZATION: Batch fetch all existing tickets in one query
+      // Step 4: OPTIMIZATION - Batch fetch existing tickets in one query
       const ticketIds = ticketsWithTechIds.map(t => t.freshserviceTicketId);
       const existingTicketsArray = await ticketRepository.getByFreshserviceIds(ticketIds);
       const existingTicketsMap = new Map(
@@ -191,41 +402,25 @@ class SyncService {
       );
       logger.info(`Found ${existingTicketsMap.size} existing tickets out of ${ticketIds.length}`);
 
-      // OPTIMIZATION: Skip activity analysis during full sync (too slow)
-      // Analyze NEW tickets or tickets missing assignment data
-      // IMPORTANT: Do this even during full sync to ensure assignedBy is populated
-      const activityAnalysisMap = new Map();
-
-      const ticketsNeedingAnalysis = ticketsWithTechIds.filter(ticket => {
-        const existingTicket = existingTicketsMap.get(ticket.freshserviceTicketId.toString());
+      // Step 5: Use _analyzeTicketActivities() with selective filter
+      // Only analyze NEW tickets or tickets missing assignment data
+      const ticketFilter = (fsTicket) => {
+        const existingTicket = existingTicketsMap.get(fsTicket.id.toString());
+        const hasAssignedTech = fsTicket.responder_id != null;
         const needsAnalysis = !existingTicket ||
-          (existingTicket.assignedTechId && (!existingTicket.assignedBy || !existingTicket.firstAssignedAt));
-        return needsAnalysis && ticket.assignedTechId;
+          (hasAssignedTech && (!existingTicket.assignedBy || !existingTicket.firstAssignedAt));
+        return needsAnalysis && hasAssignedTech;
+      };
+
+      const activityAnalysisMap = await this._analyzeTicketActivities(client, fsTickets, {
+        concurrency: 1,
+        batchDelay: 1100,
+        ticketFilter,
       });
 
-      logger.info(`${ticketsNeedingAnalysis.length} tickets need activity analysis`);
+      logger.info(`Analyzed ${activityAnalysisMap.size} tickets for activity data`);
 
-      // Fetch activities for tickets that need analysis (with rate limiting)
-      for (const ticket of ticketsNeedingAnalysis) {
-        try {
-          // Add delay to avoid hitting FreshService rate limits (~1 request per second)
-          await new Promise(resolve => setTimeout(resolve, 1100));
-
-          const activities = await client.fetchTicketActivities(
-            ticket.freshserviceTicketId
-          );
-          const analysis = analyzeTicketActivities(activities);
-          activityAnalysisMap.set(ticket.freshserviceTicketId.toString(), analysis);
-          logger.debug(`Ticket ${ticket.freshserviceTicketId}: isSelfPicked=${analysis.isSelfPicked}, assignedBy=${analysis.assignedBy}`);
-        } catch (activityError) {
-          logger.warn(
-            `Failed to fetch activities for ticket ${ticket.freshserviceTicketId}:`,
-            activityError
-          );
-        }
-      }
-
-      // OPTIMIZATION: Batch upsert tickets
+      // Step 6: Upsert tickets with merge logic and activity logging
       let syncedCount = 0;
       for (const ticket of ticketsWithTechIds) {
         try {
@@ -652,28 +847,22 @@ class SyncService {
    * 3. Analyze activities for assignment tracking
    * 4. Backfill pickup times for assigned tickets
    *
+   * REFACTORED: Now uses core private methods for consistency and maintainability
+   *
    * @param {Object} options - Sync options
    * @param {string} options.startDate - Monday of the week (YYYY-MM-DD)
    * @param {string} options.endDate - Sunday of the week (YYYY-MM-DD)
-   * @param {number} options.concurrency - Number of parallel API calls (default: 5)
+   * @param {number} options.concurrency - Number of parallel API calls (default: 3)
    * @returns {Promise<Object>} Sync result summary
    */
   async syncWeek({ startDate, endDate, concurrency = 3 }) {
     try {
       logger.info(`Starting week sync: ${startDate} to ${endDate} (concurrency: ${concurrency})`);
       const client = await this._initializeClient();
-      const { PrismaClient } = await import('@prisma/client');
-      const prisma = new PrismaClient();
 
       // Convert dates to Date objects
       const start = new Date(startDate + 'T00:00:00Z');
       const end = new Date(endDate + 'T23:59:59Z');
-
-      let ticketsSynced = 0;
-      let activitiesAnalyzed = 0;
-      let pickupTimesBackfilled = 0;
-      let failureCount = 0;
-      const apiErrors = { rate_limit: 0, server_error: 0, other: 0 };
 
       // Step 1: Fetch tickets from FreshService for this week
       logger.info(`Fetching tickets updated/created between ${startDate} and ${endDate}`);
@@ -693,117 +882,39 @@ class SyncService {
 
       logger.info(`Found ${tickets.length} tickets in this week (filtered from ${allTickets.length} total)`);
 
-      // Step 2: Transform tickets and map technician IDs
-      logger.info('Transforming tickets and mapping technician IDs...');
-      const transformedTickets = tickets
-        .map(fsTicket => transformTicket(fsTicket))
-        .filter(t => t !== null);
+      // Step 2: Transform tickets and map technician IDs using core method
+      const preparedTickets = await this._prepareTicketsForDatabase(tickets);
 
-      // Get all technicians to build ID mapping (CRITICAL: ensures tickets link to technicians)
-      const technicians = await technicianRepository.getAllActive();
-      const fsIdToInternalId = new Map(
-        technicians.map(tech => [Number(tech.freshserviceId), tech.id])
-      );
-      logger.info(`Built technician ID map for ${technicians.length} technicians`);
+      // Step 3: Upsert tickets using core method
+      const ticketsSynced = await this._upsertTickets(preparedTickets);
+      const ticketsSkipped = tickets.length - ticketsSynced;
 
-      // Map FreshService responder IDs to internal technician IDs
-      const ticketsWithTechIds = mapTechnicianIds(transformedTickets, fsIdToInternalId);
+      // Step 4: Analyze activities using core method
+      const analysisMap = await this._analyzeTicketActivities(client, tickets, {
+        concurrency,
+        batchDelay: 1500, // 1.5s delay per batch for week sync
+      });
 
-      // Upsert tickets to database
-      const syncedTicketIds = new Set();
-      for (const ticket of ticketsWithTechIds) {
-        try {
-          await ticketRepository.upsert(ticket);
-          syncedTicketIds.add(ticket.freshserviceTicketId); // Track successfully synced tickets
-          ticketsSynced++;
-        } catch (error) {
-          const errorMsg = String(error.message || error);
-          logger.warn(`Failed to sync ticket ${ticket.freshserviceTicketId}: ${errorMsg}`);
-          failureCount++;
+      // Step 5: Update tickets with analysis results using core method
+      await this._updateTicketsWithAnalysis(analysisMap);
+
+      // Count pickup times backfilled (tickets that had firstAssignedAt set)
+      let pickupTimesBackfilled = 0;
+      for (const [ticketId, analysis] of analysisMap.entries()) {
+        if (analysis.firstAssignedAt) {
+          pickupTimesBackfilled++;
         }
       }
 
-      // Step 3: Fetch and analyze activities for successfully synced tickets only
-      const ticketsToProcess = tickets.filter(t => syncedTicketIds.has(t.id));
-      logger.info(`Fetching activities for ${ticketsToProcess.length} tickets (${concurrency} parallel requests)...`);
-
-      // Process tickets in parallel batches
-      const processTicket = async (ticket, index) => {
-        const delayMs = Math.floor(index / concurrency) * 1500; // 1.5s delay per batch (slower to avoid rate limits)
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-
-        try {
-          const activities = await client.fetchTicketActivities(Number(ticket.id));
-
-          if (activities && activities.length > 0) {
-            const analysis = analyzeTicketActivities(activities);
-
-            // Update ticket with activity analysis results
-            await prisma.ticket.update({
-              where: { freshserviceTicketId: ticket.id },
-              data: {
-                firstAssignedAt: analysis.firstAssignedAt,
-                isSelfPicked: analysis.isSelfPicked,
-                assignedBy: analysis.assignedBy,
-              },
-            });
-
-            if (analysis.firstAssignedAt) {
-              pickupTimesBackfilled++;
-            }
-
-            return { success: true, ticketId: ticket.id };
-          }
-
-          return { success: true, ticketId: ticket.id, noActivities: true };
-        } catch (error) {
-          // Categorize error type
-          const errorMessage = String(error.message || error);
-          let errorType = 'other';
-
-          if (errorMessage.includes('429')) {
-            errorType = 'rate_limit';
-            apiErrors.rate_limit++;
-          } else if (errorMessage.includes('500')) {
-            errorType = 'server_error';
-            apiErrors.server_error++;
-          } else {
-            apiErrors.other++;
-          }
-
-          // Only log non-500 errors (500 errors are expected for some tickets)
-          if (errorType !== 'server_error') {
-            logger.warn(`Failed to fetch activities for ticket ${ticket.id}: ${errorMessage}`);
-          }
-
-          return { success: false, ticketId: ticket.id, error: errorMessage, errorType };
-        }
-      };
-
-      // Process all successfully synced tickets with concurrency limit
-      const results = await Promise.all(
-        ticketsToProcess.map((ticket, index) => processTicket(ticket, index))
-      );
-
-      // Count successes and failures
-      activitiesAnalyzed = results.filter(r => r.success && !r.noActivities).length;
-      const activityFailures = results.filter(r => !r.success).length;
-      failureCount += activityFailures;
-
-      await prisma.$disconnect();
-
-      const successCount = results.filter(r => r.success).length;
       const summary = {
         ticketsSynced,
-        ticketsSkipped: tickets.length - ticketsSynced,
-        activitiesAnalyzed,
+        ticketsSkipped,
+        activitiesAnalyzed: analysisMap.size,
         pickupTimesBackfilled,
-        failureCount,
-        apiErrors,
         totalProcessed: tickets.length,
-        successRate: ticketsToProcess.length > 0 ? `${Math.round((successCount / ticketsToProcess.length) * 100)}%` : '100%',
+        successRate: tickets.length > 0 ? `${Math.round((ticketsSynced / tickets.length) * 100)}%` : '100%',
         weekRange: `${startDate} to ${endDate}`,
-        message: `Synced ${ticketsSynced}/${tickets.length} tickets, analyzed ${activitiesAnalyzed} activities, backfilled ${pickupTimesBackfilled} pickup times. Errors: ${apiErrors.server_error} API errors (500), ${apiErrors.rate_limit} rate limits (429), ${apiErrors.other} other`,
+        message: `Synced ${ticketsSynced}/${tickets.length} tickets, analyzed ${analysisMap.size} activities, backfilled ${pickupTimesBackfilled} pickup times`,
       };
 
       logger.info('Week sync completed', summary);

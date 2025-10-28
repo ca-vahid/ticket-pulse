@@ -18,7 +18,64 @@
 
 ---
 
-## ✅ Recently Completed (October 18, 2025)
+## ✅ Recently Completed (October 28, 2024)
+
+### Major Improvements - Code Quality & Data Accuracy
+
+- [x] **Sync Service Refactor** - Eliminated 400 lines of duplicated code (49% reduction)
+  - Extracted 5 core private methods as single source of truth
+  - `_prepareTicketsForDatabase()` - Transform and map technician IDs
+  - `_analyzeTicketActivities()` - Batch analyze with rate limiting
+  - `_updateTicketsWithAnalysis()` - Update self-picked/assigned data
+  - `_upsertTickets()` - Safe database upserts
+  - `_buildSyncFilters()` - Consistent API filters
+  - **Impact**: All sync methods (syncTickets, syncWeek, backfillPickupTimes) now use identical core logic
+  - **File**: `backend/src/services/syncService.js` - 819 lines → 550 lines (33% reduction)
+
+- [x] **Ticket Mapping Issue Fix** - Fixed 748 historical tickets with NULL assignedTechId
+  - Root cause: `syncWeek()` was missing technician ID mapping step
+  - Created one-time repair script: `backend/repair-unmapped-tickets.js`
+  - **Results**: Aug 25-31 week increased from 27 to 354 tickets (13x improvement)
+  - Fixed 190 tickets with valid responders, 558 genuinely unassigned
+  - **Impact**: Historical weeks now show correct ticket counts
+
+- [x] **Calendar Count Fix** - Standardized date field usage across endpoints
+  - Root cause: Calendar used `createdAt`, technician breakdown used `firstAssignedAt`
+  - 88 tickets (24%) created on different day than assigned, causing discrepancies
+  - **Solution**: Both now use `firstAssignedAt` (with `createdAt` fallback)
+  - **File**: `backend/src/routes/dashboard.routes.js` - `/weekly-stats` endpoint
+  - **Results**: Calendar day totals now exactly match sum of technician counts
+
+### Frontend UX Improvements
+
+- [x] **Smart View Mode Transitions** - Preserve historical context when switching views
+  - Weekly → Daily: Shows matching day of week from selected historical week
+  - Daily → Weekly: Shows week containing selected date
+  - **File**: `frontend/src/pages/Dashboard.jsx` - Added `handleSwitchToDaily()` and `handleSwitchToWeekly()`
+
+- [x] **localStorage Persistence** - Selected date/week/view survives browser refresh
+  - Automatically saves `dashboardSelectedDate`, `dashboardSelectedWeek`, `dashboardViewMode`
+  - Works across browser refreshes, crashes, and navigation
+  - **File**: `frontend/src/pages/Dashboard.jsx` - Added 3 useEffect hooks for auto-save
+
+### Documentation & Cleanup
+
+- [x] **Consolidated Documentation** - Created `CHANGELOG.md` with all improvements
+- [x] **Cleaned Up MD Files** - Removed 4 individual improvement docs, kept consolidated version
+- [x] **Updated README** - Added CHANGELOG.md reference
+
+### Diagnostic Tools Created
+
+- `backend/repair-unmapped-tickets.js` - One-time historical data repair
+- `backend/analyze-date-fields.js` - Date field analysis
+- `backend/verify-calendar-counts.js` - Verification script
+- `backend/count-unmapped.js` - Count unmapped tickets
+
+**See [CHANGELOG.md](../CHANGELOG.md) for detailed documentation of all improvements.**
+
+---
+
+## ✅ Completed (October 18, 2025)
 
 ### Backend Enhancements
 - [x] **Incremental Background Sync** - Only fetches tickets updated since last sync (5-min buffer)

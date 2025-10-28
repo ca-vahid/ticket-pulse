@@ -57,13 +57,21 @@ export default function Dashboard() {
   const [showSyncDetails, setShowSyncDetails] = useState(false);
   const [backgroundSyncRunning, setBackgroundSyncRunning] = useState(false);
 
-  // Initialize selectedDate from navigation state (when returning from detail page) or default to today
+  // Initialize selectedDate from localStorage, navigation state, or default to today
   const [selectedDate, setSelectedDate] = useState(() => {
+    // Priority 1: Navigation state (when returning from detail page)
     const returnDate = location.state?.returnDate;
     if (returnDate) {
-      // If returnDate is a string (YYYY-MM-DD), parse it
       return typeof returnDate === 'string' ? new Date(returnDate + 'T12:00:00') : new Date(returnDate);
     }
+
+    // Priority 2: localStorage (persists across browser refreshes)
+    const stored = localStorage.getItem('dashboardSelectedDate');
+    if (stored) {
+      return new Date(stored);
+    }
+
+    // Priority 3: Default to today
     return new Date();
   });
   const [hiddenTechIds, setHiddenTechIds] = useState(() => {
@@ -92,19 +100,38 @@ export default function Dashboard() {
   const [weeklyData, setWeeklyData] = useState(null);
   const [isLoadingWeekly, setIsLoadingWeekly] = useState(false);
 
-  // Daily/Weekly view toggle state - restore from navigation state if available
+  // Daily/Weekly view toggle state - restore from localStorage or navigation state
   const [viewMode, setViewMode] = useState(() => {
-    return location.state?.viewMode || 'daily';
-  });
-
-  // Selected week (Monday) for weekly view - restore from navigation state if available
-  const [selectedWeek, setSelectedWeek] = useState(() => {
-    const returnWeek = location.state?.returnWeek;
-    if (returnWeek) {
-      const weekDate = new Date(returnWeek + 'T12:00:00');
-      return weekDate;
+    // Priority 1: Navigation state
+    if (location.state?.viewMode) {
+      return location.state.viewMode;
     }
 
+    // Priority 2: localStorage (persists across browser refreshes)
+    const stored = localStorage.getItem('dashboardViewMode');
+    if (stored) {
+      return stored;
+    }
+
+    // Priority 3: Default to daily
+    return 'daily';
+  });
+
+  // Selected week (Monday) for weekly view - restore from localStorage or navigation state
+  const [selectedWeek, setSelectedWeek] = useState(() => {
+    // Priority 1: Navigation state
+    const returnWeek = location.state?.returnWeek;
+    if (returnWeek) {
+      return new Date(returnWeek + 'T12:00:00');
+    }
+
+    // Priority 2: localStorage (persists across browser refreshes)
+    const stored = localStorage.getItem('dashboardSelectedWeek');
+    if (stored) {
+      return new Date(stored);
+    }
+
+    // Priority 3: Calculate current week's Monday
     const now = new Date();
     const currentDay = (now.getDay() + 6) % 7; // Convert to Monday=0
     const monday = new Date(now);
@@ -113,6 +140,21 @@ export default function Dashboard() {
     return monday;
   });
 
+  // Persist selectedDate to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('dashboardSelectedDate', selectedDate.toISOString());
+  }, [selectedDate]);
+
+  // Persist selectedWeek to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('dashboardSelectedWeek', selectedWeek.toISOString());
+  }, [selectedWeek]);
+
+  // Persist viewMode to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('dashboardViewMode', viewMode);
+  }, [viewMode]);
+
   // Helper function to format date as YYYY-MM-DD in local timezone
   const formatDateLocal = useCallback((date) => {
     const year = date.getFullYear();
@@ -120,6 +162,32 @@ export default function Dashboard() {
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }, []);
+
+  // Smart handler for switching to daily view
+  const handleSwitchToDaily = useCallback(() => {
+    // Calculate which day of week today is
+    const today = new Date();
+    const todayDayOfWeek = (today.getDay() + 6) % 7; // Convert to Monday=0
+
+    // Calculate the same day of week from the selected week
+    const targetDate = new Date(selectedWeek);
+    targetDate.setDate(selectedWeek.getDate() + todayDayOfWeek);
+
+    setSelectedDate(targetDate);
+    setViewMode('daily');
+  }, [selectedWeek]);
+
+  // Smart handler for switching to weekly view
+  const handleSwitchToWeekly = useCallback(() => {
+    // Calculate Monday of the selected date's week
+    const currentDay = (selectedDate.getDay() + 6) % 7; // Convert to Monday=0
+    const monday = new Date(selectedDate);
+    monday.setDate(selectedDate.getDate() - currentDay);
+    monday.setHours(0, 0, 0, 0);
+
+    setSelectedWeek(monday);
+    setViewMode('weekly');
+  }, [selectedDate]);
 
   // Fetch dashboard data on mount and when date changes
   useEffect(() => {
@@ -849,7 +917,7 @@ export default function Dashboard() {
               {/* Daily/Weekly/Monthly Toggle */}
               <div className="inline-flex items-center gap-1 bg-white bg-opacity-20 rounded-lg p-1 mb-2">
                 <button
-                  onClick={() => setViewMode('daily')}
+                  onClick={handleSwitchToDaily}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                     viewMode === 'daily'
                       ? 'bg-white text-blue-600 shadow-sm'
@@ -859,7 +927,7 @@ export default function Dashboard() {
                   Daily
                 </button>
                 <button
-                  onClick={() => setViewMode('weekly')}
+                  onClick={handleSwitchToWeekly}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                     viewMode === 'weekly'
                       ? 'bg-white text-blue-600 shadow-sm'
