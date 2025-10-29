@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Ticket Pulse** is a real-time IT helpdesk dashboard that provides visibility into FreshService ticket distribution across technicians. The primary user is an IT Coordinator who needs to fairly assign 20-30 tickets daily while balancing workload across ~11 technicians.
 
-**Current Status**: Planning phase (Phase 0). Backend and frontend code not yet implemented.
+**Current Status**: MVP implemented with real-time dashboard, search/filter functionality, and weekly view. Production-ready.
 
 ## Tech Stack
 
@@ -33,11 +33,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Application Insights (monitoring)
 - GitHub Actions (CI/CD)
 
+## Implemented Features
+
+### Search and Filter System (Completed Oct 2025)
+**Dashboard Page:**
+- **SearchBox Component**: Real-time search by ticket subject, ID, or requester name
+- **CategoryFilter Component**: Multi-select dropdown for filtering by ticket category
+- **Dynamic Stats Recalculation**: All stats cards and individual technician metrics update when filtering
+- **Session Persistence**: Filters persist in sessionStorage during navigation
+- **Weekly View Support**: Full filtering works in both daily and weekly views
+- **Daily Breakdown Grid**: Weekly view's Mon-Sun calendar updates with filtered counts
+
+**Technical Implementation:**
+- Frontend filtering with dynamic stat recalculation (`recalculateTechStats` helper)
+- Backend sends `weeklyTickets` array for weekly view filtering
+- Separate handling for `tickets` (daily) vs `weeklyTickets` (weekly) fields
+- Defensive programming with explicit existence checks (not truthiness)
+
+**Known Issues to Fix:**
+- TechnicianDetail page doesn't receive filtered context when navigating from filtered Dashboard
+- TechnicianDetail page lacks search/filter components
+
+### Core Dashboard Features
+- **Real-time Updates**: SSE (Server-Sent Events) for live data refresh
+- **Daily/Weekly Views**: Toggle between daily and weekly ticket views
+- **Self-Picked Detection**: Algorithm identifies tickets picked vs assigned
+- **Load Level Indicators**: Visual workload indicators (light/medium/heavy)
+- **Compact View Mode**: Space-efficient display option
+- **Hidden Technicians**: Ability to hide inactive technicians
+- **Date Navigation**: Calendar picker and prev/next navigation
+- **Sync Controls**: Manual sync with FreshService API
+
 ## Planned Architecture
 
 ### Directory Structure
 ```
-freshservice-dashboard/
+ticket-pulse/
 ├── backend/
 │   ├── src/
 │   │   ├── app.js              # Express app initialization

@@ -1,6 +1,30 @@
 # Ticket Pulse
 
-FreshService Real-Time IT Dashboard - A real-time workload management system for IT helpdesk ticket distribution.
+FreshService Real-Time IT Dashboard - A real-time workload management system for IT helpdesk ticket distribution with advanced search, filtering, and analytics capabilities.
+
+## ✨ Features
+
+### Core Dashboard
+- **Real-time Updates** - Server-Sent Events (SSE) for live ticket updates
+- **Daily/Weekly Views** - Toggle between daily workload and weekly trends
+- **Self-Picked Detection** - Smart algorithm identifies tickets picked vs assigned
+- **Load Level Indicators** - Visual workload indicators (🟢 Light / 🟡 Medium / 🔴 Heavy)
+- **Compact View Mode** - Space-efficient display for more technicians
+- **Date Navigation** - Calendar picker with quick navigation controls
+
+### Search & Filter System
+- **🔍 Smart Search** - Search tickets by subject, ID, or requester name
+- **🏷️ Category Filter** - Multi-select filtering by ticket categories
+- **📊 Dynamic Stats** - All metrics recalculate instantly when filtering
+- **💾 Session Persistence** - Filters persist during navigation
+- **📅 Weekly Grid Updates** - Mon-Sun breakdown adjusts with filters
+
+### Technical Highlights
+- **Frontend**: React 18.3 + Vite + Tailwind CSS
+- **Backend**: Node.js + Express + Prisma ORM
+- **Database**: PostgreSQL with optimized indexes
+- **Auth**: Session-based with secure cookies
+- **API Integration**: FreshService Enterprise API with rate limiting
 
 ## Quick Start
 

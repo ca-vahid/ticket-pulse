@@ -255,6 +255,9 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     // Breakdown
     dailyBreakdown,
 
+    // Weekly tickets array (for filtering/search on frontend)
+    weeklyTickets,
+
     loadLevel: getLoadLevel(openTickets.length),
   };
 }

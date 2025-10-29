@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
+import SearchBox from '../components/SearchBox';
 import {
   ArrowLeft,
   User,
@@ -45,6 +46,12 @@ export default function TechnicianDetail() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [highlightedSection, setHighlightedSection] = useState(null);
+
+  // Search state - persisted in sessionStorage
+  const [searchTerm, setSearchTerm] = useState(() => {
+    const stored = sessionStorage.getItem('techDetail_search');
+    return stored || '';
+  });
 
   // Helper to format date as YYYY-MM-DD in local timezone
   const formatDateLocal = (date) => {
@@ -139,6 +146,11 @@ export default function TechnicianDetail() {
     fetchTechnician();
   }, [id, getTechnician, selectedDate]);
 
+  // Persist search term to sessionStorage whenever it changes
+  useEffect(() => {
+    sessionStorage.setItem('techDetail_search', searchTerm);
+  }, [searchTerm]);
+
   const handleBack = () => {
     // Pass the selected date back to dashboard via state
     navigate('/dashboard', {
@@ -217,6 +229,30 @@ export default function TechnicianDetail() {
 
   const closedTickets = technician.closedTicketsOnDate || [];
   const openTickets = technician.openTickets || [];
+
+  // Filter function for search
+  const filterTicketsBySearch = (tickets) => {
+    if (!searchTerm) return tickets;
+
+    const searchLower = searchTerm.toLowerCase();
+    return tickets.filter(ticket => {
+      const subjectMatch = ticket.subject?.toLowerCase().includes(searchLower);
+      const ticketIdMatch = ticket.freshserviceTicketId?.toString().includes(searchTerm);
+      const requesterMatch = ticket.requesterName?.toLowerCase().includes(searchLower);
+      return subjectMatch || ticketIdMatch || requesterMatch;
+    });
+  };
+
+  // Apply search filter to all ticket arrays
+  const filteredSelfPickedTickets = filterTicketsBySearch(selfPickedTickets);
+  const filteredAssignedTickets = filterTicketsBySearch(assignedTickets);
+  const filteredClosedTickets = filterTicketsBySearch(closedTickets);
+  const filteredOpenTickets = filterTicketsBySearch(openTickets);
+
+  // Calculate total results count
+  const searchResultsCount = searchTerm
+    ? filteredSelfPickedTickets.length + filteredAssignedTickets.length + filteredClosedTickets.length + filteredOpenTickets.length
+    : 0;
 
   const loadLevelColors = {
     light: 'bg-green-100 text-green-800',
@@ -496,6 +532,16 @@ export default function TechnicianDetail() {
           </div>
         </div>
 
+        {/* Search Box */}
+        <div className="mb-3">
+          <SearchBox
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search this technician's tickets..."
+            resultsCount={searchTerm ? searchResultsCount : null}
+          />
+        </div>
+
         {/* Self-Picked Tickets */}
         <div
           id="self-picked-section"
@@ -505,17 +551,17 @@ export default function TechnicianDetail() {
         >
           <h2 className="text-sm font-semibold mb-3 flex items-center gap-1">
             <Star className="w-4 h-4 text-purple-600 fill-purple-600" />
-            Self-Picked Tickets ({selfPickedTickets.length})
+            Self-Picked Tickets ({searchTerm ? `${filteredSelfPickedTickets.length} of ${selfPickedTickets.length}` : selfPickedTickets.length})
           </h2>
-          {selfPickedTickets.length > 0 ? (
+          {filteredSelfPickedTickets.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {selfPickedTickets.map((ticket) => (
+              {filteredSelfPickedTickets.map((ticket) => (
                 <TicketCard key={ticket.id} ticket={ticket} showAssignmentBadge={true} />
               ))}
             </div>
           ) : (
             <div className="text-center py-4 text-gray-500 text-xs">
-              No self-picked tickets on this date
+              {searchTerm ? 'No matching tickets' : 'No self-picked tickets on this date'}
             </div>
           )}
         </div>
@@ -529,17 +575,17 @@ export default function TechnicianDetail() {
         >
           <h2 className="text-sm font-semibold mb-3 flex items-center gap-1">
             <User className="w-4 h-4 text-orange-600" />
-            Assigned Tickets ({assignedTickets.length})
+            Assigned Tickets ({searchTerm ? `${filteredAssignedTickets.length} of ${assignedTickets.length}` : assignedTickets.length})
           </h2>
-          {assignedTickets.length > 0 ? (
+          {filteredAssignedTickets.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {assignedTickets.map((ticket) => (
+              {filteredAssignedTickets.map((ticket) => (
                 <TicketCard key={ticket.id} ticket={ticket} showAssignmentBadge={true} />
               ))}
             </div>
           ) : (
             <div className="text-center py-4 text-gray-500 text-xs">
-              No assigned tickets on this date
+              {searchTerm ? 'No matching tickets' : 'No assigned tickets on this date'}
             </div>
           )}
         </div>
@@ -553,17 +599,17 @@ export default function TechnicianDetail() {
         >
           <h2 className="text-sm font-semibold mb-3 flex items-center gap-1">
             <CheckCircle className="w-4 h-4 text-green-600" />
-            {isToday ? 'Closed Today' : `Closed on ${formattedDate}`} ({closedTickets.length})
+            {isToday ? 'Closed Today' : `Closed on ${formattedDate}`} ({searchTerm ? `${filteredClosedTickets.length} of ${closedTickets.length}` : closedTickets.length})
           </h2>
-          {closedTickets.length > 0 ? (
+          {filteredClosedTickets.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {closedTickets.map((ticket) => (
+              {filteredClosedTickets.map((ticket) => (
                 <TicketCard key={ticket.id} ticket={ticket} showAssignmentBadge={false} />
               ))}
             </div>
           ) : (
             <div className="text-center py-4 text-gray-500 text-xs">
-              No tickets closed on this date
+              {searchTerm ? 'No matching tickets' : 'No tickets closed on this date'}
             </div>
           )}
         </div>
@@ -592,7 +638,7 @@ export default function TechnicianDetail() {
         >
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold">
-              {isToday ? 'Current Open Tickets' : `Tickets Open on ${formattedDate}`} ({openTickets.length})
+              {isToday ? 'Current Open Tickets' : `Tickets Open on ${formattedDate}`} ({searchTerm ? `${filteredOpenTickets.length} of ${openTickets.length}` : openTickets.length})
             </h2>
             {!isToday && (
               <span className="text-[10px] text-gray-500 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
@@ -600,16 +646,16 @@ export default function TechnicianDetail() {
               </span>
             )}
           </div>
-          {openTickets.length > 0 ? (
+          {filteredOpenTickets.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {openTickets.map((ticket) => (
+              {filteredOpenTickets.map((ticket) => (
                 <TicketCard key={ticket.id} ticket={ticket} showAssignmentBadge={false} />
               ))}
             </div>
           ) : (
             <div className="text-center py-4 text-gray-500 text-xs">
               <CheckCircle className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-              <p>{isToday ? 'No open tickets' : 'No tickets were open on this date'}</p>
+              <p>{searchTerm ? 'No matching tickets' : isToday ? 'No open tickets' : 'No tickets were open on this date'}</p>
             </div>
           )}
         </div>

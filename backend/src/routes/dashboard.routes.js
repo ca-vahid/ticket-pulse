@@ -249,12 +249,20 @@ router.get(
       timezone
     );
 
+    // Transform technicians to include weeklyTickets array for frontend filtering
+    const techsWithTickets = dashboardData.technicians.map(tech => ({
+      ...tech,
+      // Add weeklyTickets field for frontend to filter
+      weeklyTickets: tech.weeklyTickets || [],
+    }));
+
     res.json({
       success: true,
       data: {
         weekStart: weekStartDate.toISOString().split('T')[0],
         weekEnd: weekEndDate.toISOString().split('T')[0],
-        ...dashboardData,
+        technicians: techsWithTickets,
+        statistics: dashboardData.statistics,
         timestamp: new Date().toISOString(),
       },
     });

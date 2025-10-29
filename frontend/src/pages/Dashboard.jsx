@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,6 +6,8 @@ import { syncAPI, dashboardAPI } from '../services/api';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
 import StatCard from '../components/StatCard';
+import SearchBox from '../components/SearchBox';
+import CategoryFilter from '../components/CategoryFilter';
 import {
   Users,
   Ticket,
@@ -81,6 +83,18 @@ export default function Dashboard() {
   });
   const [showHidden, setShowHidden] = useState(false);
 
+  // Search state - persisted in sessionStorage
+  const [searchTerm, setSearchTerm] = useState(() => {
+    const stored = sessionStorage.getItem('dashboard_search');
+    return stored || '';
+  });
+
+  // Category filter state - persisted in sessionStorage
+  const [selectedCategories, setSelectedCategories] = useState(() => {
+    const stored = sessionStorage.getItem('dashboard_categories');
+    return stored ? JSON.parse(stored) : [];
+  });
+
   // Compact view state - persisted in localStorage
   const [isCompactView, setIsCompactView] = useState(() => {
     const stored = localStorage.getItem('compactView');
@@ -154,6 +168,16 @@ export default function Dashboard() {
   useEffect(() => {
     localStorage.setItem('dashboardViewMode', viewMode);
   }, [viewMode]);
+
+  // Persist search term to sessionStorage whenever it changes
+  useEffect(() => {
+    sessionStorage.setItem('dashboard_search', searchTerm);
+  }, [searchTerm]);
+
+  // Persist selected categories to sessionStorage whenever they change
+  useEffect(() => {
+    sessionStorage.setItem('dashboard_categories', JSON.stringify(selectedCategories));
+  }, [selectedCategories]);
 
   // Helper function to format date as YYYY-MM-DD in local timezone
   const formatDateLocal = useCallback((date) => {
@@ -576,6 +600,210 @@ export default function Dashboard() {
   const visibleTechnicians = technicians.filter(tech => !hiddenTechIds.includes(tech.id));
   const hiddenTechnicians = technicians.filter(tech => hiddenTechIds.includes(tech.id));
 
+  // Helper function to get tickets array from tech (handles both daily and weekly views)
+  const getTechTickets = (tech) => {
+    // Explicitly prioritize based on what exists (not truthiness)
+    // This is important because empty arrays are truthy
+    if (tech.weeklyTickets !== undefined) return tech.weeklyTickets;
+    if (tech.tickets !== undefined) return tech.tickets;
+    return [];
+  };
+
+  // Helper function to recalculate technician stats based on filtered tickets
+  const recalculateTechStats = (tech, filteredTickets) => {
+    // Recalculate stats based on the filtered tickets
+    const openTickets = filteredTickets.filter(t => ['Open', 'Pending'].includes(t.status));
+    const openOnlyCount = filteredTickets.filter(t => t.status === 'Open').length;
+    const pendingCount = filteredTickets.filter(t => t.status === 'Pending').length;
+    const selfPicked = filteredTickets.filter(t => t.isSelfPicked || t.assignedBy === tech.name);
+    const assigned = filteredTickets.filter(t => !t.isSelfPicked && t.assignedBy !== tech.name);
+    const closed = filteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status));
+
+    // Calculate assigners (who assigned tickets to this tech)
+    const assignerCounts = {};
+    assigned.forEach(ticket => {
+      if (ticket.assignedBy && ticket.assignedBy !== tech.name) {
+        assignerCounts[ticket.assignedBy] = (assignerCounts[ticket.assignedBy] || 0) + 1;
+      }
+    });
+    const assigners = Object.entries(assignerCounts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Recalculate daily breakdown for weekly view (Mon-Sun grid)
+    let dailyBreakdown = tech.dailyBreakdown; // Keep original if not in weekly mode
+    if (viewMode === 'weekly' && tech.dailyBreakdown) {
+      // Create a new daily breakdown based on filtered tickets
+      dailyBreakdown = tech.dailyBreakdown.map(day => {
+        // Parse the date for this day
+        const dayDate = new Date(day.date + 'T00:00:00');
+        const dayEnd = new Date(day.date + 'T23:59:59');
+
+        // Filter tickets for this specific day
+        const dayTickets = filteredTickets.filter(ticket => {
+          const ticketDate = new Date(ticket.firstAssignedAt || ticket.createdAt);
+          return ticketDate >= dayDate && ticketDate <= dayEnd;
+        });
+
+        // Calculate counts for this day
+        const daySelf = dayTickets.filter(t => t.isSelfPicked || t.assignedBy === tech.name).length;
+        const dayAssigned = dayTickets.filter(t => !t.isSelfPicked && t.assignedBy !== tech.name).length;
+        const dayClosed = filteredTickets.filter(ticket => {
+          const closeDate = ticket.closedAt || ticket.resolvedAt;
+          if (!closeDate) return false;
+          const closeDateObj = new Date(closeDate);
+          return closeDateObj >= dayDate && closeDateObj <= dayEnd;
+        }).length;
+
+        return {
+          date: day.date,
+          total: dayTickets.length,
+          self: daySelf,
+          assigned: dayAssigned,
+          closed: dayClosed,
+        };
+      });
+    }
+
+    return {
+      // Counts
+      openTicketCount: openTickets.length,
+      openOnlyCount,
+      pendingCount,
+      totalTicketsToday: filteredTickets.length,
+      selfPickedToday: selfPicked.length,
+      assignedToday: assigned.length,
+      closedToday: closed.length,
+
+      // Weekly stats (if in weekly mode)
+      weeklyTotalCreated: filteredTickets.length,
+      weeklySelfPicked: selfPicked.length,
+      weeklyAssigned: assigned.length,
+      weeklyClosed: closed.length,
+      assigners, // List of who assigned tickets (for weekly view)
+      dailyBreakdown, // Daily grid (Mon-Sun) for weekly view
+    };
+  };
+
+  // Extract unique categories from all visible technicians' tickets
+  const categorySet = new Set();
+  visibleTechnicians.forEach(tech => {
+    getTechTickets(tech).forEach(ticket => {
+      if (ticket.ticketCategory) {
+        categorySet.add(ticket.ticketCategory);
+      }
+    });
+  });
+  const allCategories = Array.from(categorySet).sort();
+
+  // Apply search filter to visible technicians
+  const searchedTechnicians = searchTerm
+    ? visibleTechnicians.map(tech => {
+        // Filter tickets by search term
+        const techTickets = getTechTickets(tech);
+        const matchingTickets = techTickets.filter(ticket => {
+          const searchLower = searchTerm.toLowerCase();
+          const subjectMatch = ticket.subject?.toLowerCase().includes(searchLower);
+          const ticketIdMatch = ticket.freshserviceTicketId?.toString().includes(searchTerm);
+          const requesterMatch = ticket.requesterName?.toLowerCase().includes(searchLower);
+          return subjectMatch || ticketIdMatch || requesterMatch;
+        });
+
+        // Recalculate stats based on filtered tickets
+        const recalculatedStats = recalculateTechStats(tech, matchingTickets);
+
+        // Update the appropriate field based on view mode
+        const updatedTech = {
+          ...tech,
+          ...recalculatedStats, // Overwrite stats with recalculated values
+          // Preserve original ticket counts for display
+          originalTicketCount: techTickets.length || 0,
+          matchingTicketCount: matchingTickets.length
+        };
+
+        // Set the correct field based on what was originally present
+        // Use !== undefined to check for existence, not truthiness (empty arrays are truthy)
+        if (tech.weeklyTickets !== undefined) {
+          updatedTech.weeklyTickets = matchingTickets;
+          delete updatedTech.tickets; // Clear daily tickets to prevent stale data
+        } else {
+          updatedTech.tickets = matchingTickets;
+          delete updatedTech.weeklyTickets; // Clear weekly tickets to prevent stale data
+        }
+
+        return updatedTech;
+      }).filter(tech => tech.matchingTicketCount > 0)
+    : visibleTechnicians;
+
+  // Apply category filter after search
+  const filteredTechnicians = selectedCategories.length > 0
+    ? searchedTechnicians.map(tech => {
+        // Filter tickets by selected categories
+        const techTickets = getTechTickets(tech);
+        const matchingTickets = techTickets.filter(ticket =>
+          selectedCategories.includes(ticket.ticketCategory)
+        );
+
+        // Recalculate stats based on filtered tickets
+        const recalculatedStats = recalculateTechStats(tech, matchingTickets);
+
+        // Update the appropriate field based on view mode
+        const updatedTech = {
+          ...tech,
+          ...recalculatedStats, // Overwrite stats with recalculated values
+          originalTicketCount: tech.originalTicketCount || techTickets.length || 0,
+          matchingTicketCount: matchingTickets.length
+        };
+
+        // Set the correct field based on what was originally present
+        if (tech.weeklyTickets !== undefined) {
+          updatedTech.weeklyTickets = matchingTickets;
+          delete updatedTech.tickets; // Clear daily tickets to prevent stale data
+        } else {
+          updatedTech.tickets = matchingTickets;
+          delete updatedTech.weeklyTickets; // Clear weekly tickets to prevent stale data
+        }
+
+        return updatedTech;
+      }).filter(tech => tech.matchingTicketCount > 0)
+    : searchedTechnicians;
+
+  // Calculate results count
+  const searchResultsCount = searchTerm || selectedCategories.length > 0
+    ? filteredTechnicians.reduce((sum, tech) => sum + (tech.matchingTicketCount || getTechTickets(tech).length || 0), 0)
+    : 0;
+
+  // Recalculate stats based on filtered tickets (if filters are active)
+  const displayStats = (searchTerm || selectedCategories.length > 0) ? (() => {
+    // Collect all filtered tickets
+    const allFilteredTickets = filteredTechnicians.flatMap(tech => getTechTickets(tech));
+
+    // Calculate filtered stats based on view mode
+    const filteredStats = {
+      totalTechnicians: filteredTechnicians.length,
+
+      // Daily view stats
+      totalTicketsToday: allFilteredTickets.length,
+      openOnlyCount: allFilteredTickets.filter(t => t.status === 'Open').length,
+      pendingCount: allFilteredTickets.filter(t => t.status === 'Pending').length,
+      closedTicketsToday: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
+      selfPickedToday: allFilteredTickets.filter(t => t.isSelfPicked).length,
+
+      // Weekly view stats
+      weeklyTotalCreated: allFilteredTickets.length,
+      weeklyClosed: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
+      weeklySelfPicked: allFilteredTickets.filter(t => t.isSelfPicked).length,
+      weeklyAssigned: allFilteredTickets.filter(t => !t.isSelfPicked).length,
+
+      // Load level counts (only meaningful in daily view with current open tickets)
+      lightLoad: filteredTechnicians.filter(t => t.loadLevel === 'light').length,
+      mediumLoad: filteredTechnicians.filter(t => t.loadLevel === 'medium').length,
+      heavyLoad: filteredTechnicians.filter(t => t.loadLevel === 'heavy').length,
+    };
+
+    return filteredStats;
+  })() : stats;
+
   // Format selected date in a friendly format
   const dateOptions = { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' };
   const formattedDate = selectedDate.toLocaleDateString('en-US', dateOptions);
@@ -660,8 +888,8 @@ export default function Dashboard() {
     localStorage.setItem('collapsedSections', JSON.stringify(newCollapsedSections));
   };
 
-  // Calculate rankings based on self-picked today (only for visible techs)
-  const techsWithRanks = [...visibleTechnicians]
+  // Calculate rankings based on self-picked today (only for visible/searched/filtered techs)
+  const techsWithRanks = [...filteredTechnicians]
     .sort((a, b) => b.selfPickedToday - a.selfPickedToday)
     .map((tech, index) => ({
       ...tech,
@@ -677,11 +905,11 @@ export default function Dashboard() {
 
   // Calculate team self-pick percentage
   const totalTicketsToday = viewMode === 'weekly'
-    ? (stats.weeklyTotalCreated || 0)
-    : (stats.totalTicketsToday || 0);
+    ? (displayStats.weeklyTotalCreated || 0)
+    : (displayStats.totalTicketsToday || 0);
   const selfPickedToday = viewMode === 'weekly'
-    ? (stats.weeklySelfPicked || 0)
-    : (stats.selfPickedToday || 0);
+    ? (displayStats.weeklySelfPicked || 0)
+    : (displayStats.selfPickedToday || 0);
   const selfPickPercentage = totalTicketsToday > 0
     ? Math.round((selfPickedToday / totalTicketsToday) * 100)
     : 0;
@@ -1081,7 +1309,7 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <div className="text-lg font-bold">
-                    {viewMode === 'weekly' ? (stats.weeklyTotalCreated || 0) : (stats.totalTicketsToday || 0)}
+                    {viewMode === 'weekly' ? (displayStats.weeklyTotalCreated || 0) : (displayStats.totalTicketsToday || 0)}
                   </div>
                   <div className="text-[9px] text-blue-100 uppercase font-medium leading-tight">
                     <div>Total</div>
@@ -1106,7 +1334,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <div className="text-lg font-bold">
-                      {stats.openOnlyCount || 0}
+                      {displayStats.openOnlyCount || 0}
                     </div>
                     <div className="text-[9px] text-blue-100 uppercase font-medium">Open</div>
                   </div>
@@ -1120,7 +1348,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <div className="text-lg font-bold">
-                      {stats.pendingCount || 0}
+                      {displayStats.pendingCount || 0}
                     </div>
                     <div className="text-[9px] text-blue-100 uppercase font-medium">Pending</div>
                   </div>
@@ -1133,7 +1361,7 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <div className="text-lg font-bold">
-                    {viewMode === 'weekly' ? (stats.weeklyClosed || 0) : (stats.closedTicketsToday || 0)}
+                    {viewMode === 'weekly' ? (displayStats.weeklyClosed || 0) : (displayStats.closedTicketsToday || 0)}
                   </div>
                   <div className="text-[9px] text-blue-100 uppercase font-medium">Closed</div>
                 </div>
@@ -1145,7 +1373,7 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <div className="text-lg font-bold">
-                    {viewMode === 'weekly' ? (stats.weeklySelfPicked || 0) : (stats.selfPickedToday || 0)}
+                    {viewMode === 'weekly' ? (displayStats.weeklySelfPicked || 0) : (displayStats.selfPickedToday || 0)}
                   </div>
                   <div className="text-[9px] text-blue-100 uppercase font-medium">Self</div>
                 </div>
@@ -1173,16 +1401,33 @@ export default function Dashboard() {
                 {isToday && (
                   <span className="flex items-center gap-1">
                     <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                    <span>{stats.lightLoad || 0}</span>
+                    <span>{displayStats.lightLoad || 0}</span>
                     <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                    <span>{stats.mediumLoad || 0}</span>
+                    <span>{displayStats.mediumLoad || 0}</span>
                     <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                    <span>{stats.heavyLoad || 0}</span>
+                    <span>{displayStats.heavyLoad || 0}</span>
                   </span>
                 )}
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Search and Filter Bar */}
+        <div className="mb-4 flex items-start gap-3">
+          <SearchBox
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search tickets by subject, ID, or requester..."
+            resultsCount={searchTerm || selectedCategories.length > 0 ? searchResultsCount : null}
+            className="flex-1 max-w-2xl"
+          />
+          <CategoryFilter
+            categories={allCategories}
+            selected={selectedCategories}
+            onChange={setSelectedCategories}
+            placeholder="Category"
+          />
         </div>
 
         {/* Technicians List - Cascading */}
@@ -1191,7 +1436,9 @@ export default function Dashboard() {
             <div className="flex items-center gap-4">
               <div className="flex items-baseline gap-2">
                 <h2 className="text-lg font-semibold">Technicians</h2>
-                <span className="text-xs text-gray-500">({stats.totalTechnicians || 0} active)</span>
+                <span className="text-xs text-gray-500">
+                  ({searchTerm || selectedCategories.length > 0 ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
+                </span>
               </div>
               {hiddenTechnicians.length > 0 && (
                 <button
@@ -1247,15 +1494,39 @@ export default function Dashboard() {
           )}
 
           {/* Visible Technicians */}
-          {visibleTechnicians.length === 0 ? (
+          {techsWithRanks.length === 0 ? (
             <div className="bg-white rounded-lg shadow-sm p-8 text-center border border-gray-200">
               <Users className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600">No technicians found</p>
+              <p className="text-gray-600">
+                {searchTerm || selectedCategories.length > 0 ? 'No matching tickets found' : 'No technicians found'}
+              </p>
               <p className="text-sm text-gray-500 mt-2">
-                {technicians.length > 0
+                {searchTerm || selectedCategories.length > 0
+                  ? 'Try adjusting your search or filters'
+                  : technicians.length > 0
                   ? 'All technicians are hidden. Click "Show Hidden" to restore them.'
                   : 'Sync with FreshService to see technicians'}
               </p>
+              {(searchTerm || selectedCategories.length > 0) && (
+                <div className="flex gap-2 justify-center mt-4">
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm('')}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                      Clear Search
+                    </button>
+                  )}
+                  {selectedCategories.length > 0 && (
+                    <button
+                      onClick={() => setSelectedCategories([])}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                      Clear Filters
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             /* Grid or List layout based on view mode */
