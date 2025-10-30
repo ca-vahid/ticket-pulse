@@ -491,8 +491,9 @@ export default function Dashboard() {
 
       // Add more detailed error info
       if (err.message.includes('timeout')) {
-        addSyncLog('The sync operation took longer than expected (>2 minutes)', 'error');
-        addSyncLog('This might indicate a large amount of data or slow network', 'warn');
+        addSyncLog('⚠ Sync is taking longer than expected', 'warn');
+        addSyncLog('Large syncs can take 5-15 minutes. The sync continues in background.', 'info');
+        addSyncLog('Try refreshing the page in a few minutes to see results.', 'info');
       } else if (err.message.includes('Network error')) {
         addSyncLog('Cannot connect to the backend server', 'error');
         addSyncLog('Please check if the backend is running on port 3000', 'warn');
@@ -604,6 +605,16 @@ export default function Dashboard() {
     } catch (err) {
       console.error('[SYNC WEEK] Error during week sync:', err);
       addSyncLog(`✗ Error: ${err.message}`, 'error');
+
+      // Add more detailed error info
+      if (err.message.includes('timeout')) {
+        addSyncLog('⚠ Week sync is taking longer than expected', 'warn');
+        addSyncLog('Historical week syncs can take 8-15 minutes. The sync continues in background.', 'info');
+        addSyncLog('Try refreshing the page in a few minutes to see results.', 'info');
+      } else if (err.message.includes('Network error')) {
+        addSyncLog('Cannot connect to the backend server', 'error');
+        addSyncLog('Please check if the backend is running on port 3000', 'warn');
+      }
 
       setSyncStatus('error');
       setSyncMessage('Failed to sync week: ' + err.message);

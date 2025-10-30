@@ -19,7 +19,7 @@ const apiLongTimeout = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 300000, // 5 minute timeout for sync operations (FreshService rate limiting can be slow)
+  timeout: 900000, // 15 minute timeout for sync operations (large historical syncs can take 8-10 minutes)
 });
 
 // Response interceptor for error handling

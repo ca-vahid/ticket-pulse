@@ -893,8 +893,9 @@ class SyncService {
       const end = new Date(endDate + 'T23:59:59Z');
 
       // Step 1: Fetch tickets from FreshService for this week
-      this.progress.currentStep = 'Fetching tickets from FreshService';
+      this.progress.currentStep = 'Fetching tickets from FreshService (this may take 1-2 minutes)';
       this.progress.currentStepNumber = 1;
+      this.progress.percentage = 5; // Show some progress immediately
       logger.info(`Fetching tickets updated/created between ${startDate} and ${endDate}`);
 
       const filters = {
