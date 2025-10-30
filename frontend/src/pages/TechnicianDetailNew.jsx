@@ -329,6 +329,34 @@ export default function TechnicianDetailNew() {
     day: 'numeric',
   });
 
+  // Check if selected week is current week
+  const isCurrentWeek = viewMode === 'weekly' && selectedWeek ? (() => {
+    const now = new Date();
+    const currentDay = (now.getDay() + 6) % 7;
+    const currentMonday = new Date(now);
+    currentMonday.setDate(now.getDate() - currentDay);
+    currentMonday.setHours(0, 0, 0, 0);
+
+    const selectedMonday = new Date(selectedWeek);
+    selectedMonday.setHours(0, 0, 0, 0);
+
+    return selectedMonday.getTime() === currentMonday.getTime();
+  })() : false;
+
+  // Format week range for display
+  const weekRangeLabel = viewMode === 'weekly' && selectedWeek ? (() => {
+    if (isCurrentWeek) return 'This Week';
+
+    const weekStart = new Date(selectedWeek);
+    const weekEnd = new Date(selectedWeek);
+    weekEnd.setDate(weekStart.getDate() + 6);
+
+    const startStr = weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const endStr = weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+    return `${startStr} - ${endStr}`;
+  })() : 'This Week';
+
   // Use ticket arrays from backend (already categorized)
   // Weekly mode uses different fields from the backend response
   const selfPickedTickets = viewMode === 'weekly'
@@ -672,7 +700,7 @@ export default function TechnicianDetailNew() {
             </div>
             <div className="text-2xl font-bold text-purple-900">{selfPickedCount}</div>
             <div className="text-xs text-gray-500 mt-1">
-              {viewMode === 'weekly' ? 'This Week' : (isToday ? 'Today' : displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))}
+              {viewMode === 'weekly' ? weekRangeLabel : (isToday ? 'Today' : displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))}
             </div>
           </button>
 
@@ -689,7 +717,7 @@ export default function TechnicianDetailNew() {
             </div>
             <div className="text-2xl font-bold text-orange-900">{assignedCount}</div>
             <div className="text-xs text-gray-500 mt-1">
-              {viewMode === 'weekly' ? 'This Week' : (isToday ? 'Today' : displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))}
+              {viewMode === 'weekly' ? weekRangeLabel : (isToday ? 'Today' : displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))}
             </div>
           </button>
 
@@ -706,7 +734,7 @@ export default function TechnicianDetailNew() {
             </div>
             <div className="text-2xl font-bold text-green-900">{closedCount}</div>
             <div className="text-xs text-gray-500 mt-1">
-              {viewMode === 'weekly' ? 'This Week' : (isToday ? 'Today' : displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))}
+              {viewMode === 'weekly' ? weekRangeLabel : (isToday ? 'Today' : displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))}
             </div>
           </button>
         </div>
