@@ -63,7 +63,7 @@ class FreshServiceClient {
 
     while (hasMore) {
       try {
-        const response = await this.client.get(endpoint, {
+        const response = await this._fetchWithRetry(endpoint, {
           params: {
             ...params,
             page,
@@ -87,8 +87,8 @@ class FreshServiceClient {
           hasMore = false;
         }
 
-        // Rate limiting: small delay between requests
-        await this._sleep(200);
+        // Rate limiting: 1 second delay between requests (5000 req/hour limit)
+        await this._sleep(1000);
       } catch (error) {
         logger.error(`Error fetching page ${page} of ${endpoint}:`, error);
         throw error;
@@ -97,6 +97,44 @@ class FreshServiceClient {
 
     logger.info(`Fetched ${allResults.length} items from ${endpoint}`);
     return allResults;
+  }
+
+  /**
+   * Fetch with retry logic for rate limiting (429 errors)
+   * @param {string} endpoint - API endpoint
+   * @param {Object} config - Axios request config
+   * @param {number} maxRetries - Maximum number of retries
+   * @returns {Promise<Object>} API response
+   */
+  async _fetchWithRetry(endpoint, config = {}, maxRetries = 3) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.client.get(endpoint, config);
+      } catch (error) {
+        lastError = error;
+        const status = error.response?.status;
+
+        // Only retry on 429 (rate limit) errors
+        if (status === 429 && attempt < maxRetries) {
+          // Exponential backoff: 5s, 10s, 20s
+          const delayMs = 5000 * Math.pow(2, attempt - 1);
+          logger.warn(
+            `Rate limit hit (429) on ${endpoint} page ${config.params?.page || 1}. ` +
+            `Retrying in ${delayMs / 1000}s (attempt ${attempt}/${maxRetries})...`
+          );
+          await this._sleep(delayMs);
+          continue;
+        }
+
+        // Don't retry other errors or if max retries reached
+        throw error;
+      }
+    }
+
+    // If we get here, all retries failed
+    throw lastError;
   }
 
   /**

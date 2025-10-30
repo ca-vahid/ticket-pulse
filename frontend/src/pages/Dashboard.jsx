@@ -290,7 +290,25 @@ export default function Dashboard() {
 
   const addSyncLog = (message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
-    setSyncLogs(prev => [...prev, { timestamp, message, type }]);
+
+    // Check if this is a progress update (contains percentage)
+    const isProgressUpdate = message.includes('(') && message.includes('%)');
+
+    setSyncLogs(prev => {
+      // If it's a progress update, replace the last message if it was also a progress update
+      if (isProgressUpdate && prev.length > 0) {
+        const lastLog = prev[prev.length - 1];
+        const lastIsProgress = lastLog.message.includes('(') && lastLog.message.includes('%)');
+
+        if (lastIsProgress) {
+          // Replace the last progress message
+          return [...prev.slice(0, -1), { timestamp, message, type }];
+        }
+      }
+
+      // Otherwise, append normally
+      return [...prev, { timestamp, message, type }];
+    });
   };
 
   const handleRefresh = useCallback(async () => {
