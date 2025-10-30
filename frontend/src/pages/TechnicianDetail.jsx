@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import SearchBox from '../components/SearchBox';
+import CategoryFilter from '../components/CategoryFilter';
 import {
   ArrowLeft,
   User,
@@ -49,8 +50,22 @@ export default function TechnicianDetail() {
 
   // Search state - persisted in sessionStorage
   const [searchTerm, setSearchTerm] = useState(() => {
+    // Priority: navigation state > sessionStorage > default
+    const navSearch = location.state?.searchTerm;
+    if (navSearch !== undefined) return navSearch;
+
     const stored = sessionStorage.getItem('techDetail_search');
     return stored || '';
+  });
+
+  // Category filter state - persisted in sessionStorage
+  const [selectedCategories, setSelectedCategories] = useState(() => {
+    // Priority: navigation state > sessionStorage > default
+    const navCategories = location.state?.selectedCategories;
+    if (navCategories !== undefined) return navCategories;
+
+    const stored = sessionStorage.getItem('techDetail_categories');
+    return stored ? JSON.parse(stored) : [];
   });
 
   // Helper to format date as YYYY-MM-DD in local timezone
@@ -151,10 +166,21 @@ export default function TechnicianDetail() {
     sessionStorage.setItem('techDetail_search', searchTerm);
   }, [searchTerm]);
 
+  // Persist selected categories to sessionStorage whenever they change
+  useEffect(() => {
+    sessionStorage.setItem('techDetail_categories', JSON.stringify(selectedCategories));
+  }, [selectedCategories]);
+
   const handleBack = () => {
-    // Pass the selected date back to dashboard via state
+    // Pass the selected date and filters back to dashboard via state
     navigate('/dashboard', {
-      state: { returnDate: selectedDate || formatDateLocal(new Date()) }
+      state: {
+        returnDate: selectedDate || formatDateLocal(new Date()),
+        searchTerm: searchTerm,
+        selectedCategories: selectedCategories,
+        viewMode: location.state?.viewMode || 'daily',
+        returnWeek: location.state?.selectedWeek
+      }
     });
   };
 
@@ -230,27 +256,51 @@ export default function TechnicianDetail() {
   const closedTickets = technician.closedTicketsOnDate || [];
   const openTickets = technician.openTickets || [];
 
-  // Filter function for search
-  const filterTicketsBySearch = (tickets) => {
-    if (!searchTerm) return tickets;
+  // Extract unique categories from all tickets
+  const allTickets = [...selfPickedTickets, ...assignedTickets, ...closedTickets, ...openTickets];
+  const categorySet = new Set();
+  allTickets.forEach(ticket => {
+    if (ticket.ticketCategory) {
+      categorySet.add(ticket.ticketCategory);
+    }
+  });
+  const availableCategories = Array.from(categorySet).sort();
 
-    const searchLower = searchTerm.toLowerCase();
-    return tickets.filter(ticket => {
-      const subjectMatch = ticket.subject?.toLowerCase().includes(searchLower);
-      const ticketIdMatch = ticket.freshserviceTicketId?.toString().includes(searchTerm);
-      const requesterMatch = ticket.requesterName?.toLowerCase().includes(searchLower);
-      return subjectMatch || ticketIdMatch || requesterMatch;
-    });
+  // Filter function for search and categories (consistent with Dashboard)
+  const filterTickets = (tickets) => {
+    let filtered = tickets;
+
+    // Apply search filter
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      filtered = filtered.filter(ticket => {
+        // Search in subject, ticket ID, requester name, AND category
+        const subjectMatch = ticket.subject?.toLowerCase().includes(searchLower);
+        const ticketIdMatch = ticket.freshserviceTicketId?.toString().includes(searchTerm);
+        const requesterMatch = ticket.requesterName?.toLowerCase().includes(searchLower);
+        const categoryMatch = ticket.ticketCategory?.toLowerCase().includes(searchLower);
+        return subjectMatch || ticketIdMatch || requesterMatch || categoryMatch;
+      });
+    }
+
+    // Apply category filter
+    if (selectedCategories.length > 0) {
+      filtered = filtered.filter(ticket =>
+        selectedCategories.includes(ticket.ticketCategory)
+      );
+    }
+
+    return filtered;
   };
 
-  // Apply search filter to all ticket arrays
-  const filteredSelfPickedTickets = filterTicketsBySearch(selfPickedTickets);
-  const filteredAssignedTickets = filterTicketsBySearch(assignedTickets);
-  const filteredClosedTickets = filterTicketsBySearch(closedTickets);
-  const filteredOpenTickets = filterTicketsBySearch(openTickets);
+  // Apply filters to all ticket arrays
+  const filteredSelfPickedTickets = filterTickets(selfPickedTickets);
+  const filteredAssignedTickets = filterTickets(assignedTickets);
+  const filteredClosedTickets = filterTickets(closedTickets);
+  const filteredOpenTickets = filterTickets(openTickets);
 
   // Calculate total results count
-  const searchResultsCount = searchTerm
+  const searchResultsCount = (searchTerm || selectedCategories.length > 0)
     ? filteredSelfPickedTickets.length + filteredAssignedTickets.length + filteredClosedTickets.length + filteredOpenTickets.length
     : 0;
 
@@ -532,14 +582,24 @@ export default function TechnicianDetail() {
           </div>
         </div>
 
-        {/* Search Box */}
-        <div className="mb-3">
+        {/* Search and Filter Controls - Always visible */}
+        <div className="mb-3 space-y-2">
           <SearchBox
             value={searchTerm}
             onChange={setSearchTerm}
-            placeholder="Search this technician's tickets..."
-            resultsCount={searchTerm ? searchResultsCount : null}
+            placeholder="Search this technician's tickets by subject, ID, or requester..."
+            resultsCount={searchTerm || selectedCategories.length > 0 ? searchResultsCount : null}
+            className="w-full"
           />
+          {availableCategories.length > 0 && (
+            <CategoryFilter
+              categories={availableCategories}
+              selected={selectedCategories}
+              onChange={setSelectedCategories}
+              placeholder="Filter by category"
+              className="w-full"
+            />
+          )}
         </div>
 
         {/* Self-Picked Tickets */}

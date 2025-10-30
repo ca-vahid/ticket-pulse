@@ -419,13 +419,11 @@ router.get(
       !ticket.isSelfPicked && ticket.assignedBy !== technician.name
     );
 
-    // Closed tickets = tickets that were CLOSED during the week (not just assigned and happen to be closed)
-    const closedTickets = technician.tickets.filter(ticket => {
-      const closeDate = ticket.closedAt || ticket.resolvedAt;
-      if (!closeDate) return false;
-      const closeDateObj = new Date(closeDate);
-      return closeDateObj >= weekStartDate && closeDateObj <= weekEndDate;
-    });
+    // Closed tickets = tickets ASSIGNED during the week that are now closed
+    // Note: Filter by assignment date + status (not close date) because closedAt/resolvedAt may be null
+    const closedTickets = weeklyTickets.filter(ticket =>
+      ['Resolved', 'Closed'].includes(ticket.status)
+    );
 
     // Currently open tickets (snapshot)
     const openTickets = technician.tickets.filter(ticket =>

@@ -31,7 +31,7 @@ const getInitials = (name) => {
   return '??';
 };
 
-export default function TechCardCompact({ technician, onHide, rank, selectedDate, selectedWeek, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily' }) {
+export default function TechCardCompact({ technician, onHide, rank, selectedDate, selectedWeek, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [] }) {
   const navigate = useNavigate();
   const [showAssignersPopup, setShowAssignersPopup] = useState(false);
 
@@ -63,12 +63,14 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
     // Don't navigate if clicking the hide button
     if (e.target.closest('.hide-button')) return;
 
-    // Pass the selected date/week and view mode to the technician detail page
+    // Pass the selected date/week, view mode, and filters to the technician detail page
     navigate(`/technician/${technician.id}`, {
       state: {
         selectedDate: selectedDate,
         selectedWeek: selectedWeek,
-        viewMode: viewMode
+        viewMode: viewMode,
+        searchTerm: searchTerm,
+        selectedCategories: selectedCategories
       }
     });
   };
