@@ -869,10 +869,10 @@ class SyncService {
    * @param {Object} options - Sync options
    * @param {string} options.startDate - Monday of the week (YYYY-MM-DD)
    * @param {string} options.endDate - Sunday of the week (YYYY-MM-DD)
-   * @param {number} options.concurrency - Number of parallel API calls (default: 3)
+   * @param {number} options.concurrency - Number of parallel API calls (default: 1, reduced from 3 to avoid rate limits)
    * @returns {Promise<Object>} Sync result summary
    */
-  async syncWeek({ startDate, endDate, concurrency = 3 }) {
+  async syncWeek({ startDate, endDate, concurrency = 1 }) {
     try {
       // Initialize progress tracking
       this.isRunning = true;

@@ -78,6 +78,11 @@ class FreshServiceClient {
           allResults.push(...results);
           page++;
 
+          // Log progress every 10 pages to show sync progress
+          if (page % 10 === 0) {
+            logger.info(`Fetching ${endpoint}: ${allResults.length} items so far (page ${page})...`);
+          }
+
           // Check if there are more pages
           // FreshService returns fewer results when we're on the last page
           if (results.length < 100) {
@@ -209,7 +214,8 @@ class FreshServiceClient {
    */
   async fetchTicketActivities(ticketId) {
     try {
-      const response = await this.client.get(`/tickets/${ticketId}/activities`);
+      // Use retry logic to handle rate limiting (429 errors)
+      const response = await this._fetchWithRetry(`/tickets/${ticketId}/activities`, {}, 3);
       return response.data.activities || [];
     } catch (error) {
       logger.error(`Error fetching activities for ticket ${ticketId}:`, error);
