@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { dashboardAPI } from '../services/api';
+import SearchBox from '../components/SearchBox';
+import CategoryFilter from '../components/CategoryFilter';
+import { filterTickets, getAvailableCategories } from '../utils/ticketFilter';
 import {
   ArrowLeft,
   User,
@@ -60,6 +63,22 @@ export default function TechnicianDetailNew() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('all'); // 'all', 'self', 'assigned', 'closed'
+
+  // Search state - persisted in sessionStorage
+  const [searchTerm, setSearchTerm] = useState(() => {
+    const navSearch = location.state?.searchTerm;
+    if (navSearch !== undefined) return navSearch;
+    const stored = sessionStorage.getItem('techDetailNew_search');
+    return stored || '';
+  });
+
+  // Category filter state - persisted in sessionStorage
+  const [selectedCategories, setSelectedCategories] = useState(() => {
+    const navCategories = location.state?.selectedCategories;
+    if (navCategories !== undefined) return navCategories;
+    const stored = sessionStorage.getItem('techDetailNew_categories');
+    return stored ? JSON.parse(stored) : [];
+  });
 
   // Helper to format date as YYYY-MM-DD in local timezone
   const formatDateLocal = (date) => {
@@ -201,12 +220,24 @@ export default function TechnicianDetailNew() {
     fetchTechnician();
   }, [id, getTechnician, selectedDate, viewMode, selectedWeek]);
 
+  // Persist search term to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem('techDetailNew_search', searchTerm);
+  }, [searchTerm]);
+
+  // Persist selected categories to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem('techDetailNew_categories', JSON.stringify(selectedCategories));
+  }, [selectedCategories]);
+
   const handleBack = () => {
     navigate('/dashboard', {
       state: {
         viewMode: viewMode,
         returnDate: selectedDate || formatDateLocal(new Date()),
-        returnWeek: selectedWeek ? formatDateLocal(selectedWeek) : null
+        returnWeek: selectedWeek ? formatDateLocal(selectedWeek) : null,
+        searchTerm: searchTerm,
+        selectedCategories: selectedCategories
       }
     });
   };
@@ -311,44 +342,76 @@ export default function TechnicianDetailNew() {
     : (technician.closedTicketsOnDate || []);
   const allOpenTickets = technician.openTickets || []; // All currently open tickets (regardless of creation date)
 
-  // Count open vs pending for All Open tab
-  const openCount = allOpenTickets.filter(t => t.status === 'Open').length;
-  const pendingCount = allOpenTickets.filter(t => t.status === 'Pending').length;
+  // Determine if filtering is active
+  const isFiltering = searchTerm || selectedCategories.length > 0;
 
-  // Get stat values based on view mode
-  const selfPickedCount = viewMode === 'weekly'
-    ? (technician.weeklySelfPicked || 0)
-    : (technician.selfPickedOnDate || 0);
-  const assignedCount = viewMode === 'weekly'
-    ? (technician.weeklyAssigned || 0)
-    : (technician.assignedOnDate || 0);
-  const closedCount = viewMode === 'weekly'
-    ? (technician.weeklyClosed || 0)
-    : (technician.closedTicketsOnDateCount || 0);
+  // If filtering is active, recalculate stats from filtered tickets
+  // Otherwise use the raw backend stats
+  let openCount, pendingCount, selfPickedCount, assignedCount, closedCount;
+
+  if (isFiltering) {
+    // Filter each ticket array
+    const filteredAllOpen = filterTickets(allOpenTickets, searchTerm, selectedCategories);
+    const filteredSelfPicked = filterTickets(selfPickedTickets, searchTerm, selectedCategories);
+    const filteredAssigned = filterTickets(assignedTickets, searchTerm, selectedCategories);
+    const filteredClosed = filterTickets(closedTicketsToday, searchTerm, selectedCategories);
+
+    // Recalculate counts from filtered arrays
+    openCount = filteredAllOpen.filter(t => t.status === 'Open').length;
+    pendingCount = filteredAllOpen.filter(t => t.status === 'Pending').length;
+    selfPickedCount = filteredSelfPicked.length;
+    assignedCount = filteredAssigned.length;
+    closedCount = filteredClosed.length;
+  } else {
+    // Use raw backend stats (no filtering)
+    openCount = allOpenTickets.filter(t => t.status === 'Open').length;
+    pendingCount = allOpenTickets.filter(t => t.status === 'Pending').length;
+    selfPickedCount = viewMode === 'weekly'
+      ? (technician.weeklySelfPicked || 0)
+      : (technician.selfPickedOnDate || 0);
+    assignedCount = viewMode === 'weekly'
+      ? (technician.weeklyAssigned || 0)
+      : (technician.assignedOnDate || 0);
+    closedCount = viewMode === 'weekly'
+      ? (technician.weeklyClosed || 0)
+      : (technician.closedTicketsOnDateCount || 0);
+  }
+
+  // Extract unique categories from all tickets using centralized utility
+  const allTickets = [...selfPickedTickets, ...assignedTickets, ...closedTicketsToday, ...allOpenTickets];
+  const availableCategories = getAvailableCategories(allTickets);
+
+  // Calculate total results count
+  const searchResultsCount = (searchTerm || selectedCategories.length > 0)
+    ? filterTickets(allTickets, searchTerm, selectedCategories).length
+    : 0;
 
   // Get tickets based on active tab
-  let displayedTickets;
+  let tabTickets;
   switch (activeTab) {
     case 'self':
-      displayedTickets = selfPickedTickets; // Show all self-picked from today (open + closed)
+      tabTickets = selfPickedTickets; // Show all self-picked from today (open + closed)
       break;
     case 'assigned':
-      displayedTickets = assignedTickets; // Show all assigned from today (open + closed)
+      tabTickets = assignedTickets; // Show all assigned from today (open + closed)
       break;
     case 'closed':
-      displayedTickets = closedTicketsToday; // Show closed from today
+      tabTickets = closedTicketsToday; // Show closed from today
       break;
     case 'all':
     default:
       // Show all currently open (from any date)
       // Sort: Open status first, then Pending
-      displayedTickets = [...allOpenTickets].sort((a, b) => {
+      tabTickets = [...allOpenTickets].sort((a, b) => {
         if (a.status === 'Open' && b.status === 'Pending') return -1;
         if (a.status === 'Pending' && b.status === 'Open') return 1;
         return 0;
       });
       break;
   }
+
+  // Apply filters to displayed tickets using centralized utility
+  const displayedTickets = filterTickets(tabTickets, searchTerm, selectedCategories);
 
   // Ticket Card Component with left color strip
   const TicketCard = ({ ticket }) => {
@@ -648,6 +711,26 @@ export default function TechnicianDetailNew() {
           </button>
         </div>
 
+        {/* Search and Filter Controls */}
+        <div className="mb-3 space-y-2">
+          <SearchBox
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search tickets by subject, ID, or requester..."
+            resultsCount={searchTerm || selectedCategories.length > 0 ? searchResultsCount : null}
+            className="w-full"
+          />
+          {availableCategories.length > 0 && (
+            <CategoryFilter
+              categories={availableCategories}
+              selected={selectedCategories}
+              onChange={setSelectedCategories}
+              placeholder="Filter by category"
+              className="w-full"
+            />
+          )}
+        </div>
+
         {/* Tabs */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="border-b border-gray-200">
@@ -675,7 +758,7 @@ export default function TechnicianDetailNew() {
               >
                 Self-Picked
                 <span className="ml-2 bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full text-xs font-semibold">
-                  {selfPickedTickets.length}
+                  {selfPickedCount}
                 </span>
               </button>
               <button
@@ -688,7 +771,7 @@ export default function TechnicianDetailNew() {
               >
                 Assigned
                 <span className="ml-2 bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-xs font-semibold">
-                  {assignedTickets.length}
+                  {assignedCount}
                 </span>
               </button>
               <button
@@ -701,7 +784,7 @@ export default function TechnicianDetailNew() {
               >
                 Closed
                 <span className="ml-2 bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-semibold">
-                  {closedTicketsToday.length}
+                  {closedCount}
                 </span>
               </button>
             </div>

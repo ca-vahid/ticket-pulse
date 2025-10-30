@@ -8,6 +8,7 @@ import TechCardCompact from '../components/TechCardCompact';
 import StatCard from '../components/StatCard';
 import SearchBox from '../components/SearchBox';
 import CategoryFilter from '../components/CategoryFilter';
+import { filterTickets, getAvailableCategories } from '../utils/ticketFilter';
 import {
   Users,
   Ticket,
@@ -85,12 +86,20 @@ export default function Dashboard() {
 
   // Search state - persisted in sessionStorage
   const [searchTerm, setSearchTerm] = useState(() => {
+    // Priority: navigation state > sessionStorage > default
+    const returnSearch = location.state?.searchTerm;
+    if (returnSearch !== undefined) return returnSearch;
+
     const stored = sessionStorage.getItem('dashboard_search');
     return stored || '';
   });
 
   // Category filter state - persisted in sessionStorage
   const [selectedCategories, setSelectedCategories] = useState(() => {
+    // Priority: navigation state > sessionStorage > default
+    const returnCategories = location.state?.selectedCategories;
+    if (returnCategories !== undefined) return returnCategories;
+
     const stored = sessionStorage.getItem('dashboard_categories');
     return stored ? JSON.parse(stored) : [];
   });
@@ -601,13 +610,19 @@ export default function Dashboard() {
   const hiddenTechnicians = technicians.filter(tech => hiddenTechIds.includes(tech.id));
 
   // Helper function to get tickets array from tech (handles both daily and weekly views)
+  // CRITICAL: Use viewMode to determine which field to use, NOT whether fields exist
+  // This prevents cross-contamination between daily and weekly data
   const getTechTickets = (tech) => {
-    // Explicitly prioritize based on what exists (not truthiness)
-    // This is important because empty arrays are truthy
-    if (tech.weeklyTickets !== undefined) return tech.weeklyTickets;
-    if (tech.tickets !== undefined) return tech.tickets;
-    return [];
+    if (viewMode === 'weekly') {
+      return tech.weeklyTickets || [];
+    } else {
+      // Daily view
+      return tech.tickets || [];
+    }
   };
+
+  // Note: Filtering logic now centralized in ticketFilter.js utility
+  // This ensures consistency across all views (daily, weekly, technician detail)
 
   // Helper function to recalculate technician stats based on filtered tickets
   const recalculateTechStats = (tech, filteredTickets) => {
@@ -696,77 +711,38 @@ export default function Dashboard() {
   });
   const allCategories = Array.from(categorySet).sort();
 
-  // Apply search filter to visible technicians
-  const searchedTechnicians = searchTerm
+  // Apply search and category filters using centralized filtering utility
+  const filteredTechnicians = (searchTerm || selectedCategories.length > 0)
     ? visibleTechnicians.map(tech => {
-        // Filter tickets by search term
+        // Filter tickets using centralized filterTickets function
         const techTickets = getTechTickets(tech);
-        const matchingTickets = techTickets.filter(ticket => {
-          const searchLower = searchTerm.toLowerCase();
-          const subjectMatch = ticket.subject?.toLowerCase().includes(searchLower);
-          const ticketIdMatch = ticket.freshserviceTicketId?.toString().includes(searchTerm);
-          const requesterMatch = ticket.requesterName?.toLowerCase().includes(searchLower);
-          return subjectMatch || ticketIdMatch || requesterMatch;
-        });
+        const matchingTickets = filterTickets(techTickets, searchTerm, selectedCategories);
 
         // Recalculate stats based on filtered tickets
         const recalculatedStats = recalculateTechStats(tech, matchingTickets);
 
-        // Update the appropriate field based on view mode
+        // Update the appropriate field based on CURRENT VIEW MODE
+        // CRITICAL: Don't check what fields exist - use viewMode to decide
+        // This prevents cross-contamination between daily and weekly filtering
         const updatedTech = {
           ...tech,
           ...recalculatedStats, // Overwrite stats with recalculated values
-          // Preserve original ticket counts for display
           originalTicketCount: techTickets.length || 0,
           matchingTicketCount: matchingTickets.length
         };
 
-        // Set the correct field based on what was originally present
-        // Use !== undefined to check for existence, not truthiness (empty arrays are truthy)
-        if (tech.weeklyTickets !== undefined) {
+        // Set the correct field based on current view mode (not what exists in the object)
+        if (viewMode === 'weekly') {
           updatedTech.weeklyTickets = matchingTickets;
-          delete updatedTech.tickets; // Clear daily tickets to prevent stale data
+          // Don't clear tickets - they might be from another context
         } else {
           updatedTech.tickets = matchingTickets;
-          delete updatedTech.weeklyTickets; // Clear weekly tickets to prevent stale data
+          // Don't clear weeklyTickets - they might be from another context
         }
 
         return updatedTech;
       }).filter(tech => tech.matchingTicketCount > 0)
     : visibleTechnicians;
-
-  // Apply category filter after search
-  const filteredTechnicians = selectedCategories.length > 0
-    ? searchedTechnicians.map(tech => {
-        // Filter tickets by selected categories
-        const techTickets = getTechTickets(tech);
-        const matchingTickets = techTickets.filter(ticket =>
-          selectedCategories.includes(ticket.ticketCategory)
-        );
-
-        // Recalculate stats based on filtered tickets
-        const recalculatedStats = recalculateTechStats(tech, matchingTickets);
-
-        // Update the appropriate field based on view mode
-        const updatedTech = {
-          ...tech,
-          ...recalculatedStats, // Overwrite stats with recalculated values
-          originalTicketCount: tech.originalTicketCount || techTickets.length || 0,
-          matchingTicketCount: matchingTickets.length
-        };
-
-        // Set the correct field based on what was originally present
-        if (tech.weeklyTickets !== undefined) {
-          updatedTech.weeklyTickets = matchingTickets;
-          delete updatedTech.tickets; // Clear daily tickets to prevent stale data
-        } else {
-          updatedTech.tickets = matchingTickets;
-          delete updatedTech.weeklyTickets; // Clear weekly tickets to prevent stale data
-        }
-
-        return updatedTech;
-      }).filter(tech => tech.matchingTicketCount > 0)
-    : searchedTechnicians;
 
   // Calculate results count
   const searchResultsCount = searchTerm || selectedCategories.length > 0
@@ -1567,6 +1543,8 @@ export default function Dashboard() {
                           maxOpenCount={maxOpenCount}
                           maxDailyCount={maxDailyCount}
                           viewMode={viewMode}
+                          searchTerm={searchTerm}
+                          selectedCategories={selectedCategories}
                         />
                       </div>
                     ))}
@@ -1589,6 +1567,8 @@ export default function Dashboard() {
                           maxOpenCount={maxOpenCount}
                           maxDailyCount={maxDailyCount}
                           viewMode={viewMode}
+                          searchTerm={searchTerm}
+                          selectedCategories={selectedCategories}
                         />
                       </div>
                     ))}

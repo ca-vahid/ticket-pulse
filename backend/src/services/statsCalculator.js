@@ -116,6 +116,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     closedToday,
     loadLevel,
     openTickets,
+    ticketsToday, // Tickets assigned on the selected date (for daily view filtering)
   };
 }
 
@@ -170,13 +171,12 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count);
 
-  // Closed tickets during the week (based on when they were actually closed)
-  const weeklyClosed = tech.tickets.filter(ticket => {
-    const closeDate = ticket.closedAt || ticket.resolvedAt;
-    if (!closeDate) return false;
-    const closeDateObj = new Date(closeDate);
-    return closeDateObj >= weekStart && closeDateObj <= weekEnd;
-  }).length;
+  // Closed tickets assigned during the week (filter weeklyTickets by status)
+  // Note: We filter by assignment date (consistent with daily view), not close date
+  // because closedAt/resolvedAt fields may be null
+  const weeklyClosed = weeklyTickets.filter(ticket =>
+    ['Resolved', 'Closed'].includes(ticket.status)
+  ).length;
 
   // Weekly totals
   const weeklyTotalCreated = weeklyTickets.length;
@@ -213,13 +213,11 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
       !ticket.isSelfPicked && ticket.assignedBy !== tech.name
     ).length;
 
-    // Count tickets closed on this specific day
-    const dayClosed = tech.tickets.filter(ticket => {
-      const closeDate = ticket.closedAt || ticket.resolvedAt;
-      if (!closeDate) return false;
-      const closeDateObj = new Date(closeDate);
-      return closeDateObj >= dayStart && closeDateObj <= dayEnd;
-    }).length;
+    // Count tickets assigned on this day that are now closed
+    // Note: Filter by assignment date + status (not close date) because closedAt may be null
+    const dayClosed = dayTickets.filter(ticket =>
+      ['Resolved', 'Closed'].includes(ticket.status)
+    ).length;
 
     dailyBreakdown.push({
       date: date.toISOString().split('T')[0],

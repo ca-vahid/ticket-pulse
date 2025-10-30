@@ -75,14 +75,16 @@ router.get(
     );
 
     // Transform tickets for frontend (flatten requester object)
+    // Use ticketsToday for date-filtered view (tickets assigned on selected date)
     const techsWithTransformedTickets = dashboardData.technicians.map(tech => ({
       ...tech,
-      tickets: (tech.openTickets || []).map(transformTicket),
+      tickets: (tech.ticketsToday || []).map(transformTicket),
     }));
 
-    // Remove openTickets array from response (we use tickets instead)
+    // Remove intermediate arrays from response (we use tickets instead)
     techsWithTransformedTickets.forEach(tech => {
       delete tech.openTickets;
+      delete tech.ticketsToday;
     });
 
     const statistics = dashboardData.statistics;
@@ -252,8 +254,8 @@ router.get(
     // Transform technicians to include weeklyTickets array for frontend filtering
     const techsWithTickets = dashboardData.technicians.map(tech => ({
       ...tech,
-      // Add weeklyTickets field for frontend to filter
-      weeklyTickets: tech.weeklyTickets || [],
+      // Add weeklyTickets field for frontend to filter (transform like daily tickets)
+      weeklyTickets: (tech.weeklyTickets || []).map(transformTicket),
     }));
 
     res.json({
