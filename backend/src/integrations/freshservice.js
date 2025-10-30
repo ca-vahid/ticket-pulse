@@ -54,9 +54,10 @@ class FreshServiceClient {
    * Fetch all pages of a paginated API endpoint
    * @param {string} endpoint - API endpoint
    * @param {Object} params - Query parameters
+   * @param {Function} onProgress - Optional callback for progress updates (page, itemCount)
    * @returns {Promise<Array>} Combined results from all pages
    */
-  async fetchAllPages(endpoint, params = {}) {
+  async fetchAllPages(endpoint, params = {}, onProgress = null) {
     const allResults = [];
     let page = 1;
     let hasMore = true;
@@ -81,6 +82,11 @@ class FreshServiceClient {
           // Log progress every 10 pages to show sync progress
           if (page % 10 === 0) {
             logger.info(`Fetching ${endpoint}: ${allResults.length} items so far (page ${page})...`);
+
+            // Call progress callback if provided
+            if (onProgress) {
+              onProgress(page, allResults.length);
+            }
           }
 
           // Check if there are more pages
@@ -159,9 +165,10 @@ class FreshServiceClient {
   /**
    * Fetch tickets with optional filters
    * @param {Object} filters - Query filters
+   * @param {Function} onProgress - Optional callback for progress updates (page, itemCount)
    * @returns {Promise<Array>} Array of tickets
    */
-  async fetchTickets(filters = {}) {
+  async fetchTickets(filters = {}, onProgress = null) {
     try {
       logger.info('Fetching tickets from FreshService', filters);
 
@@ -183,7 +190,7 @@ class FreshServiceClient {
         params.include = filters.include;
       }
 
-      const tickets = await this.fetchAllPages('/tickets', params);
+      const tickets = await this.fetchAllPages('/tickets', params, onProgress);
       logger.info(`Fetched ${tickets.length} tickets`);
       return tickets;
     } catch (error) {

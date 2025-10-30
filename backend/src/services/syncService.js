@@ -893,7 +893,7 @@ class SyncService {
       const end = new Date(endDate + 'T23:59:59Z');
 
       // Step 1: Fetch tickets from FreshService for this week
-      this.progress.currentStep = 'Fetching tickets from FreshService (this may take 1-2 minutes)';
+      this.progress.currentStep = 'Fetching tickets from FreshService';
       this.progress.currentStepNumber = 1;
       this.progress.percentage = 5; // Show some progress immediately
       logger.info(`Fetching tickets updated/created between ${startDate} and ${endDate}`);
@@ -903,7 +903,13 @@ class SyncService {
         include: 'requester,stats',
       };
 
-      const allTickets = await client.fetchTickets(filters);
+      // Fetch tickets with progress callback to update UI in real-time
+      const allTickets = await client.fetchTickets(filters, (page, itemCount) => {
+        // Update progress with page and item count (updates every 10 pages)
+        this.progress.currentStep = `Fetching tickets from FreshService (${itemCount} items, page ${page})`;
+        // Progress from 5% to 20% based on estimated 80 pages max
+        this.progress.percentage = Math.min(5 + Math.floor((page / 80) * 15), 20);
+      });
 
       // Filter to only include tickets updated within this specific week
       const tickets = allTickets.filter(ticket => {
