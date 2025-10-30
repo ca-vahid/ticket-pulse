@@ -491,9 +491,11 @@ export default function Dashboard() {
       setSyncStatus('syncing');
 
       // Calculate Monday of the selected week
-      const currentDay = (selectedDate.getDay() + 6) % 7; // Convert to Monday=0, ..., Sunday=6
-      const monday = new Date(selectedDate);
-      monday.setDate(selectedDate.getDate() - currentDay);
+      // Use selectedWeek for weekly mode, selectedDate for daily mode
+      const sourceDate = viewMode === 'weekly' ? selectedWeek : selectedDate;
+      const currentDay = (sourceDate.getDay() + 6) % 7; // Convert to Monday=0, ..., Sunday=6
+      const monday = new Date(sourceDate);
+      monday.setDate(sourceDate.getDate() - currentDay);
       monday.setHours(0, 0, 0, 0);
 
       // Calculate Sunday of the selected week
