@@ -334,7 +334,16 @@ export default function Dashboard() {
           await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
 
           const statusCheck = await syncAPI.getStatus();
-          addSyncLog(`Checking sync status... (${attempts * 2}s elapsed)`, 'info');
+          const progress = statusCheck.data?.sync?.progress;
+
+          if (progress) {
+            // Display progress information
+            const progressMsg = `${progress.currentStep} (${progress.percentage}%)`;
+            addSyncLog(progressMsg, 'info');
+            setSyncMessage(progressMsg);
+          } else {
+            addSyncLog(`Checking sync status... (${attempts * 2}s elapsed)`, 'info');
+          }
 
           if (!statusCheck.data?.sync?.isRunning) {
             addSyncLog('Background sync completed!', 'success');
@@ -512,12 +521,32 @@ export default function Dashboard() {
       addSyncLog('Calling sync week API endpoint...', 'info');
       const startTime = Date.now();
 
-      const response = await syncAPI.syncWeek({
-        startDate: formatDateLocal(monday),
-        endDate: formatDateLocal(sunday)
-      });
+      // Start polling for progress updates
+      const progressPollingInterval = setInterval(async () => {
+        try {
+          const statusCheck = await syncAPI.getStatus();
+          const progress = statusCheck.data?.sync?.progress;
 
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+          if (progress) {
+            const progressMsg = `${progress.currentStep} (${progress.percentage}%)`;
+            addSyncLog(progressMsg, 'info');
+            setSyncMessage(progressMsg);
+          }
+        } catch (err) {
+          console.error('[SYNC WEEK] Error polling progress:', err);
+        }
+      }, 2000); // Poll every 2 seconds
+
+      try {
+        const response = await syncAPI.syncWeek({
+          startDate: formatDateLocal(monday),
+          endDate: formatDateLocal(sunday)
+        });
+
+        // Stop polling
+        clearInterval(progressPollingInterval);
+
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
       if (response.success) {
         addSyncLog(`✓ Week sync completed in ${duration}s`, 'success');
@@ -547,6 +576,11 @@ export default function Dashboard() {
         }, 5000);
       } else {
         throw new Error(response.message || 'Week sync failed');
+      }
+      } catch (err) {
+        // Stop polling on error
+        clearInterval(progressPollingInterval);
+        throw err;
       }
 
     } catch (err) {

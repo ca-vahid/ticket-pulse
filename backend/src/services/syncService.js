@@ -116,6 +116,7 @@ class SyncService {
       batchDelay = 1100,
       ticketFilter = null,
       existingTicketsMap = new Map(),
+      onProgress = null,
     } = options;
 
     if (!Array.isArray(tickets) || tickets.length === 0) {
@@ -133,6 +134,7 @@ class SyncService {
     const analysisMap = new Map();
     let processedCount = 0;
     let errorCount = 0;
+    const totalCount = ticketsToAnalyze.length;
 
     // Process function for a single ticket
     const processTicket = async (ticket, index) => {
@@ -155,6 +157,11 @@ class SyncService {
           analysisMap.set(ticketId.toString(), analysis);
           processedCount++;
 
+          // Report progress if callback provided
+          if (onProgress && processedCount % 5 === 0) {
+            onProgress(processedCount, totalCount);
+          }
+
           logger.debug(`Ticket ${ticketId}: isSelfPicked=${analysis.isSelfPicked}, assignedBy=${analysis.assignedBy}`);
         }
 
@@ -162,6 +169,11 @@ class SyncService {
       } catch (error) {
         errorCount++;
         const ticketId = ticket.id || ticket.freshserviceTicketId;
+
+        // Report progress even on error
+        if (onProgress && (processedCount + errorCount) % 5 === 0) {
+          onProgress(processedCount + errorCount, totalCount);
+        }
 
         // Only log non-500 errors (500s are expected for some tickets)
         if (!String(error).includes('500')) {
@@ -176,6 +188,11 @@ class SyncService {
     await Promise.all(
       ticketsToAnalyze.map((ticket, index) => processTicket(ticket, index))
     );
+
+    // Final progress report
+    if (onProgress) {
+      onProgress(totalCount, totalCount);
+    }
 
     logger.info(`Activity analysis complete: ${processedCount} analyzed, ${errorCount} errors`);
     return analysisMap;
@@ -857,6 +874,17 @@ class SyncService {
    */
   async syncWeek({ startDate, endDate, concurrency = 3 }) {
     try {
+      // Initialize progress tracking
+      this.isRunning = true;
+      this.progress = {
+        currentStep: 'Initializing week sync',
+        currentStepNumber: 1,
+        totalSteps: 5,
+        ticketsToProcess: 0,
+        ticketsProcessed: 0,
+        percentage: 0,
+      };
+
       logger.info(`Starting week sync: ${startDate} to ${endDate} (concurrency: ${concurrency})`);
       const client = await this._initializeClient();
 
@@ -865,6 +893,8 @@ class SyncService {
       const end = new Date(endDate + 'T23:59:59Z');
 
       // Step 1: Fetch tickets from FreshService for this week
+      this.progress.currentStep = 'Fetching tickets from FreshService';
+      this.progress.currentStepNumber = 1;
       logger.info(`Fetching tickets updated/created between ${startDate} and ${endDate}`);
 
       const filters = {
@@ -882,20 +912,43 @@ class SyncService {
 
       logger.info(`Found ${tickets.length} tickets in this week (filtered from ${allTickets.length} total)`);
 
+      // Update progress with total count
+      this.progress.ticketsToProcess = tickets.length;
+
       // Step 2: Transform tickets and map technician IDs using core method
+      this.progress.currentStep = 'Preparing tickets for database';
+      this.progress.currentStepNumber = 2;
+      this.progress.percentage = 20;
       const preparedTickets = await this._prepareTicketsForDatabase(tickets);
 
       // Step 3: Upsert tickets using core method
+      this.progress.currentStep = 'Saving tickets to database';
+      this.progress.currentStepNumber = 3;
+      this.progress.percentage = 30;
       const ticketsSynced = await this._upsertTickets(preparedTickets);
       const ticketsSkipped = tickets.length - ticketsSynced;
 
       // Step 4: Analyze activities using core method
+      this.progress.currentStep = `Analyzing ticket activities (0/${tickets.length})`;
+      this.progress.currentStepNumber = 4;
+      this.progress.percentage = 40;
+      this.progress.ticketsProcessed = 0;
+
       const analysisMap = await this._analyzeTicketActivities(client, tickets, {
         concurrency,
         batchDelay: 1500, // 1.5s delay per batch for week sync
+        onProgress: (processed, total) => {
+          this.progress.ticketsProcessed = processed;
+          this.progress.currentStep = `Analyzing ticket activities (${processed}/${total})`;
+          // Progress from 40% to 90% during analysis (the longest step)
+          this.progress.percentage = 40 + Math.floor((processed / total) * 50);
+        },
       });
 
       // Step 5: Update tickets with analysis results using core method
+      this.progress.currentStep = 'Finalizing sync and updating database';
+      this.progress.currentStepNumber = 5;
+      this.progress.percentage = 90;
       await this._updateTicketsWithAnalysis(analysisMap);
 
       // Count pickup times backfilled (tickets that had firstAssignedAt set)
@@ -917,10 +970,16 @@ class SyncService {
         message: `Synced ${ticketsSynced}/${tickets.length} tickets, analyzed ${analysisMap.size} activities, backfilled ${pickupTimesBackfilled} pickup times`,
       };
 
+      // Mark as complete
+      this.progress.currentStep = 'Completed';
+      this.progress.percentage = 100;
+      this.isRunning = false;
+
       logger.info('Week sync completed', summary);
       return summary;
 
     } catch (error) {
+      this.isRunning = false;
       logger.error('Week sync failed:', error);
       throw error;
     }
