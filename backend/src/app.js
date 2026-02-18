@@ -59,10 +59,10 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: config.isProduction, // HTTPS only in production
+      secure: true, // Must be true when sameSite is 'none'
       httpOnly: true,
       maxAge: config.session.maxAge,
-      sameSite: 'lax',
+      sameSite: 'none', // Required for cross-origin requests (SWA → App Service)
     },
   }),
 );
