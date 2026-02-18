@@ -1,0 +1,306 @@
+// Ticket Pulse - FreshService Real-Time Dashboard
+// Database Schema for PostgreSQL
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Technician {
+  id              Int       @id @default(autoincrement())
+  freshserviceId  BigInt    @unique @map("freshservice_id")
+  name            String    @db.VarChar(255)
+  email           String?   @db.VarChar(255)
+  photoUrl        String?   @db.Text @map("photo_url") // Azure AD profile photo URL or base64 data
+  timezone        String    @default("America/Los_Angeles") @db.VarChar(50)
+  location        String?   @db.VarChar(100)
+  workspaceId     BigInt?   @map("workspace_id") // FreshService workspace ID
+  isActive        Boolean   @default(true) @map("is_active")
+  photoSyncedAt   DateTime? @map("photo_synced_at") // Last time photo was fetched from Azure AD
+  showOnMap       Boolean   @default(true) @map("show_on_map") // Show on visuals map
+  isMapManager    Boolean   @default(false) @map("is_map_manager") // Is manager on visuals map
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tickets         Ticket[]
+
+  @@map("technicians")
+  @@index([freshserviceId])
+  @@index([workspaceId])
+  @@index([email])
+}
+
+model Requester {
+  id                Int       @id @default(autoincrement())
+  freshserviceId    BigInt    @unique @map("freshservice_id")
+  name              String    @db.VarChar(255)
+  email             String?   @db.VarChar(255)
+  phone             String?   @db.VarChar(50)
+  mobile            String?   @db.VarChar(50)
+  department        String?   @db.VarChar(255)
+  jobTitle          String?   @db.VarChar(255) @map("job_title")
+  timeZone          String?   @db.VarChar(100) @map("time_zone")
+  language          String?   @db.VarChar(50)
+  isActive          Boolean   @default(true) @map("is_active")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  tickets           Ticket[]
+
+  @@map("requesters")
+  @@index([freshserviceId])
+  @@index([email])
+}
+
+model Ticket {
+  id                    Int       @id @default(autoincrement())
+  freshserviceTicketId  BigInt    @unique @map("freshservice_ticket_id")
+  subject               String?   @db.Text
+  description           String?   @db.Text
+  descriptionText       String?   @db.Text @map("description_text") // Plain text version
+  status                String    @db.VarChar(50) // open, pending, resolved, closed
+  priority              Int       @default(3) // 1=Urgent, 2=High, 3=Medium, 4=Low
+
+  // Relationships
+  assignedTechId        Int?      @map("assigned_tech_id")
+  assignedTech          Technician? @relation(fields: [assignedTechId], references: [id])
+
+  // Requester relationship
+  requesterId           Int?      @map("requester_id") // Internal DB ID
+  requester             Requester? @relation(fields: [requesterId], references: [id])
+  requesterFreshserviceId BigInt? @map("requester_freshservice_id") // FreshService requester ID (for mapping)
+
+  // Timestamps
+  createdAt             DateTime  @map("created_at")
+  assignedAt            DateTime? @map("assigned_at")
+  resolvedAt            DateTime? @map("resolved_at")
+  closedAt              DateTime? @map("closed_at")
+  dueBy                 DateTime? @map("due_by")
+  frDueBy               DateTime? @map("fr_due_by") // First response due by
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Assignment tracking
+  isSelfPicked          Boolean   @default(false) @map("is_self_picked")
+  assignedBy            String?   @db.VarChar(255) @map("assigned_by") // Name or ID
+
+  // Additional metadata
+  source                Int?      // 1=Email, 2=Portal, 3=Phone, etc.
+  category              String?   @db.VarChar(255)
+  subCategory           String?   @db.VarChar(255) @map("sub_category")
+  ticketCategory        String?   @db.VarChar(100) @map("ticket_category") // Custom field: security (e.g., BST, GIS, etc.)
+  department            String?   @db.VarChar(255)
+  isEscalated           Boolean?  @default(false) @map("is_escalated")
+
+  // Time tracking (from FreshService stats)
+  timeSpentMinutes      Int?      @map("time_spent_minutes") // Total time spent in minutes (requires time_entries API)
+  billableMinutes       Int?      @map("billable_minutes")   // Billable time in minutes (requires time_entries API)
+  nonBillableMinutes    Int?      @map("non_billable_minutes") // Non-billable time in minutes (requires time_entries API)
+  resolutionTimeSeconds Int?      @map("resolution_time_seconds") // Time from creation to resolution (from stats field)
+  firstAssignedAt       DateTime? @map("first_assigned_at") // When ticket was first assigned (from activities API)
+  firstPublicAgentReplyAt DateTime? @map("first_public_agent_reply_at") // First public agent reply timestamp (from activities API)
+
+  // Workspace filtering
+  workspaceName         String?   @db.VarChar(100) @map("workspace_name")
+
+  // CSAT (Customer Satisfaction Survey)
+  csatResponseId        BigInt?   @map("csat_response_id") // FreshService CSAT response ID
+  csatScore             Int?      @map("csat_score") // Acquired score (1-4)
+  csatTotalScore        Int?      @map("csat_total_score") // Total possible score (usually 4)
+  csatRatingText        String?   @db.VarChar(50) @map("csat_rating_text") // "Poor", "Good", "Excellent", etc.
+  csatOverallRating     Int?      @map("csat_overall_rating") // FreshService rating code (e.g., 301)
+  csatFeedback          String?   @db.Text @map("csat_feedback") // User's detailed feedback/comments
+  csatSubmittedAt       DateTime? @map("csat_submitted_at") // When survey was submitted
+
+  // Computed fields (handled in application logic)
+  // isToday: computed based on createdAt and PST timezone
+  // timeToResolve: computed as resolvedAt - createdAt
+  // timeToFirstResponse: computed from activities
+  // timeToClose: computed as closedAt - createdAt
+
+  @@map("tickets")
+  @@index([assignedTechId])
+  @@index([createdAt])
+  @@index([status])
+  @@index([workspaceName])
+  @@index([requesterId])
+  @@index([csatScore])
+  @@index([csatSubmittedAt])
+  @@index([firstPublicAgentReplyAt])
+}
+
+model TicketActivity {
+  id            Int       @id @default(autoincrement())
+  ticketId      Int       @map("ticket_id")
+  activityType  String    @db.VarChar(50) // assigned, status_changed, resolved, picked
+  performedBy   String    @db.VarChar(255) @map("performed_by")
+  performedAt   DateTime  @map("performed_at")
+  details       Json?     // Store additional context as JSON
+
+  @@map("ticket_activities")
+  @@index([ticketId])
+  @@index([performedAt])
+}
+
+model AppSettings {
+  id              Int       @id @default(autoincrement())
+  key             String    @unique @db.VarChar(100)
+  value           String    @db.Text
+  description     String?   @db.Text
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
+
+model SyncLog {
+  id              Int       @id @default(autoincrement())
+  syncType        String    @db.VarChar(50) // tickets, technicians
+  status          String    @db.VarChar(20) // success, error, partial
+  recordsProcessed Int      @default(0) @map("records_processed")
+  errorMessage    String?   @db.Text @map("error_message")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+
+  @@map("sync_logs")
+  @@index([startedAt])
+}
+
+model BusinessHour {
+  id          Int      @id @default(autoincrement())
+  dayOfWeek   Int      // 0=Sunday, 1=Monday, ..., 6=Saturday
+  startTime   String   @db.VarChar(5) // HH:MM format (24-hour)
+  endTime     String   @db.VarChar(5) // HH:MM format (24-hour)
+  isEnabled   Boolean  @default(true) @map("is_enabled")
+  timezone    String   @default("America/Los_Angeles") @db.VarChar(50)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("business_hours")
+  @@index([dayOfWeek])
+}
+
+model Holiday {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(255)
+  date        DateTime @db.Date
+  isRecurring Boolean  @default(false) @map("is_recurring") // Annual holiday (e.g., New Year's)
+  country     String?  @db.VarChar(2) // ISO country code (CA, US, etc.)
+  isEnabled   Boolean  @default(true) @map("is_enabled")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("holidays")
+  @@index([date])
+}
+
+model AutoResponse {
+  id                  Int      @id @default(autoincrement())
+  ticketId            Int?     @map("ticket_id") // Associated ticket (if from webhook)
+  freshserviceTicketId BigInt? @map("freshservice_ticket_id")
+  senderEmail         String   @db.VarChar(255) @map("sender_email")
+  senderName          String?  @db.VarChar(255) @map("sender_name")
+  
+  // Analysis results
+  classification      String   @db.VarChar(50) // human, automated, spam, etc.
+  severity            String?  @db.VarChar(20) // low, medium, high, urgent
+  isAfterHours        Boolean  @default(false) @map("is_after_hours")
+  isHoliday           Boolean  @default(false) @map("is_holiday")
+  
+  // ETA calculation
+  estimatedWaitMinutes Int?    @map("estimated_wait_minutes")
+  queueLength         Int?     @map("queue_length")
+  activeAgentCount    Int?     @map("active_agent_count")
+  
+  // Response details
+  responseGenerated   String?  @db.Text @map("response_generated")
+  responseSent        Boolean  @default(false) @map("response_sent")
+  sentAt              DateTime? @map("sent_at")
+  
+  // LLM metadata
+  llmModel            String?  @db.VarChar(50) @map("llm_model")
+  llmTokensUsed       Int?     @map("llm_tokens_used")
+  configVersionUsed   Int?     @map("config_version_used") // Track which config version was used
+  
+  // Audit trail
+  rawEmailBody        String?  @db.Text @map("raw_email_body")
+  webhookPayload      Json?    @map("webhook_payload")
+  errorMessage        String?  @db.Text @map("error_message")
+  
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("auto_responses")
+  @@index([freshserviceTicketId])
+  @@index([createdAt])
+  @@index([senderEmail])
+}
+
+model LlmConfig {
+  id                    Int      @id @default(autoincrement())
+  version               Int      @default(1)
+  status                String   @default("draft") @db.VarChar(20) // draft, published
+  
+  // Prompts
+  classificationPrompt  String   @db.Text @map("classification_prompt")
+  responsePrompt        String   @db.Text @map("response_prompt")
+  
+  // Templates & Signatures
+  signatureBlock        String?  @db.Text @map("signature_block")
+  fallbackMessage       String?  @db.Text @map("fallback_message")
+  
+  // Tone presets per classification type (JSON: {human_request: "warm", automated_notification: "brief"})
+  tonePresets           Json?    @map("tone_presets")
+
+  // Runtime settings
+  model                 String   @default("gpt-5.1") @db.VarChar(100)
+  reasoningEffort       String   @default("none") @db.VarChar(20) @map("reasoning_effort")
+  verbosity             String   @default("medium") @db.VarChar(20)
+  maxOutputTokens       Int      @default(800) @map("max_output_tokens")
+  
+  // ETA Rules
+  baseResponseMinutes   Int      @default(30) @map("base_response_minutes")
+  perTicketDelayMinutes Int      @default(10) @map("per_ticket_delay_minutes")
+  afterHoursMessage     String?  @db.Text @map("after_hours_message")
+  holidayMessage        String?  @db.Text @map("holiday_message")
+  
+  // Classification Overrides (JSON array of rules)
+  overrideRules         Json?    @map("override_rules")
+  domainWhitelist       Json?    @map("domain_whitelist") // Array of allowed domains
+  domainBlacklist       Json?    @map("domain_blacklist") // Array of blocked domains
+  
+  // Metadata
+  createdBy             String?  @db.VarChar(255) @map("created_by")
+  publishedBy           String?  @db.VarChar(255) @map("published_by")
+  publishedAt           DateTime? @map("published_at")
+  notes                 String?  @db.Text
+  
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("llm_configs")
+  @@index([status])
+  @@index([version])
+}
+
+model LlmConfigHistory {
+  id                Int      @id @default(autoincrement())
+  configId          Int      @map("config_id") // Original config this was based on
+  version           Int
+  action            String   @db.VarChar(50) // created, updated, published, reverted
+  
+  // Snapshot of the full config at this point
+  configSnapshot    Json     @map("config_snapshot")
+  
+  // Change details
+  changedBy         String?  @db.VarChar(255) @map("changed_by")
+  changeNotes       String?  @db.Text @map("change_notes")
+  
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@map("llm_config_history")
+  @@index([configId])
+  @@index([createdAt])
+}
