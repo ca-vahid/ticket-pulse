@@ -21,7 +21,7 @@
     "dashboard",
     "it-helpdesk"
   ],
-  "author": "BGC Engineering IT",
+  "author": "BGC Engineering",
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "^5.19.0",
