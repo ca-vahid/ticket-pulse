@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import jwksRsa from 'jwks-rsa';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { ValidationError, AuthenticationError } from '../utils/errors.js';
+// SSO via Azure AD - validates ID tokens and creates sessions
 import logger from '../utils/logger.js';
 
 const router = express.Router();
