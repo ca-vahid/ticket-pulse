@@ -10,6 +10,7 @@ const envSchema = z.object({
   PORT: z.string().default('3000').transform(Number),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   SESSION_SECRET: z.string().min(1, 'SESSION_SECRET is required'),
+  CORS_ORIGIN: z.string().optional(),
   FRESHSERVICE_API_KEY: z.string().optional(),
   FRESHSERVICE_DOMAIN: z.string().optional(),
   FRESHSERVICE_WORKSPACE_ID: z.string().optional(),
@@ -53,7 +54,7 @@ export default {
   // CORS
   cors: {
     origin: config.NODE_ENV === 'production'
-      ? ['https://your-production-domain.com']
+      ? (config.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean)
       : ['http://localhost:5173', 'http://127.0.0.1:5173'],
   },
 
