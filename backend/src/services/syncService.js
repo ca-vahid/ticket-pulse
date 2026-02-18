@@ -160,6 +160,10 @@ class SyncService {
             onProgress(processedCount, totalCount);
           }
 
+          if (processedCount % 50 === 0) {
+            logger.info(`Activity analysis progress: ${processedCount}/${totalCount} (${Math.round(processedCount / totalCount * 100)}%) - ${errorCount} errors`);
+          }
+
           logger.debug(`Ticket ${ticketId}: isSelfPicked=${analysis.isSelfPicked}, assignedBy=${analysis.assignedBy}`);
         }
 
@@ -171,6 +175,10 @@ class SyncService {
         // Report progress even on error
         if (onProgress && (processedCount + errorCount) % 5 === 0) {
           onProgress(processedCount + errorCount, totalCount);
+        }
+
+        if ((processedCount + errorCount) % 50 === 0) {
+          logger.info(`Activity analysis progress: ${processedCount + errorCount}/${totalCount} (${Math.round((processedCount + errorCount) / totalCount * 100)}%) - ${errorCount} errors`);
         }
 
         // Only log non-500 errors (500s are expected for some tickets)
