@@ -39,6 +39,7 @@ jobs:
         run: |
           cd backend
           zip -r ../backend.zip . \
+            --exclude "node_modules/*" \
             --exclude "*.test.js" \
             --exclude "*.spec.js" \
             --exclude ".env" \
