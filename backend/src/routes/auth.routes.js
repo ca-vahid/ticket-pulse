@@ -1,65 +1,103 @@
 import express from 'express';
-import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import jwksRsa from 'jwks-rsa';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { ValidationError, AuthenticationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
 
-// Hardcoded admin credentials (can be moved to database later)
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || null;
+const TENANT_ID = process.env.AZURE_AD_TENANT_ID;
+const CLIENT_ID = process.env.AZURE_AD_CLIENT_ID;
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
+  .split(',')
+  .map(e => e.trim().toLowerCase())
+  .filter(Boolean);
+
+const jwksClient = jwksRsa({
+  jwksUri: `https://login.microsoftonline.com/${TENANT_ID}/discovery/v2.0/keys`,
+  cache: true,
+  cacheMaxAge: 86400000,
+  rateLimit: true,
+});
+
+function getSigningKey(header, callback) {
+  jwksClient.getSigningKey(header.kid, (err, key) => {
+    if (err) return callback(err);
+    callback(null, key.getPublicKey());
+  });
+}
+
+function verifyIdToken(idToken) {
+  return new Promise((resolve, reject) => {
+    jwt.verify(
+      idToken,
+      getSigningKey,
+      {
+        audience: CLIENT_ID,
+        issuer: `https://login.microsoftonline.com/${TENANT_ID}/v2.0`,
+        algorithms: ['RS256'],
+      },
+      (err, decoded) => {
+        if (err) return reject(err);
+        resolve(decoded);
+      },
+    );
+  });
+}
 
 /**
- * POST /api/auth/login
- * Authenticate user and create session
+ * POST /api/auth/sso
+ * Validate Azure AD ID token and create session
  */
 router.post(
-  '/login',
+  '/sso',
   asyncHandler(async (req, res) => {
-    const { username, password } = req.body;
+    const { idToken } = req.body;
 
-    // Validation
-    if (!username || !password) {
-      throw new ValidationError('Username and password are required');
+    if (!idToken) {
+      throw new ValidationError('ID token is required');
     }
 
-    // Check username
-    if (username !== ADMIN_USERNAME) {
-      logger.warn(`Failed login attempt for username: ${username}`);
-      throw new AuthenticationError('Invalid credentials');
+    if (!TENANT_ID || !CLIENT_ID) {
+      logger.error('Azure AD not configured: AZURE_AD_TENANT_ID or AZURE_AD_CLIENT_ID missing');
+      throw new AuthenticationError('SSO is not configured on this server');
     }
 
-    // Check password
-    let passwordValid = false;
-    if (ADMIN_PASSWORD_HASH) {
-      passwordValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
-    } else {
-      // Fallback for development (no hash set)
-      passwordValid = password === (process.env.ADMIN_PASSWORD || 'admin');
+    let claims;
+    try {
+      claims = await verifyIdToken(idToken);
+    } catch (err) {
+      logger.warn('Invalid ID token', { error: err.message });
+      throw new AuthenticationError('Invalid or expired token');
     }
 
-    if (!passwordValid) {
-      logger.warn(`Failed login attempt for username: ${username}`);
-      throw new AuthenticationError('Invalid credentials');
+    const email = (claims.preferred_username || claims.email || '').toLowerCase();
+    const name = claims.name || email;
+    const oid = claims.oid;
+
+    if (!email) {
+      throw new AuthenticationError('No email claim found in token');
     }
 
-    // Create session
+    const role = ADMIN_EMAILS.includes(email) ? 'admin' : 'viewer';
+
     req.session.user = {
-      username,
-      role: 'admin',
+      email,
+      name,
+      username: name,
+      role,
+      oid,
       loginTime: new Date().toISOString(),
+      authMethod: 'sso',
     };
 
-    logger.info(`User ${username} logged in successfully`);
+    logger.info(`SSO login: ${name} (${email}) as ${role}`);
 
     res.json({
       success: true,
-      message: 'Login successful',
-      user: {
-        username,
-        role: 'admin',
-      },
+      message: 'SSO login successful',
+      user: { email, name, username: name, role },
     });
   }),
 );
@@ -71,7 +109,7 @@ router.post(
 router.post(
   '/logout',
   asyncHandler(async (req, res) => {
-    const username = req.session?.user?.username;
+    const name = req.session?.user?.name || req.session?.user?.username;
 
     req.session.destroy(err => {
       if (err) {
@@ -82,7 +120,7 @@ router.post(
         });
       }
 
-      logger.info(`User ${username} logged out`);
+      logger.info(`User ${name} logged out`);
 
       res.json({
         success: true,
@@ -104,7 +142,9 @@ router.get(
         success: true,
         authenticated: true,
         user: {
-          username: req.session.user.username,
+          email: req.session.user.email,
+          name: req.session.user.name,
+          username: req.session.user.username || req.session.user.name,
           role: req.session.user.role,
         },
       });

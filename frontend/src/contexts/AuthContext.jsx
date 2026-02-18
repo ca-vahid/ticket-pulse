@@ -1,20 +1,19 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useMsal } from '@azure/msal-react';
+import { InteractionStatus } from '@azure/msal-browser';
 import { authAPI } from '../services/api';
+import { loginRequest } from '../config/msalConfig';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
+  const { instance, inProgress, accounts } = useMsal();
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Check session on mount
-  useEffect(() => {
-    checkSession();
-  }, []);
-
-  const checkSession = async () => {
+  const checkSession = useCallback(async () => {
     try {
       setIsLoading(true);
       const response = await authAPI.checkSession();
@@ -33,24 +32,47 @@ export function AuthProvider({ children }) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const login = async (username, password) => {
+  useEffect(() => {
+    checkSession();
+  }, [checkSession]);
+
+  const exchangeTokenForSession = useCallback(async () => {
+    if (inProgress !== InteractionStatus.None || !accounts.length) return;
+
     try {
-      setError(null);
-      const response = await authAPI.login(username, password);
+      const tokenResponse = await instance.acquireTokenSilent({
+        ...loginRequest,
+        account: accounts[0],
+      });
 
-      if (response.success && response.user) {
-        setUser(response.user);
-        setIsAuthenticated(true);
-        return { success: true };
-      } else {
-        throw new Error('Login failed');
+      if (tokenResponse?.idToken) {
+        const response = await authAPI.ssoLogin(tokenResponse.idToken);
+        if (response.success && response.user) {
+          setUser(response.user);
+          setIsAuthenticated(true);
+          setError(null);
+        }
       }
     } catch (err) {
-      const errorMessage = err.message || 'Login failed';
-      setError(errorMessage);
-      return { success: false, error: errorMessage };
+      console.error('Token exchange failed:', err);
+      setError(err.message);
+    }
+  }, [instance, inProgress, accounts]);
+
+  useEffect(() => {
+    if (accounts.length > 0 && !isAuthenticated && inProgress === InteractionStatus.None) {
+      exchangeTokenForSession();
+    }
+  }, [accounts, isAuthenticated, inProgress, exchangeTokenForSession]);
+
+  const loginWithSSO = async () => {
+    try {
+      setError(null);
+      await instance.loginRedirect(loginRequest);
+    } catch (err) {
+      setError(err.message || 'SSO login failed');
     }
   };
 
@@ -63,6 +85,11 @@ export function AuthProvider({ children }) {
       setUser(null);
       setIsAuthenticated(false);
       setError(null);
+      try {
+        await instance.logoutRedirect({ postLogoutRedirectUri: '/' });
+      } catch (err) {
+        console.error('MSAL logout error:', err);
+      }
     }
   };
 
@@ -71,7 +98,7 @@ export function AuthProvider({ children }) {
     isAuthenticated,
     isLoading,
     error,
-    login,
+    loginWithSSO,
     logout,
     checkSession,
   };

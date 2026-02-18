@@ -113,6 +113,19 @@ function App() {
                 }
               />
 
+              {/* Auth callback - MSAL handles this automatically */}
+              <Route
+                path="/auth/callback"
+                element={
+                  <div className="min-h-screen flex items-center justify-center bg-gray-100">
+                    <div className="text-center">
+                      <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
+                      <p className="text-gray-600">Completing sign-in...</p>
+                    </div>
+                  </div>
+                }
+              />
+
               {/* Default Route */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
 

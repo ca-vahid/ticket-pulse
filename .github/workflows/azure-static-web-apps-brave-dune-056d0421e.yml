@@ -32,6 +32,8 @@ jobs:
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_FRESHSERVICE_DOMAIN: ${{ secrets.VITE_FRESHSERVICE_DOMAIN }}
+          VITE_AZURE_AD_CLIENT_ID: ${{ secrets.VITE_AZURE_AD_CLIENT_ID }}
+          VITE_AZURE_AD_TENANT_ID: ${{ secrets.VITE_AZURE_AD_TENANT_ID }}
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'

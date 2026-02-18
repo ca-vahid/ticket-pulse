@@ -53,8 +53,8 @@ apiLongTimeout.interceptors.response.use(
  * Authentication API
  */
 export const authAPI = {
-  login: async (username, password) => {
-    return await api.post('/auth/login', { username, password });
+  ssoLogin: async (idToken) => {
+    return await api.post('/auth/sso', { idToken });
   },
 
   logout: async () => {

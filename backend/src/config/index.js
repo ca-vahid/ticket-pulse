@@ -15,6 +15,7 @@ const envSchema = z.object({
   FRESHSERVICE_DOMAIN: z.string().optional(),
   FRESHSERVICE_WORKSPACE_ID: z.string().optional(),
   ADMIN_PASSWORD_HASH: z.string().optional(),
+  ADMIN_EMAILS: z.string().optional(),
   AZURE_KEY_VAULT_URL: z.string().optional(),
   APPLICATION_INSIGHTS_CONNECTION_STRING: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),

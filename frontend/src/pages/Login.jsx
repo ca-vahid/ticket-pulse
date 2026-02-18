@@ -1,35 +1,16 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const { login } = useAuth();
+  const { loginWithSSO, isAuthenticated, isLoading, error } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-
-    try {
-      const result = await login(username, password);
-
-      if (result.success) {
-        navigate('/dashboard');
-      } else {
-        setError(result.error || 'Login failed');
-      }
-    } catch (err) {
-      setError(err.message || 'Login failed');
-    } finally {
-      setIsLoading(false);
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard');
     }
-  };
+  }, [isAuthenticated, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
@@ -43,53 +24,25 @@ export default function Login() {
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-2">
-              Username
-            </label>
-            <input
-              id="username"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Enter your username"
-              disabled={isLoading}
-            />
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+            {error}
           </div>
+        )}
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Enter your password"
-              disabled={isLoading}
-            />
-          </div>
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoading ? 'Logging in...' : 'Login'}
-          </button>
-        </form>
+        <button
+          onClick={loginWithSSO}
+          disabled={isLoading}
+          className="w-full flex items-center justify-center gap-3 bg-[#0078d4] hover:bg-[#106ebe] text-white font-semibold py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="10" height="10" fill="#f25022"/>
+            <rect x="11" width="10" height="10" fill="#7fba00"/>
+            <rect y="11" width="10" height="10" fill="#00a4ef"/>
+            <rect x="11" y="11" width="10" height="10" fill="#ffb900"/>
+          </svg>
+          {isLoading ? 'Signing in...' : 'Sign in with Microsoft'}
+        </button>
 
         <div className="mt-6 text-center text-sm text-gray-500">
           <p>Real-time IT ticket monitoring</p>
