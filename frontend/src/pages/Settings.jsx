@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../contexts/SettingsContext';
 import { syncAPI } from '../services/api';
-import axios from 'axios';
+import api from '../services/api';
 import AutoResponseSettings from '../components/AutoResponseSettings';
 import AutoResponseTestInteractive from '../components/AutoResponseTestInteractive';
 import LlmAdminPanel from '../components/LlmAdminPanel';
@@ -78,8 +78,8 @@ export default function Settings() {
 
     const fetchPhotoStatus = async () => {
       try {
-        const response = await axios.get('/api/photos/status');
-        setPhotoStatus(response.data.data);
+        const response = await api.get('/photos/status');
+        setPhotoStatus(response.data);
       } catch (err) {
         console.error('Failed to fetch photo status:', err);
       }
@@ -157,21 +157,20 @@ export default function Settings() {
     setPhotoSyncStatus(null);
 
     try {
-      const response = await axios.post('/api/photos/sync');
+      const response = await api.post('/photos/sync');
 
-      if (response.data.success) {
+      if (response.success) {
         setPhotoSyncStatus({
           success: true,
-          message: `Photo sync completed! ${response.data.synced} photos synced, ${response.data.failed} failed.`,
+          message: `Photo sync completed! ${response.synced} photos synced, ${response.failed} failed.`,
         });
 
-        // Refresh photo status
-        const statusResponse = await axios.get('/api/photos/status');
-        setPhotoStatus(statusResponse.data.data);
+        const statusResponse = await api.get('/photos/status');
+        setPhotoStatus(statusResponse.data);
       } else {
         setPhotoSyncStatus({
           success: false,
-          message: response.data.message || 'Photo sync failed',
+          message: response.message || 'Photo sync failed',
         });
       }
     } catch (err) {
