@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DashboardProvider } from './contexts/DashboardContext';
 import { SettingsProvider } from './contexts/SettingsContext';
@@ -59,6 +60,32 @@ function PublicRoute({ children }) {
   return children;
 }
 
+function AuthCallback() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      navigate('/dashboard', { replace: true });
+    }
+    if (!isLoading && !isAuthenticated) {
+      const timer = setTimeout(() => {
+        navigate('/dashboard', { replace: true });
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated, isLoading, navigate]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="text-center">
+        <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
+        <p className="text-gray-600">Completing sign-in...</p>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -113,17 +140,10 @@ function App() {
                 }
               />
 
-              {/* Auth callback - MSAL handles this automatically */}
+              {/* Auth callback - waits for MSAL + session exchange, then redirects */}
               <Route
                 path="/auth/callback"
-                element={
-                  <div className="min-h-screen flex items-center justify-center bg-gray-100">
-                    <div className="text-center">
-                      <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-                      <p className="text-gray-600">Completing sign-in...</p>
-                    </div>
-                  </div>
-                }
+                element={<AuthCallback />}
               />
 
               {/* Default Route */}
