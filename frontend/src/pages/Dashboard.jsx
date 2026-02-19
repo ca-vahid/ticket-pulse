@@ -12,6 +12,8 @@ import ExportButton from '../components/ExportButton';
 import { filterTickets } from '../utils/ticketFilter';
 import { getHolidayTooltip, getHolidayInfo } from '../utils/holidays';
 import { formatDateLocal } from '../utils/dateHelpers';
+import ChangelogModal from '../components/ChangelogModal';
+import { APP_VERSION } from '../data/changelog';
 import {
   Users,
   CheckCircle,
@@ -104,6 +106,9 @@ export default function Dashboard() {
     const stored = sessionStorage.getItem('dashboard_categories');
     return stored ? JSON.parse(stored) : [];
   });
+
+  // Changelog modal
+  const [showChangelog, setShowChangelog] = useState(false);
 
   // Compact view state - persisted in localStorage
   const [isCompactView, setIsCompactView] = useState(() => {
@@ -1166,8 +1171,17 @@ export default function Dashboard() {
           <div className="grid grid-cols-12 gap-4 items-center">
             {/* Left: Title + User - 3 cols */}
             <div className="col-span-3">
-              <h1 className="text-lg font-bold text-gray-800">Ticket Pulse Dashboard</h1>
-              <p className="text-xs text-gray-600">Welcome, {user?.username}</p>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold text-gray-800">Ticket Pulse Dashboard</h1>
+                <button
+                  onClick={() => setShowChangelog(true)}
+                  className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md hover:bg-blue-100 border border-blue-200 transition-colors"
+                  title="View changelog"
+                >
+                  v{APP_VERSION}
+                </button>
+              </div>
+              <p className="text-xs text-gray-600">Welcome, {user?.name || user?.username}</p>
             </div>
 
             {/* Center: Status + Last Updated - 6 cols */}
@@ -1988,6 +2002,8 @@ export default function Dashboard() {
           )}
         </div>
       </main>
+
+      <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
     </div>
   );
 }
