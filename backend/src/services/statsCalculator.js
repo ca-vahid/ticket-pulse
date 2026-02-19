@@ -207,6 +207,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
   for (let i = 0; i < 7; i++) {
     const date = new Date(weekStart);
     date.setDate(weekStart.getDate() + i);
+    date.setHours(12, 0, 0, 0);
 
     const result = getTodayRange(timezone, date);
     const dayStart = result.start;
@@ -506,6 +507,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
   for (let dayOffset = 0; dayOffset < daysInMonth; dayOffset += 1) {
     const currentDate = new Date(monthStartDate);
     currentDate.setDate(monthStartDate.getDate() + dayOffset);
+    currentDate.setHours(12, 0, 0, 0);
 
     const { start: dayStart, end: dayEnd } = getTodayRange(timezone, currentDate);
 

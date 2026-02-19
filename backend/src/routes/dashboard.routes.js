@@ -120,12 +120,13 @@ router.get(
     const monday = new Date(selectedDate);
     monday.setDate(selectedDate.getDate() - currentDay);
 
-    // Calculate week range
-    const weekStart = new Date(monday);
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(monday);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    weekEnd.setHours(23, 59, 59, 999);
+    // Calculate week range using timezone-aware boundaries
+    const weekStartRange = getTodayRange(timezone, monday);
+    const weekStart = weekStartRange.start;
+    const fridayDate = new Date(monday);
+    fridayDate.setDate(monday.getDate() + 6);
+    const weekEndRange = getTodayRange(timezone, fridayDate);
+    const weekEnd = weekEndRange.end;
 
     logger.debug(`Fetching weekly stats: ${weekStart.toISOString()} to ${weekEnd.toISOString()}`);
 
@@ -173,6 +174,7 @@ router.get(
     for (let i = 0; i < 7; i++) {
       const date = new Date(monday);
       date.setDate(monday.getDate() + i);
+      date.setHours(12, 0, 0, 0);
 
       const result = getTodayRange(timezone, date);
       const { start, end } = result;
@@ -223,22 +225,22 @@ router.get(
     if (weekStartParam) {
       // Use provided week start
       const [year, month, day] = weekStartParam.split('-').map(Number);
-      weekStartDate = new Date(year, month - 1, day, 0, 0, 0);
+      weekStartDate = new Date(year, month - 1, day, 12, 0, 0);
     } else {
       // Calculate current week's Monday
       const now = new Date();
       const currentDay = (now.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
       weekStartDate = new Date(now);
       weekStartDate.setDate(now.getDate() - currentDay);
-      weekStartDate.setHours(0, 0, 0, 0);
+      weekStartDate.setHours(12, 0, 0, 0);
     }
 
-    // Calculate week end (Sunday 23:59:59)
+    // Calculate week end (Sunday)
     const weekEndDate = new Date(weekStartDate);
     weekEndDate.setDate(weekStartDate.getDate() + 6);
-    weekEndDate.setHours(23, 59, 59, 999);
+    weekEndDate.setHours(12, 0, 0, 0);
 
-    logger.debug(`Week range: ${weekStartDate.toISOString()} to ${weekEndDate.toISOString()}`);
+    logger.debug(`Week range: ${formatDateInTimezone(weekStartDate, timezone)} to ${formatDateInTimezone(weekEndDate, timezone)}`);
 
     // Fetch all active technicians with their tickets
     const technicians = await technicianRepository.getAllActive();
@@ -378,21 +380,21 @@ router.get(
     let weekStartDate;
     if (weekStartParam) {
       const [year, month, day] = weekStartParam.split('-').map(Number);
-      weekStartDate = new Date(year, month - 1, day, 0, 0, 0);
+      weekStartDate = new Date(year, month - 1, day, 12, 0, 0);
     } else {
       // Calculate current week's Monday
       const now = new Date();
       const currentDay = (now.getDay() + 6) % 7;
       weekStartDate = new Date(now);
       weekStartDate.setDate(now.getDate() - currentDay);
-      weekStartDate.setHours(0, 0, 0, 0);
+      weekStartDate.setHours(12, 0, 0, 0);
     }
 
     const weekEndDate = new Date(weekStartDate);
     weekEndDate.setDate(weekStartDate.getDate() + 6);
-    weekEndDate.setHours(23, 59, 59, 999);
+    weekEndDate.setHours(12, 0, 0, 0);
 
-    logger.debug(`Week range for technician: ${weekStartDate.toISOString()} to ${weekEndDate.toISOString()}`);
+    logger.debug(`Week range for technician: ${formatDateInTimezone(weekStartDate, timezone)} to ${formatDateInTimezone(weekEndDate, timezone)}`);
 
     // Use statsCalculator for weekly stats
     const weeklyStats = calculateTechnicianWeeklyStats(
@@ -476,15 +478,15 @@ router.get(
     if (monthStartParam) {
       // Use provided month start (first day of the month)
       const [year, month, day] = monthStartParam.split('-').map(Number);
-      monthStartDate = new Date(year, month - 1, day, 0, 0, 0);
+      monthStartDate = new Date(year, month - 1, day, 12, 0, 0);
     } else {
       // Calculate current month's first day
       const now = new Date();
-      monthStartDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+      monthStartDate = new Date(now.getFullYear(), now.getMonth(), 1, 12, 0, 0);
     }
 
-    // Calculate month end (last day of the month at 23:59:59)
-    const monthEndDate = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0, 23, 59, 59, 999);
+    // Calculate month end (last day of the month)
+    const monthEndDate = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0, 12, 0, 0);
 
     logger.debug(`Month range: ${monthStartDate.toISOString()} to ${monthEndDate.toISOString()}`);
 
