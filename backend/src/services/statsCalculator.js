@@ -6,7 +6,7 @@
  * prevents discrepancies between different endpoints.
  */
 
-import { getTodayRange } from '../utils/timezone.js';
+import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import { getLoadLevel } from '../config/constants.js';
 
 /**
@@ -242,7 +242,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     ).length;
 
     dailyBreakdown.push({
-      date: date.toISOString().split('T')[0],
+      date: formatDateInTimezone(date, timezone),
       total: dayTickets.length,
       self: daySelf,
       assigned: dayAssigned,
@@ -492,8 +492,8 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
 export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndDate, timezone) {
   const daysInMonth = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0).getDate();
 
-  const monthStartString = monthStartDate.toISOString().split('T')[0];
-  const monthEndString = monthEndDate.toISOString().split('T')[0];
+  const monthStartString = formatDateInTimezone(monthStartDate, timezone);
+  const monthEndString = formatDateInTimezone(monthEndDate, timezone);
 
   const dailyBreakdown = [];
 
@@ -546,7 +546,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
     monthCSAT += dayCSAT;
 
     dailyBreakdown.push({
-      date: dayStart.toISOString().split('T')[0],
+      date: formatDateInTimezone(dayStart, timezone),
       dayOfMonth: dayOffset + 1,
       dayOfWeek: dayStart.getDay(),
       total: dayTotal,

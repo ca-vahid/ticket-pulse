@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { filterTickets } from '../utils/ticketFilter';
 import { getHolidayTooltip, getDateStyling } from '../utils/holidays';
+import { formatDateLocal } from '../utils/dateHelpers';
 
 export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthChange, technicians = [], searchTerm = '', selectedCategories = [], onClearSelections: _onClearSelections }) {
   const [hoveredDayDate, setHoveredDayDate] = useState(null);
@@ -17,7 +18,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
   }, [searchTerm, selectedCategories]);
 
   const baseDailyBreakdown = monthlyData?.dailyBreakdown || [];
-  const monthStart = monthlyData?.monthStart || new Date().toISOString().split('T')[0];
+  const monthStart = monthlyData?.monthStart || formatDateLocal(new Date());
   const daysInMonth = monthlyData?.daysInMonth || 0;
 
   // Recalculate daily breakdown with filtered tickets if search/filter is active
@@ -404,7 +405,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                   return <div key={dayIdx} className="rounded-3xl border border-dashed border-gray-200 h-40" />;
                 }
 
-                const isToday = day.date === new Date().toISOString().split('T')[0];
+                const isToday = day.date === formatDateLocal(new Date());
                 const _isActive = clickedDayDate === day.date;
                 const dayTechnicians = hasFilter
                   ? day.technicians.filter((t) => selectedSet.has(t.technicianId))

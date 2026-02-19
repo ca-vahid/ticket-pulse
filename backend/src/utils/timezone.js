@@ -96,6 +96,18 @@ export function getCurrentTimeInTimezone(timezone) {
 }
 
 /**
+ * Format a date as YYYY-MM-DD in a specific timezone (not UTC)
+ * Use this instead of date.toISOString().split('T')[0] which returns UTC date
+ * @param {Date|string|null} date - Date to format (defaults to now)
+ * @param {string} timezone - Target timezone
+ * @returns {string} Date string in YYYY-MM-DD format
+ */
+export function formatDateInTimezone(date = null, timezone = config.sync.defaultTimezone) {
+  const dateObj = typeof date === 'string' ? new Date(date) : (date || new Date());
+  return formatInTimeZone(dateObj, timezone, 'yyyy-MM-dd');
+}
+
+/**
  * Format duration in minutes to human-readable string
  * @param {number} minutes - Duration in minutes
  * @returns {string} Formatted duration (e.g., "2h 30m", "45m")

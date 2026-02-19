@@ -3,7 +3,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth } from '../middleware/auth.js';
 import technicianRepository from '../services/technicianRepository.js';
 import ticketRepository from '../services/ticketRepository.js';
-import { getTodayRange } from '../utils/timezone.js';
+import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import logger from '../utils/logger.js';
 import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianDetail, calculateTechnicianWeeklyStats, calculateMonthlyDashboard } from '../services/statsCalculator.js';
 
@@ -111,7 +111,7 @@ router.get(
   '/weekly-stats',
   asyncHandler(async (req, res) => {
     const timezone = req.query.timezone || 'America/Los_Angeles';
-    const dateParam = req.query.date || new Date().toISOString().split('T')[0];
+    const dateParam = req.query.date || formatDateInTimezone(null, timezone);
 
     // Calculate Monday of the week
     const [year, month, day] = dateParam.split('-').map(Number);
@@ -186,7 +186,7 @@ router.get(
       }).length;
 
       dailyCounts.push({
-        date: date.toISOString().split('T')[0],
+        date: formatDateInTimezone(date, timezone),
         count,
         dayOfWeek: i, // 0=Monday, 6=Sunday
       });
@@ -261,8 +261,8 @@ router.get(
     res.json({
       success: true,
       data: {
-        weekStart: weekStartDate.toISOString().split('T')[0],
-        weekEnd: weekEndDate.toISOString().split('T')[0],
+        weekStart: formatDateInTimezone(weekStartDate, timezone),
+        weekEnd: formatDateInTimezone(weekEndDate, timezone),
         technicians: techsWithTickets,
         statistics: dashboardData.statistics,
         timestamp: new Date().toISOString(),
@@ -439,8 +439,8 @@ router.get(
         photoUrl: technician.photoUrl,
         timezone: technician.timezone,
         isActive: technician.isActive,
-        weekStart: weekStartDate.toISOString().split('T')[0],
-        weekEnd: weekEndDate.toISOString().split('T')[0],
+        weekStart: formatDateInTimezone(weekStartDate, timezone),
+        weekEnd: formatDateInTimezone(weekEndDate, timezone),
 
         // Weekly stats
         ...weeklyStats,

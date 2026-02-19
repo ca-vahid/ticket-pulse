@@ -11,6 +11,7 @@ import MonthlyCalendar from '../components/MonthlyCalendar';
 import ExportButton from '../components/ExportButton';
 import { filterTickets } from '../utils/ticketFilter';
 import { getHolidayTooltip, getHolidayInfo } from '../utils/holidays';
+import { formatDateLocal } from '../utils/dateHelpers';
 import {
   Users,
   CheckCircle,
@@ -462,7 +463,7 @@ export default function Dashboard() {
                 const weekResponse = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
                 setWeeklyData(weekResponse.data);
               } else {
-                const dateStr = selectedDate.toISOString().split('T')[0];
+                const dateStr = formatDateLocal(selectedDate);
                 const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
                 await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
               }
@@ -1531,7 +1532,7 @@ export default function Dashboard() {
                   const dayDateStr = `${dayDate.getFullYear()}-${String(dayDate.getMonth() + 1).padStart(2, '0')}-${String(dayDate.getDate()).padStart(2, '0')}`;
                   
                   // Determine if this day should be highlighted with white box
-                  const todayStr = new Date().toISOString().split('T')[0];
+                  const todayStr = formatDateLocal(new Date());
                   const isActualToday = dayDateStr === todayStr;
                   
                   // In daily view: highlight the selected day

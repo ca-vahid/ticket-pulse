@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { formatDateLocal } from '../utils/dateHelpers';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
 
@@ -74,7 +75,7 @@ export const dashboardAPI = {
     const params = { timezone };
     if (date) {
       // Format date as YYYY-MM-DD if it's a Date object
-      const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
+      const dateStr = typeof date === 'string' ? date : formatDateLocal(date);
       params.date = dateStr;
     }
     return await api.get('/dashboard', { params });
@@ -83,7 +84,7 @@ export const dashboardAPI = {
   getTechnician: async (id, timezone = 'America/Los_Angeles', date = null) => {
     const params = { timezone };
     if (date) {
-      const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
+      const dateStr = typeof date === 'string' ? date : formatDateLocal(date);
       params.date = dateStr;
     }
     return await api.get(`/dashboard/technician/${id}`, { params });
@@ -92,7 +93,7 @@ export const dashboardAPI = {
   getWeeklyStats: async (timezone = 'America/Los_Angeles', date = null) => {
     const params = { timezone };
     if (date) {
-      const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
+      const dateStr = typeof date === 'string' ? date : formatDateLocal(date);
       params.date = dateStr;
     }
     return await api.get('/dashboard/weekly-stats', { params });
@@ -102,7 +103,7 @@ export const dashboardAPI = {
     const params = { timezone };
     if (weekStart) {
       // weekStart should be Monday of the week (YYYY-MM-DD)
-      const dateStr = typeof weekStart === 'string' ? weekStart : weekStart.toISOString().split('T')[0];
+      const dateStr = typeof weekStart === 'string' ? weekStart : formatDateLocal(weekStart);
       params.weekStart = dateStr;
     }
     return await api.get('/dashboard/weekly', { params });
@@ -112,7 +113,7 @@ export const dashboardAPI = {
     const params = { timezone };
     if (weekStart) {
       // weekStart should be Monday of the week (YYYY-MM-DD)
-      const dateStr = typeof weekStart === 'string' ? weekStart : weekStart.toISOString().split('T')[0];
+      const dateStr = typeof weekStart === 'string' ? weekStart : formatDateLocal(weekStart);
       params.weekStart = dateStr;
     }
     return await api.get(`/dashboard/technician/${id}/weekly`, { params });
@@ -126,7 +127,7 @@ export const dashboardAPI = {
     const params = { timezone };
     if (monthStart) {
       // monthStart should be first day of the month (YYYY-MM-DD)
-      const dateStr = typeof monthStart === 'string' ? monthStart : monthStart.toISOString().split('T')[0];
+      const dateStr = typeof monthStart === 'string' ? monthStart : formatDateLocal(monthStart);
       params.monthStart = dateStr;
     }
     return await api.get('/dashboard/monthly', { params });
