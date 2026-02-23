@@ -153,13 +153,18 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
   const openOnlyCount = openTickets.filter(t => t.status === 'Open').length;
   const pendingCount = openTickets.filter(t => t.status === 'Pending').length;
 
-  // Tickets assigned during the week
-  // Use firstAssignedAt if available, otherwise fall back to createdAt
+  // Build timezone-aware week boundaries (Monday 00:00:00 to Sunday 23:59:59.999)
+  const weekStartRange = getTodayRange(timezone, weekStart);
+  const weekEndRange = getTodayRange(timezone, weekEnd);
+  const tzWeekStart = weekStartRange.start; // Monday 00:00:00 in target timezone
+  const tzWeekEnd = weekEndRange.end;       // Sunday 23:59:59.999 in target timezone
+
+  // Tickets assigned during the week (timezone-aware, consistent with dailyBreakdown)
   const weeklyTickets = tech.tickets.filter(ticket => {
     const assignDate = ticket.firstAssignedAt
       ? new Date(ticket.firstAssignedAt)
       : new Date(ticket.createdAt);
-    return assignDate >= weekStart && assignDate <= weekEnd;
+    return assignDate >= tzWeekStart && assignDate <= tzWeekEnd;
   });
 
   // Self-picked tickets created this week

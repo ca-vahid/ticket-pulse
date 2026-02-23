@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import { authAPI } from '../services/api';
@@ -12,6 +12,7 @@ export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const isRecoveringSessionRef = useRef(false);
 
   const checkSession = useCallback(async () => {
     try {
@@ -53,11 +54,14 @@ export function AuthProvider({ children }) {
           setUser(response.user);
           setIsAuthenticated(true);
           setError(null);
+          return true;
         }
       }
+      return false;
     } catch (err) {
       console.error('Token exchange failed:', err);
       setError(err.message);
+      return false;
     }
   }, [instance, inProgress, accounts]);
 
@@ -66,6 +70,29 @@ export function AuthProvider({ children }) {
       exchangeTokenForSession();
     }
   }, [accounts, isAuthenticated, inProgress, exchangeTokenForSession]);
+
+  useEffect(() => {
+    const handleUnauthorized = async () => {
+      if (isRecoveringSessionRef.current) return;
+      isRecoveringSessionRef.current = true;
+      setIsLoading(true);
+
+      try {
+        const recovered = await exchangeTokenForSession();
+        if (!recovered) {
+          setUser(null);
+          setIsAuthenticated(false);
+          setError(null);
+        }
+      } finally {
+        setIsLoading(false);
+        isRecoveringSessionRef.current = false;
+      }
+    };
+
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
+  }, [exchangeTokenForSession]);
 
   const loginWithSSO = async () => {
     try {

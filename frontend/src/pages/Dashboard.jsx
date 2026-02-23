@@ -129,6 +129,9 @@ export default function Dashboard() {
     return stored ? JSON.parse(stored) : false;
   });
 
+  // Expand-all override for compact view: null = individual control, true/false = forced
+  const [expandAllOverride, setExpandAllOverride] = useState(null);
+
   // Collapsible sections state - persisted in localStorage
   const [collapsedSections, setCollapsedSections] = useState(() => {
     const stored = localStorage.getItem('collapsedSections');
@@ -372,6 +375,10 @@ export default function Dashboard() {
     const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
     await fetchWeeklyStats('America/Los_Angeles', formatDateLocal(dateToUse));
   }, [viewMode, selectedDate, selectedWeek, selectedMonth, invalidateCurrentView, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard, fetchWeeklyStats, formatDateLocal]);
+
+  const handleRetryLoad = useCallback(async () => {
+    await refreshCurrentView();
+  }, [refreshCurrentView]);
 
   const handleRefresh = useCallback(async () => {
     console.log('[SYNC] Starting sync process...');
@@ -691,7 +698,7 @@ export default function Dashboard() {
           <XCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
           <p className="text-red-800 text-center">{error}</p>
           <button
-            onClick={handleRefresh}
+            onClick={handleRetryLoad}
             className="mt-4 w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg"
           >
             Retry
@@ -1762,6 +1769,20 @@ export default function Dashboard() {
                   <span>{hiddenTechnicians.length} Hidden</span>
                 </button>
               )}
+              {isCompactView && (
+                <button
+                  onClick={() => setExpandAllOverride(prev => prev === true ? null : true)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm transition-colors ${
+                    expandAllOverride === true
+                      ? 'bg-blue-100 hover:bg-blue-200 text-blue-700'
+                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                  }`}
+                  title={expandAllOverride === true ? 'Collapse all ticket details' : 'Expand all ticket details'}
+                >
+                  {expandAllOverride === true ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  <span>{expandAllOverride === true ? 'Collapse All' : 'Expand All'}</span>
+                </button>
+              )}
             </div>
             <div className="text-xs text-gray-500">
               <span className="font-semibold">Legend:</span>
@@ -1899,6 +1920,7 @@ export default function Dashboard() {
                           viewMode={viewMode}
                           searchTerm={searchTerm}
                           selectedCategories={selectedCategories}
+                          forceExpand={expandAllOverride}
                         />
                       </div>
                     ))}

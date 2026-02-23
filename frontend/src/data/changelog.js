@@ -1,6 +1,25 @@
-export const APP_VERSION = '1.1.0-preview';
+export const APP_VERSION = '1.1.2-preview';
 
 export const changelog = [
+  {
+    version: '1.1.2-preview',
+    date: 'February 23, 2026',
+    entries: [
+      { type: 'new', text: 'Expandable ticket drilldown in compact view — click the chevron on any technician row to see all tickets for the period, with self-picked tickets highlighted and closed tickets shown in a muted style' },
+      { type: 'new', text: 'Ticket drilldown works in daily, weekly, and monthly compact views — sections automatically label as "Today\'s tickets", "This week\'s tickets", or "This month\'s tickets"' },
+      { type: 'new', text: 'Closed/Resolved section in drilldown — tickets that were closed appear in both the main list and a dedicated greyed-out section below a divider' },
+      { type: 'new', text: 'Expand All / Collapse All button — appears in compact view header to toggle all technician drilldowns at once' },
+      { type: 'new', text: 'Centralized ExpandableTicketList component — single source of truth for ticket row rendering, grouping, and styling across all views' },
+      { type: 'new', text: 'Automatic session recovery on 401 — expired sessions silently re-authenticate via Azure AD token exchange instead of showing a dead "Authentication required" screen' },
+      { type: 'improved', text: 'SSE reconnection with exponential backoff — connection status stays "Connecting..." during retries instead of falsely showing "Offline" on first load' },
+      { type: 'improved', text: 'Ticket drilldown rows show full requester name and email in brackets (previously only showed first name)' },
+      { type: 'improved', text: 'Ticket drilldown sorted by arrival time (newest first) with date shown in weekly/monthly views (e.g., "Mon, 2/23 11:42 AM")' },
+      { type: 'improved', text: 'Error retry button on dashboard now retries loading the current view instead of triggering a full FreshService sync' },
+      { type: 'fixed', text: 'Weekly ticket counts showing 0 on current week — weeklyTickets filter now uses timezone-aware boundaries (America/Los_Angeles) consistent with daily breakdown calculations' },
+      { type: 'fixed', text: 'SSE connection getting stuck on "Offline" after auth/network hiccup — EventSource now auto-recreates with backoff instead of staying closed' },
+      { type: 'fixed', text: '"Authentication required" screen with broken Retry button — 401 errors now trigger silent token re-exchange or redirect to login' },
+    ],
+  },
   {
     version: '1.1.0-preview',
     date: 'February 22, 2026',

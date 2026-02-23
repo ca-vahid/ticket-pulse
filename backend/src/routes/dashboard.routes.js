@@ -410,12 +410,14 @@ router.get(
       timezone,
     );
 
-    // Get tickets assigned during the week for display
+    // Get tickets assigned during the week for display (timezone-aware boundaries)
+    const weekStartRange = getTodayRange(timezone, weekStartDate);
+    const weekEndRange = getTodayRange(timezone, weekEndDate);
     const weeklyTickets = technician.tickets.filter(ticket => {
       const assignDate = ticket.firstAssignedAt
         ? new Date(ticket.firstAssignedAt)
         : new Date(ticket.createdAt);
-      return assignDate >= weekStartDate && assignDate <= weekEndDate;
+      return assignDate >= weekStartRange.start && assignDate <= weekEndRange.end;
     });
 
     // Categorize weekly tickets

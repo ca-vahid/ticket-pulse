@@ -28,9 +28,20 @@ const errorInterceptor = (error) => {
   console.error('API Error:', error);
 
   if (error.response) {
+    const status = error.response.status;
+    const requestUrl = error.config?.url || '';
+
+    if (status === 401 && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout') {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+        detail: { url: requestUrl },
+      }));
+    }
+
     // Server responded with error status
     const errorMessage = error.response.data?.message || error.message;
-    throw new Error(errorMessage);
+    const enhancedError = new Error(errorMessage);
+    enhancedError.status = status;
+    throw enhancedError;
   } else if (error.request) {
     // Request made but no response
     throw new Error('Network error. Please check your connection.');

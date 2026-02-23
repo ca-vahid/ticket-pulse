@@ -24,78 +24,124 @@ export function useSSE(options = {}) {
   const [connectionStatus, setConnectionStatus] = useState(enabled ? 'connecting' : 'disconnected');
   const [lastEvent, setLastEvent] = useState(null);
   const eventSourceRef = useRef(null);
+  const retryTimerRef = useRef(null);
+  const retryAttemptRef = useRef(0);
+  const unmountedRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled) {
+    unmountedRef.current = false;
+
+    const clearRetryTimer = () => {
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+
+    const closeCurrentSource = () => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
+    };
+
+    const scheduleReconnect = () => {
+      if (!enabled || unmountedRef.current) return;
+      clearRetryTimer();
+
+      // Exponential backoff (1s -> 2s -> 4s ... max 15s)
+      const delay = Math.min(1000 * (2 ** retryAttemptRef.current), 15000);
+      retryAttemptRef.current += 1;
+      setConnectionStatus('connecting');
+
+      retryTimerRef.current = setTimeout(() => {
+        connect();
+      }, delay);
+    };
+
+    const connect = () => {
+      if (!enabled || unmountedRef.current) return;
+
+      clearRetryTimer();
+      closeCurrentSource();
+      setConnectionStatus('connecting');
+
+      try {
+        const eventSource = sseAPI.getEventSource();
+        eventSourceRef.current = eventSource;
+
+        eventSource.onopen = () => {
+          retryAttemptRef.current = 0;
+          setConnectionStatus('connected');
+        };
+
+        eventSource.addEventListener('connected', (event) => {
+          console.log('SSE connected:', event.data);
+          retryAttemptRef.current = 0;
+          setConnectionStatus('connected');
+          if (onConnected) {
+            onConnected(JSON.parse(event.data));
+          }
+        });
+
+        eventSource.addEventListener('sync-completed', (event) => {
+          console.log('Sync completed:', event.data);
+          const data = JSON.parse(event.data);
+          setLastEvent({ type: 'sync-completed', data, timestamp: Date.now() });
+          if (onSyncCompleted) {
+            onSyncCompleted(data);
+          }
+        });
+
+        eventSource.onmessage = (event) => {
+          console.log('SSE message:', event.data);
+          const data = JSON.parse(event.data);
+          setLastEvent({ type: 'message', data, timestamp: Date.now() });
+          if (onMessage) {
+            onMessage(data);
+          }
+        };
+
+        eventSource.onerror = (error) => {
+          console.error('SSE error:', error);
+
+          if (eventSource.readyState === EventSource.CLOSED) {
+            // EventSource is fully closed (often after auth/network hiccup).
+            // Recreate it ourselves so first-load status can recover automatically.
+            scheduleReconnect();
+          } else {
+            // Browser is retrying handshake automatically.
+            setConnectionStatus('connecting');
+          }
+
+          if (onError) {
+            onError(error);
+          }
+        };
+      } catch (error) {
+        console.error('Failed to create SSE connection:', error);
+        scheduleReconnect();
+        if (onError) {
+          onError(error);
+        }
+      }
+    };
+
+    if (!enabled) {
+      clearRetryTimer();
+      closeCurrentSource();
       setConnectionStatus('disconnected');
       return;
     }
 
-    setConnectionStatus('connecting');
+    connect();
 
-    try {
-      const eventSource = sseAPI.getEventSource();
-      eventSourceRef.current = eventSource;
-
-      eventSource.onopen = () => {
-        setConnectionStatus('connected');
-      };
-
-      eventSource.addEventListener('connected', (event) => {
-        console.log('SSE connected:', event.data);
-        setConnectionStatus('connected');
-        if (onConnected) {
-          onConnected(JSON.parse(event.data));
-        }
-      });
-
-      eventSource.addEventListener('sync-completed', (event) => {
-        console.log('Sync completed:', event.data);
-        const data = JSON.parse(event.data);
-        setLastEvent({ type: 'sync-completed', data, timestamp: Date.now() });
-        if (onSyncCompleted) {
-          onSyncCompleted(data);
-        }
-      });
-
-      eventSource.onmessage = (event) => {
-        console.log('SSE message:', event.data);
-        const data = JSON.parse(event.data);
-        setLastEvent({ type: 'message', data, timestamp: Date.now() });
-        if (onMessage) {
-          onMessage(data);
-        }
-      };
-
-      eventSource.onerror = (error) => {
-        console.error('SSE error:', error);
-        if (eventSource.readyState === EventSource.CLOSED) {
-          setConnectionStatus('disconnected');
-        } else {
-          // CONNECTING state — browser is retrying automatically
-          setConnectionStatus('connecting');
-        }
-        if (onError) {
-          onError(error);
-        }
-      };
-
-      return () => {
-        console.log('Closing SSE connection');
-        eventSource.close();
-        setConnectionStatus('disconnected');
-      };
-    } catch (error) {
-      console.error('Failed to create SSE connection:', error);
+    return () => {
+      unmountedRef.current = true;
+      clearRetryTimer();
+      closeCurrentSource();
       setConnectionStatus('disconnected');
-      if (onError) {
-        onError(error);
-      }
-    }
+    };
   }, [enabled, onMessage, onSyncCompleted, onConnected, onError]);
 
   const disconnect = () => {
