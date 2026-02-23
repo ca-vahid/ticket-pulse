@@ -1,7 +1,8 @@
 import { useNavigate } from 'react-router-dom';
 import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
+import { prefetchTechDetail } from '../hooks/usePrefetch';
 
 // Extremely subtle card background color based on relative load level
 const getCardBackgroundColor = (openCount, maxOpenCount) => {
@@ -35,6 +36,7 @@ const getInitials = (name) => {
 export default function TechCard({ technician, onHide, rank, selectedDate, selectedWeek, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [] }) {
   const navigate = useNavigate();
   const [showAssignersPopup, setShowAssignersPopup] = useState(false);
+  const hoverTimerRef = useRef(null);
 
   // Get color gradient based on normalized ticket count
   const getTicketColor = (count, maxCount) => {
@@ -52,11 +54,20 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
     }
   };
 
+  const handleMouseEnter = useCallback(() => {
+    hoverTimerRef.current = setTimeout(() => {
+      prefetchTechDetail(technician.id, viewMode, selectedDate, selectedWeek);
+    }, 150);
+  }, [technician.id, viewMode, selectedDate, selectedWeek]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+  }, []);
+
   const handleClick = (e) => {
     // Don't navigate if clicking the hide button
     if (e.target.closest('.hide-button')) return;
 
-    // Pass the selected date/week, view mode, and filters to the technician detail page
     navigate(`/technician/${technician.id}`, {
       state: {
         selectedDate: selectedDate,
@@ -64,6 +75,13 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
         viewMode: viewMode,
         searchTerm: searchTerm,
         selectedCategories: selectedCategories,
+        techSummary: {
+          id: technician.id,
+          name: technician.name,
+          email: technician.email,
+          photoUrl: technician.photoUrl,
+          loadLevel: technician.loadLevel,
+        },
       },
     });
   };
@@ -122,6 +140,8 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
   return (
     <div
       onClick={handleClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       className={`${cardBgColor} border border-gray-200 rounded-lg shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer group relative overflow-hidden`}
     >
       {/* Hide Button - Top Right */}
@@ -248,19 +268,37 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                   return colorClass;
                 };
 
+                const handleDayBoxClick = (e) => {
+                  e.stopPropagation();
+                  navigate(`/technician/${technician.id}`, {
+                    state: {
+                      selectedDate: new Date(day.date + 'T12:00:00'),
+                      selectedWeek: selectedWeek,
+                      viewMode: 'daily',
+                      returnViewMode: 'weekly',
+                      searchTerm: searchTerm,
+                      selectedCategories: selectedCategories,
+                    },
+                  });
+                };
+
                 return (
                   <div
                     key={day.date}
-                    className={`flex flex-col items-center ${containerClass}`}
+                    className={`flex flex-col items-center cursor-pointer ${containerClass}`}
                     title={fullTooltip}
+                    onClick={handleDayBoxClick}
                   >
                     <div className="flex items-center gap-0.5">
                       {isHolidayDay && (
                         <div className={`w-1 h-1 rounded-full ${dateStyling.isCanadian ? 'bg-rose-500' : 'bg-indigo-400'}`} />
                       )}
-                      <div className={`text-[8px] ${labelClass} mb-0.5`}>{dayNames[index]}</div>
+                      <div className={`text-[8px] ${labelClass} mb-0.5`}>
+                        {dayNames[index]}
+                        <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
+                      </div>
                     </div>
-                    <div className={`w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold border ${getBoxClasses()}`}>
+                    <div className={`w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold border transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
                       {day.total}
                     </div>
                   </div>

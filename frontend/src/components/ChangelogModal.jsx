@@ -134,7 +134,7 @@ export default function ChangelogModal({ isOpen, onClose }) {
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
                   isActive
                     ? `${config.badgeBg} ${config.badgeText} ${config.badgeBorder} ring-2 ring-offset-1 ring-${type === 'new' ? 'emerald' : type === 'improved' ? 'blue' : type === 'fixed' ? 'red' : 'amber'}-300`
-                    : `bg-white text-gray-600 border-gray-200 hover:bg-gray-50`
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                 }`}
               >
                 <Icon className="w-3 h-3" />

@@ -1,6 +1,28 @@
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0-preview';
 
 export const changelog = [
+  {
+    version: '1.1.0-preview',
+    date: 'February 22, 2026',
+    entries: [
+      { type: 'new', text: 'Technician detail Overview tab — period performance summary with metrics, daily breakdown, self-pick rate, assigners, and category breakdown' },
+      { type: 'new', text: 'Daily/Weekly toggle on technician detail page — switch views without navigating back to the dashboard' },
+      { type: 'new', text: 'Clickable day boxes in weekly view — click a day on any technician\'s weekly breakdown to jump directly to that tech\'s daily detail' },
+      { type: 'new', text: 'Clickable mini-calendar in weekly mode — click any day in the top calendar bar to switch to that day\'s daily view' },
+      { type: 'new', text: 'Day-of-month numbers shown on weekly calendars — both the dashboard mini-calendar and per-technician weekly breakdown now display date numbers (e.g., Mon 19, Tue 20)' },
+      { type: 'new', text: 'Backend read cache middleware — server-side response caching (10-15s TTL) on all dashboard endpoints, cleared automatically on sync' },
+      { type: 'new', text: 'Frontend data cache with stale-while-revalidate, request deduplication, and LRU eviction' },
+      { type: 'new', text: 'Hover prefetch on technician cards — data is preloaded when hovering over a technician card for faster navigation' },
+      { type: 'improved', text: 'Loading overlay now appears when switching dates in daily mode (previously only showed for weekly/monthly switches)' },
+      { type: 'improved', text: 'Weekly summary metrics redesigned — Total and Closed counts are now visually highlighted with bold filled cards; other metrics use a simplified neutral palette' },
+      { type: 'improved', text: 'Day box hover animation — individual day boxes in weekly breakdown scale up with a blue ring on hover for clear click affordance' },
+      { type: 'improved', text: 'Back navigation preserves origin view — clicking a day in weekly view and pressing Back correctly returns to weekly dashboard, not daily' },
+      { type: 'fixed', text: 'SSE connection shows "Connecting..." instead of false "Offline" during initial page load — added three-state connection status (connecting/connected/disconnected)' },
+      { type: 'fixed', text: 'Technician detail crash on navigation — added null guard in getInitials() and race-safe fetch with sequence tracking' },
+      { type: 'fixed', text: 'Weekly technician detail showing 0s on first load — bypassed frontend cache for weekly detail fetch to avoid stale data from cache dedup race condition' },
+      { type: 'fixed', text: 'Week range display stuck on "Loading..." — falls back to local selectedWeek state when API weekStart field is missing' },
+    ],
+  },
   {
     version: '1.0.0',
     date: 'February 18, 2026',

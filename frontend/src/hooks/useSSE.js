@@ -20,36 +20,39 @@ export function useSSE(options = {}) {
     enabled = true,
   } = options;
 
-  const [isConnected, setIsConnected] = useState(false);
+  // Three-state: 'connecting', 'connected', 'disconnected'
+  const [connectionStatus, setConnectionStatus] = useState(enabled ? 'connecting' : 'disconnected');
   const [lastEvent, setLastEvent] = useState(null);
   const eventSourceRef = useRef(null);
 
   useEffect(() => {
     if (!enabled) {
-      // Clean up existing connection if disabled
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
-        setIsConnected(false);
       }
+      setConnectionStatus('disconnected');
       return;
     }
 
-    // Create EventSource connection
+    setConnectionStatus('connecting');
+
     try {
       const eventSource = sseAPI.getEventSource();
       eventSourceRef.current = eventSource;
 
-      // Connection established
+      eventSource.onopen = () => {
+        setConnectionStatus('connected');
+      };
+
       eventSource.addEventListener('connected', (event) => {
         console.log('SSE connected:', event.data);
-        setIsConnected(true);
+        setConnectionStatus('connected');
         if (onConnected) {
           onConnected(JSON.parse(event.data));
         }
       });
 
-      // Sync completed event
       eventSource.addEventListener('sync-completed', (event) => {
         console.log('Sync completed:', event.data);
         const data = JSON.parse(event.data);
@@ -59,7 +62,6 @@ export function useSSE(options = {}) {
         }
       });
 
-      // Generic message event
       eventSource.onmessage = (event) => {
         console.log('SSE message:', event.data);
         const data = JSON.parse(event.data);
@@ -69,48 +71,44 @@ export function useSSE(options = {}) {
         }
       };
 
-      // Error handling
       eventSource.onerror = (error) => {
         console.error('SSE error:', error);
-        setIsConnected(false);
+        if (eventSource.readyState === EventSource.CLOSED) {
+          setConnectionStatus('disconnected');
+        } else {
+          // CONNECTING state — browser is retrying automatically
+          setConnectionStatus('connecting');
+        }
         if (onError) {
           onError(error);
         }
-
-        // EventSource will automatically try to reconnect
-        // But we can detect if it's permanently failed
-        if (eventSource.readyState === EventSource.CLOSED) {
-          console.log('SSE connection closed');
-        }
       };
 
-      // Cleanup on unmount
       return () => {
         console.log('Closing SSE connection');
         eventSource.close();
-        setIsConnected(false);
+        setConnectionStatus('disconnected');
       };
     } catch (error) {
       console.error('Failed to create SSE connection:', error);
+      setConnectionStatus('disconnected');
       if (onError) {
         onError(error);
       }
     }
   }, [enabled, onMessage, onSyncCompleted, onConnected, onError]);
 
-  /**
-   * Manually close the connection
-   */
   const disconnect = () => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
-      setIsConnected(false);
+      setConnectionStatus('disconnected');
     }
   };
 
   return {
-    isConnected,
+    isConnected: connectionStatus === 'connected',
+    connectionStatus,
     lastEvent,
     disconnect,
   };

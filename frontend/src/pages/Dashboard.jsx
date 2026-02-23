@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useAuth } from '../contexts/AuthContext';
-import { syncAPI, dashboardAPI } from '../services/api';
+import { syncAPI } from '../services/api';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
 import SearchBox from '../components/SearchBox';
@@ -11,9 +11,10 @@ import MonthlyCalendar from '../components/MonthlyCalendar';
 import ExportButton from '../components/ExportButton';
 import { filterTickets } from '../utils/ticketFilter';
 import { getHolidayTooltip, getHolidayInfo } from '../utils/holidays';
-import { formatDateLocal } from '../utils/dateHelpers';
+// formatDateLocal is defined locally via useCallback
 import ChangelogModal from '../components/ChangelogModal';
 import { APP_VERSION } from '../data/changelog';
+import { usePrefetch } from '../hooks/usePrefetch';
 import {
   Users,
   CheckCircle,
@@ -47,11 +48,23 @@ import {
 export default function Dashboard() {
   const {
     dashboardData,
+    weeklyData,
+    weeklyStats,
+    monthlyData,
+    isColdLoading,
+    isRefreshing,
     isLoading,
     error,
     lastUpdated,
-    sseConnected,
+    sseConnectionStatus,
     fetchDashboard,
+    fetchWeeklyStats,
+    fetchWeeklyDashboard,
+    fetchMonthlyDashboard,
+    setCurrentView,
+    invalidateCurrentView,
+    invalidateDateRange,
+    clearCacheOnLogout,
   } = useDashboard();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -121,17 +134,6 @@ export default function Dashboard() {
     const stored = localStorage.getItem('collapsedSections');
     return stored ? JSON.parse(stored) : { light: true }; // Light load collapsed by default
   });
-
-  // Weekly stats for daily ticket counts
-  const [weeklyStats, setWeeklyStats] = useState(null);
-
-  // Weekly dashboard data
-  const [weeklyData, setWeeklyData] = useState(null);
-  const [isLoadingWeekly, setIsLoadingWeekly] = useState(false);
-
-  // Monthly dashboard data
-  const [monthlyData, setMonthlyData] = useState(null);
-  const [isLoadingMonthly, setIsLoadingMonthly] = useState(false);
 
   // Daily/Weekly/Monthly view toggle state - restore from localStorage or navigation state
   const [viewMode, setViewMode] = useState(() => {
@@ -230,6 +232,21 @@ export default function Dashboard() {
     return `${year}-${month}-${day}`;
   }, []);
 
+  // Track current view for SSE-driven targeted invalidation
+  useEffect(() => {
+    const dateStr = formatDateLocal(selectedDate);
+    const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
+    setCurrentView(
+      viewMode,
+      isCurrentDay ? null : dateStr,
+      formatDateLocal(selectedWeek),
+      formatDateLocal(selectedMonth),
+    );
+  }, [viewMode, selectedDate, selectedWeek, selectedMonth, setCurrentView, formatDateLocal]);
+
+  // Prefetch adjacent time periods
+  usePrefetch({ viewMode, selectedDate, selectedWeek, selectedMonth });
+
   // Smart handler for switching to daily view
   const handleSwitchToDaily = useCallback(() => {
     // Calculate which day of week today is
@@ -272,78 +289,26 @@ export default function Dashboard() {
     fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
   }, [selectedDate, fetchDashboard, formatDateLocal]);
 
-  // Fetch weekly stats - extracted as useCallback so it can be called after sync
-  const fetchWeeklyStats = useCallback(async () => {
-    try {
-      // Use selectedWeek for weekly view, selectedDate for daily view
-      const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
-      const dateStr = formatDateLocal(dateToUse);
-      const response = await dashboardAPI.getWeeklyStats('America/Los_Angeles', dateStr);
-      setWeeklyStats(response.data.dailyCounts);
-    } catch (error) {
-      console.error('Failed to fetch weekly stats:', error);
-      setWeeklyStats(null);
-    }
-  }, [selectedDate, selectedWeek, viewMode, formatDateLocal]);
-
   // Fetch weekly stats when selected date or week changes
   useEffect(() => {
-    fetchWeeklyStats();
-  }, [fetchWeeklyStats]);
+    const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
+    const dateStr = formatDateLocal(dateToUse);
+    fetchWeeklyStats('America/Los_Angeles', dateStr);
+  }, [selectedDate, selectedWeek, viewMode, formatDateLocal, fetchWeeklyStats]);
 
   // Fetch weekly dashboard data when in weekly mode or selectedWeek changes
   useEffect(() => {
     if (viewMode !== 'weekly') return;
-
-    const fetchWeeklyDashboard = async () => {
-      try {
-        setIsLoadingWeekly(true);
-        const weekStartStr = formatDateLocal(selectedWeek);
-        const response = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
-        setWeeklyData(response.data);
-      } catch (error) {
-        console.error('Failed to fetch weekly dashboard:', error);
-        setWeeklyData(null);
-      } finally {
-        setIsLoadingWeekly(false);
-      }
-    };
-
-    fetchWeeklyDashboard();
-  }, [viewMode, selectedWeek, formatDateLocal]);
-
-  // Store original technicians with all tickets for monthly view
-  const [_monthlyTechnicians, setMonthlyTechnicians] = useState([]);
+    const weekStartStr = formatDateLocal(selectedWeek);
+    fetchWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
+  }, [viewMode, selectedWeek, formatDateLocal, fetchWeeklyDashboard]);
 
   // Fetch monthly dashboard data when in monthly mode or selectedMonth changes
   useEffect(() => {
-    if (viewMode !== 'monthly') {
-      setMonthlyTechnicians([]);
-      return;
-    }
-
-    const fetchMonthlyDashboard = async () => {
-      try {
-        setIsLoadingMonthly(true);
-        const monthStartStr = formatDateLocal(selectedMonth);
-        const response = await dashboardAPI.getMonthlyDashboard(monthStartStr, 'America/Los_Angeles');
-        setMonthlyData(response.data);
-        
-        // Also fetch all technicians with all their tickets for filtering
-        // We need to fetch from daily dashboard but get all tickets
-        // For now, use the current dashboardData which has technicians with tickets
-        // In monthly view, we'll use the technicians from dashboardData which should have all tickets
-        // (they're fetched on mount and kept fresh)
-      } catch (error) {
-        console.error('Failed to fetch monthly dashboard:', error);
-        setMonthlyData(null);
-      } finally {
-        setIsLoadingMonthly(false);
-      }
-    };
-
-    fetchMonthlyDashboard();
-  }, [viewMode, selectedMonth, formatDateLocal]);
+    if (viewMode !== 'monthly') return;
+    const monthStartStr = formatDateLocal(selectedMonth);
+    fetchMonthlyDashboard(monthStartStr, 'America/Los_Angeles');
+  }, [viewMode, selectedMonth, formatDateLocal, fetchMonthlyDashboard]);
 
   // Poll for background sync status every 5 seconds
   useEffect(() => {
@@ -388,6 +353,25 @@ export default function Dashboard() {
       return [...prev, { timestamp, message, type }];
     });
   };
+
+  // Shared helper: invalidate cache + refresh whatever view is active
+  const refreshCurrentView = useCallback(async () => {
+    invalidateCurrentView();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    if (viewMode === 'weekly') {
+      const weekStartStr = formatDateLocal(selectedWeek);
+      await fetchWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
+    } else if (viewMode === 'monthly') {
+      const monthStartStr = formatDateLocal(selectedMonth);
+      await fetchMonthlyDashboard(monthStartStr, 'America/Los_Angeles');
+    } else {
+      const dateStr = formatDateLocal(selectedDate);
+      const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
+      await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+    }
+    const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
+    await fetchWeeklyStats('America/Los_Angeles', formatDateLocal(dateToUse));
+  }, [viewMode, selectedDate, selectedWeek, selectedMonth, invalidateCurrentView, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard, fetchWeeklyStats, formatDateLocal]);
 
   const handleRefresh = useCallback(async () => {
     console.log('[SYNC] Starting sync process...');
@@ -455,25 +439,8 @@ export default function Dashboard() {
               setSyncStatus('success');
               setSyncMessage('Background sync completed successfully!');
 
-              // Refresh dashboard - use appropriate fetch based on view mode
               addSyncLog('Refreshing dashboard data...', 'info');
-
-              // Small delay to ensure database writes complete
-              await new Promise(resolve => setTimeout(resolve, 500));
-
-              if (viewMode === 'weekly') {
-                const weekStartStr = formatDateLocal(selectedWeek);
-                // Force refresh by clearing cache first
-                setWeeklyData(null);
-                const weekResponse = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
-                setWeeklyData(weekResponse.data);
-              } else {
-                const dateStr = formatDateLocal(selectedDate);
-                const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
-                await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
-              }
-              // Refresh weekly stats (calendar day numbers)
-              await fetchWeeklyStats();
+              await refreshCurrentView();
               addSyncLog('Dashboard data refreshed', 'success');
 
               setTimeout(() => {
@@ -522,26 +489,9 @@ export default function Dashboard() {
         setSyncStatus('success');
         setSyncMessage(`Sync completed! Synced ${techCount} technicians and ${ticketCount} tickets.`);
 
-        // Refresh the dashboard data - use appropriate fetch based on view mode
         console.log('[SYNC] Refreshing dashboard data...');
         addSyncLog('Refreshing dashboard data...', 'info');
-
-        // Small delay to ensure database writes complete
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        if (viewMode === 'weekly') {
-          const weekStartStr = formatDateLocal(selectedWeek);
-          // Force refresh by clearing cache first
-          setWeeklyData(null);
-          const weekResponse = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
-          setWeeklyData(weekResponse.data);
-        } else {
-          const dateStr = formatDateLocal(selectedDate);
-          const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
-          await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
-        }
-        // Refresh weekly stats (calendar day numbers)
-        await fetchWeeklyStats();
+        await refreshCurrentView();
         addSyncLog('Dashboard data refreshed successfully', 'success');
 
         // Hide success message after 5 seconds
@@ -564,21 +514,7 @@ export default function Dashboard() {
         setSyncStatus('success');
         setSyncMessage('Sync completed.');
 
-        // Refresh dashboard - use appropriate fetch based on view mode
-        // Small delay to ensure database writes complete
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        if (viewMode === 'weekly') {
-          const weekStartStr = formatDateLocal(selectedWeek);
-          // Force refresh by clearing cache first
-          setWeeklyData(null);
-          const weekResponse = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
-          setWeeklyData(weekResponse.data);
-        } else {
-          await fetchDashboard('America/Los_Angeles', formatDateLocal(selectedDate));
-        }
-        // Refresh weekly stats (calendar day numbers)
-        await fetchWeeklyStats();
+        await refreshCurrentView();
 
         setTimeout(() => {
           setSyncStatus(null);
@@ -607,7 +543,7 @@ export default function Dashboard() {
         setRefreshing(false);
       }, 5000);
     }
-  }, [selectedDate, selectedWeek, viewMode, fetchDashboard, formatDateLocal, setWeeklyData, fetchWeeklyStats]);
+  }, [selectedDate, selectedWeek, viewMode, fetchDashboard, formatDateLocal, refreshCurrentView]);
 
   const handleSyncWeek = useCallback(async () => {
     console.log('[SYNC WEEK] Starting week sync process...');
@@ -682,25 +618,9 @@ export default function Dashboard() {
           setSyncStatus('success');
           setSyncMessage(`Week sync completed! ${response.data.ticketsSynced || 0} tickets synced.`);
 
-          // Refresh dashboard - use appropriate fetch based on view mode
           addSyncLog('Refreshing dashboard data...', 'info');
-
-          // Small delay to ensure database writes complete
-          await new Promise(resolve => setTimeout(resolve, 500));
-
-          if (viewMode === 'weekly') {
-            const weekStartStr = formatDateLocal(selectedWeek);
-            // Force refresh by clearing cache first
-            setWeeklyData(null);
-            const weekResponse = await dashboardAPI.getWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
-            setWeeklyData(weekResponse.data);
-          } else {
-            const dateStr = formatDateLocal(selectedDate);
-            const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
-            await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
-          }
-          // Refresh weekly stats (calendar day numbers)
-          await fetchWeeklyStats();
+          invalidateDateRange(formatDateLocal(monday), formatDateLocal(sunday));
+          await refreshCurrentView();
           addSyncLog('Dashboard data refreshed', 'success');
 
           setTimeout(() => {
@@ -737,9 +657,10 @@ export default function Dashboard() {
         setRefreshing(false);
       }, 5000);
     }
-  }, [selectedDate, selectedWeek, viewMode, fetchDashboard, formatDateLocal, setWeeklyData, fetchWeeklyStats]);
+  }, [selectedDate, selectedWeek, viewMode, fetchDashboard, formatDateLocal, refreshCurrentView, invalidateDateRange]);
 
   const handleLogout = async () => {
+    clearCacheOnLogout();
     await logout();
     navigate('/login');
   };
@@ -1130,7 +1051,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-100 relative">
       {/* Fancy Loading Overlay */}
-      {(isLoadingWeekly || isLoadingMonthly) && (
+      {(isColdLoading && (dashboardData || weeklyData || monthlyData)) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
           {/* Faded background overlay */}
           <div className="absolute inset-0 bg-gray-900/20 backdrop-blur-[1px]" />
@@ -1188,10 +1109,15 @@ export default function Dashboard() {
             <div className="col-span-6 flex items-center justify-center gap-4">
               {/* SSE Status */}
               <div className="flex items-center gap-1.5 text-xs">
-                {sseConnected ? (
+                {sseConnectionStatus === 'connected' ? (
                   <>
                     <Wifi className="w-3.5 h-3.5 text-green-600" />
                     <span className="text-green-600 font-medium">Live</span>
+                  </>
+                ) : sseConnectionStatus === 'connecting' ? (
+                  <>
+                    <Wifi className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                    <span className="text-amber-500 font-medium">Connecting...</span>
                   </>
                 ) : (
                   <>
@@ -1209,12 +1135,17 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {/* Last Updated */}
-              {lastUpdated && (
+              {/* Last Updated / Refreshing indicator */}
+              {isRefreshing && !isColdLoading ? (
+                <span className="text-xs text-blue-500 flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  Refreshing...
+                </span>
+              ) : lastUpdated ? (
                 <span className="text-xs text-gray-500">
                   Updated: {new Date(lastUpdated).toLocaleTimeString()}
                 </span>
-              )}
+              ) : null}
             </div>
 
             {/* Right: Action Buttons - 3 cols */}
@@ -1579,12 +1510,12 @@ export default function Dashboard() {
                     }
                   }
 
-                  // Handle day click - navigate to specific day in daily view
                   const handleDayClick = () => {
-                    // Only allow clicking in daily view, not weekly view
-                    if (viewMode === 'weekly') return;
-
-                    // Navigate to the calculated dayDate
+                    if (viewMode === 'weekly') {
+                      setSelectedDate(new Date(dayDate));
+                      setViewMode('daily');
+                      return;
+                    }
                     setSelectedDate(new Date(dayDate));
                   };
                   
@@ -1609,18 +1540,18 @@ export default function Dashboard() {
                       return 'bg-white text-blue-600 shadow-md scale-110';
                     }
                     
-                    // Weekly view - non-selected days (improved visibility)
+                    // Weekly view - non-selected days (clickable to switch to daily)
                     if (viewMode === 'weekly') {
                       if (isHolidayDay && holidayInfo.isCanadian) {
-                        return 'text-rose-300 cursor-default';
+                        return 'text-rose-300 hover:text-rose-100 hover:bg-rose-400 hover:bg-opacity-30 cursor-pointer';
                       }
                       if (isHolidayDay) {
-                        return 'text-indigo-300 cursor-default';
+                        return 'text-indigo-300 hover:text-indigo-100 hover:bg-indigo-400 hover:bg-opacity-30 cursor-pointer';
                       }
                       if (isWeekendDay) {
-                        return 'text-slate-300 cursor-default';
+                        return 'text-slate-300 hover:text-white hover:bg-slate-400 hover:bg-opacity-30 cursor-pointer';
                       }
-                      return 'text-white opacity-90 cursor-default';
+                      return 'text-white opacity-90 hover:opacity-100 hover:bg-white hover:bg-opacity-20 cursor-pointer';
                     }
                     
                     // Daily view, not selected day
@@ -1640,7 +1571,6 @@ export default function Dashboard() {
                     <button
                       key={day}
                       onClick={handleDayClick}
-                      disabled={viewMode === 'weekly'}
                       className={`text-[10px] font-semibold px-1.5 py-0.5 rounded transition-all flex flex-col items-center relative ${getButtonClasses()}`}
                       title={buttonTooltip}
                     >
@@ -1651,8 +1581,9 @@ export default function Dashboard() {
                         }`} />
                       )}
                       <span>{day}</span>
+                      <span className="text-[7px] opacity-60 -mt-0.5">{dayDate.getDate()}</span>
                       {ticketCount !== null && (
-                        <div className="flex items-center gap-0.5 mt-0.5">
+                        <div className="flex items-center gap-0.5">
                           <span className="text-[9px] font-bold">{ticketCount}</span>
                           {trendIcon && (
                             <span className={trendColor}>

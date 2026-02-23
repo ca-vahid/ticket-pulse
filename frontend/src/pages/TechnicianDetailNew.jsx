@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { dashboardAPI } from '../services/api';
@@ -17,6 +17,11 @@ import {
   Send,
   ExternalLink,
   Circle,
+  BarChart3,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Users,
 } from 'lucide-react';
 
 // Priority color strips (left border)
@@ -43,6 +48,7 @@ const STATUS_COLORS = {
 
 // Get initials from technician name
 const getInitials = (name) => {
+  if (!name) return '??';
   const parts = name.split(' ').filter(p => p.length > 0);
   if (parts.length >= 2) {
     return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -56,11 +62,13 @@ export default function TechnicianDetailNew() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { getTechnician } = useDashboard();
+  const { getTechnician, getTechnicianCSAT } = useDashboard();
+
   const [technician, setTechnician] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const fetchSeqRef = useRef(0);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('all'); // 'all', 'self', 'assigned', 'closed', 'csat'
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'all', 'self', 'assigned', 'closed', 'csat'
   const [csatTickets, setCSATTickets] = useState([]);
   const [csatLoading, setCSATLoading] = useState(false);
   const [csatCount, setCSATCount] = useState(0);
@@ -171,7 +179,7 @@ export default function TechnicianDetailNew() {
   });
 
   // Initialize viewMode from navigation state (default to 'daily')
-  const [viewMode] = useState(location.state?.viewMode || 'daily');
+  const [viewMode, setViewMode] = useState(location.state?.viewMode || 'daily');
 
   // For weekly view, we need to track the selected week (Monday)
   // Restore from navigation state if available
@@ -194,18 +202,16 @@ export default function TechnicianDetailNew() {
     return null;
   });
 
-  // Fetch CSAT data on page load (for count) and when CSAT tab is activated (for full tickets)
+  // Fetch CSAT data (cache-aware via context)
   useEffect(() => {
     const fetchCSATData = async () => {
       if (!id) return;
-      
       try {
-        // Always fetch CSAT data to get the count, even if tab isn't active
         setCSATLoading(activeTab === 'csat');
-        const response = await dashboardAPI.getTechnicianCSAT(parseInt(id, 10));
-        const tickets = response.data.csatTickets || [];
-        const avg = response.data.averageScore ? parseFloat(response.data.averageScore) : null;
-        
+        const response = await getTechnicianCSAT(parseInt(id, 10));
+        const data = response?.data || response;
+        const tickets = data?.csatTickets || [];
+        const avg = data?.averageScore ? parseFloat(data.averageScore) : null;
         setCSATTickets(tickets);
         setCSATCount(tickets.length);
         setCSATAverage(avg);
@@ -215,37 +221,44 @@ export default function TechnicianDetailNew() {
         setCSATLoading(false);
       }
     };
-
     fetchCSATData();
-  }, [id]); // Only re-fetch when technician ID changes, not on tab change
+  }, [id, getTechnicianCSAT]);
 
+  // Fetch technician detail — direct API call (bypasses frontend cache to avoid stale data)
   useEffect(() => {
-    const fetchTechnician = async () => {
-      try {
-        setIsLoading(true);
+    const mySeq = ++fetchSeqRef.current;
+    setIsLoading(true);
+    setTechnician(null);
+    setError(null);
 
+    const fetchTechnicianData = async () => {
+      try {
         let data;
         if (viewMode === 'weekly') {
-          // Fetch weekly data
           const weekStart = selectedWeek ? formatDateLocal(selectedWeek) : null;
-          const response = await dashboardAPI.getTechnicianWeekly(parseInt(id, 10), weekStart, 'America/Los_Angeles');
-          data = response.data;
+          const response = await dashboardAPI.getTechnicianWeekly(
+            parseInt(id, 10), weekStart, 'America/Los_Angeles',
+          );
+          if (response.success && response.data) {
+            data = response.data;
+          } else {
+            throw new Error('Failed to fetch weekly technician data');
+          }
         } else {
-          // Fetch daily data
           data = await getTechnician(parseInt(id, 10), 'America/Los_Angeles', selectedDate);
         }
 
-        console.log('Technician data:', data);
+        if (mySeq !== fetchSeqRef.current) return;
         setTechnician(data);
       } catch (err) {
+        if (mySeq !== fetchSeqRef.current) return;
         console.error('Error fetching technician:', err);
         setError(err.message);
       } finally {
-        setIsLoading(false);
+        if (mySeq === fetchSeqRef.current) setIsLoading(false);
       }
     };
-
-    fetchTechnician();
+    fetchTechnicianData();
   }, [id, getTechnician, selectedDate, viewMode, selectedWeek]);
 
   // Persist search term to sessionStorage
@@ -258,10 +271,12 @@ export default function TechnicianDetailNew() {
     sessionStorage.setItem('techDetailNew_categories', JSON.stringify(selectedCategories));
   }, [selectedCategories]);
 
+  const returnViewMode = location.state?.returnViewMode;
+
   const handleBack = () => {
     navigate('/dashboard', {
       state: {
-        viewMode: viewMode,
+        viewMode: returnViewMode || viewMode,
         returnDate: selectedDate || formatDateLocal(new Date()),
         returnWeek: selectedWeek ? formatDateLocal(selectedWeek) : null,
         searchTerm: searchTerm,
@@ -331,11 +346,11 @@ export default function TechnicianDetailNew() {
     );
   }
 
-  if (error || !technician) {
+  if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800 text-sm">{error || 'Technician not found'}</p>
+          <p className="text-red-800 text-sm">{error}</p>
           <button
             onClick={handleBack}
             className="mt-3 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm"
@@ -343,6 +358,14 @@ export default function TechnicianDetailNew() {
             Back to Dashboard
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (!technician) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
@@ -445,17 +468,20 @@ export default function TechnicianDetailNew() {
   // Get tickets based on active tab
   let tabTickets;
   switch (activeTab) {
+  case 'overview':
+    tabTickets = [];
+    break;
   case 'self':
-    tabTickets = selfPickedTickets; // Show all self-picked from today (open + closed)
+    tabTickets = selfPickedTickets;
     break;
   case 'assigned':
-    tabTickets = assignedTickets; // Show all assigned from today (open + closed)
+    tabTickets = assignedTickets;
     break;
   case 'closed':
-    tabTickets = closedTicketsToday; // Show closed from today
+    tabTickets = closedTicketsToday;
     break;
   case 'csat':
-    tabTickets = csatTickets; // Show all CSAT tickets (already sorted by score, lowest first)
+    tabTickets = csatTickets;
     break;
   case 'all':
   default:
@@ -762,11 +788,43 @@ export default function TechnicianDetailNew() {
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-2xl font-bold text-gray-900">{technician.name}</h1>
-                  {viewMode === 'weekly' && (
-                    <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded">
-                      Weekly View
-                    </span>
-                  )}
+                  <div className="flex bg-gray-100 rounded-lg p-0.5">
+                    <button
+                      onClick={() => {
+                        if (viewMode === 'weekly' && selectedWeek) {
+                          setSelectedDate(formatDateLocal(new Date(selectedWeek)));
+                        }
+                        setViewMode('daily');
+                      }}
+                      className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                        viewMode === 'daily'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Daily
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (viewMode !== 'weekly') {
+                          const dateToUse = selectedDate ? new Date(selectedDate + 'T12:00:00') : new Date();
+                          const day = (dateToUse.getDay() + 6) % 7;
+                          const monday = new Date(dateToUse);
+                          monday.setDate(dateToUse.getDate() - day);
+                          monday.setHours(0, 0, 0, 0);
+                          setSelectedWeek(monday);
+                        }
+                        setViewMode('weekly');
+                      }}
+                      className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                        viewMode === 'weekly'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Weekly
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3 mt-1">
                   <span className="flex items-center gap-1.5 text-sm text-gray-600">
@@ -799,15 +857,22 @@ export default function TechnicianDetailNew() {
                   </button>
 
                   <div className="px-4 py-2 border border-gray-300 rounded-lg text-sm bg-white min-w-[280px] text-center">
-                    {technician.weekStart && technician.weekEnd ? (
-                      <span className="font-medium text-gray-900">
-                        {new Date(technician.weekStart + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        {' '}-{' '}
-                        {new Date(technician.weekEnd + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </span>
-                    ) : (
-                      <span className="text-gray-500">Loading week range...</span>
-                    )}
+                    {(() => {
+                      const ws = technician.weekStart
+                        ? new Date(technician.weekStart + 'T12:00:00')
+                        : selectedWeek ? new Date(selectedWeek) : null;
+                      const we = technician.weekEnd
+                        ? new Date(technician.weekEnd + 'T12:00:00')
+                        : ws ? (() => { const d = new Date(ws); d.setDate(d.getDate() + 6); return d; })() : null;
+                      if (!ws) return <span className="text-gray-500">Loading week range...</span>;
+                      return (
+                        <span className="font-medium text-gray-900">
+                          {ws.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          {' '}-{' '}
+                          {we.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   <button
@@ -988,6 +1053,17 @@ export default function TechnicianDetailNew() {
           <div className="border-b border-gray-200">
             <div className="flex">
               <button
+                onClick={() => setActiveTab('overview')}
+                className={`px-4 py-3 font-medium text-sm transition-colors relative flex items-center gap-1.5 ${
+                  activeTab === 'overview'
+                    ? 'text-indigo-600 border-b-2 border-indigo-600'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                Overview
+              </button>
+              <button
                 onClick={() => setActiveTab('all')}
                 className={`px-4 py-3 font-medium text-sm transition-colors relative ${
                   activeTab === 'all'
@@ -1055,9 +1131,389 @@ export default function TechnicianDetailNew() {
             </div>
           </div>
 
-          {/* Tickets List */}
+          {/* Tab Content */}
           <div className="p-3">
-            {csatLoading && activeTab === 'csat' ? (
+            {activeTab === 'overview' ? (
+              /* Overview Tab */
+              <div className="space-y-4">
+                {viewMode === 'weekly' && !technician.dailyBreakdown ? (
+                  <div className="text-center py-12">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-3"></div>
+                    <p className="text-gray-500 text-sm">Loading weekly data...</p>
+                  </div>
+                ) : viewMode === 'weekly' && technician.dailyBreakdown ? (
+                  /* ===== WEEKLY OVERVIEW ===== */
+                  <>
+                    {/* Daily Breakdown Grid */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Daily Breakdown</h3>
+                      <div className="grid grid-cols-7 gap-2">
+                        {technician.dailyBreakdown.map((day, index) => {
+                          const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                          const dateObj = new Date(day.date + 'T12:00:00');
+                          const dateLabel = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                          const isWeekend = index >= 5;
+                          const maxTotal = Math.max(...technician.dailyBreakdown.map(d => d.total), 1);
+                          const intensity = day.total / maxTotal;
+                          const bgClass = day.total === 0
+                            ? (isWeekend ? 'bg-slate-50' : 'bg-gray-50')
+                            : intensity >= 0.66
+                              ? 'bg-green-50 border-green-200'
+                              : intensity >= 0.33
+                                ? 'bg-blue-50 border-blue-200'
+                                : 'bg-gray-50 border-gray-200';
+
+                          return (
+                            <div key={day.date} className={`rounded-lg border p-2.5 text-center ${bgClass} ${isWeekend ? 'opacity-70' : ''}`}>
+                              <div className={`text-[10px] font-bold uppercase ${isWeekend ? 'text-slate-400' : 'text-gray-500'}`}>{dayNames[index]}</div>
+                              <div className="text-[9px] text-gray-400 mb-1">{dateLabel}</div>
+                              <div className={`text-xl font-bold ${day.total === 0 ? 'text-gray-300' : 'text-gray-800'}`}>{day.total}</div>
+                              {day.total > 0 && (
+                                <div className="mt-1.5 space-y-0.5">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <Hand className="w-2.5 h-2.5 text-purple-500" />
+                                    <span className="text-[9px] text-purple-700 font-medium">{day.self}</span>
+                                    <Send className="w-2.5 h-2.5 text-orange-500 ml-1" />
+                                    <span className="text-[9px] text-orange-700 font-medium">{day.assigned}</span>
+                                  </div>
+                                  <div className="flex items-center justify-center gap-1">
+                                    <CheckCircle className="w-2.5 h-2.5 text-green-500" />
+                                    <span className="text-[9px] text-green-700 font-medium">{day.closed} cls</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Weekly Summary Metrics */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Weekly Summary</h3>
+                      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
+                        {/* TOTAL - highlighted */}
+                        <div className="bg-blue-600 rounded-lg p-3 text-center shadow-md ring-1 ring-blue-700">
+                          <div className="text-3xl font-extrabold text-white">{technician.weeklyTotalCreated || 0}</div>
+                          <div className="text-[10px] text-blue-100 font-semibold uppercase tracking-wide">Total</div>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                          <div className="text-2xl font-bold text-gray-700">{technician.weeklySelfPicked || 0}</div>
+                          <div className="text-[10px] text-gray-500 font-medium uppercase">Self-Picked</div>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                          <div className="text-2xl font-bold text-gray-700">{technician.weeklyAssigned || 0}</div>
+                          <div className="text-[10px] text-gray-500 font-medium uppercase">Assigned</div>
+                        </div>
+                        {/* CLOSED - highlighted */}
+                        <div className="bg-green-600 rounded-lg p-3 text-center shadow-md ring-1 ring-green-700">
+                          <div className="text-3xl font-extrabold text-white">{technician.weeklyClosed || 0}</div>
+                          <div className="text-[10px] text-green-100 font-semibold uppercase tracking-wide">Closed</div>
+                        </div>
+                        {(() => {
+                          const netChange = technician.weeklyNetChange || 0;
+                          const wrapperClass = netChange > 0
+                            ? 'bg-red-50 border-red-200'
+                            : netChange < 0
+                              ? 'bg-green-50 border-green-200'
+                              : 'bg-gray-50 border-gray-200';
+                          const textClass = netChange > 0
+                            ? 'text-red-700'
+                            : netChange < 0
+                              ? 'text-green-700'
+                              : 'text-gray-700';
+                          const labelClass = netChange > 0
+                            ? 'text-red-500'
+                            : netChange < 0
+                              ? 'text-green-500'
+                              : 'text-gray-500';
+                          return (
+                            <div className={`rounded-lg p-3 text-center border ${wrapperClass}`}>
+                              <div className={`text-2xl font-bold flex items-center justify-center gap-1 ${textClass}`}>
+                                {netChange > 0 ? <TrendingUp className="w-4 h-4" /> : netChange < 0 ? <TrendingDown className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+                                {netChange > 0 ? '+' : ''}{netChange}
+                              </div>
+                              <div className={`text-[10px] font-medium uppercase ${labelClass}`}>Net Change</div>
+                            </div>
+                          );
+                        })()}
+                        {(() => {
+                          const total = technician.weeklyTotalCreated || 0;
+                          const selfRate = total > 0 ? Math.round(((technician.weeklySelfPicked || 0) / total) * 100) : 0;
+                          return (
+                            <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                              <div className="text-2xl font-bold text-gray-700">{selfRate}%</div>
+                              <div className="text-[10px] text-gray-500 font-medium uppercase">Self-Pick Rate</div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* Breakdown Bar */}
+                    {(technician.weeklyTotalCreated || 0) > 0 && (
+                      <div>
+                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Self-Picked vs Assigned</h3>
+                        <div className="flex rounded-full overflow-hidden h-4 bg-gray-100">
+                          {(technician.weeklySelfPicked || 0) > 0 && (
+                            <div
+                              className="bg-blue-500 flex items-center justify-center"
+                              style={{ width: `${((technician.weeklySelfPicked || 0) / (technician.weeklyTotalCreated || 1)) * 100}%` }}
+                            >
+                              <span className="text-[9px] text-white font-bold">{technician.weeklySelfPicked}</span>
+                            </div>
+                          )}
+                          {(technician.weeklyAssigned || 0) > 0 && (
+                            <div
+                              className="bg-gray-400 flex items-center justify-center"
+                              style={{ width: `${((technician.weeklyAssigned || 0) / (technician.weeklyTotalCreated || 1)) * 100}%` }}
+                            >
+                              <span className="text-[9px] text-white font-bold">{technician.weeklyAssigned}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex justify-between mt-1">
+                          <div className="flex items-center gap-1">
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
+                            <span className="text-[10px] text-gray-600">Self-Picked</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <div className="w-2 h-2 rounded-full bg-gray-400" />
+                            <span className="text-[10px] text-gray-600">Assigned</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Daily Averages */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Daily Averages</h3>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                          <div className="text-lg font-bold text-gray-700">{(technician.avgTicketsPerDay || 0).toFixed(1)}</div>
+                          <div className="text-[10px] text-gray-500 font-medium">Tickets / Day</div>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                          <div className="text-lg font-bold text-gray-700">{(technician.avgSelfPickedPerDay || 0).toFixed(1)}</div>
+                          <div className="text-[10px] text-gray-500 font-medium">Self-Picked / Day</div>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                          <div className="text-lg font-bold text-gray-700">{(technician.avgClosedPerDay || 0).toFixed(1)}</div>
+                          <div className="text-[10px] text-gray-500 font-medium">Closed / Day</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Assigners + CSAT Row */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {/* Assigners Breakdown */}
+                      {technician.assigners && technician.assigners.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Assigned By</h3>
+                          <div className="bg-gray-50 rounded-lg border border-gray-200 divide-y divide-gray-200">
+                            {technician.assigners.map((assigner, idx) => (
+                              <div key={idx} className="flex items-center justify-between px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <Users className="w-3.5 h-3.5 text-orange-500" />
+                                  <span className="text-sm text-gray-700">{assigner.name}</span>
+                                </div>
+                                <span className="text-sm font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">{assigner.count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Weekly CSAT */}
+                      {(technician.weeklyCSATCount || 0) > 0 && (
+                        <div>
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Weekly CSAT</h3>
+                          <div className="bg-yellow-50 rounded-lg border border-yellow-200 p-4 text-center">
+                            <div className="flex items-center justify-center gap-3">
+                              <div>
+                                <div className="text-2xl font-bold text-yellow-700">{technician.weeklyCSATCount}</div>
+                                <div className="text-[10px] text-yellow-600 font-medium">Ratings</div>
+                              </div>
+                              <div className="w-px h-10 bg-yellow-300" />
+                              <div>
+                                <div className="text-2xl font-bold text-yellow-700 flex items-center gap-1">
+                                  {technician.weeklyCSATAverage ? Number(technician.weeklyCSATAverage).toFixed(1) : 'N/A'}
+                                  <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
+                                </div>
+                                <div className="text-[10px] text-yellow-600 font-medium">Avg Score / 4</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Category Breakdown */}
+                    {(() => {
+                      const weeklyTickets = technician.weeklyTickets || [];
+                      if (weeklyTickets.length === 0) return null;
+                      const categoryMap = {};
+                      weeklyTickets.forEach(t => {
+                        const cat = t.ticketCategory || 'Uncategorized';
+                        categoryMap[cat] = (categoryMap[cat] || 0) + 1;
+                      });
+                      const sorted = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
+                      return (
+                        <div>
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Categories</h3>
+                          <div className="flex flex-wrap gap-1.5">
+                            {sorted.map(([cat, count]) => (
+                              <span key={cat} className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs border border-gray-200">
+                                {cat}
+                                <span className="font-bold text-gray-900">{count}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                ) : (
+                  /* ===== DAILY OVERVIEW ===== */
+                  <>
+                    {/* Period Metrics Grid */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                        {selectedDate
+                          ? new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                          : new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                        }
+                      </h3>
+                      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
+                        {/* TOTAL - highlighted */}
+                        <div className="bg-blue-600 rounded-lg p-3 text-center shadow-md ring-1 ring-blue-700">
+                          <div className="text-3xl font-extrabold text-white">{technician.totalTicketsOnDate || 0}</div>
+                          <div className="text-[10px] text-blue-100 font-semibold uppercase tracking-wide">Total Tickets</div>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                          <div className="text-2xl font-bold text-gray-700">{technician.selfPickedOnDate || 0}</div>
+                          <div className="text-[10px] text-gray-500 font-medium uppercase">Self-Picked</div>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                          <div className="text-2xl font-bold text-gray-700">{technician.assignedOnDate || 0}</div>
+                          <div className="text-[10px] text-gray-500 font-medium uppercase">Assigned</div>
+                        </div>
+                        {/* CLOSED - highlighted */}
+                        <div className="bg-green-600 rounded-lg p-3 text-center shadow-md ring-1 ring-green-700">
+                          <div className="text-3xl font-extrabold text-white">{technician.closedTicketsOnDateCount || 0}</div>
+                          <div className="text-[10px] text-green-100 font-semibold uppercase tracking-wide">Closed</div>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                          <div className="text-2xl font-bold text-gray-700">{openCount}</div>
+                          {pendingCount > 0 && <div className="text-[9px] text-gray-500 font-medium">+ {pendingCount} pending</div>}
+                          <div className="text-[10px] text-gray-500 font-medium uppercase">Open Now</div>
+                        </div>
+                        {(() => {
+                          const total = technician.totalTicketsOnDate || 0;
+                          const selfRate = total > 0 ? Math.round(((technician.selfPickedOnDate || 0) / total) * 100) : 0;
+                          return (
+                            <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                              <div className="text-2xl font-bold text-gray-700">{selfRate}%</div>
+                              <div className="text-[10px] text-gray-500 font-medium uppercase">Self-Pick Rate</div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* Breakdown Bar */}
+                    {(technician.totalTicketsOnDate || 0) > 0 && (
+                      <div>
+                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Self-Picked vs Assigned</h3>
+                        <div className="flex rounded-full overflow-hidden h-4 bg-gray-100">
+                          {(technician.selfPickedOnDate || 0) > 0 && (
+                            <div
+                              className="bg-blue-500 flex items-center justify-center"
+                              style={{ width: `${((technician.selfPickedOnDate || 0) / (technician.totalTicketsOnDate || 1)) * 100}%` }}
+                            >
+                              <span className="text-[9px] text-white font-bold">{technician.selfPickedOnDate}</span>
+                            </div>
+                          )}
+                          {(technician.assignedOnDate || 0) > 0 && (
+                            <div
+                              className="bg-gray-400 flex items-center justify-center"
+                              style={{ width: `${((technician.assignedOnDate || 0) / (technician.totalTicketsOnDate || 1)) * 100}%` }}
+                            >
+                              <span className="text-[9px] text-white font-bold">{technician.assignedOnDate}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex justify-between mt-1">
+                          <div className="flex items-center gap-1">
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
+                            <span className="text-[10px] text-gray-600">Self-Picked</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <div className="w-2 h-2 rounded-full bg-gray-400" />
+                            <span className="text-[10px] text-gray-600">Assigned</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Category Breakdown */}
+                    {(() => {
+                      const dayTickets = technician.ticketsOnDate || [];
+                      if (dayTickets.length === 0) return null;
+                      const categoryMap = {};
+                      dayTickets.forEach(t => {
+                        const cat = t.ticketCategory || 'Uncategorized';
+                        categoryMap[cat] = (categoryMap[cat] || 0) + 1;
+                      });
+                      const sorted = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
+                      return (
+                        <div>
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Categories</h3>
+                          <div className="flex flex-wrap gap-1.5">
+                            {sorted.map(([cat, count]) => (
+                              <span key={cat} className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs border border-gray-200">
+                                {cat}
+                                <span className="font-bold text-gray-900">{count}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Ticket Status Breakdown */}
+                    {(() => {
+                      const dayTickets = technician.ticketsOnDate || [];
+                      if (dayTickets.length === 0) return null;
+                      const statusMap = {};
+                      dayTickets.forEach(t => {
+                        const status = t.status || 'Unknown';
+                        statusMap[status] = (statusMap[status] || 0) + 1;
+                      });
+                      const statusOrder = ['Open', 'Pending', 'Resolved', 'Closed'];
+                      const sorted = Object.entries(statusMap).sort((a, b) => {
+                        const ai = statusOrder.indexOf(a[0]);
+                        const bi = statusOrder.indexOf(b[0]);
+                        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+                      });
+                      return (
+                        <div>
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Ticket Statuses</h3>
+                          <div className="flex flex-wrap gap-1.5">
+                            {sorted.map(([status, count]) => (
+                              <span key={status} className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${STATUS_COLORS[status] || 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                                {status}
+                                <span className="font-bold">{count}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
+              </div>
+            ) : csatLoading && activeTab === 'csat' ? (
               <div className="text-center py-8">
                 <div className="text-gray-400 mb-2">
                   <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-yellow-600 mx-auto"></div>

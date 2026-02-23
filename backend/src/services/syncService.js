@@ -13,6 +13,7 @@ import settingsRepository from './settingsRepository.js';
 import syncLogRepository from './syncLogRepository.js';
 import csatService from './csatService.js';
 import logger from '../utils/logger.js';
+import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
 
 // Note: SSE manager will be imported lazily to avoid circular dependency
@@ -645,6 +646,7 @@ class SyncService {
       };
 
       logger.info('Full sync completed', summary);
+      clearReadCache();
 
       // Broadcast sync completion to all SSE clients
       try {

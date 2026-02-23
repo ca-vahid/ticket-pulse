@@ -6,6 +6,7 @@ import scheduledSyncService from '../services/scheduledSyncService.js';
 import syncLogRepository from '../services/syncLogRepository.js';
 import logger from '../utils/logger.js';
 import { sseManager } from './sse.routes.js';
+import { clearReadCache } from '../services/dashboardReadCache.js';
 
 const router = express.Router();
 
@@ -32,6 +33,7 @@ router.post(
     }
 
     const result = await scheduledSyncService.triggerManualSync(fullSync, daysToSync);
+    clearReadCache();
 
     res.json({
       success: true,
@@ -187,6 +189,7 @@ router.post(
     logger.info(`Week sync triggered via API (${startDate} to ${endDate})`);
 
     const result = await syncService.syncWeek({ startDate, endDate });
+    clearReadCache();
 
     // Broadcast sync completion to all SSE clients
     sseManager.broadcast('sync-completed', {

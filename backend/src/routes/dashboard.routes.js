@@ -6,6 +6,7 @@ import ticketRepository from '../services/ticketRepository.js';
 import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import logger from '../utils/logger.js';
 import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianDetail, calculateTechnicianWeeklyStats, calculateMonthlyDashboard } from '../services/statsCalculator.js';
+import { readCache } from '../services/dashboardReadCache.js';
 
 const router = express.Router();
 
@@ -39,6 +40,7 @@ const transformTicket = (ticket) => {
  */
 router.get(
   '/',
+  readCache(10_000),
   asyncHandler(async (req, res) => {
     const timezone = req.query.timezone || 'America/Los_Angeles';
     const dateParam = req.query.date; // Format: YYYY-MM-DD
@@ -109,6 +111,7 @@ router.get(
  */
 router.get(
   '/weekly-stats',
+  readCache(15_000),
   asyncHandler(async (req, res) => {
     const timezone = req.query.timezone || 'America/Los_Angeles';
     const dateParam = req.query.date || formatDateInTimezone(null, timezone);
@@ -214,6 +217,7 @@ router.get(
  */
 router.get(
   '/weekly',
+  readCache(15_000),
   asyncHandler(async (req, res) => {
     const timezone = req.query.timezone || 'America/Los_Angeles';
     const weekStartParam = req.query.weekStart; // Format: YYYY-MM-DD
@@ -279,6 +283,7 @@ router.get(
  */
 router.get(
   '/technician/:id',
+  readCache(10_000),
   asyncHandler(async (req, res) => {
     const techId = parseInt(req.params.id, 10);
     const timezone = req.query.timezone || 'America/Los_Angeles';
@@ -352,6 +357,7 @@ router.get(
  */
 router.get(
   '/technician/:id/weekly',
+  readCache(15_000),
   asyncHandler(async (req, res) => {
     const techId = parseInt(req.params.id, 10);
     const timezone = req.query.timezone || 'America/Los_Angeles';
@@ -467,6 +473,7 @@ router.get(
  */
 router.get(
   '/monthly',
+  readCache(15_000),
   asyncHandler(async (req, res) => {
     const timezone = req.query.timezone || 'America/Los_Angeles';
     const monthStartParam = req.query.monthStart; // Format: YYYY-MM-DD
@@ -552,6 +559,7 @@ router.get(
  */
 router.get(
   '/technician/:id/csat',
+  readCache(15_000),
   asyncHandler(async (req, res) => {
     const techId = parseInt(req.params.id, 10);
 
