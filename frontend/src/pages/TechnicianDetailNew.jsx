@@ -850,6 +850,17 @@ export default function TechnicianDetailNew() {
                     </button>
                   </div>
                 </div>
+                <div className="flex items-center gap-3 mt-1">
+                  <span className="flex items-center gap-1.5 text-sm text-gray-600">
+                    <Circle className="w-2.5 h-2.5 fill-green-500 text-green-500" />
+                    {technician.timezone ? technician.timezone.split('/').pop().replace(/_/g, ' ') : 'Unknown TZ'}
+                  </span>
+                  {(technician.workStartTime || technician.workEndTime) && (
+                    <span className="text-sm text-gray-500">
+                      {technician.workStartTime || '??'} – {technician.workEndTime || '??'}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1547,12 +1558,19 @@ export default function TechnicianDetailNew() {
                   const av = technician.avoidance;
                   const freshdomain = import.meta.env.VITE_FRESHSERVICE_DOMAIN || 'efusion.freshservice.com';
 
-                  if (!av || !av.applicable) {
-                    const reason = av?.reason;
+                  if (!av) {
+                    return (
+                      <div className="text-center py-8">
+                        <p className="text-gray-500 text-sm">Coverage data is loading or unavailable.</p>
+                        <p className="text-gray-400 text-xs mt-1">Try refreshing the page (Ctrl+Shift+R) if this persists.</p>
+                      </div>
+                    );
+                  }
+                  if (!av.applicable) {
                     return (
                       <div className="text-center py-8">
                         <p className="text-gray-500 text-sm">
-                          {reason === 'weekend'
+                          {av.reason === 'weekend'
                             ? 'No coverage window for weekends.'
                             : 'Coverage analysis is not available for this period.'}
                         </p>

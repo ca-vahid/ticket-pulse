@@ -1,6 +1,5 @@
 import { PrismaClient } from '@prisma/client';
 import { formatInTimeZone } from 'date-fns-tz';
-import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
 import logger from '../utils/logger.js';
 
 const prisma = new PrismaClient();
@@ -8,22 +7,6 @@ const prisma = new PrismaClient();
 const PT_TIMEZONE = 'America/Los_Angeles';
 const BUSINESS_CLOSE = '17:00';
 const COVERAGE_END = '09:00';
-
-const IANA_ALIASES = {
-  'America/Los_Angeles': 'America/Los_Angeles',
-  'America/Vancouver': 'America/Vancouver',
-  'America/Denver': 'America/Denver',
-  'America/Chicago': 'America/Chicago',
-  'America/New_York': 'America/New_York',
-};
-
-function toIANA(tz) {
-  if (!tz) return PT_TIMEZONE;
-  if (FRESHSERVICE_TZ_TO_IANA[tz]) return FRESHSERVICE_TZ_TO_IANA[tz];
-  if (IANA_ALIASES[tz]) return IANA_ALIASES[tz];
-  if (tz.includes('/')) return tz;
-  return PT_TIMEZONE;
-}
 
 function localTimeToUTC(dateStr, timeStr, timezone) {
   const offset = formatInTimeZone(
