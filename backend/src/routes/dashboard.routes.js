@@ -7,6 +7,7 @@ import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import logger from '../utils/logger.js';
 import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianDetail, calculateTechnicianWeeklyStats, calculateMonthlyDashboard } from '../services/statsCalculator.js';
 import { readCache } from '../services/dashboardReadCache.js';
+import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTechnicianAvoidanceDetail, computeTechnicianAvoidanceWeeklyDetail } from '../services/avoidanceAnalysisService.js';
 
 const router = express.Router();
 
@@ -76,11 +77,20 @@ router.get(
       isViewingToday,
     );
 
+    // Compute avoidance analysis in parallel
+    let avoidanceMap = {};
+    try {
+      avoidanceMap = await computeDashboardAvoidance(technicians, todayStart, todayEnd);
+    } catch (err) {
+      logger.error('Avoidance analysis failed for daily dashboard:', err);
+    }
+
     // Transform tickets for frontend (flatten requester object)
     // Use ticketsToday for date-filtered view (tickets assigned on selected date)
     const techsWithTransformedTickets = dashboardData.technicians.map(tech => ({
       ...tech,
       tickets: (tech.ticketsToday || []).map(transformTicket),
+      avoidance: avoidanceMap[tech.id] || null,
     }));
 
     // Remove intermediate arrays from response (we use tickets instead)
@@ -89,13 +99,11 @@ router.get(
       delete tech.ticketsToday;
     });
 
-    const statistics = dashboardData.statistics;
-
     res.json({
       success: true,
       data: {
         technicians: techsWithTransformedTickets,
-        statistics,
+        statistics: dashboardData.statistics,
         timestamp: new Date().toISOString(),
       },
     });
@@ -257,11 +265,21 @@ router.get(
       timezone,
     );
 
+    // Compute avoidance analysis for the week
+    let avoidanceMap = {};
+    try {
+      avoidanceMap = await computeWeeklyDashboardAvoidance(
+        technicians, weekStartDate, weekEndDate, timezone,
+      );
+    } catch (err) {
+      logger.error('Avoidance analysis failed for weekly dashboard:', err);
+    }
+
     // Transform technicians to include weeklyTickets array for frontend filtering
     const techsWithTickets = dashboardData.technicians.map(tech => ({
       ...tech,
-      // Add weeklyTickets field for frontend to filter (transform like daily tickets)
       weeklyTickets: (tech.weeklyTickets || []).map(transformTicket),
+      avoidance: avoidanceMap[tech.id] || null,
     }));
 
     res.json({
@@ -330,12 +348,19 @@ router.get(
       isViewingToday,
     );
 
+    // Compute avoidance analysis for this technician
+    let avoidance = null;
+    try {
+      avoidance = await computeTechnicianAvoidanceDetail(technician, todayStart, todayEnd);
+    } catch (err) {
+      logger.error(`Avoidance analysis failed for technician ${techId}:`, err);
+    }
+
     // Transform tickets for frontend (flatten requester object)
     res.json({
       success: true,
       data: {
         ...technicianData,
-        // Ticket lists (arrays) - transformed for frontend
         openTickets: technicianData.openTickets.map(transformTicket),
         ticketsOnDate: technicianData.ticketsOnDate.map(transformTicket),
         closedTicketsOnDate: technicianData.closedTicketsOnDate.map(transformTicket),
@@ -343,6 +368,7 @@ router.get(
         assignedTickets: technicianData.assignedTickets.map(transformTicket),
         selfPickedOpenTickets: technicianData.selfPickedOpenTickets.map(transformTicket),
         assignedOpenTickets: technicianData.assignedOpenTickets.map(transformTicket),
+        avoidance,
       },
     });
   }),
@@ -440,6 +466,16 @@ router.get(
       ['Open', 'Pending'].includes(ticket.status),
     );
 
+    // Compute avoidance analysis for this technician's week
+    let avoidance = null;
+    try {
+      avoidance = await computeTechnicianAvoidanceWeeklyDetail(
+        technician, weekStartDate, weekEndDate, timezone,
+      );
+    } catch (err) {
+      logger.error(`Weekly avoidance analysis failed for technician ${techId}:`, err);
+    }
+
     res.json({
       success: true,
       data: {
@@ -448,19 +484,20 @@ router.get(
         email: technician.email,
         photoUrl: technician.photoUrl,
         timezone: technician.timezone,
+        workStartTime: technician.workStartTime || null,
+        workEndTime: technician.workEndTime || null,
         isActive: technician.isActive,
         weekStart: formatDateInTimezone(weekStartDate, timezone),
         weekEnd: formatDateInTimezone(weekEndDate, timezone),
 
-        // Weekly stats
         ...weeklyStats,
 
-        // Ticket lists (transformed for frontend)
         openTickets: openTickets.map(transformTicket),
         weeklyTickets: weeklyTickets.map(transformTicket),
         selfPickedTickets: selfPickedTickets.map(transformTicket),
         assignedTickets: assignedTickets.map(transformTicket),
         closedTickets: closedTickets.map(transformTicket),
+        avoidance,
       },
     });
   }),

@@ -222,8 +222,9 @@ export const sseAPI = {
  * Visuals API
  */
 export const visualsAPI = {
-  getAgents: async () => {
-    return await api.get('/visuals/agents');
+  getAgents: async ({ includeInactive = false } = {}) => {
+    const params = includeInactive ? { includeInactive: 'true' } : {};
+    return await api.get('/visuals/agents', { params });
   },
 
   updateAgentLocation: async (agentId, location) => {
@@ -232,6 +233,12 @@ export const visualsAPI = {
 
   batchUpdateVisibility: async (selectedIds, managerId) => {
     return await api.post('/visuals/agents/batch-visibility', { selectedIds, managerId });
+  },
+
+  updateAgentSchedule: async (agentId, { workStartTime, workEndTime, timezone } = {}) => {
+    const body = { workStartTime, workEndTime };
+    if (timezone) body.timezone = timezone;
+    return await api.patch(`/visuals/agents/${agentId}/schedule`, body);
   },
 };
 

@@ -201,6 +201,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                   <span className="text-[9px] text-purple-700 font-semibold">SELF</span>
                 </div>
               )}
+
             </div>
           </div>
         </div>

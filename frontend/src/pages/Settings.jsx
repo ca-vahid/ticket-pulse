@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../contexts/SettingsContext';
-import { syncAPI } from '../services/api';
+import { syncAPI, visualsAPI } from '../services/api';
 import api from '../services/api';
 import AutoResponseSettings from '../components/AutoResponseSettings';
 import AutoResponseTestInteractive from '../components/AutoResponseTestInteractive';
@@ -39,6 +39,10 @@ export default function Settings() {
   const [photoSyncStatus, setPhotoSyncStatus] = useState(null);
   const [isPhotoSyncing, setIsPhotoSyncing] = useState(false);
   const [photoStatus, setPhotoStatus] = useState(null);
+  const [techSchedules, setTechSchedules] = useState([]);
+  const [scheduleSaving, setScheduleSaving] = useState({});
+  const [scheduleStatus, setScheduleStatus] = useState(null);
+  const [showInactive, setShowInactive] = useState(false);
 
   const navigationItems = [
     { id: 'freshservice', label: 'FreshService', icon: '🔌' },
@@ -46,6 +50,7 @@ export default function Settings() {
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
     { id: 'photos', label: 'Profile Photos', icon: '👤' },
     { id: 'business-hours', label: 'Business Hours', icon: '🕐' },
+    { id: 'tech-schedules', label: 'Tech Schedules', icon: '📅' },
     { id: 'llm-config', label: 'LLM Configuration', icon: '🤖' },
     { id: 'auto-response-test', label: 'Test Auto-Response', icon: '🧪' },
   ];
@@ -85,8 +90,42 @@ export default function Settings() {
       }
     };
 
+    const fetchTechSchedules = async () => {
+      const toIANA = (tz) => {
+        if (!tz) return 'America/Vancouver';
+        const map = {
+          'Pacific Time (US & Canada)': 'America/Vancouver',
+          'Mountain Time (US & Canada)': 'America/Edmonton',
+          'Central Time (US & Canada)': 'America/Winnipeg',
+          'Eastern Time (US & Canada)': 'America/Toronto',
+          'Atlantic Time (Canada)': 'America/Halifax',
+          'America/Los_Angeles': 'America/Vancouver',
+          'America/Denver': 'America/Edmonton',
+          'America/Chicago': 'America/Winnipeg',
+          'America/New_York': 'America/Toronto',
+        };
+        return map[tz] || tz;
+      };
+      try {
+        const response = await visualsAPI.getAgents({ includeInactive: true });
+        if (response.success && response.data?.agents) {
+          setTechSchedules(response.data.agents.map(a => ({
+            id: a.id,
+            name: a.name,
+            timezone: toIANA(a.timezone),
+            workStartTime: a.workStartTime || '',
+            workEndTime: a.workEndTime || '',
+            isActive: a.isActive,
+          })));
+        }
+      } catch (err) {
+        console.error('Failed to fetch tech schedules:', err);
+      }
+    };
+
     fetchSyncStatus();
     fetchPhotoStatus();
+    fetchTechSchedules();
   }, []);
 
   const handleChange = (e) => {
@@ -149,6 +188,48 @@ export default function Settings() {
       setSaveStatus({ success: true, message: 'Sync completed successfully!' });
     } catch (err) {
       setSaveStatus({ success: false, message: `Sync failed: ${err.message}` });
+    }
+  };
+
+  const handleScheduleChange = (techId, field, value) => {
+    setTechSchedules(prev => prev.map(t =>
+      t.id === techId ? { ...t, [field]: value } : t,
+    ));
+  };
+
+  const handleApplyAllSchedule = (field, value) => {
+    setTechSchedules(prev => prev.map(t =>
+      t.isActive !== false ? { ...t, [field]: value } : t,
+    ));
+  };
+
+  const handleSaveAllSchedules = async () => {
+    const activeTechs = techSchedules.filter(t => t.isActive !== false);
+    setScheduleSaving({ _all: true });
+    setScheduleStatus(null);
+    let failed = 0;
+    try {
+      await Promise.all(activeTechs.map(async (tech) => {
+        try {
+          await visualsAPI.updateAgentSchedule(tech.id, {
+            workStartTime: tech.workStartTime || null,
+            workEndTime: tech.workEndTime || null,
+            timezone: tech.timezone || undefined,
+          });
+        } catch {
+          failed++;
+        }
+      }));
+      if (failed === 0) {
+        setScheduleStatus({ success: true, message: `All ${activeTechs.length} schedules saved.` });
+      } else {
+        setScheduleStatus({ success: false, message: `Saved ${activeTechs.length - failed} schedules, ${failed} failed.` });
+      }
+    } catch (err) {
+      setScheduleStatus({ success: false, message: `Save failed: ${err.message}` });
+    } finally {
+      setScheduleSaving({});
+      setTimeout(() => setScheduleStatus(null), 4000);
     }
   };
 
@@ -464,6 +545,228 @@ export default function Settings() {
             {activeSection === 'business-hours' && (
               <div className="p-6">
                 <AutoResponseSettings />
+              </div>
+            )}
+
+            {/* Technician Schedules */}
+            {activeSection === 'tech-schedules' && (
+              <div className="p-6">
+                {(() => {
+                  const TZ = [
+                    { value: 'America/Halifax', short: 'AT', label: 'Atlantic' },
+                    { value: 'America/Toronto', short: 'ET', label: 'Eastern' },
+                    { value: 'America/Winnipeg', short: 'CT', label: 'Central' },
+                    { value: 'America/Edmonton', short: 'MT', label: 'Mountain' },
+                    { value: 'America/Vancouver', short: 'PT', label: 'Pacific' },
+                  ];
+                  const TZ_COLORS = {
+                    'America/Halifax': 'bg-violet-500',
+                    'America/Toronto': 'bg-blue-500',
+                    'America/Winnipeg': 'bg-teal-500',
+                    'America/Edmonton': 'bg-amber-500',
+                    'America/Vancouver': 'bg-emerald-500',
+                  };
+                  const normTz = (tz) => {
+                    if (!tz) return 'America/Vancouver';
+                    const m = {
+                      'America/Los_Angeles': 'America/Vancouver',
+                      'America/Denver': 'America/Edmonton',
+                      'America/Chicago': 'America/Winnipeg',
+                      'America/New_York': 'America/Toronto',
+                      'Pacific Time (US & Canada)': 'America/Vancouver',
+                      'Mountain Time (US & Canada)': 'America/Edmonton',
+                      'Central Time (US & Canada)': 'America/Winnipeg',
+                      'Eastern Time (US & Canada)': 'America/Toronto',
+                      'Atlantic Time (Canada)': 'America/Halifax',
+                    };
+                    return m[tz] || tz;
+                  };
+                  const tzShort = (tz) => TZ.find(t => t.value === normTz(tz))?.short || '?';
+                  const tzLabel = (tz) => TZ.find(t => t.value === normTz(tz))?.label || tz;
+
+                  const STARTS = [
+                    { value: '', label: 'Auto' },
+                    { value: '07:00', label: '7 AM' },
+                    { value: '08:00', label: '8 AM' },
+                    { value: '09:00', label: '9 AM' },
+                  ];
+                  const ENDS = [
+                    { value: '', label: 'Auto' },
+                    { value: '16:00', label: '4 PM' },
+                    { value: '17:00', label: '5 PM' },
+                  ];
+
+                  const activeTechs = techSchedules.filter(t => t.isActive !== false);
+                  const inactiveTechs = techSchedules.filter(t => t.isActive === false);
+                  const isSavingAll = !!scheduleSaving._all;
+
+                  const Pill = ({ options, value, onChange, className = '' }) => (
+                    <div className={`inline-flex rounded-lg border border-gray-200 overflow-hidden ${className}`}>
+                      {options.map(opt => (
+                        <button
+                          key={opt.value}
+                          onClick={() => onChange(opt.value)}
+                          className={`px-3 py-1.5 text-xs font-medium transition-all ${
+                            value === opt.value
+                              ? 'bg-blue-600 text-white shadow-inner'
+                              : 'bg-white text-gray-600 hover:bg-gray-50'
+                          } ${options.indexOf(opt) > 0 ? 'border-l border-gray-200' : ''}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  );
+
+                  const TzPill = ({ value, onChange }) => (
+                    <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+                      {TZ.map((tz, i) => (
+                        <button
+                          key={tz.value}
+                          onClick={() => onChange(tz.value)}
+                          title={tz.label}
+                          className={`px-2.5 py-1.5 text-xs font-bold transition-all ${
+                            normTz(value) === tz.value
+                              ? `${TZ_COLORS[tz.value]} text-white shadow-inner`
+                              : 'bg-white text-gray-500 hover:bg-gray-50'
+                          } ${i > 0 ? 'border-l border-gray-200' : ''}`}
+                        >
+                          {tz.short}
+                        </button>
+                      ))}
+                    </div>
+                  );
+
+                  return (
+                    <div className="space-y-5">
+                      {/* Header + Apply All */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                        <div className="px-5 pt-5 pb-3">
+                          <h2 className="text-base font-semibold text-gray-900">Work Schedules</h2>
+                          <p className="text-xs text-gray-500 mt-0.5">Click to set timezone and hours per tech. Use the bar below to apply to everyone.</p>
+                        </div>
+
+                        {scheduleStatus && (
+                          <div className={`mx-5 mb-3 flex items-center gap-2 p-2.5 rounded-lg text-sm ${scheduleStatus.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                            {scheduleStatus.success ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                            {scheduleStatus.message}
+                          </div>
+                        )}
+
+                        {/* Bulk controls */}
+                        <div className="px-5 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-y border-blue-100 flex items-center gap-4 flex-wrap">
+                          <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Set all</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-blue-500 font-medium">TZ</span>
+                            <TzPill value="" onChange={v => {
+                              const label = TZ.find(t => t.value === v)?.label || v;
+                              if (window.confirm(`Set timezone to ${label} for all ${activeTechs.length} active techs?`)) handleApplyAllSchedule('timezone', v);
+                            }} />
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-blue-500 font-medium">IN</span>
+                            <Pill options={STARTS} value="__none__" onChange={v => {
+                              const label = STARTS.find(s => s.value === v)?.label || v;
+                              if (window.confirm(`Set start time to ${label} for all ${activeTechs.length} active techs?`)) handleApplyAllSchedule('workStartTime', v);
+                            }} />
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-blue-500 font-medium">OUT</span>
+                            <Pill options={ENDS} value="__none__" onChange={v => {
+                              const label = ENDS.find(s => s.value === v)?.label || v;
+                              if (window.confirm(`Set end time to ${label} for all ${activeTechs.length} active techs?`)) handleApplyAllSchedule('workEndTime', v);
+                            }} />
+                          </div>
+                        </div>
+
+                        {/* Tech rows */}
+                        <div className="divide-y divide-gray-100">
+                          {activeTechs.map(tech => (
+                            <div key={tech.id} className="px-5 py-3 flex items-center gap-4 hover:bg-gray-50/50 transition-colors">
+                              {/* Name */}
+                              <div className="w-[160px] flex-shrink-0">
+                                <div className="text-sm font-semibold text-gray-900 truncate">{tech.name}</div>
+                                <div className="text-[10px] text-gray-400">{tzLabel(tech.timezone)}</div>
+                              </div>
+
+                              {/* TZ pills */}
+                              <TzPill
+                                value={tech.timezone}
+                                onChange={v => handleScheduleChange(tech.id, 'timezone', v)}
+                              />
+
+                              {/* Start pills */}
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-gray-400 font-medium w-5">IN</span>
+                                <Pill
+                                  options={STARTS}
+                                  value={tech.workStartTime}
+                                  onChange={v => handleScheduleChange(tech.id, 'workStartTime', v)}
+                                />
+                              </div>
+
+                              {/* End pills */}
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-gray-400 font-medium w-6">OUT</span>
+                                <Pill
+                                  options={ENDS}
+                                  value={tech.workEndTime}
+                                  onChange={v => handleScheduleChange(tech.id, 'workEndTime', v)}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Save bar */}
+                        <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+                          <button
+                            onClick={handleSaveAllSchedules}
+                            disabled={isSavingAll}
+                            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-colors shadow-sm"
+                          >
+                            <Save className="w-4 h-4" />
+                            {isSavingAll ? 'Saving...' : `Save All Schedules`}
+                          </button>
+                          <span className="text-xs text-gray-400">{activeTechs.length} active technicians</span>
+                        </div>
+                      </div>
+
+                      {/* Inactive techs - collapsible */}
+                      {inactiveTechs.length > 0 && (
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                          <button
+                            onClick={() => setShowInactive(p => !p)}
+                            className="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+                          >
+                            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                              Inactive Technicians ({inactiveTechs.length})
+                            </span>
+                            <span className={`text-gray-400 text-xs transition-transform ${showInactive ? 'rotate-180' : ''}`}>&#9660;</span>
+                          </button>
+                          {showInactive && (
+                            <div className="divide-y divide-gray-100 border-t border-gray-100">
+                              {inactiveTechs.map(tech => (
+                                <div key={tech.id} className="px-5 py-2.5 flex items-center gap-4 opacity-50">
+                                  <div className="w-[160px] text-sm text-gray-600 truncate">{tech.name}</div>
+                                  <span className="text-xs text-gray-400">{tzShort(tech.timezone)}</span>
+                                  <span className="text-xs text-gray-400">{tech.workStartTime || '—'}</span>
+                                  <span className="text-xs text-gray-400">{tech.workEndTime || '—'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {techSchedules.length === 0 && (
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
+                          <p className="text-sm text-gray-500">No technicians found. Sync technicians first.</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

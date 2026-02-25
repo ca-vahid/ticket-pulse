@@ -234,6 +234,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               <span className="text-[8px] text-purple-700 font-semibold">SELF</span>
             </div>
           )}
+
         </div>
 
         {/* Weekly Breakdown Mini-Calendar - Only show in weekly view */}

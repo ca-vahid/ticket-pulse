@@ -74,6 +74,20 @@ export const TIMEZONE_MAP = {
   Default: 'America/Los_Angeles',
 };
 
+// FreshService time_zone strings -> IANA timezone identifiers
+export const FRESHSERVICE_TZ_TO_IANA = {
+  'Atlantic Time (Canada)': 'America/Halifax',
+  'Eastern Time (US & Canada)': 'America/Toronto',
+  'Central Time (US & Canada)': 'America/Winnipeg',
+  'Mountain Time (US & Canada)': 'America/Edmonton',
+  'Pacific Time (US & Canada)': 'America/Vancouver',
+  'Arizona': 'America/Phoenix',
+  'Alaska': 'America/Anchorage',
+  'Hawaii': 'Pacific/Honolulu',
+  'Newfoundland': 'America/St_Johns',
+  'Saskatchewan': 'America/Regina',
+};
+
 // API rate limits
 export const RATE_LIMITS = {
   FRESHSERVICE_HOURLY: 5000, // FreshService Enterprise plan

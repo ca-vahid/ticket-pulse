@@ -9,6 +9,28 @@ const prisma = new PrismaClient();
  */
 class TechnicianRepository {
   /**
+   * Get all technicians (active and inactive)
+   * @returns {Promise<Array>} Array of all technicians
+   */
+  async getAll() {
+    try {
+      return await prisma.technician.findMany({
+        include: {
+          tickets: {
+            include: {
+              requester: true,
+            },
+          },
+        },
+        orderBy: { name: 'asc' },
+      });
+    } catch (error) {
+      logger.error('Error fetching all technicians:', error);
+      throw new DatabaseError('Failed to fetch all technicians', error);
+    }
+  }
+
+  /**
    * Get all active technicians
    * @returns {Promise<Array>} Array of active technicians
    */
@@ -111,6 +133,8 @@ class TechnicianRepository {
       if (data.isActive !== undefined) updateData.isActive = data.isActive;
       if (data.showOnMap !== undefined) updateData.showOnMap = data.showOnMap;
       if (data.isMapManager !== undefined) updateData.isMapManager = data.isMapManager;
+      if (data.workStartTime !== undefined) updateData.workStartTime = data.workStartTime;
+      if (data.workEndTime !== undefined) updateData.workEndTime = data.workEndTime;
 
       updateData.updatedAt = new Date();
 
@@ -137,7 +161,6 @@ class TechnicianRepository {
       const updateData = {
         name: data.name,
         email: data.email || null,
-        timezone: data.timezone || 'America/Los_Angeles',
         isActive: data.isActive !== undefined ? data.isActive : true,
         updatedAt: new Date(),
       };
@@ -150,13 +173,13 @@ class TechnicianRepository {
         isActive: data.isActive !== undefined ? data.isActive : true,
       };
 
-      // Location, showOnMap, and isMapManager are managed manually via Visuals page
-      // These fields are NEVER updated during sync operations to preserve manual changes
+      // Location, timezone, showOnMap, and isMapManager are managed manually
+      // These fields are NEVER updated during sync to preserve manual changes
       // Only set defaults for new technicians
       if (data.location) {
         createData.location = data.location;
       }
-      // Note: updateData intentionally does NOT include location, showOnMap, or isMapManager
+      // Note: updateData intentionally does NOT include location, timezone, showOnMap, or isMapManager
 
       // Log what we're upserting to debug location resets
       logger.debug(`Upserting technician ${data.email}`, {

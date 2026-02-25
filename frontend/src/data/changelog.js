@@ -1,6 +1,31 @@
-export const APP_VERSION = '1.1.2-preview';
+export const APP_VERSION = '1.2.0-preview';
 
 export const changelog = [
+  {
+    version: '1.2.0-preview',
+    date: 'February 25, 2026',
+    entries: [
+      { type: 'new', text: 'Coverage Analysis tab on technician detail — shows overnight eligible tickets (previous business day 5 PM PT → 9 AM PT) split into "Picked by tech" vs "Not Picked" with full ticket lists' },
+      { type: 'new', text: 'Merged Timeline modal — chronological view of all overnight + daytime tickets with picked (green) vs not-picked (grey/dimmed) visual coding, filterable in real time' },
+      { type: 'new', text: 'Timeline markers — "Agent Start", "Vancouver Online (9 AM PT)", and "Agent End" separator lines inserted at correct chronological positions in the merged timeline' },
+      { type: 'new', text: 'Extended timeline to 5 PM PT — merged view now shows tickets arriving after 9 AM through end of business day, separated by the HQ-online marker' },
+      { type: 'new', text: 'Overnight vs early-morning ticket indicators — moon icon for tickets arriving before 5 AM ET, sunrise icon for 5 AM ET and later, with subtle background tinting' },
+      { type: 'new', text: 'Exclude filters on "Not Picked" — keyword search and clickable category pills to hide irrelevant overnight tickets; click any category badge on a ticket row to instantly exclude that category' },
+      { type: 'new', text: 'Prev/Next navigation inside merged timeline modal — arrow buttons to step through days or weeks without closing the modal' },
+      { type: 'new', text: 'Wait-time metric on coverage tickets — purple badge showing how long each ticket sat before first assignment (e.g., "⏱ 2h15m")' },
+      { type: 'new', text: 'Per-technician work schedules — new Settings page section to configure each tech\'s start time, end time, and timezone with one-click segmented controls' },
+      { type: 'new', text: 'PATCH /api/visuals/agents/:id/schedule endpoint — save per-tech work hours and timezone independently of FreshService sync' },
+      { type: 'new', text: 'FreshService timezone normalization — human-readable timezone strings (e.g., "Pacific Time (US & Canada)") automatically mapped to IANA identifiers on sync and in the UI' },
+      { type: 'new', text: 'Coverage analysis backend service — avoidanceAnalysisService.js computes overnight eligible/picked/not-picked ticket lists per tech with extended-day ticket loading' },
+      { type: 'improved', text: 'Coverage analysis scoped to Eastern/Atlantic technicians only — HQ (Pacific) techs see a clear "not applicable" message instead of empty data' },
+      { type: 'improved', text: 'Tech sync no longer overwrites manually-set timezones — upsert preserves timezone, location, showOnMap, and isMapManager fields' },
+      { type: 'improved', text: 'Two-column side-by-side layout for picked vs not-picked tickets with both columns flush at the top' },
+      { type: 'improved', text: 'Ticket rows are single-line compact — ticket number removed (link icon retained), subject truncates, all metadata on one row' },
+      { type: 'improved', text: 'Agents endpoint now supports includeInactive query parameter for the schedules settings page' },
+      { type: 'fixed', text: 'Removed old avoidance badge/scoring system (Flagged/Watch/Good) from dashboard cards and settings — replaced by transparent ticket-list approach' },
+      { type: 'database', text: 'New columns: technicians.work_start_time (VARCHAR 5) and technicians.work_end_time (VARCHAR 5) — nullable, migration included, uses IF NOT EXISTS for safe re-run' },
+    ],
+  },
   {
     version: '1.1.2-preview',
     date: 'February 23, 2026',

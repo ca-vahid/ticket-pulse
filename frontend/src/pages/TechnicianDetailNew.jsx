@@ -22,6 +22,10 @@ import {
   TrendingDown,
   Minus,
   Users,
+  Moon,
+  Sunrise,
+  X,
+  Layers,
 } from 'lucide-react';
 
 // Priority color strips (left border)
@@ -62,7 +66,7 @@ export default function TechnicianDetailNew() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { getTechnician, getTechnicianCSAT } = useDashboard();
+  const { getTechnicianCSAT } = useDashboard();
 
   const [technician, setTechnician] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -74,6 +78,11 @@ export default function TechnicianDetailNew() {
   const [csatCount, setCSATCount] = useState(0);
   const [csatAverage, setCSATAverage] = useState(null);
   const [expandedCSATTicket, setExpandedCSATTicket] = useState(null); // For CSAT feedback modal
+
+  // Coverage tab exclude filters
+  const [coverageExcludedCats, setCoverageExcludedCats] = useState(new Set());
+  const [coverageExcludeText, setCoverageExcludeText] = useState('');
+  const [showMergedTimeline, setShowMergedTimeline] = useState(false);
 
   // Search state - persisted in sessionStorage
   const [searchTerm, setSearchTerm] = useState(() => {
@@ -181,6 +190,10 @@ export default function TechnicianDetailNew() {
   // Initialize viewMode from navigation state (default to 'daily')
   const [viewMode, setViewMode] = useState(location.state?.viewMode || 'daily');
 
+  // Capture the originating dashboard viewMode so back-nav restores it correctly
+  // even if the user toggles daily/weekly within the detail page
+  const originViewModeRef = useRef(location.state?.viewMode || 'daily');
+
   // For weekly view, we need to track the selected week (Monday)
   // Restore from navigation state if available
   const [selectedWeek, setSelectedWeek] = useState(() => {
@@ -245,7 +258,15 @@ export default function TechnicianDetailNew() {
             throw new Error('Failed to fetch weekly technician data');
           }
         } else {
-          data = await getTechnician(parseInt(id, 10), 'America/Los_Angeles', selectedDate);
+          const dateStr = selectedDate ? (typeof selectedDate === 'string' ? selectedDate : formatDateLocal(selectedDate)) : null;
+          const response = await dashboardAPI.getTechnician(
+            parseInt(id, 10), 'America/Los_Angeles', dateStr,
+          );
+          if (response.success && response.data) {
+            data = response.data;
+          } else {
+            throw new Error('Failed to fetch technician data');
+          }
         }
 
         if (mySeq !== fetchSeqRef.current) return;
@@ -259,7 +280,7 @@ export default function TechnicianDetailNew() {
       }
     };
     fetchTechnicianData();
-  }, [id, getTechnician, selectedDate, viewMode, selectedWeek]);
+  }, [id, selectedDate, viewMode, selectedWeek]);
 
   // Persist search term to sessionStorage
   useEffect(() => {
@@ -271,12 +292,12 @@ export default function TechnicianDetailNew() {
     sessionStorage.setItem('techDetailNew_categories', JSON.stringify(selectedCategories));
   }, [selectedCategories]);
 
-  const returnViewMode = location.state?.returnViewMode;
-
   const handleBack = () => {
+    // Use the original dashboard viewMode (not the detail page's internal toggle)
+    const returnViewMode = location.state?.returnViewMode || originViewModeRef.current;
     navigate('/dashboard', {
       state: {
-        viewMode: returnViewMode || viewMode,
+        viewMode: returnViewMode,
         returnDate: selectedDate || formatDateLocal(new Date()),
         returnWeek: selectedWeek ? formatDateLocal(selectedWeek) : null,
         searchTerm: searchTerm,
@@ -826,13 +847,6 @@ export default function TechnicianDetailNew() {
                     </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="flex items-center gap-1.5 text-sm text-gray-600">
-                    <Circle className="w-2.5 h-2.5 fill-green-500 text-green-500" />
-                    Online
-                  </span>
-                  <span className="text-sm text-gray-500">IT Support - Pacific US & Canada</span>
-                </div>
               </div>
             </div>
 
@@ -1127,6 +1141,16 @@ export default function TechnicianDetailNew() {
                 <span className="ml-2 bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full text-xs font-semibold">
                   {csatCount}
                 </span>
+              </button>
+              <button
+                onClick={() => setActiveTab('coverage')}
+                className={`px-4 py-3 font-medium text-sm transition-colors relative ${
+                  activeTab === 'coverage'
+                    ? 'text-indigo-600 border-b-2 border-indigo-600'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Coverage
               </button>
             </div>
           </div>
@@ -1512,6 +1536,628 @@ export default function TechnicianDetailNew() {
                     })()}
                   </>
                 )}
+              </div>
+            ) : activeTab === 'coverage' ? (
+              /* Coverage Analysis Tab — two-column picked / not-picked with exclude filters */
+              <div className="space-y-4">
+                {(() => {
+                  const av = technician.avoidance;
+                  const freshdomain = import.meta.env.VITE_FRESHSERVICE_DOMAIN || 'efusion.freshservice.com';
+
+                  if (!av || !av.applicable) {
+                    const reason = av?.reason;
+                    return (
+                      <div className="text-center py-8">
+                        <p className="text-gray-500 text-sm">
+                          {reason === 'outside_eastern_focus'
+                            ? 'Coverage analysis is only applicable to Eastern / Atlantic timezone technicians.'
+                            : reason === 'weekend'
+                              ? 'No coverage window for weekends.'
+                              : 'Coverage analysis is not available for this period.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  const { totals, days } = av;
+
+                  const allPicked = days.flatMap(d =>
+                    (d.tickets || []).filter(t => t.pickedByTech).map(t => ({ ...t, _day: d.date })),
+                  );
+                  const allNotPicked = days.flatMap(d =>
+                    (d.tickets || []).filter(t => !t.pickedByTech).map(t => ({ ...t, _day: d.date })),
+                  );
+
+                  const notPickedCategories = [...new Set(allNotPicked.map(t => t.ticketCategory).filter(Boolean))].sort();
+
+                  const filteredNotPicked = allNotPicked.filter(t => {
+                    if (coverageExcludedCats.has(t.ticketCategory)) return false;
+                    if (coverageExcludeText) {
+                      const q = coverageExcludeText.toLowerCase();
+                      if (t.subject?.toLowerCase().includes(q)) return false;
+                    }
+                    return true;
+                  });
+                  const excludedCount = allNotPicked.length - filteredNotPicked.length;
+
+                  const isOvernight = (ticket) => {
+                    if (!ticket._day) return true;
+                    const cutoff = new Date(ticket._day + 'T10:00:00Z');
+                    return new Date(ticket.createdAt) < cutoff;
+                  };
+
+                  const TimeIcon = ({ ticket }) => {
+                    const overnight = isOvernight(ticket);
+                    return overnight
+                      ? <Moon className="w-3 h-3 text-indigo-400 flex-shrink-0" title="Overnight (before 5 AM ET)" />
+                      : <Sunrise className="w-3 h-3 text-amber-500 flex-shrink-0" title="Early morning (5 AM ET+)" />;
+                  };
+
+                  const fmtWait = (ticket) => {
+                    if (!ticket.firstAssignedAt) return null;
+                    const diffMs = new Date(ticket.firstAssignedAt) - new Date(ticket.createdAt);
+                    if (diffMs < 0) return null;
+                    const mins = Math.floor(diffMs / 60000);
+                    if (mins < 60) return `${mins}m`;
+                    const hrs = Math.floor(mins / 60);
+                    const rm = mins % 60;
+                    if (hrs < 24) return rm > 0 ? `${hrs}h${rm}m` : `${hrs}h`;
+                    const days = Math.floor(hrs / 24);
+                    const rh = hrs % 24;
+                    return rh > 0 ? `${days}d${rh}h` : `${days}d`;
+                  };
+
+                  const CoverageTicketRow = ({ ticket, showAssignee, onExcludeCategory }) => {
+                    const wait = fmtWait(ticket);
+                    return (
+                      <div className={`border rounded overflow-hidden hover:shadow-sm transition-all ${isOvernight(ticket) ? 'bg-slate-50 border-gray-200' : 'bg-amber-50/40 border-amber-200'}`}>
+                        <div className="flex items-stretch">
+                          <div className={`${PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-gray-400'} w-1 flex-shrink-0`}></div>
+                          <div className="flex-1 px-2 py-1.5 flex items-center gap-1.5 min-w-0">
+                            <TimeIcon ticket={ticket} />
+                            <a
+                              href={`https://${freshdomain}/a/tickets/${ticket.freshserviceTicketId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 flex-shrink-0"
+                              title={`#${ticket.freshserviceTicketId}`}
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                            <span className="text-gray-900 font-medium text-xs truncate min-w-0 flex-1">{ticket.subject}</span>
+                            <span className={`${STATUS_COLORS[ticket.status] || 'bg-gray-100 text-gray-700'} px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0`}>
+                              {ticket.status}
+                            </span>
+                            {ticket.ticketCategory && (
+                              <button
+                                onClick={onExcludeCategory ? (e) => { e.stopPropagation(); onExcludeCategory(ticket.ticketCategory); } : undefined}
+                                className={`px-1.5 py-0.5 rounded text-[10px] flex-shrink-0 truncate max-w-[90px] ${onExcludeCategory ? 'bg-blue-50 text-blue-700 hover:bg-red-50 hover:text-red-600 hover:line-through cursor-pointer' : 'bg-blue-50 text-blue-700'}`}
+                                title={onExcludeCategory ? `Click to hide "${ticket.ticketCategory}"` : ticket.ticketCategory}
+                              >
+                                {ticket.ticketCategory}
+                              </button>
+                            )}
+                            {showAssignee && ticket.assignedTechName && (
+                              <span className="text-orange-700 font-semibold text-[10px] flex-shrink-0 whitespace-nowrap">
+                                → {ticket.assignedTechName}
+                              </span>
+                            )}
+                            {wait && (
+                              <span className="bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded text-[10px] font-semibold flex-shrink-0 whitespace-nowrap" title="Time from creation to first assignment">
+                                ⏱ {wait}
+                              </span>
+                            )}
+                            <span className="text-gray-400 text-[10px] flex-shrink-0 whitespace-nowrap">
+                              {new Date(ticket.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <>
+                      {/* Summary Cards */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 text-center">
+                          <div className="text-2xl font-bold text-gray-900">{totals.eligible}</div>
+                          <div className="text-xs text-gray-500 uppercase font-medium mt-1">Eligible (overnight)</div>
+                        </div>
+                        <div className="bg-white rounded-lg shadow-sm border-2 border-green-300 p-4 text-center">
+                          <div className="text-2xl font-bold text-green-700">{totals.picked}</div>
+                          <div className="text-xs text-gray-500 uppercase font-medium mt-1">Picked by {technician.name?.split(' ')[0]}</div>
+                        </div>
+                        <div className="bg-white rounded-lg shadow-sm border-2 border-orange-300 p-4 text-center">
+                          <div className="text-2xl font-bold text-orange-700">{totals.notPicked}</div>
+                          <div className="text-xs text-gray-500 uppercase font-medium mt-1">Not Picked</div>
+                        </div>
+                      </div>
+
+                      {/* Daily Breakdown (weekly view) */}
+                      {days.length > 1 && (
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Daily Breakdown</h3>
+                          <div className="grid grid-cols-5 gap-2">
+                            {days.map((day) => {
+                              const dayDate = new Date(day.date + 'T12:00:00');
+                              const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'short' });
+                              const dayLabel = dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                              const dayPicked = (day.tickets || []).filter(t => t.pickedByTech).length;
+                              const dayTotal = (day.tickets || []).length;
+                              const dayNotPicked = dayTotal - dayPicked;
+                              return (
+                                <div key={day.date} className="text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                  <div className="text-[10px] text-gray-500 font-bold uppercase">{dayName}</div>
+                                  <div className="text-[9px] text-gray-400 mb-1">{dayLabel}</div>
+                                  <div className="text-lg font-bold text-gray-900">{dayTotal}</div>
+                                  <div className="text-[10px] text-gray-400">eligible</div>
+                                  <div className="flex items-center justify-center gap-2 mt-1.5">
+                                    <span className="text-[10px] font-bold text-green-700">{dayPicked} ✓</span>
+                                    <span className="text-[10px] text-gray-300">|</span>
+                                    <span className="text-[10px] font-bold text-orange-700">{dayNotPicked} ✗</span>
+                                  </div>
+                                  <div className="text-[9px] text-gray-400 mt-1 truncate" title={day.windowLabel}>
+                                    {day.windowLabel}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Single day window label */}
+                      {days.length === 1 && days[0].windowLabel && (
+                        <div className="bg-indigo-50 rounded-lg border border-indigo-200 px-4 py-2">
+                          <span className="text-xs text-indigo-700 font-medium">Coverage window: </span>
+                          <span className="text-xs text-indigo-900 font-semibold">{days[0].windowLabel}</span>
+                        </div>
+                      )}
+
+                      {/* Toolbar: Merged Timeline button + Exclude filters */}
+                      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3">
+                        <div className="flex items-center gap-3 mb-2">
+                          <button
+                            onClick={() => setShowMergedTimeline(true)}
+                            className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm whitespace-nowrap"
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                            Merged Timeline
+                          </button>
+                          <span className="text-gray-300">|</span>
+                          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                            Exclude:
+                          </span>
+                          <div className="relative flex-1">
+                            <input
+                              type="text"
+                              value={coverageExcludeText}
+                              onChange={(e) => setCoverageExcludeText(e.target.value)}
+                              placeholder="Type keyword to hide matching…"
+                              className="w-full px-2.5 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-orange-400 focus:border-orange-400"
+                            />
+                            {coverageExcludeText && (
+                              <button
+                                onClick={() => setCoverageExcludeText('')}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-gray-100 rounded"
+                              >
+                                <X className="w-3 h-3 text-gray-400" />
+                              </button>
+                            )}
+                          </div>
+                          {(coverageExcludedCats.size > 0 || coverageExcludeText) && (
+                            <button
+                              onClick={() => { setCoverageExcludedCats(new Set()); setCoverageExcludeText(''); }}
+                              className="px-2 py-1 rounded text-[10px] font-medium bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 whitespace-nowrap"
+                            >
+                              Clear all
+                            </button>
+                          )}
+                        </div>
+                        {notPickedCategories.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {notPickedCategories.map(cat => {
+                              const isExcluded = coverageExcludedCats.has(cat);
+                              const catCount = allNotPicked.filter(t => t.ticketCategory === cat).length;
+                              return (
+                                <button
+                                  key={cat}
+                                  onClick={() => {
+                                    setCoverageExcludedCats(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(cat)) next.delete(cat);
+                                      else next.add(cat);
+                                      return next;
+                                    });
+                                  }}
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all ${
+                                    isExcluded
+                                      ? 'bg-gray-100 text-gray-400 border-gray-200 line-through'
+                                      : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                                  }`}
+                                >
+                                  {cat} <span className="opacity-60">{catCount}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {excludedCount > 0 && (
+                          <div className="mt-1.5 text-[10px] text-gray-400">
+                            {excludedCount} ticket{excludedCount !== 1 ? 's' : ''} hidden by filters
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Two-column: Picked | Not Picked — both start at the same top edge */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                        {/* LEFT — Picked */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3">
+                          <h3 className="text-xs font-semibold text-green-700 uppercase tracking-wider mb-2 flex items-center">
+                            Picked by {technician.name?.split(' ')[0]}
+                            <span className="ml-2 bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-semibold">
+                              {allPicked.length}
+                            </span>
+                          </h3>
+                          {allPicked.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-6">No tickets picked up in this window.</p>
+                          ) : (
+                            <div className="space-y-1 max-h-[600px] overflow-y-auto">
+                              {allPicked.map(t => <CoverageTicketRow key={t.id} ticket={t} showAssignee={false} />)}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* RIGHT — Not Picked */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3">
+                          <h3 className="text-xs font-semibold text-orange-700 uppercase tracking-wider mb-2 flex items-center">
+                            Not Picked
+                            <span className="ml-2 bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-xs font-semibold">
+                              {filteredNotPicked.length}
+                            </span>
+                            {excludedCount > 0 && (
+                              <span className="ml-1 text-gray-400 text-[10px] font-normal normal-case">
+                                of {allNotPicked.length}
+                              </span>
+                            )}
+                          </h3>
+                          {filteredNotPicked.length === 0 ? (
+                            <div className="bg-green-50 rounded-lg border border-green-200 p-4 text-center">
+                              <p className="text-green-700 font-medium text-sm">
+                                {allNotPicked.length === 0
+                                  ? 'All eligible tickets were picked up.'
+                                  : 'All tickets hidden by filters.'}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="space-y-1 max-h-[600px] overflow-y-auto">
+                              {filteredNotPicked.map(t => (
+                                <CoverageTicketRow
+                                  key={t.id}
+                                  ticket={t}
+                                  showAssignee={true}
+                                  onExcludeCategory={(cat) => {
+                                    setCoverageExcludedCats(prev => {
+                                      const next = new Set(prev);
+                                      next.add(cat);
+                                      return next;
+                                    });
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Legend */}
+                      <div className="flex items-center gap-6 text-[10px] text-gray-400 px-1">
+                        <div className="flex items-center gap-1">
+                          <Moon className="w-3 h-3 text-indigo-400" />
+                          <span>Overnight (before 5 AM ET)</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Sunrise className="w-3 h-3 text-amber-500" />
+                          <span>Early morning (5 AM ET+)</span>
+                        </div>
+                        <span className="text-gray-300">|</span>
+                        <span>Click a category on a ticket to exclude it</span>
+                      </div>
+
+                      {/* ── Merged Timeline Modal ── */}
+                      {showMergedTimeline && (() => {
+                        const techStart = technician.workStartTime || '09:00';
+                        const techEnd = technician.workEndTime || '17:00';
+                        const techTz = technician.timezone || 'America/Los_Angeles';
+
+                        const extendedAll = days.flatMap(d =>
+                          (d.extendedTickets || []).map(t => ({ ...t, _day: d.date, _picked: t.pickedByTech, _section: 'after9am' })),
+                        );
+
+                        const coverageAll = [
+                          ...allPicked.map(t => ({ ...t, _picked: true, _section: 'coverage' })),
+                          ...allNotPicked.map(t => ({ ...t, _picked: false, _section: 'coverage' })),
+                        ];
+
+                        const allMerged = [...coverageAll, ...extendedAll]
+                          .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+                        const mergedFiltered = allMerged.filter(t => {
+                          if (!t._picked) {
+                            if (coverageExcludedCats.has(t.ticketCategory)) return false;
+                            if (coverageExcludeText) {
+                              const q = coverageExcludeText.toLowerCase();
+                              if (t.subject?.toLowerCase().includes(q)) return false;
+                            }
+                          }
+                          return true;
+                        });
+
+                        const mergedCategories = [...new Set(allMerged.map(t => t.ticketCategory).filter(Boolean))].sort();
+                        const mergedExcludedCount = allMerged.length - mergedFiltered.length;
+                        const mergedPickedCount = mergedFiltered.filter(t => t._picked).length;
+                        const mergedNotPickedCount = mergedFiltered.filter(t => !t._picked).length;
+
+                        const agentStartUTC = (() => {
+                          if (!days[0]) return null;
+                          const d = days[0].date;
+                          const [h, m] = techStart.split(':');
+                          const utcGuess = new Date(`${d}T${h}:${m}:00Z`);
+                          if (techTz.includes('Toronto') || techTz.includes('New_York')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 5);
+                          else if (techTz.includes('Halifax') || techTz.includes('Moncton')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 4);
+                          else if (techTz.includes('St_Johns')) { utcGuess.setUTCHours(utcGuess.getUTCHours() + 3); utcGuess.setUTCMinutes(utcGuess.getUTCMinutes() + 30); }
+                          else if (techTz.includes('Vancouver') || techTz.includes('Los_Angeles')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 8);
+                          return utcGuess;
+                        })();
+                        const agentEndUTC = (() => {
+                          if (!days[0]) return null;
+                          const d = days[0].date;
+                          const [h, m] = techEnd.split(':');
+                          const utcGuess = new Date(`${d}T${h}:${m}:00Z`);
+                          if (techTz.includes('Toronto') || techTz.includes('New_York')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 5);
+                          else if (techTz.includes('Halifax') || techTz.includes('Moncton')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 4);
+                          else if (techTz.includes('St_Johns')) { utcGuess.setUTCHours(utcGuess.getUTCHours() + 3); utcGuess.setUTCMinutes(utcGuess.getUTCMinutes() + 30); }
+                          else if (techTz.includes('Vancouver') || techTz.includes('Los_Angeles')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 8);
+                          return utcGuess;
+                        })();
+                        const hqOnlineUTC = days[0] ? new Date(days[0].windowEnd) : null;
+
+                        const TimelineSeparator = ({ label, color }) => (
+                          <div className="flex items-center gap-2 py-1.5 my-1">
+                            <div className={`flex-1 h-px ${color}`}></div>
+                            <span className={`text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${color.replace('bg-', 'text-')}`}>{label}</span>
+                            <div className={`flex-1 h-px ${color}`}></div>
+                          </div>
+                        );
+
+                        const insertMarkers = (tickets) => {
+                          const items = [];
+                          let agentStartInserted = false;
+                          let hqOnlineInserted = false;
+                          let agentEndInserted = false;
+
+                          for (const ticket of tickets) {
+                            const created = new Date(ticket.createdAt);
+
+                            if (agentStartUTC && !agentStartInserted && created >= agentStartUTC) {
+                              items.push({ _marker: true, key: 'agent-start', label: `Agent Start — ${techStart} ${techTz.split('/').pop().replace(/_/g, ' ')}`, color: 'bg-green-400' });
+                              agentStartInserted = true;
+                            }
+                            if (hqOnlineUTC && !hqOnlineInserted && created >= hqOnlineUTC) {
+                              items.push({ _marker: true, key: 'hq-online', label: 'Vancouver Online — 9:00 AM PT', color: 'bg-blue-400' });
+                              hqOnlineInserted = true;
+                            }
+                            if (agentEndUTC && !agentEndInserted && created >= agentEndUTC) {
+                              items.push({ _marker: true, key: 'agent-end', label: `Agent End — ${techEnd} ${techTz.split('/').pop().replace(/_/g, ' ')}`, color: 'bg-red-400' });
+                              agentEndInserted = true;
+                            }
+                            items.push(ticket);
+                          }
+
+                          if (agentStartUTC && !agentStartInserted) items.push({ _marker: true, key: 'agent-start', label: `Agent Start — ${techStart} ${techTz.split('/').pop().replace(/_/g, ' ')}`, color: 'bg-green-400' });
+                          if (hqOnlineUTC && !hqOnlineInserted) items.push({ _marker: true, key: 'hq-online', label: 'Vancouver Online — 9:00 AM PT', color: 'bg-blue-400' });
+                          if (agentEndUTC && !agentEndInserted) items.push({ _marker: true, key: 'agent-end', label: `Agent End — ${techEnd} ${techTz.split('/').pop().replace(/_/g, ' ')}`, color: 'bg-red-400' });
+
+                          return items;
+                        };
+
+                        const timelineItems = insertMarkers(mergedFiltered);
+
+                        return (
+                          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-6 overflow-y-auto" onClick={() => setShowMergedTimeline(false)}>
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                              {/* Header with nav arrows */}
+                              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 flex-shrink-0">
+                                <div className="flex items-center gap-3">
+                                  <Layers className="w-5 h-5 text-indigo-600" />
+                                  <div>
+                                    <h2 className="text-base font-bold text-gray-900">Merged Timeline — {technician.name}</h2>
+                                    <p className="text-[11px] text-gray-500">
+                                      {days.length === 1 ? days[0].windowLabel : `${days[0]?.windowLabel?.split('→')[0]}→ … → ${days[days.length - 1]?.windowLabel?.split('→')[1]}`}
+                                      {' '}+ extended to 5 PM PT
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  {/* Prev / Next navigation */}
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={() => { setShowMergedTimeline(false); handlePreviousDay(); setTimeout(() => setShowMergedTimeline(true), 400); }}
+                                      className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                                      title={viewMode === 'weekly' ? 'Previous week' : 'Previous day'}
+                                    >
+                                      <ChevronLeft className="w-5 h-5 text-gray-600" />
+                                    </button>
+                                    <button
+                                      onClick={() => { setShowMergedTimeline(false); handleToday(); setTimeout(() => setShowMergedTimeline(true), 400); }}
+                                      className="px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                                    >
+                                      {viewMode === 'weekly' ? 'This Week' : 'Today'}
+                                    </button>
+                                    <button
+                                      onClick={() => { setShowMergedTimeline(false); handleNextDay(); setTimeout(() => setShowMergedTimeline(true), 400); }}
+                                      className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                                      title={viewMode === 'weekly' ? 'Next week' : 'Next day'}
+                                    >
+                                      <ChevronRight className="w-5 h-5 text-gray-600" />
+                                    </button>
+                                  </div>
+                                  <span className="text-gray-200">|</span>
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <span className="flex items-center gap-1 text-green-700 font-semibold"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span> Picked {mergedPickedCount}</span>
+                                    <span className="flex items-center gap-1 text-gray-500 font-semibold"><span className="w-2.5 h-2.5 rounded-full bg-gray-400 inline-block"></span> Not Picked {mergedNotPickedCount}</span>
+                                    {mergedExcludedCount > 0 && <span className="text-gray-400">({mergedExcludedCount} hidden)</span>}
+                                  </div>
+                                  <button onClick={() => setShowMergedTimeline(false)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+                                    <X className="w-5 h-5 text-gray-500" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Filters */}
+                              <div className="px-5 py-2 border-b border-gray-100 flex-shrink-0">
+                                <div className="flex items-center gap-3 mb-1.5">
+                                  <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Exclude:</span>
+                                  <div className="relative flex-1">
+                                    <input
+                                      type="text"
+                                      value={coverageExcludeText}
+                                      onChange={(e) => setCoverageExcludeText(e.target.value)}
+                                      placeholder="Type keyword to hide matching…"
+                                      className="w-full px-2.5 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
+                                    />
+                                    {coverageExcludeText && (
+                                      <button onClick={() => setCoverageExcludeText('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-gray-100 rounded">
+                                        <X className="w-3 h-3 text-gray-400" />
+                                      </button>
+                                    )}
+                                  </div>
+                                  {(coverageExcludedCats.size > 0 || coverageExcludeText) && (
+                                    <button onClick={() => { setCoverageExcludedCats(new Set()); setCoverageExcludeText(''); }} className="px-2 py-1 rounded text-[10px] font-medium bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 whitespace-nowrap">
+                                      Clear all
+                                    </button>
+                                  )}
+                                </div>
+                                {mergedCategories.length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {mergedCategories.map(cat => {
+                                      const isExcluded = coverageExcludedCats.has(cat);
+                                      const catCount = allMerged.filter(t => t.ticketCategory === cat).length;
+                                      return (
+                                        <button
+                                          key={cat}
+                                          onClick={() => {
+                                            setCoverageExcludedCats(prev => {
+                                              const next = new Set(prev);
+                                              if (next.has(cat)) next.delete(cat);
+                                              else next.add(cat);
+                                              return next;
+                                            });
+                                          }}
+                                          className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all ${isExcluded ? 'bg-gray-100 text-gray-400 border-gray-200 line-through' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}
+                                        >
+                                          {cat} <span className="opacity-60">{catCount}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Timeline list with markers */}
+                              <div className="flex-1 overflow-y-auto px-5 py-2">
+                                <div className="space-y-0.5">
+                                  {timelineItems.map((item, idx) => {
+                                    if (item._marker) {
+                                      return <TimelineSeparator key={item.key} label={item.label} color={item.color} />;
+                                    }
+                                    const ticket = item;
+                                    const picked = ticket._picked;
+                                    const overnight = isOvernight(ticket);
+                                    const wait = fmtWait(ticket);
+                                    const isExtended = ticket._section === 'after9am';
+                                    return (
+                                      <div
+                                        key={`${ticket.id}-${idx}`}
+                                        className={`border rounded overflow-hidden transition-all ${
+                                          picked
+                                            ? (isExtended ? 'bg-green-50/40 border-green-200' : 'bg-green-50 border-green-200')
+                                            : (isExtended ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-gray-100 border-gray-300 opacity-75')
+                                        }`}
+                                      >
+                                        <div className="flex items-stretch">
+                                          <div className={`${PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-gray-400'} w-1 flex-shrink-0`}></div>
+                                          <div className={`w-1 flex-shrink-0 ${picked ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                                          <div className="flex-1 px-2 py-1.5 flex items-center gap-1.5 min-w-0">
+                                            {overnight
+                                              ? <Moon className="w-3 h-3 text-indigo-400 flex-shrink-0" />
+                                              : <Sunrise className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                                            <span className="text-gray-400 text-[10px] flex-shrink-0 whitespace-nowrap w-[52px]">
+                                              {new Date(ticket.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                            </span>
+                                            <a
+                                              href={`https://${freshdomain}/a/tickets/${ticket.freshserviceTicketId}`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-blue-600 hover:text-blue-800 flex-shrink-0"
+                                              title={`#${ticket.freshserviceTicketId}`}
+                                            >
+                                              <ExternalLink className="w-3 h-3" />
+                                            </a>
+                                            <span className={`font-medium text-xs truncate min-w-0 flex-1 ${picked ? 'text-gray-900' : 'text-gray-500'}`}>
+                                              {ticket.subject}
+                                            </span>
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${picked ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-gray-200 text-gray-600'}`}>
+                                              {picked ? `✓ ${technician.name?.split(' ')[0]}` : '✗ Not picked'}
+                                            </span>
+                                            <span className={`${STATUS_COLORS[ticket.status] || 'bg-gray-100 text-gray-700'} px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0`}>
+                                              {ticket.status}
+                                            </span>
+                                            {ticket.ticketCategory && (
+                                              <button
+                                                onClick={() => { setCoverageExcludedCats(prev => { const n = new Set(prev); n.add(ticket.ticketCategory); return n; }); }}
+                                                className="px-1.5 py-0.5 rounded text-[10px] flex-shrink-0 truncate max-w-[100px] bg-blue-50 text-blue-700 hover:bg-red-50 hover:text-red-600 hover:line-through cursor-pointer"
+                                                title={`Click to hide "${ticket.ticketCategory}"`}
+                                              >
+                                                {ticket.ticketCategory}
+                                              </button>
+                                            )}
+                                            {!picked && ticket.assignedTechName && (
+                                              <span className="text-orange-700 font-semibold text-[10px] flex-shrink-0 whitespace-nowrap">
+                                                → {ticket.assignedTechName}
+                                              </span>
+                                            )}
+                                            {wait && (
+                                              <span className="bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded text-[10px] font-semibold flex-shrink-0 whitespace-nowrap" title="Time to first assignment">
+                                                ⏱ {wait}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* Footer legend */}
+                              <div className="px-5 py-2 border-t border-gray-200 flex items-center gap-6 text-[10px] text-gray-400 flex-shrink-0">
+                                <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span> Picked</div>
+                                <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-400 inline-block"></span> Not picked</div>
+                                <div className="flex items-center gap-1"><Moon className="w-3 h-3 text-indigo-400" /> Overnight</div>
+                                <div className="flex items-center gap-1"><Sunrise className="w-3 h-3 text-amber-500" /> Morning</div>
+                                <div className="flex items-center gap-1"><span className="w-4 h-0.5 bg-green-400 inline-block rounded"></span> Agent start</div>
+                                <div className="flex items-center gap-1"><span className="w-4 h-0.5 bg-blue-400 inline-block rounded"></span> HQ online</div>
+                                <div className="flex items-center gap-1"><span className="w-4 h-0.5 bg-red-400 inline-block rounded"></span> Agent end</div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  );
+                })()}
               </div>
             ) : csatLoading && activeTab === 'csat' ? (
               <div className="text-center py-8">

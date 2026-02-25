@@ -16,10 +16,11 @@ router.use(requireAuth);
 router.get(
   '/agents',
   asyncHandler(async (req, res) => {
-    // Fetch all active technicians
-    const technicians = await technicianRepository.getAllActive();
+    const includeInactive = req.query.includeInactive === 'true';
+    const technicians = includeInactive
+      ? await technicianRepository.getAll()
+      : await technicianRepository.getAllActive();
 
-    // Transform to include only the fields needed for the map
     const agents = technicians.map(tech => ({
       id: tech.id,
       name: tech.name,
@@ -29,6 +30,9 @@ router.get(
       timezone: tech.timezone,
       showOnMap: tech.showOnMap,
       isMapManager: tech.isMapManager,
+      workStartTime: tech.workStartTime,
+      workEndTime: tech.workEndTime,
+      isActive: tech.isActive,
     }));
 
     res.json({
@@ -115,6 +119,50 @@ router.patch(
         isMapManager: updatedTech.isMapManager,
       },
       message: 'Visibility updated successfully',
+    });
+  }),
+);
+
+/**
+ * PATCH /api/visuals/agents/:id/schedule
+ * Update an agent's work schedule and optionally their timezone
+ */
+router.patch(
+  '/agents/:id/schedule',
+  asyncHandler(async (req, res) => {
+    const agentId = parseInt(req.params.id, 10);
+    const { workStartTime, workEndTime, timezone } = req.body;
+
+    if (isNaN(agentId)) {
+      return res.status(400).json({ success: false, message: 'Invalid agent ID' });
+    }
+
+    const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (workStartTime !== null && workStartTime !== undefined && !timeRegex.test(workStartTime)) {
+      return res.status(400).json({ success: false, message: 'workStartTime must be HH:MM format or null' });
+    }
+    if (workEndTime !== null && workEndTime !== undefined && !timeRegex.test(workEndTime)) {
+      return res.status(400).json({ success: false, message: 'workEndTime must be HH:MM format or null' });
+    }
+
+    const updatePayload = {
+      workStartTime: workStartTime ?? null,
+      workEndTime: workEndTime ?? null,
+    };
+    if (timezone) updatePayload.timezone = timezone;
+
+    const updatedTech = await technicianRepository.update(agentId, updatePayload);
+
+    res.json({
+      success: true,
+      data: {
+        id: updatedTech.id,
+        name: updatedTech.name,
+        timezone: updatedTech.timezone,
+        workStartTime: updatedTech.workStartTime,
+        workEndTime: updatedTech.workEndTime,
+      },
+      message: 'Schedule updated successfully',
     });
   }),
 );

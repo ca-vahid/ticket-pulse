@@ -466,6 +466,8 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
     email: technician.email,
     photoUrl: technician.photoUrl,
     timezone: technician.timezone,
+    workStartTime: technician.workStartTime || null,
+    workEndTime: technician.workEndTime || null,
     isActive: technician.isActive,
 
     // Counts from daily stats

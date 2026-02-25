@@ -13,6 +13,11 @@ const DEFAULT_SETTINGS = {
   sync_interval_minutes: 5,
   default_timezone: 'America/Los_Angeles',
   dashboard_refresh_seconds: 30,
+  avoidance_min_wait_minutes: '15',
+  avoidance_min_sample_size: '5',
+  avoidance_flag_threshold: '0.35',
+  avoidance_watch_threshold: '0.15',
+  avoidance_easy_categories: '[]',
 };
 
 /**
@@ -231,6 +236,41 @@ class SettingsRepository {
     } catch (error) {
       logger.error('Error fetching sync config:', error);
       throw new DatabaseError('Failed to fetch sync configuration', error);
+    }
+  }
+  /**
+   * Get avoidance analysis configuration
+   * @returns {Promise<Object>} Avoidance config with parsed numeric values
+   */
+  async getAvoidanceConfig() {
+    try {
+      const [minWait, minSample, flagThreshold, watchThreshold, easyCategories] = await Promise.all([
+        this.get('avoidance_min_wait_minutes'),
+        this.get('avoidance_min_sample_size'),
+        this.get('avoidance_flag_threshold'),
+        this.get('avoidance_watch_threshold'),
+        this.get('avoidance_easy_categories'),
+      ]);
+
+      let parsedCategories = [];
+      try { parsedCategories = JSON.parse(easyCategories || '[]'); } catch { /* keep empty */ }
+
+      return {
+        minWaitMinutes: Number(minWait) || 15,
+        minSampleSize: Number(minSample) || 5,
+        flagThreshold: Number(flagThreshold) || 0.35,
+        watchThreshold: Number(watchThreshold) || 0.15,
+        easyCategories: parsedCategories,
+      };
+    } catch (error) {
+      logger.error('Error fetching avoidance config:', error);
+      return {
+        minWaitMinutes: 15,
+        minSampleSize: 5,
+        flagThreshold: 0.35,
+        watchThreshold: 0.15,
+        easyCategories: [],
+      };
     }
   }
 }

@@ -3,9 +3,9 @@ import { dataCache, cacheKeys, policyForDate, TTL } from '../services/dataCache'
 import { dashboardAPI } from '../services/api';
 import { formatDateLocal } from '../utils/dateHelpers';
 
-const MAX_INFLIGHT = 2;
+const MAX_INFLIGHT = 3;
 const COOLDOWN_MS = 30_000;
-const DEBOUNCE_MS = 600;
+const DEBOUNCE_MS = 400;
 
 let _inflight = 0;
 const _cooldowns = new Map(); // key → timestamp of last prefetch
@@ -91,10 +91,20 @@ export function usePrefetch({ viewMode, selectedDate, selectedWeek, selectedMont
             () => dashboardAPI.getDashboard(TZ, nextStr).then(r => r),
             nextPolicy,
           );
-          // Also prefetch weekly stats for the same week
+          // Prefetch weekly stats for the same week
           tryPrefetch(
             cacheKeys.weeklyStats(TZ, formatDateLocal(selectedDate)),
             () => dashboardAPI.getWeeklyStats(TZ, formatDateLocal(selectedDate)).then(r => r),
+            { ttl: TTL.HIST, softTtl: TTL.HIST_SOFT },
+          );
+          // Prefetch current week's weekly dashboard for quick view switching
+          const dayOfWeek = (selectedDate.getDay() + 6) % 7;
+          const monday = new Date(selectedDate);
+          monday.setDate(selectedDate.getDate() - dayOfWeek);
+          const weekStr = formatDateLocal(monday);
+          tryPrefetch(
+            cacheKeys.weeklyDashboard(TZ, weekStr),
+            () => dashboardAPI.getWeeklyDashboard(weekStr, TZ).then(r => r),
             { ttl: TTL.HIST, softTtl: TTL.HIST_SOFT },
           );
 
@@ -116,6 +126,12 @@ export function usePrefetch({ viewMode, selectedDate, selectedWeek, selectedMont
             cacheKeys.weeklyDashboard(TZ, nextStr),
             () => dashboardAPI.getWeeklyDashboard(nextStr, TZ).then(r => r),
             { ttl: TTL.HIST, softTtl: TTL.HIST_SOFT },
+          );
+          // Prefetch today's daily dashboard for quick view switching
+          tryPrefetch(
+            cacheKeys.dailyDashboard(TZ, null),
+            () => dashboardAPI.getDashboard(TZ, null).then(r => r),
+            policyForDate(null),
           );
 
         } else if (viewMode === 'monthly' && selectedMonth) {

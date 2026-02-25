@@ -8,12 +8,54 @@ const DashboardContext = createContext(null);
 
 const TZ = 'America/Los_Angeles';
 
+// Try to restore dashboard state from cache on mount (avoids loading flash on back-nav / F5)
+function peekCachedDashboard(type) {
+  const prefixes = {
+    daily: 'dashboard:daily:',
+    weekly: 'dashboard:weekly:',
+    monthly: 'dashboard:monthly:',
+    weekStats: 'dashboard:weekStats:',
+  };
+  const prefix = prefixes[type];
+  if (!prefix) return null;
+
+  // Find the most recently fetched entry for this type
+  let best = null;
+  let bestFetched = 0;
+  for (let i = 0; i < sessionStorage.length; i++) {
+    const rawKey = sessionStorage.key(i);
+    if (!rawKey || !rawKey.startsWith('tp_cache:' + prefix)) continue;
+    try {
+      const payload = JSON.parse(sessionStorage.getItem(rawKey));
+      if (payload?.data && Date.now() <= payload.expiresAt && payload.fetchedAt > bestFetched) {
+        best = payload.data;
+        bestFetched = payload.fetchedAt;
+      }
+    } catch (_) { /* ignore */ }
+  }
+  return best;
+}
+
 export function DashboardProvider({ children }) {
   // --- Shared state for all view modes ---
-  const [dashboardData, setDashboardData] = useState(null);
-  const [weeklyData, setWeeklyData] = useState(null);
-  const [weeklyStats, setWeeklyStats] = useState(null);
-  const [monthlyData, setMonthlyData] = useState(null);
+  // Initialize from sessionStorage cache to prevent loading flash on back-nav / F5
+  const [dashboardData, setDashboardData] = useState(() => {
+    const cached = peekCachedDashboard('daily');
+    return cached?.data || cached || null;
+  });
+  const [weeklyData, setWeeklyData] = useState(() => {
+    const cached = peekCachedDashboard('weekly');
+    return cached?.data || cached || null;
+  });
+  const [weeklyStats, setWeeklyStats] = useState(() => {
+    const cached = peekCachedDashboard('weekStats');
+    const payload = cached?.data || cached;
+    return payload?.dailyCounts ?? payload ?? null;
+  });
+  const [monthlyData, setMonthlyData] = useState(() => {
+    const cached = peekCachedDashboard('monthly');
+    return cached?.data || cached || null;
+  });
 
   const [isColdLoading, setIsColdLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -43,10 +85,12 @@ export function DashboardProvider({ children }) {
     const key = cacheKeys.dailyDashboard(timezone, dateStr);
     const policy = policyForDate(dateStr);
 
-    const cached = dataCache.peek(key);
+    // Show any cached data (even expired) to avoid the loading overlay
+    const cached = dataCache.peek(key) || dataCache.peekStale(key);
     if (cached) {
-      setDashboardData(cached.data || cached);
-      if ((cached.data || cached).timestamp) setLastFreshAt(new Date((cached.data || cached).timestamp));
+      const payload = cached.data || cached;
+      setDashboardData(payload);
+      if (payload.timestamp) setLastFreshAt(new Date(payload.timestamp));
       setIsRefreshing(true);
       setIsColdLoading(false);
     } else {
@@ -108,7 +152,7 @@ export function DashboardProvider({ children }) {
     const key = cacheKeys.weeklyDashboard(timezone, weekStartStr);
     const policy = policyForDate(weekStartStr);
 
-    const cached = dataCache.peek(key);
+    const cached = dataCache.peek(key) || dataCache.peekStale(key);
     if (cached) {
       const payload = cached?.data || cached;
       setWeeklyData(payload);
@@ -148,7 +192,7 @@ export function DashboardProvider({ children }) {
     const key = cacheKeys.monthlyDashboard(timezone, monthStartStr);
     const policy = policyForDate(monthStartStr);
 
-    const cached = dataCache.peek(key);
+    const cached = dataCache.peek(key) || dataCache.peekStale(key);
     if (cached) {
       const payload = cached?.data || cached;
       setMonthlyData(payload);

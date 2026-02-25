@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Search, Sparkles, RefreshCw, Bug, Shield, Info } from 'lucide-react';
+import { X, Search, Sparkles, RefreshCw, Bug, Shield, Info, Database } from 'lucide-react';
 import { changelog, APP_VERSION } from '../data/changelog';
 
 const TYPE_CONFIG = {
@@ -38,6 +38,15 @@ const TYPE_CONFIG = {
     badgeBorder: 'border-amber-200',
     pillBg: 'bg-amber-500',
     dotColor: 'bg-amber-500',
+  },
+  database: {
+    label: 'Database',
+    icon: Database,
+    badgeBg: 'bg-violet-50',
+    badgeText: 'text-violet-700',
+    badgeBorder: 'border-violet-200',
+    pillBg: 'bg-violet-500',
+    dotColor: 'bg-violet-500',
   },
 };
 

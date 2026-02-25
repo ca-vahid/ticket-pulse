@@ -38,8 +38,8 @@ export const cacheKeys = {
 // ---------------------------------------------------------------------------
 
 export const TTL = {
-  TODAY:      30_000,
-  TODAY_SOFT: 15_000,
+  TODAY:      60_000,      // 60s hard (was 30s) — reduces cold loads on back-nav
+  TODAY_SOFT: 20_000,      // 20s soft (was 15s) — still revalidates often enough
   HIST:       5 * 60_000,
   HIST_SOFT:  2 * 60_000,
   TECH:       2 * 60_000,
@@ -61,7 +61,102 @@ export const TECH_POLICY   = { ttl: TTL.TECH, softTtl: TTL.TECH_SOFT };
 export const CSAT_POLICY   = { ttl: TTL.CSAT, softTtl: TTL.CSAT_SOFT };
 
 // ---------------------------------------------------------------------------
+// sessionStorage persistence helpers
+// ---------------------------------------------------------------------------
+
+const STORAGE_PREFIX = 'tp_cache:';
+const MAX_PERSISTED = 10;
+
+function shouldPersist(key) {
+  return key.startsWith('dashboard:');
+}
+
+function storageWrite(key, entry) {
+  try {
+    const payload = {
+      data: entry.data,
+      fetchedAt: entry.fetchedAt,
+      expiresAt: entry.expiresAt,
+      softExpiresAt: entry.softExpiresAt,
+      seq: entry.seq,
+    };
+    sessionStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(payload));
+  } catch (_) {
+    // sessionStorage full or unavailable — silently skip
+  }
+}
+
+function storageDelete(key) {
+  try {
+    sessionStorage.removeItem(STORAGE_PREFIX + key);
+  } catch (_) { /* ignore */ }
+}
+
+function storageClear() {
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k && k.startsWith(STORAGE_PREFIX)) keysToRemove.push(k);
+    }
+    keysToRemove.forEach(k => sessionStorage.removeItem(k));
+  } catch (_) { /* ignore */ }
+}
+
+function storageHydrate() {
+  const entries = new Map();
+  try {
+    const now = Date.now();
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const rawKey = sessionStorage.key(i);
+      if (!rawKey || !rawKey.startsWith(STORAGE_PREFIX)) continue;
+      const cacheKey = rawKey.slice(STORAGE_PREFIX.length);
+      try {
+        const payload = JSON.parse(sessionStorage.getItem(rawKey));
+        if (!payload?.data || now > payload.expiresAt) {
+          sessionStorage.removeItem(rawKey);
+          continue;
+        }
+        entries.set(cacheKey, {
+          data: payload.data,
+          fetchedAt: payload.fetchedAt,
+          expiresAt: payload.expiresAt,
+          softExpiresAt: payload.softExpiresAt,
+          promise: null,
+          seq: payload.seq || 0,
+        });
+      } catch (_) {
+        sessionStorage.removeItem(rawKey);
+      }
+    }
+  } catch (_) { /* sessionStorage unavailable */ }
+  return entries;
+}
+
+function storageEvict() {
+  try {
+    const items = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const rawKey = sessionStorage.key(i);
+      if (!rawKey || !rawKey.startsWith(STORAGE_PREFIX)) continue;
+      try {
+        const payload = JSON.parse(sessionStorage.getItem(rawKey));
+        items.push({ rawKey, fetchedAt: payload?.fetchedAt || 0 });
+      } catch (_) {
+        sessionStorage.removeItem(rawKey);
+      }
+    }
+    if (items.length > MAX_PERSISTED) {
+      items.sort((a, b) => a.fetchedAt - b.fetchedAt);
+      const toRemove = items.slice(0, items.length - MAX_PERSISTED);
+      toRemove.forEach(({ rawKey }) => sessionStorage.removeItem(rawKey));
+    }
+  } catch (_) { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
 // DataCache — race-safe, LRU, stale-while-revalidate, request-deduped
+//             with sessionStorage persistence for dashboard entries
 // ---------------------------------------------------------------------------
 
 const MAX_ENTRIES = 100;
@@ -74,6 +169,13 @@ class DataCache {
     this._accessOrder = [];           // LRU tracker (most-recent last)
     this._listeners = new Set();      // change listeners
     this._stats = { hit: 0, miss: 0, stale: 0, prefetchHit: 0, prefetchWaste: 0 };
+
+    // Hydrate from sessionStorage on startup
+    const hydrated = storageHydrate();
+    for (const [key, entry] of hydrated) {
+      this._store.set(key, entry);
+      this._accessOrder.push(key);
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -138,12 +240,22 @@ class DataCache {
 
   /**
    * Peek at cached data without triggering a fetch. Returns data or null.
+   * Only returns data that hasn't hard-expired.
    */
   peek(key) {
     const entry = this._store.get(key);
     if (!entry?.data) return null;
     if (Date.now() > entry.expiresAt) return null;
     return entry.data;
+  }
+
+  /**
+   * Peek at cached data even if expired — for display while a fresh fetch runs.
+   * Returns data or null (only null if no data was ever fetched for this key).
+   */
+  peekStale(key) {
+    const entry = this._store.get(key);
+    return entry?.data || null;
   }
 
   /**
@@ -154,7 +266,10 @@ class DataCache {
     for (const key of this._store.keys()) {
       if (predFn(key)) keysToDelete.push(key);
     }
-    keysToDelete.forEach(k => this._store.delete(k));
+    keysToDelete.forEach(k => {
+      this._store.delete(k);
+      storageDelete(k);
+    });
     this._accessOrder = this._accessOrder.filter(k => !keysToDelete.includes(k));
     if (keysToDelete.length > 0) this._notify();
   }
@@ -165,7 +280,10 @@ class DataCache {
   invalidateByKeys(keys) {
     let any = false;
     for (const k of keys) {
-      if (this._store.delete(k)) any = true;
+      if (this._store.delete(k)) {
+        storageDelete(k);
+        any = true;
+      }
     }
     if (any) {
       this._accessOrder = this._accessOrder.filter(k => this._store.has(k));
@@ -174,11 +292,12 @@ class DataCache {
   }
 
   /**
-   * Clear entire cache.
+   * Clear entire cache (memory + sessionStorage).
    */
   clear() {
     this._store.clear();
     this._accessOrder = [];
+    storageClear();
     this._notify();
   }
 
@@ -205,19 +324,26 @@ class DataCache {
       const data = await promise;
       const now = Date.now();
       const seq = ++_globalSeq;
-      this._store.set(key, {
+      const entry = {
         data,
         fetchedAt: now,
         expiresAt: now + ttl,
         softExpiresAt: now + softTtl,
         promise: null,
         seq,
-      });
+      };
+      this._store.set(key, entry);
       this._touch(key);
       this._evictIfNeeded();
+
+      // Persist dashboard-level entries to sessionStorage
+      if (shouldPersist(key)) {
+        storageWrite(key, entry);
+        storageEvict();
+      }
+
       return data;
     } catch (err) {
-      // On error, clear the in-flight promise so next call retries
       const entry = this._store.get(key);
       if (entry) entry.promise = null;
       throw err;
@@ -251,6 +377,7 @@ class DataCache {
     while (this._store.size > MAX_ENTRIES && this._accessOrder.length > 0) {
       const oldest = this._accessOrder.shift();
       this._store.delete(oldest);
+      storageDelete(oldest);
     }
   }
 

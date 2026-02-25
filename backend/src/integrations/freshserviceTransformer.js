@@ -1,4 +1,5 @@
 import logger from '../utils/logger.js';
+import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
 
 /**
  * Transform FreshService API data to our database schema
@@ -109,7 +110,7 @@ export function transformAgent(fsAgent, workspaceId = null) {
       freshserviceId: fsAgent.id,
       name: `${fsAgent.first_name || ''} ${fsAgent.last_name || ''}`.trim() || 'Unknown',
       email: fsAgent.email || null,
-      timezone: fsAgent.time_zone || 'America/Los_Angeles',
+      timezone: FRESHSERVICE_TZ_TO_IANA[fsAgent.time_zone] || fsAgent.time_zone || 'America/Los_Angeles',
       // location: explicitly NOT included - managed manually
       workspaceId: agentWorkspaceId ? BigInt(agentWorkspaceId) : null,
       isActive: fsAgent.active !== undefined ? fsAgent.active : true,

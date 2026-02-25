@@ -23,6 +23,8 @@ model Technician {
   photoSyncedAt   DateTime? @map("photo_synced_at") // Last time photo was fetched from Azure AD
   showOnMap       Boolean   @default(true) @map("show_on_map") // Show on visuals map
   isMapManager    Boolean   @default(false) @map("is_map_manager") // Is manager on visuals map
+  workStartTime   String?   @db.VarChar(5) @map("work_start_time") // HH:MM in tech's own timezone
+  workEndTime     String?   @db.VarChar(5) @map("work_end_time")   // HH:MM in tech's own timezone
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
