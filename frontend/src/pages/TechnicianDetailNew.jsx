@@ -6,6 +6,7 @@ import SearchBox from '../components/SearchBox';
 import CategoryFilter from '../components/CategoryFilter';
 import { filterTickets, getAvailableCategories } from '../utils/ticketFilter';
 import ExportButton from '../components/ExportButton';
+import { getHolidayInfo, getHolidayTooltip } from '../utils/holidays';
 import {
   ArrowLeft,
   User,
@@ -26,6 +27,7 @@ import {
   Sunrise,
   X,
   Layers,
+  CalendarDays,
 } from 'lucide-react';
 
 // Priority color strips (left border)
@@ -83,6 +85,7 @@ export default function TechnicianDetailNew() {
   const [coverageExcludedCats, setCoverageExcludedCats] = useState(new Set());
   const [coverageExcludeText, setCoverageExcludeText] = useState('');
   const [showMergedTimeline, setShowMergedTimeline] = useState(false);
+  const [mergedViewMode, setMergedViewMode] = useState('rolling');
 
   // Search state - persisted in sessionStorage
   const [searchTerm, setSearchTerm] = useState(() => {
@@ -1549,11 +1552,9 @@ export default function TechnicianDetailNew() {
                     return (
                       <div className="text-center py-8">
                         <p className="text-gray-500 text-sm">
-                          {reason === 'outside_eastern_focus'
-                            ? 'Coverage analysis is only applicable to Eastern / Atlantic timezone technicians.'
-                            : reason === 'weekend'
-                              ? 'No coverage window for weekends.'
-                              : 'Coverage analysis is not available for this period.'}
+                          {reason === 'weekend'
+                            ? 'No coverage window for weekends.'
+                            : 'Coverage analysis is not available for this period.'}
                         </p>
                       </div>
                     );
@@ -1686,10 +1687,21 @@ export default function TechnicianDetailNew() {
                               const dayPicked = (day.tickets || []).filter(t => t.pickedByTech).length;
                               const dayTotal = (day.tickets || []).length;
                               const dayNotPicked = dayTotal - dayPicked;
+                              const hInfo = getHolidayInfo(day.date);
+                              const hTip = getHolidayTooltip(day.date);
                               return (
-                                <div key={day.date} className="text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                  <div className="text-[10px] text-gray-500 font-bold uppercase">{dayName}</div>
+                                <div
+                                  key={day.date}
+                                  className={`text-center p-3 rounded-lg border ${hInfo.isCanadian ? 'bg-rose-50 border-rose-300' : hInfo.isUS ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-gray-200'}`}
+                                  title={hTip || undefined}
+                                >
+                                  <div className={`text-[10px] font-bold uppercase ${hInfo.isCanadian ? 'text-rose-600' : hInfo.isUS ? 'text-indigo-500' : 'text-gray-500'}`}>{dayName}</div>
                                   <div className="text-[9px] text-gray-400 mb-1">{dayLabel}</div>
+                                  {hInfo.isHoliday && (
+                                    <div className={`text-[8px] font-semibold mb-1 truncate ${hInfo.isCanadian ? 'text-rose-600' : 'text-indigo-500'}`}>
+                                      {hInfo.isCanadian ? `🍁 ${hInfo.canadianName}` : `🇺🇸 ${hInfo.usName}`}
+                                    </div>
+                                  )}
                                   <div className="text-lg font-bold text-gray-900">{dayTotal}</div>
                                   <div className="text-[10px] text-gray-400">eligible</div>
                                   <div className="flex items-center justify-center gap-2 mt-1.5">
@@ -1708,12 +1720,21 @@ export default function TechnicianDetailNew() {
                       )}
 
                       {/* Single day window label */}
-                      {days.length === 1 && days[0].windowLabel && (
-                        <div className="bg-indigo-50 rounded-lg border border-indigo-200 px-4 py-2">
-                          <span className="text-xs text-indigo-700 font-medium">Coverage window: </span>
-                          <span className="text-xs text-indigo-900 font-semibold">{days[0].windowLabel}</span>
-                        </div>
-                      )}
+                      {days.length === 1 && days[0].windowLabel && (() => {
+                        const dayHoliday = getHolidayInfo(days[0].date);
+                        const holidayTip = getHolidayTooltip(days[0].date);
+                        return (
+                          <div className={`rounded-lg border px-4 py-2 ${dayHoliday.isCanadian ? 'bg-rose-50 border-rose-300' : dayHoliday.isUS ? 'bg-indigo-50 border-indigo-300' : 'bg-indigo-50 border-indigo-200'}`}>
+                            <span className="text-xs text-indigo-700 font-medium">Coverage window: </span>
+                            <span className="text-xs text-indigo-900 font-semibold">{days[0].windowLabel}</span>
+                            {holidayTip && (
+                              <span className={`ml-3 text-xs font-semibold ${dayHoliday.isCanadian ? 'text-rose-700' : 'text-indigo-600'}`}>
+                                {holidayTip}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Toolbar: Merged Timeline button + Exclude filters */}
                       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3">
@@ -1899,29 +1920,17 @@ export default function TechnicianDetailNew() {
                         const mergedPickedCount = mergedFiltered.filter(t => t._picked).length;
                         const mergedNotPickedCount = mergedFiltered.filter(t => !t._picked).length;
 
-                        const agentStartUTC = (() => {
-                          if (!days[0]) return null;
-                          const d = days[0].date;
-                          const [h, m] = techStart.split(':');
-                          const utcGuess = new Date(`${d}T${h}:${m}:00Z`);
-                          if (techTz.includes('Toronto') || techTz.includes('New_York')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 5);
-                          else if (techTz.includes('Halifax') || techTz.includes('Moncton')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 4);
-                          else if (techTz.includes('St_Johns')) { utcGuess.setUTCHours(utcGuess.getUTCHours() + 3); utcGuess.setUTCMinutes(utcGuess.getUTCMinutes() + 30); }
-                          else if (techTz.includes('Vancouver') || techTz.includes('Los_Angeles')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 8);
-                          return utcGuess;
-                        })();
-                        const agentEndUTC = (() => {
-                          if (!days[0]) return null;
-                          const d = days[0].date;
-                          const [h, m] = techEnd.split(':');
-                          const utcGuess = new Date(`${d}T${h}:${m}:00Z`);
-                          if (techTz.includes('Toronto') || techTz.includes('New_York')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 5);
-                          else if (techTz.includes('Halifax') || techTz.includes('Moncton')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 4);
-                          else if (techTz.includes('St_Johns')) { utcGuess.setUTCHours(utcGuess.getUTCHours() + 3); utcGuess.setUTCMinutes(utcGuess.getUTCMinutes() + 30); }
-                          else if (techTz.includes('Vancouver') || techTz.includes('Los_Angeles')) utcGuess.setUTCHours(utcGuess.getUTCHours() + 8);
-                          return utcGuess;
-                        })();
-                        const hqOnlineUTC = days[0] ? new Date(days[0].windowEnd) : null;
+                        const tzCity = techTz.split('/').pop().replace(/_/g, ' ');
+
+                        const toUTCForDate = (dateStr, timeStr) => {
+                          const [h, m] = timeStr.split(':');
+                          const utc = new Date(`${dateStr}T${h}:${m}:00Z`);
+                          if (techTz.includes('Toronto') || techTz.includes('New_York')) utc.setUTCHours(utc.getUTCHours() + 5);
+                          else if (techTz.includes('Halifax') || techTz.includes('Moncton')) utc.setUTCHours(utc.getUTCHours() + 4);
+                          else if (techTz.includes('St_Johns')) { utc.setUTCHours(utc.getUTCHours() + 3); utc.setUTCMinutes(utc.getUTCMinutes() + 30); }
+                          else if (techTz.includes('Vancouver') || techTz.includes('Los_Angeles')) utc.setUTCHours(utc.getUTCHours() + 8);
+                          return utc;
+                        };
 
                         const TimelineSeparator = ({ label, color }) => (
                           <div className="flex items-center gap-2 py-1.5 my-1">
@@ -1931,38 +1940,99 @@ export default function TechnicianDetailNew() {
                           </div>
                         );
 
-                        const insertMarkers = (tickets) => {
+                        const DayHeader = ({ dateStr, dayPicked, dayNotPicked, dayTotal }) => {
+                          const d = new Date(dateStr + 'T12:00:00');
+                          const label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+                          const hInfo = getHolidayInfo(dateStr);
+                          const hTip = getHolidayTooltip(dateStr);
+                          return (
+                            <div
+                              className={`flex items-center gap-3 py-2 mt-3 mb-1 border-b-2 first:mt-0 ${hInfo.isCanadian ? 'border-rose-400 bg-rose-50/50' : hInfo.isUS ? 'border-indigo-400 bg-indigo-50/50' : 'border-indigo-300'}`}
+                              title={hTip || undefined}
+                            >
+                              <CalendarDays className={`w-4 h-4 flex-shrink-0 ${hInfo.isCanadian ? 'text-rose-600' : 'text-indigo-600'}`} />
+                              <span className={`text-sm font-bold ${hInfo.isCanadian ? 'text-rose-900' : 'text-indigo-900'}`}>{label}</span>
+                              {hInfo.isHoliday && (
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${hInfo.isCanadian ? 'bg-rose-100 text-rose-700 border border-rose-300' : 'bg-indigo-100 text-indigo-700 border border-indigo-300'}`}>
+                                  {hInfo.isCanadian ? `🍁 ${hInfo.canadianName}` : `🇺🇸 ${hInfo.usName}`}
+                                </span>
+                              )}
+                              <div className="flex items-center gap-2 ml-auto text-[10px]">
+                                <span className="text-gray-500">{dayTotal} eligible</span>
+                                <span className="text-green-700 font-semibold">{dayPicked} picked</span>
+                                <span className="text-orange-700 font-semibold">{dayNotPicked} not</span>
+                              </div>
+                            </div>
+                          );
+                        };
+
+                        const getLocalDateLabel = (utcDate) => {
+                          const d = new Date(utcDate);
+                          const dow = d.getDay();
+                          const isWkend = dow === 0 || dow === 6;
+                          const label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
+                          return { label, isWkend };
+                        };
+
+                        const getPTDateStr = (utcDate) => {
+                          const d = new Date(utcDate);
+                          return d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+                        };
+
+                        const insertMarkersForDay = (tickets, dateStr) => {
+                          const agentStart = toUTCForDate(dateStr, techStart);
+                          const hqOnline = new Date(days.find(d => d.date === dateStr)?.windowEnd || `${dateStr}T17:00:00Z`);
+                          const agentEnd = toUTCForDate(dateStr, techEnd);
                           const items = [];
-                          let agentStartInserted = false;
-                          let hqOnlineInserted = false;
-                          let agentEndInserted = false;
+                          let sI = false, hI = false, eI = false;
+                          let lastPTDate = null;
 
                           for (const ticket of tickets) {
                             const created = new Date(ticket.createdAt);
+                            const ptDate = getPTDateStr(created);
 
-                            if (agentStartUTC && !agentStartInserted && created >= agentStartUTC) {
-                              items.push({ _marker: true, key: 'agent-start', label: `Agent Start — ${techStart} ${techTz.split('/').pop().replace(/_/g, ' ')}`, color: 'bg-green-400' });
-                              agentStartInserted = true;
+                            if (lastPTDate && ptDate !== lastPTDate) {
+                              const { label, isWkend } = getLocalDateLabel(created);
+                              const hInfo = getHolidayInfo(ptDate);
+                              const holidayLabel = hInfo.isCanadian ? ` — 🍁 ${hInfo.canadianName}` : hInfo.isUS ? ` — 🇺🇸 ${hInfo.usName}` : '';
+                              items.push({
+                                _marker: true,
+                                key: `daychange-${ptDate}`,
+                                label: `${label}${isWkend ? ' (Weekend)' : ''}${holidayLabel}`,
+                                color: isWkend ? 'bg-slate-400' : hInfo.isCanadian ? 'bg-rose-400' : hInfo.isUS ? 'bg-indigo-400' : 'bg-indigo-300',
+                              });
                             }
-                            if (hqOnlineUTC && !hqOnlineInserted && created >= hqOnlineUTC) {
-                              items.push({ _marker: true, key: 'hq-online', label: 'Vancouver Online — 9:00 AM PT', color: 'bg-blue-400' });
-                              hqOnlineInserted = true;
-                            }
-                            if (agentEndUTC && !agentEndInserted && created >= agentEndUTC) {
-                              items.push({ _marker: true, key: 'agent-end', label: `Agent End — ${techEnd} ${techTz.split('/').pop().replace(/_/g, ' ')}`, color: 'bg-red-400' });
-                              agentEndInserted = true;
-                            }
+                            lastPTDate = ptDate;
+
+                            if (!sI && created >= agentStart) { items.push({ _marker: true, key: `start-${dateStr}`, label: `Agent Start — ${techStart} ${tzCity}`, color: 'bg-green-400' }); sI = true; }
+                            if (!hI && created >= hqOnline) { items.push({ _marker: true, key: `hq-${dateStr}`, label: 'Vancouver Online — 9:00 AM PT', color: 'bg-blue-400' }); hI = true; }
+                            if (!eI && created >= agentEnd) { items.push({ _marker: true, key: `end-${dateStr}`, label: `Agent End — ${techEnd} ${tzCity}`, color: 'bg-red-400' }); eI = true; }
                             items.push(ticket);
                           }
-
-                          if (agentStartUTC && !agentStartInserted) items.push({ _marker: true, key: 'agent-start', label: `Agent Start — ${techStart} ${techTz.split('/').pop().replace(/_/g, ' ')}`, color: 'bg-green-400' });
-                          if (hqOnlineUTC && !hqOnlineInserted) items.push({ _marker: true, key: 'hq-online', label: 'Vancouver Online — 9:00 AM PT', color: 'bg-blue-400' });
-                          if (agentEndUTC && !agentEndInserted) items.push({ _marker: true, key: 'agent-end', label: `Agent End — ${techEnd} ${techTz.split('/').pop().replace(/_/g, ' ')}`, color: 'bg-red-400' });
-
+                          if (!sI) items.push({ _marker: true, key: `start-${dateStr}`, label: `Agent Start — ${techStart} ${tzCity}`, color: 'bg-green-400' });
+                          if (!hI) items.push({ _marker: true, key: `hq-${dateStr}`, label: 'Vancouver Online — 9:00 AM PT', color: 'bg-blue-400' });
+                          if (!eI) items.push({ _marker: true, key: `end-${dateStr}`, label: `Agent End — ${techEnd} ${tzCity}`, color: 'bg-red-400' });
                           return items;
                         };
 
-                        const timelineItems = insertMarkers(mergedFiltered);
+                        const isWeeklyView = days.length > 1;
+
+                        const buildTimeline = () => {
+                          if (!isWeeklyView || mergedViewMode === 'combined') {
+                            return insertMarkersForDay(mergedFiltered, days[0]?.date || '');
+                          }
+                          const result = [];
+                          for (const day of days) {
+                            const dayTickets = mergedFiltered.filter(t => t._day === day.date);
+                            const dayPicked = dayTickets.filter(t => t._picked).length;
+                            const dayTotal = dayTickets.length;
+                            result.push({ _dayHeader: true, key: `dh-${day.date}`, dateStr: day.date, dayPicked, dayNotPicked: dayTotal - dayPicked, dayTotal });
+                            result.push(...insertMarkersForDay(dayTickets, day.date));
+                          }
+                          return result;
+                        };
+
+                        const timelineItems = buildTimeline();
 
                         return (
                           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-6 overflow-y-auto" onClick={() => setShowMergedTimeline(false)}>
@@ -1980,6 +2050,26 @@ export default function TechnicianDetailNew() {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-3">
+                                  {/* Rolling / Combined toggle (weekly only) */}
+                                  {isWeeklyView && (
+                                    <>
+                                      <div className="flex bg-gray-100 rounded-lg p-0.5">
+                                        <button
+                                          onClick={() => setMergedViewMode('rolling')}
+                                          className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all ${mergedViewMode === 'rolling' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+                                        >
+                                          Day by Day
+                                        </button>
+                                        <button
+                                          onClick={() => setMergedViewMode('combined')}
+                                          className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all ${mergedViewMode === 'combined' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+                                        >
+                                          Combined
+                                        </button>
+                                      </div>
+                                      <span className="text-gray-200">|</span>
+                                    </>
+                                  )}
                                   {/* Prev / Next navigation */}
                                   <div className="flex items-center gap-1">
                                     <button
@@ -2069,6 +2159,9 @@ export default function TechnicianDetailNew() {
                               <div className="flex-1 overflow-y-auto px-5 py-2">
                                 <div className="space-y-0.5">
                                   {timelineItems.map((item, idx) => {
+                                    if (item._dayHeader) {
+                                      return <DayHeader key={item.key} dateStr={item.dateStr} dayPicked={item.dayPicked} dayNotPicked={item.dayNotPicked} dayTotal={item.dayTotal} />;
+                                    }
                                     if (item._marker) {
                                       return <TimelineSeparator key={item.key} label={item.label} color={item.color} />;
                                     }
@@ -2093,8 +2186,9 @@ export default function TechnicianDetailNew() {
                                             {overnight
                                               ? <Moon className="w-3 h-3 text-indigo-400 flex-shrink-0" />
                                               : <Sunrise className="w-3 h-3 text-amber-500 flex-shrink-0" />}
-                                            <span className="text-gray-400 text-[10px] flex-shrink-0 whitespace-nowrap w-[52px]">
-                                              {new Date(ticket.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                            <span className="text-gray-400 text-[10px] flex-shrink-0 whitespace-nowrap w-[68px]">
+                                              {new Date(ticket.createdAt).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Los_Angeles' })}{' '}
+                                              {new Date(ticket.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}
                                             </span>
                                             <a
                                               href={`https://${freshdomain}/a/tickets/${ticket.freshserviceTicketId}`}

@@ -9,16 +9,6 @@ const PT_TIMEZONE = 'America/Los_Angeles';
 const BUSINESS_CLOSE = '17:00';
 const COVERAGE_END = '09:00';
 
-const EASTERN_OFFICE_TIMEZONES = new Set([
-  'America/Toronto',
-  'America/New_York',
-  'America/Halifax',
-  'America/Moncton',
-  'America/Glace_Bay',
-  'America/Goose_Bay',
-  'America/St_Johns',
-]);
-
 const IANA_ALIASES = {
   'America/Los_Angeles': 'America/Los_Angeles',
   'America/Vancouver': 'America/Vancouver',
@@ -178,11 +168,6 @@ function analyzeDayFull(techId, allTickets, win, extendedTickets) {
 }
 
 export async function computeTechnicianAvoidanceDetail(tech, rangeStart, _rangeEnd) {
-  const techTz = toIANA(tech.timezone);
-  if (!EASTERN_OFFICE_TIMEZONES.has(techTz)) {
-    return emptyResult(false, 'outside_eastern_focus');
-  }
-
   const dateStr = formatInTimeZone(rangeStart, PT_TIMEZONE, 'yyyy-MM-dd');
   const win = getCoverageWindow(dateStr);
   if (!win) return emptyResult(true, 'weekend');
@@ -203,11 +188,6 @@ export async function computeTechnicianAvoidanceDetail(tech, rangeStart, _rangeE
 }
 
 export async function computeTechnicianAvoidanceWeeklyDetail(tech, weekStart, weekEnd, _timezone) {
-  const techTz = toIANA(tech.timezone);
-  if (!EASTERN_OFFICE_TIMEZONES.has(techTz)) {
-    return emptyResult(false, 'outside_eastern_focus');
-  }
-
   const weekdays = getWeekdaysInRange(weekStart, weekEnd);
   const windows = weekdays.map(d => ({ date: d, ...getCoverageWindow(d) })).filter(w => w.windowStart);
   if (windows.length === 0) return emptyResult(true, 'no_weekdays');
@@ -244,7 +224,7 @@ export async function computeDashboardAvoidance(technicians, rangeStart, _rangeE
 
   if (!win) {
     for (const tech of technicians) {
-      results[tech.id] = emptyResult(EASTERN_OFFICE_TIMEZONES.has(toIANA(tech.timezone)), 'weekend');
+      results[tech.id] = emptyResult(true, 'weekend');
     }
     return results;
   }
@@ -255,11 +235,6 @@ export async function computeDashboardAvoidance(technicians, rangeStart, _rangeE
 
   for (const tech of technicians) {
     try {
-      const techTz = toIANA(tech.timezone);
-      if (!EASTERN_OFFICE_TIMEZONES.has(techTz)) {
-        results[tech.id] = emptyResult(false, 'outside_eastern_focus');
-        continue;
-      }
       const picked = eligible.filter(t => t.assignedTechId === tech.id).length;
       results[tech.id] = {
         applicable: true,
@@ -282,7 +257,7 @@ export async function computeWeeklyDashboardAvoidance(technicians, weekStart, we
 
   if (windows.length === 0) {
     for (const tech of technicians) {
-      results[tech.id] = emptyResult(EASTERN_OFFICE_TIMEZONES.has(toIANA(tech.timezone)), 'no_weekdays');
+      results[tech.id] = emptyResult(true, 'no_weekdays');
     }
     return results;
   }
@@ -296,11 +271,6 @@ export async function computeWeeklyDashboardAvoidance(technicians, weekStart, we
 
   for (const tech of technicians) {
     try {
-      const techTz = toIANA(tech.timezone);
-      if (!EASTERN_OFFICE_TIMEZONES.has(techTz)) {
-        results[tech.id] = emptyResult(false, 'outside_eastern_focus');
-        continue;
-      }
       let picked = 0;
       for (const dayEligible of perDay) {
         picked += dayEligible.filter(t => t.assignedTechId === tech.id).length;
