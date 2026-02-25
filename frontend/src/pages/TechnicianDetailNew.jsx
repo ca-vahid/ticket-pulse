@@ -850,15 +850,18 @@ export default function TechnicianDetailNew() {
                     </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="flex items-center gap-1.5 text-sm text-gray-600">
+                <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
+                  <span className="flex items-center gap-1.5">
                     <Circle className="w-2.5 h-2.5 fill-green-500 text-green-500" />
-                    {technician.timezone ? technician.timezone.split('/').pop().replace(/_/g, ' ') : 'Unknown TZ'}
+                    {technician.location || (technician.timezone ? technician.timezone.split('/').pop().replace(/_/g, ' ') : 'Unknown')}
                   </span>
+                  <span className="text-gray-300">|</span>
+                  <span>{technician.timezone ? technician.timezone.replace(/_/g, ' ') : 'No timezone set'}</span>
                   {(technician.workStartTime || technician.workEndTime) && (
-                    <span className="text-sm text-gray-500">
-                      {technician.workStartTime || '??'} – {technician.workEndTime || '??'}
-                    </span>
+                    <>
+                      <span className="text-gray-300">|</span>
+                      <span>{technician.workStartTime || '??'} – {technician.workEndTime || '??'}</span>
+                    </>
                   )}
                 </div>
               </div>
@@ -1940,14 +1943,26 @@ export default function TechnicianDetailNew() {
 
                         const tzCity = techTz.split('/').pop().replace(/_/g, ' ');
 
-                        const toUTCForDate = (dateStr, timeStr) => {
+                        const localTimeToUTC = (dateStr, timeStr, tz) => {
                           const [h, m] = timeStr.split(':');
-                          const utc = new Date(`${dateStr}T${h}:${m}:00Z`);
-                          if (techTz.includes('Toronto') || techTz.includes('New_York')) utc.setUTCHours(utc.getUTCHours() + 5);
-                          else if (techTz.includes('Halifax') || techTz.includes('Moncton')) utc.setUTCHours(utc.getUTCHours() + 4);
-                          else if (techTz.includes('St_Johns')) { utc.setUTCHours(utc.getUTCHours() + 3); utc.setUTCMinutes(utc.getUTCMinutes() + 30); }
-                          else if (techTz.includes('Vancouver') || techTz.includes('Los_Angeles')) utc.setUTCHours(utc.getUTCHours() + 8);
-                          return utc;
+                          const probe = new Date(`${dateStr}T12:00:00Z`);
+                          const fmt = new Intl.DateTimeFormat('en-US', {
+                            timeZone: tz,
+                            timeZoneName: 'shortOffset',
+                            year: 'numeric', month: '2-digit', day: '2-digit',
+                            hour: '2-digit', minute: '2-digit', hour12: false,
+                          });
+                          const parts = fmt.formatToParts(probe);
+                          const tzNamePart = parts.find(p => p.type === 'timeZoneName')?.value || '';
+                          const match = tzNamePart.match(/GMT([+-]?\d+)?:?(\d+)?/);
+                          let offsetMinutes = 0;
+                          if (match) {
+                            const hrs = parseInt(match[1] || '0', 10);
+                            const mins = parseInt(match[2] || '0', 10);
+                            offsetMinutes = hrs * 60 + (hrs < 0 ? -mins : mins);
+                          }
+                          const localMs = new Date(`${dateStr}T${h.padStart(2, '0')}:${m.padStart(2, '0')}:00Z`).getTime();
+                          return new Date(localMs - offsetMinutes * 60000);
                         };
 
                         const TimelineSeparator = ({ label, color }) => (
@@ -1998,9 +2013,9 @@ export default function TechnicianDetailNew() {
                         };
 
                         const insertMarkersForDay = (tickets, dateStr) => {
-                          const agentStart = toUTCForDate(dateStr, techStart);
+                          const agentStart = localTimeToUTC(dateStr, techStart, techTz);
                           const hqOnline = new Date(days.find(d => d.date === dateStr)?.windowEnd || `${dateStr}T17:00:00Z`);
-                          const agentEnd = toUTCForDate(dateStr, techEnd);
+                          const agentEnd = localTimeToUTC(dateStr, techEnd, techTz);
                           const items = [];
                           let sI = false, hI = false, eI = false;
                           let lastPTDate = null;
