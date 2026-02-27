@@ -43,6 +43,7 @@ import {
   CheckSquare,
   Clock,
   Map,
+  Layers,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -680,6 +681,10 @@ export default function Dashboard() {
     navigate('/visuals');
   };
 
+  const handleTimeline = () => {
+    navigate('/timeline');
+  };
+
   if (isLoading && !dashboardData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
@@ -1208,6 +1213,16 @@ export default function Dashboard() {
                 title={backgroundSyncRunning ? 'Syncing...' : refreshing ? 'Syncing...' : 'Sync All'}
               >
                 <RefreshCw className={`w-4 h-4 ${refreshing || backgroundSyncRunning ? 'animate-spin text-blue-600' : ''}`} />
+              </button>
+
+              {/* Timeline Explorer Button */}
+              <button
+                onClick={handleTimeline}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-600 border border-blue-200 hover:border-blue-300"
+                title="Timeline Explorer"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span className="text-xs font-semibold">Timeline</span>
               </button>
 
               {/* Visuals Button */}

@@ -63,7 +63,7 @@ export default function TechnicianDetailNew() {
     return stored ? JSON.parse(stored) : [];
   });
 
-  // Date / week state
+  // Date / week / month state
   const [selectedDate, setSelectedDate] = useState(() => {
     const passedDate = location.state?.selectedDate;
     if (!passedDate) return null;
@@ -89,6 +89,14 @@ export default function TechnicianDetailNew() {
     return null;
   });
 
+  // selectedMonth: Date representing the 1st of the selected month
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const nav = location.state?.selectedMonth;
+    if (nav) return new Date(nav);
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+  });
+
   // ── Effects ────────────────────────────────────────────────────────────────
 
   // Fetch CSAT
@@ -112,7 +120,8 @@ export default function TechnicianDetailNew() {
   useEffect(() => {
     const mySeq = ++fetchSeqRef.current;
     setIsLoading(true);
-    setTechnician(null);
+    // Don't null out technician — keep stale data visible during navigation
+    // so child component state (e.g. showMergedTimeline) is never lost
     setError(null);
 
     const fetchData = async () => {
@@ -122,6 +131,13 @@ export default function TechnicianDetailNew() {
           const weekStart = selectedWeek ? formatDateLocal(selectedWeek) : null;
           const res = await dashboardAPI.getTechnicianWeekly(parseInt(id, 10), weekStart, 'America/Los_Angeles');
           if (!res.success || !res.data) throw new Error('Failed to fetch weekly technician data');
+          data = res.data;
+        } else if (viewMode === 'monthly') {
+          const monthStr = selectedMonth
+            ? `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}`
+            : null;
+          const res = await dashboardAPI.getTechnicianMonthly(parseInt(id, 10), monthStr, 'America/Los_Angeles');
+          if (!res.success || !res.data) throw new Error('Failed to fetch monthly technician data');
           data = res.data;
         } else {
           const dateStr = selectedDate
@@ -142,7 +158,7 @@ export default function TechnicianDetailNew() {
       }
     };
     fetchData();
-  }, [id, selectedDate, viewMode, selectedWeek]);
+  }, [id, selectedDate, viewMode, selectedWeek, selectedMonth]);
 
   // Persist search/filter
   useEffect(() => { sessionStorage.setItem('techDetailNew_search', searchTerm); }, [searchTerm]);
@@ -168,6 +184,10 @@ export default function TechnicianDetailNew() {
       const prev = new Date(cur);
       prev.setDate(cur.getDate() - 7);
       setSelectedWeek(prev);
+    } else if (viewMode === 'monthly') {
+      const cur = selectedMonth || new Date();
+      const prev = new Date(cur.getFullYear(), cur.getMonth() - 1, 1, 0, 0, 0);
+      setSelectedMonth(prev);
     } else {
       const cur = selectedDate ? new Date(selectedDate + 'T12:00:00') : new Date();
       cur.setDate(cur.getDate() - 1);
@@ -176,24 +196,32 @@ export default function TechnicianDetailNew() {
   };
 
   const handleNext = () => {
-    const todayStr = formatDateLocal(new Date());
+    const now = new Date();
     if (viewMode === 'weekly') {
-      const cur = selectedWeek || new Date();
+      const todayStr = formatDateLocal(now);
+      const cur = selectedWeek || now;
       const next = new Date(cur);
       next.setDate(cur.getDate() + 7);
-      // Don't navigate past the week that contains today
       if (formatDateLocal(next) <= todayStr) {
         setSelectedWeek(next);
       }
+    } else if (viewMode === 'monthly') {
+      const cur = selectedMonth || now;
+      const next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1, 0, 0, 0);
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+      if (next <= currentMonthStart) {
+        setSelectedMonth(next);
+      }
     } else {
-      if (isToday) return; // already on today, can't go further
+      const todayStr = formatDateLocal(now);
+      if (isToday) return;
       const cur = new Date(selectedDate + 'T12:00:00');
       cur.setDate(cur.getDate() + 1);
       const nextStr = formatDateLocal(cur);
       if (nextStr <= todayStr) {
         setSelectedDate(nextStr);
       } else {
-        setSelectedDate(null); // snap to today
+        setSelectedDate(null);
       }
     }
   };
@@ -206,6 +234,9 @@ export default function TechnicianDetailNew() {
       monday.setDate(now.getDate() - day);
       monday.setHours(0, 0, 0, 0);
       setSelectedWeek(monday);
+    } else if (viewMode === 'monthly') {
+      const now = new Date();
+      setSelectedMonth(new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0));
     } else {
       setSelectedDate(null);
     }
@@ -217,7 +248,11 @@ export default function TechnicianDetailNew() {
 
   // ── Loading / error states ─────────────────────────────────────────────────
 
-  if (isLoading || !technician) {
+  // Full-page spinner only on the very first load (no technician data yet).
+  // During date/week navigation we keep stale data visible so child state
+  // (showMergedTimeline, etc.) is never torn down. isLoading is used below
+  // for a subtle header indicator instead.
+  if (!technician) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
@@ -257,6 +292,12 @@ export default function TechnicianDetailNew() {
     return sel.getTime() === mon.getTime();
   })() : false;
 
+  const isCurrentMonth = viewMode === 'monthly' && selectedMonth ? (() => {
+    const now = new Date();
+    return selectedMonth.getFullYear() === now.getFullYear() &&
+      selectedMonth.getMonth() === now.getMonth();
+  })() : false;
+
   const weekRangeLabel = viewMode === 'weekly' && selectedWeek ? (() => {
     if (isCurrentWeek) return 'This Week';
     const ws = new Date(selectedWeek);
@@ -265,10 +306,16 @@ export default function TechnicianDetailNew() {
     return `${ws.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${we.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
   })() : 'This Week';
 
+  const monthLabel = viewMode === 'monthly' && selectedMonth
+    ? selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    : new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
   // Ticket arrays
   const selfPickedTickets = technician.selfPickedTickets || [];
   const assignedTickets   = technician.assignedTickets || [];
-  const closedTickets     = viewMode === 'weekly' ? (technician.closedTickets || []) : (technician.closedTicketsOnDate || []);
+  const closedTickets     = (viewMode === 'weekly' || viewMode === 'monthly')
+    ? (technician.closedTickets || [])
+    : (technician.closedTicketsOnDate || []);
   const allOpenTickets    = technician.openTickets || [];
 
   const isFiltering = searchTerm || selectedCategories.length > 0;
@@ -287,9 +334,19 @@ export default function TechnicianDetailNew() {
   } else {
     openCount      = allOpenTickets.filter((t) => t.status === 'Open').length;
     pendingCount   = allOpenTickets.filter((t) => t.status === 'Pending').length;
-    selfPickedCount = viewMode === 'weekly' ? (technician.weeklySelfPicked || 0) : (technician.selfPickedOnDate || 0);
-    assignedCount  = viewMode === 'weekly' ? (technician.weeklyAssigned || 0) : (technician.assignedOnDate || 0);
-    closedCount    = viewMode === 'weekly' ? (technician.weeklyClosed || 0) : (technician.closedTicketsOnDateCount || 0);
+    if (viewMode === 'weekly') {
+      selfPickedCount = technician.weeklySelfPicked || 0;
+      assignedCount   = technician.weeklyAssigned || 0;
+      closedCount     = technician.weeklyClosed || 0;
+    } else if (viewMode === 'monthly') {
+      selfPickedCount = technician.monthlySelfPicked || 0;
+      assignedCount   = technician.monthlyAssigned || 0;
+      closedCount     = technician.monthlyClosed || 0;
+    } else {
+      selfPickedCount = technician.selfPickedOnDate || 0;
+      assignedCount   = technician.assignedOnDate || 0;
+      closedCount     = technician.closedTicketsOnDateCount || 0;
+    }
   }
 
   // Tickets for the board tab, based on ticketView
@@ -314,6 +371,12 @@ export default function TechnicianDetailNew() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Thin progress bar while re-fetching (navigation between dates/weeks) */}
+      {isLoading && (
+        <div className="fixed top-0 left-0 right-0 z-50 h-0.5 bg-blue-100 overflow-hidden">
+          <div className="h-full bg-blue-500 animate-pulse w-full" />
+        </div>
+      )}
       {/* Header */}
       <TechDetailHeader
         technician={technician}
@@ -323,6 +386,8 @@ export default function TechnicianDetailNew() {
         setSelectedDate={setSelectedDate}
         selectedWeek={selectedWeek}
         setSelectedWeek={setSelectedWeek}
+        selectedMonth={selectedMonth}
+        setSelectedMonth={setSelectedMonth}
         allTickets={allTickets}
         onBack={handleBack}
         onPrevious={handlePrevious}
@@ -331,14 +396,17 @@ export default function TechnicianDetailNew() {
         onDateChange={handleDateChange}
         isToday={isToday}
         isCurrentWeek={isCurrentWeek}
+        isCurrentMonth={isCurrentMonth}
+        monthLabel={monthLabel}
       />
 
       <main className="max-w-7xl mx-auto px-6 py-4 space-y-4">
         {/* Primary tab bar */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           {/* Tab navigation */}
-          <div className="flex border-b border-slate-200">
+          <div className="flex border-b border-slate-200 bg-slate-50/60">
             {PRIMARY_TABS.map((tab) => {
+              const isActive = activeTab === tab.id;
               const badge = tab.id === 'tickets' ? openCount + pendingCount
                 : tab.id === 'csat' ? csatCount
                   : null;
@@ -346,16 +414,18 @@ export default function TechnicianDetailNew() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1.5 px-5 py-3 text-sm font-medium transition-colors relative ${
-                    activeTab === tab.id
-                      ? 'text-blue-600 border-b-2 border-blue-600 -mb-px'
-                      : 'text-slate-500 hover:text-slate-800'
+                  className={`flex items-center gap-2 px-5 py-3 text-sm transition-all relative border-b-2 -mb-px ${
+                    isActive
+                      ? 'text-slate-900 font-semibold border-blue-600 bg-white'
+                      : 'text-slate-400 font-medium border-transparent hover:text-slate-600 hover:bg-white/60'
                   }`}
                 >
                   {tab.label}
                   {badge != null && badge > 0 && (
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                      activeTab === tab.id ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full transition-all ${
+                      isActive
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-200 text-slate-500'
                     }`}>
                       {badge}
                     </span>
@@ -372,6 +442,7 @@ export default function TechnicianDetailNew() {
                 technician={technician}
                 viewMode={viewMode}
                 selectedDate={selectedDate}
+                selectedMonth={selectedMonth}
                 openCount={openCount}
                 pendingCount={pendingCount}
               />
@@ -392,6 +463,7 @@ export default function TechnicianDetailNew() {
                   isToday={isToday}
                   displayDate={displayDate}
                   weekRangeLabel={weekRangeLabel}
+                  monthLabel={monthLabel}
                 />
                 {/* Search + filter */}
                 <div className="flex gap-2 items-start">
@@ -431,6 +503,7 @@ export default function TechnicianDetailNew() {
                 viewMode={viewMode}
                 selectedDate={selectedDate}
                 selectedWeek={selectedWeek}
+                selectedMonth={selectedMonth}
                 onPrevious={handlePrevious}
                 onNext={handleNext}
                 onToday={handleToday}

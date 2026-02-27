@@ -10,6 +10,8 @@ export default function TechDetailHeader({
   setSelectedDate,
   selectedWeek,
   setSelectedWeek,
+  selectedMonth,
+  setSelectedMonth,
   allTickets,
   onBack,
   onPrevious,
@@ -18,6 +20,8 @@ export default function TechDetailHeader({
   onDateChange,
   isToday,
   isCurrentWeek,
+  isCurrentMonth,
+  monthLabel,
 }) {
   const weekDisplayLabel = (() => {
     const ws = technician.weekStart
@@ -35,13 +39,17 @@ export default function TechDetailHeader({
   const handleSwitchToDaily = () => {
     if (viewMode === 'weekly' && selectedWeek) {
       setSelectedDate(formatDateLocal(new Date(selectedWeek)));
+    } else if (viewMode === 'monthly' && selectedMonth) {
+      setSelectedDate(formatDateLocal(selectedMonth));
     }
     setViewMode('daily');
   };
 
   const handleSwitchToWeekly = () => {
     if (viewMode !== 'weekly') {
-      const dateToUse = selectedDate ? new Date(selectedDate + 'T12:00:00') : new Date();
+      const dateToUse = selectedDate ? new Date(selectedDate + 'T12:00:00')
+        : viewMode === 'monthly' && selectedMonth ? selectedMonth
+          : new Date();
       const day = (dateToUse.getDay() + 6) % 7;
       const monday = new Date(dateToUse);
       monday.setDate(dateToUse.getDate() - day);
@@ -50,6 +58,33 @@ export default function TechDetailHeader({
     }
     setViewMode('weekly');
   };
+
+  const handleSwitchToMonthly = () => {
+    if (viewMode !== 'monthly') {
+      const dateToUse = selectedDate ? new Date(selectedDate + 'T12:00:00')
+        : viewMode === 'weekly' && selectedWeek ? new Date(selectedWeek)
+          : new Date();
+      const firstOfMonth = new Date(dateToUse.getFullYear(), dateToUse.getMonth(), 1, 0, 0, 0);
+      setSelectedMonth(firstOfMonth);
+    }
+    setViewMode('monthly');
+  };
+
+  const handleMonthChange = (e) => {
+    if (e.target.value) {
+      const [year, month] = e.target.value.split('-').map(Number);
+      setSelectedMonth(new Date(year, month - 1, 1, 0, 0, 0));
+    }
+  };
+
+  const monthInputValue = selectedMonth
+    ? `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}`
+    : (() => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; })();
+
+  const maxMonthValue = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  })();
 
   const location = technician.location ||
     (technician.timezone ? technician.timezone.split('/').pop().replace(/_/g, ' ') : null);
@@ -105,9 +140,9 @@ export default function TechDetailHeader({
             </div>
           </div>
 
-          {/* Right controls: Daily/Weekly toggle + date nav + export */}
+          {/* Right controls: Daily/Weekly/Monthly toggle + date nav + export */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Daily / Weekly toggle */}
+            {/* Daily / Weekly / Monthly toggle */}
             <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs font-semibold">
               <button
                 onClick={handleSwitchToDaily}
@@ -125,52 +160,81 @@ export default function TechDetailHeader({
               >
                 Weekly
               </button>
+              <button
+                onClick={handleSwitchToMonthly}
+                className={`px-3 py-1.5 rounded-md transition-all ${
+                  viewMode === 'monthly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Monthly
+              </button>
             </div>
 
             <div className="w-px h-5 bg-slate-200" />
 
-            {/* Date / week navigation */}
+            {/* Date / week / month navigation — fixed-width area so layout never shifts */}
             <button
               onClick={onPrevious}
-              className="p-1.5 hover:bg-slate-100 rounded-md transition-colors"
-              title={viewMode === 'weekly' ? 'Previous week' : 'Previous day'}
+              className="p-1.5 hover:bg-slate-100 rounded-md transition-colors flex-shrink-0"
+              title={viewMode === 'weekly' ? 'Previous week' : viewMode === 'monthly' ? 'Previous month' : 'Previous day'}
             >
               <ChevronLeft className="w-4 h-4 text-slate-500" />
             </button>
 
-            {viewMode === 'weekly' ? (
-              <span className="text-sm font-medium text-slate-700 min-w-[200px] text-center">
-                {weekDisplayLabel}
-              </span>
-            ) : (
-              <input
-                type="date"
-                value={selectedDate || formatDateLocal(new Date())}
-                max={formatDateLocal(new Date())}
-                onChange={onDateChange}
-                className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-700"
-              />
-            )}
+            {/* Fixed-width date display: all three modes share the same 216px slot */}
+            <div className="w-[216px] flex items-center justify-center">
+              {viewMode === 'weekly' ? (
+                <span className="text-sm font-medium text-slate-700 text-center w-full text-center">
+                  {weekDisplayLabel}
+                </span>
+              ) : viewMode === 'monthly' ? (
+                <input
+                  type="month"
+                  value={monthInputValue}
+                  max={maxMonthValue}
+                  onChange={handleMonthChange}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-700"
+                />
+              ) : (
+                <input
+                  type="date"
+                  value={selectedDate || formatDateLocal(new Date())}
+                  max={formatDateLocal(new Date())}
+                  onChange={onDateChange}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-700"
+                />
+              )}
+            </div>
 
-            {/* Next button — hidden when already at today / current week */}
-            {!(viewMode === 'daily' && isToday) && !(viewMode === 'weekly' && isCurrentWeek) && (
-              <button
-                onClick={onNext}
-                className="p-1.5 hover:bg-slate-100 rounded-md transition-colors"
-                title={viewMode === 'weekly' ? 'Next week' : 'Next day'}
-              >
-                <ChevronRight className="w-4 h-4 text-slate-500" />
-              </button>
-            )}
+            {/* Next button — invisible (not removed) when at current period so layout stays fixed */}
+            {(() => {
+              const atEnd = (viewMode === 'daily' && isToday) || (viewMode === 'weekly' && isCurrentWeek) || (viewMode === 'monthly' && isCurrentMonth);
+              return (
+                <button
+                  onClick={atEnd ? undefined : onNext}
+                  className={`p-1.5 rounded-md transition-colors flex-shrink-0 ${atEnd ? 'invisible' : 'hover:bg-slate-100'}`}
+                  title={viewMode === 'weekly' ? 'Next week' : viewMode === 'monthly' ? 'Next month' : 'Next day'}
+                  tabIndex={atEnd ? -1 : 0}
+                >
+                  <ChevronRight className="w-4 h-4 text-slate-500" />
+                </button>
+              );
+            })()}
 
-            {(viewMode === 'weekly' ? !isCurrentWeek : !isToday) && (
-              <button
-                onClick={onToday}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
-              >
-                {viewMode === 'weekly' ? 'This Week' : 'Today'}
-              </button>
-            )}
+            {/* Today/This Week/This Month — invisible when already on current period */}
+            {(() => {
+              const atCurrent = (viewMode === 'daily' && isToday) || (viewMode === 'weekly' && isCurrentWeek) || (viewMode === 'monthly' && isCurrentMonth);
+              const label = viewMode === 'monthly' ? 'This Month' : viewMode === 'weekly' ? 'This Week' : 'Today';
+              return (
+                <button
+                  onClick={atCurrent ? undefined : onToday}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex-shrink-0 ${atCurrent ? 'invisible' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                  tabIndex={atCurrent ? -1 : 0}
+                >
+                  {label}
+                </button>
+              );
+            })()}
 
             <div className="w-px h-5 bg-slate-200" />
 

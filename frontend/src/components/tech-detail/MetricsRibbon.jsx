@@ -31,12 +31,15 @@ export default function MetricsRibbon({
   isToday,
   displayDate,
   weekRangeLabel,
+  monthLabel,
 }) {
-  const periodLabel = viewMode === 'weekly'
-    ? weekRangeLabel
-    : isToday
-      ? 'Today'
-      : displayDate?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const periodLabel = viewMode === 'monthly'
+    ? (monthLabel || 'This Month')
+    : viewMode === 'weekly'
+      ? weekRangeLabel
+      : isToday
+        ? 'Today'
+        : displayDate?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg flex items-center divide-x divide-slate-200 overflow-hidden">

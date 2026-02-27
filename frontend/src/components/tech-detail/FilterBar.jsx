@@ -10,6 +10,21 @@ export function parseTerms(text) {
 }
 
 /**
+ * Apply INCLUDE-only filters to a picked ticket.
+ * Exclude filters are never applied to picked tickets — you never want to hide
+ * something the tech actually picked up.
+ * Returns true if the ticket should be visible.
+ */
+export function applyPickedFilters(ticket, { includeCats, includeText }) {
+  const hay = (ticket.subject || '').toLowerCase();
+  const inTerms = parseTerms(includeText);
+
+  if (includeCats.size > 0 && !includeCats.has(ticket.ticketCategory)) return false;
+  if (inTerms.length > 0 && !inTerms.some((t) => hay.includes(t))) return false;
+  return true;
+}
+
+/**
  * Apply exclude + include filters to a single not-picked ticket.
  * Returns true if the ticket should be visible.
  *

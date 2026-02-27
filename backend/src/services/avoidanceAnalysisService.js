@@ -59,7 +59,9 @@ function getWeekdaysInRange(rangeStart, rangeEnd) {
   const dates = [];
   const seen = new Set();
   const cursor = new Date(rangeStart);
-  for (let i = 0; i < 14 && cursor <= rangeEnd; i++) {
+  // Allow up to 40 iterations to cover any month (max 31 days + DST buffer)
+  const maxDays = Math.ceil((rangeEnd - rangeStart) / (1000 * 60 * 60 * 24)) + 2;
+  for (let i = 0; i < maxDays && cursor <= rangeEnd; i++) {
     const dateStr = formatInTimeZone(cursor, PT_TIMEZONE, 'yyyy-MM-dd');
     if (isWeekday(dateStr) && !seen.has(dateStr)) {
       seen.add(dateStr);
@@ -172,6 +174,34 @@ export async function computeTechnicianAvoidanceDetail(tech, rangeStart, _rangeE
 
 export async function computeTechnicianAvoidanceWeeklyDetail(tech, weekStart, weekEnd, _timezone) {
   const weekdays = getWeekdaysInRange(weekStart, weekEnd);
+  const windows = weekdays.map(d => ({ date: d, ...getCoverageWindow(d) })).filter(w => w.windowStart);
+  if (windows.length === 0) return emptyResult(true, 'no_weekdays');
+
+  const earliest = new Date(Math.min(...windows.map(w => w.windowStart.getTime())));
+  const latestExtended = new Date(Math.max(...windows.map(w => w.extendedEnd.getTime())));
+  const allTickets = await loadTicketsFull(earliest, latestExtended);
+
+  const days = [];
+  let tE = 0, tP = 0;
+
+  for (const win of windows) {
+    const day = analyzeDayFull(tech.id, allTickets, win, allTickets);
+    const picked = day.tickets.filter(t => t.pickedByTech).length;
+    tE += day.tickets.length;
+    tP += picked;
+    days.push({ date: win.date, ...day });
+  }
+
+  return {
+    applicable: true,
+    reason: null,
+    days,
+    totals: { eligible: tE, picked: tP, notPicked: tE - tP },
+  };
+}
+
+export async function computeTechnicianAvoidanceMonthlyDetail(tech, monthStart, monthEnd, _timezone) {
+  const weekdays = getWeekdaysInRange(monthStart, monthEnd);
   const windows = weekdays.map(d => ({ date: d, ...getCoverageWindow(d) })).filter(w => w.windowStart);
   if (windows.length === 0) return emptyResult(true, 'no_weekdays');
 

@@ -130,6 +130,28 @@ export const dashboardAPI = {
     return await api.get(`/dashboard/technician/${id}/weekly`, { params });
   },
 
+  getTechnicianMonthly: async (id, month = null, timezone = 'America/Los_Angeles') => {
+    const params = { timezone };
+    if (month) params.month = month; // "YYYY-MM"
+    return await api.get(`/dashboard/technician/${id}/monthly`, { params });
+  },
+
+  /**
+   * Fetch full timeline/coverage data for one or more technicians.
+   * Used by Timeline Explorer. Specify exactly one of date/weekStart/month.
+   *
+   * @param {number[]} techIds  - array of technician IDs
+   * @param {object}   period   - { type: 'daily'|'weekly'|'monthly', date?, weekStart?, month? }
+   * @param {string}   timezone
+   */
+  getTimeline: async (techIds, period = {}, timezone = 'America/Los_Angeles') => {
+    const params = { techIds: techIds.join(','), timezone };
+    if (period.date)      params.date      = period.date;
+    if (period.weekStart) params.weekStart  = period.weekStart;
+    if (period.month)     params.month      = period.month;
+    return await api.get('/dashboard/timeline', { params });
+  },
+
   getTechnicianCSAT: async (id) => {
     return await api.get(`/dashboard/technician/${id}/csat`);
   },

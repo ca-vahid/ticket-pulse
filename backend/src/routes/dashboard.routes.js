@@ -5,9 +5,9 @@ import technicianRepository from '../services/technicianRepository.js';
 import ticketRepository from '../services/ticketRepository.js';
 import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import logger from '../utils/logger.js';
-import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianDetail, calculateTechnicianWeeklyStats, calculateMonthlyDashboard } from '../services/statsCalculator.js';
+import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianDetail, calculateTechnicianWeeklyStats, calculateTechnicianMonthlyStats, calculateMonthlyDashboard } from '../services/statsCalculator.js';
 import { readCache } from '../services/dashboardReadCache.js';
-import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTechnicianAvoidanceDetail, computeTechnicianAvoidanceWeeklyDetail } from '../services/avoidanceAnalysisService.js';
+import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTechnicianAvoidanceDetail, computeTechnicianAvoidanceWeeklyDetail, computeTechnicianAvoidanceMonthlyDetail } from '../services/avoidanceAnalysisService.js';
 
 const router = express.Router();
 
@@ -498,6 +498,219 @@ router.get(
         assignedTickets: assignedTickets.map(transformTicket),
         closedTickets: closedTickets.map(transformTicket),
         avoidance,
+      },
+    });
+  }),
+);
+
+/**
+ * GET /api/dashboard/technician/:id/monthly
+ * Get monthly stats for a single technician
+ * Query params:
+ *   - month: "YYYY-MM" (optional, defaults to current month)
+ *   - timezone: Timezone for date calculations (default: America/Los_Angeles)
+ */
+router.get(
+  '/technician/:id/monthly',
+  readCache(15_000),
+  asyncHandler(async (req, res) => {
+    const techId = parseInt(req.params.id, 10);
+    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const monthParam = req.query.month; // Format: "YYYY-MM"
+
+    if (isNaN(techId)) {
+      return res.status(400).json({ success: false, message: 'Invalid technician ID' });
+    }
+
+    logger.debug(`Fetching monthly stats for technician ${techId}, month: ${monthParam || 'current'}`);
+
+    // Parse month into first-of-month and last-of-month dates
+    let monthStartDate;
+    if (monthParam) {
+      const [year, month] = monthParam.split('-').map(Number);
+      monthStartDate = new Date(year, month - 1, 1, 12, 0, 0);
+    } else {
+      const now = new Date();
+      monthStartDate = new Date(now.getFullYear(), now.getMonth(), 1, 12, 0, 0);
+    }
+    const monthEndDate = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0, 12, 0, 0);
+
+    // Fetch technician with all tickets
+    const technician = await technicianRepository.getById(techId);
+    if (!technician) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+
+    // Calculate monthly stats
+    const monthlyStats = calculateTechnicianMonthlyStats(
+      technician,
+      monthStartDate,
+      monthEndDate,
+      timezone,
+    );
+
+    // Get tickets assigned during the month for display
+    const monthStartRange = getTodayRange(timezone, monthStartDate);
+    const monthEndRange = getTodayRange(timezone, monthEndDate);
+    const monthlyTickets = technician.tickets.filter(ticket => {
+      const assignDate = ticket.firstAssignedAt
+        ? new Date(ticket.firstAssignedAt)
+        : new Date(ticket.createdAt);
+      return assignDate >= monthStartRange.start && assignDate <= monthEndRange.end;
+    });
+
+    const selfPickedTickets = monthlyTickets.filter(ticket =>
+      ticket.isSelfPicked || ticket.assignedBy === technician.name,
+    );
+    const assignedTickets = monthlyTickets.filter(ticket =>
+      !ticket.isSelfPicked && ticket.assignedBy !== technician.name,
+    );
+    const closedTickets = monthlyTickets.filter(ticket =>
+      ['Resolved', 'Closed'].includes(ticket.status),
+    );
+    const openTickets = technician.tickets.filter(ticket =>
+      ['Open', 'Pending'].includes(ticket.status),
+    );
+
+    // Compute avoidance analysis for the month
+    let avoidance = null;
+    try {
+      avoidance = await computeTechnicianAvoidanceMonthlyDetail(
+        technician, monthStartDate, monthEndDate, timezone,
+      );
+    } catch (err) {
+      logger.error(`Monthly avoidance analysis failed for technician ${techId}:`, err);
+    }
+
+    const monthStr = monthStartDate.toLocaleDateString('en-CA').slice(0, 7); // "YYYY-MM"
+
+    res.json({
+      success: true,
+      data: {
+        id: technician.id,
+        name: technician.name,
+        email: technician.email,
+        photoUrl: technician.photoUrl,
+        timezone: technician.timezone,
+        workStartTime: technician.workStartTime || null,
+        workEndTime: technician.workEndTime || null,
+        isActive: technician.isActive,
+        monthStart: formatDateInTimezone(monthStartDate, timezone),
+        monthEnd: formatDateInTimezone(monthEndDate, timezone),
+        month: monthStr,
+
+        ...monthlyStats,
+
+        openTickets: openTickets.map(transformTicket),
+        monthlyTickets: monthlyTickets.map(transformTicket),
+        selfPickedTickets: selfPickedTickets.map(transformTicket),
+        assignedTickets: assignedTickets.map(transformTicket),
+        closedTickets: closedTickets.map(transformTicket),
+        avoidance,
+      },
+    });
+  }),
+);
+
+/**
+ * GET /api/dashboard/timeline
+ * Fetch full coverage timeline data for one or more technicians.
+ * Used by the Timeline Explorer page for multi-technician views.
+ *
+ * Query params:
+ *   - techIds:    comma-separated technician IDs (required, e.g. "3,5,8")
+ *   - date:       daily mode — YYYY-MM-DD (default: today)
+ *   - weekStart:  weekly mode — Monday YYYY-MM-DD
+ *   - month:      monthly mode — YYYY-MM
+ *   - timezone:   IANA timezone (default: America/Los_Angeles)
+ *
+ * Response: { technicians: [{ id, name, photoUrl, timezone, workStartTime, workEndTime, avoidance }] }
+ */
+router.get(
+  '/timeline',
+  readCache(30_000),
+  asyncHandler(async (req, res) => {
+    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const rawIds = req.query.techIds || '';
+    const techIds = rawIds.split(',').map(Number).filter((n) => !isNaN(n) && n > 0);
+
+    if (techIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'At least one techId is required' });
+    }
+
+    // Determine period type and date range
+    let periodType = 'daily';
+    let rangeStart, rangeEnd;
+
+    if (req.query.month) {
+      periodType = 'monthly';
+      const [year, month] = req.query.month.split('-').map(Number);
+      rangeStart = new Date(year, month - 1, 1, 12, 0, 0);
+      rangeEnd   = new Date(year, month, 0, 12, 0, 0); // last day of month
+    } else if (req.query.weekStart) {
+      periodType = 'weekly';
+      const [y, m, d] = req.query.weekStart.split('-').map(Number);
+      rangeStart = new Date(y, m - 1, d, 12, 0, 0);
+      rangeEnd   = new Date(y, m - 1, d + 6, 12, 0, 0);
+    } else {
+      periodType = 'daily';
+      if (req.query.date) {
+        const [y, m, d] = req.query.date.split('-').map(Number);
+        rangeStart = new Date(y, m - 1, d, 12, 0, 0);
+      } else {
+        rangeStart = new Date();
+        rangeStart.setHours(12, 0, 0, 0);
+      }
+      rangeEnd = rangeStart;
+    }
+
+    logger.debug(`Timeline endpoint: periodType=${periodType}, techIds=${techIds.join(',')}, range=${rangeStart.toISOString()} – ${rangeEnd.toISOString()}`);
+
+    // Fetch avoidance data for all techs in parallel
+    const techResults = await Promise.all(
+      techIds.map(async (techId) => {
+        const tech = await technicianRepository.getById(techId);
+        if (!tech) {
+          logger.warn(`Timeline: technician ${techId} not found`);
+          return null;
+        }
+
+        let avoidance = null;
+        try {
+          if (periodType === 'monthly') {
+            avoidance = await computeTechnicianAvoidanceMonthlyDetail(tech, rangeStart, rangeEnd, timezone);
+          } else if (periodType === 'weekly') {
+            avoidance = await computeTechnicianAvoidanceWeeklyDetail(tech, rangeStart, rangeEnd, timezone);
+          } else {
+            avoidance = await computeTechnicianAvoidanceDetail(tech, rangeStart, rangeEnd);
+          }
+        } catch (err) {
+          logger.error(`Timeline avoidance failed for tech ${techId}:`, err);
+        }
+
+        return {
+          id: tech.id,
+          name: tech.name,
+          email: tech.email,
+          photoUrl: tech.photoUrl,
+          timezone: tech.timezone,
+          workStartTime: tech.workStartTime || null,
+          workEndTime: tech.workEndTime || null,
+          isActive: tech.isActive,
+          avoidance,
+        };
+      }),
+    );
+
+    const technicians = techResults.filter(Boolean);
+
+    res.json({
+      success: true,
+      data: {
+        technicians,
+        periodType,
+        periodStart: formatDateInTimezone(rangeStart, timezone),
+        periodEnd: formatDateInTimezone(rangeEnd, timezone),
       },
     });
   }),

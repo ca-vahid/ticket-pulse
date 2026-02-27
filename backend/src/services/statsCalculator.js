@@ -307,6 +307,159 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
 }
 
 /**
+ * Calculate statistics for a single technician for a given month
+ * @param {Object} technician - Technician object with tickets array
+ * @param {Date} monthStart - First day of the month (at 12:00:00 local)
+ * @param {Date} monthEnd - Last day of the month (at 12:00:00 local)
+ * @param {string} timezone - Timezone for date calculations
+ * @returns {Object} Monthly statistics for the technician
+ */
+export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd, timezone) {
+  const tech = technician;
+
+  // Current open tickets (snapshot, not time-bound)
+  const openTickets = tech.tickets.filter(ticket =>
+    ['Open', 'Pending'].includes(ticket.status),
+  );
+
+  const openOnlyCount = openTickets.filter(t => t.status === 'Open').length;
+  const pendingCount = openTickets.filter(t => t.status === 'Pending').length;
+
+  // Build timezone-aware month boundaries
+  const monthStartRange = getTodayRange(timezone, monthStart);
+  const monthEndRange = getTodayRange(timezone, monthEnd);
+  const tzMonthStart = monthStartRange.start;
+  const tzMonthEnd = monthEndRange.end;
+
+  // Tickets assigned during the month (timezone-aware)
+  const monthlyTickets = tech.tickets.filter(ticket => {
+    const assignDate = ticket.firstAssignedAt
+      ? new Date(ticket.firstAssignedAt)
+      : new Date(ticket.createdAt);
+    return assignDate >= tzMonthStart && assignDate <= tzMonthEnd;
+  });
+
+  const monthlySelfPicked = monthlyTickets.filter(ticket =>
+    ticket.isSelfPicked || ticket.assignedBy === tech.name,
+  ).length;
+
+  const assignedTicketsThisMonth = monthlyTickets.filter(ticket =>
+    !ticket.isSelfPicked && ticket.assignedBy !== tech.name,
+  );
+  const monthlyAssigned = assignedTicketsThisMonth.length;
+
+  const assignerCounts = {};
+  assignedTicketsThisMonth.forEach(ticket => {
+    if (ticket.assignedBy && ticket.assignedBy !== tech.name) {
+      assignerCounts[ticket.assignedBy] = (assignerCounts[ticket.assignedBy] || 0) + 1;
+    }
+  });
+
+  const assigners = Object.entries(assignerCounts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const monthlyClosed = monthlyTickets.filter(ticket =>
+    ['Resolved', 'Closed'].includes(ticket.status),
+  ).length;
+
+  const monthlyTotalCreated = monthlyTickets.length;
+  const monthlyNetChange = monthlyTotalCreated - monthlyClosed;
+
+  // Number of days in the month
+  const daysInMonth = Math.round((monthEnd.getTime() - monthStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+  // Daily averages (over all days in month)
+  const avgTicketsPerDay = parseFloat((monthlyTotalCreated / daysInMonth).toFixed(1));
+  const avgSelfPickedPerDay = parseFloat((monthlySelfPicked / daysInMonth).toFixed(1));
+  const avgClosedPerDay = parseFloat((monthlyClosed / daysInMonth).toFixed(1));
+
+  // Daily breakdown (one entry per day)
+  const dailyBreakdown = [];
+  for (let i = 0; i < daysInMonth; i++) {
+    const date = new Date(monthStart);
+    date.setDate(monthStart.getDate() + i);
+    date.setHours(12, 0, 0, 0);
+
+    const result = getTodayRange(timezone, date);
+    const dayStart = result.start;
+    const dayEnd = result.end;
+
+    const dayTickets = tech.tickets.filter(ticket => {
+      const assignDate = ticket.firstAssignedAt
+        ? new Date(ticket.firstAssignedAt)
+        : new Date(ticket.createdAt);
+      return assignDate >= dayStart && assignDate <= dayEnd;
+    });
+
+    const daySelf = dayTickets.filter(ticket =>
+      ticket.isSelfPicked || ticket.assignedBy === tech.name,
+    ).length;
+
+    const dayAssigned = dayTickets.filter(ticket =>
+      !ticket.isSelfPicked && ticket.assignedBy !== tech.name,
+    ).length;
+
+    const dayClosed = dayTickets.filter(ticket =>
+      ['Resolved', 'Closed'].includes(ticket.status),
+    ).length;
+
+    dailyBreakdown.push({
+      date: formatDateInTimezone(date, timezone),
+      total: dayTickets.length,
+      self: daySelf,
+      assigned: dayAssigned,
+      closed: dayClosed,
+    });
+  }
+
+  // CSAT statistics for the month
+  const monthlyCSATTickets = tech.tickets.filter(ticket =>
+    ticket.csatScore !== null &&
+    ticket.csatSubmittedAt &&
+    new Date(ticket.csatSubmittedAt) >= monthStart &&
+    new Date(ticket.csatSubmittedAt) <= monthEnd,
+  );
+
+  const monthlyCSATCount = monthlyCSATTickets.length;
+  const monthlyCSATAverage = monthlyCSATCount > 0
+    ? monthlyCSATTickets.reduce((sum, t) => sum + (t.csatScore || 0), 0) / monthlyCSATCount
+    : null;
+
+  return {
+    // Current snapshot
+    openTicketCount: openTickets.length,
+    openOnlyCount,
+    pendingCount,
+
+    // Monthly totals
+    monthlyTotalCreated,
+    monthlySelfPicked,
+    monthlyAssigned,
+    monthlyClosed,
+    assigners,
+    monthlyNetChange,
+
+    // Daily averages
+    avgTicketsPerDay,
+    avgSelfPickedPerDay,
+    avgClosedPerDay,
+
+    // Breakdown
+    dailyBreakdown,
+
+    // Monthly tickets array (for filtering/search on frontend)
+    monthlyTickets,
+
+    loadLevel: getLoadLevel(openTickets.length),
+
+    // CSAT statistics
+    monthlyCSATCount,
+    monthlyCSATAverage,
+  };
+}
+
+/**
  * Calculate daily dashboard statistics
  * @param {Array} technicians - Array of technicians with tickets
  * @param {Date} dateStart - Start of date range

@@ -1,6 +1,31 @@
-export const APP_VERSION = '1.2.1-preview';
+export const APP_VERSION = '1.2.5-preview';
 
 export const changelog = [
+  {
+    version: '1.2.5-preview',
+    date: 'February 27, 2026',
+    entries: [
+      { type: 'new', text: 'Monthly view on technician detail page — Daily/Weekly/Monthly toggle in header, with month picker, calendar-grid daily breakdown (7-column Mon–Sun), monthly summary stats, averages, assigners, and CSAT; works across Overview, Tickets, Coverage, and Timeline' },
+      { type: 'new', text: 'Monthly coverage analysis — new backend endpoint and service (computeTechnicianAvoidanceMonthlyDetail) returns all weekday coverage windows for the full month in a single query; Coverage tab shows a 5-column multi-row weekday grid for monthly breakdown' },
+      { type: 'new', text: 'Timeline Explorer — standalone page (/timeline) with multi-technician selection, daily/weekly/monthly period controls, Day by Day / Combined view toggles, full filter bar (exclude + include), and per-agent color-coded ticket rows' },
+      { type: 'new', text: 'Multi-technician timeline — select 1 or more techs from a sidebar panel; each tech gets a distinct accent color; picked tickets show which agent picked them; markers show per-agent online/offline times sorted chronologically' },
+      { type: 'new', text: 'Timeline Explorer sidebar — collapsible tech selector with smooth animation; search, select all/none, per-tech picked/not-picked stats inline; selected techs sort to top alphabetically; collapsed mode shows avatars with stats' },
+      { type: 'new', text: 'Hide agents — eye button on each tech in Timeline Explorer to hide inactive agents; hidden techs collapse to a bottom section; show/hide persisted in sessionStorage' },
+      { type: 'new', text: 'Empty day collapsing — consecutive days with no matching tickets in Day by Day rolling view are collapsed into a single compact dashed separator line (e.g., "6 days · Feb 6 – Feb 13 · no matching tickets")' },
+      { type: 'new', text: 'Batch timeline API endpoint — GET /api/dashboard/timeline accepts multiple techIds and a period (date/weekStart/month); runs avoidance analysis in parallel for all selected techs; 30-second read cache' },
+      { type: 'new', text: 'Timeline button on main Dashboard header — blue outlined button with Layers icon navigates directly to /timeline' },
+      { type: 'new', text: 'Full-date ticket timestamps in multi-day views — ticket rows show "1-16 Fri. 3:03 AM" format in weekly/monthly instead of ambiguous "Fri 3:03 AM"' },
+      { type: 'improved', text: 'Timeline markers are compact — "REZA ONLINE — 08:00 VANCOUVER" shortened to "Reza on · 8am Van"; city names abbreviated (Vancouver→Van, Toronto→Tor, etc.); marker colors (green/blue/red) carry the meaning' },
+      { type: 'improved', text: 'Timeline markers sorted by time — when no tickets trigger markers (empty days), remaining agent on/HQ on/agent off markers now sort chronologically instead of code-insertion order' },
+      { type: 'improved', text: 'Header toggle layout stabilized — Daily/Weekly/Monthly buttons, date picker, Next button, and Today/This Week/This Month button all use fixed-width slots and invisible placeholders instead of conditional rendering, eliminating layout shifts when switching views' },
+      { type: 'improved', text: 'Coverage filter bar moved to full width — filter bar now spans above both Picked and Not Picked columns so it is clearly a shared filter, not just for the right column' },
+      { type: 'improved', text: 'Coverage Timeline button relocated — moved from the Picked column header to a tall button alongside the summary cards for better visibility' },
+      { type: 'improved', text: 'MergedTimelineModal fully refactored — ~490 lines reduced to ~120 by extracting all rendering and logic into shared timeline/* modules (TimelineCore, TimelineTicketRow, TimelineSeparators, timelineUtils); identical visual behavior' },
+      { type: 'improved', text: 'Loading overlay on Timeline Explorer — same fancy multi-ring spinner with backdrop blur as the main Dashboard, shown during initial tech list load and all data fetches' },
+      { type: 'fixed', text: 'Monthly coverage timeline cut off at 14 days — getWeekdaysInRange had a hardcoded loop limit of 14 iterations; now dynamically computed from the actual date range to cover any month' },
+      { type: 'fixed', text: 'Per-tech picked count mismatch — stats used _techFirstName string matching which missed extended tickets; fixed to use assignedTechId for accurate counting' },
+    ],
+  },
   {
     version: '1.2.1-preview',
     date: 'February 26, 2026',

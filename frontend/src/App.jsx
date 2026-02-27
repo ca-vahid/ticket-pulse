@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import TechnicianDetailNew from './pages/TechnicianDetailNew';
 import Settings from './pages/Settings';
 import Visuals from './pages/Visuals';
+import TimelineExplorer from './pages/TimelineExplorer';
 import { Activity } from 'lucide-react';
 
 /**
@@ -136,6 +137,15 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Visuals />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/timeline"
+                element={
+                  <ProtectedRoute>
+                    <TimelineExplorer />
                   </ProtectedRoute>
                 }
               />

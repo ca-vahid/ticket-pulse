@@ -3,7 +3,7 @@ import { Moon, Sunrise, ExternalLink, Layers } from 'lucide-react';
 import { getHolidayInfo, getHolidayTooltip } from '../../utils/holidays';
 import { PRIORITY_STRIP_COLORS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from './constants';
 import { fmtWaitTime } from './utils';
-import FilterBar, { applyNotPickedFilters } from './FilterBar';
+import FilterBar, { applyNotPickedFilters, applyPickedFilters } from './FilterBar';
 import MergedTimelineModal from './MergedTimelineModal';
 
 function isOvernight(ticket) {
@@ -73,6 +73,7 @@ export default function CoverageTab({
   viewMode,
   selectedDate,
   selectedWeek,
+  selectedMonth,
   onPrevious,
   onNext,
   onToday,
@@ -119,6 +120,7 @@ export default function CoverageTab({
 
   const filters = { excludeCats, excludeText, includeCats, includeText };
   const filteredNotPicked = allNotPicked.filter((t) => applyNotPickedFilters(t, filters));
+  const filteredPicked = allPicked.filter((t) => applyPickedFilters(t, { includeCats, includeText }));
   const hiddenCount = allNotPicked.length - filteredNotPicked.length;
 
   // All unique categories across both lists for the dropdowns
@@ -128,65 +130,136 @@ export default function CoverageTab({
 
   return (
     <div className="space-y-4">
-      {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-white rounded-lg border border-slate-200 p-4 text-center">
-          <div className="text-2xl font-bold text-slate-800">{totals.eligible}</div>
-          <div className="text-xs text-slate-400 uppercase font-medium mt-1">Eligible (overnight)</div>
-        </div>
-        <div className="bg-white rounded-lg border-2 border-emerald-300 p-4 text-center">
-          <div className="text-2xl font-bold text-emerald-700">{totals.picked}</div>
-          <div className="text-xs text-slate-400 uppercase font-medium mt-1">
-            Picked by {technician.name?.split(' ')[0]}
+      {/* Summary cards + Timeline button */}
+      <div className="flex items-stretch gap-3">
+        <div className="flex-1 grid grid-cols-3 gap-3">
+          <div className="bg-white rounded-lg border border-slate-200 p-4 text-center">
+            <div className="text-2xl font-bold text-slate-800">{totals.eligible}</div>
+            <div className="text-xs text-slate-400 uppercase font-medium mt-1">Eligible (overnight)</div>
+          </div>
+          <div className="bg-white rounded-lg border-2 border-emerald-300 p-4 text-center">
+            <div className="text-2xl font-bold text-emerald-700">{totals.picked}</div>
+            <div className="text-xs text-slate-400 uppercase font-medium mt-1">
+              Picked by {technician.name?.split(' ')[0]}
+            </div>
+          </div>
+          <div className="bg-white rounded-lg border-2 border-amber-300 p-4 text-center">
+            <div className="text-2xl font-bold text-amber-700">{totals.notPicked}</div>
+            <div className="text-xs text-slate-400 uppercase font-medium mt-1">Not Picked</div>
           </div>
         </div>
-        <div className="bg-white rounded-lg border-2 border-amber-300 p-4 text-center">
-          <div className="text-2xl font-bold text-amber-700">{totals.notPicked}</div>
-          <div className="text-xs text-slate-400 uppercase font-medium mt-1">Not Picked</div>
-        </div>
+        <button
+          onClick={() => setShowMergedTimeline(true)}
+          className="flex flex-col items-center justify-center gap-2 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors shadow-sm flex-shrink-0"
+        >
+          <Layers className="w-5 h-5" />
+          <span className="text-xs font-semibold">Timeline</span>
+        </button>
       </div>
 
-      {/* Daily breakdown (weekly mode) */}
+      {/* Daily breakdown (weekly / monthly mode) */}
       {days.length > 1 && (
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <h3 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">Daily Breakdown</h3>
-          <div className="grid grid-cols-5 gap-2">
-            {days.map((day) => {
-              const dayDate = new Date(day.date + 'T12:00:00');
-              const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'short' });
-              const dayLabel = dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-              const dayPicked = (day.tickets || []).filter((t) => t.pickedByTech).length;
-              const dayTotal = (day.tickets || []).length;
-              const dayNotPicked = dayTotal - dayPicked;
-              const hInfo = getHolidayInfo(day.date);
-              const hTip = getHolidayTooltip(day.date);
-              return (
-                <div
-                  key={day.date}
-                  className={`text-center p-3 rounded-lg border ${hInfo.isCanadian ? 'bg-rose-50 border-rose-300' : hInfo.isUS ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'}`}
-                  title={hTip || undefined}
-                >
-                  <div className={`text-[10px] font-bold uppercase ${hInfo.isCanadian ? 'text-rose-600' : hInfo.isUS ? 'text-indigo-500' : 'text-slate-400'}`}>{dayName}</div>
-                  <div className="text-[9px] text-slate-300 mb-1">{dayLabel}</div>
-                  {hInfo.isHoliday && (
-                    <div className={`text-[8px] font-semibold mb-1 truncate ${hInfo.isCanadian ? 'text-rose-600' : 'text-indigo-500'}`}>
-                      {hInfo.isCanadian ? `🍁 ${hInfo.canadianName}` : `🇺🇸 ${hInfo.usName}`}
+          {viewMode === 'monthly' ? (
+            /* Monthly: 5-column Mon–Fri grid, multi-row */
+            <>
+              <div className="grid grid-cols-5 gap-1.5 mb-1">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((d) => (
+                  <div key={d} className="text-[9px] font-bold uppercase tracking-wide text-center text-slate-400">{d}</div>
+                ))}
+              </div>
+              {/* Build rows of weekdays */}
+              {(() => {
+                // Group days into rows (weeks), padding the first row
+                const firstDow = (() => {
+                  const d = new Date(days[0].date + 'T12:00:00');
+                  return (d.getDay() + 6) % 7; // Mon=0, Fri=4
+                })();
+                const cells = [];
+                for (let i = 0; i < firstDow; i++) cells.push(null);
+                days.forEach((d) => cells.push(d));
+                // Pad to complete the last row
+                while (cells.length % 5 !== 0) cells.push(null);
+                // Split into rows of 5
+                const rows = [];
+                for (let i = 0; i < cells.length; i += 5) rows.push(cells.slice(i, i + 5));
+                return rows.map((row, ri) => (
+                  <div key={ri} className="grid grid-cols-5 gap-1.5 mb-1.5">
+                    {row.map((day, ci) => {
+                      if (!day) return <div key={ci} className="rounded-lg border border-transparent p-2" />;
+                      const dayPicked = (day.tickets || []).filter((t) => t.pickedByTech).length;
+                      const dayTotal = (day.tickets || []).length;
+                      const dayNotPicked = dayTotal - dayPicked;
+                      const hInfo = getHolidayInfo(day.date);
+                      const hTip = getHolidayTooltip(day.date);
+                      const dayDate = new Date(day.date + 'T12:00:00');
+                      const dayLabel = dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                      return (
+                        <div
+                          key={day.date}
+                          className={`text-center p-2 rounded-lg border ${hInfo.isCanadian ? 'bg-rose-50 border-rose-300' : hInfo.isUS ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'}`}
+                          title={hTip || undefined}
+                        >
+                          <div className="text-[9px] text-slate-300 mb-0.5">{dayLabel}</div>
+                          {hInfo.isHoliday && (
+                            <div className={`text-[7px] font-semibold mb-0.5 truncate ${hInfo.isCanadian ? 'text-rose-600' : 'text-indigo-500'}`}>
+                              {hInfo.isCanadian ? `🍁` : `🇺🇸`}
+                            </div>
+                          )}
+                          <div className="text-base font-bold text-slate-800">{dayTotal}</div>
+                          <div className="flex items-center justify-center gap-1 mt-0.5">
+                            <span className="text-[9px] font-bold text-emerald-600">{dayPicked}✓</span>
+                            <span className="text-slate-200">|</span>
+                            <span className="text-[9px] font-bold text-amber-600">{dayNotPicked}✗</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ));
+              })()}
+            </>
+          ) : (
+            /* Weekly: single row of 5 weekday cells */
+            <div className="grid grid-cols-5 gap-2">
+              {days.map((day) => {
+                const dayDate = new Date(day.date + 'T12:00:00');
+                const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'short' });
+                const dayLabel = dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const dayPicked = (day.tickets || []).filter((t) => t.pickedByTech).length;
+                const dayTotal = (day.tickets || []).length;
+                const dayNotPicked = dayTotal - dayPicked;
+                const hInfo = getHolidayInfo(day.date);
+                const hTip = getHolidayTooltip(day.date);
+                return (
+                  <div
+                    key={day.date}
+                    className={`text-center p-3 rounded-lg border ${hInfo.isCanadian ? 'bg-rose-50 border-rose-300' : hInfo.isUS ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'}`}
+                    title={hTip || undefined}
+                  >
+                    <div className={`text-[10px] font-bold uppercase ${hInfo.isCanadian ? 'text-rose-600' : hInfo.isUS ? 'text-indigo-500' : 'text-slate-400'}`}>{dayName}</div>
+                    <div className="text-[9px] text-slate-300 mb-1">{dayLabel}</div>
+                    {hInfo.isHoliday && (
+                      <div className={`text-[8px] font-semibold mb-1 truncate ${hInfo.isCanadian ? 'text-rose-600' : 'text-indigo-500'}`}>
+                        {hInfo.isCanadian ? `🍁 ${hInfo.canadianName}` : `🇺🇸 ${hInfo.usName}`}
+                      </div>
+                    )}
+                    <div className="text-lg font-bold text-slate-800">{dayTotal}</div>
+                    <div className="text-[10px] text-slate-300">eligible</div>
+                    <div className="flex items-center justify-center gap-2 mt-1.5">
+                      <span className="text-[10px] font-bold text-emerald-600">{dayPicked} ✓</span>
+                      <span className="text-slate-200">|</span>
+                      <span className="text-[10px] font-bold text-amber-600">{dayNotPicked} ✗</span>
                     </div>
-                  )}
-                  <div className="text-lg font-bold text-slate-800">{dayTotal}</div>
-                  <div className="text-[10px] text-slate-300">eligible</div>
-                  <div className="flex items-center justify-center gap-2 mt-1.5">
-                    <span className="text-[10px] font-bold text-emerald-600">{dayPicked} ✓</span>
-                    <span className="text-slate-200">|</span>
-                    <span className="text-[10px] font-bold text-amber-600">{dayNotPicked} ✗</span>
+                    <div className="text-[9px] text-slate-300 mt-1 truncate" title={day.windowLabel}>
+                      {day.windowLabel}
+                    </div>
                   </div>
-                  <div className="text-[9px] text-slate-300 mt-1 truncate" title={day.windowLabel}>
-                    {day.windowLabel}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -207,30 +280,43 @@ export default function CoverageTab({
         );
       })()}
 
+      {/* Full-width filter bar — affects both columns */}
+      <div className="bg-white rounded-lg border border-slate-200 px-3 py-2">
+        <FilterBar
+          allCategories={allCategories}
+          excludeCats={excludeCats}
+          setExcludeCats={setExcludeCats}
+          excludeText={excludeText}
+          setExcludeText={setExcludeText}
+          includeCats={includeCats}
+          setIncludeCats={setIncludeCats}
+          includeText={includeText}
+          setIncludeText={setIncludeText}
+        />
+      </div>
+
       {/* Two-column: Picked | Not Picked */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* LEFT — Picked */}
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-100">
+          <div className="flex items-center px-3 py-2.5 border-b border-slate-100">
             <h3 className="text-xs font-semibold text-emerald-700 uppercase tracking-wider flex items-center gap-1.5">
               Picked by {technician.name?.split(' ')[0]}
               <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full text-[10px] font-bold">
-                {allPicked.length}
+                {filteredPicked.length}
               </span>
+              {filteredPicked.length !== allPicked.length && (
+                <span className="text-slate-400 text-[10px] font-normal normal-case">of {allPicked.length}</span>
+              )}
             </h3>
-            <button
-              onClick={() => setShowMergedTimeline(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm"
-            >
-              <Layers className="w-3.5 h-3.5" />
-              Timeline
-            </button>
           </div>
-          {allPicked.length === 0 ? (
-            <p className="text-slate-400 text-sm text-center py-8">No tickets picked up in this window.</p>
+          {filteredPicked.length === 0 ? (
+            <p className="text-slate-400 text-sm text-center py-8">
+              {allPicked.length === 0 ? 'No tickets picked up in this window.' : 'All picked tickets hidden by include filter.'}
+            </p>
           ) : (
             <div className="space-y-1 p-2 max-h-[600px] overflow-y-auto">
-              {allPicked.map((t) => (
+              {filteredPicked.map((t) => (
                 <CoverageTicketRow key={t.id} ticket={t} showAssignee={false} />
               ))}
             </div>
@@ -239,33 +325,17 @@ export default function CoverageTab({
 
         {/* RIGHT — Not Picked */}
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-          {/* Column header */}
-          <div className="px-3 pt-2.5 pb-2 border-b border-slate-100">
-            <div className="flex items-center gap-1.5 mb-2">
-              <h3 className="text-xs font-semibold text-amber-700 uppercase tracking-wider flex items-center gap-1.5">
-                Not Picked
-                <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full text-[10px] font-bold">
-                  {filteredNotPicked.length}
-                </span>
-                {hiddenCount > 0 && (
-                  <span className="text-slate-400 text-[10px] font-normal normal-case">of {allNotPicked.length}</span>
-                )}
-              </h3>
-            </div>
-            {/* Filter bar — one line */}
-            <FilterBar
-              allCategories={allCategories}
-              excludeCats={excludeCats}
-              setExcludeCats={setExcludeCats}
-              excludeText={excludeText}
-              setExcludeText={setExcludeText}
-              includeCats={includeCats}
-              setIncludeCats={setIncludeCats}
-              includeText={includeText}
-              setIncludeText={setIncludeText}
-            />
+          <div className="flex items-center px-3 py-2.5 border-b border-slate-100">
+            <h3 className="text-xs font-semibold text-amber-700 uppercase tracking-wider flex items-center gap-1.5">
+              Not Picked
+              <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full text-[10px] font-bold">
+                {filteredNotPicked.length}
+              </span>
+              {hiddenCount > 0 && (
+                <span className="text-slate-400 text-[10px] font-normal normal-case">of {allNotPicked.length}</span>
+              )}
+            </h3>
           </div>
-
           {filteredNotPicked.length === 0 ? (
             <div className="p-4 text-center">
               <p className={`text-sm font-medium ${allNotPicked.length === 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
@@ -318,6 +388,7 @@ export default function CoverageTab({
           viewMode={viewMode}
           selectedDate={selectedDate}
           selectedWeek={selectedWeek}
+          selectedMonth={selectedMonth}
           onClose={() => setShowMergedTimeline(false)}
           onPrevious={onPrevious}
           onNext={onNext}
