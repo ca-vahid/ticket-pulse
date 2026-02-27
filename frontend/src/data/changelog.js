@@ -1,6 +1,33 @@
-export const APP_VERSION = '1.2.0-preview';
+export const APP_VERSION = '1.2.1-preview';
 
 export const changelog = [
+  {
+    version: '1.2.1-preview',
+    date: 'February 26, 2026',
+    entries: [
+      { type: 'new', text: 'Technician detail page fully redesigned — 2,500-line monolith refactored into 9 focused sub-components (TechDetailHeader, MetricsRibbon, OverviewTab, TicketBoardTab, CoverageTab, CSATTab, MergedTimelineModal, FilterBar, and shared constants/utils)' },
+      { type: 'new', text: '4-tab structure replaces 7 flat tabs — Overview, Tickets, Coverage, and CSAT; the Tickets tab has its own sub-navigation pills (All Open, Self-Picked, Assigned, Closed)' },
+      { type: 'new', text: 'Compact single-row sticky header — tech identity (photo, name, location, timezone, schedule) on the left; Daily/Weekly toggle, date navigation, and export all grouped on the right' },
+      { type: 'new', text: 'Slim metrics ribbon — replaces the 5 large clickable stat cards with a single unclickable horizontal row of key figures; ribbon lives inside the Tickets tab where it is contextually relevant' },
+      { type: 'new', text: 'Ticket list redesigned as a strict CSS-grid table — columns for Priority, Ticket #, Subject/Requester, Status, Category, and Time Metric; alternating row backgrounds for scanability; "badge diet" reduces visual noise' },
+      { type: 'new', text: 'Include filter added to Coverage and Merged Timeline — one-line filter bar with [Exclude ▼] [exclude text] | [include text] [Include ▼]; include filter shows only tickets matching the specified keywords or categories' },
+      { type: 'new', text: 'OR syntax in both filter inputs — use `|` to combine multiple terms (e.g. "cpu | printer | vpn" matches any ticket containing any of those words)' },
+      { type: 'new', text: 'Category filter dropdowns replace pill walls — compact popovers with checkbox lists for both Exclude and Include; no more horizontal scrolling wall of pills in the Coverage and Timeline filter bars' },
+      { type: 'new', text: 'Day by Day / Combined toggle in Merged Timeline weekly view — "Day by Day" shows tickets grouped and separated by date with per-day headers; "Combined" collapses all days to time-of-day order across the whole week' },
+      { type: 'new', text: 'Weekend day separators in combined Merged Timeline — automatic divider lines mark date boundaries, labelled with weekday name and holiday info if applicable' },
+      { type: 'new', text: 'Coverage analysis now available for all technicians — removed Eastern/Atlantic-only restriction; Pacific, Mountain, Central, and other timezones now show full coverage data' },
+      { type: 'new', text: 'Future days blocked from navigation — Next Day / Next Week buttons hidden when already on today or the current week; date picker max is set to today; Coverage timeline filters out any future days automatically' },
+      { type: 'improved', text: 'Overview tab visually distinct from other tabs — subtle background tint on active Overview, making it clear it is an analytics view rather than a data list' },
+      { type: 'improved', text: 'Overview stat rows are compact — replaced tall metric boxes with a tight horizontal StatRow; large numbers with small labels replaced by balanced size hierarchy' },
+      { type: 'improved', text: 'Weekly Overview order corrected — Weekly Summary and Self-Picked vs Assigned bar now appear above the Daily Breakdown grid instead of below it' },
+      { type: 'improved', text: 'Merged Timeline stays open during date navigation — clicking Previous, Next, or Today inside the timeline modal no longer closes and reopens the modal; data refreshes in place' },
+      { type: 'improved', text: 'Semantic color palette applied throughout — decorative purple/orange/yellow replaced with a strict system: red for Open/Urgent, amber for Pending, emerald for Resolved/Closed/picked, slate for neutral' },
+      { type: 'improved', text: 'Coverage filter shared between the Coverage tab and Merged Timeline — any exclude/include change made in one view is immediately reflected in the other without resetting' },
+      { type: 'fixed', text: 'Agent online/offline markers in Merged Timeline showing incorrect times for non-Eastern timezones — rewritten to use Intl.DateTimeFormat for DST-accurate UTC offset calculation (fixes Mountain Time / Edmonton and similar)' },
+      { type: 'fixed', text: 'Merged Timeline closing on prev/next navigation — removed the erroneous onClose() calls from the navigation button handlers inside the modal' },
+      { type: 'fixed', text: 'Coverage Daily Breakdown and timeline including tomorrow and future days when viewing the current week — future dates are now filtered before rendering' },
+    ],
+  },
   {
     version: '1.2.0-preview',
     date: 'February 25, 2026',
