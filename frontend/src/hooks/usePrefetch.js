@@ -58,11 +58,14 @@ const TZ = 'America/Los_Angeles';
  * Prefetch adjacent time periods for the current view.
  * Runs after render in idle time with debounce, concurrency limits, and network guards.
  */
-export function usePrefetch({ viewMode, selectedDate, selectedWeek, selectedMonth }) {
+export function usePrefetch({ viewMode, selectedDate, selectedWeek, selectedMonth, primaryDataReady = true }) {
   const timerRef = useRef(null);
   const idleRef = useRef(null);
 
   useEffect(() => {
+    // Wait until the primary view has rendered before prefetching adjacent periods
+    if (!primaryDataReady) return;
+
     // Debounce: wait for navigation to settle
     if (timerRef.current) clearTimeout(timerRef.current);
     if (idleRef.current) cancelIdle(idleRef.current);
@@ -161,7 +164,7 @@ export function usePrefetch({ viewMode, selectedDate, selectedWeek, selectedMont
       if (timerRef.current) clearTimeout(timerRef.current);
       if (idleRef.current) cancelIdle(idleRef.current);
     };
-  }, [viewMode, selectedDate, selectedWeek, selectedMonth]);
+  }, [viewMode, selectedDate, selectedWeek, selectedMonth, primaryDataReady]);
 }
 
 /**

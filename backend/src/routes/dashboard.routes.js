@@ -3,6 +3,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth } from '../middleware/auth.js';
 import technicianRepository from '../services/technicianRepository.js';
 import ticketRepository from '../services/ticketRepository.js';
+import prisma from '../services/prisma.js';
 import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import logger from '../utils/logger.js';
 import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianDetail, calculateTechnicianWeeklyStats, calculateTechnicianMonthlyStats, calculateMonthlyDashboard } from '../services/statsCalculator.js';
@@ -49,41 +50,31 @@ router.get(
 
     logger.debug(`Fetching dashboard data for timezone: ${timezone}, date: ${dateParam || 'today'}`);
 
-    // Fetch all active technicians with their tickets
-    const technicians = await technicianRepository.getAllActive();
-
     // Get date range for filtering
     let todayStart, todayEnd;
     if (dateParam) {
-      // Use provided date - interpret the date string as being in the target timezone
-      // Create a date at noon in the target timezone to avoid edge cases
       const [year, month, day] = dateParam.split('-').map(Number);
       const selectedDate = new Date(year, month - 1, day, 12, 0, 0);
       const result = getTodayRange(timezone, selectedDate);
       todayStart = result.start;
       todayEnd = result.end;
     } else {
-      // Use today
       const result = getTodayRange(timezone);
       todayStart = result.start;
       todayEnd = result.end;
     }
 
-    // Use statsCalculator for consistent calculations across all endpoints
-    const dashboardData = calculateDailyDashboard(
-      technicians,
-      todayStart,
-      todayEnd,
-      isViewingToday,
-    );
+    // Fetch active technicians with only relevant tickets (scoped to date range + open + CSAT)
+    const technicians = await technicianRepository.getAllActiveScoped(todayStart, todayEnd);
 
-    // Compute avoidance analysis in parallel
-    let avoidanceMap = {};
-    try {
-      avoidanceMap = await computeDashboardAvoidance(technicians, todayStart, todayEnd);
-    } catch (err) {
-      logger.error('Avoidance analysis failed for daily dashboard:', err);
-    }
+    // Run stats calculation (sync) and avoidance analysis (async DB query) in parallel
+    const [dashboardData, avoidanceMap] = await Promise.all([
+      Promise.resolve(calculateDailyDashboard(technicians, todayStart, todayEnd, isViewingToday)),
+      computeDashboardAvoidance(technicians, todayStart, todayEnd).catch(err => {
+        logger.error('Avoidance analysis failed for daily dashboard:', err);
+        return {};
+      }),
+    ]);
 
     // Transform tickets for frontend (flatten requester object)
     // Use ticketsToday for date-filtered view (tickets assigned on selected date)
@@ -143,9 +134,6 @@ router.get(
 
     // Fetch all tickets in the week range (by either createdAt or firstAssignedAt)
     // This matches the statsCalculator logic exactly
-    const { PrismaClient} = await import('@prisma/client');
-    const prisma = new PrismaClient();
-
     const tickets = await prisma.ticket.findMany({
       where: {
         OR: [
@@ -173,8 +161,6 @@ router.get(
         firstAssignedAt: true,
       },
     });
-
-    await prisma.$disconnect();
 
     logger.debug(`Found ${tickets.length} tickets in week range`);
 
@@ -254,26 +240,21 @@ router.get(
 
     logger.debug(`Week range: ${formatDateInTimezone(weekStartDate, timezone)} to ${formatDateInTimezone(weekEndDate, timezone)}`);
 
-    // Fetch all active technicians with their tickets
-    const technicians = await technicianRepository.getAllActive();
+    // Get timezone-aware UTC boundaries for the scoped query
+    const weekStartRange = getTodayRange(timezone, weekStartDate);
+    const weekEndRange = getTodayRange(timezone, weekEndDate);
 
-    // Use statsCalculator for consistent calculations
-    const dashboardData = calculateWeeklyDashboard(
-      technicians,
-      weekStartDate,
-      weekEndDate,
-      timezone,
-    );
+    // Fetch active technicians with only relevant tickets
+    const technicians = await technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end);
 
-    // Compute avoidance analysis for the week
-    let avoidanceMap = {};
-    try {
-      avoidanceMap = await computeWeeklyDashboardAvoidance(
-        technicians, weekStartDate, weekEndDate, timezone,
-      );
-    } catch (err) {
-      logger.error('Avoidance analysis failed for weekly dashboard:', err);
-    }
+    // Run stats calculation (sync) and avoidance analysis (async DB query) in parallel
+    const [dashboardData, avoidanceMap] = await Promise.all([
+      Promise.resolve(calculateWeeklyDashboard(technicians, weekStartDate, weekEndDate, timezone)),
+      computeWeeklyDashboardAvoidance(technicians, weekStartDate, weekEndDate, timezone).catch(err => {
+        logger.error('Avoidance analysis failed for weekly dashboard:', err);
+        return {};
+      }),
+    ]);
 
     // Transform technicians to include weeklyTickets array for frontend filtering
     const techsWithTickets = dashboardData.technicians.map(tech => ({
@@ -749,8 +730,12 @@ router.get(
 
     logger.debug(`Month range: ${monthStartDate.toISOString()} to ${monthEndDate.toISOString()}`);
 
-    // Fetch all active technicians with their tickets
-    const technicians = await technicianRepository.getAllActive();
+    // Get timezone-aware UTC boundaries for the scoped query
+    const monthStartRange = getTodayRange(timezone, monthStartDate);
+    const monthEndRange = getTodayRange(timezone, monthEndDate);
+
+    // Fetch active technicians with only relevant tickets
+    const technicians = await technicianRepository.getAllActiveScoped(monthStartRange.start, monthEndRange.end);
 
     // Use statsCalculator for consistent calculations
     const monthlyData = calculateMonthlyDashboard(

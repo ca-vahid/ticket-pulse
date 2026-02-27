@@ -31,7 +31,7 @@ const errorInterceptor = (error) => {
     const status = error.response.status;
     const requestUrl = error.config?.url || '';
 
-    if (status === 401 && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout') {
+    if (status === 401 && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout' && !error.config?._speculative) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: { url: requestUrl },
       }));

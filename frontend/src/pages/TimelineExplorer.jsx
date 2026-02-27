@@ -579,9 +579,9 @@ export default function TimelineExplorer() {
         </div>
       )}
 
-      {/* ── Header ── */}
+      {/* ── White top bar ── */}
       <header className="bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
-        <div className="max-w-full px-6 py-3 flex items-center gap-4">
+        <div className="px-4 py-2 flex items-center gap-3">
           {/* Back */}
           <button
             onClick={() => navigate('/dashboard')}
@@ -590,12 +590,12 @@ export default function TimelineExplorer() {
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
 
-          <div className="w-px h-6 bg-slate-200 flex-shrink-0" />
+          <div className="w-px h-5 bg-slate-200 flex-shrink-0" />
 
           {/* Title */}
-          <div className="flex items-center gap-2 min-w-0">
-            <Layers className="w-5 h-5 text-blue-600 flex-shrink-0" />
-            <h1 className="text-base font-bold text-slate-900 leading-tight">Timeline Explorer</h1>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Layers className="w-4 h-4 text-blue-600 flex-shrink-0" />
+            <h1 className="text-sm font-bold text-slate-900">Timeline Explorer</h1>
             {selectedTechIds.size > 0 && (
               <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
                 {selectedTechIds.size} tech{selectedTechIds.size > 1 ? 's' : ''}
@@ -605,89 +605,20 @@ export default function TimelineExplorer() {
 
           <div className="flex-1" />
 
-          {/* Period toggle */}
-          <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs font-semibold flex-shrink-0">
-            {['daily', 'weekly', 'monthly'].map((m) => (
-              <button
-                key={m}
-                onClick={() => setViewMode(m)}
-                className={`px-3 py-1.5 rounded-md capitalize transition-all ${
-                  viewMode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-
-          <div className="w-px h-5 bg-slate-200 flex-shrink-0" />
-
-          {/* Date nav */}
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <button onClick={handlePrevious} className="p-1.5 hover:bg-slate-100 rounded-md transition-colors">
-              <ChevronLeft className="w-4 h-4 text-slate-500" />
-            </button>
-
-            <div className="w-[216px] flex items-center justify-center">
-              {viewMode === 'weekly' ? (
-                <span className="text-sm font-medium text-slate-700 text-center w-full">{periodLabel}</span>
-              ) : viewMode === 'monthly' ? (
-                <input
-                  type="month"
-                  value={monthInputValue}
-                  max={maxMonthValue}
-                  onChange={(e) => {
-                    const [y, mo] = e.target.value.split('-').map(Number);
-                    setSelectedMonth(new Date(y, mo - 1, 1));
-                  }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-700"
-                />
-              ) : (
-                <input
-                  type="date"
-                  value={selectedDate || formatDateLocal(new Date())}
-                  max={formatDateLocal(new Date())}
-                  onChange={(e) => setSelectedDate(e.target.value || null)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-700"
-                />
+          {/* Picked / Not-picked totals */}
+          {totals && (
+            <div className="flex items-center gap-3 text-xs flex-shrink-0">
+              <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                Picked {totals.picked}
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-400 font-semibold">
+                <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" />
+                Not picked {totals.notPicked}
+              </span>
+              {totals.hidden > 0 && (
+                <span className="text-slate-300 text-[10px]">({totals.hidden} hidden)</span>
               )}
-            </div>
-
-            <button
-              onClick={atCurrentPeriod ? undefined : handleNext}
-              className={`p-1.5 rounded-md transition-colors ${atCurrentPeriod ? 'invisible' : 'hover:bg-slate-100'}`}
-              tabIndex={atCurrentPeriod ? -1 : 0}
-            >
-              <ChevronRight className="w-4 h-4 text-slate-500" />
-            </button>
-
-            <button
-              onClick={atCurrentPeriod ? undefined : handleToday}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex-shrink-0 ${
-                atCurrentPeriod ? 'invisible' : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-              tabIndex={atCurrentPeriod ? -1 : 0}
-            >
-              {viewMode === 'monthly' ? 'This Month' : viewMode === 'weekly' ? 'This Week' : 'Today'}
-            </button>
-          </div>
-
-          <div className="w-px h-5 bg-slate-200 flex-shrink-0" />
-
-          {/* View mode (rolling/combined) */}
-          {isMultiDay && (
-            <div className="flex bg-slate-100 rounded-lg p-0.5 text-[11px] font-semibold flex-shrink-0">
-              {['rolling', 'combined'].map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setMergedViewMode(m)}
-                  className={`px-2.5 py-1 rounded-md capitalize transition-all ${
-                    mergedViewMode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  {m === 'rolling' ? 'Day by Day' : 'Combined'}
-                </button>
-              ))}
             </div>
           )}
 
@@ -700,21 +631,107 @@ export default function TimelineExplorer() {
           >
             <RefreshCw className={`w-4 h-4 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
-
-          {/* Stats — totals only (per-tech breakdown is in the sidebar) */}
-          {totals && (
-            <div className="flex items-center gap-2 text-xs flex-shrink-0">
-              <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Picked {totals.picked}
-              </span>
-              <span className="flex items-center gap-1 text-slate-400 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" /> Not picked {totals.notPicked}
-              </span>
-              {totals.hidden > 0 && <span className="text-slate-300">({totals.hidden} hidden)</span>}
-            </div>
-          )}
         </div>
       </header>
+
+      {/* ── Gradient date/period navigation bar ── */}
+      <div className="flex-shrink-0 px-4 pt-2 pb-2">
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-3 py-2 flex items-center gap-3 text-white">
+
+          {/* LEFT: Date navigation */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={handlePrevious}
+              className="p-1.5 hover:bg-white hover:bg-opacity-20 rounded transition-colors"
+              title={viewMode === 'daily' ? 'Previous day' : viewMode === 'weekly' ? 'Previous week' : 'Previous month'}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <div className="w-52 flex items-center justify-center">
+              {viewMode === 'weekly' ? (
+                <span className="text-sm font-medium text-center w-full opacity-95">{periodLabel}</span>
+              ) : viewMode === 'monthly' ? (
+                <input
+                  type="month"
+                  value={monthInputValue}
+                  max={maxMonthValue}
+                  onChange={(e) => {
+                    const [y, mo] = e.target.value.split('-').map(Number);
+                    setSelectedMonth(new Date(y, mo - 1, 1));
+                  }}
+                  className="w-full px-2 py-0.5 bg-white bg-opacity-20 border border-white border-opacity-30 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-white"
+                />
+              ) : (
+                <input
+                  type="date"
+                  value={selectedDate || formatDateLocal(new Date())}
+                  max={formatDateLocal(new Date())}
+                  onChange={(e) => setSelectedDate(e.target.value || null)}
+                  className="w-full px-2 py-0.5 bg-white bg-opacity-20 border border-white border-opacity-30 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-white"
+                />
+              )}
+            </div>
+
+            <button
+              onClick={atCurrentPeriod ? undefined : handleNext}
+              className={`p-1.5 rounded transition-colors ${atCurrentPeriod ? 'opacity-30 cursor-default' : 'hover:bg-white hover:bg-opacity-20'}`}
+              title={viewMode === 'daily' ? 'Next day' : viewMode === 'weekly' ? 'Next week' : 'Next month'}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+
+            {!atCurrentPeriod && (
+              <button
+                onClick={handleToday}
+                className="px-2 py-0.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors whitespace-nowrap"
+              >
+                {viewMode === 'monthly' ? 'This Month' : viewMode === 'weekly' ? 'This Week' : 'Today'}
+              </button>
+            )}
+          </div>
+
+          <div className="flex-1" />
+
+          {/* RIGHT: Rolling/Combined + Daily/Weekly/Monthly */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Rolling/Combined toggle (only when multi-day) */}
+            {isMultiDay && (
+              <>
+                <div className="inline-flex items-center gap-0.5 bg-white bg-opacity-20 rounded-lg p-0.5">
+                  {['rolling', 'combined'].map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setMergedViewMode(m)}
+                      className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                        mergedViewMode === m ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white hover:bg-opacity-10'
+                      }`}
+                    >
+                      {m === 'rolling' ? 'Day by Day' : 'Combined'}
+                    </button>
+                  ))}
+                </div>
+                <div className="w-px h-6 bg-white bg-opacity-20 flex-none" />
+              </>
+            )}
+
+            {/* Period toggle — far right, matching Dashboard position */}
+            <div className="inline-flex items-center gap-0.5 bg-white bg-opacity-20 rounded-lg p-0.5">
+              {['daily', 'weekly', 'monthly'].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setViewMode(m)}
+                  className={`px-3 py-1 rounded text-xs font-medium capitalize transition-colors ${
+                    viewMode === m ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white hover:bg-opacity-10'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* ── Body ── */}
       <div className="flex flex-1 overflow-hidden">

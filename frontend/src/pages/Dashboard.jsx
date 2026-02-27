@@ -45,6 +45,8 @@ import {
   Map,
   Layers,
   GitBranch,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -53,6 +55,7 @@ export default function Dashboard() {
     weeklyData,
     weeklyStats,
     monthlyData,
+    primaryDataReady,
     isColdLoading,
     isRefreshing,
     isLoading,
@@ -153,8 +156,8 @@ export default function Dashboard() {
       return stored;
     }
 
-    // Priority 3: Default to daily
-    return 'daily';
+    // Priority 3: Default to weekly (best overview for first-time users)
+    return 'weekly';
   });
 
   // Selected week (Monday) for weekly view - restore from localStorage or navigation state
@@ -249,8 +252,8 @@ export default function Dashboard() {
     );
   }, [viewMode, selectedDate, selectedWeek, selectedMonth, setCurrentView, formatDateLocal]);
 
-  // Prefetch adjacent time periods
-  usePrefetch({ viewMode, selectedDate, selectedWeek, selectedMonth });
+  // Prefetch adjacent time periods (gated on primary data having arrived)
+  usePrefetch({ viewMode, selectedDate, selectedWeek, selectedMonth, primaryDataReady });
 
   // Smart handler for switching to daily view
   const handleSwitchToDaily = useCallback(() => {
@@ -315,8 +318,10 @@ export default function Dashboard() {
     fetchMonthlyDashboard(monthStartStr, 'America/Los_Angeles');
   }, [viewMode, selectedMonth, formatDateLocal, fetchMonthlyDashboard]);
 
-  // Poll for background sync status every 5 seconds
+  // Poll for background sync status every 5 seconds (deferred until primary data arrives)
   useEffect(() => {
+    if (!primaryDataReady) return;
+
     const checkBackgroundSync = async () => {
       try {
         const status = await syncAPI.getStatus();
@@ -327,14 +332,12 @@ export default function Dashboard() {
       }
     };
 
-    // Check immediately
     checkBackgroundSync();
 
-    // Then check every 5 seconds
     const interval = setInterval(checkBackgroundSync, 5000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [primaryDataReady]);
 
   const addSyncLog = (message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
@@ -1100,7 +1103,7 @@ export default function Dashboard() {
       )}
       
       {/* Compact Header - Single Row Grid */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
+      <header className="sticky top-0 z-40 bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-2">
           <div className="grid grid-cols-12 gap-4 items-center">
             {/* Left: Title + User - 3 cols */}
@@ -1163,21 +1166,6 @@ export default function Dashboard() {
 
             {/* Right: Action Buttons - 3 cols */}
             <div className="col-span-3 flex items-center justify-end gap-2">
-              {/* Compact View Toggle */}
-              <button
-                onClick={toggleCompactView}
-                className={`p-1.5 rounded transition-colors ${
-                  isCompactView ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-100'
-                }`}
-                title={isCompactView ? 'Normal View' : 'Compact View'}
-              >
-                {isCompactView ? (
-                  <Maximize2 className="w-4 h-4" />
-                ) : (
-                  <Minimize2 className="w-4 h-4" />
-                )}
-              </button>
-
               {/* Export Button */}
               <ExportButton
                 tickets={filteredTechnicians.flatMap(tech => getTechTickets(tech))}
@@ -1188,34 +1176,32 @@ export default function Dashboard() {
                 selectedMonth={selectedMonth}
               />
 
-              {/* Sync dropdown — merged Sync All + Sync Week */}
-              <div className="relative">
-                <div className="flex items-center">
-                  <button
-                    onClick={handleRefresh}
-                    disabled={refreshing || backgroundSyncRunning}
-                    className={`p-1.5 rounded-l-lg border border-r-0 border-gray-300 transition-colors ${
-                      refreshing || backgroundSyncRunning
-                        ? 'opacity-50 cursor-not-allowed'
-                        : 'hover:bg-gray-100'
-                    }`}
-                    title="Sync All"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${refreshing || backgroundSyncRunning ? 'animate-spin text-blue-600' : ''}`} />
-                  </button>
-                  <button
-                    onClick={handleSyncWeek}
-                    disabled={refreshing || backgroundSyncRunning}
-                    className={`p-1.5 rounded-r-lg border border-gray-300 transition-colors ${
-                      refreshing || backgroundSyncRunning
-                        ? 'opacity-50 cursor-not-allowed'
-                        : 'hover:bg-blue-50 hover:border-blue-300'
-                    }`}
-                    title="Sync Week (full detail sync for current week)"
-                  >
-                    <Calendar className={`w-4 h-4 ${backgroundSyncRunning ? 'text-blue-600' : ''}`} />
-                  </button>
-                </div>
+              {/* Sync buttons — greyed out when any sync is running */}
+              <div className="flex items-center">
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing || backgroundSyncRunning}
+                  className={`p-1.5 rounded-l-lg border border-r-0 border-gray-300 transition-colors ${
+                    refreshing || backgroundSyncRunning
+                      ? 'opacity-40 cursor-not-allowed'
+                      : 'hover:bg-gray-100'
+                  }`}
+                  title="Sync All"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleSyncWeek}
+                  disabled={refreshing || backgroundSyncRunning}
+                  className={`p-1.5 rounded-r-lg border border-gray-300 transition-colors ${
+                    refreshing || backgroundSyncRunning
+                      ? 'opacity-40 cursor-not-allowed'
+                      : 'hover:bg-blue-50 hover:border-blue-300'
+                  }`}
+                  title="Sync Week (full detail sync for current week)"
+                >
+                  <Calendar className="w-4 h-4" />
+                </button>
               </div>
 
               {/* Timeline Explorer */}
@@ -1372,13 +1358,306 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-3">
-        {/* Compact Single Row: Date + Stats + Self-Pick Rate */}
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-3 mb-4">
-          <div className="grid grid-cols-12 gap-4 items-center text-white">
-            {/* Date Navigation + Day of Week - 3 cols */}
-            <div className="col-span-3">
-              {/* Daily/Weekly/Monthly Toggle */}
-              <div className="inline-flex items-center gap-1 bg-white bg-opacity-20 rounded-lg p-1 mb-2">
+        {/* Stats Bar: Date Navigation (left) + Stats + Self-Pick + View Toggle (right) */}
+        <div className="sticky top-[52px] z-30 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-3 mb-4">
+          <div className="flex items-stretch gap-3 text-white">
+
+            {/* LEFT ZONE: Date Navigation + Day Grid */}
+            <div className="flex-none w-80">
+              {/* Navigation Controls */}
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <button
+                  onClick={viewMode === 'daily' ? goToPreviousDay : viewMode === 'weekly' ? goToPreviousWeek : goToPreviousMonth}
+                  className="p-1.5 hover:bg-white hover:bg-opacity-20 rounded transition-colors flex-none"
+                  title={viewMode === 'daily' ? 'Previous day' : viewMode === 'weekly' ? 'Previous week' : 'Previous month'}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                  <Calendar className="w-3.5 h-3.5 flex-none opacity-80" />
+                  {viewMode === 'daily' ? (
+                    <input
+                      type="date"
+                      value={formatDateLocal(selectedDate)}
+                      onChange={(e) => setSelectedDate(new Date(e.target.value + 'T12:00:00'))}
+                      className="bg-white bg-opacity-20 border border-white border-opacity-30 rounded px-2 py-0.5 text-white text-xs focus:outline-none focus:ring-1 focus:ring-white flex-1 min-w-0"
+                    />
+                  ) : viewMode === 'weekly' ? (
+                    <div className="bg-white bg-opacity-20 border border-white border-opacity-30 rounded px-2 py-0.5 text-white text-xs flex-1 min-w-0 text-center truncate">
+                      {(() => {
+                        const weekEnd = new Date(selectedWeek);
+                        weekEnd.setDate(selectedWeek.getDate() + 6);
+                        return `${selectedWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} \u2013 ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="bg-white bg-opacity-20 border border-white border-opacity-30 rounded px-2 py-0.5 text-white text-xs flex-1 min-w-0 text-center">
+                      {selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={viewMode === 'daily' ? goToNextDay : viewMode === 'weekly' ? goToNextWeek : goToNextMonth}
+                  disabled={viewMode === 'daily' && isToday}
+                  className={`p-1.5 rounded transition-colors flex-none ${(viewMode === 'daily' && isToday) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white hover:bg-opacity-20'}`}
+                  title={viewMode === 'daily' ? 'Next day' : viewMode === 'weekly' ? 'Next week' : 'Next month'}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                {!isToday && viewMode === 'daily' && (
+                  <button
+                    onClick={goToToday}
+                    className="px-2 py-0.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors whitespace-nowrap"
+                  >
+                    Today
+                  </button>
+                )}
+                {viewMode === 'weekly' && (
+                  <button
+                    onClick={goToCurrentWeek}
+                    className="px-2 py-0.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors whitespace-nowrap"
+                  >
+                    This Week
+                  </button>
+                )}
+                {viewMode === 'monthly' && (
+                  <button
+                    onClick={goToCurrentMonth}
+                    className="px-2 py-0.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors whitespace-nowrap"
+                  >
+                    This Month
+                  </button>
+                )}
+              </div>
+
+              {/* Day of Week Indicators - Clickable (Monday to Sunday) */}
+              <div className="flex justify-between gap-0.5">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
+                  const currentDay = (selectedDate.getDay() + 6) % 7;
+                  const dayStats = weeklyStats?.[index];
+                  const ticketCount = dayStats?.count ?? null;
+
+                  let dayDate;
+                  if (viewMode === 'weekly' && selectedWeek) {
+                    dayDate = new Date(selectedWeek);
+                    dayDate.setDate(selectedWeek.getDate() + index);
+                  } else {
+                    const dayDifference = index - currentDay;
+                    dayDate = new Date(selectedDate);
+                    dayDate.setDate(dayDate.getDate() + dayDifference);
+                  }
+                  const dayDateStr = `${dayDate.getFullYear()}-${String(dayDate.getMonth() + 1).padStart(2, '0')}-${String(dayDate.getDate()).padStart(2, '0')}`;
+
+                  const todayStr = formatDateLocal(new Date());
+                  const isActualToday = dayDateStr === todayStr;
+                  const isSelectedDay = viewMode === 'daily'
+                    ? index === currentDay
+                    : isActualToday;
+                  const isWeekendDay = index === 5 || index === 6;
+                  const holidayInfo = getHolidayInfo(dayDateStr);
+                  const isHolidayDay = holidayInfo.isHoliday;
+                  const holidayTooltip = getHolidayTooltip(dayDateStr);
+
+                  let trendIcon = null;
+                  let trendColor = '';
+                  if (weeklyStats && index > 0) {
+                    const prevDayCount = weeklyStats[index - 1]?.count ?? 0;
+                    const currentCount = ticketCount ?? 0;
+                    if (currentCount > prevDayCount) {
+                      trendIcon = <TrendingUp className="w-2.5 h-2.5" />;
+                      trendColor = 'text-red-400';
+                    } else if (currentCount < prevDayCount) {
+                      trendIcon = <TrendingDown className="w-2.5 h-2.5" />;
+                      trendColor = 'text-green-400';
+                    } else if (currentCount === prevDayCount && currentCount > 0) {
+                      trendIcon = <Minus className="w-2.5 h-2.5" />;
+                      trendColor = 'text-gray-400';
+                    }
+                  }
+
+                  const handleDayClick = () => {
+                    if (viewMode === 'weekly') {
+                      setSelectedDate(new Date(dayDate));
+                      setViewMode('daily');
+                      return;
+                    }
+                    setSelectedDate(new Date(dayDate));
+                  };
+
+                  let buttonTooltip = day;
+                  if (ticketCount !== null) buttonTooltip += ` - ${ticketCount} tickets`;
+                  if (holidayTooltip) buttonTooltip += `\n${holidayTooltip}`;
+
+                  const getButtonClasses = () => {
+                    if (isSelectedDay) {
+                      if (isHolidayDay && holidayInfo.isCanadian) return 'bg-rose-100 text-rose-700 shadow-md scale-110 ring-2 ring-rose-300';
+                      if (isHolidayDay) return 'bg-indigo-100 text-indigo-700 shadow-md scale-110 ring-2 ring-indigo-300';
+                      if (isWeekendDay) return 'bg-slate-100 text-slate-700 shadow-md scale-110';
+                      return 'bg-white text-blue-600 shadow-md scale-110';
+                    }
+                    if (viewMode === 'weekly') {
+                      if (isHolidayDay && holidayInfo.isCanadian) return 'text-rose-300 hover:text-rose-100 hover:bg-rose-400 hover:bg-opacity-30 cursor-pointer';
+                      if (isHolidayDay) return 'text-indigo-300 hover:text-indigo-100 hover:bg-indigo-400 hover:bg-opacity-30 cursor-pointer';
+                      if (isWeekendDay) return 'text-slate-300 hover:text-white hover:bg-slate-400 hover:bg-opacity-30 cursor-pointer';
+                      return 'text-white opacity-90 hover:opacity-100 hover:bg-white hover:bg-opacity-20 cursor-pointer';
+                    }
+                    if (isHolidayDay && holidayInfo.isCanadian) return 'text-rose-300 hover:text-rose-100 hover:bg-rose-400 hover:bg-opacity-30 cursor-pointer';
+                    if (isHolidayDay) return 'text-indigo-300 hover:text-indigo-100 hover:bg-indigo-400 hover:bg-opacity-30 cursor-pointer';
+                    if (isWeekendDay) return 'text-slate-300 hover:text-white hover:bg-slate-400 hover:bg-opacity-30 cursor-pointer';
+                    return 'text-white opacity-90 hover:opacity-100 hover:bg-white hover:bg-opacity-20 cursor-pointer';
+                  };
+
+                  return (
+                    <button
+                      key={day}
+                      onClick={handleDayClick}
+                      className={`text-[10px] font-semibold px-1 py-0.5 rounded transition-all flex flex-col items-center relative flex-1 ${getButtonClasses()}`}
+                      title={buttonTooltip}
+                    >
+                      {isHolidayDay && (
+                        <div className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${holidayInfo.isCanadian ? 'bg-rose-400' : 'bg-indigo-400'}`} />
+                      )}
+                      <span>{day}</span>
+                      <span className="text-[7px] opacity-60 -mt-0.5">{dayDate.getDate()}</span>
+                      {ticketCount !== null && (
+                        <div className="flex items-center gap-0.5">
+                          <span className="text-[9px] font-bold">{ticketCount}</span>
+                          {trendIcon && <span className={trendColor}>{trendIcon}</span>}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Vertical Divider */}
+            <div className="w-px bg-white bg-opacity-20 flex-none self-stretch" />
+
+            {/* RIGHT ZONE: Stats Cards + Self-Pick + View Toggle */}
+            <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+
+              {/* Stats Cards */}
+              <div className="flex items-center gap-1.5">
+                {/* Total */}
+                <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
+                  <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-400 bg-opacity-30 flex-none">
+                    <Inbox className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <div>
+                    <div className="text-base font-bold leading-tight">
+                      {viewMode === 'monthly' ? (displayStats.monthTotalCreated || 0) : viewMode === 'weekly' ? (displayStats.weeklyTotalCreated || 0) : (displayStats.totalTicketsToday || 0)}
+                    </div>
+                    <div className="text-[9px] text-blue-100 uppercase font-medium leading-tight">
+                      <div>Total</div>
+                      <div className="text-[8px] opacity-80">
+                        {viewMode === 'monthly'
+                          ? selectedMonth.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                          : viewMode === 'weekly'
+                            ? `${(() => {
+                              const weekEnd = new Date(selectedWeek);
+                              weekEnd.setDate(selectedWeek.getDate() + 6);
+                              return `${selectedWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} \u2013 ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+                            })()}`
+                            : selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                        }
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Open - Daily only */}
+                {viewMode === 'daily' && (
+                  <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
+                    <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-yellow-500 bg-opacity-30 flex-none">
+                      <FolderOpen className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-base font-bold leading-tight">{displayStats.openOnlyCount || 0}</div>
+                      <div className="text-[9px] text-blue-100 uppercase font-medium">Open</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pending - Daily only */}
+                {viewMode === 'daily' && (
+                  <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
+                    <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-orange-500 bg-opacity-30 flex-none">
+                      <Clock className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-base font-bold leading-tight">{displayStats.pendingCount || 0}</div>
+                      <div className="text-[9px] text-blue-100 uppercase font-medium">Pending</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Closed */}
+                <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
+                  <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-green-500 bg-opacity-30 flex-none">
+                    <CheckSquare className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <div>
+                    <div className="text-base font-bold leading-tight">
+                      {viewMode === 'monthly' ? (displayStats.monthClosed || 0) : viewMode === 'weekly' ? (displayStats.weeklyClosed || 0) : (displayStats.closedTicketsToday || 0)}
+                    </div>
+                    <div className="text-[9px] text-blue-100 uppercase font-medium">Closed</div>
+                  </div>
+                </div>
+
+                {/* Self */}
+                <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
+                  <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-purple-500 bg-opacity-30 flex-none">
+                    <Hand className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <div>
+                    <div className="text-base font-bold leading-tight">
+                      {viewMode === 'monthly' ? (displayStats.monthSelfPicked || 0) : viewMode === 'weekly' ? (displayStats.weeklySelfPicked || 0) : (displayStats.selfPickedToday || 0)}
+                    </div>
+                    <div className="text-[9px] text-blue-100 uppercase font-medium">Self</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div className="w-px h-10 bg-white bg-opacity-20 flex-none" />
+
+              {/* Self-Pick Progress */}
+              <div className="flex-none w-40">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold">Team Self-Pick</span>
+                  <span className="text-xs font-bold">{selfPickPercentage}%</span>
+                </div>
+                <div className="w-full bg-blue-900 bg-opacity-30 rounded-full h-2 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      selfPickPercentage >= 70 ? 'bg-green-400' :
+                        selfPickPercentage >= 50 ? 'bg-yellow-400' :
+                          'bg-red-400'
+                    }`}
+                    style={{ width: `${selfPickPercentage}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] text-blue-200 mt-0.5">
+                  <span>Goal: 70%</span>
+                  {isToday && (
+                    <span className="flex items-center gap-1">
+                      <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                      <span>{displayStats.lightLoad || 0}</span>
+                      <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                      <span>{displayStats.mediumLoad || 0}</span>
+                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                      <span>{displayStats.heavyLoad || 0}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div className="w-px h-10 bg-white bg-opacity-20 flex-none" />
+
+              {/* View Toggle - far right */}
+              <div className="flex-none inline-flex items-center gap-1 bg-white bg-opacity-20 rounded-lg p-1">
                 <button
                   onClick={handleSwitchToDaily}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
@@ -1409,332 +1688,6 @@ export default function Dashboard() {
                 >
                   Monthly
                 </button>
-              </div>
-              {/* Navigation Controls */}
-              <div className="flex items-center gap-2 mb-2">
-                <button
-                  onClick={viewMode === 'daily' ? goToPreviousDay : viewMode === 'weekly' ? goToPreviousWeek : goToPreviousMonth}
-                  className="p-1.5 hover:bg-white hover:bg-opacity-20 rounded transition-colors"
-                  title={viewMode === 'daily' ? 'Previous day' : viewMode === 'weekly' ? 'Previous week' : 'Previous month'}
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <div className="flex items-center gap-1.5 flex-1">
-                  <Calendar className="w-4 h-4" />
-                  {viewMode === 'daily' ? (
-                    <input
-                      type="date"
-                      value={formatDateLocal(selectedDate)}
-                      onChange={(e) => setSelectedDate(new Date(e.target.value + 'T12:00:00'))}
-                      className="bg-white bg-opacity-20 border border-white border-opacity-30 rounded px-2 py-1 text-white text-xs focus:outline-none focus:ring-1 focus:ring-white w-full"
-                    />
-                  ) : viewMode === 'weekly' ? (
-                    <div className="bg-white bg-opacity-20 border border-white border-opacity-30 rounded px-2 py-1 text-white text-xs w-full text-center">
-                      {(() => {
-                        const weekEnd = new Date(selectedWeek);
-                        weekEnd.setDate(selectedWeek.getDate() + 6);
-                        return `${selectedWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-                      })()}
-                    </div>
-                  ) : (
-                    <div className="bg-white bg-opacity-20 border border-white border-opacity-30 rounded px-2 py-1 text-white text-xs w-full text-center">
-                      {selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={viewMode === 'daily' ? goToNextDay : viewMode === 'weekly' ? goToNextWeek : goToNextMonth}
-                  disabled={viewMode === 'daily' && isToday}
-                  className={`p-1.5 rounded transition-colors ${
-                    (viewMode === 'daily' && isToday) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white hover:bg-opacity-20'
-                  }`}
-                  title={viewMode === 'daily' ? 'Next day' : viewMode === 'weekly' ? 'Next week' : 'Next month'}
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-                {!isToday && viewMode === 'daily' && (
-                  <button
-                    onClick={goToToday}
-                    className="px-2 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors"
-                  >
-                    Today
-                  </button>
-                )}
-                {viewMode === 'weekly' && (
-                  <button
-                    onClick={goToCurrentWeek}
-                    className="px-2 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors"
-                  >
-                    This Week
-                  </button>
-                )}
-                {viewMode === 'monthly' && (
-                  <button
-                    onClick={goToCurrentMonth}
-                    className="px-2 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors"
-                  >
-                    This Month
-                  </button>
-                )}
-              </div>
-
-              {/* Day of Week Indicator - Clickable (Monday to Sunday) */}
-              <div className="flex justify-center gap-1 relative">
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
-                  // Adjust for Monday start: Mon=0, Tue=1, ..., Sun=6
-                  const currentDay = (selectedDate.getDay() + 6) % 7; // Convert Sun=0 to Sun=6, Mon=1 to Mon=0, etc.
-
-                  // Get ticket count for this day
-                  const dayStats = weeklyStats?.[index];
-                  const ticketCount = dayStats?.count ?? null;
-                  
-                  // Calculate the actual date for this day of the week
-                  // In weekly view, use selectedWeek (Monday) as the base; otherwise use selectedDate
-                  let dayDate;
-                  if (viewMode === 'weekly' && selectedWeek) {
-                    // selectedWeek is the Monday of the week, so just add index days
-                    dayDate = new Date(selectedWeek);
-                    dayDate.setDate(selectedWeek.getDate() + index);
-                  } else {
-                    // For daily view, calculate from selectedDate
-                    const dayDifference = index - currentDay;
-                    dayDate = new Date(selectedDate);
-                    dayDate.setDate(dayDate.getDate() + dayDifference);
-                  }
-                  const dayDateStr = `${dayDate.getFullYear()}-${String(dayDate.getMonth() + 1).padStart(2, '0')}-${String(dayDate.getDate()).padStart(2, '0')}`;
-                  
-                  // Determine if this day should be highlighted with white box
-                  const todayStr = formatDateLocal(new Date());
-                  const isActualToday = dayDateStr === todayStr;
-                  
-                  // In daily view: highlight the selected day
-                  // In weekly view: only highlight if it's actually today
-                  const isSelectedDay = viewMode === 'daily' 
-                    ? index === currentDay  // In daily view, highlight selected day of week
-                    : isActualToday;        // In weekly view, only highlight actual today
-                  
-                  // Get weekend/holiday styling
-                  const isWeekendDay = index === 5 || index === 6; // Sat = 5, Sun = 6
-                  const holidayInfo = getHolidayInfo(dayDateStr);
-                  const isHolidayDay = holidayInfo.isHoliday;
-                  const holidayTooltip = getHolidayTooltip(dayDateStr);
-
-                  // Calculate trend (compare to previous day)
-                  let trendIcon = null;
-                  let trendColor = '';
-                  if (weeklyStats && index > 0) {
-                    const prevDayCount = weeklyStats[index - 1]?.count ?? 0;
-                    const currentCount = ticketCount ?? 0;
-                    if (currentCount > prevDayCount) {
-                      trendIcon = <TrendingUp className="w-2.5 h-2.5" />;
-                      trendColor = 'text-red-400'; // More tickets = red (bad)
-                    } else if (currentCount < prevDayCount) {
-                      trendIcon = <TrendingDown className="w-2.5 h-2.5" />;
-                      trendColor = 'text-green-400'; // Fewer tickets = green (good)
-                    } else if (currentCount === prevDayCount && currentCount > 0) {
-                      trendIcon = <Minus className="w-2.5 h-2.5" />;
-                      trendColor = 'text-gray-400'; // Same = gray (neutral)
-                    }
-                  }
-
-                  const handleDayClick = () => {
-                    if (viewMode === 'weekly') {
-                      setSelectedDate(new Date(dayDate));
-                      setViewMode('daily');
-                      return;
-                    }
-                    setSelectedDate(new Date(dayDate));
-                  };
-                  
-                  // Build button tooltip
-                  let buttonTooltip = day;
-                  if (ticketCount !== null) buttonTooltip += ` - ${ticketCount} tickets`;
-                  if (holidayTooltip) buttonTooltip += `\n${holidayTooltip}`;
-                  
-                  // Determine styling classes based on weekend/holiday
-                  const getButtonClasses = () => {
-                    // Selected/highlighted day (white box)
-                    if (isSelectedDay) {
-                      if (isHolidayDay && holidayInfo.isCanadian) {
-                        return 'bg-rose-100 text-rose-700 shadow-md scale-110 ring-2 ring-rose-300';
-                      }
-                      if (isHolidayDay) {
-                        return 'bg-indigo-100 text-indigo-700 shadow-md scale-110 ring-2 ring-indigo-300';
-                      }
-                      if (isWeekendDay) {
-                        return 'bg-slate-100 text-slate-700 shadow-md scale-110';
-                      }
-                      return 'bg-white text-blue-600 shadow-md scale-110';
-                    }
-                    
-                    // Weekly view - non-selected days (clickable to switch to daily)
-                    if (viewMode === 'weekly') {
-                      if (isHolidayDay && holidayInfo.isCanadian) {
-                        return 'text-rose-300 hover:text-rose-100 hover:bg-rose-400 hover:bg-opacity-30 cursor-pointer';
-                      }
-                      if (isHolidayDay) {
-                        return 'text-indigo-300 hover:text-indigo-100 hover:bg-indigo-400 hover:bg-opacity-30 cursor-pointer';
-                      }
-                      if (isWeekendDay) {
-                        return 'text-slate-300 hover:text-white hover:bg-slate-400 hover:bg-opacity-30 cursor-pointer';
-                      }
-                      return 'text-white opacity-90 hover:opacity-100 hover:bg-white hover:bg-opacity-20 cursor-pointer';
-                    }
-                    
-                    // Daily view, not selected day
-                    if (isHolidayDay && holidayInfo.isCanadian) {
-                      return 'text-rose-300 hover:text-rose-100 hover:bg-rose-400 hover:bg-opacity-30 cursor-pointer';
-                    }
-                    if (isHolidayDay) {
-                      return 'text-indigo-300 hover:text-indigo-100 hover:bg-indigo-400 hover:bg-opacity-30 cursor-pointer';
-                    }
-                    if (isWeekendDay) {
-                      return 'text-slate-300 hover:text-white hover:bg-slate-400 hover:bg-opacity-30 cursor-pointer';
-                    }
-                    return 'text-white opacity-90 hover:opacity-100 hover:bg-white hover:bg-opacity-20 cursor-pointer';
-                  };
-
-                  return (
-                    <button
-                      key={day}
-                      onClick={handleDayClick}
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded transition-all flex flex-col items-center relative ${getButtonClasses()}`}
-                      title={buttonTooltip}
-                    >
-                      {/* Holiday indicator dot */}
-                      {isHolidayDay && (
-                        <div className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${
-                          holidayInfo.isCanadian ? 'bg-rose-400' : 'bg-indigo-400'
-                        }`} />
-                      )}
-                      <span>{day}</span>
-                      <span className="text-[7px] opacity-60 -mt-0.5">{dayDate.getDate()}</span>
-                      {ticketCount !== null && (
-                        <div className="flex items-center gap-0.5">
-                          <span className="text-[9px] font-bold">{ticketCount}</span>
-                          {trendIcon && (
-                            <span className={trendColor}>
-                              {trendIcon}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Stats Cards - 6 cols */}
-            <div className="col-span-6 grid grid-cols-5 gap-2">
-              {/* Tickets for Selected Date/Week/Month */}
-              <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-2 flex items-center gap-2 hover:bg-opacity-20 transition-all">
-                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-400 bg-opacity-30">
-                  <Inbox className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <div className="text-lg font-bold">
-                    {viewMode === 'monthly' ? (displayStats.monthTotalCreated || 0) : viewMode === 'weekly' ? (displayStats.weeklyTotalCreated || 0) : (displayStats.totalTicketsToday || 0)}
-                  </div>
-                  <div className="text-[9px] text-blue-100 uppercase font-medium leading-tight">
-                    <div>Total</div>
-                    <div className="text-[8px] opacity-80">
-                      {viewMode === 'monthly'
-                        ? selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-                        : viewMode === 'weekly'
-                          ? `${(() => {
-                            const weekEnd = new Date(selectedWeek);
-                            weekEnd.setDate(selectedWeek.getDate() + 6);
-                            return `${selectedWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-                          })()}`
-                          : selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-                      }
-                    </div>
-                  </div>
-                </div>
-              </div>
-              {/* Open Tickets (current snapshot) - Only show in daily view */}
-              {viewMode === 'daily' && (
-                <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-2 flex items-center gap-2 hover:bg-opacity-20 transition-all">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-yellow-500 bg-opacity-30">
-                    <FolderOpen className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <div className="text-lg font-bold">
-                      {displayStats.openOnlyCount || 0}
-                    </div>
-                    <div className="text-[9px] text-blue-100 uppercase font-medium">Open</div>
-                  </div>
-                </div>
-              )}
-              {/* Pending Tickets (current snapshot) - Only show in daily view */}
-              {viewMode === 'daily' && (
-                <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-2 flex items-center gap-2 hover:bg-opacity-20 transition-all">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-orange-500 bg-opacity-30">
-                    <Clock className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <div className="text-lg font-bold">
-                      {displayStats.pendingCount || 0}
-                    </div>
-                    <div className="text-[9px] text-blue-100 uppercase font-medium">Pending</div>
-                  </div>
-                </div>
-              )}
-              {/* Closed Today/Week/Month */}
-              <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-2 flex items-center gap-2 hover:bg-opacity-20 transition-all">
-                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-green-500 bg-opacity-30">
-                  <CheckSquare className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <div className="text-lg font-bold">
-                    {viewMode === 'monthly' ? (displayStats.monthClosed || 0) : viewMode === 'weekly' ? (displayStats.weeklyClosed || 0) : (displayStats.closedTicketsToday || 0)}
-                  </div>
-                  <div className="text-[9px] text-blue-100 uppercase font-medium">Closed</div>
-                </div>
-              </div>
-              {/* Self-Picked Today/Week/Month */}
-              <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-2 flex items-center gap-2 hover:bg-opacity-20 transition-all">
-                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-purple-500 bg-opacity-30">
-                  <Hand className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <div className="text-lg font-bold">
-                    {viewMode === 'monthly' ? (displayStats.monthSelfPicked || 0) : viewMode === 'weekly' ? (displayStats.weeklySelfPicked || 0) : (displayStats.selfPickedToday || 0)}
-                  </div>
-                  <div className="text-[9px] text-blue-100 uppercase font-medium">Self</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Self-Pick Progress - 3 cols */}
-            <div className="col-span-3">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-semibold">Team Self-Pick</span>
-                <span className="text-xs font-bold">{selfPickPercentage}%</span>
-              </div>
-              <div className="w-full bg-blue-900 bg-opacity-30 rounded-full h-2 overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    selfPickPercentage >= 70 ? 'bg-green-400' :
-                      selfPickPercentage >= 50 ? 'bg-yellow-400' :
-                        'bg-red-400'
-                  }`}
-                  style={{ width: `${selfPickPercentage}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-[10px] text-blue-200 mt-0.5">
-                <span>Goal: 70%</span>
-                {isToday && (
-                  <span className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                    <span>{displayStats.lightLoad || 0}</span>
-                    <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                    <span>{displayStats.mediumLoad || 0}</span>
-                    <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                    <span>{displayStats.heavyLoad || 0}</span>
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -1780,6 +1733,29 @@ export default function Dashboard() {
                   ({searchTerm || selectedCategories.length > 0 ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
                 </span>
               </div>
+
+              {/* View toggle — Card / Compact */}
+              <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-medium">
+                <button
+                  onClick={() => { if (isCompactView) toggleCompactView(); }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
+                    !isCompactView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  Cards
+                </button>
+                <button
+                  onClick={() => { if (!isCompactView) toggleCompactView(); }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
+                    isCompactView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  <List className="w-3.5 h-3.5" />
+                  Compact
+                </button>
+              </div>
+
               {hiddenTechnicians.length > 0 && (
                 <button
                   onClick={() => setShowHidden(!showHidden)}

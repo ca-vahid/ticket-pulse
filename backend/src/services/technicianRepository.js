@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
-
-const prisma = new PrismaClient();
 
 /**
  * Repository for Technician operations
@@ -50,6 +48,41 @@ class TechnicianRepository {
     } catch (error) {
       logger.error('Error fetching active technicians:', error);
       throw new DatabaseError('Failed to fetch active technicians', error);
+    }
+  }
+
+  /**
+   * Get all active technicians with only the tickets relevant to a specific
+   * date range.  Loads: (1) tickets assigned in [dateStart, dateEnd],
+   * (2) currently Open/Pending tickets (for workload indicators),
+   * (3) CSAT tickets submitted in the range.
+   *
+   * @param {Date} dateStart - Start of the date range (inclusive)
+   * @param {Date} dateEnd   - End of the date range (inclusive)
+   * @returns {Promise<Array>} Array of active technicians with scoped tickets
+   */
+  async getAllActiveScoped(dateStart, dateEnd) {
+    try {
+      return await prisma.technician.findMany({
+        where: { isActive: true },
+        include: {
+          tickets: {
+            where: {
+              OR: [
+                { firstAssignedAt: { gte: dateStart, lte: dateEnd } },
+                { firstAssignedAt: null, createdAt: { gte: dateStart, lte: dateEnd } },
+                { status: { in: ['Open', 'Pending'] } },
+                { csatSubmittedAt: { gte: dateStart, lte: dateEnd } },
+              ],
+            },
+            include: { requester: true },
+          },
+        },
+        orderBy: { name: 'asc' },
+      });
+    } catch (error) {
+      logger.error('Error fetching active technicians (scoped):', error);
+      throw new DatabaseError('Failed to fetch active technicians (scoped)', error);
     }
   }
 

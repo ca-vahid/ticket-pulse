@@ -132,6 +132,7 @@ model Ticket {
   @@index([csatScore])
   @@index([csatSubmittedAt])
   @@index([firstPublicAgentReplyAt])
+  @@index([firstAssignedAt])
 }
 
 model TicketActivity {

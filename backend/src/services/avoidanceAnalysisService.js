@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import prisma from './prisma.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import logger from '../utils/logger.js';
-
-const prisma = new PrismaClient();
 
 const PT_TIMEZONE = 'America/Los_Angeles';
 const BUSINESS_CLOSE = '17:00';

@@ -1,6 +1,30 @@
-export const APP_VERSION = '1.2.5-preview';
+export const APP_VERSION = '1.2.6-preview';
 
 export const changelog = [
+  {
+    version: '1.2.6-preview',
+    date: 'February 27, 2026',
+    entries: [
+      { type: 'new', text: 'Redesigned dashboard stats bar — two-zone flex layout replaces the old 3-column grid; date navigation anchored on the left, all stats + self-pick progress + view toggle on the right; cleaner separation between controls and data' },
+      { type: 'new', text: 'View toggle (Daily / Weekly / Monthly) moved to far right of the stats bar — treated as a mode selector alongside the data, not mixed into the navigation zone; consistent with standard UI patterns' },
+      { type: 'new', text: 'Compact view toggle moved into the Technicians section — Cards / Compact segmented control now lives above the tech list where it contextually belongs, removed from the top header' },
+      { type: 'new', text: 'Timeline Explorer redesigned to match the Dashboard header — white top bar (Back, title, tech count, picked/not-picked totals, refresh) + gradient nav bar (date nav on left, Day by Day/Combined + Daily/Weekly/Monthly on right)' },
+      { type: 'new', text: 'Scoped ticket loading (getAllActiveScoped) — backend now fetches only tickets relevant to the requested date range plus open/pending and CSAT records, instead of loading every ticket for every technician on every request' },
+      { type: 'new', text: 'Speculative cache warmup on page load — DashboardContext prefetches current week, today, and weekly stats immediately on mount using a _speculative flag that suppresses 401 auth redirects, so data is ready before the first render' },
+      { type: 'new', text: 'Shared Prisma singleton (prisma.js) — all services and routes now share one PrismaClient instance instead of creating one per module, eliminating connection pool exhaustion under load' },
+      { type: 'improved', text: 'Dashboard white header is now sticky (z-40) — stays visible at the top while scrolling through the technician list' },
+      { type: 'improved', text: 'Gradient stats bar is now sticky (z-30, top-[52px]) — docks directly below the sticky white header; keeps date context, stats, and view controls visible when scrolling' },
+      { type: 'improved', text: 'Default view on first load changed from Daily to Weekly — weekly overview gives a better immediate picture of team workload for coordinators arriving each morning' },
+      { type: 'improved', text: 'Stats and avoidance analysis run in parallel (Promise.all) — daily and weekly dashboard endpoints no longer wait for avoidance analysis to finish before returning stats; reduces response latency' },
+      { type: 'improved', text: 'Background sync status polling deferred until primary data arrives — prevents unnecessary /sync/status requests during the cold load phase, reducing startup network chatter' },
+      { type: 'improved', text: 'Adjacent-period prefetch gated on primaryDataReady — usePrefetch no longer fires before the active view has rendered, preventing redundant fetches that compete with the primary request' },
+      { type: 'improved', text: 'Sync buttons simplified — removed dropdown wrapper; Sync All and Sync Week are now plain paired icon buttons with cleaner disabled state (opacity-40 instead of opacity-50)' },
+      { type: 'improved', text: 'Speculative 401 errors silenced — requests fired during the auth-check window carry a _speculative flag; if they get a 401, the auth:unauthorized event is suppressed so the login redirect is not triggered incorrectly' },
+      { type: 'fixed', text: 'Multiple PrismaClient instances created on each request — avoidanceAnalysisService, technicianRepository, and weekly/monthly route handlers each instantiated their own PrismaClient; now all share the singleton, fixing potential connection limit errors on Azure' },
+      { type: 'fixed', text: 'Weekly/monthly dashboard routes manually constructing and disconnecting PrismaClient inline — removed all ad-hoc instantiation and $disconnect() calls; shared client manages its own lifecycle' },
+      { type: 'database', text: 'New index: tickets_first_assigned_at_idx on first_assigned_at — required by the scoped ticket query (OR condition on firstAssignedAt range). Migration file included (20260227000000_add_first_assigned_at_index). Run `prisma migrate deploy` on production before deploying this version.' },
+    ],
+  },
   {
     version: '1.2.5-preview',
     date: 'February 27, 2026',
