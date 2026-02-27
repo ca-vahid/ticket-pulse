@@ -44,6 +44,7 @@ import {
   Clock,
   Map,
   Layers,
+  GitBranch,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -1177,20 +1178,6 @@ export default function Dashboard() {
                 )}
               </button>
 
-              {/* Sync Week Button */}
-              <button
-                onClick={handleSyncWeek}
-                disabled={refreshing || backgroundSyncRunning}
-                className={`px-2 py-1 text-xs font-medium rounded transition-colors border ${
-                  refreshing || backgroundSyncRunning
-                    ? 'opacity-50 cursor-not-allowed border-gray-300'
-                    : 'hover:bg-blue-50 hover:border-blue-300 border-gray-300'
-                }`}
-                title="Sync current week (Monday-Sunday) with full details"
-              >
-                <span>Sync Week</span>
-              </button>
-
               {/* Export Button */}
               <ExportButton
                 tickets={filteredTechnicians.flatMap(tech => getTechTickets(tech))}
@@ -1201,28 +1188,46 @@ export default function Dashboard() {
                 selectedMonth={selectedMonth}
               />
 
-              {/* Refresh Button */}
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing || backgroundSyncRunning}
-                className={`p-1.5 rounded transition-colors ${
-                  refreshing || backgroundSyncRunning
-                    ? 'opacity-50 cursor-not-allowed'
-                    : 'hover:bg-gray-100'
-                }`}
-                title={backgroundSyncRunning ? 'Syncing...' : refreshing ? 'Syncing...' : 'Sync All'}
-              >
-                <RefreshCw className={`w-4 h-4 ${refreshing || backgroundSyncRunning ? 'animate-spin text-blue-600' : ''}`} />
-              </button>
+              {/* Sync dropdown — merged Sync All + Sync Week */}
+              <div className="relative">
+                <div className="flex items-center">
+                  <button
+                    onClick={handleRefresh}
+                    disabled={refreshing || backgroundSyncRunning}
+                    className={`p-1.5 rounded-l-lg border border-r-0 border-gray-300 transition-colors ${
+                      refreshing || backgroundSyncRunning
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'hover:bg-gray-100'
+                    }`}
+                    title="Sync All"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${refreshing || backgroundSyncRunning ? 'animate-spin text-blue-600' : ''}`} />
+                  </button>
+                  <button
+                    onClick={handleSyncWeek}
+                    disabled={refreshing || backgroundSyncRunning}
+                    className={`p-1.5 rounded-r-lg border border-gray-300 transition-colors ${
+                      refreshing || backgroundSyncRunning
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'hover:bg-blue-50 hover:border-blue-300'
+                    }`}
+                    title="Sync Week (full detail sync for current week)"
+                  >
+                    <Calendar className={`w-4 h-4 ${backgroundSyncRunning ? 'text-blue-600' : ''}`} />
+                  </button>
+                </div>
+              </div>
 
-              {/* Timeline Explorer Button */}
+              {/* Timeline Explorer */}
               <button
                 onClick={handleTimeline}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-600 border border-blue-200 hover:border-blue-300"
+                className="group flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300 hover:shadow-sm whitespace-nowrap"
                 title="Timeline Explorer"
               >
-                <Layers className="w-3.5 h-3.5" />
-                <span className="text-xs font-semibold">Timeline</span>
+                <span className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center group-hover:bg-indigo-700 transition-colors">
+                  <Clock className="w-3 h-3 text-white" />
+                </span>
+                Timeline Explorer
               </button>
 
               {/* Visuals Button */}
