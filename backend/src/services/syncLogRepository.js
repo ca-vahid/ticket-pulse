@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
-
-const prisma = new PrismaClient();
 
 /**
  * Repository for SyncLog operations

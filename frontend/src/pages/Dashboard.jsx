@@ -80,6 +80,8 @@ export default function Dashboard() {
   const [syncLogs, setSyncLogs] = useState([]); // Array of log messages
   const [showSyncDetails, setShowSyncDetails] = useState(false);
   const [backgroundSyncRunning, setBackgroundSyncRunning] = useState(false);
+  const [backgroundSyncStep, setBackgroundSyncStep] = useState(null);
+  const [killingSync, setKillingSync] = useState(false);
 
   // Initialize selectedDate from localStorage, navigation state, or default to today
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -327,6 +329,7 @@ export default function Dashboard() {
         const status = await syncAPI.getStatus();
         const isRunning = status.data?.sync?.isRunning || false;
         setBackgroundSyncRunning(isRunning);
+        setBackgroundSyncStep(status.data?.sync?.progress?.currentStep || null);
       } catch (err) {
         // Ignore errors, sync status is not critical
       }
@@ -675,6 +678,22 @@ export default function Dashboard() {
     clearCacheOnLogout();
     await logout();
     navigate('/login');
+  };
+
+  const handleKillSync = async () => {
+    if (!window.confirm('Force-stop the current sync? This will clear the stuck state so you can start a new sync. The sync in progress will be abandoned.')) return;
+    setKillingSync(true);
+    try {
+      await syncAPI.resetSync();
+      setBackgroundSyncRunning(false);
+      setBackgroundSyncStep(null);
+      setRefreshing(false);
+      setSyncStatus(null);
+    } catch (err) {
+      console.error('[KILL SYNC] Failed:', err);
+    } finally {
+      setKillingSync(false);
+    }
   };
 
   const handleSettings = () => {
@@ -1145,9 +1164,22 @@ export default function Dashboard() {
 
               {/* Background Sync Status */}
               {backgroundSyncRunning && (
-                <div className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full border border-blue-200">
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                  <span className="font-medium">Syncing...</span>
+                <div className="flex items-center gap-1 text-xs bg-blue-50 border border-blue-200 rounded-lg px-2 py-1 max-w-[260px]">
+                  <RefreshCw className="w-3 h-3 text-blue-500 animate-spin flex-none" />
+                  <div className="flex flex-col min-w-0 mx-1">
+                    <span className="font-semibold text-blue-700 leading-tight">Syncing…</span>
+                    {backgroundSyncStep && (
+                      <span className="text-[9px] text-blue-500 truncate leading-tight">{backgroundSyncStep}</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleKillSync}
+                    disabled={killingSync}
+                    className="flex-none ml-1 p-0.5 rounded hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+                    title="Force-stop stuck sync"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               )}
 

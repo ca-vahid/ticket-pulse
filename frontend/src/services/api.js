@@ -223,6 +223,10 @@ export const syncAPI = {
   stopSchedule: async () => {
     return await api.post('/sync/stop-schedule');
   },
+
+  resetSync: async () => {
+    return await api.post('/sync/reset');
+  },
 };
 
 /**

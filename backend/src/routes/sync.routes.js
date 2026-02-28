@@ -168,6 +168,51 @@ router.post(
 );
 
 /**
+ * POST /api/sync/reset
+ * Force-stop a stuck sync — clears the in-memory running flag and marks all
+ * open sync log entries as failed.  Safe to call at any time; if no sync is
+ * running it is a no-op that still returns success.
+ */
+router.post(
+  '/reset',
+  asyncHandler(async (req, res) => {
+    const wasRunning = syncService.getSyncStatus().isRunning;
+
+    // Clear in-memory running flag
+    syncService.forceStop();
+
+    // Mark any lingering 'started' sync logs as failed in the DB
+    let logsResolved = 0;
+    try {
+      const stuckLogs = await syncLogRepository.getRecent(10);
+      for (const log of stuckLogs) {
+        if (log.status === 'started') {
+          await syncLogRepository.failLog(log.id, 'Force stopped by user');
+          logsResolved++;
+        }
+      }
+    } catch (err) {
+      logger.error('Failed to resolve stuck sync logs during reset:', err);
+    }
+
+    clearReadCache();
+
+    logger.warn(`Sync force-reset by user (wasRunning=${wasRunning}, logsResolved=${logsResolved})`);
+
+    res.json({
+      success: true,
+      data: {
+        wasRunning,
+        logsResolved,
+        message: wasRunning
+          ? `Sync stopped. ${logsResolved} log(s) marked as failed.`
+          : 'No sync was running — state cleared.',
+      },
+    });
+  }),
+);
+
+/**
  * POST /api/sync/week
  * Sync a specific week with full details (tickets + activities + pickup times)
  * Body params:
