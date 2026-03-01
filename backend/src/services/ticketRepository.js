@@ -226,6 +226,8 @@ class TicketRepository {
           nonBillableMinutes: data.nonBillableMinutes,
           resolutionTimeSeconds: data.resolutionTimeSeconds,
           firstAssignedAt: data.firstAssignedAt,
+          isNoise: data.isNoise ?? undefined,
+          noiseRuleMatched: data.noiseRuleMatched ?? undefined,
           updatedAt: new Date(),
         },
         create: {
@@ -256,6 +258,8 @@ class TicketRepository {
           nonBillableMinutes: data.nonBillableMinutes,
           resolutionTimeSeconds: data.resolutionTimeSeconds,
           firstAssignedAt: data.firstAssignedAt,
+          isNoise: data.isNoise || false,
+          noiseRuleMatched: data.noiseRuleMatched || null,
         },
         include: {
           assignedTech: true,

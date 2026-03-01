@@ -81,15 +81,31 @@ export const authAPI = {
 /**
  * Dashboard API
  */
+// Global noise filter state - read by all dashboard API calls
+let _excludeNoise = localStorage.getItem('tp_excludeNoise') === 'true';
+
+export function setGlobalExcludeNoise(value) {
+  _excludeNoise = value;
+  localStorage.setItem('tp_excludeNoise', value ? 'true' : 'false');
+}
+
+export function getGlobalExcludeNoise() {
+  return _excludeNoise;
+}
+
+function applyNoiseParam(params) {
+  if (_excludeNoise) params.excludeNoise = 'true';
+  return params;
+}
+
 export const dashboardAPI = {
   getDashboard: async (timezone = 'America/Los_Angeles', date = null) => {
     const params = { timezone };
     if (date) {
-      // Format date as YYYY-MM-DD if it's a Date object
       const dateStr = typeof date === 'string' ? date : formatDateLocal(date);
       params.date = dateStr;
     }
-    return await api.get('/dashboard', { params });
+    return await api.get('/dashboard', { params: applyNoiseParam(params) });
   },
 
   getTechnician: async (id, timezone = 'America/Los_Angeles', date = null) => {
@@ -98,7 +114,7 @@ export const dashboardAPI = {
       const dateStr = typeof date === 'string' ? date : formatDateLocal(date);
       params.date = dateStr;
     }
-    return await api.get(`/dashboard/technician/${id}`, { params });
+    return await api.get(`/dashboard/technician/${id}`, { params: applyNoiseParam(params) });
   },
 
   getWeeklyStats: async (timezone = 'America/Los_Angeles', date = null) => {
@@ -107,33 +123,31 @@ export const dashboardAPI = {
       const dateStr = typeof date === 'string' ? date : formatDateLocal(date);
       params.date = dateStr;
     }
-    return await api.get('/dashboard/weekly-stats', { params });
+    return await api.get('/dashboard/weekly-stats', { params: applyNoiseParam(params) });
   },
 
   getWeeklyDashboard: async (weekStart = null, timezone = 'America/Los_Angeles') => {
     const params = { timezone };
     if (weekStart) {
-      // weekStart should be Monday of the week (YYYY-MM-DD)
       const dateStr = typeof weekStart === 'string' ? weekStart : formatDateLocal(weekStart);
       params.weekStart = dateStr;
     }
-    return await api.get('/dashboard/weekly', { params });
+    return await api.get('/dashboard/weekly', { params: applyNoiseParam(params) });
   },
 
   getTechnicianWeekly: async (id, weekStart = null, timezone = 'America/Los_Angeles') => {
     const params = { timezone };
     if (weekStart) {
-      // weekStart should be Monday of the week (YYYY-MM-DD)
       const dateStr = typeof weekStart === 'string' ? weekStart : formatDateLocal(weekStart);
       params.weekStart = dateStr;
     }
-    return await api.get(`/dashboard/technician/${id}/weekly`, { params });
+    return await api.get(`/dashboard/technician/${id}/weekly`, { params: applyNoiseParam(params) });
   },
 
   getTechnicianMonthly: async (id, month = null, timezone = 'America/Los_Angeles') => {
     const params = { timezone };
     if (month) params.month = month; // "YYYY-MM"
-    return await api.get(`/dashboard/technician/${id}/monthly`, { params });
+    return await api.get(`/dashboard/technician/${id}/monthly`, { params: applyNoiseParam(params) });
   },
 
   /**
@@ -149,7 +163,7 @@ export const dashboardAPI = {
     if (period.date)      params.date      = period.date;
     if (period.weekStart) params.weekStart  = period.weekStart;
     if (period.month)     params.month      = period.month;
-    return await api.get('/dashboard/timeline', { params });
+    return await api.get('/dashboard/timeline', { params: applyNoiseParam(params) });
   },
 
   getTechnicianCSAT: async (id) => {
@@ -163,7 +177,7 @@ export const dashboardAPI = {
       const dateStr = typeof monthStart === 'string' ? monthStart : formatDateLocal(monthStart);
       params.monthStart = dateStr;
     }
-    return await api.get('/dashboard/monthly', { params });
+    return await api.get('/dashboard/monthly', { params: applyNoiseParam(params) });
   },
 };
 
@@ -265,6 +279,43 @@ export const visualsAPI = {
     const body = { workStartTime, workEndTime };
     if (timezone) body.timezone = timezone;
     return await api.patch(`/visuals/agents/${agentId}/schedule`, body);
+  },
+};
+
+/**
+ * Noise Rules API
+ */
+export const noiseRulesAPI = {
+  getAll: async () => {
+    return await api.get('/noise-rules');
+  },
+
+  getStats: async () => {
+    return await api.get('/noise-rules/stats');
+  },
+
+  create: async (rule) => {
+    return await api.post('/noise-rules', rule);
+  },
+
+  update: async (id, data) => {
+    return await api.put(`/noise-rules/${id}`, data);
+  },
+
+  delete: async (id) => {
+    return await api.delete(`/noise-rules/${id}`);
+  },
+
+  test: async (pattern) => {
+    return await api.post('/noise-rules/test', { pattern });
+  },
+
+  backfill: async () => {
+    return await apiLongTimeout.post('/noise-rules/backfill');
+  },
+
+  seed: async () => {
+    return await api.post('/noise-rules/seed');
   },
 };
 

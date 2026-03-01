@@ -88,9 +88,11 @@ function slimTicket(t) {
   };
 }
 
-async function loadTicketsFull(start, end) {
+async function loadTicketsFull(start, end, { excludeNoise = false } = {}) {
+  const where = { createdAt: { gte: start, lte: end } };
+  if (excludeNoise) where.isNoise = false;
   return prisma.ticket.findMany({
-    where: { createdAt: { gte: start, lte: end } },
+    where,
     select: {
       id: true,
       freshserviceTicketId: true,
@@ -109,9 +111,11 @@ async function loadTicketsFull(start, end) {
   });
 }
 
-async function loadTicketsSlim(start, end) {
+async function loadTicketsSlim(start, end, { excludeNoise = false } = {}) {
+  const where = { createdAt: { gte: start, lte: end } };
+  if (excludeNoise) where.isNoise = false;
   return prisma.ticket.findMany({
-    where: { createdAt: { gte: start, lte: end } },
+    where,
     select: { id: true, createdAt: true, assignedTechId: true },
   });
 }
@@ -150,14 +154,14 @@ function analyzeDayFull(techId, allTickets, win, extendedTickets) {
   };
 }
 
-export async function computeTechnicianAvoidanceDetail(tech, rangeStart, _rangeEnd) {
+export async function computeTechnicianAvoidanceDetail(tech, rangeStart, _rangeEnd, { excludeNoise = false } = {}) {
   const dateStr = formatInTimeZone(rangeStart, PT_TIMEZONE, 'yyyy-MM-dd');
   const win = getCoverageWindow(dateStr);
   if (!win) return emptyResult(true, 'weekend');
 
   const [coverageTickets, extendedTickets] = await Promise.all([
-    loadTicketsFull(win.windowStart, win.windowEnd),
-    loadTicketsFull(win.windowEnd, win.extendedEnd),
+    loadTicketsFull(win.windowStart, win.windowEnd, { excludeNoise }),
+    loadTicketsFull(win.windowEnd, win.extendedEnd, { excludeNoise }),
   ]);
   const day = analyzeDayFull(tech.id, coverageTickets, win, extendedTickets);
   const picked = day.tickets.filter(t => t.pickedByTech).length;
@@ -170,14 +174,14 @@ export async function computeTechnicianAvoidanceDetail(tech, rangeStart, _rangeE
   };
 }
 
-export async function computeTechnicianAvoidanceWeeklyDetail(tech, weekStart, weekEnd, _timezone) {
+export async function computeTechnicianAvoidanceWeeklyDetail(tech, weekStart, weekEnd, _timezone, { excludeNoise = false } = {}) {
   const weekdays = getWeekdaysInRange(weekStart, weekEnd);
   const windows = weekdays.map(d => ({ date: d, ...getCoverageWindow(d) })).filter(w => w.windowStart);
   if (windows.length === 0) return emptyResult(true, 'no_weekdays');
 
   const earliest = new Date(Math.min(...windows.map(w => w.windowStart.getTime())));
   const latestExtended = new Date(Math.max(...windows.map(w => w.extendedEnd.getTime())));
-  const allTickets = await loadTicketsFull(earliest, latestExtended);
+  const allTickets = await loadTicketsFull(earliest, latestExtended, { excludeNoise });
 
   const days = [];
   let tE = 0, tP = 0;
@@ -198,14 +202,14 @@ export async function computeTechnicianAvoidanceWeeklyDetail(tech, weekStart, we
   };
 }
 
-export async function computeTechnicianAvoidanceMonthlyDetail(tech, monthStart, monthEnd, _timezone) {
+export async function computeTechnicianAvoidanceMonthlyDetail(tech, monthStart, monthEnd, _timezone, { excludeNoise = false } = {}) {
   const weekdays = getWeekdaysInRange(monthStart, monthEnd);
   const windows = weekdays.map(d => ({ date: d, ...getCoverageWindow(d) })).filter(w => w.windowStart);
   if (windows.length === 0) return emptyResult(true, 'no_weekdays');
 
   const earliest = new Date(Math.min(...windows.map(w => w.windowStart.getTime())));
   const latestExtended = new Date(Math.max(...windows.map(w => w.extendedEnd.getTime())));
-  const allTickets = await loadTicketsFull(earliest, latestExtended);
+  const allTickets = await loadTicketsFull(earliest, latestExtended, { excludeNoise });
 
   const days = [];
   let tE = 0, tP = 0;

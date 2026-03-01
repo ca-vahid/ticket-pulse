@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, Layers, RefreshCw,
   Users, Check, X as XIcon, Search, PanelLeftClose, PanelLeftOpen,
-  EyeOff, Eye,
+  EyeOff, Eye, VolumeX, Volume2,
 } from 'lucide-react';
-import { dashboardAPI } from '../services/api';
+import { dashboardAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import FilterBar, { applyNotPickedFilters, applyPickedFilters } from '../components/tech-detail/FilterBar';
 import TimelineCore, { TimelineLegend } from '../components/timeline/TimelineCore';
 import {
@@ -321,6 +321,8 @@ export default function TimelineExplorer() {
   const [excludeText, setExcludeText] = useState('');
   const [includeCats, setIncludeCats] = useState(new Set());
   const [includeText, setIncludeText] = useState('');
+  const [excludeNoise, setExcludeNoise] = useState(() => getGlobalExcludeNoise());
+  const [hideNonPicked, setHideNonPicked] = useState(false);
 
   // ── Data state ──
   const [techData, setTechData]   = useState(null);  // raw API response
@@ -516,7 +518,8 @@ export default function TimelineExplorer() {
     const filters = { excludeCats, excludeText, includeCats, includeText };
     const allMerged = mergeTicketsForTimeline(mergedDays, allPicked, allNotPicked);
     const filtered = allMerged.filter((t) => {
-      if (t._picked) return applyPickedFilters(t, { includeCats, includeText });
+      if (t._picked) return applyPickedFilters(t, filters);
+      if (hideNonPicked) return false;
       return applyNotPickedFilters(t, filters);
     });
 
@@ -549,6 +552,15 @@ export default function TimelineExplorer() {
 
   const addExcludeCat = (cat) =>
     setExcludeCats((prev) => { const n = new Set(prev); n.add(cat); return n; });
+
+  const handleToggleNoise = useCallback(() => {
+    const newValue = !excludeNoise;
+    setExcludeNoise(newValue);
+    setGlobalExcludeNoise(newValue);
+    // Re-fetch will happen because fetchTimeline is called on data deps
+    // but we need to manually trigger since excludeNoise isn't in the useCallback deps
+    setTimeout(() => fetchTimeline(), 100);
+  }, [excludeNoise, fetchTimeline]);
 
   const isMultiDay = days.length > 1;
 
@@ -769,7 +781,7 @@ export default function TimelineExplorer() {
         {/* Right: filter bar + timeline */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0 pr-4 py-4 gap-3">
           {/* Filter bar */}
-          <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex-shrink-0">
+          <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex-shrink-0 flex items-center gap-3">
             <FilterBar
               allCategories={allCategories}
               excludeCats={excludeCats}
@@ -781,6 +793,30 @@ export default function TimelineExplorer() {
               includeText={includeText}
               setIncludeText={setIncludeText}
             />
+            <button
+              onClick={handleToggleNoise}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+                excludeNoise
+                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+              }`}
+              title={excludeNoise ? 'Noise tickets are hidden' : 'Hide automated/noise tickets'}
+            >
+              {excludeNoise ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+              {excludeNoise ? 'Noise Hidden' : 'Hide Noise'}
+            </button>
+            <button
+              onClick={() => setHideNonPicked(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+                hideNonPicked
+                  ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 ring-1 ring-emerald-300'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+              }`}
+              title={hideNonPicked ? 'Showing only picked tickets. Click to show all.' : 'Hide tickets not picked by selected agent(s)'}
+            >
+              {hideNonPicked ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              {hideNonPicked ? 'Picked Only' : 'Hide Non-Picked'}
+            </button>
           </div>
 
           {/* Timeline */}

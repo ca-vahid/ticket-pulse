@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useAuth } from '../contexts/AuthContext';
-import { syncAPI } from '../services/api';
+import { syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
 import SearchBox from '../components/SearchBox';
@@ -47,6 +47,8 @@ import {
   GitBranch,
   LayoutGrid,
   List,
+  VolumeX,
+  Volume2,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -126,6 +128,9 @@ export default function Dashboard() {
     const stored = sessionStorage.getItem('dashboard_categories');
     return stored ? JSON.parse(stored) : [];
   });
+
+  // Noise filter
+  const [excludeNoise, setExcludeNoise] = useState(() => getGlobalExcludeNoise());
 
   // Changelog modal
   const [showChangelog, setShowChangelog] = useState(false);
@@ -383,6 +388,27 @@ export default function Dashboard() {
     const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
     await fetchWeeklyStats('America/Los_Angeles', formatDateLocal(dateToUse));
   }, [viewMode, selectedDate, selectedWeek, selectedMonth, invalidateCurrentView, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard, fetchWeeklyStats, formatDateLocal]);
+
+  const handleToggleNoise = useCallback(async () => {
+    const newValue = !excludeNoise;
+    setExcludeNoise(newValue);
+    setGlobalExcludeNoise(newValue);
+    invalidateCurrentView();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    if (viewMode === 'weekly') {
+      const weekStartStr = formatDateLocal(selectedWeek);
+      await fetchWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
+    } else if (viewMode === 'monthly') {
+      const monthStartStr = formatDateLocal(selectedMonth);
+      await fetchMonthlyDashboard(monthStartStr, 'America/Los_Angeles');
+    } else {
+      const dateStr = formatDateLocal(selectedDate);
+      const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
+      await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+    }
+    const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
+    await fetchWeeklyStats('America/Los_Angeles', formatDateLocal(dateToUse));
+  }, [excludeNoise, viewMode, selectedDate, selectedWeek, selectedMonth, invalidateCurrentView, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard, fetchWeeklyStats, formatDateLocal]);
 
   const handleRetryLoad = useCallback(async () => {
     await refreshCurrentView();
@@ -1788,6 +1814,18 @@ export default function Dashboard() {
                 </button>
               </div>
 
+              <button
+                onClick={handleToggleNoise}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm transition-colors ${
+                  excludeNoise
+                    ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                }`}
+                title={excludeNoise ? 'Noise tickets are hidden. Click to show all tickets.' : 'Click to hide automated/noise tickets (alerts, backups, monitoring, spam)'}
+              >
+                {excludeNoise ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                <span>{excludeNoise ? 'Noise Hidden' : 'Hide Noise'}</span>
+              </button>
               {hiddenTechnicians.length > 0 && (
                 <button
                   onClick={() => setShowHidden(!showHidden)}

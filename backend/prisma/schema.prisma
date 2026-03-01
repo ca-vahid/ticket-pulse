@@ -117,6 +117,10 @@ model Ticket {
   csatFeedback          String?   @db.Text @map("csat_feedback") // User's detailed feedback/comments
   csatSubmittedAt       DateTime? @map("csat_submitted_at") // When survey was submitted
 
+  // Noise detection
+  isNoise           Boolean   @default(false) @map("is_noise")
+  noiseRuleMatched  String?   @db.VarChar(100) @map("noise_rule_matched")
+
   // Computed fields (handled in application logic)
   // isToday: computed based on createdAt and PST timezone
   // timeToResolve: computed as resolvedAt - createdAt
@@ -133,6 +137,23 @@ model Ticket {
   @@index([csatSubmittedAt])
   @@index([firstPublicAgentReplyAt])
   @@index([firstAssignedAt])
+  @@index([isNoise])
+}
+
+model NoiseRule {
+  id              Int      @id @default(autoincrement())
+  name            String   @db.VarChar(255)
+  pattern         String   @db.Text
+  description     String?  @db.Text
+  category        String   @db.VarChar(100) // infrastructure, security, vendor, spam, monitoring, etc.
+  isEnabled       Boolean  @default(true) @map("is_enabled")
+  matchCount      Int      @default(0) @map("match_count")
+  dedupWindowDays Int?     @map("dedup_window_days") // If set, only mark as noise when a same-subject ticket already exists within this many days
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("noise_rules")
+  @@index([isEnabled])
 }
 
 model TicketActivity {

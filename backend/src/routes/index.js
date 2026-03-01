@@ -9,6 +9,7 @@ import webhookRoutes from './webhook.routes.js';
 import autoresponseRoutes from './autoresponse.routes.js';
 import llmAdminRoutes from './llmAdmin.routes.js';
 import visualsRoutes from './visuals.routes.js';
+import noiseRoutes from './noise.routes.js';
 
 const router = express.Router();
 
@@ -32,5 +33,6 @@ router.use('/webhook', webhookRoutes);
 router.use('/autoresponse', autoresponseRoutes);
 router.use('/admin/llm-settings', llmAdminRoutes);
 router.use('/visuals', visualsRoutes);
+router.use('/noise-rules', noiseRoutes);
 
 export default router;

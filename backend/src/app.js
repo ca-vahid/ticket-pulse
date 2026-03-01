@@ -13,6 +13,7 @@ import scheduledSyncService from './services/scheduledSyncService.js';
 import settingsRepository from './services/settingsRepository.js';
 import availabilityService from './services/availabilityService.js';
 import llmConfigService from './services/llmConfigService.js';
+import noiseRuleService from './services/noiseRuleService.js';
 
 // Setup BigInt serialization for JSON responses
 setupBigIntSerialization();
@@ -122,6 +123,10 @@ async function initialize() {
     } catch (error) {
       logger.warn('Failed to initialize LLM config, will use defaults:', error);
     }
+
+    // Seed default noise rules (no-op if already seeded)
+    await noiseRuleService.seedDefaults();
+    logger.info('Noise rules initialized');
 
     // Check if FreshService is configured
     const isConfigured = await settingsRepository.isFreshServiceConfigured();

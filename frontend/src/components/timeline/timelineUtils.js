@@ -13,8 +13,10 @@ import { getHolidayInfo } from '../../utils/holidays';
 
 /** Convert a local time (HH:MM) in a given IANA timezone to a UTC Date for a specific date string */
 export function localTimeToUTC(dateStr, timeStr, tz) {
+  if (!dateStr || !timeStr) return new Date(0);
   const [h, m] = timeStr.split(':');
   const probe = new Date(`${dateStr}T12:00:00Z`);
+  if (isNaN(probe.getTime())) return new Date(0);
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     timeZoneName: 'shortOffset',
@@ -299,9 +301,12 @@ export function buildCombinedTimeline(tickets, techConfigs, days) {
  * @param {Array} techConfigs - [{ id, firstName, techStart, techEnd, techTz, tzCity }]
  */
 export function buildTimeline(days, mergedFiltered, mergedViewMode, techConfigs) {
+  if (!days || days.length === 0) return [];
   const isMultiDay = days.length > 1;
   if (!isMultiDay) {
-    return insertMarkersForDay(mergedFiltered, days[0]?.date || '', techConfigs, days);
+    const dateStr = days[0]?.date;
+    if (!dateStr) return mergedFiltered;
+    return insertMarkersForDay(mergedFiltered, dateStr, techConfigs, days);
   }
   if (mergedViewMode === 'combined') {
     return buildCombinedTimeline(mergedFiltered, techConfigs, days);

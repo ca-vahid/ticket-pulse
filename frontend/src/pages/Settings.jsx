@@ -6,6 +6,7 @@ import api from '../services/api';
 import AutoResponseSettings from '../components/AutoResponseSettings';
 import AutoResponseTestInteractive from '../components/AutoResponseTestInteractive';
 import LlmAdminPanel from '../components/LlmAdminPanel';
+import NoiseRulesPanel from '../components/NoiseRulesPanel';
 import {
   ArrowLeft,
   Save,
@@ -51,6 +52,7 @@ export default function Settings() {
     { id: 'photos', label: 'Profile Photos', icon: '👤' },
     { id: 'business-hours', label: 'Business Hours', icon: '🕐' },
     { id: 'tech-schedules', label: 'Tech Schedules', icon: '📅' },
+    { id: 'noise-rules', label: 'Noise Rules', icon: '🔇' },
     { id: 'llm-config', label: 'LLM Configuration', icon: '🤖' },
     { id: 'auto-response-test', label: 'Test Auto-Response', icon: '🧪' },
   ];
@@ -768,6 +770,11 @@ export default function Settings() {
                   );
                 })()}
               </div>
+            )}
+
+            {/* Noise Rules */}
+            {activeSection === 'noise-rules' && (
+              <NoiseRulesPanel />
             )}
 
             {/* LLM Configuration */}

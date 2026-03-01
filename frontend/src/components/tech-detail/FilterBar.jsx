@@ -1,5 +1,33 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Filter, X, Check } from 'lucide-react';
+
+// ── Debounced text input ──────────────────────────────────────────────────────
+
+function DebouncedInput({ value: externalValue, onChange, delay = 400, ...props }) {
+  const [localValue, setLocalValue] = useState(externalValue);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    setLocalValue(externalValue);
+  }, [externalValue]);
+
+  const handleChange = useCallback((e) => {
+    const v = e.target.value;
+    setLocalValue(v);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => onChange(v), delay);
+  }, [onChange, delay]);
+
+  const handleClear = useCallback(() => {
+    setLocalValue('');
+    clearTimeout(timerRef.current);
+    onChange('');
+  }, [onChange]);
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  return { localValue, handleChange, handleClear };
+}
 
 // ── Shared filtering utilities ────────────────────────────────────────────────
 
@@ -15,10 +43,15 @@ export function parseTerms(text) {
  * something the tech actually picked up.
  * Returns true if the ticket should be visible.
  */
-export function applyPickedFilters(ticket, { includeCats, includeText }) {
+export function applyPickedFilters(ticket, { includeCats, includeText, excludeCats, excludeText } = {}) {
   const hay = (ticket.subject || '').toLowerCase();
   const inTerms = parseTerms(includeText);
 
+  if (excludeCats?.size > 0 && excludeCats.has(ticket.ticketCategory)) return false;
+  if (excludeText) {
+    const exTerms = parseTerms(excludeText);
+    if (exTerms.length > 0 && exTerms.some((t) => hay.includes(t))) return false;
+  }
   if (includeCats.size > 0 && !includeCats.has(ticket.ticketCategory)) return false;
   if (inTerms.length > 0 && !inTerms.some((t) => hay.includes(t))) return false;
   return true;
@@ -165,6 +198,9 @@ export default function FilterBar({
       return n;
     });
 
+  const excInput = DebouncedInput({ value: excludeText, onChange: setExcludeText });
+  const incInput = DebouncedInput({ value: includeText, onChange: setIncludeText });
+
   const hasAny = excludeCats.size > 0 || excludeText || includeCats.size > 0 || includeText;
 
   return (
@@ -180,14 +216,14 @@ export default function FilterBar({
       <div className="relative flex-1">
         <input
           type="text"
-          value={excludeText}
-          onChange={(e) => setExcludeText(e.target.value)}
+          value={excInput.localValue}
+          onChange={excInput.handleChange}
           placeholder="Exclude keywords… (use | for OR)"
           className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs placeholder-slate-300 focus:ring-1 focus:ring-red-300 focus:border-red-300"
         />
-        {excludeText && (
+        {excInput.localValue && (
           <button
-            onClick={() => setExcludeText('')}
+            onClick={excInput.handleClear}
             className="absolute right-1.5 top-1/2 -translate-y-1/2"
           >
             <X className="w-3 h-3 text-slate-400 hover:text-slate-600" />
@@ -201,14 +237,14 @@ export default function FilterBar({
       <div className="relative flex-1">
         <input
           type="text"
-          value={includeText}
-          onChange={(e) => setIncludeText(e.target.value)}
+          value={incInput.localValue}
+          onChange={incInput.handleChange}
           placeholder="Include only… (use | for OR)"
           className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs placeholder-slate-300 focus:ring-1 focus:ring-emerald-300 focus:border-emerald-300"
         />
-        {includeText && (
+        {incInput.localValue && (
           <button
-            onClick={() => setIncludeText('')}
+            onClick={incInput.handleClear}
             className="absolute right-1.5 top-1/2 -translate-y-1/2"
           >
             <X className="w-3 h-3 text-slate-400 hover:text-slate-600" />

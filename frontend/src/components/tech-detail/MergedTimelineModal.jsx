@@ -50,7 +50,7 @@ export default function MergedTimelineModal({
   // Apply filters
   const filters = { excludeCats, excludeText, includeCats, includeText };
   const mergedFiltered = allMerged.filter((t) => {
-    if (t._picked) return applyPickedFilters(t, { includeCats, includeText });
+    if (t._picked) return applyPickedFilters(t, filters);
     return applyNotPickedFilters(t, filters);
   });
 

@@ -1,6 +1,32 @@
-export const APP_VERSION = '1.2.6-preview';
+export const APP_VERSION = '1.2.7-preview';
 
 export const changelog = [
+  {
+    version: '1.2.7-preview',
+    date: 'February 27, 2026',
+    entries: [
+      { type: 'new', text: 'Noise ticket detection system — regex-based rule engine identifies automated/non-actionable tickets (Synology NAS alerts, Hyper-V backup errors, Teams Rooms incidents, vendor spam, monitoring flaps, etc.) and flags them with isNoise; 23 default rules ship out of the box, covering ~20% of all historical tickets' },
+      { type: 'new', text: 'Smart dedup window on noise rules — optional dedupWindowDays field lets a rule keep the first occurrence of a recurring alert actionable while suppressing repeats within the window (e.g., Veeam errors use a 7-day window: first alert visible, duplicates hidden)' },
+      { type: 'new', text: 'Hide Noise toggle on Dashboard — amber button in the toolbar hides all noise-flagged tickets from stats, counts, and ticket lists; persists in localStorage across sessions; all views (daily, weekly, monthly) and technician detail pages respect the filter' },
+      { type: 'new', text: 'Hide Noise toggle on Timeline Explorer — same noise filter available next to the exclude/include filter bar; toggles noise tickets in/out of the avoidance analysis timeline' },
+      { type: 'new', text: 'Hide Non-Picked toggle on Timeline Explorer — emerald button filters the timeline to show only tickets picked by the selected agent(s), hiding all not-picked tickets' },
+      { type: 'new', text: 'Noise Rules management UI in Settings — new "Noise Rules" section with full CRUD: view all rules with match counts, enable/disable toggles, inline editing of name/pattern/category/description/dedup window, test patterns against the full ticket database with sample matches, add custom rules, delete rules' },
+      { type: 'new', text: 'Noise rules backfill — "Re-run Backfill" button in Settings re-evaluates all tickets against current rules; processes chronologically for correct dedup window behavior; updates match counts per rule' },
+      { type: 'new', text: 'Noise rules REST API — GET/POST/PUT/DELETE /api/noise-rules for rule management, POST /test to preview pattern matches, POST /backfill to re-tag tickets, POST /seed for initial setup, GET /stats for noise analytics' },
+      { type: 'new', text: 'Noise stats dashboard in Settings — 4-card overview showing total tickets, actionable count, noise count, and noise percentage' },
+      { type: 'new', text: 'Auto-seeding on startup — noiseRuleService.seedDefaults() runs on server boot, populating the 23 default rules if the noise_rules table is empty; no manual setup required' },
+      { type: 'new', text: 'Noise evaluation during sync — every ticket is evaluated against enabled noise rules during FreshService sync, so new tickets are automatically flagged as they arrive' },
+      { type: 'improved', text: 'Exclude filters now apply to picked tickets too — previously, excluding a category (e.g., Licensing) only hid not-picked tickets; now picked tickets are also filtered, consistent with user expectation across Timeline Explorer, Coverage tab, and Merged Timeline modal' },
+      { type: 'improved', text: 'Debounced text inputs in filter bars — exclude/include keyword inputs now wait 400ms after the last keystroke before triggering a re-filter, eliminating jittery re-renders on every keypress' },
+      { type: 'fixed', text: 'Timeline Explorer crash (RangeError: Invalid time value) when noise filter removes all tickets for a day — buildTimeline now returns early for empty day arrays, and localTimeToUTC guards against undefined/invalid date strings' },
+      { type: 'fixed', text: 'Timeline Explorer noise toggle had no effect — /api/dashboard/timeline endpoint was not reading the excludeNoise query parameter; avoidance analysis functions (loadTicketsFull) were querying all tickets directly without noise filtering; both now thread excludeNoise through the full call chain' },
+      { type: 'security', text: 'All noise rule API endpoints require authentication (requireAuth middleware) — no public access to rule management or ticket data' },
+      { type: 'security', text: 'Regex pattern validation on create/update — invalid patterns are rejected with a descriptive error before being stored, preventing ReDoS or runtime crashes from malformed expressions' },
+      { type: 'database', text: 'New table: noise_rules (id, name, pattern, description, category, is_enabled, match_count, dedup_window_days, created_at, updated_at) with index on is_enabled' },
+      { type: 'database', text: 'New columns on tickets: is_noise (BOOLEAN DEFAULT false, indexed) and noise_rule_matched (VARCHAR 100, nullable)' },
+      { type: 'database', text: 'Run `prisma db push` or `prisma migrate deploy` on production before deploying. After deploy, call POST /api/noise-rules/seed to populate rules, then POST /api/noise-rules/backfill to tag existing tickets (~12k tickets takes ~15 seconds).' },
+    ],
+  },
   {
     version: '1.2.6-preview',
     date: 'February 27, 2026',

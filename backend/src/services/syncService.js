@@ -12,6 +12,7 @@ import requesterRepository from './requesterRepository.js';
 import settingsRepository from './settingsRepository.js';
 import syncLogRepository from './syncLogRepository.js';
 import csatService from './csatService.js';
+import noiseRuleService from './noiseRuleService.js';
 import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
@@ -263,6 +264,9 @@ class SyncService {
 
     for (const ticket of tickets) {
       try {
+        const { isNoise, ruleId } = await noiseRuleService.evaluate(ticket.subject, ticket.createdAt ? new Date(ticket.createdAt) : null);
+        ticket.isNoise = isNoise;
+        ticket.noiseRuleMatched = ruleId;
         await ticketRepository.upsert(ticket);
         syncedCount++;
       } catch (error) {

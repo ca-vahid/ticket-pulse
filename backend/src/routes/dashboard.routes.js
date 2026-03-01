@@ -46,9 +46,10 @@ router.get(
   asyncHandler(async (req, res) => {
     const timezone = req.query.timezone || 'America/Los_Angeles';
     const dateParam = req.query.date; // Format: YYYY-MM-DD
+    const excludeNoise = req.query.excludeNoise === 'true';
     const isViewingToday = !dateParam; // Determine if we're viewing today vs historical date
 
-    logger.debug(`Fetching dashboard data for timezone: ${timezone}, date: ${dateParam || 'today'}`);
+    logger.debug(`Fetching dashboard data for timezone: ${timezone}, date: ${dateParam || 'today'}, excludeNoise: ${excludeNoise}`);
 
     // Get date range for filtering
     let todayStart, todayEnd;
@@ -65,7 +66,7 @@ router.get(
     }
 
     // Fetch active technicians with only relevant tickets (scoped to date range + open + CSAT)
-    const technicians = await technicianRepository.getAllActiveScoped(todayStart, todayEnd);
+    const technicians = await technicianRepository.getAllActiveScoped(todayStart, todayEnd, { excludeNoise });
 
     // Run stats calculation (sync) and avoidance analysis (async DB query) in parallel
     const [dashboardData, avoidanceMap] = await Promise.all([
@@ -132,29 +133,23 @@ router.get(
 
     logger.debug(`Fetching weekly stats: ${weekStart.toISOString()} to ${weekEnd.toISOString()}`);
 
+    const excludeNoise = req.query.excludeNoise === 'true';
+
     // Fetch all tickets in the week range (by either createdAt or firstAssignedAt)
     // This matches the statsCalculator logic exactly
+    const weeklyTicketWhere = {
+      OR: [
+        { createdAt: { gte: weekStart, lte: weekEnd } },
+        { firstAssignedAt: { gte: weekStart, lte: weekEnd } },
+      ],
+      assignedTech: { isActive: true },
+    };
+    if (excludeNoise) {
+      weeklyTicketWhere.isNoise = false;
+    }
+
     const tickets = await prisma.ticket.findMany({
-      where: {
-        OR: [
-          {
-            createdAt: {
-              gte: weekStart,
-              lte: weekEnd,
-            },
-          },
-          {
-            firstAssignedAt: {
-              gte: weekStart,
-              lte: weekEnd,
-            },
-          },
-        ],
-        // Only count tickets assigned to active technicians
-        assignedTech: {
-          isActive: true,
-        },
-      },
+      where: weeklyTicketWhere,
       select: {
         id: true,
         createdAt: true,
@@ -216,7 +211,9 @@ router.get(
     const timezone = req.query.timezone || 'America/Los_Angeles';
     const weekStartParam = req.query.weekStart; // Format: YYYY-MM-DD
 
-    logger.debug(`Fetching weekly dashboard for timezone: ${timezone}, weekStart: ${weekStartParam || 'current week'}`);
+    const excludeNoise = req.query.excludeNoise === 'true';
+
+    logger.debug(`Fetching weekly dashboard for timezone: ${timezone}, weekStart: ${weekStartParam || 'current week'}, excludeNoise: ${excludeNoise}`);
 
     // Calculate week start (Monday) and end (Sunday)
     let weekStartDate;
@@ -245,7 +242,7 @@ router.get(
     const weekEndRange = getTodayRange(timezone, weekEndDate);
 
     // Fetch active technicians with only relevant tickets
-    const technicians = await technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end);
+    const technicians = await technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end, { excludeNoise });
 
     // Run stats calculation (sync) and avoidance analysis (async DB query) in parallel
     const [dashboardData, avoidanceMap] = await Promise.all([
@@ -287,6 +284,7 @@ router.get(
     const techId = parseInt(req.params.id, 10);
     const timezone = req.query.timezone || 'America/Los_Angeles';
     const dateParam = req.query.date; // Format: YYYY-MM-DD
+    const excludeNoise = req.query.excludeNoise === 'true';
     const isViewingToday = !dateParam;
 
     if (isNaN(techId)) {
@@ -297,7 +295,7 @@ router.get(
     }
 
     // Fetch technician with all tickets
-    const technician = await technicianRepository.getById(techId);
+    const technician = await technicianRepository.getById(techId, { excludeNoise });
 
     if (!technician) {
       return res.status(404).json({
@@ -377,10 +375,12 @@ router.get(
       });
     }
 
+    const excludeNoise = req.query.excludeNoise === 'true';
+
     logger.debug(`Fetching weekly stats for technician ${techId}, weekStart: ${weekStartParam || 'current week'}`);
 
     // Fetch technician with all tickets
-    const technician = await technicianRepository.getById(techId);
+    const technician = await technicianRepository.getById(techId, { excludeNoise });
 
     if (!technician) {
       return res.status(404).json({
@@ -503,6 +503,8 @@ router.get(
       return res.status(400).json({ success: false, message: 'Invalid technician ID' });
     }
 
+    const excludeNoise = req.query.excludeNoise === 'true';
+
     logger.debug(`Fetching monthly stats for technician ${techId}, month: ${monthParam || 'current'}`);
 
     // Parse month into first-of-month and last-of-month dates
@@ -517,7 +519,7 @@ router.get(
     const monthEndDate = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0, 12, 0, 0);
 
     // Fetch technician with all tickets
-    const technician = await technicianRepository.getById(techId);
+    const technician = await technicianRepository.getById(techId, { excludeNoise });
     if (!technician) {
       return res.status(404).json({ success: false, message: 'Technician not found' });
     }
@@ -612,6 +614,7 @@ router.get(
   readCache(30_000),
   asyncHandler(async (req, res) => {
     const timezone = req.query.timezone || 'America/Los_Angeles';
+    const excludeNoise = req.query.excludeNoise === 'true';
     const rawIds = req.query.techIds || '';
     const techIds = rawIds.split(',').map(Number).filter((n) => !isNaN(n) && n > 0);
 
@@ -650,7 +653,7 @@ router.get(
     // Fetch avoidance data for all techs in parallel
     const techResults = await Promise.all(
       techIds.map(async (techId) => {
-        const tech = await technicianRepository.getById(techId);
+        const tech = await technicianRepository.getById(techId, { excludeNoise });
         if (!tech) {
           logger.warn(`Timeline: technician ${techId} not found`);
           return null;
@@ -659,11 +662,11 @@ router.get(
         let avoidance = null;
         try {
           if (periodType === 'monthly') {
-            avoidance = await computeTechnicianAvoidanceMonthlyDetail(tech, rangeStart, rangeEnd, timezone);
+            avoidance = await computeTechnicianAvoidanceMonthlyDetail(tech, rangeStart, rangeEnd, timezone, { excludeNoise });
           } else if (periodType === 'weekly') {
-            avoidance = await computeTechnicianAvoidanceWeeklyDetail(tech, rangeStart, rangeEnd, timezone);
+            avoidance = await computeTechnicianAvoidanceWeeklyDetail(tech, rangeStart, rangeEnd, timezone, { excludeNoise });
           } else {
-            avoidance = await computeTechnicianAvoidanceDetail(tech, rangeStart, rangeEnd);
+            avoidance = await computeTechnicianAvoidanceDetail(tech, rangeStart, rangeEnd, { excludeNoise });
           }
         } catch (err) {
           logger.error(`Timeline avoidance failed for tech ${techId}:`, err);
@@ -711,7 +714,9 @@ router.get(
     const timezone = req.query.timezone || 'America/Los_Angeles';
     const monthStartParam = req.query.monthStart; // Format: YYYY-MM-DD
 
-    logger.debug(`Fetching monthly dashboard for timezone: ${timezone}, monthStart: ${monthStartParam || 'current month'}`);
+    const excludeNoise = req.query.excludeNoise === 'true';
+
+    logger.debug(`Fetching monthly dashboard for timezone: ${timezone}, monthStart: ${monthStartParam || 'current month'}, excludeNoise: ${excludeNoise}`);
 
     // Calculate month start and end
     let monthStartDate;
@@ -735,7 +740,7 @@ router.get(
     const monthEndRange = getTodayRange(timezone, monthEndDate);
 
     // Fetch active technicians with only relevant tickets
-    const technicians = await technicianRepository.getAllActiveScoped(monthStartRange.start, monthEndRange.end);
+    const technicians = await technicianRepository.getAllActiveScoped(monthStartRange.start, monthEndRange.end, { excludeNoise });
 
     // Use statsCalculator for consistent calculations
     const monthlyData = calculateMonthlyDashboard(

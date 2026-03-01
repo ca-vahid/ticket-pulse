@@ -61,20 +61,26 @@ class TechnicianRepository {
    * @param {Date} dateEnd   - End of the date range (inclusive)
    * @returns {Promise<Array>} Array of active technicians with scoped tickets
    */
-  async getAllActiveScoped(dateStart, dateEnd) {
+  async getAllActiveScoped(dateStart, dateEnd, { excludeNoise = false } = {}) {
     try {
+      const ticketWhere = {
+        OR: [
+          { firstAssignedAt: { gte: dateStart, lte: dateEnd } },
+          { firstAssignedAt: null, createdAt: { gte: dateStart, lte: dateEnd } },
+          { status: { in: ['Open', 'Pending'] } },
+          { csatSubmittedAt: { gte: dateStart, lte: dateEnd } },
+        ],
+      };
+
+      if (excludeNoise) {
+        ticketWhere.isNoise = false;
+      }
+
       return await prisma.technician.findMany({
         where: { isActive: true },
         include: {
           tickets: {
-            where: {
-              OR: [
-                { firstAssignedAt: { gte: dateStart, lte: dateEnd } },
-                { firstAssignedAt: null, createdAt: { gte: dateStart, lte: dateEnd } },
-                { status: { in: ['Open', 'Pending'] } },
-                { csatSubmittedAt: { gte: dateStart, lte: dateEnd } },
-              ],
-            },
+            where: ticketWhere,
             include: { requester: true },
           },
         },
@@ -91,12 +97,14 @@ class TechnicianRepository {
    * @param {number} id - Internal technician ID
    * @returns {Promise<Object|null>} Technician object or null
    */
-  async getById(id) {
+  async getById(id, { excludeNoise = false } = {}) {
     try {
+      const ticketWhere = excludeNoise ? { isNoise: false } : undefined;
       return await prisma.technician.findUnique({
         where: { id },
         include: {
           tickets: {
+            where: ticketWhere,
             include: {
               requester: true,
             },

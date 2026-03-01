@@ -120,7 +120,7 @@ export default function CoverageTab({
 
   const filters = { excludeCats, excludeText, includeCats, includeText };
   const filteredNotPicked = allNotPicked.filter((t) => applyNotPickedFilters(t, filters));
-  const filteredPicked = allPicked.filter((t) => applyPickedFilters(t, { includeCats, includeText }));
+  const filteredPicked = allPicked.filter((t) => applyPickedFilters(t, filters));
   const hiddenCount = allNotPicked.length - filteredNotPicked.length;
 
   // All unique categories across both lists for the dropdowns
