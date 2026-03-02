@@ -304,7 +304,8 @@ class NoiseRuleService {
       });
     }
 
-    while (true) {
+    let hasMore = true;
+    while (hasMore) {
       // Order by createdAt ASC so dedup window checks see earlier tickets first
       const tickets = await prisma.ticket.findMany({
         select: { id: true, subject: true, createdAt: true, isNoise: true, noiseRuleMatched: true },
@@ -313,7 +314,7 @@ class NoiseRuleService {
         orderBy: { createdAt: 'asc' },
       });
 
-      if (tickets.length === 0) break;
+      if (tickets.length === 0) { hasMore = false; break; }
 
       // Process one at a time for dedup rules (need DB state to be committed)
       for (const ticket of tickets) {
