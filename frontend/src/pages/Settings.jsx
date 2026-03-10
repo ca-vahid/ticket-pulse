@@ -17,13 +17,32 @@ import {
   XCircle,
   Activity,
   Users,
+  Plug,
+  BarChart3,
+  LayoutDashboard,
+  Camera,
+  Clock,
+  CalendarDays,
+  VolumeX,
+  Bot,
+  FlaskConical,
 } from 'lucide-react';
 
 export default function Settings() {
   const navigate = useNavigate();
   const { settings, isLoading, fetchSettings, updateSettings, testConnection } = useSettings();
 
-  const [activeSection, setActiveSection] = useState('freshservice');
+  const validSections = ['freshservice', 'sync', 'sync-ops', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'noise-rules', 'llm-config', 'auto-response-test'];
+  const initialSection = (() => {
+    const hash = window.location.hash.replace('#', '');
+    return validSections.includes(hash) ? hash : 'freshservice';
+  })();
+  const [activeSection, setActiveSectionRaw] = useState(initialSection);
+
+  const setActiveSection = (id) => {
+    setActiveSectionRaw(id);
+    window.history.replaceState(null, '', `#${id}`);
+  };
 
   const [formData, setFormData] = useState({
     freshservice_domain: '',
@@ -47,16 +66,16 @@ export default function Settings() {
   const [showInactive, setShowInactive] = useState(false);
 
   const navigationItems = [
-    { id: 'freshservice', label: 'FreshService', icon: '🔌' },
-    { id: 'sync', label: 'Sync Settings', icon: '🔄' },
-    { id: 'sync-ops', label: 'Sync Operations', icon: '📈' },
-    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-    { id: 'photos', label: 'Profile Photos', icon: '👤' },
-    { id: 'business-hours', label: 'Business Hours', icon: '🕐' },
-    { id: 'tech-schedules', label: 'Tech Schedules', icon: '📅' },
-    { id: 'noise-rules', label: 'Noise Rules', icon: '🔇' },
-    { id: 'llm-config', label: 'LLM Configuration', icon: '🤖' },
-    { id: 'auto-response-test', label: 'Test Auto-Response', icon: '🧪' },
+    { id: 'freshservice', label: 'FreshService', Icon: Plug },
+    { id: 'sync', label: 'Sync Settings', Icon: RefreshCw },
+    { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3 },
+    { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
+    { id: 'photos', label: 'Profile Photos', Icon: Camera },
+    { id: 'business-hours', label: 'Business Hours', Icon: Clock },
+    { id: 'tech-schedules', label: 'Tech Schedules', Icon: CalendarDays },
+    { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX },
+    { id: 'llm-config', label: 'LLM Config', Icon: Bot },
+    { id: 'auto-response-test', label: 'Test Auto-Response', Icon: FlaskConical },
   ];
 
   useEffect(() => {
@@ -296,22 +315,25 @@ export default function Settings() {
       {/* Main Content with Sidebar */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Navigation Pane */}
-        <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0">
-          <nav className="p-3 space-y-0.5 h-full overflow-y-auto">
-            {navigationItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setActiveSection(item.id)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md text-sm text-left transition-all ${
-                  activeSection === item.id
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <span className="text-base">{item.icon}</span>
-                <span className="font-medium">{item.label}</span>
-              </button>
-            ))}
+        <aside className="w-52 bg-gray-50/70 border-r border-gray-200/80 flex-shrink-0">
+          <nav className="p-2 space-y-px h-full overflow-y-auto">
+            {navigationItems.map((item) => {
+              const isActive = activeSection === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveSection(item.id)}
+                  className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[13px] text-left transition-all ${
+                    isActive
+                      ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200/80 font-medium'
+                      : 'text-gray-500 hover:text-gray-700 hover:bg-white/60'
+                  }`}
+                >
+                  <item.Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-600' : 'text-gray-400'}`} />
+                  <span className="truncate">{item.label}</span>
+                </button>
+              );
+            })}
           </nav>
         </aside>
 
