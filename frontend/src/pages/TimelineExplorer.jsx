@@ -382,7 +382,9 @@ export default function TimelineExplorer() {
         const ws = selectedWeek || getMonday(new Date());
         period.weekStart = formatDateLocal(ws);
       } else {
-        if (selectedDate) period.date = selectedDate;
+        // Always send an explicit date using local timezone to avoid the backend
+        // defaulting to UTC "today" (which is tomorrow evening in Pacific time).
+        period.date = selectedDate || formatDateLocal(new Date());
       }
       const res = await dashboardAPI.getTimeline(techIds, period, 'America/Los_Angeles');
       if (!res.success) throw new Error('Failed to load timeline');
