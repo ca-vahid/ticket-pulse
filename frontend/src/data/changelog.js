@@ -1,6 +1,29 @@
-export const APP_VERSION = '1.4.1-preview';
+export const APP_VERSION = '1.4.2-preview';
 
 export const changelog = [
+  {
+    version: '1.4.2-preview',
+    date: 'March 10, 2026',
+    entries: [
+      { type: 'new', text: 'Sync Operations panel in Settings — new dedicated section with a full Sync Health dashboard (4 stat cards: total syncs, success rate, last sync, longest gap) and a 48-hour visual timeline strip showing sync coverage vs gaps; uptime indicator shows how long the backend process has been running' },
+      { type: 'new', text: 'Feature-rich Sync Log viewer — filterable table with status pills (All/Completed/Failed/Running), date range selector (24h/7d/30d/All), free-text error search, pagination with "Load More", gap highlighting between rows (amber ≥ 30min, red ≥ 1h), click-to-expand detail modal with full error text, and CSV export of the current filtered view' },
+      { type: 'new', text: 'Auto-refresh in Sync Operations panel — logs and stats reload every 30 seconds while the section is open so you can watch a live sync progress without manually refreshing' },
+      { type: 'new', text: 'CSAT pending count on Sync Health — displays the number of closed/resolved tickets that have no CSAT response yet, giving visibility into the CSAT backlog' },
+      { type: 'new', text: 'Startup gap detection and catch-up sync — on every app start (including deployments and restarts), the scheduled sync service now checks how long ago the last successful sync completed; if the gap is over 1 hour it runs a full sync covering gap + 7 days (capped at 90) instead of a normal incremental sync, ensuring no data is missed after idle periods or crashes' },
+      { type: 'new', text: 'Azure Always On and health check enabled — App Service is now configured with alwaysOn=true (prevents the process from being killed after 20 minutes of idle) and healthCheckPath="/health" (Azure auto-restarts the instance if the health endpoint stops responding), ensuring cron jobs run continuously 24/7' },
+      { type: 'new', text: 'App uptime exposed on health endpoint — GET /health now returns appStartedAt timestamp, shown in the Sync Health panel and useful for diagnosing unexpected restarts' },
+      { type: 'improved', text: 'CSAT sync window widened from 30 to 90 days and made configurable — the csat_sync_days app_settings key (default 90) controls how far back each sync checks for new CSAT responses; customers who submit survey feedback weeks after ticket closure will no longer be missed by the 30-day cutoff' },
+      { type: 'improved', text: 'Settings sidebar modernized — emoji icons replaced with Lucide icons consistent with the rest of the app; active item uses a white card with blue icon accent instead of a heavy blue fill; inactive items are lighter and subtler; sidebar is slightly narrower for a cleaner layout' },
+      { type: 'improved', text: 'Settings tab persists across page refresh — the active section is stored in the URL hash (e.g., /settings#sync-ops); pressing F5 or sharing the URL restores the correct tab; invalid or empty hashes default to FreshService' },
+      { type: 'improved', text: 'GET /api/sync/logs API enhanced with pagination, filtering, and total count — supports offset, status, startDate, endDate, and search query params with a pagination envelope ({ total, limit, offset, hasMore }) alongside the data array; max 200 results per page' },
+      { type: 'improved', text: 'GET /api/sync/stats API enhanced — now includes longestGap analysis (gapMinutes, gapStart, gapEnd over last 7 days) and csatPendingCount alongside the existing total/completed/failed/successRate fields' },
+      { type: 'security', text: 'JWT bearer token fallback for all protected routes — requireAuth middleware now accepts a valid HS256 JWT in the Authorization header when no session cookie is present; this fixes authentication for cross-origin deployments where third-party cookies are blocked (Chrome incognito, Firefox strict mode)' },
+      { type: 'security', text: 'SSO login now issues a short-lived JWT alongside the session cookie — the 8-hour JWT is stored in memory (never localStorage) and sent via Authorization header on every API request; cleared on logout' },
+      { type: 'security', text: 'SSE EventSource JWT support — since EventSource does not support custom headers, the JWT is passed as a ?token= query parameter; the SSE route middleware promotes it to an Authorization header before requireAuth runs' },
+      { type: 'security', text: 'GET /api/auth/session validates JWT bearer token — the session check endpoint now also accepts and validates the JWT so that cookie-less sessions can verify their auth state on page load' },
+      { type: 'database', text: 'No schema changes — all improvements are code-level. No migration or prisma db push required for this release.' },
+    ],
+  },
   {
     version: '1.4.1-preview',
     date: 'March 10, 2026',
