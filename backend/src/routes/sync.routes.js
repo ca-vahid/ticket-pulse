@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import syncService from '../services/syncService.js';
 import scheduledSyncService from '../services/scheduledSyncService.js';
 import syncLogRepository from '../services/syncLogRepository.js';
+import ticketRepository from '../services/ticketRepository.js';
 import logger from '../utils/logger.js';
 import { sseManager } from './sse.routes.js';
 import { clearReadCache } from '../services/dashboardReadCache.js';
@@ -66,33 +67,58 @@ router.get(
 
 /**
  * GET /api/sync/logs
- * Get sync logs
+ * Get sync logs with pagination, filtering, and total count
+ * Query params:
+ *   - limit (default 50)
+ *   - offset (default 0)
+ *   - status (completed | failed | started)
+ *   - startDate, endDate (ISO strings)
+ *   - search (free-text on error messages)
  */
 router.get(
   '/logs',
   asyncHandler(async (req, res) => {
-    const limit = parseInt(req.query.limit, 10) || 20;
-    const logs = await syncLogRepository.getRecent(limit);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const { status, startDate, endDate, search } = req.query;
+
+    const { logs, total } = await syncLogRepository.getRecent({
+      limit,
+      offset,
+      status: status || null,
+      startDate: startDate || null,
+      endDate: endDate || null,
+      search: search || null,
+    });
 
     res.json({
       success: true,
       data: logs,
+      pagination: { total, limit, offset, hasMore: offset + logs.length < total },
     });
   }),
 );
 
 /**
  * GET /api/sync/stats
- * Get sync statistics
+ * Get sync statistics, gap analysis, and CSAT coverage
  */
 router.get(
   '/stats',
   asyncHandler(async (req, res) => {
-    const stats = await syncLogRepository.getStats();
+    const [stats, longestGap, csatPendingCount] = await Promise.all([
+      syncLogRepository.getStats(),
+      syncLogRepository.getLongestGap(7),
+      ticketRepository.getCSATPendingCount(),
+    ]);
 
     res.json({
       success: true,
-      data: stats,
+      data: {
+        ...stats,
+        longestGap,
+        csatPendingCount,
+      },
     });
   }),
 );

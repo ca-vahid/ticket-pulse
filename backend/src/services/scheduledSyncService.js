@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import syncService from './syncService.js';
+import syncLogRepository from './syncLogRepository.js';
 import settingsRepository from './settingsRepository.js';
 import logger from '../utils/logger.js';
 
@@ -60,11 +61,28 @@ class ScheduledSyncService {
       this.isScheduled = true;
       logger.info('Scheduled sync started successfully');
 
-      // Perform initial sync immediately
-      logger.info('Performing initial sync');
+      // Perform initial sync immediately, with catch-up if there's been a gap
       setImmediate(async () => {
         try {
-          await syncService.performFullSync();
+          const lastSync = await syncLogRepository.getLatestSuccessful();
+          if (lastSync?.completedAt) {
+            const gapMs = Date.now() - new Date(lastSync.completedAt).getTime();
+            const gapMinutes = Math.round(gapMs / 60000);
+            const gapHours = (gapMs / 3600000).toFixed(1);
+
+            if (gapMs > 3600000) { // > 1 hour
+              const gapDays = Math.ceil(gapMs / 86400000);
+              const daysToSync = Math.min(gapDays + 7, 90);
+              logger.warn(`Sync gap detected: ${gapHours}h since last successful sync. Running catch-up full sync (${daysToSync} days)`);
+              await syncService.performFullSync({ fullSync: true, daysToSync });
+            } else {
+              logger.info(`Last sync was ${gapMinutes}m ago. Running normal incremental sync`);
+              await syncService.performFullSync();
+            }
+          } else {
+            logger.info('No previous sync found. Running initial full sync');
+            await syncService.performFullSync({ fullSync: true, daysToSync: 30 });
+          }
         } catch (error) {
           logger.error('Initial sync failed:', error);
         }

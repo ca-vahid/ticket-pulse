@@ -404,6 +404,24 @@ class TicketRepository {
   }
 
   /**
+   * Count closed/resolved tickets that have no CSAT response
+   * @returns {Promise<number>}
+   */
+  async getCSATPendingCount() {
+    try {
+      return await prisma.ticket.count({
+        where: {
+          status: { in: ['Resolved', 'Closed'] },
+          csatResponseId: null,
+        },
+      });
+    } catch (error) {
+      logger.error('Error counting CSAT-pending tickets:', error);
+      return 0;
+    }
+  }
+
+  /**
    * Get all tickets with CSAT responses for a specific technician
    * @param {number} technicianId - Internal technician ID
    * @returns {Promise<Array>} Array of tickets with CSAT data

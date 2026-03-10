@@ -155,16 +155,34 @@ class SyncLogRepository {
   }
 
   /**
-   * Get recent sync logs
-   * @param {number} limit - Maximum number of logs to return
-   * @returns {Promise<Array>} Array of sync logs
+   * Get recent sync logs with pagination and filtering
+   * @param {Object} options - Query options
+   * @returns {Promise<{logs: Array, total: number}>}
    */
-  async getRecent(limit = 20) {
+  async getRecent({ limit = 50, offset = 0, status = null, startDate = null, endDate = null, search = null } = {}) {
     try {
-      return await prisma.syncLog.findMany({
-        orderBy: { startedAt: 'desc' },
-        take: limit,
-      });
+      const where = {};
+      if (status) where.status = status;
+      if (startDate || endDate) {
+        where.startedAt = {};
+        if (startDate) where.startedAt.gte = new Date(startDate);
+        if (endDate) where.startedAt.lte = new Date(endDate);
+      }
+      if (search) {
+        where.errorMessage = { contains: search, mode: 'insensitive' };
+      }
+
+      const [logs, total] = await Promise.all([
+        prisma.syncLog.findMany({
+          where,
+          orderBy: { startedAt: 'desc' },
+          take: limit,
+          skip: offset,
+        }),
+        prisma.syncLog.count({ where }),
+      ]);
+
+      return { logs, total };
     } catch (error) {
       logger.error('Error fetching recent sync logs:', error);
       throw new DatabaseError('Failed to fetch recent sync logs', error);
@@ -238,6 +256,48 @@ class SyncLogRepository {
     } catch (error) {
       logger.error('Error cleaning old sync logs:', error);
       throw new DatabaseError('Failed to clean old sync logs', error);
+    }
+  }
+
+  /**
+   * Compute the longest gap between consecutive completed syncs
+   * @param {number} lookbackDays - How far back to analyze
+   * @returns {Promise<{gapMinutes: number, gapStart: string|null, gapEnd: string|null}>}
+   */
+  async getLongestGap(lookbackDays = 7) {
+    try {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - lookbackDays);
+
+      const logs = await prisma.syncLog.findMany({
+        where: { status: 'completed', completedAt: { gte: cutoff } },
+        orderBy: { completedAt: 'asc' },
+        select: { completedAt: true, startedAt: true },
+      });
+
+      let maxGapMs = 0;
+      let gapStart = null;
+      let gapEnd = null;
+
+      for (let i = 1; i < logs.length; i++) {
+        const prev = new Date(logs[i - 1].completedAt).getTime();
+        const curr = new Date(logs[i].startedAt).getTime();
+        const gap = curr - prev;
+        if (gap > maxGapMs) {
+          maxGapMs = gap;
+          gapStart = logs[i - 1].completedAt;
+          gapEnd = logs[i].startedAt;
+        }
+      }
+
+      return {
+        gapMinutes: Math.round(maxGapMs / 60000),
+        gapStart: gapStart?.toISOString() || null,
+        gapEnd: gapEnd?.toISOString() || null,
+      };
+    } catch (error) {
+      logger.error('Error computing longest sync gap:', error);
+      return { gapMinutes: 0, gapStart: null, gapEnd: null };
     }
   }
 

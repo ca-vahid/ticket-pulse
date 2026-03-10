@@ -80,12 +80,16 @@ app.use((req, res, next) => {
   next();
 });
 
+// Track when the app process started
+const APP_STARTED_AT = new Date().toISOString();
+
 // Health check (no auth required)
 app.get('/health', (req, res) => {
   res.json({
     success: true,
     message: 'Server is healthy',
     timestamp: new Date().toISOString(),
+    appStartedAt: APP_STARTED_AT,
   });
 });
 

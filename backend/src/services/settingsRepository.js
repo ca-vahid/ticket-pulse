@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS = {
   sync_interval_minutes: 5,
   default_timezone: 'America/Los_Angeles',
   dashboard_refresh_seconds: 30,
+  csat_sync_days: '90',
   avoidance_min_wait_minutes: '15',
   avoidance_min_sample_size: '5',
   avoidance_flag_threshold: '0.35',

@@ -616,7 +616,8 @@ class SyncService {
       try {
         this.progress.currentStep = 'Syncing CSAT responses';
         this.progress.currentStepNumber = 4;
-        const csatResults = await this.syncRecentCSAT(30); // Last 30 days
+        const csatDaysBack = parseInt(await settingsRepository.get('csat_sync_days'), 10) || 90;
+        const csatResults = await this.syncRecentCSAT(csatDaysBack);
         csatSynced = csatResults.csatFound;
         this.progress.csatSynced = csatSynced;
       } catch (error) {

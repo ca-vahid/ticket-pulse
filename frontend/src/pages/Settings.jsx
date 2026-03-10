@@ -7,6 +7,7 @@ import AutoResponseSettings from '../components/AutoResponseSettings';
 import AutoResponseTestInteractive from '../components/AutoResponseTestInteractive';
 import LlmAdminPanel from '../components/LlmAdminPanel';
 import NoiseRulesPanel from '../components/NoiseRulesPanel';
+import SyncOperationsPanel from '../components/settings/SyncOperationsPanel';
 import {
   ArrowLeft,
   Save,
@@ -48,6 +49,7 @@ export default function Settings() {
   const navigationItems = [
     { id: 'freshservice', label: 'FreshService', icon: '🔌' },
     { id: 'sync', label: 'Sync Settings', icon: '🔄' },
+    { id: 'sync-ops', label: 'Sync Operations', icon: '📈' },
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
     { id: 'photos', label: 'Profile Photos', icon: '👤' },
     { id: 'business-hours', label: 'Business Hours', icon: '🕐' },
@@ -464,6 +466,9 @@ export default function Settings() {
                 </div>
               </div>
             )}
+
+            {/* Sync Operations */}
+            {activeSection === 'sync-ops' && <SyncOperationsPanel />}
 
             {/* Dashboard Configuration */}
             {activeSection === 'dashboard' && (

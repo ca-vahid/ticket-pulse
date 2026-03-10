@@ -242,8 +242,13 @@ export const syncAPI = {
     return await api.get('/sync/status');
   },
 
-  getLogs: async (limit = 20) => {
-    return await api.get('/sync/logs', { params: { limit } });
+  getLogs: async ({ limit = 50, offset = 0, status = null, startDate = null, endDate = null, search = null } = {}) => {
+    const params = { limit, offset };
+    if (status) params.status = status;
+    if (startDate) params.startDate = startDate;
+    if (endDate) params.endDate = endDate;
+    if (search) params.search = search;
+    return await api.get('/sync/logs', { params });
   },
 
   getStats: async () => {
