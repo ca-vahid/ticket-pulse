@@ -9,16 +9,63 @@
 
 import { getHolidayInfo } from '../../utils/holidays';
 
+// ── Timezone normalization ───────────────────────────────────────────────────
+
+const FRESHSERVICE_TZ_TO_IANA = {
+  'Atlantic Time (Canada)': 'America/Halifax',
+  'Eastern Time (US & Canada)': 'America/Toronto',
+  'Central Time (US & Canada)': 'America/Winnipeg',
+  'Mountain Time (US & Canada)': 'America/Edmonton',
+  'Pacific Time (US & Canada)': 'America/Vancouver',
+  'Arizona': 'America/Phoenix',
+  'Alaska': 'America/Anchorage',
+  'Hawaii': 'Pacific/Honolulu',
+  'Newfoundland': 'America/St_Johns',
+  'Saskatchewan': 'America/Regina',
+  'International Date Line West': 'Etc/GMT+12',
+  'Midway Island': 'Pacific/Midway',
+  'Samoa': 'Pacific/Pago_Pago',
+  'UTC': 'UTC',
+  'London': 'Europe/London',
+  'Edinburgh': 'Europe/London',
+  'Amsterdam': 'Europe/Amsterdam',
+  'Berlin': 'Europe/Berlin',
+  'Paris': 'Europe/Paris',
+  'Moscow': 'Europe/Moscow',
+  'Chennai': 'Asia/Kolkata',
+  'Mumbai': 'Asia/Kolkata',
+  'Tokyo': 'Asia/Tokyo',
+  'Sydney': 'Australia/Sydney',
+  'Melbourne': 'Australia/Melbourne',
+  'Auckland': 'Pacific/Auckland',
+  'Wellington': 'Pacific/Auckland',
+};
+
+/** Normalize a timezone string to a valid IANA identifier */
+export function toIANA(tz) {
+  if (!tz) return 'America/Los_Angeles';
+  if (FRESHSERVICE_TZ_TO_IANA[tz]) return FRESHSERVICE_TZ_TO_IANA[tz];
+  // Already an IANA identifier (contains '/') — validate it
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    console.warn(`Invalid timezone "${tz}", falling back to America/Los_Angeles`);
+    return 'America/Los_Angeles';
+  }
+}
+
 // ── Time helpers ──────────────────────────────────────────────────────────────
 
 /** Convert a local time (HH:MM) in a given IANA timezone to a UTC Date for a specific date string */
 export function localTimeToUTC(dateStr, timeStr, tz) {
   if (!dateStr || !timeStr) return new Date(0);
+  const safeTz = toIANA(tz);
   const [h, m] = timeStr.split(':');
   const probe = new Date(`${dateStr}T12:00:00Z`);
   if (isNaN(probe.getTime())) return new Date(0);
   const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
+    timeZone: safeTz,
     timeZoneName: 'shortOffset',
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', hour12: false,
@@ -355,7 +402,7 @@ export function buildTimeline(days, mergedFiltered, mergedViewMode, techConfigs)
  * Build a techConfigs array from a single technician object (for modal usage).
  */
 export function techConfigsFromTechnician(technician) {
-  const techTz = technician.timezone || 'America/Los_Angeles';
+  const techTz = toIANA(technician.timezone);
   return [{
     id: technician.id,
     firstName: technician.name?.split(' ')[0] || 'Agent',

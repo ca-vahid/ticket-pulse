@@ -1,6 +1,23 @@
-export const APP_VERSION = '1.2.7-preview';
+export const APP_VERSION = '1.4.1-preview';
 
 export const changelog = [
+  {
+    version: '1.4.1-preview',
+    date: 'March 10, 2026',
+    entries: [
+      { type: 'fixed', text: 'Infinite 401 loop after SSO login in incognito mode — the auth recovery handler and the token-exchange useEffect could both fire exchangeTokenForSession() concurrently, each creating a new backend session while dashboard API calls raced ahead without the cookie; dozens of SSO logins and 401 errors per second flooded the server, leaving the dashboard stuck on "Loading dashboard..." indefinitely' },
+      { type: 'fixed', text: 'Auth recovery now capped at 3 attempts with 2-second cooldown — after exhausting retries the user is redirected to the login page instead of looping; a global exchange lock (isExchangingRef) prevents concurrent token exchanges from any code path' },
+      { type: 'fixed', text: 'Session cookie verification after SSO login — exchangeTokenForSession() now calls checkSession() after ssoLogin() to confirm the cookie is actually usable before setting isAuthenticated=true, closing the window where the browser had not yet applied the Set-Cookie header' },
+      { type: 'fixed', text: 'Auth callback 5-second fallback redirected unauthenticated users to /dashboard — changed to redirect to /login instead, preventing an unauthenticated render of the dashboard that triggers more 401 cascades' },
+      { type: 'fixed', text: 'Background sync never starting on production — server initialization crashed at noiseRuleService.seedDefaults() due to PostgreSQL connection exhaustion ("remaining connection slots are reserved"), and the error was caught at the top level, silently skipping scheduledSyncService.start(); the app served HTTP requests with stale data but ran zero syncs' },
+      { type: 'fixed', text: 'noiseRuleService.seedDefaults() failure now non-fatal — wrapped in its own try/catch so a database connection error during noise rule seeding no longer prevents the sync service from starting; a last-resort fallback in the outer catch block also attempts to start the sync service even if other initialization steps fail' },
+      { type: 'fixed', text: 'Timeline Explorer crash for technicians with FreshService-format timezones — selecting a tech with timezone "Mountain Time (US & Canada)" threw RangeError: Invalid time zone specified because Intl.DateTimeFormat requires IANA identifiers; affected techs whose records were created before the FRESHSERVICE_TZ_TO_IANA mapping was added, or whose timezone was set via the Visuals schedule API without normalization' },
+      { type: 'improved', text: 'Comprehensive timezone normalization with toIANA() — new shared helper in timelineUtils.js maps 27 FreshService/common timezone names to IANA identifiers with Intl.DateTimeFormat validation and safe fallback to America/Los_Angeles; applied in localTimeToUTC(), techConfigsFromTechnician(), and TimelineExplorer techConfigs builder' },
+      { type: 'security', text: 'Visuals schedule API now normalizes timezone before persisting — PATCH /api/visuals/agents/:id/schedule maps incoming timezone through FRESHSERVICE_TZ_TO_IANA before writing to the database, preventing non-IANA values from being stored in the future' },
+      { type: 'security', text: 'Auth recovery rate limiting prevents server abuse — the 401 handler now enforces a 2-second cooldown between recovery attempts and a hard cap of 3 retries per session, stopping the runaway SSO login flood that previously generated hundreds of backend requests per second' },
+      { type: 'database', text: 'No schema changes — all fixes are code-level. No migration or prisma db push required for this release.' },
+    ],
+  },
   {
     version: '1.2.7-preview',
     date: 'February 27, 2026',

@@ -71,7 +71,7 @@ function AuthCallback() {
     }
     if (!isLoading && !isAuthenticated) {
       const timer = setTimeout(() => {
-        navigate('/dashboard', { replace: true });
+        navigate('/login', { replace: true });
       }, 5000);
       return () => clearTimeout(timer);
     }

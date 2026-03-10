@@ -12,6 +12,7 @@ import {
   mergeTicketsForTimeline,
   buildTimeline,
   collapseMarkers,
+  toIANA,
 } from '../components/timeline/timelineUtils';
 import { TECH_ACCENT_COLORS } from '../components/timeline/constants';
 import { getInitials, formatDateLocal } from '../components/tech-detail/utils';
@@ -476,7 +477,7 @@ export default function TimelineExplorer() {
     // Build techConfigs for marker insertion
     const tcs = techDataArray.map((tech) => {
       const accent = accentMap.get(tech.id);
-      const tz = tech.timezone || 'America/Los_Angeles';
+      const tz = toIANA(tech.timezone);
       return {
         id: tech.id,
         firstName: tech.name?.split(' ')[0] || 'Tech',

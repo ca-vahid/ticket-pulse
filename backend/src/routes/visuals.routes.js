@@ -2,6 +2,7 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth } from '../middleware/auth.js';
 import technicianRepository from '../services/technicianRepository.js';
+import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -149,7 +150,9 @@ router.patch(
       workStartTime: workStartTime ?? null,
       workEndTime: workEndTime ?? null,
     };
-    if (timezone) updatePayload.timezone = timezone;
+    if (timezone) {
+      updatePayload.timezone = FRESHSERVICE_TZ_TO_IANA[timezone] || timezone;
+    }
 
     const updatedTech = await technicianRepository.update(agentId, updatePayload);
 

@@ -124,9 +124,13 @@ async function initialize() {
       logger.warn('Failed to initialize LLM config, will use defaults:', error);
     }
 
-    // Seed default noise rules (no-op if already seeded)
-    await noiseRuleService.seedDefaults();
-    logger.info('Noise rules initialized');
+    // Seed default noise rules (non-critical, must not block sync startup)
+    try {
+      await noiseRuleService.seedDefaults();
+      logger.info('Noise rules initialized');
+    } catch (noiseError) {
+      logger.warn('Noise rules initialization failed (non-fatal):', noiseError.message || noiseError);
+    }
 
     // Check if FreshService is configured
     const isConfigured = await settingsRepository.isFreshServiceConfigured();
@@ -141,7 +145,16 @@ async function initialize() {
     logger.info('Server initialization complete');
   } catch (error) {
     logger.error('Server initialization failed:', error);
-    // Don't exit - allow server to start even if initialization fails
+    // Last resort: still try to start the sync service
+    try {
+      const isConfigured = await settingsRepository.isFreshServiceConfigured();
+      if (isConfigured) {
+        logger.info('Attempting to start scheduled sync despite initialization error');
+        await scheduledSyncService.start();
+      }
+    } catch (syncError) {
+      logger.error('Failed to start scheduled sync after initialization error:', syncError);
+    }
   }
 }
 

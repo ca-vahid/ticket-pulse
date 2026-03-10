@@ -6,13 +6,18 @@ import { loginRequest } from '../config/msalConfig';
 
 const AuthContext = createContext(null);
 
+const MAX_RECOVERY_ATTEMPTS = 3;
+const RECOVERY_COOLDOWN_MS = 2000;
+
 export function AuthProvider({ children }) {
   const { instance, inProgress, accounts } = useMsal();
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const isRecoveringSessionRef = useRef(false);
+  const isExchangingRef = useRef(false);
+  const recoveryAttemptsRef = useRef(0);
+  const recoveryCooldownRef = useRef(null);
 
   const checkSession = useCallback(async () => {
     try {
@@ -22,6 +27,7 @@ export function AuthProvider({ children }) {
       if (response.authenticated && response.user) {
         setUser(response.user);
         setIsAuthenticated(true);
+        recoveryAttemptsRef.current = 0;
       } else {
         setUser(null);
         setIsAuthenticated(false);
@@ -40,7 +46,9 @@ export function AuthProvider({ children }) {
   }, [checkSession]);
 
   const exchangeTokenForSession = useCallback(async () => {
-    if (inProgress !== InteractionStatus.None || !accounts.length) return;
+    if (inProgress !== InteractionStatus.None || !accounts.length) return false;
+    if (isExchangingRef.current) return false;
+    isExchangingRef.current = true;
 
     try {
       const tokenResponse = await instance.acquireTokenSilent({
@@ -51,10 +59,16 @@ export function AuthProvider({ children }) {
       if (tokenResponse?.idToken) {
         const response = await authAPI.ssoLogin(tokenResponse.idToken);
         if (response.success && response.user) {
-          setUser(response.user);
-          setIsAuthenticated(true);
-          setError(null);
-          return true;
+          // Verify session is actually usable before declaring success
+          await new Promise(r => setTimeout(r, 100));
+          const sessionCheck = await authAPI.checkSession();
+          if (sessionCheck.authenticated && sessionCheck.user) {
+            setUser(sessionCheck.user);
+            setIsAuthenticated(true);
+            setError(null);
+            recoveryAttemptsRef.current = 0;
+            return true;
+          }
         }
       }
       return false;
@@ -62,6 +76,8 @@ export function AuthProvider({ children }) {
       console.error('Token exchange failed:', err);
       setError(err.message);
       return false;
+    } finally {
+      isExchangingRef.current = false;
     }
   }, [instance, inProgress, accounts]);
 
@@ -73,10 +89,22 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const handleUnauthorized = async () => {
-      if (isRecoveringSessionRef.current) return;
-      isRecoveringSessionRef.current = true;
-      setIsLoading(true);
+      if (isExchangingRef.current) return;
+      if (recoveryAttemptsRef.current >= MAX_RECOVERY_ATTEMPTS) {
+        console.warn(`Auth recovery exhausted (${MAX_RECOVERY_ATTEMPTS} attempts). Redirecting to login.`);
+        setUser(null);
+        setIsAuthenticated(false);
+        setIsLoading(false);
+        return;
+      }
+      if (recoveryCooldownRef.current) return;
 
+      recoveryAttemptsRef.current++;
+      recoveryCooldownRef.current = setTimeout(() => {
+        recoveryCooldownRef.current = null;
+      }, RECOVERY_COOLDOWN_MS);
+
+      setIsLoading(true);
       try {
         const recovered = await exchangeTokenForSession();
         if (!recovered) {
@@ -86,12 +114,14 @@ export function AuthProvider({ children }) {
         }
       } finally {
         setIsLoading(false);
-        isRecoveringSessionRef.current = false;
       }
     };
 
     window.addEventListener('auth:unauthorized', handleUnauthorized);
-    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
+    return () => {
+      window.removeEventListener('auth:unauthorized', handleUnauthorized);
+      if (recoveryCooldownRef.current) clearTimeout(recoveryCooldownRef.current);
+    };
   }, [exchangeTokenForSession]);
 
   const loginWithSSO = async () => {
