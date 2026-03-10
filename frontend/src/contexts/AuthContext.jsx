@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
-import { authAPI, markAuthGracePeriod } from '../services/api';
+import { authAPI, setAuthToken, clearAuthToken } from '../services/api';
 import { loginRequest } from '../config/msalConfig';
 
 const AuthContext = createContext(null);
@@ -61,10 +61,10 @@ export function AuthProvider({ children }) {
       if (tokenResponse?.idToken) {
         const response = await authAPI.ssoLogin(tokenResponse.idToken);
         if (response.success && response.user) {
-          // Trust the ssoLogin response — the session was created server-side.
-          // Mark a grace period so the API interceptor retries 401s while
-          // the cross-origin Set-Cookie propagates (incognito is slower).
-          markAuthGracePeriod();
+          // Store JWT for cookie-less auth (incognito / cross-origin)
+          if (response.authToken) {
+            setAuthToken(response.authToken);
+          }
           lastAuthSuccessRef.current = Date.now();
           setUser(response.user);
           setIsAuthenticated(true);
@@ -146,6 +146,7 @@ export function AuthProvider({ children }) {
     } catch (err) {
       console.error('Logout error:', err);
     } finally {
+      clearAuthToken();
       setUser(null);
       setIsAuthenticated(false);
       setError(null);

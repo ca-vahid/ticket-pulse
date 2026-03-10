@@ -1,9 +1,9 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import jwksRsa from 'jwks-rsa';
+import config from '../config/index.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { ValidationError, AuthenticationError } from '../utils/errors.js';
-// SSO via Azure AD - validates ID tokens and creates sessions
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -95,10 +95,19 @@ router.post(
 
     logger.info(`SSO login: ${name} (${email}) as ${role}`);
 
+    // Issue a JWT so the frontend can authenticate even when third-party
+    // cookies are blocked (e.g., Chrome incognito with cross-origin deploy).
+    const userPayload = { email, name, username: name, role };
+    const authToken = jwt.sign(userPayload, config.session.secret, {
+      algorithm: 'HS256',
+      expiresIn: '8h',
+    });
+
     res.json({
       success: true,
       message: 'SSO login successful',
-      user: { email, name, username: name, role },
+      user: userPayload,
+      authToken,
     });
   }),
 );
@@ -138,8 +147,9 @@ router.post(
 router.get(
   '/session',
   asyncHandler(async (req, res) => {
+    // Check session cookie first
     if (req.session?.user) {
-      res.json({
+      return res.json({
         success: true,
         authenticated: true,
         user: {
@@ -149,12 +159,33 @@ router.get(
           role: req.session.user.role,
         },
       });
-    } else {
-      res.json({
-        success: true,
-        authenticated: false,
-      });
     }
+
+    // Fallback: check JWT in Authorization header
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.substring(7);
+        const decoded = jwt.verify(token, config.session.secret, { algorithms: ['HS256'] });
+        return res.json({
+          success: true,
+          authenticated: true,
+          user: {
+            email: decoded.email,
+            name: decoded.name,
+            username: decoded.username || decoded.name,
+            role: decoded.role,
+          },
+        });
+      } catch {
+        // Invalid token — fall through
+      }
+    }
+
+    res.json({
+      success: true,
+      authenticated: false,
+    });
   }),
 );
 

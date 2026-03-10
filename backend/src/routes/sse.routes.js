@@ -4,7 +4,14 @@ import logger from '../utils/logger.js';
 
 const router = express.Router();
 
-// Protect all SSE routes with authentication
+// For SSE, accept JWT via query param since EventSource doesn't support headers
+router.use((req, res, next) => {
+  if (req.query.token && !req.headers.authorization) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  next();
+});
+
 router.use(requireAuth);
 
 /**

@@ -3,14 +3,26 @@ import { formatDateLocal } from '../utils/dateHelpers';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
 
+// JWT token stored in memory (never localStorage — cleared on tab close).
+// Used as fallback when third-party cookies are blocked (Chrome incognito).
+let _authToken = null;
+
+export function setAuthToken(token) {
+  _authToken = token;
+}
+
+export function clearAuthToken() {
+  _authToken = null;
+}
+
 // Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true, // Important for session cookies
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000, // 30 second timeout (default)
+  timeout: 30000,
 });
 
 // Create a separate instance for long-running operations like sync
@@ -20,34 +32,26 @@ const apiLongTimeout = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 900000, // 15 minute timeout for sync operations (large historical syncs can take 8-10 minutes)
+  timeout: 900000,
 });
 
-// Post-login grace period: 401s within this window get retried instead of
-// triggering auth recovery, giving the cross-origin Set-Cookie time to
-// propagate (especially important in incognito mode).
-let _authGraceUntil = 0;
-const AUTH_GRACE_MS = 5000;
-const AUTH_RETRY_DELAY_MS = 800;
-
-export function markAuthGracePeriod() {
-  _authGraceUntil = Date.now() + AUTH_GRACE_MS;
-}
+// Attach JWT Authorization header to every request as a cookie fallback
+const authRequestInterceptor = (reqConfig) => {
+  if (_authToken && !reqConfig.headers.Authorization) {
+    reqConfig.headers.Authorization = `Bearer ${_authToken}`;
+  }
+  return reqConfig;
+};
+api.interceptors.request.use(authRequestInterceptor);
+apiLongTimeout.interceptors.request.use(authRequestInterceptor);
 
 // Response interceptor for error handling
-const errorInterceptor = async (error) => {
+const errorInterceptor = (error) => {
   if (error.response) {
     const status = error.response.status;
     const requestUrl = error.config?.url || '';
 
     if (status === 401 && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout' && requestUrl !== '/auth/sso' && !error.config?._speculative) {
-      // During grace period, retry once after a delay instead of triggering recovery
-      if (Date.now() < _authGraceUntil && !error.config?._retried) {
-        await new Promise(r => setTimeout(r, AUTH_RETRY_DELAY_MS));
-        error.config._retried = true;
-        return api.request(error.config);
-      }
-
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: { url: requestUrl },
       }));
@@ -264,9 +268,11 @@ export const syncAPI = {
  */
 export const sseAPI = {
   getEventSource: () => {
-    return new EventSource(`${API_BASE_URL}/sse/events`, {
-      withCredentials: true,
-    });
+    // EventSource doesn't support custom headers, so pass JWT as query param
+    const url = _authToken
+      ? `${API_BASE_URL}/sse/events?token=${encodeURIComponent(_authToken)}`
+      : `${API_BASE_URL}/sse/events`;
+    return new EventSource(url, { withCredentials: true });
   },
 
   getStatus: async () => {
