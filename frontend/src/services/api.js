@@ -23,15 +23,31 @@ const apiLongTimeout = axios.create({
   timeout: 900000, // 15 minute timeout for sync operations (large historical syncs can take 8-10 minutes)
 });
 
-// Response interceptor for error handling
-const errorInterceptor = (error) => {
-  console.error('API Error:', error);
+// Post-login grace period: 401s within this window get retried instead of
+// triggering auth recovery, giving the cross-origin Set-Cookie time to
+// propagate (especially important in incognito mode).
+let _authGraceUntil = 0;
+const AUTH_GRACE_MS = 5000;
+const AUTH_RETRY_DELAY_MS = 800;
 
+export function markAuthGracePeriod() {
+  _authGraceUntil = Date.now() + AUTH_GRACE_MS;
+}
+
+// Response interceptor for error handling
+const errorInterceptor = async (error) => {
   if (error.response) {
     const status = error.response.status;
     const requestUrl = error.config?.url || '';
 
-    if (status === 401 && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout' && !error.config?._speculative) {
+    if (status === 401 && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout' && requestUrl !== '/auth/sso' && !error.config?._speculative) {
+      // During grace period, retry once after a delay instead of triggering recovery
+      if (Date.now() < _authGraceUntil && !error.config?._retried) {
+        await new Promise(r => setTimeout(r, AUTH_RETRY_DELAY_MS));
+        error.config._retried = true;
+        return api.request(error.config);
+      }
+
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: { url: requestUrl },
       }));

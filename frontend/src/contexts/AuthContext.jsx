@@ -1,13 +1,14 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
-import { authAPI } from '../services/api';
+import { authAPI, markAuthGracePeriod } from '../services/api';
 import { loginRequest } from '../config/msalConfig';
 
 const AuthContext = createContext(null);
 
 const MAX_RECOVERY_ATTEMPTS = 3;
 const RECOVERY_COOLDOWN_MS = 2000;
+const POST_LOGIN_SUPPRESS_MS = 5000;
 
 export function AuthProvider({ children }) {
   const { instance, inProgress, accounts } = useMsal();
@@ -18,6 +19,7 @@ export function AuthProvider({ children }) {
   const isExchangingRef = useRef(false);
   const recoveryAttemptsRef = useRef(0);
   const recoveryCooldownRef = useRef(null);
+  const lastAuthSuccessRef = useRef(0);
 
   const checkSession = useCallback(async () => {
     try {
@@ -59,16 +61,16 @@ export function AuthProvider({ children }) {
       if (tokenResponse?.idToken) {
         const response = await authAPI.ssoLogin(tokenResponse.idToken);
         if (response.success && response.user) {
-          // Verify session is actually usable before declaring success
-          await new Promise(r => setTimeout(r, 100));
-          const sessionCheck = await authAPI.checkSession();
-          if (sessionCheck.authenticated && sessionCheck.user) {
-            setUser(sessionCheck.user);
-            setIsAuthenticated(true);
-            setError(null);
-            recoveryAttemptsRef.current = 0;
-            return true;
-          }
+          // Trust the ssoLogin response — the session was created server-side.
+          // Mark a grace period so the API interceptor retries 401s while
+          // the cross-origin Set-Cookie propagates (incognito is slower).
+          markAuthGracePeriod();
+          lastAuthSuccessRef.current = Date.now();
+          setUser(response.user);
+          setIsAuthenticated(true);
+          setError(null);
+          recoveryAttemptsRef.current = 0;
+          return true;
         }
       }
       return false;
@@ -90,6 +92,11 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const handleUnauthorized = async () => {
       if (isExchangingRef.current) return;
+      // Within the post-login window, the API interceptor handles retries —
+      // suppress full auth recovery to avoid creating new sessions.
+      if (lastAuthSuccessRef.current && Date.now() - lastAuthSuccessRef.current < POST_LOGIN_SUPPRESS_MS) {
+        return;
+      }
       if (recoveryAttemptsRef.current >= MAX_RECOVERY_ATTEMPTS) {
         console.warn(`Auth recovery exhausted (${MAX_RECOVERY_ATTEMPTS} attempts). Redirecting to login.`);
         setUser(null);
