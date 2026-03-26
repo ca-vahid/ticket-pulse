@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 import { syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
@@ -74,6 +75,7 @@ export default function Dashboard() {
     clearCacheOnLogout,
   } = useDashboard();
   const { user, logout } = useAuth();
+  const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
   const [refreshing, setRefreshing] = useState(false);
@@ -1163,7 +1165,35 @@ export default function Dashboard() {
                   v{APP_VERSION}
                 </button>
               </div>
-              <p className="text-xs text-gray-600">Welcome, {user?.name || user?.username}</p>
+              <div className="flex items-center gap-2 text-xs text-gray-600">
+                <span>Welcome, {user?.name || user?.username}</span>
+                {currentWorkspace && availableWorkspaces.length > 1 && (
+                  <select
+                    value={currentWorkspace.id}
+                    onChange={async (e) => {
+                      const newId = Number(e.target.value);
+                      if (newId === currentWorkspace.id) return;
+                      try {
+                        await switchWorkspace(newId);
+                      } catch (err) {
+                        console.error('Workspace switch failed:', err);
+                      }
+                      window.location.href = '/dashboard';
+                    }}
+                    className="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-medium cursor-pointer hover:bg-blue-100"
+                    title="Switch workspace"
+                  >
+                    {availableWorkspaces.map(ws => (
+                      <option key={ws.id} value={ws.id}>{ws.name}</option>
+                    ))}
+                  </select>
+                )}
+                {currentWorkspace && availableWorkspaces.length <= 1 && (
+                  <span className="bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-medium">
+                    {currentWorkspace.name}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Center: Status + Last Updated - 6 cols */}

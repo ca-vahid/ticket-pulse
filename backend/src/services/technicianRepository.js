@@ -10,9 +10,11 @@ class TechnicianRepository {
    * Get all technicians (active and inactive)
    * @returns {Promise<Array>} Array of all technicians
    */
-  async getAll() {
+  async getAll(workspaceId = null) {
     try {
+      const where = workspaceId ? { workspaceId } : {};
       return await prisma.technician.findMany({
+        where,
         include: {
           tickets: {
             include: {
@@ -32,14 +34,17 @@ class TechnicianRepository {
    * Get all active technicians
    * @returns {Promise<Array>} Array of active technicians
    */
-  async getAllActive() {
+  async getAllActive(workspaceId = null) {
     try {
+      const where = { isActive: true };
+      if (workspaceId) where.workspaceId = workspaceId;
+
       return await prisma.technician.findMany({
-        where: { isActive: true },
+        where,
         include: {
           tickets: {
             include: {
-              requester: true, // Include requester for ticket details
+              requester: true,
             },
           },
         },
@@ -61,8 +66,11 @@ class TechnicianRepository {
    * @param {Date} dateEnd   - End of the date range (inclusive)
    * @returns {Promise<Array>} Array of active technicians with scoped tickets
    */
-  async getAllActiveScoped(dateStart, dateEnd, { excludeNoise = false } = {}) {
+  async getAllActiveScoped(dateStart, dateEnd, { excludeNoise = false, workspaceId = null } = {}) {
     try {
+      const techWhere = { isActive: true };
+      if (workspaceId) techWhere.workspaceId = workspaceId;
+
       const ticketWhere = {
         OR: [
           { firstAssignedAt: { gte: dateStart, lte: dateEnd } },
@@ -77,7 +85,7 @@ class TechnicianRepository {
       }
 
       return await prisma.technician.findMany({
-        where: { isActive: true },
+        where: techWhere,
         include: {
           tickets: {
             where: ticketWhere,
@@ -122,13 +130,22 @@ class TechnicianRepository {
    * @param {number} freshserviceId - FreshService technician ID
    * @returns {Promise<Object|null>} Technician object or null
    */
-  async getByFreshserviceId(freshserviceId) {
+  async getByFreshserviceId(freshserviceId, workspaceId = null) {
     try {
-      return await prisma.technician.findUnique({
+      if (workspaceId) {
+        return await prisma.technician.findUnique({
+          where: {
+            freshserviceId_workspaceId: {
+              freshserviceId: BigInt(freshserviceId),
+              workspaceId,
+            },
+          },
+          include: { tickets: true },
+        });
+      }
+      return await prisma.technician.findFirst({
         where: { freshserviceId: BigInt(freshserviceId) },
-        include: {
-          tickets: true,
-        },
+        include: { tickets: true },
       });
     } catch (error) {
       logger.error(`Error fetching technician by FreshService ID ${freshserviceId}:`, error);
@@ -230,14 +247,17 @@ class TechnicianRepository {
         createDataKeys: Object.keys(createData),
       });
 
-      // Include workspaceId if provided
-      if (data.workspaceId !== undefined) {
-        updateData.workspaceId = data.workspaceId;
-        createData.workspaceId = data.workspaceId;
-      }
+      // workspaceId is required — used as part of the composite unique key
+      const wsId = data.workspaceId || 1;
+      createData.workspaceId = wsId;
 
       return await prisma.technician.upsert({
-        where: { freshserviceId: BigInt(data.freshserviceId) },
+        where: {
+          freshserviceId_workspaceId: {
+            freshserviceId: BigInt(data.freshserviceId),
+            workspaceId: wsId,
+          },
+        },
         update: updateData,
         create: createData,
       });
@@ -270,11 +290,8 @@ class TechnicianRepository {
     try {
       const result = await prisma.technician.updateMany({
         where: {
-          OR: [
-            { workspaceId: null },
-            { workspaceId: { not: BigInt(workspaceId) } },
-          ],
-          isActive: true, // Only deactivate currently active technicians
+          workspaceId,
+          isActive: true,
         },
         data: {
           isActive: false,
@@ -284,8 +301,33 @@ class TechnicianRepository {
 
       return result.count;
     } catch (error) {
-      logger.error(`Error deactivating technicians not in workspace ${workspaceId}:`, error);
+      logger.error(`Error deactivating technicians in workspace ${workspaceId}:`, error);
       throw new DatabaseError('Failed to deactivate technicians by workspace', error);
+    }
+  }
+
+  /**
+   * Deactivate technicians in a workspace that are NOT in the given set of FreshService IDs.
+   * Used during sync to mark agents that were removed from the FreshService workspace.
+   */
+  async deactivateNotInList(workspaceId, activeFreshserviceIds) {
+    try {
+      const result = await prisma.technician.updateMany({
+        where: {
+          workspaceId,
+          isActive: true,
+          freshserviceId: { notIn: activeFreshserviceIds.map(id => BigInt(id)) },
+        },
+        data: {
+          isActive: false,
+          updatedAt: new Date(),
+        },
+      });
+
+      return result.count;
+    } catch (error) {
+      logger.error(`Error deactivating technicians not in list for workspace ${workspaceId}:`, error);
+      throw new DatabaseError('Failed to deactivate technicians not in list', error);
     }
   }
 
@@ -293,11 +335,12 @@ class TechnicianRepository {
    * Get technician count statistics
    * @returns {Promise<Object>} Count statistics
    */
-  async getStats() {
+  async getStats(workspaceId = null) {
     try {
-      const total = await prisma.technician.count();
+      const baseWhere = workspaceId ? { workspaceId } : {};
+      const total = await prisma.technician.count({ where: baseWhere });
       const active = await prisma.technician.count({
-        where: { isActive: true },
+        where: { ...baseWhere, isActive: true },
       });
 
       return {

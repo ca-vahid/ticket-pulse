@@ -13,12 +13,13 @@ import logger from '../utils/logger.js';
 export const getConfig = async (req, res) => {
   try {
     const { type = 'draft' } = req.query;
+    const workspaceId = req.workspaceId;
 
     let config;
     if (type === 'published') {
-      config = await llmConfigService.getPublishedConfig();
+      config = await llmConfigService.getPublishedConfig(workspaceId);
     } else {
-      config = await llmConfigService.getDraftConfig();
+      config = await llmConfigService.getDraftConfig(workspaceId);
     }
 
     res.json({
@@ -77,6 +78,7 @@ export const updatePrompts = async (req, res) => {
     const updated = await llmConfigService.updateDraft(
       { classificationPrompt, responsePrompt },
       updatedBy,
+      req.workspaceId,
     );
 
     res.json({
@@ -108,7 +110,7 @@ export const updateTemplates = async (req, res) => {
     if (fallbackMessage !== undefined) updates.fallbackMessage = fallbackMessage;
     if (tonePresets !== undefined) updates.tonePresets = tonePresets;
 
-    const updated = await llmConfigService.updateDraft(updates, updatedBy);
+    const updated = await llmConfigService.updateDraft(updates, updatedBy, req.workspaceId);
 
     res.json({
       success: true,
@@ -145,7 +147,7 @@ export const updateEtaRules = async (req, res) => {
     if (afterHoursMessage !== undefined) updates.afterHoursMessage = afterHoursMessage;
     if (holidayMessage !== undefined) updates.holidayMessage = holidayMessage;
 
-    const updated = await llmConfigService.updateDraft(updates, updatedBy);
+    const updated = await llmConfigService.updateDraft(updates, updatedBy, req.workspaceId);
 
     res.json({
       success: true,
@@ -176,7 +178,7 @@ export const updateOverrides = async (req, res) => {
     if (domainWhitelist !== undefined) updates.domainWhitelist = domainWhitelist;
     if (domainBlacklist !== undefined) updates.domainBlacklist = domainBlacklist;
 
-    const updated = await llmConfigService.updateDraft(updates, updatedBy);
+    const updated = await llmConfigService.updateDraft(updates, updatedBy, req.workspaceId);
 
     res.json({
       success: true,
@@ -256,7 +258,7 @@ export const updateRuntimeSettings = async (req, res) => {
       });
     }
 
-    const updated = await llmConfigService.updateDraft(updates, updatedBy);
+    const updated = await llmConfigService.updateDraft(updates, updatedBy, req.workspaceId);
 
     res.json({
       success: true,
@@ -282,7 +284,8 @@ export const publishConfig = async (req, res) => {
     const { notes } = req.body;
     const publishedBy = req.session?.user?.name || 'admin';
 
-    const published = await llmConfigService.publishDraft(publishedBy, notes);
+    const draft = await llmConfigService.getDraftConfig(req.workspaceId);
+    const published = await llmConfigService.publishDraft(draft.id, publishedBy, req.workspaceId, notes);
 
     res.json({
       success: true,
@@ -307,7 +310,7 @@ export const resetToDefaults = async (req, res) => {
   try {
     const resetBy = req.session?.user?.name || 'admin';
 
-    const draft = await llmConfigService.resetDraftToDefaults(resetBy);
+    const draft = await llmConfigService.resetDraftToDefaults(req.workspaceId, resetBy);
 
     res.json({
       success: true,
@@ -332,7 +335,7 @@ export const getHistory = async (req, res) => {
   try {
     const { limit = 50 } = req.query;
 
-    const history = await llmConfigService.getHistory(parseInt(limit));
+    const history = await llmConfigService.getHistory(req.workspaceId, parseInt(limit, 10));
 
     res.json({
       success: true,
@@ -364,7 +367,11 @@ export const revertToVersion = async (req, res) => {
       });
     }
 
-    const reverted = await llmConfigService.revertToVersion(parseInt(historyId), revertedBy);
+    const reverted = await llmConfigService.revertToVersion(
+      parseInt(historyId, 10),
+      revertedBy,
+      req.workspaceId,
+    );
 
     res.json({
       success: true,

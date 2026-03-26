@@ -33,7 +33,7 @@ router.post(
       logger.info('Manual incremental sync triggered via API');
     }
 
-    const result = await scheduledSyncService.triggerManualSync(fullSync, daysToSync);
+    const result = await scheduledSyncService.triggerManualSync(fullSync, daysToSync, req.workspaceId);
     clearReadCache();
 
     res.json({
@@ -52,7 +52,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const syncStatus = syncService.getSyncStatus();
     const scheduleStatus = scheduledSyncService.getStatus();
-    const latestSync = await syncLogRepository.getLatest();
+    const latestSync = await syncLogRepository.getLatest(req.workspaceId);
 
     res.json({
       success: true,
@@ -89,6 +89,7 @@ router.get(
       startDate: startDate || null,
       endDate: endDate || null,
       search: search || null,
+      workspaceId: req.workspaceId,
     });
 
     res.json({
@@ -107,9 +108,9 @@ router.get(
   '/stats',
   asyncHandler(async (req, res) => {
     const [stats, longestGap, csatPendingCount] = await Promise.all([
-      syncLogRepository.getStats(),
-      syncLogRepository.getLongestGap(7),
-      ticketRepository.getCSATPendingCount(),
+      syncLogRepository.getStats(null, null, req.workspaceId),
+      syncLogRepository.getLongestGap(7, req.workspaceId),
+      ticketRepository.getCSATPendingCount(req.workspaceId),
     ]);
 
     res.json({
@@ -184,6 +185,7 @@ router.post(
       daysToSync,
       processAll,
       concurrency,
+      workspaceId: req.workspaceId,
     });
 
     res.json({
@@ -259,14 +261,13 @@ router.post(
 
     logger.info(`Week sync triggered via API (${startDate} to ${endDate})`);
 
-    const result = await syncService.syncWeek({ startDate, endDate });
+    const result = await syncService.syncWeek({ startDate, endDate, workspaceId: req.workspaceId });
     clearReadCache();
 
-    // Broadcast sync completion to all SSE clients
     sseManager.broadcast('sync-completed', {
       syncType: 'week',
       result,
-    });
+    }, req.workspaceId);
 
     res.json({
       success: true,

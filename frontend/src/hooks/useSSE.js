@@ -18,6 +18,7 @@ export function useSSE(options = {}) {
     onConnected,
     onError,
     enabled = true,
+    reconnectKey = null,
   } = options;
 
   // Three-state: 'connecting', 'connected', 'disconnected'
@@ -142,7 +143,7 @@ export function useSSE(options = {}) {
       closeCurrentSource();
       setConnectionStatus('disconnected');
     };
-  }, [enabled, onMessage, onSyncCompleted, onConnected, onError]);
+  }, [enabled, onMessage, onSyncCompleted, onConnected, onError, reconnectKey]);
 
   const disconnect = () => {
     if (eventSourceRef.current) {

@@ -1,5 +1,6 @@
 import express from 'express';
 import authRoutes from './auth.routes.js';
+import workspaceRoutes from './workspace.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import settingsRoutes from './settings.routes.js';
 import syncRoutes from './sync.routes.js';
@@ -10,6 +11,7 @@ import autoresponseRoutes from './autoresponse.routes.js';
 import llmAdminRoutes from './llmAdmin.routes.js';
 import visualsRoutes from './visuals.routes.js';
 import noiseRoutes from './noise.routes.js';
+import { requireWorkspace } from '../middleware/workspace.js';
 
 const router = express.Router();
 
@@ -22,8 +24,14 @@ router.get('/health', (req, res) => {
   });
 });
 
-// Mount route modules
+// Auth & workspace selection (exempt from workspace requirement)
 router.use('/auth', authRoutes);
+router.use('/workspaces', workspaceRoutes);
+
+// Workspace resolution middleware — all routes below require a workspace
+router.use(requireWorkspace);
+
+// Mount route modules
 router.use('/dashboard', dashboardRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/sync', syncRoutes);

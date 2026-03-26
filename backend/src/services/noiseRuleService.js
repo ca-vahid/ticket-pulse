@@ -143,33 +143,40 @@ const DEFAULT_RULES = [
   },
 ];
 
-let cachedRules = null;
-let cacheTimestamp = 0;
+/** @type {Map<number, { rules: Array<object>, timestamp: number }>} */
+const rulesCacheByWorkspace = new Map();
 const CACHE_TTL_MS = 60_000;
 
+function notFoundError() {
+  const err = new Error('Rule not found');
+  err.code = 'P2025';
+  return err;
+}
+
 class NoiseRuleService {
-  async _getRules() {
+  async _getRules(workspaceId) {
+    const wsId = workspaceId ?? 1;
     const now = Date.now();
-    if (cachedRules && now - cacheTimestamp < CACHE_TTL_MS) {
-      return cachedRules;
+    const entry = rulesCacheByWorkspace.get(wsId);
+    if (entry && now - entry.timestamp < CACHE_TTL_MS) {
+      return entry.rules;
     }
 
     const rules = await prisma.noiseRule.findMany({
-      where: { isEnabled: true },
+      where: { isEnabled: true, workspaceId: wsId },
       orderBy: { matchCount: 'desc' },
     });
 
-    cachedRules = rules.map(r => ({
+    const mapped = rules.map(r => ({
       ...r,
       regex: new RegExp(r.pattern, 'i'),
     }));
-    cacheTimestamp = now;
-    return cachedRules;
+    rulesCacheByWorkspace.set(wsId, { rules: mapped, timestamp: now });
+    return mapped;
   }
 
   invalidateCache() {
-    cachedRules = null;
-    cacheTimestamp = 0;
+    rulesCacheByWorkspace.clear();
   }
 
   /**
@@ -182,10 +189,11 @@ class NoiseRuleService {
    * @param {Date|null} createdAt - Ticket creation date (needed for dedup check)
    * @returns {Promise<{isNoise: boolean, ruleId: string|null}>}
    */
-  async evaluate(subject, createdAt = null) {
+  async evaluate(subject, createdAt = null, workspaceId = 1) {
     if (!subject) return { isNoise: false, ruleId: null };
 
-    const rules = await this._getRules();
+    const wsId = workspaceId ?? 1;
+    const rules = await this._getRules(wsId);
     for (const rule of rules) {
       if (!rule.regex.test(subject)) continue;
 
@@ -195,6 +203,7 @@ class NoiseRuleService {
 
         const existingCount = await prisma.ticket.count({
           where: {
+            workspaceId: wsId,
             subject,
             createdAt: { gte: windowStart, lt: createdAt },
           },
@@ -212,8 +221,12 @@ class NoiseRuleService {
     return { isNoise: false, ruleId: null };
   }
 
-  async getAllRules() {
-    return prisma.noiseRule.findMany({ orderBy: { matchCount: 'desc' } });
+  async getAllRules(workspaceId) {
+    const wsId = workspaceId ?? 1;
+    return prisma.noiseRule.findMany({
+      where: { workspaceId: wsId },
+      orderBy: { matchCount: 'desc' },
+    });
   }
 
   async createRule(data) {
@@ -232,13 +245,20 @@ class NoiseRuleService {
         category: data.category || 'custom',
         isEnabled: data.isEnabled !== false,
         dedupWindowDays: data.dedupWindowDays || null,
+        workspaceId: data.workspaceId,
       },
     });
     this.invalidateCache();
     return rule;
   }
 
-  async updateRule(id, data) {
+  async updateRule(id, data, workspaceId) {
+    const wsId = workspaceId ?? 1;
+    const existing = await prisma.noiseRule.findFirst({ where: { id, workspaceId: wsId } });
+    if (!existing) {
+      throw notFoundError();
+    }
+
     if (data.pattern) {
       try {
         new RegExp(data.pattern, 'i');
@@ -263,22 +283,47 @@ class NoiseRuleService {
     return rule;
   }
 
-  async deleteRule(id) {
+  async deleteRule(id, workspaceId) {
+    const wsId = workspaceId ?? 1;
+    const existing = await prisma.noiseRule.findFirst({ where: { id, workspaceId: wsId } });
+    if (!existing) {
+      throw notFoundError();
+    }
     await prisma.noiseRule.delete({ where: { id } });
     this.invalidateCache();
   }
 
-  async seedDefaults() {
-    const existing = await prisma.noiseRule.count();
-    if (existing > 0) {
-      logger.info(`Noise rules already seeded (${existing} rules exist)`);
-      return existing;
+  async seedDefaults(workspaceId = null) {
+    if (workspaceId != null) {
+      const wsId = workspaceId;
+      const existing = await prisma.noiseRule.count({ where: { workspaceId: wsId } });
+      if (existing > 0) {
+        logger.info(`Noise rules already seeded for workspace ${wsId} (${existing} rules exist)`);
+        return 0;
+      }
+
+      logger.info(`Seeding ${DEFAULT_RULES.length} default noise rules for workspace ${wsId}...`);
+      await prisma.noiseRule.createMany({
+        data: DEFAULT_RULES.map(r => ({
+          name: r.name,
+          pattern: r.pattern,
+          description: r.description ?? null,
+          category: r.category,
+          isEnabled: true,
+          dedupWindowDays: r.dedupWindowDays ?? null,
+          workspaceId: wsId,
+        })),
+      });
+      this.invalidateCache();
+      return DEFAULT_RULES.length;
     }
 
-    logger.info(`Seeding ${DEFAULT_RULES.length} default noise rules...`);
-    await prisma.noiseRule.createMany({ data: DEFAULT_RULES });
-    this.invalidateCache();
-    return DEFAULT_RULES.length;
+    const workspaces = await prisma.workspace.findMany({ select: { id: true } });
+    let seeded = 0;
+    for (const { id } of workspaces) {
+      seeded += await this.seedDefaults(id);
+    }
+    return seeded;
   }
 
   /**
@@ -286,8 +331,9 @@ class NoiseRuleService {
    * Processes chronologically (oldest first) so dedup window rules work correctly.
    * Returns { updated, noiseCount, totalProcessed }
    */
-  async backfillAll(progressCallback = null) {
-    const rules = await this._getRules();
+  async backfillAll(progressCallback = null, workspaceId = null) {
+    const wsId = workspaceId ?? 1;
+    const rules = await this._getRules(wsId);
     const hasDedupRules = rules.some(r => r.dedupWindowDays);
     const batchSize = 500;
     let offset = 0;
@@ -295,11 +341,12 @@ class NoiseRuleService {
     let noiseCount = 0;
     let updated = 0;
 
-    const totalTickets = await prisma.ticket.count();
+    const totalTickets = await prisma.ticket.count({ where: { workspaceId: wsId } });
 
     // First pass: clear all noise flags so dedup windows evaluate cleanly
     if (hasDedupRules) {
       await prisma.ticket.updateMany({
+        where: { workspaceId: wsId },
         data: { isNoise: false, noiseRuleMatched: null },
       });
     }
@@ -308,6 +355,7 @@ class NoiseRuleService {
     while (hasMore) {
       // Order by createdAt ASC so dedup window checks see earlier tickets first
       const tickets = await prisma.ticket.findMany({
+        where: { workspaceId: wsId },
         select: { id: true, subject: true, createdAt: true, isNoise: true, noiseRuleMatched: true },
         skip: offset,
         take: batchSize,
@@ -331,6 +379,7 @@ class NoiseRuleService {
 
               const existingCount = await prisma.ticket.count({
                 where: {
+                  workspaceId: wsId,
                   subject: ticket.subject,
                   isNoise: false,
                   createdAt: { gte: windowStart, lt: ticket.createdAt },
@@ -370,7 +419,7 @@ class NoiseRuleService {
     // Update match counts per rule
     for (const rule of rules) {
       const count = await prisma.ticket.count({
-        where: { noiseRuleMatched: rule.name },
+        where: { workspaceId: wsId, noiseRuleMatched: rule.name },
       });
       await prisma.noiseRule.update({
         where: { id: rule.id },
@@ -385,12 +434,13 @@ class NoiseRuleService {
   /**
    * Get statistics about noise tickets
    */
-  async getStats() {
+  async getStats(workspaceId) {
+    const wsId = workspaceId ?? 1;
     const [total, noiseCount, rules] = await Promise.all([
-      prisma.ticket.count(),
-      prisma.ticket.count({ where: { isNoise: true } }),
+      prisma.ticket.count({ where: { workspaceId: wsId } }),
+      prisma.ticket.count({ where: { workspaceId: wsId, isNoise: true } }),
       prisma.noiseRule.findMany({
-        where: { isEnabled: true },
+        where: { isEnabled: true, workspaceId: wsId },
         select: { id: true, name: true, category: true, matchCount: true },
         orderBy: { matchCount: 'desc' },
       }),
@@ -414,12 +464,13 @@ class NoiseRuleService {
   /**
    * Test a pattern against existing tickets to see how many would match
    */
-  async testPattern(pattern) {
+  async testPattern(pattern, workspaceId) {
+    const wsId = workspaceId ?? 1;
     try {
       const regex = new RegExp(pattern, 'i');
       const tickets = await prisma.ticket.findMany({
         select: { subject: true },
-        where: { subject: { not: null } },
+        where: { workspaceId: wsId, subject: { not: null } },
       });
 
       const matches = tickets.filter(t => regex.test(t.subject));

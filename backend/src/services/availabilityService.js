@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import logger from '../utils/logger.js';
 import llmConfigService from './llmConfigService.js';
@@ -14,14 +14,16 @@ class AvailabilityService {
   /**
    * Initialize default business hours (Mon-Fri, 9am-5pm PST)
    */
-  async initializeDefaultBusinessHours() {
-    const existingHours = await prisma.businessHour.count();
+  async initializeDefaultBusinessHours(workspaceId = 1) {
+    const existingHours = await prisma.businessHour.count({
+      where: { workspaceId },
+    });
     if (existingHours > 0) {
-      logger.debug('Business hours already configured');
+      logger.debug('Business hours already configured', { workspaceId });
       return;
     }
 
-    logger.info('Initializing default business hours');
+    logger.info('Initializing default business hours', { workspaceId });
 
     // Monday to Friday, 9am to 5pm
     const businessDays = [1, 2, 3, 4, 5];
@@ -31,20 +33,22 @@ class AvailabilityService {
       endTime: '17:00',
       isEnabled: true,
       timezone: 'America/Los_Angeles',
+      workspaceId,
     }));
 
     await prisma.businessHour.createMany({
       data: defaultHours,
     });
 
-    logger.info('Default business hours created');
+    logger.info('Default business hours created', { workspaceId });
   }
 
   /**
    * Get all business hours
    */
-  async getBusinessHours() {
+  async getBusinessHours(workspaceId) {
     return await prisma.businessHour.findMany({
+      where: { workspaceId },
       orderBy: { dayOfWeek: 'asc' },
     });
   }
@@ -52,33 +56,38 @@ class AvailabilityService {
   /**
    * Update business hours
    */
-  async updateBusinessHours(hours) {
-    // Delete existing hours
-    await prisma.businessHour.deleteMany();
+  async updateBusinessHours(hours, workspaceId) {
+    await prisma.businessHour.deleteMany({
+      where: { workspaceId },
+    });
 
-    // Create new hours
     if (hours && hours.length > 0) {
+      const rows = hours.map((h) => {
+        const { id: _id, workspaceId: _ws, ...rest } = h;
+        return { ...rest, workspaceId };
+      });
       await prisma.businessHour.createMany({
-        data: hours,
+        data: rows,
       });
     }
 
-    logger.info('Business hours updated');
+    logger.info('Business hours updated', { workspaceId });
   }
 
   /**
    * Check if a given date/time falls within business hours
    * @param {Date} dateTime - The date/time to check
    * @param {string} timezone - The timezone to use (default: America/Los_Angeles)
+   * @param {number|null} workspaceId - When set, scope business hours and holidays to this workspace
    * @returns {Promise<{isBusinessHours: boolean, reason: string}>}
    */
-  async isBusinessHours(dateTime = new Date(), timezone = 'America/Los_Angeles') {
+  async isBusinessHours(dateTime = new Date(), timezone = 'America/Los_Angeles', workspaceId = null) {
     const date = new Date(dateTime);
     const zoned = toZonedTime(date, timezone);
     const dayOfWeek = zoned.getDay(); // 0=Sunday, 6=Saturday
 
     // Check if it's a holiday
-    const isHoliday = await this.isHoliday(date, timezone);
+    const isHoliday = await this.isHoliday(date, timezone, workspaceId);
     if (isHoliday.isHoliday) {
       return {
         isBusinessHours: false,
@@ -86,12 +95,15 @@ class AvailabilityService {
       };
     }
 
+    const businessWhere = {
+      dayOfWeek,
+      isEnabled: true,
+      ...(workspaceId != null ? { workspaceId } : {}),
+    };
+
     // Get business hours for this day of week
     const businessHour = await prisma.businessHour.findFirst({
-      where: {
-        dayOfWeek,
-        isEnabled: true,
-      },
+      where: businessWhere,
     });
 
     if (!businessHour) {
@@ -126,14 +138,19 @@ class AvailabilityService {
    * Get next business day/time
    * @param {Date} fromDate - Starting date
    * @param {string} timezone - The timezone to use (default: America/Los_Angeles)
+   * @param {number|null} workspaceId - When set, scope business hours and holidays
    * @returns {Promise<{nextBusinessTime: Date, reason: string}>}
    */
-  async getNextBusinessTime(fromDate = new Date(), timezone = 'America/Los_Angeles') {
+  async getNextBusinessTime(fromDate = new Date(), timezone = 'America/Los_Angeles', workspaceId = null) {
     const date = new Date(fromDate);
     const maxDaysToCheck = 14; // Check up to 2 weeks ahead
     let daysChecked = 0;
 
-    const businessHours = await this.getBusinessHours();
+    const businessHours = workspaceId != null
+      ? await this.getBusinessHours(workspaceId)
+      : await prisma.businessHour.findMany({
+        orderBy: { dayOfWeek: 'asc' },
+      });
     const enabledDays = new Set(businessHours.filter(h => h.isEnabled).map(h => h.dayOfWeek));
 
     while (daysChecked < maxDaysToCheck) {
@@ -142,7 +159,7 @@ class AvailabilityService {
 
       // Check if this day has business hours
       if (enabledDays.has(dayOfWeek)) {
-        const isHoliday = await this.isHoliday(date, timezone);
+        const isHoliday = await this.isHoliday(date, timezone, workspaceId);
         if (!isHoliday.isHoliday) {
           // Found a business day
           const businessHour = businessHours.find(h => h.dayOfWeek === dayOfWeek);
@@ -187,10 +204,20 @@ class AvailabilityService {
   }
 
   /**
-   * Get all holidays
+   * Get all holidays (optionally scoped: workspace-specific plus shared rows where workspaceId is null)
    */
-  async getHolidays() {
+  async getHolidays(workspaceId = null) {
+    const where = workspaceId != null
+      ? {
+        OR: [
+          { workspaceId },
+          { workspaceId: null },
+        ],
+      }
+      : undefined;
+
     return await prisma.holiday.findMany({
+      ...(where ? { where } : {}),
       orderBy: { date: 'asc' },
     });
   }
@@ -198,9 +225,13 @@ class AvailabilityService {
   /**
    * Add a holiday
    */
-  async addHoliday(holiday) {
+  async addHoliday(holiday, workspaceId = null) {
+    const data = { ...holiday };
+    if (workspaceId != null) {
+      data.workspaceId = workspaceId;
+    }
     return await prisma.holiday.create({
-      data: holiday,
+      data,
     });
   }
 
@@ -227,13 +258,23 @@ class AvailabilityService {
    * Check if a given date is a holiday
    * @param {Date} date - The date to check
    * @param {string} timezone - The timezone to use (default: America/Los_Angeles)
+   * @param {number|null} workspaceId - When set, include shared holidays (workspaceId null) and this workspace's holidays
    * @returns {Promise<{isHoliday: boolean, name: string|null}>}
    */
-  async isHoliday(date, timezone = 'America/Los_Angeles') {
+  async isHoliday(date, timezone = 'America/Los_Angeles', workspaceId = null) {
     const checkDate = new Date(date);
 
     // Determine the start/end of the local day in the given timezone and query by range.
     const { start, end } = getTodayRange(timezone, checkDate);
+
+    const workspaceScope = workspaceId != null
+      ? {
+        OR: [
+          { workspaceId },
+          { workspaceId: null },
+        ],
+      }
+      : {};
 
     // Check for exact date match (non-recurring holidays stored as a DATE)
     const exactHoliday = await prisma.holiday.findFirst({
@@ -244,6 +285,7 @@ class AvailabilityService {
           gte: start,
           lte: end,
         },
+        ...workspaceScope,
       },
       orderBy: { date: 'asc' },
     });
@@ -258,6 +300,7 @@ class AvailabilityService {
       where: {
         isEnabled: true,
         isRecurring: true,
+        ...workspaceScope,
       },
       select: {
         name: true,
@@ -285,6 +328,7 @@ class AvailabilityService {
   async calculateETA(stats = {}) {
     const now = new Date();
     const timezone = stats.timezone || 'America/Los_Angeles';
+    const workspaceId = stats.workspaceId ?? null;
     const ticketsArrivedSoFarToday = stats.ticketsArrivedSoFarToday ?? stats.todayTicketCount ?? 0;
     const recentOpenBacklog = stats.recentOpenBacklog ?? stats.openTicketCount ?? 0;
     const activeAgentCount = stats.activeAgentCount ?? 1;
@@ -296,10 +340,10 @@ class AvailabilityService {
     const perTicketDelay = llmConfig.perTicketDelayMinutes || 10;
 
     // Check if we're in business hours
-    const availabilityCheck = await this.isBusinessHours(now, timezone);
+    const availabilityCheck = await this.isBusinessHours(now, timezone, workspaceId);
 
     if (!availabilityCheck.isBusinessHours) {
-      const nextBusiness = await this.getNextBusinessTime(now, timezone);
+      const nextBusiness = await this.getNextBusinessTime(now, timezone, workspaceId);
       const minutesUntilOpen = Math.ceil((nextBusiness.nextBusinessTime - now) / (1000 * 60));
 
       return {
@@ -330,6 +374,7 @@ class AvailabilityService {
     // If unavailable, fall back to baseMinutes.
     const baselineMinutes = await this._getBaselineFirstPublicReplyMinutes({
       lookbackDays: 14,
+      workspaceId,
     });
 
     const minMinutesSinceOpenForIntraday = 60;
@@ -355,7 +400,7 @@ class AvailabilityService {
     };
   }
 
-  async _getBaselineFirstPublicReplyMinutes({ lookbackDays = 14 } = {}) {
+  async _getBaselineFirstPublicReplyMinutes({ lookbackDays = 14, workspaceId = null } = {}) {
     const now = new Date();
     const cutoff = new Date(now);
     cutoff.setDate(cutoff.getDate() - lookbackDays);
@@ -372,6 +417,7 @@ class AvailabilityService {
           "first_public_agent_reply_at" IS NOT NULL
           AND "created_at" >= ${cutoff}
           AND "first_public_agent_reply_at" >= "created_at"
+          ${workspaceId != null ? Prisma.sql`AND "workspace_id" = ${workspaceId}` : Prisma.empty}
       `;
 
       const median = rows?.[0]?.median_minutes;
@@ -389,7 +435,7 @@ class AvailabilityService {
   /**
    * Load common Canadian holidays
    */
-  async loadCanadianHolidays(year = new Date().getFullYear()) {
+  async loadCanadianHolidays(year = new Date().getFullYear(), workspaceId = null) {
     const holidays = [
       { name: 'New Year\'s Day', date: new Date(year, 0, 1), isRecurring: true, country: 'CA' },
       { name: 'Canada Day', date: new Date(year, 6, 1), isRecurring: true, country: 'CA' },
@@ -399,20 +445,30 @@ class AvailabilityService {
       { name: 'Boxing Day', date: new Date(year, 11, 26), isRecurring: true, country: 'CA' },
     ];
 
+    const dedupScope = workspaceId != null
+      ? {
+        OR: [
+          { workspaceId },
+          { workspaceId: null },
+        ],
+      }
+      : {};
+
     for (const holiday of holidays) {
       const existing = await prisma.holiday.findFirst({
         where: {
           name: holiday.name,
           date: holiday.date,
+          ...dedupScope,
         },
       });
 
       if (!existing) {
-        await this.addHoliday(holiday);
+        await this.addHoliday(holiday, workspaceId);
       }
     }
 
-    logger.info(`Loaded Canadian holidays for ${year}`);
+    logger.info(`Loaded Canadian holidays for ${year}`, { workspaceId });
   }
 
   /**

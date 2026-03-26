@@ -12,19 +12,23 @@ class TicketRepository {
   /**
    * Get all tickets created today (timezone-aware)
    * @param {string} timezone - Timezone for "today" calculation
+   * @param {number|null} workspaceId - When set, restrict to this workspace
    * @returns {Promise<Array>} Array of tickets
    */
-  async getAllToday(timezone = 'America/Los_Angeles') {
+  async getAllToday(timezone = 'America/Los_Angeles', workspaceId = null) {
     try {
       const { start, end } = getTodayRange(timezone);
 
-      return await prisma.ticket.findMany({
-        where: {
-          createdAt: {
-            gte: start,
-            lte: end,
-          },
+      const where = {
+        createdAt: {
+          gte: start,
+          lte: end,
         },
+      };
+      if (workspaceId != null) where.workspaceId = workspaceId;
+
+      return await prisma.ticket.findMany({
+        where,
         include: {
           assignedTech: true,
           requester: true,
@@ -143,6 +147,7 @@ class TicketRepository {
           priority: data.priority || 3,
           assignedTechId: data.assignedTechId || null,
           isSelfPicked: data.isSelfPicked || false,
+          workspaceId: data.workspaceId || 1,
           createdAt: data.createdAt ? new Date(data.createdAt) : undefined,
           updatedAt: data.updatedAt ? new Date(data.updatedAt) : undefined,
         },
@@ -198,69 +203,78 @@ class TicketRepository {
    */
   async upsert(data) {
     try {
+      const updatePayload = {
+        subject: data.subject,
+        description: data.description,
+        descriptionText: data.descriptionText,
+        status: data.status,
+        priority: data.priority || 3,
+        assignedTechId: data.assignedTechId || null,
+        isSelfPicked: data.isSelfPicked || false,
+        assignedBy: data.assignedBy || null,
+        requesterFreshserviceId: data.requesterId ? BigInt(data.requesterId) : null,
+        assignedAt: data.assignedAt,
+        resolvedAt: data.resolvedAt,
+        closedAt: data.closedAt,
+        dueBy: data.dueBy,
+        frDueBy: data.frDueBy,
+        source: data.source,
+        category: data.category,
+        subCategory: data.subCategory,
+        ticketCategory: data.ticketCategory,
+        department: data.department,
+        isEscalated: data.isEscalated,
+        timeSpentMinutes: data.timeSpentMinutes,
+        billableMinutes: data.billableMinutes,
+        nonBillableMinutes: data.nonBillableMinutes,
+        resolutionTimeSeconds: data.resolutionTimeSeconds,
+        firstAssignedAt: data.firstAssignedAt,
+        isNoise: data.isNoise ?? undefined,
+        noiseRuleMatched: data.noiseRuleMatched ?? undefined,
+        updatedAt: new Date(),
+      };
+
+      if (data.workspaceId !== undefined) {
+        updatePayload.workspaceId = data.workspaceId;
+      }
+
+      const createPayload = {
+        freshserviceTicketId: BigInt(data.freshserviceTicketId),
+        subject: data.subject,
+        description: data.description,
+        descriptionText: data.descriptionText,
+        status: data.status,
+        priority: data.priority || 3,
+        assignedTechId: data.assignedTechId || null,
+        isSelfPicked: data.isSelfPicked || false,
+        assignedBy: data.assignedBy || null,
+        requesterFreshserviceId: data.requesterId ? BigInt(data.requesterId) : null,
+        createdAt: data.createdAt ? new Date(data.createdAt) : undefined,
+        assignedAt: data.assignedAt,
+        resolvedAt: data.resolvedAt,
+        closedAt: data.closedAt,
+        dueBy: data.dueBy,
+        frDueBy: data.frDueBy,
+        source: data.source,
+        category: data.category,
+        subCategory: data.subCategory,
+        ticketCategory: data.ticketCategory,
+        department: data.department,
+        isEscalated: data.isEscalated,
+        timeSpentMinutes: data.timeSpentMinutes,
+        billableMinutes: data.billableMinutes,
+        nonBillableMinutes: data.nonBillableMinutes,
+        resolutionTimeSeconds: data.resolutionTimeSeconds,
+        firstAssignedAt: data.firstAssignedAt,
+        isNoise: data.isNoise || false,
+        noiseRuleMatched: data.noiseRuleMatched || null,
+        workspaceId: data.workspaceId || 1,
+      };
+
       return await prisma.ticket.upsert({
         where: { freshserviceTicketId: BigInt(data.freshserviceTicketId) },
-        update: {
-          subject: data.subject,
-          description: data.description,
-          descriptionText: data.descriptionText,
-          status: data.status,
-          priority: data.priority || 3,
-          assignedTechId: data.assignedTechId || null,
-          isSelfPicked: data.isSelfPicked || false,
-          assignedBy: data.assignedBy || null,
-          requesterFreshserviceId: data.requesterId ? BigInt(data.requesterId) : null,
-          assignedAt: data.assignedAt,
-          resolvedAt: data.resolvedAt,
-          closedAt: data.closedAt,
-          dueBy: data.dueBy,
-          frDueBy: data.frDueBy,
-          source: data.source,
-          category: data.category,
-          subCategory: data.subCategory,
-          ticketCategory: data.ticketCategory,
-          department: data.department,
-          isEscalated: data.isEscalated,
-          timeSpentMinutes: data.timeSpentMinutes,
-          billableMinutes: data.billableMinutes,
-          nonBillableMinutes: data.nonBillableMinutes,
-          resolutionTimeSeconds: data.resolutionTimeSeconds,
-          firstAssignedAt: data.firstAssignedAt,
-          isNoise: data.isNoise ?? undefined,
-          noiseRuleMatched: data.noiseRuleMatched ?? undefined,
-          updatedAt: new Date(),
-        },
-        create: {
-          freshserviceTicketId: BigInt(data.freshserviceTicketId),
-          subject: data.subject,
-          description: data.description,
-          descriptionText: data.descriptionText,
-          status: data.status,
-          priority: data.priority || 3,
-          assignedTechId: data.assignedTechId || null,
-          isSelfPicked: data.isSelfPicked || false,
-          assignedBy: data.assignedBy || null,
-          requesterFreshserviceId: data.requesterId ? BigInt(data.requesterId) : null,
-          createdAt: data.createdAt ? new Date(data.createdAt) : undefined,
-          assignedAt: data.assignedAt,
-          resolvedAt: data.resolvedAt,
-          closedAt: data.closedAt,
-          dueBy: data.dueBy,
-          frDueBy: data.frDueBy,
-          source: data.source,
-          category: data.category,
-          subCategory: data.subCategory,
-          ticketCategory: data.ticketCategory,
-          department: data.department,
-          isEscalated: data.isEscalated,
-          timeSpentMinutes: data.timeSpentMinutes,
-          billableMinutes: data.billableMinutes,
-          nonBillableMinutes: data.nonBillableMinutes,
-          resolutionTimeSeconds: data.resolutionTimeSeconds,
-          firstAssignedAt: data.firstAssignedAt,
-          isNoise: data.isNoise || false,
-          noiseRuleMatched: data.noiseRuleMatched || null,
-        },
+        update: updatePayload,
+        create: createPayload,
         include: {
           assignedTech: true,
           requester: true,
@@ -276,34 +290,41 @@ class TicketRepository {
    * Get ticket count statistics
    * @param {string} timezone - Timezone for "today" calculation
    * @param {Date} date - Optional date to get stats for (defaults to today)
+   * @param {number|null} workspaceId - When set, restrict to this workspace
    * @returns {Promise<Object>} Count statistics
    */
-  async getStats(timezone = 'America/Los_Angeles', date = null) {
+  async getStats(timezone = 'America/Los_Angeles', date = null, workspaceId = null) {
     try {
       const { start, end } = getTodayRange(timezone, date);
+
+      const workspaceClause = workspaceId != null ? { workspaceId } : {};
 
       const [totalToday, openToday, closedToday, selfPickedToday] = await Promise.all([
         prisma.ticket.count({
           where: {
             createdAt: { gte: start, lte: end },
+            ...workspaceClause,
           },
         }),
         prisma.ticket.count({
           where: {
             createdAt: { gte: start, lte: end },
             status: { in: ['Open', 'Pending', 'In Progress'] },
+            ...workspaceClause,
           },
         }),
         prisma.ticket.count({
           where: {
             createdAt: { gte: start, lte: end },
             status: { in: ['Resolved', 'Closed'] },
+            ...workspaceClause,
           },
         }),
         prisma.ticket.count({
           where: {
             createdAt: { gte: start, lte: end },
             isSelfPicked: true,
+            ...workspaceClause,
           },
         }),
       ]);
@@ -341,19 +362,23 @@ class TicketRepository {
   /**
    * Get recent closed/resolved tickets without CSAT responses
    * @param {Date} cutoffDate - Only get tickets closed/resolved after this date
+   * @param {number|null} workspaceId - When set, restrict to this workspace
    * @returns {Promise<Array>} Array of tickets
    */
-  async getRecentClosedWithoutCSAT(cutoffDate) {
+  async getRecentClosedWithoutCSAT(cutoffDate, workspaceId = null) {
     try {
+      const where = {
+        status: { in: ['Resolved', 'Closed'] },
+        OR: [
+          { closedAt: { gte: cutoffDate } },
+          { resolvedAt: { gte: cutoffDate } },
+        ],
+        csatResponseId: null, // No CSAT response yet
+      };
+      if (workspaceId != null) where.workspaceId = workspaceId;
+
       return await prisma.ticket.findMany({
-        where: {
-          status: { in: ['Resolved', 'Closed'] },
-          OR: [
-            { closedAt: { gte: cutoffDate } },
-            { resolvedAt: { gte: cutoffDate } },
-          ],
-          csatResponseId: null, // No CSAT response yet
-        },
+        where,
         select: {
           id: true,
           freshserviceTicketId: true,
@@ -375,15 +400,19 @@ class TicketRepository {
   /**
    * Get all closed/resolved tickets without CSAT responses (for backfill)
    * @param {number} limit - Maximum number of tickets to return
+   * @param {number|null} workspaceId - When set, restrict to this workspace
    * @returns {Promise<Array>} Array of tickets
    */
-  async getAllClosedWithoutCSAT(limit = 1000) {
+  async getAllClosedWithoutCSAT(limit = 1000, workspaceId = null) {
     try {
+      const where = {
+        status: { in: ['Resolved', 'Closed'] },
+        csatResponseId: null, // No CSAT response yet
+      };
+      if (workspaceId != null) where.workspaceId = workspaceId;
+
       return await prisma.ticket.findMany({
-        where: {
-          status: { in: ['Resolved', 'Closed'] },
-          csatResponseId: null, // No CSAT response yet
-        },
+        where,
         select: {
           id: true,
           freshserviceTicketId: true,
@@ -405,15 +434,19 @@ class TicketRepository {
 
   /**
    * Count closed/resolved tickets that have no CSAT response
+   * @param {number|null} workspaceId - When set, restrict to this workspace
    * @returns {Promise<number>}
    */
-  async getCSATPendingCount() {
+  async getCSATPendingCount(workspaceId = null) {
     try {
+      const where = {
+        status: { in: ['Resolved', 'Closed'] },
+        csatResponseId: null,
+      };
+      if (workspaceId != null) where.workspaceId = workspaceId;
+
       return await prisma.ticket.count({
-        where: {
-          status: { in: ['Resolved', 'Closed'] },
-          csatResponseId: null,
-        },
+        where,
       });
     } catch (error) {
       logger.error('Error counting CSAT-pending tickets:', error);
@@ -424,13 +457,15 @@ class TicketRepository {
   /**
    * Get all tickets with CSAT responses for a specific technician
    * @param {number} technicianId - Internal technician ID
+   * @param {number} workspaceId - Workspace scope
    * @returns {Promise<Array>} Array of tickets with CSAT data
    */
-  async getTicketsWithCSATByTechnician(technicianId) {
+  async getTicketsWithCSATByTechnician(technicianId, workspaceId) {
     try {
       return await prisma.ticket.findMany({
         where: {
           assignedTechId: technicianId,
+          workspaceId,
           csatScore: { not: null }, // Has CSAT response
         },
         include: {
@@ -496,18 +531,22 @@ class TicketRepository {
   /**
    * Clean up old tickets (optional utility for data management)
    * @param {number} daysToKeep - Number of days of ticket history to keep
+   * @param {number|null} workspaceId - When set, restrict deletes to this workspace
    * @returns {Promise<number>} Number of tickets deleted
    */
-  async cleanOldTickets(daysToKeep = 90) {
+  async cleanOldTickets(daysToKeep = 90, workspaceId = null) {
     try {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
+      const where = {
+        createdAt: { lt: cutoffDate },
+        status: { in: ['Resolved', 'Closed'] },
+      };
+      if (workspaceId != null) where.workspaceId = workspaceId;
+
       const result = await prisma.ticket.deleteMany({
-        where: {
-          createdAt: { lt: cutoffDate },
-          status: { in: ['Resolved', 'Closed'] },
-        },
+        where,
       });
 
       logger.info(`Cleaned up ${result.count} old tickets`);

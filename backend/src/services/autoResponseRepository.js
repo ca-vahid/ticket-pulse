@@ -53,9 +53,9 @@ class AutoResponseRepository {
    * @param {number} id - Record ID
    * @returns {Promise<Object|null>}
    */
-  async getById(id) {
-    return await prisma.autoResponse.findUnique({
-      where: { id },
+  async getById(id, workspaceId) {
+    return await prisma.autoResponse.findFirst({
+      where: { id, workspaceId },
     });
   }
 
@@ -76,8 +76,9 @@ class AutoResponseRepository {
    * @param {number} limit - Max number of records
    * @returns {Promise<Array>}
    */
-  async getRecent(limit = 50) {
+  async getRecent(limit = 50, workspaceId) {
     return await prisma.autoResponse.findMany({
+      where: { workspaceId },
       take: limit,
       orderBy: { createdAt: 'desc' },
     });
@@ -103,9 +104,10 @@ class AutoResponseRepository {
    * @param {Date} endDate
    * @returns {Promise<Object>}
    */
-  async getStats(startDate, endDate) {
+  async getStats(startDate, endDate, workspaceId) {
     const responses = await prisma.autoResponse.findMany({
       where: {
+        workspaceId,
         createdAt: {
           gte: startDate,
           lte: endDate,

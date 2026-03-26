@@ -66,12 +66,12 @@ router.get(
     }
 
     // Fetch active technicians with only relevant tickets (scoped to date range + open + CSAT)
-    const technicians = await technicianRepository.getAllActiveScoped(todayStart, todayEnd, { excludeNoise });
+    const technicians = await technicianRepository.getAllActiveScoped(todayStart, todayEnd, { excludeNoise, workspaceId: req.workspaceId });
 
     // Run stats calculation (sync) and avoidance analysis (async DB query) in parallel
     const [dashboardData, avoidanceMap] = await Promise.all([
       Promise.resolve(calculateDailyDashboard(technicians, todayStart, todayEnd, isViewingToday)),
-      computeDashboardAvoidance(technicians, todayStart, todayEnd).catch(err => {
+      computeDashboardAvoidance(technicians, todayStart, todayEnd, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for daily dashboard:', err);
         return {};
       }),
@@ -142,6 +142,7 @@ router.get(
         { createdAt: { gte: weekStart, lte: weekEnd } },
         { firstAssignedAt: { gte: weekStart, lte: weekEnd } },
       ],
+      workspaceId: req.workspaceId,
       assignedTech: { isActive: true },
     };
     if (excludeNoise) {
@@ -242,12 +243,12 @@ router.get(
     const weekEndRange = getTodayRange(timezone, weekEndDate);
 
     // Fetch active technicians with only relevant tickets
-    const technicians = await technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end, { excludeNoise });
+    const technicians = await technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end, { excludeNoise, workspaceId: req.workspaceId });
 
     // Run stats calculation (sync) and avoidance analysis (async DB query) in parallel
     const [dashboardData, avoidanceMap] = await Promise.all([
       Promise.resolve(calculateWeeklyDashboard(technicians, weekStartDate, weekEndDate, timezone)),
-      computeWeeklyDashboardAvoidance(technicians, weekStartDate, weekEndDate, timezone).catch(err => {
+      computeWeeklyDashboardAvoidance(technicians, weekStartDate, weekEndDate, timezone, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for weekly dashboard:', err);
         return {};
       }),
@@ -304,6 +305,10 @@ router.get(
       });
     }
 
+    if (technician.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+
     // Get date range for filtering (if viewing historical date)
     let todayStart, todayEnd;
     if (dateParam) {
@@ -330,7 +335,7 @@ router.get(
     // Compute avoidance analysis for this technician
     let avoidance = null;
     try {
-      avoidance = await computeTechnicianAvoidanceDetail(technician, todayStart, todayEnd);
+      avoidance = await computeTechnicianAvoidanceDetail(technician, todayStart, todayEnd, req.workspaceId, { excludeNoise });
     } catch (err) {
       logger.error(`Avoidance analysis failed for technician ${techId}:`, err);
     }
@@ -387,6 +392,10 @@ router.get(
         success: false,
         message: 'Technician not found',
       });
+    }
+
+    if (technician.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
     }
 
     // Calculate week start (Monday) and end (Sunday)
@@ -451,7 +460,7 @@ router.get(
     let avoidance = null;
     try {
       avoidance = await computeTechnicianAvoidanceWeeklyDetail(
-        technician, weekStartDate, weekEndDate, timezone,
+        technician, weekStartDate, weekEndDate, timezone, req.workspaceId, { excludeNoise },
       );
     } catch (err) {
       logger.error(`Weekly avoidance analysis failed for technician ${techId}:`, err);
@@ -524,6 +533,10 @@ router.get(
       return res.status(404).json({ success: false, message: 'Technician not found' });
     }
 
+    if (technician.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+
     // Calculate monthly stats
     const monthlyStats = calculateTechnicianMonthlyStats(
       technician,
@@ -559,7 +572,7 @@ router.get(
     let avoidance = null;
     try {
       avoidance = await computeTechnicianAvoidanceMonthlyDetail(
-        technician, monthStartDate, monthEndDate, timezone,
+        technician, monthStartDate, monthEndDate, timezone, req.workspaceId, { excludeNoise },
       );
     } catch (err) {
       logger.error(`Monthly avoidance analysis failed for technician ${techId}:`, err);
@@ -659,14 +672,19 @@ router.get(
           return null;
         }
 
+        if (tech.workspaceId !== req.workspaceId) {
+          logger.warn(`Timeline: technician ${techId} not in workspace ${req.workspaceId}`);
+          return null;
+        }
+
         let avoidance = null;
         try {
           if (periodType === 'monthly') {
-            avoidance = await computeTechnicianAvoidanceMonthlyDetail(tech, rangeStart, rangeEnd, timezone, { excludeNoise });
+            avoidance = await computeTechnicianAvoidanceMonthlyDetail(tech, rangeStart, rangeEnd, timezone, req.workspaceId, { excludeNoise });
           } else if (periodType === 'weekly') {
-            avoidance = await computeTechnicianAvoidanceWeeklyDetail(tech, rangeStart, rangeEnd, timezone, { excludeNoise });
+            avoidance = await computeTechnicianAvoidanceWeeklyDetail(tech, rangeStart, rangeEnd, timezone, req.workspaceId, { excludeNoise });
           } else {
-            avoidance = await computeTechnicianAvoidanceDetail(tech, rangeStart, rangeEnd, { excludeNoise });
+            avoidance = await computeTechnicianAvoidanceDetail(tech, rangeStart, rangeEnd, req.workspaceId, { excludeNoise });
           }
         } catch (err) {
           logger.error(`Timeline avoidance failed for tech ${techId}:`, err);
@@ -740,7 +758,7 @@ router.get(
     const monthEndRange = getTodayRange(timezone, monthEndDate);
 
     // Fetch active technicians with only relevant tickets
-    const technicians = await technicianRepository.getAllActiveScoped(monthStartRange.start, monthEndRange.end, { excludeNoise });
+    const technicians = await technicianRepository.getAllActiveScoped(monthStartRange.start, monthEndRange.end, { excludeNoise, workspaceId: req.workspaceId });
 
     // Use statsCalculator for consistent calculations
     const monthlyData = calculateMonthlyDashboard(
@@ -822,8 +840,12 @@ router.get(
       });
     }
 
+    if (technician.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+
     // Get all tickets with CSAT for this technician
-    const csatTickets = await ticketRepository.getTicketsWithCSATByTechnician(techId);
+    const csatTickets = await ticketRepository.getTicketsWithCSATByTechnician(techId, req.workspaceId);
 
     logger.debug(`Found ${csatTickets.length} CSAT responses for technician ${techId}`);
 

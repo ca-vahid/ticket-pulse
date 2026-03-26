@@ -4,6 +4,7 @@ import jwksRsa from 'jwks-rsa';
 import config from '../config/index.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { ValidationError, AuthenticationError } from '../utils/errors.js';
+import workspaceRepository from '../services/workspaceRepository.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -83,6 +84,39 @@ router.post(
 
     const role = ADMIN_EMAILS.includes(email) ? 'admin' : 'viewer';
 
+    // Fetch workspaces this user has access to
+    let availableWorkspaces = [];
+    try {
+      if (role === 'admin') {
+        availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
+          id: ws.id,
+          name: ws.name,
+          slug: ws.slug,
+          role: 'admin',
+        }));
+      } else {
+        availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
+      }
+    } catch (err) {
+      logger.warn('Failed to fetch workspaces during login:', err.message);
+    }
+
+    // Preserve existing workspace selection if session already has one
+    const existingWsId = req.session?.user?.selectedWorkspaceId;
+    const existingWsName = req.session?.user?.selectedWorkspaceName;
+    const existingWsSlug = req.session?.user?.selectedWorkspaceSlug;
+
+    // Auto-select only if no existing selection and exactly one workspace
+    let selectedWorkspaceId = existingWsId || null;
+    let selectedWorkspaceName = existingWsName || null;
+    let selectedWorkspaceSlug = existingWsSlug || null;
+
+    if (!selectedWorkspaceId && availableWorkspaces.length === 1) {
+      selectedWorkspaceId = availableWorkspaces[0].id;
+      selectedWorkspaceName = availableWorkspaces[0].name;
+      selectedWorkspaceSlug = availableWorkspaces[0].slug;
+    }
+
     req.session.user = {
       email,
       name,
@@ -91,12 +125,14 @@ router.post(
       oid,
       loginTime: new Date().toISOString(),
       authMethod: 'sso',
+      availableWorkspaces,
+      selectedWorkspaceId,
+      selectedWorkspaceName,
+      selectedWorkspaceSlug,
     };
 
-    logger.info(`SSO login: ${name} (${email}) as ${role}`);
+    logger.info(`SSO login: ${name} (${email}) as ${role}, ${availableWorkspaces.length} workspace(s)`);
 
-    // Issue a JWT so the frontend can authenticate even when third-party
-    // cookies are blocked (e.g., Chrome incognito with cross-origin deploy).
     const userPayload = { email, name, username: name, role };
     const authToken = jwt.sign(userPayload, config.session.secret, {
       algorithm: 'HS256',
@@ -108,6 +144,8 @@ router.post(
       message: 'SSO login successful',
       user: userPayload,
       authToken,
+      availableWorkspaces,
+      selectedWorkspaceId,
     });
   }),
 );
@@ -147,7 +185,6 @@ router.post(
 router.get(
   '/session',
   asyncHandler(async (req, res) => {
-    // Check session cookie first
     if (req.session?.user) {
       return res.json({
         success: true,
@@ -158,6 +195,10 @@ router.get(
           username: req.session.user.username || req.session.user.name,
           role: req.session.user.role,
         },
+        availableWorkspaces: req.session.user.availableWorkspaces || [],
+        selectedWorkspaceId: req.session.user.selectedWorkspaceId || null,
+        selectedWorkspaceName: req.session.user.selectedWorkspaceName || null,
+        selectedWorkspaceSlug: req.session.user.selectedWorkspaceSlug || null,
       });
     }
 
@@ -167,6 +208,37 @@ router.get(
       try {
         const token = authHeader.substring(7);
         const decoded = jwt.verify(token, config.session.secret, { algorithms: ['HS256'] });
+
+        // Resolve workspace access from DB since JWT doesn't carry it
+        let availableWorkspaces = [];
+        let selectedWorkspaceId = null;
+        try {
+          const email = decoded.email?.toLowerCase();
+          const role = decoded.role;
+          if (role === 'admin') {
+            availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
+              id: ws.id, name: ws.name, slug: ws.slug, role: 'admin',
+            }));
+          } else if (email) {
+            availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
+          }
+          if (availableWorkspaces.length === 1) {
+            selectedWorkspaceId = availableWorkspaces[0].id;
+          }
+          // Restore session if it was lost
+          if (req.session) {
+            req.session.user = {
+              ...decoded,
+              availableWorkspaces,
+              selectedWorkspaceId: req.session.user?.selectedWorkspaceId || selectedWorkspaceId,
+              selectedWorkspaceName: req.session.user?.selectedWorkspaceName || null,
+              selectedWorkspaceSlug: req.session.user?.selectedWorkspaceSlug || null,
+            };
+          }
+        } catch (wsErr) {
+          logger.warn('Failed to resolve workspaces in JWT fallback:', wsErr.message);
+        }
+
         return res.json({
           success: true,
           authenticated: true,
@@ -176,6 +248,10 @@ router.get(
             username: decoded.username || decoded.name,
             role: decoded.role,
           },
+          availableWorkspaces,
+          selectedWorkspaceId: req.session?.user?.selectedWorkspaceId || selectedWorkspaceId,
+          selectedWorkspaceName: req.session?.user?.selectedWorkspaceName || null,
+          selectedWorkspaceSlug: req.session?.user?.selectedWorkspaceSlug || null,
         });
       } catch {
         // Invalid token — fall through

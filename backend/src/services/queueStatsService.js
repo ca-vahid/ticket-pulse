@@ -28,6 +28,7 @@ class QueueStatsService {
     const timezone = options.timezone || config.sync.defaultTimezone;
     const staleDays = options.staleDays ?? 3;
     const openStatuses = options.openStatuses || ['Open', 'Pending', 'In Progress'];
+    const workspaceId = options.workspaceId ?? 1;
 
     const now = new Date();
 
@@ -37,7 +38,7 @@ class QueueStatsService {
       const dayOfWeek = zonedNow.getDay();
 
       const businessHour = await prisma.businessHour.findFirst({
-        where: { dayOfWeek, isEnabled: true },
+        where: { dayOfWeek, isEnabled: true, workspaceId },
       });
 
       let businessStart = null;
@@ -67,6 +68,7 @@ class QueueStatsService {
       const ticketsArrivedSoFarToday = hasStartedBusinessDay
         ? await prisma.ticket.count({
           where: {
+            workspaceId,
             createdAt: {
               gte: businessStart || now, // if no businessStart configured, treat as started
               lte: effectiveSoFarEnd,
@@ -79,13 +81,14 @@ class QueueStatsService {
       cutoffRecent.setDate(cutoffRecent.getDate() - staleDays);
 
       const recentOpenWhere = {
+        workspaceId,
         status: { in: openStatuses },
         OR: [{ updatedAt: { gte: cutoffRecent } }, { createdAt: { gte: cutoffRecent } }],
       };
 
       const [recentOpenBacklog, openTicketCountAll, activeAgents] = await Promise.all([
         prisma.ticket.count({ where: recentOpenWhere }),
-        prisma.ticket.count({ where: { status: { in: openStatuses } } }),
+        prisma.ticket.count({ where: { workspaceId, status: { in: openStatuses } } }),
         prisma.ticket.groupBy({
           by: ['assignedTechId'],
           where: {
@@ -97,10 +100,11 @@ class QueueStatsService {
 
       // In case business hours are not configured, availabilityService may still provide after-hours behavior.
       // We include it here to let ETA logic explain state.
-      const availability = await availabilityService.isBusinessHours(now, timezone);
+      const availability = await availabilityService.isBusinessHours(now, timezone, workspaceId);
 
       return {
         timezone,
+        workspaceId,
         now,
         availability,
         businessStart,
@@ -121,6 +125,7 @@ class QueueStatsService {
       logger.error('QueueStatsService.getQueueStats failed', { error: error.message });
       return {
         timezone,
+        workspaceId,
         now,
         availability: { isBusinessHours: true, reason: 'unknown' },
         businessStart: null,

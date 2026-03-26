@@ -5,6 +5,7 @@ import availabilityService from '../services/availabilityService.js';
 import queueStatsService from '../services/queueStatsService.js';
 import autoResponseRepository from '../services/autoResponseRepository.js';
 import logger from '../utils/logger.js';
+import config from '../config/index.js';
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ router.use(requireAuth);
  * Get business hours configuration
  */
 router.get('/business-hours', asyncHandler(async (req, res) => {
-  const businessHours = await availabilityService.getBusinessHours();
+  const businessHours = await availabilityService.getBusinessHours(req.workspaceId);
 
   res.json({
     success: true,
@@ -38,7 +39,7 @@ router.put('/business-hours', asyncHandler(async (req, res) => {
     });
   }
 
-  await availabilityService.updateBusinessHours(hours);
+  await availabilityService.updateBusinessHours(hours, req.workspaceId);
 
   res.json({
     success: true,
@@ -51,7 +52,7 @@ router.put('/business-hours', asyncHandler(async (req, res) => {
  * Get all holidays
  */
 router.get('/holidays', asyncHandler(async (req, res) => {
-  const holidays = await availabilityService.getHolidays();
+  const holidays = await availabilityService.getHolidays(req.workspaceId);
 
   res.json({
     success: true,
@@ -79,7 +80,7 @@ router.post('/holidays', asyncHandler(async (req, res) => {
     isRecurring: isRecurring || false,
     country: country || null,
     isEnabled: true,
-  });
+  }, req.workspaceId);
 
   res.json({
     success: true,
@@ -134,7 +135,7 @@ router.post('/holidays/load-canadian', asyncHandler(async (req, res) => {
   const { year } = req.body;
   const targetYear = year || new Date().getFullYear();
 
-  await availabilityService.loadCanadianHolidays(targetYear);
+  await availabilityService.loadCanadianHolidays(targetYear, req.workspaceId);
 
   res.json({
     success: true,
@@ -148,7 +149,7 @@ router.post('/holidays/load-canadian', asyncHandler(async (req, res) => {
  */
 router.get('/responses', asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 50;
-  const responses = await autoResponseRepository.getRecent(limit);
+  const responses = await autoResponseRepository.getRecent(limit, req.workspaceId);
 
   res.json({
     success: true,
@@ -162,7 +163,7 @@ router.get('/responses', asyncHandler(async (req, res) => {
  */
 router.get('/responses/:id', asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const response = await autoResponseRepository.getById(id);
+  const response = await autoResponseRepository.getById(id, req.workspaceId);
 
   if (!response) {
     return res.status(404).json({
@@ -187,7 +188,7 @@ router.get('/stats', asyncHandler(async (req, res) => {
   const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const end = endDate ? new Date(endDate) : new Date();
 
-  const stats = await autoResponseRepository.getStats(start, end);
+  const stats = await autoResponseRepository.getStats(start, end, req.workspaceId);
 
   res.json({
     success: true,
@@ -202,8 +203,9 @@ router.get('/stats', asyncHandler(async (req, res) => {
 router.get('/availability/check', asyncHandler(async (req, res) => {
   const now = new Date();
 
-  const availabilityCheck = await availabilityService.isBusinessHours(now);
-  const holidayCheck = await availabilityService.isHoliday(now);
+  const tz = config.sync.defaultTimezone;
+  const availabilityCheck = await availabilityService.isBusinessHours(now, tz, req.workspaceId);
+  const holidayCheck = await availabilityService.isHoliday(now, tz, req.workspaceId);
 
   res.json({
     success: true,
@@ -228,7 +230,7 @@ router.get('/eta/debug', asyncHandler(async (req, res) => {
   const timezone = req.query.timezone || 'America/Los_Angeles';
   const staleDays = req.query.staleDays ? parseInt(req.query.staleDays, 10) : 3;
 
-  const queueStats = await queueStatsService.getQueueStats({ timezone, staleDays });
+  const queueStats = await queueStatsService.getQueueStats({ timezone, staleDays, workspaceId: req.workspaceId });
   const eta = await availabilityService.calculateETA(queueStats);
 
   res.json({

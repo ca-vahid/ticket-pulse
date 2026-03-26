@@ -152,9 +152,10 @@ class CSATService {
    * @param {Object} ticketRepository - Ticket repository instance
    * @param {number} daysBack - Number of days to look back (default 30)
    * @param {Function} onProgress - Optional callback for progress updates
+   * @param {number|null} workspaceId - When set, only tickets in this workspace are considered
    * @returns {Promise<Object>} Summary of sync results
    */
-  async syncRecentCSAT(freshserviceClient, ticketRepository, daysBack = 30, onProgress = null) {
+  async syncRecentCSAT(freshserviceClient, ticketRepository, daysBack = 30, onProgress = null, workspaceId = null) {
     try {
       logger.info(`Syncing CSAT for tickets from last ${daysBack} days`);
 
@@ -162,7 +163,7 @@ class CSATService {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysBack);
 
-      const tickets = await ticketRepository.getRecentClosedWithoutCSAT(cutoffDate);
+      const tickets = await ticketRepository.getRecentClosedWithoutCSAT(cutoffDate, workspaceId);
       logger.info(`Found ${tickets.length} closed tickets without CSAT from last ${daysBack} days`);
 
       if (tickets.length === 0) {

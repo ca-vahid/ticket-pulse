@@ -19,8 +19,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const includeInactive = req.query.includeInactive === 'true';
     const technicians = includeInactive
-      ? await technicianRepository.getAll()
-      : await technicianRepository.getAllActive();
+      ? await technicianRepository.getAll(req.workspaceId)
+      : await technicianRepository.getAllActive(req.workspaceId);
 
     const agents = technicians.map(tech => ({
       id: tech.id,
@@ -189,7 +189,7 @@ router.post(
     }
 
     // Get all active technicians
-    const technicians = await technicianRepository.getAllActive();
+    const technicians = await technicianRepository.getAllActive(req.workspaceId);
 
     // Update all technicians
     const updates = technicians.map(async (tech) => {

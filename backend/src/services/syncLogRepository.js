@@ -19,6 +19,7 @@ class SyncLogRepository {
           status: data.status || 'started',
           recordsProcessed: (data.ticketsSynced || 0) + (data.techniciansSynced || 0),
           errorMessage: data.errorMessage || null,
+          workspaceId: data.workspaceId || 1,
           startedAt: data.startedAt ? new Date(data.startedAt) : new Date(),
           completedAt: data.completedAt ? new Date(data.completedAt) : null,
         },
@@ -102,9 +103,11 @@ class SyncLogRepository {
    * Get the latest sync log
    * @returns {Promise<Object|null>} Latest sync log or null
    */
-  async getLatest() {
+  async getLatest(workspaceId = null) {
     try {
+      const where = workspaceId ? { workspaceId } : {};
       return await prisma.syncLog.findFirst({
+        where,
         orderBy: { startedAt: 'desc' },
       });
     } catch (error) {
@@ -113,14 +116,13 @@ class SyncLogRepository {
     }
   }
 
-  /**
-   * Get the latest successful sync log
-   * @returns {Promise<Object|null>} Latest successful sync log or null
-   */
-  async getLatestSuccessful() {
+  async getLatestSuccessful(workspaceId = null) {
     try {
+      const where = { status: 'completed' };
+      if (workspaceId) where.workspaceId = workspaceId;
+
       return await prisma.syncLog.findFirst({
-        where: { status: 'completed' },
+        where,
         orderBy: { startedAt: 'desc' },
       });
     } catch (error) {
@@ -159,9 +161,10 @@ class SyncLogRepository {
    * @param {Object} options - Query options
    * @returns {Promise<{logs: Array, total: number}>}
    */
-  async getRecent({ limit = 50, offset = 0, status = null, startDate = null, endDate = null, search = null } = {}) {
+  async getRecent({ limit = 50, offset = 0, status = null, startDate = null, endDate = null, search = null, workspaceId = null } = {}) {
     try {
       const where = {};
+      if (workspaceId) where.workspaceId = workspaceId;
       if (status) where.status = status;
       if (startDate || endDate) {
         where.startedAt = {};
@@ -195,9 +198,10 @@ class SyncLogRepository {
    * @param {Date} endDate - End date (optional)
    * @returns {Promise<Object>} Sync statistics
    */
-  async getStats(startDate = null, endDate = null) {
+  async getStats(startDate = null, endDate = null, workspaceId = null) {
     try {
       const whereClause = {};
+      if (workspaceId) whereClause.workspaceId = workspaceId;
       if (startDate || endDate) {
         whereClause.startedAt = {};
         if (startDate) whereClause.startedAt.gte = startDate;
@@ -264,13 +268,16 @@ class SyncLogRepository {
    * @param {number} lookbackDays - How far back to analyze
    * @returns {Promise<{gapMinutes: number, gapStart: string|null, gapEnd: string|null}>}
    */
-  async getLongestGap(lookbackDays = 7) {
+  async getLongestGap(lookbackDays = 7, workspaceId = null) {
     try {
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - lookbackDays);
 
+      const where = { status: 'completed', completedAt: { gte: cutoff } };
+      if (workspaceId) where.workspaceId = workspaceId;
+
       const logs = await prisma.syncLog.findMany({
-        where: { status: 'completed', completedAt: { gte: cutoff } },
+        where,
         orderBy: { completedAt: 'asc' },
         select: { completedAt: true, startedAt: true },
       });
@@ -305,10 +312,13 @@ class SyncLogRepository {
    * Check if a sync is currently running
    * @returns {Promise<boolean>} True if a sync is running
    */
-  async isSyncRunning() {
+  async isSyncRunning(workspaceId = null) {
     try {
+      const where = { status: 'started' };
+      if (workspaceId) where.workspaceId = workspaceId;
+
       const runningSync = await prisma.syncLog.findFirst({
-        where: { status: 'started' },
+        where,
         orderBy: { startedAt: 'desc' },
       });
 

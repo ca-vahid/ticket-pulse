@@ -31,6 +31,7 @@ export const handleTicketWebhook = async (req, res) => {
       status: payload.status,
       source: payload.source,
       createdAt: payload.createdAt || payload.created_at || new Date().toISOString(),
+      workspaceId: req.workspaceId,
     };
 
     // Process auto-response asynchronously

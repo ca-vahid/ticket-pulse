@@ -16,6 +16,7 @@ export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [workspaceData, setWorkspaceData] = useState(null);
   const isExchangingRef = useRef(false);
   const recoveryAttemptsRef = useRef(0);
   const recoveryCooldownRef = useRef(null);
@@ -30,6 +31,12 @@ export function AuthProvider({ children }) {
         setUser(response.user);
         setIsAuthenticated(true);
         recoveryAttemptsRef.current = 0;
+        setWorkspaceData({
+          availableWorkspaces: response.availableWorkspaces || [],
+          selectedWorkspaceId: response.selectedWorkspaceId || null,
+          selectedWorkspaceName: response.selectedWorkspaceName || null,
+          selectedWorkspaceSlug: response.selectedWorkspaceSlug || null,
+        });
       } else {
         setUser(null);
         setIsAuthenticated(false);
@@ -61,7 +68,6 @@ export function AuthProvider({ children }) {
       if (tokenResponse?.idToken) {
         const response = await authAPI.ssoLogin(tokenResponse.idToken);
         if (response.success && response.user) {
-          // Store JWT for cookie-less auth (incognito / cross-origin)
           if (response.authToken) {
             setAuthToken(response.authToken);
           }
@@ -70,6 +76,10 @@ export function AuthProvider({ children }) {
           setIsAuthenticated(true);
           setError(null);
           recoveryAttemptsRef.current = 0;
+          setWorkspaceData({
+            availableWorkspaces: response.availableWorkspaces || [],
+            selectedWorkspaceId: response.selectedWorkspaceId || null,
+          });
           return true;
         }
       }
@@ -150,6 +160,9 @@ export function AuthProvider({ children }) {
       setUser(null);
       setIsAuthenticated(false);
       setError(null);
+      setWorkspaceData(null);
+      try { sessionStorage.clear(); } catch (_) { /* ignore */ }
+      try { localStorage.removeItem('tp_selectedWorkspace'); } catch (_) { /* ignore */ }
       try {
         await instance.logoutRedirect({ postLogoutRedirectUri: '/' });
       } catch (err) {
@@ -163,6 +176,7 @@ export function AuthProvider({ children }) {
     isAuthenticated,
     isLoading,
     error,
+    workspaceData,
     loginWithSSO,
     logout,
     checkSession,

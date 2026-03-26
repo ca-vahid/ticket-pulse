@@ -21,9 +21,15 @@ export function requireAuth(req, res, next) {
     try {
       const token = authHeader.substring(7);
       const decoded = jwt.verify(token, config.session.secret, { algorithms: ['HS256'] });
-      // Attach user to request (session-less auth)
       req.user = decoded;
-      req.session.user = decoded;
+      // Merge JWT user data without overwriting workspace fields
+      if (!req.session.user) {
+        req.session.user = decoded;
+      } else {
+        req.session.user.email = decoded.email;
+        req.session.user.name = decoded.name;
+        req.session.user.role = decoded.role;
+      }
       return next();
     } catch {
       // Invalid or expired token — fall through to auth error

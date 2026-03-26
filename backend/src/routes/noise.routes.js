@@ -15,7 +15,7 @@ router.use(requireAuth);
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const rules = await noiseRuleService.getAllRules();
+    const rules = await noiseRuleService.getAllRules(req.workspaceId);
     res.json({ success: true, data: rules });
   }),
 );
@@ -27,7 +27,7 @@ router.get(
 router.get(
   '/stats',
   asyncHandler(async (req, res) => {
-    const stats = await noiseRuleService.getStats();
+    const stats = await noiseRuleService.getStats(req.workspaceId);
     res.json({ success: true, data: stats });
   }),
 );
@@ -55,6 +55,7 @@ router.post(
         description,
         category,
         isEnabled,
+        workspaceId: req.workspaceId,
       });
       logger.info(`Created noise rule: ${name}`);
       res.status(201).json({ success: true, data: rule });
@@ -80,7 +81,7 @@ router.put(
     }
 
     try {
-      const rule = await noiseRuleService.updateRule(id, req.body);
+      const rule = await noiseRuleService.updateRule(id, req.body, req.workspaceId);
       logger.info(`Updated noise rule ${id}: ${rule.name}`);
       res.json({ success: true, data: rule });
     } catch (error) {
@@ -105,7 +106,7 @@ router.delete(
     }
 
     try {
-      await noiseRuleService.deleteRule(id);
+      await noiseRuleService.deleteRule(id, req.workspaceId);
       logger.info(`Deleted noise rule ${id}`);
       res.json({ success: true, message: 'Rule deleted' });
     } catch (error) {
@@ -130,7 +131,7 @@ router.post(
     }
 
     try {
-      const result = await noiseRuleService.testPattern(pattern);
+      const result = await noiseRuleService.testPattern(pattern, req.workspaceId);
       res.json({ success: true, data: result });
     } catch (error) {
       return res.status(400).json({ success: false, message: error.message });
@@ -148,7 +149,7 @@ router.post(
     logger.info('Starting noise rule backfill...');
     const result = await noiseRuleService.backfillAll((progress) => {
       logger.info(`Backfill progress: ${progress.totalProcessed}/${progress.totalTickets} (${progress.noiseCount} noise)`);
-    });
+    }, req.workspaceId);
 
     logger.info(`Backfill complete: ${result.updated} tickets updated, ${result.noiseCount} noise tickets`);
     res.json({ success: true, data: result });
@@ -162,7 +163,7 @@ router.post(
 router.post(
   '/seed',
   asyncHandler(async (req, res) => {
-    const count = await noiseRuleService.seedDefaults();
+    const count = await noiseRuleService.seedDefaults(req.workspaceId);
     res.json({
       success: true,
       message: `${count} noise rules seeded`,

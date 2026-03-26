@@ -32,9 +32,10 @@ const getSSEManager = async () => {
  */
 class SyncService {
   constructor() {
-    this.isRunning = false;
+    this.runningWorkspaces = new Set();
     this.lastSyncTime = null;
     this.currentStep = null;
+    this.progressByWorkspace = new Map();
     this.progress = {
       currentStep: null,
       techniciansSynced: 0,
@@ -43,6 +44,10 @@ class SyncService {
       totalSteps: 4,
       currentStepNumber: 0,
     };
+  }
+
+  get isRunning() {
+    return this.runningWorkspaces.size > 0;
   }
 
   /**
@@ -63,6 +68,18 @@ class SyncService {
     }
   }
 
+  /**
+   * Get the FreshService workspace ID for a given internal workspace ID.
+   * Falls back to global settings if workspaceId is not provided.
+   */
+  async _getWorkspaceConfig(workspaceId) {
+    if (workspaceId) {
+      return settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+    }
+    const config = await settingsRepository.getFreshServiceConfig();
+    return { ...config, defaultTimezone: 'America/Los_Angeles', syncIntervalMinutes: 5 };
+  }
+
   // ========================================
   // CORE SYNC METHODS (Private - Single Source of Truth)
   // ========================================
@@ -75,24 +92,33 @@ class SyncService {
    * @returns {Promise<Array>} Tickets with assignedTechId populated
    * @private
    */
-  async _prepareTicketsForDatabase(fsTickets) {
+  async _prepareTicketsForDatabase(fsTickets, workspaceId = null) {
     if (!Array.isArray(fsTickets) || fsTickets.length === 0) {
       return [];
     }
 
-    // Step 1: Transform tickets to our format
-    const transformedTickets = transformTickets(fsTickets);
+    const transformOptions = {};
+    if (workspaceId) {
+      const wsConfig = await this._getWorkspaceConfig(workspaceId);
+      if (wsConfig.categoryCustomField) {
+        transformOptions.categoryCustomField = wsConfig.categoryCustomField;
+      }
+    }
+
+    const transformedTickets = transformTickets(fsTickets, transformOptions);
     logger.debug(`Transformed ${transformedTickets.length} tickets`);
 
-    // Step 2: Get all active technicians to build ID mapping
-    const technicians = await technicianRepository.getAllActive();
+    const technicians = await technicianRepository.getAllActive(workspaceId);
     const fsIdToInternalId = new Map(
       technicians.map(tech => [Number(tech.freshserviceId), tech.id]),
     );
     logger.debug(`Built technician ID map for ${technicians.length} technicians`);
 
-    // Step 3: Map FreshService responder IDs to internal technician IDs
     const ticketsWithTechIds = mapTechnicianIds(transformedTickets, fsIdToInternalId);
+
+    if (workspaceId) {
+      ticketsWithTechIds.forEach(t => { t.workspaceId = workspaceId; });
+    }
 
     logger.info(`Prepared ${ticketsWithTechIds.length} tickets for database (mapped to ${technicians.length} technicians)`);
     return ticketsWithTechIds;
@@ -264,7 +290,12 @@ class SyncService {
 
     for (const ticket of tickets) {
       try {
-        const { isNoise, ruleId } = await noiseRuleService.evaluate(ticket.subject, ticket.createdAt ? new Date(ticket.createdAt) : null);
+        const noiseWorkspaceId = ticket.workspaceId != null ? ticket.workspaceId : 1;
+        const { isNoise, ruleId } = await noiseRuleService.evaluate(
+          ticket.subject,
+          ticket.createdAt ? new Date(ticket.createdAt) : null,
+          noiseWorkspaceId,
+        );
         ticket.isNoise = isNoise;
         ticket.noiseRuleMatched = ruleId;
         await ticketRepository.upsert(ticket);
@@ -297,6 +328,7 @@ class SyncService {
       fullSync = false,
       daysToSync = 30,
       weekStart = null,
+      workspaceId = null,
     } = params;
 
     const filters = {
@@ -304,22 +336,17 @@ class SyncService {
     };
 
     if (syncType === 'week' && weekStart) {
-      // Week sync: use week start date
       filters.updated_since = new Date(weekStart + 'T00:00:00Z').toISOString();
     } else if (syncType === 'full' || fullSync) {
-      // Full sync: go back N days
       const historicalDate = new Date();
       historicalDate.setDate(historicalDate.getDate() - daysToSync);
       filters.updated_since = historicalDate.toISOString();
     } else {
-      // Incremental sync: use last successful sync time
-      const latestSync = await syncLogRepository.getLatestSuccessful();
+      const latestSync = await syncLogRepository.getLatestSuccessful(workspaceId);
 
       if (latestSync && latestSync.completedAt) {
-        // Add 5-minute buffer to avoid missing tickets
         filters.updated_since = new Date(latestSync.completedAt.getTime() - 5 * 60 * 1000).toISOString();
       } else {
-        // No previous sync, fallback to full sync
         const historicalDate = new Date();
         historicalDate.setDate(historicalDate.getDate() - daysToSync);
         filters.updated_since = historicalDate.toISOString();
@@ -337,46 +364,48 @@ class SyncService {
    * Sync technicians from FreshService
    * @returns {Promise<number>} Number of technicians synced
    */
-  async syncTechnicians() {
+  async syncTechnicians(workspaceId = null) {
     try {
       this.progress.currentStep = 'Syncing technicians from FreshService';
       this.progress.currentStepNumber = 1;
-      logger.info('Starting technician sync');
+      logger.info(`Starting technician sync${workspaceId ? ` for workspace ${workspaceId}` : ''}`);
       const client = await this._initializeClient();
-      const config = await settingsRepository.getFreshServiceConfig();
+      const wsConfig = await this._getWorkspaceConfig(workspaceId);
 
-      // Fetch agents from FreshService with optional workspace filter
       const filters = {};
-      if (config.workspaceId) {
-        filters.workspace_id = config.workspaceId;
+      if (wsConfig.workspaceId) {
+        filters.workspace_id = wsConfig.workspaceId;
       }
 
       const fsAgents = await client.fetchAgents(filters);
       logger.info(`Fetched ${fsAgents.length} agents from FreshService`);
 
-      // Transform agents to our format, filtering by workspace
-      const transformedAgents = transformAgents(fsAgents, config.workspaceId);
+      const transformedAgents = transformAgents(fsAgents, wsConfig.workspaceId);
 
-      // Upsert each technician
       let syncedCount = 0;
+      const syncedFreshserviceIds = [];
       for (const agent of transformedAgents) {
         try {
+          if (workspaceId) agent.workspaceId = workspaceId;
           await technicianRepository.upsert(agent);
           syncedCount++;
+          syncedFreshserviceIds.push(agent.freshserviceId);
         } catch (error) {
           logger.error(`Failed to upsert technician ${agent.name}:`, error);
         }
       }
 
-      // Deactivate technicians not in the IT workspace (if workspace filtering is enabled)
-      if (config.workspaceId) {
+      if (workspaceId && syncedFreshserviceIds.length > 0) {
         try {
-          const deactivatedCount = await technicianRepository.deactivateByWorkspace(config.workspaceId);
+          const deactivatedCount = await technicianRepository.deactivateNotInList(
+            workspaceId,
+            syncedFreshserviceIds,
+          );
           if (deactivatedCount > 0) {
-            logger.info(`Deactivated ${deactivatedCount} technicians not in workspace ${config.workspaceId}`);
+            logger.info(`Deactivated ${deactivatedCount} technicians no longer in workspace ${workspaceId}`);
           }
         } catch (error) {
-          logger.error('Failed to deactivate non-workspace technicians:', error);
+          logger.error('Failed to deactivate removed technicians:', error);
         }
       }
 
@@ -409,6 +438,7 @@ class SyncService {
         syncType: options.fullSync ? 'full' : 'incremental',
         fullSync: options.fullSync,
         daysToSync: options.daysToSync || 30,
+        workspaceId: options.workspaceId || null,
       });
 
       if (options.status) {
@@ -420,7 +450,7 @@ class SyncService {
       logger.info(`Fetched ${fsTickets.length} tickets from FreshService`);
 
       // Step 3: Use _prepareTicketsForDatabase() for transform + mapping
-      const ticketsWithTechIds = await this._prepareTicketsForDatabase(fsTickets);
+      const ticketsWithTechIds = await this._prepareTicketsForDatabase(fsTickets, options.workspaceId);
 
       // Step 4: OPTIMIZATION - Batch fetch existing tickets in one query
       const ticketIds = ticketsWithTechIds.map(t => t.freshserviceTicketId);
@@ -580,13 +610,14 @@ class SyncService {
    * @returns {Promise<Object>} Sync summary
    */
   async performFullSync(options = {}) {
-    // Prevent concurrent syncs
-    if (this.isRunning) {
-      logger.warn('Sync already in progress, skipping');
-      return { status: 'skipped', reason: 'Sync already in progress' };
+    const workspaceId = options.workspaceId || 1;
+
+    if (this.runningWorkspaces.has(workspaceId)) {
+      logger.warn(`Sync already in progress for workspace ${workspaceId}, skipping`);
+      return { status: 'skipped', reason: `Sync already in progress for workspace ${workspaceId}` };
     }
 
-    this.isRunning = true;
+    this.runningWorkspaces.add(workspaceId);
     this.progress = {
       currentStep: 'Initializing sync',
       techniciansSynced: 0,
@@ -595,18 +626,19 @@ class SyncService {
       csatSynced: 0,
       totalSteps: 5,
       currentStepNumber: 0,
+      workspaceId,
     };
 
-    const syncLog = await syncLogRepository.createLog({ status: 'started' });
+    const syncLog = await syncLogRepository.createLog({ status: 'started', workspaceId });
 
     try {
-      logger.info('Starting full sync');
+      logger.info(`Starting full sync for workspace ${workspaceId}`);
 
       // Sync technicians first (needed for ticket assignment mapping)
-      const techniciansSynced = await this.syncTechnicians();
+      const techniciansSynced = await this.syncTechnicians(workspaceId);
 
-      // Sync tickets with options (including fullSync flag)
-      const ticketsSynced = await this.syncTickets(options);
+      // Sync tickets with options (including fullSync flag and workspaceId)
+      const ticketsSynced = await this.syncTickets({ ...options, workspaceId });
 
       // Sync requesters (fetch requester details for tickets)
       const requestersSynced = await this.syncRequesters();
@@ -617,7 +649,7 @@ class SyncService {
         this.progress.currentStep = 'Syncing CSAT responses';
         this.progress.currentStepNumber = 4;
         const csatDaysBack = parseInt(await settingsRepository.get('csat_sync_days'), 10) || 90;
-        const csatResults = await this.syncRecentCSAT(csatDaysBack);
+        const csatResults = await this.syncRecentCSAT(csatDaysBack, workspaceId);
         csatSynced = csatResults.csatFound;
         this.progress.csatSynced = csatSynced;
       } catch (error) {
@@ -637,7 +669,7 @@ class SyncService {
       });
 
       this.lastSyncTime = new Date();
-      this.isRunning = false;
+      this.runningWorkspaces.delete(workspaceId);
       this.progress.currentStep = 'Completed';
       this.progress.currentStepNumber = 5;
 
@@ -653,11 +685,11 @@ class SyncService {
       logger.info('Full sync completed', summary);
       clearReadCache();
 
-      // Broadcast sync completion to all SSE clients
+      // Broadcast sync completion to SSE clients for this workspace
       try {
         const manager = await getSSEManager();
         if (manager) {
-          manager.broadcast('sync-completed', summary);
+          manager.broadcast('sync-completed', summary, workspaceId);
         }
       } catch (error) {
         logger.error('Failed to broadcast SSE update:', error);
@@ -670,7 +702,7 @@ class SyncService {
       // Mark sync as failed
       await syncLogRepository.failLog(syncLog.id, error.message);
 
-      this.isRunning = false;
+      this.runningWorkspaces.delete(workspaceId);
 
       throw error;
     }
@@ -707,7 +739,7 @@ class SyncService {
    */
   forceStop() {
     logger.warn('Force stopping sync');
-    this.isRunning = false;
+    this.runningWorkspaces.clear();
   }
 
   /**
@@ -905,10 +937,9 @@ class SyncService {
    * @param {number} options.concurrency - Number of parallel API calls (default: 10 for 10x speedup with retry logic)
    * @returns {Promise<Object>} Sync result summary
    */
-  async syncWeek({ startDate, endDate, concurrency = 10 }) {
+  async syncWeek({ startDate, endDate, concurrency = 10, workspaceId = 1 }) {
     try {
-      // Initialize progress tracking
-      this.isRunning = true;
+      this.runningWorkspaces.add(workspaceId);
       this.progress = {
         currentStep: 'Initializing week sync',
         currentStepNumber: 1,
@@ -1013,13 +1044,13 @@ class SyncService {
       // Mark as complete
       this.progress.currentStep = 'Completed';
       this.progress.percentage = 100;
-      this.isRunning = false;
+      this.runningWorkspaces.delete(workspaceId);
 
       logger.info('Week sync completed', summary);
       return summary;
 
     } catch (error) {
-      this.isRunning = false;
+      this.runningWorkspaces.delete(workspaceId);
       logger.error('Week sync failed:', error);
       throw error;
     }
@@ -1030,7 +1061,7 @@ class SyncService {
    * @param {number} daysBack - Number of days to look back (default 30)
    * @returns {Promise<Object>} Summary of CSAT sync results
    */
-  async syncRecentCSAT(daysBack = 30) {
+  async syncRecentCSAT(daysBack = 30, workspaceId = null) {
     try {
       const client = await this._initializeClient();
       return await csatService.syncRecentCSAT(
@@ -1040,6 +1071,7 @@ class SyncService {
         (current, total, found) => {
           this.progress.currentStep = `Syncing CSAT responses (${current}/${total}, found ${found})`;
         },
+        workspaceId,
       );
     } catch (error) {
       logger.error('Error syncing recent CSAT:', error);

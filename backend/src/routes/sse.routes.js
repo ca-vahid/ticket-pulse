@@ -15,69 +15,96 @@ router.use((req, res, next) => {
 router.use(requireAuth);
 
 /**
- * SSE connection manager
+ * SSE connection manager with per-workspace channels.
+ * Clients register with a workspaceId; broadcasts target a specific workspace
+ * (or all workspaces if workspaceId is omitted).
  */
 class SSEConnectionManager {
   constructor() {
-    this.clients = new Set();
+    this.channels = new Map();
   }
 
-  /**
-   * Add a new client connection
-   */
-  addClient(client) {
-    this.clients.add(client);
-    logger.info(`SSE client connected. Total clients: ${this.clients.size}`);
+  addClient(client, workspaceId = null) {
+    const key = workspaceId || '__global__';
+    if (!this.channels.has(key)) {
+      this.channels.set(key, new Set());
+    }
+    this.channels.get(key).add(client);
+    logger.info(`SSE client connected (workspace=${workspaceId || 'global'}). Total clients: ${this._totalClients()}`);
   }
 
-  /**
-   * Remove a client connection
-   */
   removeClient(client) {
-    this.clients.delete(client);
-    logger.info(`SSE client disconnected. Total clients: ${this.clients.size}`);
+    for (const [key, clients] of this.channels) {
+      if (clients.has(client)) {
+        clients.delete(client);
+        if (clients.size === 0) this.channels.delete(key);
+        break;
+      }
+    }
+    logger.info(`SSE client disconnected. Total clients: ${this._totalClients()}`);
   }
 
   /**
-   * Broadcast data to all connected clients
+   * Broadcast to clients in a specific workspace.
+   * If workspaceId is null, broadcasts to all clients.
    */
-  broadcast(event, data) {
+  broadcast(event, data, workspaceId = null) {
     const message = JSON.stringify(data);
     const formatted = `event: ${event}\ndata: ${message}\n\n`;
+    let count = 0;
 
-    this.clients.forEach(client => {
-      try {
-        client.write(formatted);
-      } catch (error) {
-        logger.error('Error sending SSE to client:', error);
-        this.removeClient(client);
+    const sendTo = (clients) => {
+      clients.forEach(client => {
+        try {
+          client.write(formatted);
+          count++;
+        } catch (error) {
+          logger.error('Error sending SSE to client:', error);
+          this.removeClient(client);
+        }
+      });
+    };
+
+    if (workspaceId) {
+      const wsClients = this.channels.get(workspaceId);
+      if (wsClients) sendTo(wsClients);
+    } else {
+      for (const clients of this.channels.values()) {
+        sendTo(clients);
       }
-    });
+    }
 
-    logger.debug(`Broadcasted ${event} to ${this.clients.size} clients`);
+    logger.debug(`Broadcasted ${event} to ${count} clients (workspace=${workspaceId || 'all'})`);
   }
 
-  /**
-   * Send heartbeat to keep connections alive
-   */
   sendHeartbeat() {
     const heartbeat = `:heartbeat ${Date.now()}\n\n`;
 
-    this.clients.forEach(client => {
-      try {
-        client.write(heartbeat);
-      } catch (error) {
-        logger.error('Error sending heartbeat:', error);
-        this.removeClient(client);
-      }
-    });
+    for (const clients of this.channels.values()) {
+      clients.forEach(client => {
+        try {
+          client.write(heartbeat);
+        } catch (error) {
+          logger.error('Error sending heartbeat:', error);
+          this.removeClient(client);
+        }
+      });
+    }
   }
 
-  /**
-   * Get number of active connections
-   */
-  getClientCount() {
-    return this.clients.size;
+  getClientCount(workspaceId = null) {
+    if (workspaceId) {
+      return this.channels.get(workspaceId)?.size || 0;
+    }
+    return this._totalClients();
+  }
+
+  _totalClients() {
+    let total = 0;
+    for (const clients of this.channels.values()) {
+      total += clients.size;
+    }
+    return total;
   }
 }
 
@@ -100,11 +127,11 @@ router.get('/events', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // Disable buffering in nginx
 
-  // Send initial connection message
-  res.write('event: connected\ndata: {"message":"Connected to dashboard updates"}\n\n');
+  const workspaceId = req.workspaceId || (req.query.workspaceId ? Number(req.query.workspaceId) : null);
 
-  // Add client to manager
-  sseManager.addClient(res);
+  res.write(`event: connected\ndata: ${JSON.stringify({ message: 'Connected to dashboard updates', workspaceId })}\n\n`);
+
+  sseManager.addClient(res, workspaceId);
 
   // Clean up on client disconnect
   req.on('close', () => {

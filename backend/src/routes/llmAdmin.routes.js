@@ -1,12 +1,15 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth } from '../middleware/auth.js';
+import { requireWorkspace } from '../middleware/workspace.js';
 import * as llmAdminController from '../controllers/llmAdmin.controller.js';
 
 const router = express.Router();
 
 // Protect all routes with authentication
 router.use(requireAuth);
+// Ensures req.workspaceId for controller → llmConfigService (also set on parent /api router)
+router.use(requireWorkspace);
 
 /**
  * Configuration management

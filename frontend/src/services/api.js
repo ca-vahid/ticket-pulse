@@ -4,8 +4,8 @@ import { formatDateLocal } from '../utils/dateHelpers';
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
 
 // JWT token stored in memory (never localStorage — cleared on tab close).
-// Used as fallback when third-party cookies are blocked (Chrome incognito).
 let _authToken = null;
+let _workspaceId = null;
 
 export function setAuthToken(token) {
   _authToken = token;
@@ -13,6 +13,14 @@ export function setAuthToken(token) {
 
 export function clearAuthToken() {
   _authToken = null;
+}
+
+export function setWorkspaceId(id) {
+  _workspaceId = id;
+}
+
+export function getWorkspaceId() {
+  return _workspaceId;
 }
 
 // Create axios instance
@@ -35,10 +43,13 @@ const apiLongTimeout = axios.create({
   timeout: 900000,
 });
 
-// Attach JWT Authorization header to every request as a cookie fallback
+// Attach JWT + workspace headers to every request
 const authRequestInterceptor = (reqConfig) => {
   if (_authToken && !reqConfig.headers.Authorization) {
     reqConfig.headers.Authorization = `Bearer ${_authToken}`;
+  }
+  if (_workspaceId && !reqConfig.headers['X-Workspace-Id']) {
+    reqConfig.headers['X-Workspace-Id'] = String(_workspaceId);
   }
   return reqConfig;
 };
@@ -273,10 +284,11 @@ export const syncAPI = {
  */
 export const sseAPI = {
   getEventSource: () => {
-    // EventSource doesn't support custom headers, so pass JWT as query param
-    const url = _authToken
-      ? `${API_BASE_URL}/sse/events?token=${encodeURIComponent(_authToken)}`
-      : `${API_BASE_URL}/sse/events`;
+    const params = new URLSearchParams();
+    if (_authToken) params.set('token', _authToken);
+    if (_workspaceId) params.set('workspaceId', String(_workspaceId));
+    const qs = params.toString();
+    const url = qs ? `${API_BASE_URL}/sse/events?${qs}` : `${API_BASE_URL}/sse/events`;
     return new EventSource(url, { withCredentials: true });
   },
 
@@ -343,6 +355,43 @@ export const noiseRulesAPI = {
 
   seed: async () => {
     return await api.post('/noise-rules/seed');
+  },
+};
+
+/**
+ * Workspace API
+ */
+export const workspaceAPI = {
+  getAll: async () => {
+    return await api.get('/workspaces');
+  },
+
+  getById: async (id) => {
+    return await api.get(`/workspaces/${id}`);
+  },
+
+  select: async (workspaceId) => {
+    return await api.post('/workspaces/select', { workspaceId });
+  },
+
+  create: async (data) => {
+    return await api.post('/workspaces', data);
+  },
+
+  update: async (id, data) => {
+    return await api.put(`/workspaces/${id}`, data);
+  },
+
+  getAccess: async (workspaceId) => {
+    return await api.get(`/workspaces/${workspaceId}/access`);
+  },
+
+  grantAccess: async (workspaceId, email, role = 'viewer') => {
+    return await api.post(`/workspaces/${workspaceId}/access`, { email, role });
+  },
+
+  revokeAccess: async (workspaceId, email) => {
+    return await api.delete(`/workspaces/${workspaceId}/access/${encodeURIComponent(email)}`);
   },
 };
 

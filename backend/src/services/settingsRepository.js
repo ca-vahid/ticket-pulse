@@ -5,6 +5,41 @@ import { DatabaseError, NotFoundError } from '../utils/errors.js';
 const prisma = new PrismaClient();
 
 /**
+ * Get FreshService config for a specific workspace by reading the Workspace row
+ * and combining with global settings (domain + API key).
+ */
+async function getFreshServiceConfigForWorkspace(workspaceId, settingsRepo) {
+  try {
+    const [domain, apiKey] = await Promise.all([
+      settingsRepo.get('freshservice_domain'),
+      settingsRepo.get('freshservice_api_key'),
+    ]);
+
+    if (!domain || !apiKey) {
+      throw new NotFoundError('FreshService domain/apiKey not configured globally');
+    }
+
+    const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
+    if (!workspace) {
+      throw new NotFoundError(`Workspace ${workspaceId} not found`);
+    }
+
+    return {
+      domain,
+      apiKey,
+      workspaceId: workspace.freshserviceWorkspaceId ? String(workspace.freshserviceWorkspaceId) : null,
+      defaultTimezone: workspace.defaultTimezone,
+      syncIntervalMinutes: workspace.syncIntervalMinutes,
+      categoryCustomField: workspace.categoryCustomField || 'security',
+    };
+  } catch (error) {
+    if (error instanceof NotFoundError) throw error;
+    logger.error(`Error fetching FreshService config for workspace ${workspaceId}:`, error);
+    throw new DatabaseError('Failed to fetch FreshService config for workspace', error);
+  }
+}
+
+/**
  * Default settings values
  */
 const DEFAULT_SETTINGS = {
@@ -220,9 +255,13 @@ class SettingsRepository {
   }
 
   /**
-   * Get sync configuration
-   * @returns {Promise<Object>} Sync config
+   * Get FreshService config for a specific workspace.
+   * Uses global domain/apiKey from app_settings + workspace-specific workspace ID.
    */
+  async getFreshServiceConfigForWorkspace(workspaceId) {
+    return getFreshServiceConfigForWorkspace(workspaceId, this);
+  }
+
   async getSyncConfig() {
     try {
       const [intervalMinutes, defaultTimezone] = await Promise.all([

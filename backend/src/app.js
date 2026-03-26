@@ -116,17 +116,18 @@ async function initialize() {
     await settingsRepository.initializeDefaults();
     logger.info('Default settings initialized');
 
-    // Initialize default business hours for auto-response
-    await availabilityService.initializeDefaultBusinessHours();
-    logger.info('Availability service initialized');
-
-    // Initialize default LLM configuration
-    try {
-      await llmConfigService.initializeDefaultConfig();
-      logger.info('LLM configuration initialized');
-    } catch (error) {
-      logger.warn('Failed to initialize LLM config, will use defaults:', error);
+    // Initialize default business hours and LLM config per active workspace
+    const workspaceRepo = (await import('./services/workspaceRepository.js')).default;
+    const activeWorkspaces = await workspaceRepo.getAllActive();
+    for (const ws of activeWorkspaces) {
+      await availabilityService.initializeDefaultBusinessHours(ws.id);
+      try {
+        await llmConfigService.initializeDefaultConfig(ws.id);
+      } catch (error) {
+        logger.warn(`Failed to initialize LLM config for workspace ${ws.id}, will use defaults:`, error);
+      }
     }
+    logger.info('Availability and LLM configuration initialized for all active workspaces');
 
     // Seed default noise rules (non-critical, must not block sync startup)
     try {
@@ -136,11 +137,11 @@ async function initialize() {
       logger.warn('Noise rules initialization failed (non-fatal):', noiseError.message || noiseError);
     }
 
-    // Check if FreshService is configured
+    // Start sync for all active workspaces (checks FreshService config internally)
     const isConfigured = await settingsRepository.isFreshServiceConfigured();
 
     if (isConfigured) {
-      logger.info('FreshService is configured, starting scheduled sync');
+      logger.info('FreshService is configured, starting scheduled sync for all workspaces');
       await scheduledSyncService.start();
     } else {
       logger.warn('FreshService not configured. Please configure in settings.');

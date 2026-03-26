@@ -5,6 +5,7 @@ import autoResponseRepository from './autoResponseRepository.js';
 import llmConfigService from './llmConfigService.js';
 import queueStatsService from './queueStatsService.js';
 import logger from '../utils/logger.js';
+import config from '../config/index.js';
 
 /**
  * Auto Response Service
@@ -150,16 +151,19 @@ class AutoResponseService {
       // STEP 3: Check availability (business hours, holidays)
       const stepStartAvailability = Date.now();
       const now = new Date();
-      const availabilityCheck = await availabilityService.isBusinessHours(now);
+      const workspaceId = webhookPayload.workspaceId ?? 1;
+      const tz = config.sync.defaultTimezone;
+      const availabilityCheck = await availabilityService.isBusinessHours(now, tz, workspaceId);
       const isAfterHours = !availabilityCheck.isBusinessHours;
 
-      const holidayCheck = await availabilityService.isHoliday(now);
+      const holidayCheck = await availabilityService.isHoliday(now, tz, workspaceId);
       const isHoliday = holidayCheck.isHoliday;
 
       addStep(3, 'Availability Check', Date.now() - stepStartAvailability,
         {
           currentTime: now.toISOString(),
-          timezone: 'America/Los_Angeles',
+          timezone: tz,
+          workspaceId,
         },
         {
           isBusinessHours: !isAfterHours,
@@ -172,7 +176,7 @@ class AutoResponseService {
       // STEP 4: Calculate ETA
       const stepStartEta = Date.now();
       logger.info('Calculating ETA');
-      const queueStats = await queueStatsService.getQueueStats();
+      const queueStats = await queueStatsService.getQueueStats({ workspaceId });
       const etaInfo = await availabilityService.calculateETA(queueStats);
 
       addStep(4, 'ETA Calculation', Date.now() - stepStartEta,

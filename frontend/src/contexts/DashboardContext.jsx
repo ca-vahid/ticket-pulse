@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import api, { dashboardAPI } from '../services/api';
+import api, { dashboardAPI, getWorkspaceId } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { dataCache, cacheKeys, policyForDate, TECH_POLICY, CSAT_POLICY, TTL } from '../services/dataCache';
 import { formatDateLocal } from '../utils/dateHelpers';
@@ -10,16 +10,17 @@ const TZ = 'America/Los_Angeles';
 
 // Try to restore dashboard state from cache on mount (avoids loading flash on back-nav / F5)
 function peekCachedDashboard(type) {
+  const wsId = getWorkspaceId();
+  const wsTag = wsId ? `ws${wsId}:` : '';
   const prefixes = {
-    daily: 'dashboard:daily:',
-    weekly: 'dashboard:weekly:',
-    monthly: 'dashboard:monthly:',
-    weekStats: 'dashboard:weekStats:',
+    daily: `${wsTag}dashboard:daily:`,
+    weekly: `${wsTag}dashboard:weekly:`,
+    monthly: `${wsTag}dashboard:monthly:`,
+    weekStats: `${wsTag}dashboard:weekStats:`,
   };
   const prefix = prefixes[type];
   if (!prefix) return null;
 
-  // Find the most recently fetched entry for this type
   let best = null;
   let bestFetched = 0;
   for (let i = 0; i < sessionStorage.length; i++) {
@@ -453,6 +454,7 @@ export function DashboardProvider({ children }) {
     onSyncCompleted: handleSyncCompleted,
     onConnected: handleConnected,
     onError: handleError,
+    reconnectKey: getWorkspaceId(),
   });
 
   const primaryDataReady = !!(dashboardData || weeklyData || monthlyData);

@@ -1,93 +1,37 @@
 import cron from 'node-cron';
 import syncService from './syncService.js';
 import syncLogRepository from './syncLogRepository.js';
+import workspaceRepository from './workspaceRepository.js';
 import settingsRepository from './settingsRepository.js';
 import logger from '../utils/logger.js';
 
 /**
- * Service for scheduling automatic syncs
+ * Multi-workspace scheduled sync service.
+ * Manages one cron job per active workspace, each with its own interval.
  */
 class ScheduledSyncService {
   constructor() {
-    this.cronJob = null;
-    this.isScheduled = false;
+    this.cronJobs = new Map();
   }
 
   /**
-   * Start scheduled sync
-   * @param {number} intervalMinutes - Interval in minutes (optional, uses settings if not provided)
-   * @returns {Promise<boolean>} True if started successfully
+   * Start sync schedules for all active workspaces.
    */
-  async start(intervalMinutes = null) {
+  async start() {
     try {
-      // Stop existing schedule if any
-      this.stop();
+      this.stopAll();
 
-      // Get interval from settings if not provided
-      if (!intervalMinutes) {
-        const syncConfig = await settingsRepository.getSyncConfig();
-        intervalMinutes = syncConfig.intervalMinutes;
+      const workspaces = await workspaceRepository.getAllActive();
+      if (workspaces.length === 0) {
+        logger.warn('No active workspaces found, skipping scheduled sync');
+        return false;
       }
 
-      // Validate interval
-      if (intervalMinutes < 1 || intervalMinutes > 60) {
-        logger.warn(`Invalid sync interval ${intervalMinutes}m, defaulting to 5m`);
-        intervalMinutes = 5;
+      for (const ws of workspaces) {
+        await this.startForWorkspace(ws);
       }
 
-      // Create cron expression
-      // For intervals under 60 minutes, use */N * * * * pattern
-      const cronExpression = `*/${intervalMinutes} * * * *`;
-
-      logger.info(`Starting scheduled sync with ${intervalMinutes} minute interval`);
-
-      // Create and start cron job
-      this.cronJob = cron.schedule(
-        cronExpression,
-        async () => {
-          try {
-            logger.info('Scheduled sync triggered');
-            await syncService.performFullSync();
-          } catch (error) {
-            logger.error('Scheduled sync failed:', error);
-          }
-        },
-        {
-          scheduled: true,
-          timezone: 'America/Los_Angeles', // Use consistent timezone
-        },
-      );
-
-      this.isScheduled = true;
-      logger.info('Scheduled sync started successfully');
-
-      // Perform initial sync immediately, with catch-up if there's been a gap
-      setImmediate(async () => {
-        try {
-          const lastSync = await syncLogRepository.getLatestSuccessful();
-          if (lastSync?.completedAt) {
-            const gapMs = Date.now() - new Date(lastSync.completedAt).getTime();
-            const gapMinutes = Math.round(gapMs / 60000);
-            const gapHours = (gapMs / 3600000).toFixed(1);
-
-            if (gapMs > 3600000) { // > 1 hour
-              const gapDays = Math.ceil(gapMs / 86400000);
-              const daysToSync = Math.min(gapDays + 7, 90);
-              logger.warn(`Sync gap detected: ${gapHours}h since last successful sync. Running catch-up full sync (${daysToSync} days)`);
-              await syncService.performFullSync({ fullSync: true, daysToSync });
-            } else {
-              logger.info(`Last sync was ${gapMinutes}m ago. Running normal incremental sync`);
-              await syncService.performFullSync();
-            }
-          } else {
-            logger.info('No previous sync found. Running initial full sync');
-            await syncService.performFullSync({ fullSync: true, daysToSync: 30 });
-          }
-        } catch (error) {
-          logger.error('Initial sync failed:', error);
-        }
-      });
-
+      logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
     } catch (error) {
       logger.error('Failed to start scheduled sync:', error);
@@ -96,57 +40,133 @@ class ScheduledSyncService {
   }
 
   /**
-   * Stop scheduled sync
+   * Start a cron job for a single workspace.
    */
-  stop() {
-    if (this.cronJob) {
-      logger.info('Stopping scheduled sync');
-      this.cronJob.stop();
-      this.cronJob = null;
-      this.isScheduled = false;
+  async startForWorkspace(workspace) {
+    const wsId = workspace.id;
+    const wsName = workspace.name;
+
+    this.stopForWorkspace(wsId);
+
+    let intervalMinutes = workspace.syncIntervalMinutes || 5;
+    if (intervalMinutes < 1 || intervalMinutes > 60) {
+      logger.warn(`Invalid sync interval ${intervalMinutes}m for workspace ${wsName}, defaulting to 5m`);
+      intervalMinutes = 5;
+    }
+
+    const cronExpression = `*/${intervalMinutes} * * * *`;
+
+    logger.info(`Starting scheduled sync for workspace "${wsName}" (id=${wsId}) every ${intervalMinutes}m`);
+
+    const job = cron.schedule(
+      cronExpression,
+      async () => {
+        try {
+          logger.info(`Scheduled sync triggered for workspace "${wsName}"`);
+          await syncService.performFullSync({ workspaceId: wsId });
+        } catch (error) {
+          logger.error(`Scheduled sync failed for workspace "${wsName}":`, error);
+        }
+      },
+      {
+        scheduled: true,
+        timezone: workspace.defaultTimezone || 'America/Los_Angeles',
+      },
+    );
+
+    this.cronJobs.set(wsId, { job, workspaceName: wsName });
+
+    setImmediate(async () => {
+      try {
+        const lastSync = await syncLogRepository.getLatestSuccessful(wsId);
+        if (lastSync?.completedAt) {
+          const gapMs = Date.now() - new Date(lastSync.completedAt).getTime();
+          const gapHours = (gapMs / 3600000).toFixed(1);
+
+          if (gapMs > 3600000) {
+            const gapDays = Math.ceil(gapMs / 86400000);
+            const daysToSync = Math.min(gapDays + 7, 90);
+            logger.warn(`[${wsName}] Sync gap: ${gapHours}h. Running catch-up full sync (${daysToSync} days)`);
+            await syncService.performFullSync({ workspaceId: wsId, fullSync: true, daysToSync });
+          } else {
+            const gapMinutes = Math.round(gapMs / 60000);
+            logger.info(`[${wsName}] Last sync was ${gapMinutes}m ago. Running normal incremental sync`);
+            await syncService.performFullSync({ workspaceId: wsId });
+          }
+        } else {
+          logger.info(`[${wsName}] No previous sync found. Running initial full sync`);
+          await syncService.performFullSync({ workspaceId: wsId, fullSync: true, daysToSync: 30 });
+        }
+      } catch (error) {
+        logger.error(`[${wsName}] Initial sync failed:`, error);
+      }
+    });
+  }
+
+  stopForWorkspace(wsId) {
+    const entry = this.cronJobs.get(wsId);
+    if (entry) {
+      logger.info(`Stopping scheduled sync for workspace "${entry.workspaceName}"`);
+      entry.job.stop();
+      this.cronJobs.delete(wsId);
+    }
+  }
+
+  stopAll() {
+    if (this.cronJobs.size > 0) {
+      logger.info(`Stopping all ${this.cronJobs.size} scheduled sync(s)`);
+      for (const [wsId] of this.cronJobs) {
+        this.stopForWorkspace(wsId);
+      }
     }
   }
 
   /**
-   * Restart scheduled sync with new interval
-   * @param {number} intervalMinutes - New interval in minutes
-   * @returns {Promise<boolean>} True if restarted successfully
+   * Legacy stop() — stops all workspaces (backward compatible).
    */
-  async restart(intervalMinutes = null) {
-    logger.info('Restarting scheduled sync');
-    this.stop();
-    return await this.start(intervalMinutes);
+  stop() {
+    this.stopAll();
   }
 
-  /**
-   * Get schedule status
-   * @returns {Object} Schedule status
-   */
+  async restart(workspaceId = null) {
+    if (workspaceId) {
+      const ws = await workspaceRepository.getById(workspaceId);
+      this.stopForWorkspace(workspaceId);
+      await this.startForWorkspace(ws);
+    } else {
+      return await this.start();
+    }
+  }
+
   getStatus() {
+    const workspaces = [];
+    for (const [wsId, entry] of this.cronJobs) {
+      workspaces.push({
+        workspaceId: wsId,
+        workspaceName: entry.workspaceName,
+        isScheduled: true,
+      });
+    }
+
     return {
-      isScheduled: this.isScheduled,
-      hasActiveCronJob: this.cronJob !== null,
+      isScheduled: this.cronJobs.size > 0,
+      workspaceCount: this.cronJobs.size,
+      workspaces,
     };
   }
 
-  /**
-   * Trigger manual sync
-   * @param {boolean} fullSync - Whether to perform a full sync
-   * @param {number} daysToSync - Number of days to sync (default: 30)
-   * @returns {Promise<Object>} Sync result
-   */
-  async triggerManualSync(fullSync = false, daysToSync = 30) {
-    logger.info(`Manual sync triggered (fullSync=${fullSync}, daysToSync=${daysToSync})`);
+  async triggerManualSync(fullSync = false, daysToSync = 30, workspaceId = null) {
+    const wsId = workspaceId || 1;
+    logger.info(`Manual sync triggered for workspace ${wsId} (fullSync=${fullSync}, daysToSync=${daysToSync})`);
     try {
+      const options = { workspaceId: wsId };
       if (fullSync) {
-        // Force full sync by passing options with daysToSync
-        return await syncService.performFullSync({ fullSync: true, daysToSync });
-      } else {
-        // Normal incremental sync
-        return await syncService.performFullSync();
+        options.fullSync = true;
+        options.daysToSync = daysToSync;
       }
+      return await syncService.performFullSync(options);
     } catch (error) {
-      logger.error('Manual sync failed:', error);
+      logger.error(`Manual sync failed for workspace ${wsId}:`, error);
       throw error;
     }
   }

@@ -118,22 +118,23 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
   /**
    * Initialize default published configuration if none exists
    */
-  async initializeDefaultConfig() {
+  async initializeDefaultConfig(workspaceId = 1) {
     try {
       const existingPublished = await prisma.llmConfig.findFirst({
-        where: { status: 'published' },
+        where: { status: 'published', workspaceId },
       });
 
       if (existingPublished) {
-        logger.debug('Published LLM config already exists');
+        logger.debug('Published LLM config already exists', { workspaceId });
         return existingPublished;
       }
 
-      logger.info('No published LLM config found, creating default published config');
+      logger.info('No published LLM config found, creating default published config', { workspaceId });
 
       const defaults = this.getDefaults();
       const published = await prisma.llmConfig.create({
         data: {
+          workspaceId,
           status: 'published',
           version: 1,
           classificationPrompt: defaults.classificationPrompt,
@@ -158,10 +159,16 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
         },
       });
 
-      // Log to history
-      await this.logHistory(published.id, published.version, 'created', 'system', 'Initial default configuration published');
+      await this.logHistory(
+        published.id,
+        published.version,
+        'created',
+        'system',
+        'Initial default configuration published',
+        workspaceId,
+      );
 
-      logger.info('Default LLM config published', { id: published.id, version: published.version });
+      logger.info('Default LLM config published', { id: published.id, version: published.version, workspaceId });
       return published;
     } catch (error) {
       logger.error('Failed to initialize default LLM config:', error);
@@ -172,10 +179,10 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
   /**
    * Get the currently published configuration
    */
-  async getPublishedConfig() {
+  async getPublishedConfig(workspaceId = 1) {
     try {
       const config = await prisma.llmConfig.findFirst({
-        where: { status: 'published' },
+        where: { status: 'published', workspaceId },
         orderBy: { version: 'desc' },
       });
 
@@ -183,9 +190,8 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
         return this.hydrateConfig(config);
       }
 
-      // No published config, initialize defaults
-      logger.info('No published LLM config found, initializing defaults');
-      const initialized = await this.initializeDefaultConfig();
+      logger.info('No published LLM config found, initializing defaults', { workspaceId });
+      const initialized = await this.initializeDefaultConfig(workspaceId);
       return this.hydrateConfig(initialized);
     } catch (error) {
       logger.error('Error fetching published LLM config:', error);
@@ -196,17 +202,16 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
   /**
    * Get draft configuration (or create one from published)
    */
-  async getDraftConfig() {
+  async getDraftConfig(workspaceId = 1) {
     try {
       let draft = await prisma.llmConfig.findFirst({
-        where: { status: 'draft' },
+        where: { status: 'draft', workspaceId },
         orderBy: { updatedAt: 'desc' },
       });
 
       if (!draft) {
-        // Create draft from published or defaults
-        const published = await this.getPublishedConfig();
-        draft = await this.createDraft(published);
+        const published = await this.getPublishedConfig(workspaceId);
+        draft = await this.createDraft(published, workspaceId);
       }
 
       return this.hydrateConfig(draft);
@@ -236,11 +241,12 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
   /**
    * Create a draft configuration
    */
-  async createDraft(baseConfig, createdBy = 'system') {
+  async createDraft(baseConfig, workspaceId = 1, createdBy = 'system') {
     const defaults = this.getDefaults();
 
     const draft = await prisma.llmConfig.create({
       data: {
+        workspaceId,
         status: 'draft',
         version: 1,
         classificationPrompt: baseConfig.classificationPrompt || defaults.classificationPrompt,
@@ -263,19 +269,18 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
       },
     });
 
-    // Log creation in history
-    await this.logHistory(draft.id, draft.version, 'created', createdBy, 'Draft configuration created');
+    await this.logHistory(draft.id, draft.version, 'created', createdBy, 'Draft configuration created', workspaceId);
 
-    logger.info('Draft LLM config created', { id: draft.id, version: draft.version });
+    logger.info('Draft LLM config created', { id: draft.id, version: draft.version, workspaceId });
     return draft;
   }
 
   /**
    * Update draft configuration
    */
-  async updateDraft(updates, updatedBy = 'system') {
+  async updateDraft(updates, updatedBy = 'system', workspaceId = 1) {
     try {
-      const draft = await this.getDraftConfig();
+      const draft = await this.getDraftConfig(workspaceId);
 
       const updated = await prisma.llmConfig.update({
         where: { id: draft.id },
@@ -285,10 +290,13 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
         },
       });
 
-      // Log update in history
-      await this.logHistory(updated.id, updated.version, 'updated', updatedBy, 'Draft configuration updated');
+      if (updated.workspaceId !== workspaceId) {
+        throw new Error('Draft workspace mismatch');
+      }
 
-      logger.info('Draft LLM config updated', { id: updated.id });
+      await this.logHistory(updated.id, updated.version, 'updated', updatedBy, 'Draft configuration updated', workspaceId);
+
+      logger.info('Draft LLM config updated', { id: updated.id, workspaceId });
       return this.hydrateConfig(updated);
     } catch (error) {
       logger.error('Error updating draft LLM config:', error);
@@ -299,24 +307,28 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
   /**
    * Publish draft configuration
    */
-  async publishDraft(publishedBy = 'system', notes = null) {
+  async publishDraft(id, publishedBy, workspaceId = 1, notes = null) {
     try {
-      const draft = await this.getDraftConfig();
+      const draft = await prisma.llmConfig.findFirst({
+        where: { id, workspaceId, status: 'draft' },
+      });
 
-      // Unpublish any existing published config
+      if (!draft) {
+        throw new Error('Draft not found for this workspace');
+      }
+
       await prisma.llmConfig.updateMany({
-        where: { status: 'published' },
+        where: { status: 'published', workspaceId },
         data: { status: 'archived' },
       });
 
-      // Get the highest version number
-      const latestPublished = await prisma.llmConfig.findFirst({
+      const latestInWorkspace = await prisma.llmConfig.findFirst({
+        where: { workspaceId },
         orderBy: { version: 'desc' },
       });
 
-      const newVersion = latestPublished ? latestPublished.version + 1 : 1;
+      const newVersion = latestInWorkspace ? latestInWorkspace.version + 1 : 1;
 
-      // Publish the draft
       const published = await prisma.llmConfig.update({
         where: { id: draft.id },
         data: {
@@ -328,10 +340,16 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
         },
       });
 
-      // Log publish in history
-      await this.logHistory(published.id, published.version, 'published', publishedBy, notes || 'Configuration published');
+      await this.logHistory(
+        published.id,
+        published.version,
+        'published',
+        publishedBy,
+        notes || 'Configuration published',
+        workspaceId,
+      );
 
-      logger.info('Draft LLM config published', { id: published.id, version: published.version });
+      logger.info('Draft LLM config published', { id: published.id, version: published.version, workspaceId });
       return this.hydrateConfig(published);
     } catch (error) {
       logger.error('Error publishing LLM config:', error);
@@ -342,17 +360,15 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
   /**
    * Reset draft to defaults
    */
-  async resetDraftToDefaults(resetBy = 'system') {
+  async resetDraftToDefaults(workspaceId, resetBy = 'system') {
     try {
       const defaults = this.getDefaults();
 
-      // Delete existing draft
       await prisma.llmConfig.deleteMany({
-        where: { status: 'draft' },
+        where: { status: 'draft', workspaceId },
       });
 
-      // Create new draft with defaults
-      return await this.createDraft(defaults, resetBy);
+      return await this.createDraft(defaults, workspaceId, resetBy);
     } catch (error) {
       logger.error('Error resetting draft to defaults:', error);
       throw error;
@@ -362,8 +378,9 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
   /**
    * Get configuration history
    */
-  async getHistory(limit = 50) {
+  async getHistory(workspaceId, limit = 50) {
     return await prisma.llmConfigHistory.findMany({
+      where: { workspaceId },
       take: limit,
       orderBy: { createdAt: 'desc' },
     });
@@ -372,11 +389,16 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
   /**
    * Log configuration change to history
    */
-  async logHistory(configId, version, action, changedBy, changeNotes) {
+  async logHistory(configId, version, action, changedBy, changeNotes, workspaceId = 1) {
     const config = await prisma.llmConfig.findUnique({ where: { id: configId } });
+
+    if (!config || config.workspaceId !== workspaceId) {
+      throw new Error('Config not found for workspace');
+    }
 
     return await prisma.llmConfigHistory.create({
       data: {
+        workspaceId,
         configId,
         version,
         action,
@@ -390,10 +412,10 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
   /**
    * Revert to a specific version
    */
-  async revertToVersion(historyId, revertedBy = 'system') {
+  async revertToVersion(historyId, changedBy = 'system', workspaceId = 1) {
     try {
-      const historyRecord = await prisma.llmConfigHistory.findUnique({
-        where: { id: historyId },
+      const historyRecord = await prisma.llmConfigHistory.findFirst({
+        where: { id: historyId, workspaceId },
       });
 
       if (!historyRecord) {
@@ -402,21 +424,20 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
 
       const snapshot = historyRecord.configSnapshot;
 
-      // Delete current draft
-      await prisma.llmConfig.deleteMany({ where: { status: 'draft' } });
+      await prisma.llmConfig.deleteMany({ where: { status: 'draft', workspaceId } });
 
-      // Create new draft from snapshot
-      const reverted = await this.createDraft(snapshot, revertedBy);
+      const reverted = await this.createDraft(snapshot, workspaceId, changedBy);
 
       await this.logHistory(
         reverted.id,
         reverted.version,
         'reverted',
-        revertedBy,
+        changedBy,
         `Reverted to version ${historyRecord.version}`,
+        workspaceId,
       );
 
-      logger.info('LLM config reverted', { historyId, newDraftId: reverted.id });
+      logger.info('LLM config reverted', { historyId, newDraftId: reverted.id, workspaceId });
       return reverted;
     } catch (error) {
       logger.error('Error reverting LLM config:', error);
@@ -512,4 +533,3 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
 }
 
 export default new LlmConfigService();
-

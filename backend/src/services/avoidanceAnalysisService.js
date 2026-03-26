@@ -88,9 +88,10 @@ function slimTicket(t) {
   };
 }
 
-async function loadTicketsFull(start, end, { excludeNoise = false } = {}) {
+async function loadTicketsFull(start, end, workspaceId = null, { excludeNoise = false } = {}) {
   const where = { createdAt: { gte: start, lte: end } };
   if (excludeNoise) where.isNoise = false;
+  if (workspaceId != null) where.workspaceId = workspaceId;
   return prisma.ticket.findMany({
     where,
     select: {
@@ -111,9 +112,10 @@ async function loadTicketsFull(start, end, { excludeNoise = false } = {}) {
   });
 }
 
-async function loadTicketsSlim(start, end, { excludeNoise = false } = {}) {
+async function loadTicketsSlim(start, end, workspaceId = null, { excludeNoise = false } = {}) {
   const where = { createdAt: { gte: start, lte: end } };
   if (excludeNoise) where.isNoise = false;
+  if (workspaceId != null) where.workspaceId = workspaceId;
   return prisma.ticket.findMany({
     where,
     select: { id: true, createdAt: true, assignedTechId: true },
@@ -154,14 +156,14 @@ function analyzeDayFull(techId, allTickets, win, extendedTickets) {
   };
 }
 
-export async function computeTechnicianAvoidanceDetail(tech, rangeStart, _rangeEnd, { excludeNoise = false } = {}) {
+export async function computeTechnicianAvoidanceDetail(tech, rangeStart, _rangeEnd, workspaceId = null, { excludeNoise = false } = {}) {
   const dateStr = formatInTimeZone(rangeStart, PT_TIMEZONE, 'yyyy-MM-dd');
   const win = getCoverageWindow(dateStr);
   if (!win) return emptyResult(true, 'weekend');
 
   const [coverageTickets, extendedTickets] = await Promise.all([
-    loadTicketsFull(win.windowStart, win.windowEnd, { excludeNoise }),
-    loadTicketsFull(win.windowEnd, win.extendedEnd, { excludeNoise }),
+    loadTicketsFull(win.windowStart, win.windowEnd, workspaceId, { excludeNoise }),
+    loadTicketsFull(win.windowEnd, win.extendedEnd, workspaceId, { excludeNoise }),
   ]);
   const day = analyzeDayFull(tech.id, coverageTickets, win, extendedTickets);
   const picked = day.tickets.filter(t => t.pickedByTech).length;
@@ -174,14 +176,14 @@ export async function computeTechnicianAvoidanceDetail(tech, rangeStart, _rangeE
   };
 }
 
-export async function computeTechnicianAvoidanceWeeklyDetail(tech, weekStart, weekEnd, _timezone, { excludeNoise = false } = {}) {
+export async function computeTechnicianAvoidanceWeeklyDetail(tech, weekStart, weekEnd, _timezone, workspaceId = null, { excludeNoise = false } = {}) {
   const weekdays = getWeekdaysInRange(weekStart, weekEnd);
   const windows = weekdays.map(d => ({ date: d, ...getCoverageWindow(d) })).filter(w => w.windowStart);
   if (windows.length === 0) return emptyResult(true, 'no_weekdays');
 
   const earliest = new Date(Math.min(...windows.map(w => w.windowStart.getTime())));
   const latestExtended = new Date(Math.max(...windows.map(w => w.extendedEnd.getTime())));
-  const allTickets = await loadTicketsFull(earliest, latestExtended, { excludeNoise });
+  const allTickets = await loadTicketsFull(earliest, latestExtended, workspaceId, { excludeNoise });
 
   const days = [];
   let tE = 0, tP = 0;
@@ -202,14 +204,14 @@ export async function computeTechnicianAvoidanceWeeklyDetail(tech, weekStart, we
   };
 }
 
-export async function computeTechnicianAvoidanceMonthlyDetail(tech, monthStart, monthEnd, _timezone, { excludeNoise = false } = {}) {
+export async function computeTechnicianAvoidanceMonthlyDetail(tech, monthStart, monthEnd, _timezone, workspaceId = null, { excludeNoise = false } = {}) {
   const weekdays = getWeekdaysInRange(monthStart, monthEnd);
   const windows = weekdays.map(d => ({ date: d, ...getCoverageWindow(d) })).filter(w => w.windowStart);
   if (windows.length === 0) return emptyResult(true, 'no_weekdays');
 
   const earliest = new Date(Math.min(...windows.map(w => w.windowStart.getTime())));
   const latestExtended = new Date(Math.max(...windows.map(w => w.extendedEnd.getTime())));
-  const allTickets = await loadTicketsFull(earliest, latestExtended, { excludeNoise });
+  const allTickets = await loadTicketsFull(earliest, latestExtended, workspaceId, { excludeNoise });
 
   const days = [];
   let tE = 0, tP = 0;
@@ -232,7 +234,7 @@ export async function computeTechnicianAvoidanceMonthlyDetail(tech, monthStart, 
 
 // ── Dashboard-level (counts only, single DB query) ────────────────
 
-export async function computeDashboardAvoidance(technicians, rangeStart, _rangeEnd) {
+export async function computeDashboardAvoidance(technicians, rangeStart, _rangeEnd, workspaceId = null) {
   const dateStr = formatInTimeZone(rangeStart, PT_TIMEZONE, 'yyyy-MM-dd');
   const win = getCoverageWindow(dateStr);
   const results = {};
@@ -244,7 +246,7 @@ export async function computeDashboardAvoidance(technicians, rangeStart, _rangeE
     return results;
   }
 
-  const allTickets = await loadTicketsSlim(win.windowStart, win.windowEnd);
+  const allTickets = await loadTicketsSlim(win.windowStart, win.windowEnd, workspaceId);
   const eligible = filterEligible(allTickets, win.windowStart, win.windowEnd);
   const eligibleCount = eligible.length;
 
@@ -265,7 +267,7 @@ export async function computeDashboardAvoidance(technicians, rangeStart, _rangeE
   return results;
 }
 
-export async function computeWeeklyDashboardAvoidance(technicians, weekStart, weekEnd, _timezone) {
+export async function computeWeeklyDashboardAvoidance(technicians, weekStart, weekEnd, _timezone, workspaceId = null) {
   const weekdays = getWeekdaysInRange(weekStart, weekEnd);
   const windows = weekdays.map(d => ({ date: d, ...getCoverageWindow(d) })).filter(w => w.windowStart);
   const results = {};
@@ -279,7 +281,7 @@ export async function computeWeeklyDashboardAvoidance(technicians, weekStart, we
 
   const earliest = new Date(Math.min(...windows.map(w => w.windowStart.getTime())));
   const latest = new Date(Math.max(...windows.map(w => w.windowEnd.getTime())));
-  const allTickets = await loadTicketsSlim(earliest, latest);
+  const allTickets = await loadTicketsSlim(earliest, latest, workspaceId);
 
   const perDay = windows.map(w => filterEligible(allTickets, w.windowStart, w.windowEnd));
   const totalEligible = perDay.reduce((s, d) => s + d.length, 0);

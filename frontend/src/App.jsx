@@ -1,9 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { WorkspaceProvider, useWorkspace } from './contexts/WorkspaceContext';
 import { DashboardProvider } from './contexts/DashboardContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import Login from './pages/Login';
+import WorkspacePicker from './pages/WorkspacePicker';
 import Dashboard from './pages/Dashboard';
 import TechnicianDetailNew from './pages/TechnicianDetailNew';
 import Settings from './pages/Settings';
@@ -17,8 +19,9 @@ import { Activity } from 'lucide-react';
  */
 function ProtectedRoute({ children }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const { isWorkspaceSelected, availableWorkspaces, isHydrated } = useWorkspace();
 
-  if (isLoading) {
+  if (isLoading || !isHydrated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
         <div className="text-center">
@@ -31,6 +34,10 @@ function ProtectedRoute({ children }) {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (!isWorkspaceSelected && availableWorkspaces.length > 1) {
+    return <Navigate to="/workspace" replace />;
   }
 
   return children;
@@ -91,79 +98,89 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <DashboardProvider>
-          <SettingsProvider>
-            <Routes>
-              {/* Public Routes */}
-              <Route
-                path="/login"
-                element={
-                  <PublicRoute>
-                    <Login />
-                  </PublicRoute>
-                }
-              />
+        <WorkspaceProvider>
+          <DashboardProvider>
+            <SettingsProvider>
+              <Routes>
+                {/* Public Routes */}
+                <Route
+                  path="/login"
+                  element={
+                    <PublicRoute>
+                      <Login />
+                    </PublicRoute>
+                  }
+                />
 
-              {/* Protected Routes */}
-              <Route
-                path="/dashboard"
-                element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                }
-              />
+                {/* Workspace Selection (authenticated but no workspace yet) */}
+                <Route
+                  path="/workspace"
+                  element={
+                    <WorkspacePicker />
+                  }
+                />
 
-              <Route
-                path="/technician/:id"
-                element={
-                  <ProtectedRoute>
-                    <TechnicianDetailNew />
-                  </ProtectedRoute>
-                }
-              />
+                {/* Protected Routes */}
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <Dashboard />
+                    </ProtectedRoute>
+                  }
+                />
 
-              <Route
-                path="/settings"
-                element={
-                  <ProtectedRoute>
-                    <Settings />
-                  </ProtectedRoute>
-                }
-              />
+                <Route
+                  path="/technician/:id"
+                  element={
+                    <ProtectedRoute>
+                      <TechnicianDetailNew />
+                    </ProtectedRoute>
+                  }
+                />
 
-              <Route
-                path="/visuals"
-                element={
-                  <ProtectedRoute>
-                    <Visuals />
-                  </ProtectedRoute>
-                }
-              />
+                <Route
+                  path="/settings"
+                  element={
+                    <ProtectedRoute>
+                      <Settings />
+                    </ProtectedRoute>
+                  }
+                />
 
-              <Route
-                path="/timeline"
-                element={
-                  <ProtectedRoute>
-                    <TimelineExplorer />
-                  </ProtectedRoute>
-                }
-              />
+                <Route
+                  path="/visuals"
+                  element={
+                    <ProtectedRoute>
+                      <Visuals />
+                    </ProtectedRoute>
+                  }
+                />
 
-              {/* Auth callback - waits for MSAL + session exchange, then redirects */}
-              <Route
-                path="/auth/callback"
-                element={<AuthCallback />}
-              />
+                <Route
+                  path="/timeline"
+                  element={
+                    <ProtectedRoute>
+                      <TimelineExplorer />
+                    </ProtectedRoute>
+                  }
+                />
 
-              {/* Default Route */}
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                {/* Auth callback */}
+                <Route
+                  path="/auth/callback"
+                  element={<AuthCallback />}
+                />
 
-              {/* 404 Catch-all */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </SettingsProvider>
-        </DashboardProvider>
+                {/* Default Route */}
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+                {/* 404 Catch-all */}
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              </Routes>
+            </SettingsProvider>
+          </DashboardProvider>
+        </WorkspaceProvider>
       </AuthProvider>
     </BrowserRouter>
   );

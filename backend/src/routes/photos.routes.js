@@ -28,10 +28,11 @@ router.post(
 
     logger.info('Starting photo sync from Azure AD');
 
-    // Get all active technicians with emails
+    // Get all active technicians with emails (scoped to workspace)
     const technicians = await prisma.technician.findMany({
       where: {
         isActive: true,
+        workspaceId: req.workspaceId,
         email: {
           not: null,
         },
@@ -182,6 +183,7 @@ router.get(
     const technicians = await prisma.technician.findMany({
       where: {
         isActive: true,
+        workspaceId: req.workspaceId,
       },
       select: {
         id: true,

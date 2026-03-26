@@ -32,7 +32,7 @@ const PRIORITY_MAP = {
  * @param {Object} fsTicket - FreshService ticket object
  * @returns {Object} Transformed ticket data
  */
-export function transformTicket(fsTicket) {
+export function transformTicket(fsTicket, { categoryCustomField = 'security' } = {}) {
   if (!fsTicket || !fsTicket.id) {
     logger.warn('Invalid FreshService ticket data');
     return null;
@@ -46,14 +46,12 @@ export function transformTicket(fsTicket) {
       descriptionText: fsTicket.description_text || null,
       status: STATUS_MAP[fsTicket.status] || 'Open',
       priority: PRIORITY_MAP[fsTicket.priority] || 3,
-      assignedTechId: null, // Will be resolved later with tech mapping
+      assignedTechId: null,
       assignedFreshserviceId: fsTicket.responder_id || null,
-      isSelfPicked: false, // Will be determined by activity analysis
-      // Requester information (from included data or IDs)
+      isSelfPicked: false,
       requesterName: fsTicket.requester?.name || null,
       requesterEmail: fsTicket.requester?.email || null,
       requesterId: fsTicket.requester_id ? BigInt(fsTicket.requester_id) : null,
-      // Timestamps
       createdAt: fsTicket.created_at ? new Date(fsTicket.created_at) : new Date(),
       assignedAt: fsTicket.assigned_at ? new Date(fsTicket.assigned_at) : null,
       resolvedAt: fsTicket.resolved_at ? new Date(fsTicket.resolved_at) : null,
@@ -61,11 +59,10 @@ export function transformTicket(fsTicket) {
       dueBy: fsTicket.due_by ? new Date(fsTicket.due_by) : null,
       frDueBy: fsTicket.fr_due_by ? new Date(fsTicket.fr_due_by) : null,
       updatedAt: fsTicket.updated_at ? new Date(fsTicket.updated_at) : new Date(),
-      // Additional metadata
       source: fsTicket.source || null,
       category: fsTicket.category || null,
       subCategory: fsTicket.sub_category || null,
-      ticketCategory: fsTicket.custom_fields?.security || null, // Custom field: security (e.g., BST, GIS)
+      ticketCategory: fsTicket.custom_fields?.[categoryCustomField] || null,
       department: fsTicket.department?.name || null,
       isEscalated: fsTicket.is_escalated || false,
       // Time tracking - Logged work hours (would need separate /time_entries API call)
@@ -266,14 +263,14 @@ export function transformTicketActivity(fsActivity, ticketId) {
  * @param {Array} fsTickets - Array of FreshService tickets
  * @returns {Array} Array of transformed tickets
  */
-export function transformTickets(fsTickets) {
+export function transformTickets(fsTickets, options = {}) {
   if (!Array.isArray(fsTickets)) {
     logger.warn('Invalid tickets array');
     return [];
   }
 
   return fsTickets
-    .map(ticket => transformTicket(ticket))
+    .map(ticket => transformTicket(ticket, options))
     .filter(ticket => ticket !== null);
 }
 

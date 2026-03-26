@@ -1,4 +1,5 @@
 import { formatDateLocal } from '../utils/dateHelpers';
+import { getWorkspaceId } from './api';
 
 // ---------------------------------------------------------------------------
 // Cache Key Factory
@@ -10,27 +11,32 @@ function normalizeDateParam(date) {
   return formatDateLocal(date);
 }
 
+function wsPrefix() {
+  const wsId = getWorkspaceId();
+  return wsId ? `ws${wsId}:` : '';
+}
+
 export const cacheKeys = {
   dailyDashboard: (tz, date) =>
-    `dashboard:daily:tz=${tz}:date=${normalizeDateParam(date)}`,
+    `${wsPrefix()}dashboard:daily:tz=${tz}:date=${normalizeDateParam(date)}`,
 
   weeklyStats: (tz, weekStart) =>
-    `dashboard:weekStats:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
+    `${wsPrefix()}dashboard:weekStats:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
 
   weeklyDashboard: (tz, weekStart) =>
-    `dashboard:weekly:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
+    `${wsPrefix()}dashboard:weekly:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
 
   monthlyDashboard: (tz, monthStart) =>
-    `dashboard:monthly:tz=${tz}:monthStart=${normalizeDateParam(monthStart)}`,
+    `${wsPrefix()}dashboard:monthly:tz=${tz}:monthStart=${normalizeDateParam(monthStart)}`,
 
   techDaily: (id, tz, date) =>
-    `tech:daily:id=${id}:tz=${tz}:date=${normalizeDateParam(date)}`,
+    `${wsPrefix()}tech:daily:id=${id}:tz=${tz}:date=${normalizeDateParam(date)}`,
 
   techWeekly: (id, tz, weekStart) =>
-    `tech:weekly:id=${id}:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
+    `${wsPrefix()}tech:weekly:id=${id}:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
 
   techCSAT: (id) =>
-    `tech:csat:id=${id}`,
+    `${wsPrefix()}tech:csat:id=${id}`,
 };
 
 // ---------------------------------------------------------------------------
