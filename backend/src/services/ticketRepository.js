@@ -25,7 +25,7 @@ class TicketRepository {
           lte: end,
         },
       };
-      if (workspaceId != null) where.workspaceId = workspaceId;
+      if (workspaceId !== null) where.workspaceId = workspaceId;
 
       return await prisma.ticket.findMany({
         where,
@@ -297,7 +297,7 @@ class TicketRepository {
     try {
       const { start, end } = getTodayRange(timezone, date);
 
-      const workspaceClause = workspaceId != null ? { workspaceId } : {};
+      const workspaceClause = workspaceId !== null ? { workspaceId } : {};
 
       const [totalToday, openToday, closedToday, selfPickedToday] = await Promise.all([
         prisma.ticket.count({
@@ -375,7 +375,7 @@ class TicketRepository {
         ],
         csatResponseId: null, // No CSAT response yet
       };
-      if (workspaceId != null) where.workspaceId = workspaceId;
+      if (workspaceId !== null) where.workspaceId = workspaceId;
 
       return await prisma.ticket.findMany({
         where,
@@ -409,7 +409,7 @@ class TicketRepository {
         status: { in: ['Resolved', 'Closed'] },
         csatResponseId: null, // No CSAT response yet
       };
-      if (workspaceId != null) where.workspaceId = workspaceId;
+      if (workspaceId !== null) where.workspaceId = workspaceId;
 
       return await prisma.ticket.findMany({
         where,
@@ -443,7 +443,7 @@ class TicketRepository {
         status: { in: ['Resolved', 'Closed'] },
         csatResponseId: null,
       };
-      if (workspaceId != null) where.workspaceId = workspaceId;
+      if (workspaceId !== null) where.workspaceId = workspaceId;
 
       return await prisma.ticket.count({
         where,
@@ -543,7 +543,7 @@ class TicketRepository {
         createdAt: { lt: cutoffDate },
         status: { in: ['Resolved', 'Closed'] },
       };
-      if (workspaceId != null) where.workspaceId = workspaceId;
+      if (workspaceId !== null) where.workspaceId = workspaceId;
 
       const result = await prisma.ticket.deleteMany({
         where,

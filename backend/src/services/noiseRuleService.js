@@ -294,7 +294,7 @@ class NoiseRuleService {
   }
 
   async seedDefaults(workspaceId = null) {
-    if (workspaceId != null) {
+    if (workspaceId !== null) {
       const wsId = workspaceId;
       const existing = await prisma.noiseRule.count({ where: { workspaceId: wsId } });
       if (existing > 0) {

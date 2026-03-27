@@ -2,7 +2,6 @@ import cron from 'node-cron';
 import syncService from './syncService.js';
 import syncLogRepository from './syncLogRepository.js';
 import workspaceRepository from './workspaceRepository.js';
-import settingsRepository from './settingsRepository.js';
 import logger from '../utils/logger.js';
 
 /**

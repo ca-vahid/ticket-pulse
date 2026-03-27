@@ -63,7 +63,7 @@ class AvailabilityService {
 
     if (hours && hours.length > 0) {
       const rows = hours.map((h) => {
-        const { id: _id, workspaceId: _ws, ...rest } = h;
+        const { id, workspaceId: wsId, ...rest } = h; // eslint-disable-line no-unused-vars
         return { ...rest, workspaceId };
       });
       await prisma.businessHour.createMany({
@@ -98,7 +98,7 @@ class AvailabilityService {
     const businessWhere = {
       dayOfWeek,
       isEnabled: true,
-      ...(workspaceId != null ? { workspaceId } : {}),
+      ...(workspaceId !== null ? { workspaceId } : {}),
     };
 
     // Get business hours for this day of week
@@ -146,7 +146,7 @@ class AvailabilityService {
     const maxDaysToCheck = 14; // Check up to 2 weeks ahead
     let daysChecked = 0;
 
-    const businessHours = workspaceId != null
+    const businessHours = workspaceId !== null
       ? await this.getBusinessHours(workspaceId)
       : await prisma.businessHour.findMany({
         orderBy: { dayOfWeek: 'asc' },
@@ -207,7 +207,7 @@ class AvailabilityService {
    * Get all holidays (optionally scoped: workspace-specific plus shared rows where workspaceId is null)
    */
   async getHolidays(workspaceId = null) {
-    const where = workspaceId != null
+    const where = workspaceId !== null
       ? {
         OR: [
           { workspaceId },
@@ -227,7 +227,7 @@ class AvailabilityService {
    */
   async addHoliday(holiday, workspaceId = null) {
     const data = { ...holiday };
-    if (workspaceId != null) {
+    if (workspaceId !== null) {
       data.workspaceId = workspaceId;
     }
     return await prisma.holiday.create({
@@ -267,7 +267,7 @@ class AvailabilityService {
     // Determine the start/end of the local day in the given timezone and query by range.
     const { start, end } = getTodayRange(timezone, checkDate);
 
-    const workspaceScope = workspaceId != null
+    const workspaceScope = workspaceId !== null
       ? {
         OR: [
           { workspaceId },
@@ -417,7 +417,7 @@ class AvailabilityService {
           "first_public_agent_reply_at" IS NOT NULL
           AND "created_at" >= ${cutoff}
           AND "first_public_agent_reply_at" >= "created_at"
-          ${workspaceId != null ? Prisma.sql`AND "workspace_id" = ${workspaceId}` : Prisma.empty}
+          ${workspaceId !== null ? Prisma.sql`AND "workspace_id" = ${workspaceId}` : Prisma.empty}
       `;
 
       const median = rows?.[0]?.median_minutes;
@@ -445,7 +445,7 @@ class AvailabilityService {
       { name: 'Boxing Day', date: new Date(year, 11, 26), isRecurring: true, country: 'CA' },
     ];
 
-    const dedupScope = workspaceId != null
+    const dedupScope = workspaceId !== null
       ? {
         OR: [
           { workspaceId },

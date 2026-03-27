@@ -285,7 +285,7 @@ class SyncService {
 
     for (const ticket of tickets) {
       try {
-        const noiseWorkspaceId = ticket.workspaceId != null ? ticket.workspaceId : 1;
+        const noiseWorkspaceId = ticket.workspaceId !== null ? ticket.workspaceId : 1;
         const { isNoise, ruleId } = await noiseRuleService.evaluate(
           ticket.subject,
           ticket.createdAt ? new Date(ticket.createdAt) : null,

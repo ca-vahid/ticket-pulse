@@ -91,7 +91,7 @@ function slimTicket(t) {
 async function loadTicketsFull(start, end, workspaceId = null, { excludeNoise = false } = {}) {
   const where = { createdAt: { gte: start, lte: end } };
   if (excludeNoise) where.isNoise = false;
-  if (workspaceId != null) where.workspaceId = workspaceId;
+  if (workspaceId !== null) where.workspaceId = workspaceId;
   return prisma.ticket.findMany({
     where,
     select: {
@@ -115,7 +115,7 @@ async function loadTicketsFull(start, end, workspaceId = null, { excludeNoise = 
 async function loadTicketsSlim(start, end, workspaceId = null, { excludeNoise = false } = {}) {
   const where = { createdAt: { gte: start, lte: end } };
   if (excludeNoise) where.isNoise = false;
-  if (workspaceId != null) where.workspaceId = workspaceId;
+  if (workspaceId !== null) where.workspaceId = workspaceId;
   return prisma.ticket.findMany({
     where,
     select: { id: true, createdAt: true, assignedTechId: true },
