@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { filterTickets } from '../utils/ticketFilter';
 import { getHolidayTooltip, getDateStyling } from '../utils/holidays';
+import { getLeaveForDate, getLeaveBadge, getLeaveTooltip } from '../utils/leaveInfo';
 import { formatDateLocal } from '../utils/dateHelpers';
 
 export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthChange, technicians = [], searchTerm = '', selectedCategories = [], onClearSelections: _onClearSelections }) {
@@ -428,7 +429,15 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                 const _maxTicketsForAvatars = topTechs.length > 0 ? Math.max(...topTechs.map((t) => t.total)) : 1;
 
                 const isHovered = hoveredDayDate === day.date;
-                
+
+                // Count technicians on leave this day
+                const leaveCounts = { OFF: 0, WFH: 0, OTHER: 0 };
+                for (const tech of technicians) {
+                  const leave = getLeaveForDate(tech.leaveInfo, day.date);
+                  if (leave) leaveCounts[leave.category]++;
+                }
+                const hasLeave = leaveCounts.OFF + leaveCounts.WFH + leaveCounts.OTHER > 0;
+
                 // Get weekend/holiday styling
                 const dateStyling = getDateStyling(day.date, { variant: 'cell' });
                 const holidayTooltip = getHolidayTooltip(day.date);
@@ -678,6 +687,27 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                         ) : (
                           <div className="mt-auto text-xs text-gray-300">No activity</div>
                         )}
+
+                        {/* Leave indicators */}
+                        {hasLeave && !isHovered && (
+                          <div className="flex items-center gap-1 mt-1 flex-wrap">
+                            {leaveCounts.OFF > 0 && (
+                              <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-amber-100 border border-amber-300 text-[8px] font-semibold text-amber-800">
+                                <span className="w-1 h-1 rounded-full bg-amber-400" />{leaveCounts.OFF} OFF
+                              </span>
+                            )}
+                            {leaveCounts.WFH > 0 && (
+                              <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-teal-100 border border-teal-300 text-[8px] font-semibold text-teal-800">
+                                <span className="w-1 h-1 rounded-full bg-teal-400" />{leaveCounts.WFH} WFH
+                              </span>
+                            )}
+                            {leaveCounts.OTHER > 0 && (
+                              <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-purple-100 border border-purple-300 text-[8px] font-semibold text-purple-800">
+                                <span className="w-1 h-1 rounded-full bg-purple-400" />{leaveCounts.OTHER} OTH
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     
                       {/* Bottom Tech Indicator Line - Only in hover when filtering */}
@@ -879,6 +909,17 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                               )}
                               <div className="w-full">
                                 <h4 className="font-bold text-gray-800 mb-1">{tech.technicianName}</h4>
+                                {(() => {
+                                  const leave = getLeaveForDate(info?.leaveInfo, clickedDayDate);
+                                  if (!leave) return null;
+                                  const badge = getLeaveBadge(leave);
+                                  return (
+                                    <div className={`inline-flex items-center gap-1 px-2 py-0.5 ${badge.badgeBg} ${badge.badgeText} border ${badge.badgeBorder} rounded-full text-[10px] font-semibold mb-1`} title={getLeaveTooltip(leave)}>
+                                      <div className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
+                                      {badge.shortText}
+                                    </div>
+                                  );
+                                })()}
                                 <div className="text-2xl font-bold text-gray-900 mb-3">{tech.total}</div>
                                 <div className="flex flex-col gap-1.5 text-xs font-semibold">
                                   {tech.selfPicked > 0 && (

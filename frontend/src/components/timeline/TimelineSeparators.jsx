@@ -1,33 +1,97 @@
 import { CalendarDays, MoreHorizontal } from 'lucide-react';
 import { getHolidayInfo, getHolidayTooltip } from '../../utils/holidays';
 
-/** Single horizontal separator with a coloured label in the centre */
+/** Single horizontal separator with a coloured label in the centre.
+ *  Splits "Karen off · 5pm VAN" so names are plain and the time+tz
+ *  part gets a distinct pill badge.
+ */
 export function TimelineSeparator({ label, color }) {
+  const textColor = color.replace('bg-', 'text-');
+  const borderColor = color.replace('bg-', 'border-');
+  const sepIdx = label.indexOf(' · ');
+
+  let content;
+  if (sepIdx !== -1) {
+    const nameAction = label.slice(0, sepIdx);
+    const timeTz = label.slice(sepIdx + 3);
+    content = (
+      <>
+        <span className={`${textColor}`}>{nameAction}</span>
+        <span className={`ml-1.5 px-1.5 py-0.5 rounded border ${borderColor} ${textColor} bg-white/60`}>
+          {timeTz}
+        </span>
+      </>
+    );
+  } else {
+    content = <span className={textColor}>{label}</span>;
+  }
+
   return (
     <div className="flex items-center gap-2 py-1.5 my-1">
       <div className={`flex-1 h-px ${color}`} />
-      <span className={`text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${color.replace('bg-', 'text-')}`}>
-        {label}
+      <span className="flex items-center text-[10px] font-bold uppercase tracking-wider whitespace-nowrap">
+        {content}
       </span>
       <div className={`flex-1 h-px ${color}`} />
     </div>
   );
 }
 
-/** Multiple consecutive markers collapsed into one compact line */
+/** Multiple consecutive markers collapsed into one compact line.
+ *  Groups markers that share the same suffix (e.g. "off · 5pm VAN") to avoid
+ *  repeating "KAREN OFF · 5PM VAN · ZOE OFF · 5PM VAN · …" for 17 agents.
+ *  Instead renders "Karen, Zoe, … OFF · 5PM VAN".
+ */
 export function MergedSeparator({ markers }) {
+  const groups = [];
+  const groupMap = new Map();
+
+  for (const m of markers) {
+    const sepIdx = m.label.indexOf(' · ');
+    if (sepIdx === -1) {
+      groups.push({ names: null, suffix: m.label, color: m.color });
+      continue;
+    }
+    const namePart = m.label.slice(0, sepIdx);
+    const suffix = m.label.slice(sepIdx + 3);
+    const action = namePart.includes(' on') ? 'on' : namePart.includes(' off') ? 'off' : '';
+    const name = namePart.replace(/ on$| off$/, '');
+    const gKey = `${action}|${suffix}|${m.color}`;
+
+    if (!groupMap.has(gKey)) {
+      const g = { names: [name], action, suffix, color: m.color };
+      groupMap.set(gKey, g);
+      groups.push(g);
+    } else {
+      groupMap.get(gKey).names.push(name);
+    }
+  }
+
   return (
     <div className="flex items-center gap-2 py-1 my-0.5">
       <div className="flex-1 h-px bg-slate-200" />
-      <div className="flex items-center gap-0 flex-shrink-0">
-        {markers.map((m, i) => (
-          <span key={i} className="flex items-center">
-            {i > 0 && <span className="text-slate-300 mx-2 text-[10px]">·</span>}
-            <span className={`text-[9px] font-bold uppercase tracking-wider whitespace-nowrap ${m.color.replace('bg-', 'text-')}`}>
-              {m.label}
+      <div className="flex items-center gap-0 flex-shrink-0 flex-wrap justify-center">
+        {groups.map((g, i) => {
+          const textColor = g.color.replace('bg-', 'text-');
+          const borderColor = g.color.replace('bg-', 'border-');
+          return (
+            <span key={i} className="flex items-center">
+              {i > 0 && <span className="text-slate-300 mx-2 text-[10px]">·</span>}
+              <span className={`flex items-center text-[9px] font-bold uppercase tracking-wider whitespace-nowrap ${textColor}`}>
+                {g.names
+                  ? (
+                    <>
+                      <span>{g.names.join(', ')} {g.action}</span>
+                      <span className={`ml-1.5 px-1.5 py-0.5 rounded border ${borderColor} ${textColor} bg-white/60`}>
+                        {g.suffix}
+                      </span>
+                    </>
+                  )
+                  : g.suffix}
+              </span>
             </span>
-          </span>
-        ))}
+          );
+        })}
       </div>
       <div className="flex-1 h-px bg-slate-200" />
     </div>

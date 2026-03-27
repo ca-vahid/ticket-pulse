@@ -235,6 +235,17 @@ export const settingsAPI = {
   initialize: async () => {
     return await api.post('/settings/initialize');
   },
+
+  getAdmins: async () => {
+    return await api.get('/settings/admins');
+  },
+
+  updateAdmins: async (emails) => {
+    return await api.put('/settings/admins', { emails });
+  },
+
+  getTechnicians: () => api.get('/settings/technicians'),
+  setTechnicianActive: (id, isActive) => api.put(`/settings/technicians/${id}/active`, { isActive }),
 };
 
 /**
@@ -276,6 +287,30 @@ export const syncAPI = {
 
   resetSync: async () => {
     return await api.post('/sync/reset');
+  },
+
+  /**
+   * Start a historical backfill with SSE progress.
+   * Returns an EventSource that emits backfill-progress, backfill-complete, backfill-error events.
+   */
+  startBackfill: ({ startDate, endDate, skipExisting = true, activityConcurrency = 3 }) => {
+    const url = `${API_BASE_URL}/sync/backfill`;
+    const body = JSON.stringify({ startDate, endDate, skipExisting, activityConcurrency });
+
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+        ...(_workspaceId ? { 'X-Workspace-Id': String(_workspaceId) } : {}),
+      },
+      credentials: 'include',
+      body,
+    });
+  },
+
+  getBackfillStatus: async () => {
+    return await api.get('/sync/backfill/status');
   },
 };
 
@@ -382,6 +417,14 @@ export const workspaceAPI = {
     return await api.put(`/workspaces/${id}`, data);
   },
 
+  discover: async () => {
+    return await api.get('/workspaces/discover');
+  },
+
+  activate: async (data) => {
+    return await api.post('/workspaces/activate', data);
+  },
+
   getAccess: async (workspaceId) => {
     return await api.get(`/workspaces/${workspaceId}/access`);
   },
@@ -393,6 +436,26 @@ export const workspaceAPI = {
   revokeAccess: async (workspaceId, email) => {
     return await api.delete(`/workspaces/${workspaceId}/access/${encodeURIComponent(email)}`);
   },
+};
+
+/**
+ * Vacation Tracker API
+ */
+export const vacationTrackerAPI = {
+  getConfig: () => api.get('/vacation-tracker/config'),
+  updateConfig: (data) => api.put('/vacation-tracker/config', data),
+  testConnection: (apiKey) => api.post('/vacation-tracker/config/test', { apiKey }),
+
+  getLeaveTypes: () => api.get('/vacation-tracker/leave-types'),
+  syncLeaveTypes: () => api.post('/vacation-tracker/leave-types/sync'),
+  updateLeaveTypeMappings: (mappings) => api.put('/vacation-tracker/leave-types', { mappings }),
+
+  getUsers: () => api.get('/vacation-tracker/users'),
+  syncUsers: () => api.post('/vacation-tracker/users/sync'),
+  matchUser: (id, technicianId) => api.put(`/vacation-tracker/users/${id}/match`, { technicianId }),
+
+  triggerSync: () => api.post('/vacation-tracker/sync'),
+  getSyncStatus: () => api.get('/vacation-tracker/sync/status'),
 };
 
 /**

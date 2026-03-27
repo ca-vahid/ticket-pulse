@@ -9,6 +9,7 @@ import logger from '../utils/logger.js';
 import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianDetail, calculateTechnicianWeeklyStats, calculateTechnicianMonthlyStats, calculateMonthlyDashboard } from '../services/statsCalculator.js';
 import { readCache } from '../services/dashboardReadCache.js';
 import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTechnicianAvoidanceDetail, computeTechnicianAvoidanceWeeklyDetail, computeTechnicianAvoidanceMonthlyDetail } from '../services/avoidanceAnalysisService.js';
+import vtService from '../services/vacationTrackerService.js';
 
 const router = express.Router();
 
@@ -68,11 +69,18 @@ router.get(
     // Fetch active technicians with only relevant tickets (scoped to date range + open + CSAT)
     const technicians = await technicianRepository.getAllActiveScoped(todayStart, todayEnd, { excludeNoise, workspaceId: req.workspaceId });
 
-    // Run stats calculation (sync) and avoidance analysis (async DB query) in parallel
-    const [dashboardData, avoidanceMap] = await Promise.all([
+    // Compute the date string for leave lookup
+    const dashDateStr = dateParam || formatDateInTimezone(null, timezone);
+
+    // Run stats calculation (sync), avoidance analysis, and leave info in parallel
+    const [dashboardData, avoidanceMap, leaveInfoMap] = await Promise.all([
       Promise.resolve(calculateDailyDashboard(technicians, todayStart, todayEnd, isViewingToday)),
       computeDashboardAvoidance(technicians, todayStart, todayEnd, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for daily dashboard:', err);
+        return {};
+      }),
+      vtService.getLeaveInfoForDashboard(req.workspaceId, dashDateStr, dashDateStr).catch(err => {
+        logger.debug('VT leave info not available:', err.message);
         return {};
       }),
     ]);
@@ -83,6 +91,7 @@ router.get(
       ...tech,
       tickets: (tech.ticketsToday || []).map(transformTicket),
       avoidance: avoidanceMap[tech.id] || null,
+      leaveInfo: leaveInfoMap[tech.id] || {},
     }));
 
     // Remove intermediate arrays from response (we use tickets instead)
@@ -245,11 +254,18 @@ router.get(
     // Fetch active technicians with only relevant tickets
     const technicians = await technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end, { excludeNoise, workspaceId: req.workspaceId });
 
-    // Run stats calculation (sync) and avoidance analysis (async DB query) in parallel
-    const [dashboardData, avoidanceMap] = await Promise.all([
+    const weekStartStr = formatDateInTimezone(weekStartDate, timezone);
+    const weekEndStr = formatDateInTimezone(weekEndDate, timezone);
+
+    // Run stats calculation (sync), avoidance analysis, and leave info in parallel
+    const [dashboardData, avoidanceMap, leaveInfoMap] = await Promise.all([
       Promise.resolve(calculateWeeklyDashboard(technicians, weekStartDate, weekEndDate, timezone)),
       computeWeeklyDashboardAvoidance(technicians, weekStartDate, weekEndDate, timezone, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for weekly dashboard:', err);
+        return {};
+      }),
+      vtService.getLeaveInfoForDashboard(req.workspaceId, weekStartStr, weekEndStr).catch(err => {
+        logger.debug('VT leave info not available:', err.message);
         return {};
       }),
     ]);
@@ -259,6 +275,7 @@ router.get(
       ...tech,
       weeklyTickets: (tech.weeklyTickets || []).map(transformTicket),
       avoidance: avoidanceMap[tech.id] || null,
+      leaveInfo: leaveInfoMap[tech.id] || {},
     }));
 
     res.json({
@@ -768,6 +785,16 @@ router.get(
       timezone,
     );
 
+    // Fetch leave info for the month
+    const monthStartStr = formatDateInTimezone(monthStartDate, timezone);
+    const monthEndStr = formatDateInTimezone(monthEndDate, timezone);
+    let leaveInfoMap = {};
+    try {
+      leaveInfoMap = await vtService.getLeaveInfoForDashboard(req.workspaceId, monthStartStr, monthEndStr);
+    } catch (err) {
+      logger.debug('VT leave info not available for monthly:', err.message);
+    }
+
     // Also return technicians with their tickets filtered by month for frontend filtering
     const techniciansWithMonthTickets = technicians.map(tech => {
       const monthTickets = tech.tickets.filter(ticket => {
@@ -799,6 +826,7 @@ router.get(
         tickets: monthTickets.map(transformTicket),
         monthlyCSATCount: csatCount,
         monthlyCSATAverage: csatAverage,
+        leaveInfo: leaveInfoMap[tech.id] || {},
       };
     });
 

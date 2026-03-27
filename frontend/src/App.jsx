@@ -36,7 +36,7 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/login" replace />;
   }
 
-  if (!isWorkspaceSelected && availableWorkspaces.length > 1) {
+  if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
     return <Navigate to="/workspace" replace />;
   }
 

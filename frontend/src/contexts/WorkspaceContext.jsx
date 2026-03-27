@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { workspaceAPI, setWorkspaceId } from '../services/api';
+import { workspaceAPI, setWorkspaceId, setAuthToken } from '../services/api';
+import { dataCache } from '../services/dataCache';
 import { useAuth } from './AuthContext';
 
 const WorkspaceContext = createContext(null);
@@ -45,8 +46,9 @@ export function WorkspaceProvider({ children }) {
     if (!isAuthenticated) {
       setCurrentWorkspace(null);
       setAvailableWorkspaces([]);
-      setWorkspaceId(null);
-      persistWorkspace(null);
+      // Keep _workspaceId and localStorage intact during transient auth
+      // states (session check → token exchange). They're only cleared
+      // on explicit logout via clearWorkspace().
       setIsHydrated(true);
       return;
     }
@@ -59,7 +61,16 @@ export function WorkspaceProvider({ children }) {
       const serverSelectedId = workspaceData.selectedWorkspaceId;
       const localWs = loadPersistedWorkspace();
 
-      if (serverSelectedId) {
+      // localStorage takes priority — it's updated synchronously during
+      // switchWorkspace() before the page reload, while the server session
+      // may lag behind due to cookie propagation timing.
+      if (localWs && workspaces.some(w => w.id === localWs.id)) {
+        setCurrentWorkspace(localWs);
+        setWorkspaceId(localWs.id);
+        if (localWs.id !== serverSelectedId) {
+          workspaceAPI.select(localWs.id).catch(() => {});
+        }
+      } else if (serverSelectedId) {
         const ws = workspaces.find(w => w.id === serverSelectedId) || {
           id: serverSelectedId,
           name: workspaceData.selectedWorkspaceName || 'Workspace',
@@ -68,10 +79,6 @@ export function WorkspaceProvider({ children }) {
         setCurrentWorkspace(ws);
         setWorkspaceId(ws.id);
         persistWorkspace(ws);
-      } else if (localWs && workspaces.some(w => w.id === localWs.id)) {
-        setCurrentWorkspace(localWs);
-        setWorkspaceId(localWs.id);
-        workspaceAPI.select(localWs.id).catch(() => {});
       } else if (workspaces.length === 1) {
         const ws = workspaces[0];
         setCurrentWorkspace(ws);
@@ -86,6 +93,9 @@ export function WorkspaceProvider({ children }) {
 
   const selectWorkspace = useCallback(async (workspaceId) => {
     const response = await workspaceAPI.select(workspaceId);
+    if (response.authToken) {
+      setAuthToken(response.authToken);
+    }
     const ws = response.data?.workspace;
     if (ws) {
       const selected = { id: ws.id, name: ws.name, slug: ws.slug };
@@ -97,11 +107,32 @@ export function WorkspaceProvider({ children }) {
     return null;
   }, []);
 
-  const switchWorkspace = useCallback(async (workspaceId) => {
+  const switchWorkspace = useCallback((targetId) => {
+    const ws = availableWorkspaces.find(w => w.id === targetId);
+    const selected = ws
+      ? { id: ws.id, name: ws.name, slug: ws.slug }
+      : { id: targetId, name: '', slug: '' };
+
+    setWorkspaceId(selected.id);
+    persistWorkspace(selected);
+    setCurrentWorkspace(selected);
+
+    dataCache.clear();
     sessionStorage.clear();
-    const ws = await selectWorkspace(workspaceId);
-    return ws;
-  }, [selectWorkspace]);
+
+    selectWorkspace(targetId).catch(() => {});
+  }, [availableWorkspaces, selectWorkspace]);
+
+  const refreshWorkspaces = useCallback(async () => {
+    try {
+      const res = await workspaceAPI.getAll();
+      const list = (res.data || []).map(ws => ({
+        id: ws.id, name: ws.name, slug: ws.slug, role: ws.role,
+      }));
+      setAvailableWorkspaces(list);
+      return list;
+    } catch { return availableWorkspaces; }
+  }, [availableWorkspaces]);
 
   const clearWorkspace = useCallback(() => {
     setCurrentWorkspace(null);
@@ -120,6 +151,7 @@ export function WorkspaceProvider({ children }) {
         isHydrated,
         selectWorkspace,
         switchWorkspace,
+        refreshWorkspaces,
         clearWorkspace,
       }}
     >

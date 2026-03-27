@@ -39,6 +39,7 @@ function mergeMultiTechData(techDataArray, accentMap) {
   for (const tech of techDataArray) {
     const accent = accentMap.get(tech.id);
     const firstName = tech.name?.split(' ')[0] || 'Tech';
+    const photoUrl = tech.photoUrl || null;
 
     for (const day of tech.avoidance?.days || []) {
       if (!dayMap.has(day.date)) {
@@ -55,12 +56,14 @@ function mergeMultiTechData(techDataArray, accentMap) {
       // Coverage tickets
       for (const t of day.tickets || []) {
         if (!merged._seen.has(t.id)) {
-          merged._seen.set(t.id, { ...t, _techFirstName: null, _accent: null });
+          merged._seen.set(t.id, { ...t, _techFirstName: null, _techPhotoUrl: null, _accent: null });
           merged.tickets.push(merged._seen.get(t.id));
         }
         if (t.pickedByTech) {
           const existing = merged._seen.get(t.id);
+          existing.pickedByTech = true;
           existing._techFirstName = firstName;
+          existing._techPhotoUrl = photoUrl;
           existing._accent = accent;
         }
       }
@@ -68,12 +71,14 @@ function mergeMultiTechData(techDataArray, accentMap) {
       // Extended tickets (after 9 AM)
       for (const t of day.extendedTickets || []) {
         if (!merged._seenExt.has(t.id)) {
-          merged._seenExt.set(t.id, { ...t, _techFirstName: null, _accent: null });
+          merged._seenExt.set(t.id, { ...t, _techFirstName: null, _techPhotoUrl: null, _accent: null });
           merged.extendedTickets.push(merged._seenExt.get(t.id));
         }
         if (t.pickedByTech) {
           const existing = merged._seenExt.get(t.id);
+          existing.pickedByTech = true;
           existing._techFirstName = firstName;
+          existing._techPhotoUrl = photoUrl;
           existing._accent = accent;
         }
       }
@@ -483,6 +488,7 @@ export default function TimelineExplorer() {
       return {
         id: tech.id,
         firstName: tech.name?.split(' ')[0] || 'Tech',
+        photoUrl: tech.photoUrl || null,
         techStart: tech.workStartTime || '09:00',
         techEnd: tech.workEndTime || '17:00',
         techTz: tz,
@@ -502,10 +508,11 @@ export default function TimelineExplorer() {
     if (techDataArray.length === 1) {
       const av = techDataArray[0].avoidance;
       const firstName = tcs[0].firstName;
+      const photoUrl = tcs[0].photoUrl;
       const accent = tcs[0].accent;
       mergedDays.forEach((day) => {
         (day.tickets || []).forEach((t) => {
-          const enriched = { ...t, _day: day.date, _techFirstName: firstName, _accent: accent };
+          const enriched = { ...t, _day: day.date, _techFirstName: firstName, _techPhotoUrl: photoUrl, _accent: accent };
           (t.pickedByTech ? allPicked : allNotPicked).push(enriched);
         });
       });

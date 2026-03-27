@@ -168,6 +168,7 @@ class FreshServiceClient {
     if (endpoint.includes('/agents')) return data.agents || [];
     if (endpoint.includes('/requesters')) return data.requesters || [];
     if (endpoint.includes('/activities')) return data.activities || [];
+    if (endpoint.includes('/workspaces')) return data.workspaces || [];
     return data;
   }
 
@@ -182,6 +183,11 @@ class FreshServiceClient {
       logger.info('Fetching tickets from FreshService', filters);
 
       const params = {};
+
+      // Scope to a specific FreshService workspace
+      if (filters.workspace_id) {
+        params.workspace_id = filters.workspace_id;
+      }
 
       // Apply filters
       if (filters.updated_since) {
@@ -255,6 +261,22 @@ class FreshServiceClient {
       return response.data.activities || [];
     } catch (error) {
       logger.error(`Error fetching activities for ticket ${ticketId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch all workspaces from FreshService
+   * @returns {Promise<Array>} Array of workspace objects
+   */
+  async fetchWorkspaces() {
+    try {
+      logger.info('Fetching workspaces from FreshService');
+      const workspaces = await this.fetchAllPages('/workspaces', {});
+      logger.info(`Fetched ${workspaces.length} workspaces`);
+      return workspaces;
+    } catch (error) {
+      logger.error('Error fetching workspaces:', error);
       throw error;
     }
   }

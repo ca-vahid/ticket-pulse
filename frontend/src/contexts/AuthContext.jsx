@@ -79,6 +79,8 @@ export function AuthProvider({ children }) {
           setWorkspaceData({
             availableWorkspaces: response.availableWorkspaces || [],
             selectedWorkspaceId: response.selectedWorkspaceId || null,
+            selectedWorkspaceName: response.selectedWorkspaceName || null,
+            selectedWorkspaceSlug: response.selectedWorkspaceSlug || null,
           });
           return true;
         }

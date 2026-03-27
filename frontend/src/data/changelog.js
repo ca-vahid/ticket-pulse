@@ -1,6 +1,27 @@
-export const APP_VERSION = '1.4.2-preview';
+export const APP_VERSION = '1.5.0-preview';
 
 export const changelog = [
+  {
+    version: '1.5.0-preview',
+    date: 'March 27, 2026',
+    entries: [
+      { type: 'new', text: 'Multi-workspace support -- discover, activate, and switch between FreshService workspaces from a workspace picker in the dashboard header; each workspace has independent technicians, tickets, sync schedules, and settings; workspace selection persists across sessions' },
+      { type: 'new', text: 'Workspace Management panel in Settings -- discover all FreshService workspaces, activate/deactivate with one click, auto-provisions default business hours, LLM config, and noise rules for new workspaces' },
+      { type: 'new', text: 'Vacation Tracker integration -- sync leave data from vacationtracker.io to show who is OFF, WFH, or on training directly on the dashboard; per-workspace API key, leave type categorization (OFF/WFH/OTHER), and automatic user matching by email' },
+      { type: 'new', text: 'Leave indicators on dashboard -- amber badges for OFF (Vacation/PTO/Sick), teal for WFH, purple for OTHER; visible in daily view (name badge), weekly view (colored day cells with dots), and monthly calendar (leave count pills per day)' },
+      { type: 'new', text: 'Technician Visibility panel in Settings -- permanently enable/disable technicians per workspace with toggle switches; disabled technicians are hidden from all dashboard views; survives FreshService sync cycles' },
+      { type: 'new', text: 'Admin Management panel in Settings -- manage admin email addresses via UI; admins can add/remove other admins (cannot remove themselves)' },
+      { type: 'new', text: 'Backfill panel in Settings -- import historical ticket data with timeframe presets, real-time progress tracking, and skip-existing option' },
+      { type: 'new', text: 'Per-workspace configurable category custom field -- each workspace can use a different FreshService custom field for ticket categorization (e.g., IT uses "security", Accounting uses "case_type")' },
+      { type: 'improved', text: 'Dashboard ticket total display redesigned -- removed misleading "+" prefix, centered layout with indigo color, label changed from "WEEK" to "total"' },
+      { type: 'improved', text: 'All dashboard queries are now workspace-scoped -- technicians, tickets, sync logs, noise rules, and settings are filtered by the active workspace' },
+      { type: 'improved', text: 'Technician sync no longer overwrites manual isActive changes -- the FreshService sync preserves admin-set visibility, only setting isActive on first creation' },
+      { type: 'improved', text: 'Dashboard read cache is cleared when technician visibility is toggled, ensuring immediate UI updates' },
+      { type: 'security', text: 'Workspace isolation -- all API routes enforce workspace boundaries via middleware; workspace ID passed via X-Workspace-Id header and validated server-side' },
+      { type: 'database', text: 'New tables: workspaces, workspace_access, vacation_tracker_configs, vt_leave_types, vt_user_mappings, technician_leaves -- workspace_id foreign key added to all tenant-scoped tables with automatic backfill to workspace 1 (IT)' },
+      { type: 'database', text: 'Technician unique constraint changed from freshservice_id to composite (freshservice_id, workspace_id) to support same agent across multiple workspaces' },
+    ],
+  },
   {
     version: '1.4.2-preview',
     date: 'March 10, 2026',

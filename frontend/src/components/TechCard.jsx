@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
+import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle } from '../utils/leaveInfo';
 import { prefetchTechDetail } from '../hooks/usePrefetch';
 
 // Extremely subtle card background color based on relative load level
@@ -202,6 +203,27 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                 </div>
               )}
 
+              {/* Leave Badge */}
+              {(() => {
+                let dateStr;
+                if (viewMode === 'daily') {
+                  dateStr = selectedDate
+                    ? (typeof selectedDate === 'string' ? selectedDate : selectedDate.toISOString().slice(0, 10))
+                    : new Date().toISOString().slice(0, 10);
+                } else {
+                  dateStr = new Date().toISOString().slice(0, 10);
+                }
+                const leave = getLeaveForDate(technician.leaveInfo, dateStr);
+                if (!leave) return null;
+                const badge = getLeaveBadge(leave);
+                return (
+                  <div className={`flex items-center gap-1 px-2 py-0.5 ${badge.badgeBg} ${badge.badgeText} border ${badge.badgeBorder} rounded-full`} title={getLeaveTooltip(leave)}>
+                    <div className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
+                    <span className="text-[9px] font-semibold">{badge.shortText}</span>
+                  </div>
+                );
+              })()}
+
             </div>
           </div>
         </div>
@@ -220,9 +242,17 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                 const isWeekendDay = dateStyling.isWeekend;
                 const isHolidayDay = dateStyling.isHoliday;
                 
+                // Leave info for this day
+                const dayLeave = getLeaveForDate(technician.leaveInfo, day.date);
+                const leaveTooltip = getLeaveTooltip(dayLeave);
+                const leaveDot = getLeaveDotClass(dayLeave);
+
                 // Build tooltip
                 const baseTooltip = `${dayNames[index]}: ${day.total} tickets (${day.self} self, ${day.assigned} assigned, ${day.closed} closed)`;
-                const fullTooltip = holidayTooltip ? `${baseTooltip}\n${holidayTooltip}` : baseTooltip;
+                const tooltipParts = [baseTooltip];
+                if (holidayTooltip) tooltipParts.push(holidayTooltip);
+                if (leaveTooltip) tooltipParts.push(leaveTooltip);
+                const fullTooltip = tooltipParts.join('\n');
                 
                 // Determine label styling
                 const labelClass = isHolidayDay 
@@ -233,26 +263,32 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                     ? 'text-slate-500 font-semibold' 
                     : 'text-gray-500 font-semibold';
                 
-                // Container styling for weekend/holiday
-                const containerClass = isHolidayDay
-                  ? dateStyling.isCanadian
-                    ? 'bg-rose-50/50 rounded-lg p-0.5'
-                    : 'bg-indigo-50/40 rounded-lg p-0.5'
-                  : isWeekendDay
-                    ? 'bg-slate-50/50 rounded-lg p-0.5'
-                    : '';
+                const leaveStyle = dayLeave ? getLeaveStyle(dayLeave.category) : null;
 
-                // Determine box styling - holidays/weekends override normal colors
+                // Container styling for leave/holiday/weekend
+                const containerClass = dayLeave
+                  ? `${leaveStyle.bgClass} rounded-lg p-0.5`
+                  : isHolidayDay
+                    ? dateStyling.isCanadian
+                      ? 'bg-rose-50/50 rounded-lg p-0.5'
+                      : 'bg-indigo-50/40 rounded-lg p-0.5'
+                    : isWeekendDay
+                      ? 'bg-slate-50/50 rounded-lg p-0.5'
+                      : '';
+
+                // Determine box styling - leave/holidays/weekends override normal colors
                 const getBoxClasses = () => {
+                  if (dayLeave) {
+                    if (day.total === 0) return `${leaveStyle.borderClass} ${leaveStyle.bgClass} ${leaveStyle.textClass}`;
+                    return `${leaveStyle.borderClass} ${leaveStyle.badgeBg} ${leaveStyle.badgeText}`;
+                  }
                   if (isHolidayDay) {
                     if (dateStyling.isCanadian) {
                       if (day.total === 0) {
                         return 'border-rose-300 bg-rose-50 text-rose-400';
                       }
-                      // Has tickets on Canadian holiday - use rose-themed colors
                       return 'border-rose-400 bg-rose-100 text-rose-800';
                     }
-                    // US holiday
                     if (day.total === 0) {
                       return 'border-indigo-200 bg-indigo-50 text-indigo-400';
                     }
@@ -262,10 +298,8 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                     if (day.total === 0) {
                       return 'border-slate-300 bg-slate-50 text-slate-400';
                     }
-                    // Has tickets on weekend - use slate-themed colors
                     return 'border-slate-400 bg-slate-200 text-slate-800';
                   }
-                  // Normal day - use the ticket color
                   return colorClass;
                 };
 
@@ -293,6 +327,9 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                     <div className="flex items-center gap-0.5">
                       {isHolidayDay && (
                         <div className={`w-1 h-1 rounded-full ${dateStyling.isCanadian ? 'bg-rose-500' : 'bg-indigo-400'}`} />
+                      )}
+                      {leaveDot && (
+                        <div className={`w-1.5 h-1.5 rounded-full ${leaveDot}`} />
                       )}
                       <div className={`text-[8px] ${labelClass} mb-0.5`}>
                         {dayNames[index]}
@@ -325,11 +362,11 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               </div>
             )}
 
-            {/* Today/Week Count */}
+            {/* Total Count */}
             <div className="text-center">
-              <div className="text-3xl font-bold text-blue-600 leading-none">+{totalTickets}</div>
-              <div className="text-xs text-blue-700 uppercase font-bold mt-1">
-                {viewMode === 'weekly' ? 'Week' : 'Today'}
+              <div className="text-3xl font-bold text-indigo-600 leading-none">{totalTickets}</div>
+              <div className="text-[9px] text-indigo-400 uppercase font-semibold mt-1">
+                {viewMode === 'weekly' ? 'total' : 'today'}
               </div>
             </div>
           </div>

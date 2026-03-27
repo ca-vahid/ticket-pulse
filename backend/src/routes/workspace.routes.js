@@ -1,7 +1,15 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
+import config from '../config/index.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import workspaceRepository from '../services/workspaceRepository.js';
+import settingsRepository from '../services/settingsRepository.js';
+import availabilityService from '../services/availabilityService.js';
+import llmConfigService from '../services/llmConfigService.js';
+import noiseRuleService from '../services/noiseRuleService.js';
+import scheduledSyncService from '../services/scheduledSyncService.js';
+import { createFreshServiceClient } from '../integrations/freshservice.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -34,6 +42,120 @@ router.get(
 );
 
 /**
+ * Initialize a workspace with defaults (business hours, LLM, noise rules, sync).
+ */
+async function initializeWorkspace(ws) {
+  try {
+    await availabilityService.initializeDefaultBusinessHours(ws.id);
+  } catch (err) {
+    logger.warn(`Failed to init business hours for workspace ${ws.id}:`, err.message);
+  }
+  try {
+    await llmConfigService.initializeDefaultConfig(ws.id);
+  } catch (err) {
+    logger.warn(`Failed to init LLM config for workspace ${ws.id}:`, err.message);
+  }
+  try {
+    await noiseRuleService.seedDefaults(ws.id);
+  } catch (err) {
+    logger.warn(`Failed to seed noise rules for workspace ${ws.id}:`, err.message);
+  }
+  try {
+    await scheduledSyncService.startForWorkspace(ws);
+    logger.info(`Started sync schedule for workspace "${ws.name}"`);
+  } catch (err) {
+    logger.warn(`Failed to start sync for workspace ${ws.id}:`, err.message);
+  }
+}
+
+/**
+ * GET /api/workspaces/discover
+ * Fetch all workspaces from FreshService and cross-reference with DB.
+ * Returns each workspace with status: active, inactive, or new.
+ */
+router.get(
+  '/discover',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const fsConfig = await settingsRepository.getFreshServiceConfig();
+    const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+
+    const fsWorkspaces = await client.fetchWorkspaces();
+
+    const dbWorkspaces = await workspaceRepository.getAll();
+    const dbInactive = await workspaceRepository.getAllInactive();
+    const dbMap = new Map();
+    for (const ws of [...dbWorkspaces, ...dbInactive]) {
+      dbMap.set(String(ws.freshserviceWorkspaceId), ws);
+    }
+
+    const merged = fsWorkspaces.map(fsWs => {
+      const fsId = String(fsWs.id);
+      const dbWs = dbMap.get(fsId);
+
+      let status = 'new';
+      if (dbWs) {
+        status = dbWs.isActive ? 'active' : 'inactive';
+      }
+
+      return {
+        freshserviceId: fsWs.id,
+        name: fsWs.name || `Workspace ${fsWs.id}`,
+        description: fsWs.description || null,
+        primary: fsWs.primary || false,
+        status,
+        dbWorkspace: dbWs || null,
+      };
+    });
+
+    res.json({ success: true, data: merged });
+  }),
+);
+
+/**
+ * POST /api/workspaces/activate
+ * Activate a FreshService workspace: create DB record if needed,
+ * initialize defaults, and start sync schedule.
+ */
+router.post(
+  '/activate',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { freshserviceWorkspaceId, name, slug, defaultTimezone, syncIntervalMinutes } = req.body;
+
+    if (!freshserviceWorkspaceId || !name) {
+      return res.status(400).json({
+        success: false,
+        message: 'freshserviceWorkspaceId and name are required',
+      });
+    }
+
+    const wsSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    let ws;
+    const existing = await workspaceRepository.getByFreshserviceId(freshserviceWorkspaceId);
+
+    if (existing) {
+      ws = await workspaceRepository.update(existing.id, { isActive: true });
+      logger.info(`Re-activated workspace: ${ws.name}`);
+    } else {
+      ws = await workspaceRepository.create({
+        name,
+        slug: wsSlug,
+        freshserviceWorkspaceId,
+        defaultTimezone: defaultTimezone || 'America/Los_Angeles',
+        syncIntervalMinutes: syncIntervalMinutes || 5,
+      });
+      logger.info(`Created workspace: ${ws.name} (slug: ${ws.slug})`);
+    }
+
+    await initializeWorkspace(ws);
+
+    res.status(201).json({ success: true, data: ws });
+  }),
+);
+
+/**
  * GET /api/workspaces/:id
  */
 router.get(
@@ -46,7 +168,7 @@ router.get(
 
 /**
  * POST /api/workspaces
- * Create a new workspace (admin only).
+ * Create a new workspace (admin only). Initializes defaults and starts sync.
  */
 router.post(
   '/',
@@ -70,6 +192,9 @@ router.post(
     });
 
     logger.info(`Workspace created: ${name} (slug: ${slug})`);
+
+    await initializeWorkspace(ws);
+
     res.status(201).json({ success: true, data: ws });
   }),
 );
@@ -107,8 +232,21 @@ router.post(
       req.session.user.selectedWorkspaceSlug = ws.slug;
     }
 
-    logger.info(`User ${req.session?.user?.email} selected workspace: ${ws.name}`);
-    res.json({ success: true, data: { workspace: ws } });
+    const user = req.session?.user || req.user || {};
+    const authToken = jwt.sign(
+      {
+        email: user.email,
+        name: user.name,
+        username: user.username || user.name,
+        role: user.role,
+        selectedWorkspaceId: ws.id,
+      },
+      config.session.secret,
+      { algorithm: 'HS256', expiresIn: '8h' },
+    );
+
+    logger.info(`User ${user.email} selected workspace: ${ws.name}`);
+    res.json({ success: true, data: { workspace: ws }, authToken });
   }),
 );
 

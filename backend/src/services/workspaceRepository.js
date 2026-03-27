@@ -157,6 +157,29 @@ class WorkspaceRepository {
       throw new DatabaseError('Failed to fetch active workspaces', error);
     }
   }
+
+  async getAllInactive() {
+    try {
+      return await prisma.workspace.findMany({
+        where: { isActive: false },
+        orderBy: { id: 'asc' },
+      });
+    } catch (error) {
+      logger.error('Error fetching inactive workspaces:', error);
+      throw new DatabaseError('Failed to fetch inactive workspaces', error);
+    }
+  }
+
+  async getByFreshserviceId(freshserviceWorkspaceId) {
+    try {
+      return await prisma.workspace.findFirst({
+        where: { freshserviceWorkspaceId: BigInt(freshserviceWorkspaceId) },
+      });
+    } catch (error) {
+      logger.error(`Error fetching workspace by FS ID ${freshserviceWorkspaceId}:`, error);
+      throw new DatabaseError('Failed to fetch workspace by FreshService ID', error);
+    }
+  }
 }
 
 export default new WorkspaceRepository();

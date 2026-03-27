@@ -2,6 +2,7 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth } from '../middleware/auth.js';
 import azureAdService from '../services/azureAdService.js';
+import { clearReadCache } from '../services/dashboardReadCache.js';
 import logger from '../utils/logger.js';
 import { PrismaClient } from '@prisma/client';
 
@@ -88,6 +89,7 @@ router.post(
     await prisma.$disconnect();
 
     logger.info(`Photo sync completed: ${synced} synced, ${failed} failed`);
+    clearReadCache();
 
     res.json({
       success: true,

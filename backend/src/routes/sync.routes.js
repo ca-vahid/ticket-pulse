@@ -212,7 +212,7 @@ router.post(
     // Mark any lingering 'started' sync logs as failed in the DB
     let logsResolved = 0;
     try {
-      const stuckLogs = await syncLogRepository.getRecent(10);
+      const { logs: stuckLogs } = await syncLogRepository.getRecent({ limit: 10, workspaceId: req.workspaceId });
       for (const log of stuckLogs) {
         if (log.status === 'started') {
           await syncLogRepository.failLog(log.id, 'Force stopped by user');
@@ -272,6 +272,81 @@ router.post(
     res.json({
       success: true,
       data: result,
+    });
+  }),
+);
+
+/**
+ * POST /api/sync/backfill
+ * Historical backfill with live SSE progress streaming.
+ * Body: { startDate, endDate, skipExisting?, activityConcurrency? }
+ * Response: SSE stream with progress events, then a final JSON summary.
+ */
+router.post(
+  '/backfill',
+  asyncHandler(async (req, res) => {
+    const { startDate, endDate, skipExisting = true, activityConcurrency = 3 } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ success: false, message: 'startDate and endDate are required (YYYY-MM-DD)' });
+    }
+
+    if (new Date(startDate) > new Date(endDate)) {
+      return res.status(400).json({ success: false, message: 'startDate must be before endDate' });
+    }
+
+    // Set up SSE response for live progress
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const send = (event, data) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    send('backfill-start', { startDate, endDate, workspaceId: req.workspaceId });
+
+    logger.info(`Backfill triggered: ${startDate} to ${endDate}, workspace=${req.workspaceId}, skipExisting=${skipExisting}`);
+
+    try {
+      const result = await syncService.backfillDateRange({
+        startDate,
+        endDate,
+        workspaceId: req.workspaceId,
+        skipExisting,
+        activityConcurrency,
+        onProgress: (progress) => {
+          send('backfill-progress', progress);
+        },
+      });
+
+      clearReadCache();
+      sseManager.broadcast('sync-completed', { syncType: 'backfill', result }, req.workspaceId);
+      send('backfill-complete', result);
+    } catch (err) {
+      send('backfill-error', { message: err.message });
+      logger.error('Backfill endpoint error:', err);
+    } finally {
+      res.end();
+    }
+  }),
+);
+
+/**
+ * GET /api/sync/backfill/status
+ * Check if a backfill is currently running for the current workspace.
+ */
+router.get(
+  '/backfill/status',
+  asyncHandler(async (req, res) => {
+    const key = `backfill:${req.workspaceId}`;
+    const isRunning = syncService.isRunning && syncService.runningWorkspaces?.has?.(key);
+
+    res.json({
+      success: true,
+      data: { isRunning },
     });
   }),
 );

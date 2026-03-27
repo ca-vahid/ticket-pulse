@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
+import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle } from '../utils/leaveInfo';
 import { prefetchTechDetail } from '../hooks/usePrefetch';
 import ExpandableTicketList, { useGroupedTickets, getTicketsForView } from './ExpandableTicketList';
 
@@ -235,6 +236,37 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
             </div>
           )}
 
+          {/* Leave Badge */}
+          {(() => {
+            if (viewMode === 'daily') {
+              const dateStr = selectedDate
+                ? (typeof selectedDate === 'string' ? selectedDate : selectedDate.toISOString().slice(0, 10))
+                : new Date().toISOString().slice(0, 10);
+              const leave = getLeaveForDate(technician.leaveInfo, dateStr);
+              if (!leave) return null;
+              const badge = getLeaveBadge(leave);
+              return (
+                <div className={`flex items-center gap-0.5 px-1.5 py-0.5 ${badge.badgeBg} ${badge.badgeText} border ${badge.badgeBorder} rounded-full flex-shrink-0`} title={getLeaveTooltip(leave)}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
+                  <span className="text-[8px] font-semibold">{badge.shortText}</span>
+                </div>
+              );
+            }
+            if (viewMode === 'weekly' && technician.leaveInfo) {
+              const todayStr = new Date().toISOString().slice(0, 10);
+              const leave = getLeaveForDate(technician.leaveInfo, todayStr);
+              if (!leave) return null;
+              const badge = getLeaveBadge(leave);
+              return (
+                <div className={`flex items-center gap-0.5 px-1.5 py-0.5 ${badge.badgeBg} ${badge.badgeText} border ${badge.badgeBorder} rounded-full flex-shrink-0`} title={getLeaveTooltip(leave)}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
+                  <span className="text-[8px] font-semibold">{badge.shortText}</span>
+                </div>
+              );
+            }
+            return null;
+          })()}
+
         </div>
 
         {/* Weekly Breakdown Mini-Calendar - Only show in weekly view */}
@@ -249,8 +281,15 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               const isWeekendDay = dateStyling.isWeekend;
               const isHolidayDay = dateStyling.isHoliday;
               
+              const dayLeave = getLeaveForDate(technician.leaveInfo, day.date);
+              const leaveTooltip = getLeaveTooltip(dayLeave);
+              const leaveDot = getLeaveDotClass(dayLeave);
+
               const baseTooltip = `${dayNames[index]}: ${day.total} tickets (${day.self} self, ${day.assigned} assigned, ${day.closed} closed)`;
-              const fullTooltip = holidayTooltip ? `${baseTooltip}\n${holidayTooltip}` : baseTooltip;
+              const tooltipParts = [baseTooltip];
+              if (holidayTooltip) tooltipParts.push(holidayTooltip);
+              if (leaveTooltip) tooltipParts.push(leaveTooltip);
+              const fullTooltip = tooltipParts.join('\n');
               
               const labelClass = isHolidayDay 
                 ? dateStyling.isCanadian 
@@ -260,15 +299,23 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                   ? 'text-slate-500 font-semibold' 
                   : 'text-gray-500 font-semibold';
               
-              const containerClass = isHolidayDay
-                ? dateStyling.isCanadian
-                  ? 'bg-rose-50/50 rounded-lg p-0.5'
-                  : 'bg-indigo-50/40 rounded-lg p-0.5'
-                : isWeekendDay
-                  ? 'bg-slate-50/50 rounded-lg p-0.5'
-                  : '';
+              const leaveStyle = dayLeave ? getLeaveStyle(dayLeave.category) : null;
+
+              const containerClass = dayLeave
+                ? `${leaveStyle.bgClass} rounded-lg p-0.5`
+                : isHolidayDay
+                  ? dateStyling.isCanadian
+                    ? 'bg-rose-50/50 rounded-lg p-0.5'
+                    : 'bg-indigo-50/40 rounded-lg p-0.5'
+                  : isWeekendDay
+                    ? 'bg-slate-50/50 rounded-lg p-0.5'
+                    : '';
 
               const getBoxClasses = () => {
+                if (dayLeave) {
+                  if (day.total === 0) return `${leaveStyle.borderClass} ${leaveStyle.bgClass} ${leaveStyle.textClass}`;
+                  return `${leaveStyle.borderClass} ${leaveStyle.badgeBg} ${leaveStyle.badgeText}`;
+                }
                 if (isHolidayDay) {
                   if (dateStyling.isCanadian) {
                     if (day.total === 0) return 'border-rose-300 bg-rose-50 text-rose-400';
@@ -309,6 +356,9 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                     {isHolidayDay && (
                       <div className={`w-1 h-1 rounded-full ${dateStyling.isCanadian ? 'bg-rose-500' : 'bg-indigo-400'}`} />
                     )}
+                    {leaveDot && (
+                      <div className={`w-1.5 h-1.5 rounded-full ${leaveDot}`} />
+                    )}
                     <div className={`text-[8px] ${labelClass} mb-0.5`}>
                       {dayNames[index]}
                       <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
@@ -338,14 +388,14 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           </div>
         )}
 
-        {/* Today/Week Count */}
-        <div className="flex items-center justify-center gap-1 w-[70px] flex-shrink-0">
-          <div className="text-xl font-bold text-blue-600 leading-none">+{totalTickets}</div>
-          <div className="text-[8px] text-blue-600 uppercase font-bold">{viewMode === 'weekly' ? 'Week' : 'Today'}</div>
+        {/* Total Count */}
+        <div className="flex flex-col items-center justify-center flex-1 min-w-[60px]">
+          <div className="text-2xl font-bold text-indigo-600 leading-none">{totalTickets}</div>
+          <div className="text-[8px] text-indigo-400 uppercase font-semibold mt-0.5">{viewMode === 'weekly' ? 'total' : 'today'}</div>
         </div>
 
         {/* Metrics - Self, Assigned, Done */}
-        <div className="flex items-center gap-3 ml-auto">
+        <div className="flex items-center gap-3 flex-shrink-0">
           {/* Self */}
           <div className="flex flex-col items-center justify-center px-3 py-1.5 bg-purple-100 rounded border border-purple-200 w-[50px] h-[60px]">
             <Hand className="w-4 h-4 text-purple-700 mb-1" />

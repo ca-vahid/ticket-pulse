@@ -11,6 +11,7 @@ import autoresponseRoutes from './autoresponse.routes.js';
 import llmAdminRoutes from './llmAdmin.routes.js';
 import visualsRoutes from './visuals.routes.js';
 import noiseRoutes from './noise.routes.js';
+import vacationTrackerRoutes from './vacationTracker.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 
 const router = express.Router();
@@ -42,5 +43,6 @@ router.use('/autoresponse', autoresponseRoutes);
 router.use('/admin/llm-settings', llmAdminRoutes);
 router.use('/visuals', visualsRoutes);
 router.use('/noise-rules', noiseRoutes);
+router.use('/vacation-tracker', vacationTrackerRoutes);
 
 export default router;

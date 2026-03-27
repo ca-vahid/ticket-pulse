@@ -219,7 +219,6 @@ class TechnicianRepository {
       const updateData = {
         name: data.name,
         email: data.email || null,
-        isActive: data.isActive !== undefined ? data.isActive : true,
         updatedAt: new Date(),
       };
 

@@ -1170,15 +1170,11 @@ export default function Dashboard() {
                 {currentWorkspace && availableWorkspaces.length > 1 && (
                   <select
                     value={currentWorkspace.id}
-                    onChange={async (e) => {
+                    onChange={(e) => {
                       const newId = Number(e.target.value);
                       if (newId === currentWorkspace.id) return;
-                      try {
-                        await switchWorkspace(newId);
-                      } catch (err) {
-                        console.error('Workspace switch failed:', err);
-                      }
-                      window.location.href = '/dashboard';
+                      switchWorkspace(newId);
+                      window.location.reload();
                     }}
                     className="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-medium cursor-pointer hover:bg-blue-100"
                     title="Switch workspace"

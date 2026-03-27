@@ -6,7 +6,7 @@
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
+    "dev": "nodemon --exec \"node --max-old-space-size=4096\" src/app.js",
     "test": "jest --coverage",
     "test:watch": "jest --watch",
     "lint": "eslint src/**/*.js",

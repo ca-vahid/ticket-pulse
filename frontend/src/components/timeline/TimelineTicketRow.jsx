@@ -20,6 +20,8 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
 
   // In multi-tech mode tickets carry _techFirstName; single-tech falls back to defaultFirstName
   const pickerName = ticket._techFirstName || defaultFirstName || 'Tech';
+  const pickerPhoto = ticket._techPhotoUrl || null;
+  const pickerInitials = pickerName.charAt(0).toUpperCase();
   // Accent colours from multi-tech merge (optional)
   const accent = ticket._accent;
 
@@ -74,6 +76,15 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
           >
             <ExternalLink className="w-3 h-3" />
           </a>
+
+          {/* Agent avatar (before subject) */}
+          {picked && pickerPhoto ? (
+            <img src={pickerPhoto} alt={pickerName} title={pickerName} className="w-5 h-5 rounded-full object-cover flex-shrink-0 border border-slate-200" />
+          ) : picked ? (
+            <div title={pickerName} className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[8px] font-bold text-white ${accent?.bg || 'bg-emerald-500'}`}>
+              {pickerInitials}
+            </div>
+          ) : null}
 
           {/* Subject */}
           <span className={`font-medium text-xs truncate min-w-0 flex-1 ${picked ? 'text-slate-900' : 'text-slate-500'}`}>

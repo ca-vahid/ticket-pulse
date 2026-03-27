@@ -5,16 +5,27 @@ import config from '../config/index.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { ValidationError, AuthenticationError } from '../utils/errors.js';
 import workspaceRepository from '../services/workspaceRepository.js';
+import settingsRepository from '../services/settingsRepository.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
 
 const TENANT_ID = process.env.AZURE_AD_TENANT_ID;
 const CLIENT_ID = process.env.AZURE_AD_CLIENT_ID;
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
+const ENV_ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
   .split(',')
   .map(e => e.trim().toLowerCase())
   .filter(Boolean);
+
+async function getAdminEmails() {
+  try {
+    const dbVal = await settingsRepository.get('admin_emails');
+    if (dbVal && dbVal.trim()) {
+      return dbVal.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+    }
+  } catch { /* fall through */ }
+  return ENV_ADMIN_EMAILS;
+}
 
 const jwksClient = jwksRsa({
   jwksUri: `https://login.microsoftonline.com/${TENANT_ID}/discovery/v2.0/keys`,
@@ -82,7 +93,8 @@ router.post(
       throw new AuthenticationError('No email claim found in token');
     }
 
-    const role = ADMIN_EMAILS.includes(email) ? 'admin' : 'viewer';
+    const adminEmails = await getAdminEmails();
+    const role = adminEmails.includes(email) ? 'admin' : 'viewer';
 
     // Fetch workspaces this user has access to
     let availableWorkspaces = [];
@@ -134,6 +146,9 @@ router.post(
     logger.info(`SSO login: ${name} (${email}) as ${role}, ${availableWorkspaces.length} workspace(s)`);
 
     const userPayload = { email, name, username: name, role };
+    if (selectedWorkspaceId) {
+      userPayload.selectedWorkspaceId = selectedWorkspaceId;
+    }
     const authToken = jwt.sign(userPayload, config.session.secret, {
       algorithm: 'HS256',
       expiresIn: '8h',
@@ -222,17 +237,21 @@ router.get(
           } else if (email) {
             availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
           }
-          if (availableWorkspaces.length === 1) {
+          if (decoded.selectedWorkspaceId) {
+            selectedWorkspaceId = decoded.selectedWorkspaceId;
+          } else if (availableWorkspaces.length === 1) {
             selectedWorkspaceId = availableWorkspaces[0].id;
           }
-          // Restore session if it was lost
+          const selectedWs = selectedWorkspaceId
+            ? availableWorkspaces.find(w => w.id === selectedWorkspaceId) || null
+            : null;
           if (req.session) {
             req.session.user = {
               ...decoded,
               availableWorkspaces,
               selectedWorkspaceId: req.session.user?.selectedWorkspaceId || selectedWorkspaceId,
-              selectedWorkspaceName: req.session.user?.selectedWorkspaceName || null,
-              selectedWorkspaceSlug: req.session.user?.selectedWorkspaceSlug || null,
+              selectedWorkspaceName: req.session.user?.selectedWorkspaceName || selectedWs?.name || null,
+              selectedWorkspaceSlug: req.session.user?.selectedWorkspaceSlug || selectedWs?.slug || null,
             };
           }
         } catch (wsErr) {

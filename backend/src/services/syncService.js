@@ -244,34 +244,29 @@ class SyncService {
       return 0;
     }
 
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
+    const prismaModule = await import('./prisma.js');
+    const db = prismaModule.default;
     let updatedCount = 0;
 
-    try {
-      // Batch update tickets
-      for (const [ticketId, analysis] of analysisMap.entries()) {
-        try {
-          await prisma.ticket.update({
-            where: { freshserviceTicketId: BigInt(ticketId) },
-            data: {
-              firstAssignedAt: analysis.firstAssignedAt,
-              isSelfPicked: analysis.isSelfPicked,
-              assignedBy: analysis.assignedBy,
-              firstPublicAgentReplyAt: analysis.firstPublicAgentReplyAt || undefined,
-            },
-          });
-          updatedCount++;
-        } catch (error) {
-          logger.warn(`Failed to update ticket ${ticketId} with analysis: ${error.message || error}`);
-        }
+    for (const [ticketId, analysis] of analysisMap.entries()) {
+      try {
+        await db.ticket.update({
+          where: { freshserviceTicketId: BigInt(ticketId) },
+          data: {
+            firstAssignedAt: analysis.firstAssignedAt,
+            isSelfPicked: analysis.isSelfPicked,
+            assignedBy: analysis.assignedBy,
+            firstPublicAgentReplyAt: analysis.firstPublicAgentReplyAt || undefined,
+          },
+        });
+        updatedCount++;
+      } catch (error) {
+        logger.warn(`Failed to update ticket ${ticketId} with analysis: ${error.message || error}`);
       }
-
-      logger.info(`Updated ${updatedCount} tickets with activity analysis`);
-      return updatedCount;
-    } finally {
-      await prisma.$disconnect();
     }
+
+    logger.info(`Updated ${updatedCount} tickets with activity analysis`);
+    return updatedCount;
   }
 
   /**
@@ -334,6 +329,14 @@ class SyncService {
     const filters = {
       include: 'requester,stats',
     };
+
+    // Add FreshService workspace_id so we only get tickets from this workspace
+    if (workspaceId) {
+      const wsConfig = await this._getWorkspaceConfig(workspaceId);
+      if (wsConfig.workspaceId) {
+        filters.workspace_id = wsConfig.workspaceId;
+      }
+    }
 
     if (syncType === 'week' && weekStart) {
       filters.updated_since = new Date(weekStart + 'T00:00:00Z').toISOString();
@@ -842,9 +845,9 @@ class SyncService {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysToSync);
 
-      // Get tickets missing firstAssignedAt using raw Prisma query
-      const { PrismaClient } = await import('@prisma/client');
-      const prisma = new PrismaClient();
+      const prismaModule = await import('./prisma.js');
+      const db = prismaModule.default;
+      const wsId = options.workspaceId || 1;
 
       let totalSuccessCount = 0;
       let totalFailureCount = 0;
@@ -853,11 +856,12 @@ class SyncService {
       let hasMore = true;
 
       while (hasMore) {
-        const tickets = await prisma.ticket.findMany({
+        const tickets = await db.ticket.findMany({
           where: {
             assignedTechId: { not: null },
             firstAssignedAt: null,
             createdAt: { gte: cutoffDate },
+            workspaceId: wsId,
           },
           select: {
             id: true,
@@ -877,7 +881,7 @@ class SyncService {
         const batchStartTime = Date.now();
 
         // Process tickets in parallel with concurrency limit
-        const results = await this._processTicketsInParallel(client, prisma, tickets, concurrency);
+        const results = await this._processTicketsInParallel(client, db, tickets, concurrency);
 
         // Count successes and failures
         const batchSuccessCount = results.filter(r => r.success).length;
@@ -902,8 +906,6 @@ class SyncService {
           hasMore = false;
         }
       }
-
-      await prisma.$disconnect();
 
       const summary = {
         ticketsProcessed: totalProcessed,
@@ -951,6 +953,7 @@ class SyncService {
 
       logger.info(`Starting week sync: ${startDate} to ${endDate} (concurrency: ${concurrency})`);
       const client = await this._initializeClient();
+      const wsConfig = await this._getWorkspaceConfig(workspaceId);
 
       // Convert dates to Date objects
       const start = new Date(startDate + 'T00:00:00Z');
@@ -966,6 +969,9 @@ class SyncService {
         updated_since: start.toISOString(),
         include: 'requester,stats',
       };
+      if (wsConfig.workspaceId) {
+        filters.workspace_id = wsConfig.workspaceId;
+      }
 
       // Fetch tickets with progress callback to update UI in real-time
       const allTickets = await client.fetchTickets(filters, (page, itemCount) => {
@@ -990,7 +996,7 @@ class SyncService {
       this.progress.currentStep = 'Preparing tickets for database';
       this.progress.currentStepNumber = 2;
       this.progress.percentage = 20;
-      const preparedTickets = await this._prepareTicketsForDatabase(tickets);
+      const preparedTickets = await this._prepareTicketsForDatabase(tickets, workspaceId);
 
       // Step 3: Upsert tickets using core method
       this.progress.currentStep = 'Saving tickets to database';
@@ -1052,6 +1058,180 @@ class SyncService {
     } catch (error) {
       this.runningWorkspaces.delete(workspaceId);
       logger.error('Week sync failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Historical backfill: fetch and sync tickets for a date range with progress tracking.
+   *
+   * Designed as the primary workspace onboarding tool. Processes tickets in
+   * date-based batches with live SSE feedback, supports resuming after failure,
+   * and can optionally skip tickets that already exist in the database.
+   *
+   * @param {Object} options
+   * @param {string} options.startDate - YYYY-MM-DD
+   * @param {string} options.endDate   - YYYY-MM-DD
+   * @param {number} options.workspaceId
+   * @param {boolean} options.skipExisting - Skip tickets already in DB
+   * @param {number} options.activityConcurrency - Parallel activity fetches (default 3)
+   * @param {Function} options.onProgress - Callback({phase, step, total, processed, pct, detail, batchRange})
+   * @returns {Promise<Object>} Summary
+   */
+  async backfillDateRange(options = {}) {
+    const {
+      startDate,
+      endDate,
+      workspaceId = 1,
+      skipExisting = true,
+      activityConcurrency = 3,
+      onProgress = null,
+    } = options;
+
+    const backfillKey = `backfill:${workspaceId}`;
+    if (this.runningWorkspaces.has(backfillKey)) {
+      return { status: 'skipped', reason: 'Backfill already running for this workspace' };
+    }
+
+    this.runningWorkspaces.add(backfillKey);
+    const emit = (data) => { if (onProgress) onProgress(data); };
+    const startTime = Date.now();
+
+    try {
+      const client = await this._initializeClient();
+      const wsConfig = await this._getWorkspaceConfig(workspaceId);
+
+      emit({ phase: 'init', step: 'Initializing backfill', pct: 0, detail: `${startDate} → ${endDate}` });
+
+      // Phase 1: Sync technicians for this workspace
+      emit({ phase: 'technicians', step: 'Syncing technicians', pct: 2 });
+      const techsSynced = await this.syncTechnicians(workspaceId);
+      emit({ phase: 'technicians', step: `Synced ${techsSynced} technicians`, pct: 5 });
+
+      // Phase 2: Fetch all tickets in the date range from FreshService
+      emit({ phase: 'fetch', step: 'Fetching tickets from FreshService', pct: 6, detail: `Since ${startDate}` });
+
+      const fetchStart = new Date(startDate + 'T00:00:00Z');
+      const fetchEnd = new Date(endDate + 'T23:59:59Z');
+
+      const filters = {
+        updated_since: fetchStart.toISOString(),
+        include: 'requester,stats',
+      };
+      if (wsConfig.workspaceId) {
+        filters.workspace_id = wsConfig.workspaceId;
+      }
+
+      const allTickets = await client.fetchTickets(filters, (page, itemCount) => {
+        emit({ phase: 'fetch', step: `Fetching tickets (page ${page}, ${itemCount} so far)`, pct: Math.min(6 + Math.floor(page * 0.5), 20) });
+      });
+
+      // Filter to tickets updated within the target range
+      const rangeTickets = allTickets.filter(t => {
+        const updated = new Date(t.updated_at);
+        return updated >= fetchStart && updated <= fetchEnd;
+      });
+
+      const totalTickets = rangeTickets.length;
+      emit({ phase: 'fetch', step: `Found ${totalTickets} tickets in range`, pct: 20, total: totalTickets });
+
+      if (totalTickets === 0) {
+        this.runningWorkspaces.delete(backfillKey);
+        return { status: 'completed', ticketsFetched: 0, ticketsSynced: 0, activitiesAnalyzed: 0, skipped: 0, elapsed: `${((Date.now() - startTime) / 1000).toFixed(0)}s` };
+      }
+
+      // Phase 3: Transform + map technician IDs
+      emit({ phase: 'prepare', step: 'Mapping tickets to technicians', pct: 22 });
+      const preparedTickets = await this._prepareTicketsForDatabase(rangeTickets, workspaceId);
+
+      // Phase 4: Skip existing (optional)
+      let ticketsToSync = preparedTickets;
+      let skippedCount = 0;
+
+      if (skipExisting) {
+        emit({ phase: 'dedup', step: 'Checking for existing tickets', pct: 24 });
+        const ticketIds = preparedTickets.map(t => t.freshserviceTicketId);
+        const existingArr = await ticketRepository.getByFreshserviceIds(ticketIds);
+        const existingSet = new Set(existingArr.map(t => t.freshserviceTicketId.toString()));
+
+        ticketsToSync = preparedTickets.filter(t => !existingSet.has(t.freshserviceTicketId.toString()));
+        skippedCount = preparedTickets.length - ticketsToSync.length;
+        emit({ phase: 'dedup', step: `Skipping ${skippedCount} existing tickets, ${ticketsToSync.length} to sync`, pct: 26 });
+      }
+
+      // Phase 5: Upsert tickets in batches
+      const batchSize = 50;
+      let syncedCount = 0;
+      const totalToSync = ticketsToSync.length;
+
+      for (let i = 0; i < totalToSync; i += batchSize) {
+        const batch = ticketsToSync.slice(i, i + batchSize);
+        const batchNum = Math.floor(i / batchSize) + 1;
+        const totalBatches = Math.ceil(totalToSync / batchSize);
+        const batchPct = 26 + Math.floor(((i + batch.length) / totalToSync) * 30);
+
+        emit({
+          phase: 'upsert',
+          step: `Saving batch ${batchNum}/${totalBatches}`,
+          pct: batchPct,
+          processed: syncedCount,
+          total: totalToSync,
+          batchRange: `${i + 1}-${Math.min(i + batchSize, totalToSync)}`,
+        });
+
+        const batchSynced = await this._upsertTickets(batch);
+        syncedCount += batchSynced;
+      }
+
+      emit({ phase: 'upsert', step: `Saved ${syncedCount} tickets`, pct: 56, processed: syncedCount, total: totalToSync });
+
+      // Phase 6: Analyze activities for assignment tracking
+      emit({ phase: 'activities', step: 'Analyzing ticket activities', pct: 58, processed: 0, total: totalTickets });
+
+      const analysisMap = await this._analyzeTicketActivities(client, rangeTickets, {
+        concurrency: activityConcurrency,
+        batchDelay: 2000,
+        onProgress: (processed, total) => {
+          const actPct = 58 + Math.floor((processed / total) * 34);
+          emit({
+            phase: 'activities',
+            step: `Analyzing activities (${processed}/${total})`,
+            pct: actPct,
+            processed,
+            total,
+          });
+        },
+      });
+
+      // Phase 7: Update tickets with analysis
+      emit({ phase: 'finalize', step: 'Updating tickets with analysis data', pct: 93 });
+      await this._updateTicketsWithAnalysis(analysisMap);
+
+      // Phase 8: Sync requesters
+      emit({ phase: 'requesters', step: 'Syncing requester details', pct: 95 });
+      await this.syncRequesters();
+
+      const elapsed = `${((Date.now() - startTime) / 1000).toFixed(0)}s`;
+      const summary = {
+        status: 'completed',
+        ticketsFetched: totalTickets,
+        ticketsSynced: syncedCount,
+        activitiesAnalyzed: analysisMap.size,
+        skipped: skippedCount,
+        dateRange: `${startDate} → ${endDate}`,
+        elapsed,
+      };
+
+      emit({ phase: 'done', step: 'Backfill complete', pct: 100, detail: summary.elapsed, ...summary });
+
+      this.runningWorkspaces.delete(backfillKey);
+      clearReadCache();
+      logger.info('Historical backfill completed', summary);
+      return summary;
+    } catch (error) {
+      this.runningWorkspaces.delete(backfillKey);
+      emit({ phase: 'error', step: `Backfill failed: ${error.message}`, pct: -1 });
+      logger.error('Historical backfill failed:', error);
       throw error;
     }
   }

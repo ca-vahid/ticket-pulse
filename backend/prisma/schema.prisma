@@ -23,15 +23,19 @@ model Workspace {
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
 
-  technicians     Technician[]
-  tickets         Ticket[]
-  syncLogs        SyncLog[]
-  noiseRules      NoiseRule[]
-  businessHours   BusinessHour[]
-  holidays        Holiday[]
-  autoResponses   AutoResponse[]
-  llmConfigs      LlmConfig[]
-  access          WorkspaceAccess[]
+  technicians            Technician[]
+  tickets                Ticket[]
+  syncLogs               SyncLog[]
+  noiseRules             NoiseRule[]
+  businessHours          BusinessHour[]
+  holidays               Holiday[]
+  autoResponses          AutoResponse[]
+  llmConfigs             LlmConfig[]
+  access                 WorkspaceAccess[]
+  vacationTrackerConfig  VacationTrackerConfig?
+  vtLeaveTypes           VtLeaveType[]
+  vtUserMappings         VtUserMapping[]
+  technicianLeaves       TechnicianLeave[]
 
   @@map("workspaces")
 }
@@ -69,6 +73,8 @@ model Technician {
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   tickets         Ticket[]
+  leaves          TechnicianLeave[]
+  vtUserMappings  VtUserMapping[]
 
   @@unique([freshserviceId, workspaceId])
   @@map("technicians")
@@ -381,4 +387,73 @@ model LlmConfigHistory {
   @@index([configId])
   @@index([createdAt])
   @@index([workspaceId])
+}
+
+model VacationTrackerConfig {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @unique @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  apiKey      String    @db.Text @map("api_key")
+  syncEnabled Boolean   @default(false) @map("sync_enabled")
+  lastSyncAt  DateTime? @map("last_sync_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("vacation_tracker_configs")
+}
+
+model VtLeaveType {
+  id              Int       @id @default(autoincrement())
+  workspaceId     Int       @map("workspace_id")
+  workspace       Workspace @relation(fields: [workspaceId], references: [id])
+  vtLeaveTypeId   String    @db.VarChar(255) @map("vt_leave_type_id")
+  vtLeaveTypeName String    @db.VarChar(255) @map("vt_leave_type_name")
+  category        String    @default("OTHER") @db.VarChar(20)
+  color           String?   @db.VarChar(20)
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, vtLeaveTypeId])
+  @@map("vt_leave_types")
+  @@index([workspaceId])
+}
+
+model VtUserMapping {
+  id           Int          @id @default(autoincrement())
+  workspaceId  Int          @map("workspace_id")
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id])
+  vtUserId     String       @db.VarChar(255) @map("vt_user_id")
+  vtUserName   String       @db.VarChar(255) @map("vt_user_name")
+  vtUserEmail  String       @db.VarChar(255) @map("vt_user_email")
+  technicianId Int?         @map("technician_id")
+  technician   Technician?  @relation(fields: [technicianId], references: [id])
+  matchStatus  String       @default("unmatched") @db.VarChar(20) @map("match_status")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, vtUserId])
+  @@map("vt_user_mappings")
+  @@index([workspaceId])
+  @@index([technicianId])
+}
+
+model TechnicianLeave {
+  id            Int        @id @default(autoincrement())
+  workspaceId   Int        @map("workspace_id")
+  workspace     Workspace  @relation(fields: [workspaceId], references: [id])
+  technicianId  Int        @map("technician_id")
+  technician    Technician @relation(fields: [technicianId], references: [id])
+  vtLeaveId     String     @db.VarChar(255) @map("vt_leave_id")
+  leaveDate     DateTime   @db.Date @map("leave_date")
+  leaveTypeName String     @db.VarChar(255) @map("leave_type_name")
+  category      String     @db.VarChar(20)
+  status        String     @default("APPROVED") @db.VarChar(20)
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  @@unique([vtLeaveId, leaveDate])
+  @@map("technician_leaves")
+  @@index([workspaceId, leaveDate])
+  @@index([technicianId, leaveDate])
 }

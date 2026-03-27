@@ -8,7 +8,8 @@ const _stats = { hit: 0, miss: 0, invalidations: 0 };
 function makeKey(req) {
   const path = req.baseUrl + req.path;
   const params = JSON.stringify(req.query);
-  return `${path}:${params}`;
+  const wsId = req.workspaceId || req.headers['x-workspace-id'] || '0';
+  return `ws${wsId}:${path}:${params}`;
 }
 
 function isExpired(entry) {

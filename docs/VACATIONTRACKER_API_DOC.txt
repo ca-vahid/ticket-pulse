@@ -1,0 +1,406 @@
+================================================================================
+  VACATION TRACKER - OPEN API REFERENCE
+  Base URL: https://api.vacationtracker.io
+  Last verified: March 26, 2026 (live API calls confirmed)
+================================================================================
+
+AUTHENTICATION
+--------------------------------------------------------------------------------
+  Header:   x-api-key: <your-api-key>
+  Note:     Bearer token does NOT work (returns 403). Must use x-api-key header.
+  API key:  Stored in Ticket Pulse database per workspace (VacationTrackerConfig).
+            Do NOT store API keys in code, env files, or this document.
+
+
+================================================================================
+  ENDPOINTS
+================================================================================
+
+
+1. GET /v1/leave-types
+--------------------------------------------------------------------------------
+   Returns all leave types with IDs, names, colors, and active status.
+   This is the ONLY endpoint that returns leave type colors.
+
+   Parameters: None
+
+   Response (200):
+   {
+     "status": "ok",
+     "data": [
+       {
+         "id": "leaveType-13386930-2929-49b6-8175-1752a3bb6b0f",
+         "name": "Vacation",
+         "isActive": true,
+         "color": "#e3818d"
+       }
+     ]
+   }
+
+   LIVE DATA (our account, as of Mar 2026):
+     - Vacation          color: #e3818d   (pink/red)
+     - Site Visit        color: #1fa0cf   (blue)
+     - WFH               color: #91d5ff   (light blue)
+     - Training & Conf.  color: #7f00ff   (purple)
+     - PTO               color: #e02238   (red)
+     - Sick Day          color: #e05153   (red)
+
+   Errors: 400 (invalid params), 404 (not found)
+
+
+2. GET /v1/leaves
+--------------------------------------------------------------------------------
+   Returns leave requests between two dates. Paginated.
+
+   Parameters (query string):
+     startDate *    string   YYYY-MM-DD format (required)
+     endDate *      string   YYYY-MM-DD format, must be >= startDate (required)
+     nextToken      string   Token from previous response for pagination
+     limit          string   Number of records: 25-500, default 300
+     status         string   Filter by status. Default: APPROVED
+                             Values: APPROVED, OPEN, DENIED, CANCELLED, EXPIRED, DELETED
+     expand         string   Comma-separated. Embeds related objects inline.
+                             Values: user, approver, leaveType
+
+   Response (200) with expand=user,leaveType:
+   {
+     "status": "ok",
+     "nextToken": null,
+     "data": [
+       {
+         "id": "leaveRequest-d9dc3a74-fbff-417f-9b5b-d439e315dc8c",
+         "userId": "microsoft-5c0493bf-997d-4ca6-85c5-4cfa4b48bec2",
+         "approverId": "microsoft-5e699a8b-ee3e-403e-b320-9f8dab118ea1",
+         "autoApproved": false,
+         "durationCalendarDays": 30,
+         "durationWorkingDays": 21,
+         "startDate": "2026-03-12",
+         "endDate": "2026-04-10",
+         "isFullDayLeave": true,
+         "leaveTypeId": "leaveType-13386930-2929-49b6-8175-1752a3bb6b0f",
+         "locationId": "location-afd8f992-a18b-48f7-8def-7aadd2f1163a",
+         "departmentId": "team-ca9353d4-1ad7-4a12-80cf-bdb288c8762b",
+         "status": "APPROVED",
+         "leaveType": {
+           "id": "leaveType-13386930-2929-49b6-8175-1752a3bb6b0f",
+           "name": "Vacation",
+           "isDefault": null
+         },
+         "user": {
+           "id": "microsoft-5c0493bf-997d-4ca6-85c5-4cfa4b48bec2",
+           "name": "Muhammad Shahidullah",
+           "role": "User",
+           "status": "ACTIVE",
+           "startDate": "2023-01-01T00:00:00.000Z",
+           "endDate": "",
+           "email": "mshahidullah@bgcengineering.ca",
+           "isAdmin": false,
+           "employeeId": "1371",
+           "labels": [],
+           "location": {
+             "id": "location-afd8f992-a18b-48f7-8def-7aadd2f1163a",
+             "name": "BGC Engineering",
+             "timezone": "America/Vancouver",
+             "isDefault": true,
+             "createdAt": "2023-04-18T23:05:43.153Z"
+           },
+           "locationId": "location-afd8f992-a18b-48f7-8def-7aadd2f1163a",
+           "teamId": "team-ca9353d4-1ad7-4a12-80cf-bdb288c8762b",
+           "department": {
+             "id": "team-ca9353d4-1ad7-4a12-80cf-bdb288c8762b",
+             "name": "IT",
+             "isDefault": true,
+             "createdAt": "2023-04-24T17:00:03.393Z"
+           }
+         }
+       }
+     ]
+   }
+
+   IMPORTANT NOTES (from live testing):
+     - Expanded leaveType does NOT include "color" -- only id, name, isDefault.
+       Fetch colors separately from GET /v1/leave-types.
+     - Fields startHour, endHour, startMinute, endMinute are OMITTED for
+       full-day leaves (isFullDayLeave=true). May appear for partial-day leaves.
+     - Field "createdAt" shown in official docs is NOT present in live responses.
+     - Expanded "user" includes extra fields not in /v1/users: "role", "teamId".
+     - Multi-day leaves return as a single record with startDate != endDate.
+       Consumer must expand date range into individual days.
+     - nextToken is null when all results fit in one page.
+
+   Errors: 400 (invalid params)
+
+
+3. GET /v1/users
+--------------------------------------------------------------------------------
+   Returns all users with IDs, names, emails, and basic info. Paginated.
+
+   Parameters (query string):
+     nextToken      string   Token from previous response for pagination
+     limit          string   Number of records: 25-500, default 300
+     status         string   Filter by status. Default: ACTIVE
+                             Values: ACTIVE, INACTIVE, DELETED
+     locations      string   Comma-separated location IDs for filtering
+     departments    string   Comma-separated department IDs for filtering
+     labels         string   Comma-separated label names for filtering
+     expand         string   Comma-separated. Embeds related objects inline.
+                             Values: location, department, holidays
+
+   Response (200) with expand=location,department:
+   {
+     "status": "ok",
+     "nextToken": null,
+     "data": [
+       {
+         "id": "microsoft-98cd9a35-33fd-4ecc-8bf0-00fbe0ddc7f9",
+         "name": "Adrian Lo",
+         "email": "alo@bgcengineering.ca",
+         "isAdmin": false,
+         "locationId": "location-afd8f992-a18b-48f7-8def-7aadd2f1163a",
+         "departmentId": "team-ca9353d4-1ad7-4a12-80cf-bdb288c8762b",
+         "labels": [],
+         "status": "ACTIVE",
+         "employeeId": null,
+         "startDate": "2026-03-03T20:35:43.513Z",
+         "endDate": null,
+         "location": {
+           "id": "location-afd8f992-a18b-48f7-8def-7aadd2f1163a",
+           "name": "BGC Engineering",
+           "timezone": "America/Vancouver",
+           "isDefault": true,
+           "createdAt": "2023-04-18T23:05:43.153Z"
+         },
+         "department": {
+           "id": "team-ca9353d4-1ad7-4a12-80cf-bdb288c8762b",
+           "name": "IT",
+           "isDefault": true,
+           "createdAt": "2023-04-24T17:00:03.393Z"
+         }
+       }
+     ]
+   }
+
+   LIVE DATA (our account, 14 active users as of Mar 2026):
+     All users are in department "IT" at location "BGC Engineering"
+     (timezone: America/Vancouver). All emails are @bgcengineering.ca.
+
+     User IDs are prefixed "microsoft-" (Microsoft Teams integration).
+     employeeId is nullable -- some newer users don't have one.
+     endDate can be null or "" (empty string) for active users.
+
+   Errors: 400 (invalid params), 404 (not found)
+
+
+4. GET /v1/departments
+--------------------------------------------------------------------------------
+   Returns all active departments.
+
+   Parameters: None
+
+   Response (200):
+   {
+     "status": "ok",
+     "data": [
+       {
+         "id": "team-ca9353d4-1ad7-4a12-80cf-bdb288c8762b",
+         "name": "IT",
+         "isDefault": true,
+         "createdAt": "2023-04-24T17:00:03.393Z"
+       }
+     ]
+   }
+
+   LIVE DATA: Single department "IT" (our account).
+
+   Errors: 400 (invalid params), 404 (not found)
+
+
+5. GET /v1/locations
+--------------------------------------------------------------------------------
+   Returns all active locations with timezone info.
+
+   Parameters: None
+
+   Response (200):
+   {
+     "status": "ok",
+     "data": [
+       {
+         "id": "location-afd8f992-a18b-48f7-8def-7aadd2f1163a",
+         "name": "BGC Engineering",
+         "timezone": "America/Vancouver",
+         "isDefault": true,
+         "createdAt": "2023-04-18T23:05:43.153Z"
+       }
+     ]
+   }
+
+   LIVE DATA: Single location "BGC Engineering" (America/Vancouver).
+
+   Errors: 400 (invalid params), 404 (not found)
+
+
+6. GET /v1/labels
+--------------------------------------------------------------------------------
+   Returns all active labels.
+
+   Parameters: None
+
+   Response (200):
+   {
+     "status": "ok",
+     "data": [
+       {
+         "id": "969f8429-7dc3-48a1-96b1-6049a99dda06",
+         "name": "Team B",
+         "color": "FF0000",
+         "userCount": 42
+       }
+     ]
+   }
+
+   LIVE DATA: No labels currently in use (our account).
+
+   Errors: 400 (invalid params), 404 (not found)
+
+
+================================================================================
+  PAGINATION
+================================================================================
+
+  Endpoints that return lists (leaves, users) support cursor-based pagination:
+
+  1. First request: omit nextToken
+  2. If response has "nextToken": "<value>", pass it as ?nextToken=<value>
+  3. If response has "nextToken": null, all results have been returned
+
+  Default limit is 300. Range: 25-500.
+  Note: Filters are applied AFTER the limit, so returned count may be < limit.
+
+
+================================================================================
+  ERROR RESPONSES
+================================================================================
+
+  400 - Request parameters are not valid
+  403 - Forbidden (wrong or missing API key)
+        Response: { "message": "Forbidden" }
+  404 - API Gateway cannot find the resource
+
+
+================================================================================
+  DATA MODEL SCHEMAS
+================================================================================
+
+  Department {
+    id          string    "team-<uuid>"
+    name        string
+    isDefault   boolean
+    createdAt   string    ISO 8601 datetime
+  }
+
+  Location {
+    id          string    "location-<uuid>"
+    name        string
+    timezone    string    IANA timezone (e.g., "America/Vancouver")
+    isDefault   boolean
+    createdAt   string    ISO 8601 datetime
+  }
+
+  Label {
+    id          string    UUID
+    name        string
+    color       string    Hex color without #
+    userCount   integer
+  }
+
+  LeaveType {
+    id          string    "leaveType-<uuid>"
+    name        string
+    color       string    Hex color WITH # (e.g., "#e3818d")
+    isActive    boolean
+  }
+
+  LeaveType (expanded in /v1/leaves) {
+    id          string    "leaveType-<uuid>"
+    name        string
+    isDefault   null      (color NOT included here)
+  }
+
+  User {
+    id            string    "<provider>-<uuid>" (e.g., "microsoft-...")
+    name          string
+    email         string
+    isAdmin       boolean
+    locationId    string
+    departmentId  string
+    labels        string[]
+    status        string    "ACTIVE" | "INACTIVE" | "DELETED"
+    employeeId    string?   nullable
+    startDate     string    ISO 8601 datetime or YYYY-MM-DD
+    endDate       string?   nullable or ""
+    location      Location  (when expanded)
+    department    Department (when expanded)
+    holidays      PublicHolidaysByYear[] (when expanded)
+  }
+
+  User (expanded in /v1/leaves) {
+    ...User fields above, plus:
+    role          string    "User" | "Admin"
+    teamId        string    same as departmentId
+  }
+
+  Leave {
+    id                    string    "leaveRequest-<uuid>"
+    userId                string
+    approverId            string
+    autoApproved          boolean
+    durationCalendarDays  integer
+    durationWorkingDays   integer
+    startDate             string    YYYY-MM-DD
+    endDate               string    YYYY-MM-DD
+    isFullDayLeave        boolean
+    leaveTypeId           string
+    locationId            string
+    departmentId          string
+    status                string    "APPROVED" | "OPEN" | "DENIED" | etc.
+    leaveType             LeaveType (when expanded -- no color)
+    user                  User      (when expanded -- includes role, teamId)
+    approver              User      (when expanded)
+  }
+
+  PublicHolidaysByYear {
+    year        integer
+    holidays    PublicHoliday[]
+  }
+
+  PublicHoliday {
+    id          string
+    name        string
+    date        string    YYYY-MM-DD
+    isHalfDay   boolean
+  }
+
+
+================================================================================
+  USAGE IN TICKET PULSE
+================================================================================
+
+  Recommended API call pattern for syncing leave data:
+
+  1. GET /v1/leave-types
+     -> Cache leave type IDs, names, and colors
+     -> Map each to a category: OFF, WFH, OTHER, or IGNORED
+
+  2. GET /v1/users?status=ACTIVE&expand=location,department
+     -> Paginate with nextToken until null
+     -> Match to Ticket Pulse technicians by email (primary) or name (fallback)
+
+  3. GET /v1/leaves?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&status=APPROVED&expand=user,leaveType
+     -> Paginate with nextToken until null
+     -> For each leave, expand startDate..endDate into individual day records
+     -> Look up category from leave type mapping
+     -> Upsert into TechnicianLeave table
+
+  Sync window: past 7 days + next 30 days (adjustable).
+  Recommended sync frequency: every 15-30 minutes (leave data changes infrequently).

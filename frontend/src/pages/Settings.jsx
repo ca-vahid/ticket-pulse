@@ -1,13 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../contexts/SettingsContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 import { syncAPI, visualsAPI } from '../services/api';
 import api from '../services/api';
+import { dataCache } from '../services/dataCache';
 import AutoResponseSettings from '../components/AutoResponseSettings';
 import AutoResponseTestInteractive from '../components/AutoResponseTestInteractive';
 import LlmAdminPanel from '../components/LlmAdminPanel';
 import NoiseRulesPanel from '../components/NoiseRulesPanel';
 import SyncOperationsPanel from '../components/settings/SyncOperationsPanel';
+import BackfillPanel from '../components/settings/BackfillPanel';
+import WorkspaceManagementPanel from '../components/settings/WorkspaceManagementPanel';
+import AdminManagementPanel from '../components/settings/AdminManagementPanel';
+import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
+import TechnicianVisibilityPanel from '../components/settings/TechnicianVisibilityPanel';
 import {
   ArrowLeft,
   Save,
@@ -26,13 +33,18 @@ import {
   VolumeX,
   Bot,
   FlaskConical,
+  Download,
+  Globe,
+  Shield,
+  EyeOff,
 } from 'lucide-react';
 
 export default function Settings() {
   const navigate = useNavigate();
   const { settings, isLoading, fetchSettings, updateSettings, testConnection } = useSettings();
+  const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
 
-  const validSections = ['freshservice', 'sync', 'sync-ops', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'noise-rules', 'llm-config', 'auto-response-test'];
+  const validSections = ['freshservice', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -69,13 +81,18 @@ export default function Settings() {
     { id: 'freshservice', label: 'FreshService', Icon: Plug },
     { id: 'sync', label: 'Sync Settings', Icon: RefreshCw },
     { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3 },
+    { id: 'backfill', label: 'Backfill', Icon: Download },
+    { id: 'workspaces', label: 'Workspaces', Icon: Globe },
+    { id: 'admins', label: 'Admins', Icon: Shield },
     { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
     { id: 'photos', label: 'Profile Photos', Icon: Camera },
     { id: 'business-hours', label: 'Business Hours', Icon: Clock },
     { id: 'tech-schedules', label: 'Tech Schedules', Icon: CalendarDays },
+    { id: 'tech-visibility', label: 'Tech Visibility', Icon: EyeOff },
     { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX },
     { id: 'llm-config', label: 'LLM Config', Icon: Bot },
     { id: 'auto-response-test', label: 'Test Auto-Response', Icon: FlaskConical },
+    { id: 'vacation-tracker', label: 'Vacation Tracker', Icon: CalendarDays },
   ];
 
   useEffect(() => {
@@ -264,6 +281,9 @@ export default function Settings() {
       const response = await api.post('/photos/sync');
 
       if (response.success) {
+        dataCache.clear();
+        sessionStorage.clear();
+
         setPhotoSyncStatus({
           success: true,
           message: `Photo sync completed! ${response.synced} photos synced, ${response.failed} failed.`,
@@ -310,6 +330,23 @@ export default function Settings() {
           <div className="h-4 w-px bg-gray-300"></div>
           <h1 className="text-sm font-semibold text-gray-900">Settings</h1>
         </div>
+        {currentWorkspace && availableWorkspaces.length > 1 && (
+          <select
+            value={currentWorkspace.id}
+            onChange={(e) => {
+              const newId = Number(e.target.value);
+              if (newId === currentWorkspace.id) return;
+              switchWorkspace(newId);
+              window.location.reload();
+            }}
+            className="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded px-2 py-1 font-medium cursor-pointer hover:bg-blue-100"
+            title="Switch workspace"
+          >
+            {availableWorkspaces.map(ws => (
+              <option key={ws.id} value={ws.id}>{ws.name}</option>
+            ))}
+          </select>
+        )}
       </header>
 
       {/* Main Content with Sidebar */}
@@ -491,6 +528,27 @@ export default function Settings() {
 
             {/* Sync Operations */}
             {activeSection === 'sync-ops' && <SyncOperationsPanel />}
+
+            {/* Backfill */}
+            {activeSection === 'backfill' && (
+              <div className="p-6">
+                <BackfillPanel />
+              </div>
+            )}
+
+            {/* Workspaces */}
+            {activeSection === 'workspaces' && (
+              <div className="p-6">
+                <WorkspaceManagementPanel />
+              </div>
+            )}
+
+            {/* Admins */}
+            {activeSection === 'admins' && (
+              <div className="p-6">
+                <AdminManagementPanel />
+              </div>
+            )}
 
             {/* Dashboard Configuration */}
             {activeSection === 'dashboard' && (
@@ -799,6 +857,13 @@ export default function Settings() {
               </div>
             )}
 
+            {/* Technician Visibility */}
+            {activeSection === 'tech-visibility' && (
+              <div className="p-6">
+                <TechnicianVisibilityPanel />
+              </div>
+            )}
+
             {/* Noise Rules */}
             {activeSection === 'noise-rules' && (
               <NoiseRulesPanel />
@@ -815,6 +880,13 @@ export default function Settings() {
             {activeSection === 'auto-response-test' && (
               <div className="p-6">
                 <AutoResponseTestInteractive />
+              </div>
+            )}
+
+            {/* Vacation Tracker */}
+            {activeSection === 'vacation-tracker' && (
+              <div className="p-6">
+                <VacationTrackerPanel />
               </div>
             )}
           </div>

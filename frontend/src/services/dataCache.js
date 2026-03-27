@@ -74,7 +74,7 @@ const STORAGE_PREFIX = 'tp_cache:';
 const MAX_PERSISTED = 10;
 
 function shouldPersist(key) {
-  return key.startsWith('dashboard:');
+  return key.includes('dashboard:');
 }
 
 function storageWrite(key, entry) {
