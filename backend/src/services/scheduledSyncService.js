@@ -1,5 +1,7 @@
 import cron from 'node-cron';
 import syncService from './syncService.js';
+import vtService from './vacationTrackerService.js';
+import vtRepo from './vacationTrackerRepository.js';
 import syncLogRepository from './syncLogRepository.js';
 import workspaceRepository from './workspaceRepository.js';
 import logger from '../utils/logger.js';
@@ -11,6 +13,7 @@ import logger from '../utils/logger.js';
 class ScheduledSyncService {
   constructor() {
     this.cronJobs = new Map();
+    this.vtCronJobs = new Map();
   }
 
   /**
@@ -28,6 +31,7 @@ class ScheduledSyncService {
 
       for (const ws of workspaces) {
         await this.startForWorkspace(ws);
+        await this.startVTSyncForWorkspace(ws);
       }
 
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
@@ -102,6 +106,58 @@ class ScheduledSyncService {
     });
   }
 
+  async startVTSyncForWorkspace(workspace) {
+    const wsId = workspace.id;
+    const wsName = workspace.name;
+
+    this.stopVTSyncForWorkspace(wsId);
+
+    const config = await vtRepo.getConfig(wsId);
+    if (!config?.apiKey || !config?.syncEnabled) {
+      return;
+    }
+
+    logger.info(`Starting VT sync for workspace "${wsName}" (id=${wsId}) every 60m`);
+
+    const job = cron.schedule(
+      '0 * * * *',
+      async () => {
+        const logEntry = await syncLogRepository.createLog({
+          syncType: 'vacation-tracker',
+          status: 'started',
+          workspaceId: wsId,
+        });
+        try {
+          logger.info(`Scheduled VT sync triggered for workspace "${wsName}"`);
+          const result = await vtService.fullSync(wsId);
+          await syncLogRepository.completeLog(logEntry.id, {
+            ticketsSynced: result.leaveDaysCreated || 0,
+            techniciansSynced: result.leavesProcessed || 0,
+          });
+          logger.info(`Scheduled VT sync completed for workspace "${wsName}": ${result.leaveDaysCreated} leave-days`);
+        } catch (error) {
+          logger.error(`Scheduled VT sync failed for workspace "${wsName}":`, error);
+          await syncLogRepository.failLog(logEntry.id, error.message);
+        }
+      },
+      {
+        scheduled: true,
+        timezone: workspace.defaultTimezone || 'America/Los_Angeles',
+      },
+    );
+
+    this.vtCronJobs.set(wsId, { job, workspaceName: wsName });
+  }
+
+  stopVTSyncForWorkspace(wsId) {
+    const entry = this.vtCronJobs.get(wsId);
+    if (entry) {
+      logger.info(`Stopping VT sync for workspace "${entry.workspaceName}"`);
+      entry.job.stop();
+      this.vtCronJobs.delete(wsId);
+    }
+  }
+
   stopForWorkspace(wsId) {
     const entry = this.cronJobs.get(wsId);
     if (entry) {
@@ -109,6 +165,7 @@ class ScheduledSyncService {
       entry.job.stop();
       this.cronJobs.delete(wsId);
     }
+    this.stopVTSyncForWorkspace(wsId);
   }
 
   stopAll() {
@@ -132,6 +189,7 @@ class ScheduledSyncService {
       const ws = await workspaceRepository.getById(workspaceId);
       this.stopForWorkspace(workspaceId);
       await this.startForWorkspace(ws);
+      await this.startVTSyncForWorkspace(ws);
     } else {
       return await this.start();
     }
