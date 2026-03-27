@@ -55,7 +55,26 @@ export function WorkspaceProvider({ children }) {
 
     if (workspaceData && !hasHydratedRef.current) {
       hasHydratedRef.current = true;
-      const workspaces = workspaceData.availableWorkspaces || [];
+      let workspaces = workspaceData.availableWorkspaces || [];
+
+      if (workspaces.length === 0) {
+        workspaceAPI.getAll().then(res => {
+          const fetched = (res?.data || res || []).map(ws => ({
+            id: ws.id, name: ws.name, slug: ws.slug, role: ws.role || 'viewer',
+          }));
+          if (fetched.length > 0) {
+            setAvailableWorkspaces(fetched);
+            if (fetched.length === 1) {
+              const ws = fetched[0];
+              setCurrentWorkspace(ws);
+              setWorkspaceId(ws.id);
+              persistWorkspace(ws);
+              workspaceAPI.select(ws.id).catch(() => {});
+            }
+          }
+        }).catch(() => {});
+      }
+
       setAvailableWorkspaces(workspaces);
 
       const serverSelectedId = workspaceData.selectedWorkspaceId;

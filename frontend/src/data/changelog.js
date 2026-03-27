@@ -1,6 +1,20 @@
-export const APP_VERSION = '1.5.0-preview';
+export const APP_VERSION = '1.5.1-preview';
 
 export const changelog = [
+  {
+    version: '1.5.1-preview',
+    date: 'March 27, 2026',
+    entries: [
+      { type: 'new', text: 'Hourly Vacation Tracker sync -- leave data is now automatically refreshed every hour via a scheduled cron job; sync results are logged and visible in Settings > Sync Operations alongside FreshService sync logs' },
+      { type: 'improved', text: 'Dashboard row alignment fixed -- technician name and badges (SELF, OFF, WFH, OTH) are now in separate fixed-width columns so weekly day cells always align vertically regardless of badge count' },
+      { type: 'improved', text: 'Dashboard total count display -- removed misleading "+" prefix, vertically centered with indigo color, consistent across Cards and Compact views' },
+      { type: 'improved', text: 'Workspace auto-retry on login -- if the workspace list fails to load during authentication (e.g., slow DB startup), the app automatically retries fetching workspaces instead of showing an empty list' },
+      { type: 'improved', text: 'Database connection pooling -- session store capped at 5 connections, Prisma pool limited to 10 connections; prevents connection exhaustion during development restarts and ensures stable production operation' },
+      { type: 'fix', text: 'Technician visibility persists across syncs -- FreshService sync no longer overwrites admin-set isActive status; disabled technicians stay hidden permanently until re-enabled in Settings' },
+      { type: 'fix', text: 'Production data migration -- existing tickets, technicians, and sync logs correctly assigned to workspace 1 (IT); non-IT FreshService agents cleaned up from IT workspace view' },
+      { type: 'database', text: 'Connection pool limits added to prevent pg_use_reserved_connections errors under load' },
+    ],
+  },
   {
     version: '1.5.0-preview',
     date: 'March 27, 2026',

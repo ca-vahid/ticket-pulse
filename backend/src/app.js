@@ -48,6 +48,7 @@ app.use(express.urlencoded({ extended: true }));
 // Session configuration with PostgreSQL store
 const pgPool = new Pool({
   connectionString: config.database.url,
+  max: 5,
 });
 
 app.use(

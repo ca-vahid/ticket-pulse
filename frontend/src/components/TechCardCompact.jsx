@@ -207,9 +207,8 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           )}
         </div>
 
-        {/* Name + Badges */}
-        <div className="flex items-center gap-2 w-[200px] flex-shrink-0">
-          {/* Rank Badge */}
+        {/* Name */}
+        <div className="flex items-center gap-2 w-[160px] flex-shrink-0">
           {isTopPerformer && (
             <div className={`
               flex items-center justify-center rounded-full w-5 h-5 flex-shrink-0
@@ -222,51 +221,33 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               )}
             </div>
           )}
-
-          {/* Name */}
-          <span className="font-semibold text-sm text-gray-900 truncate flex-1">
+          <span className="font-semibold text-sm text-gray-900 truncate">
             {technician.name}
           </span>
+        </div>
 
-          {/* Self-Starter Badge */}
+        {/* Badges (fixed width so day cells always align) */}
+        <div className="flex items-center gap-1 w-[90px] flex-shrink-0">
           {highSelfPickRate && (
-            <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-100 rounded-full flex-shrink-0">
+            <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-100 rounded-full">
               <Star className="w-2 h-2 text-purple-600 fill-purple-600" />
               <span className="text-[8px] text-purple-700 font-semibold">SELF</span>
             </div>
           )}
-
-          {/* Leave Badge */}
           {(() => {
-            if (viewMode === 'daily') {
-              const dateStr = selectedDate
-                ? (typeof selectedDate === 'string' ? selectedDate : selectedDate.toISOString().slice(0, 10))
-                : new Date().toISOString().slice(0, 10);
-              const leave = getLeaveForDate(technician.leaveInfo, dateStr);
-              if (!leave) return null;
-              const badge = getLeaveBadge(leave);
-              return (
-                <div className={`flex items-center gap-0.5 px-1.5 py-0.5 ${badge.badgeBg} ${badge.badgeText} border ${badge.badgeBorder} rounded-full flex-shrink-0`} title={getLeaveTooltip(leave)}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
-                  <span className="text-[8px] font-semibold">{badge.shortText}</span>
-                </div>
-              );
-            }
-            if (viewMode === 'weekly' && technician.leaveInfo) {
-              const todayStr = new Date().toISOString().slice(0, 10);
-              const leave = getLeaveForDate(technician.leaveInfo, todayStr);
-              if (!leave) return null;
-              const badge = getLeaveBadge(leave);
-              return (
-                <div className={`flex items-center gap-0.5 px-1.5 py-0.5 ${badge.badgeBg} ${badge.badgeText} border ${badge.badgeBorder} rounded-full flex-shrink-0`} title={getLeaveTooltip(leave)}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
-                  <span className="text-[8px] font-semibold">{badge.shortText}</span>
-                </div>
-              );
-            }
-            return null;
+            const dateStr = viewMode === 'daily'
+              ? (selectedDate ? (typeof selectedDate === 'string' ? selectedDate : selectedDate.toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10))
+              : new Date().toISOString().slice(0, 10);
+            const leave = getLeaveForDate(technician.leaveInfo, dateStr);
+            if (!leave) return null;
+            const badge = getLeaveBadge(leave);
+            return (
+              <div className={`flex items-center gap-0.5 px-1.5 py-0.5 ${badge.badgeBg} ${badge.badgeText} border ${badge.badgeBorder} rounded-full`} title={getLeaveTooltip(leave)}>
+                <div className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
+                <span className="text-[8px] font-semibold">{badge.shortText}</span>
+              </div>
+            );
           })()}
-
         </div>
 
         {/* Weekly Breakdown Mini-Calendar - Only show in weekly view */}
