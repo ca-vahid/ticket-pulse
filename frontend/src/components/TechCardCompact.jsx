@@ -329,11 +329,11 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               return (
                 <div
                   key={day.date}
-                  className={`flex flex-col items-center cursor-pointer ${containerClass}`}
+                  className={`flex flex-col items-center cursor-pointer w-[38px] ${containerClass}`}
                   title={fullTooltip}
                   onClick={handleDayBoxClick}
                 >
-                  <div className="flex items-center gap-0.5">
+                  <div className="flex items-center justify-center gap-0.5 h-3">
                     {isHolidayDay && (
                       <div className={`w-1 h-1 rounded-full ${dateStyling.isCanadian ? 'bg-rose-500' : 'bg-indigo-400'}`} />
                     )}
