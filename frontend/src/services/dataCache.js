@@ -1,5 +1,5 @@
 import { formatDateLocal } from '../utils/dateHelpers';
-import { getWorkspaceId, getGlobalExcludeNoise } from './api';
+import { getWorkspaceId } from './api';
 
 // ---------------------------------------------------------------------------
 // Cache Key Factory
@@ -16,28 +16,24 @@ function wsPrefix() {
   return wsId ? `ws${wsId}:` : '';
 }
 
-function noiseSuffix() {
-  return getGlobalExcludeNoise() ? ':noNoise' : '';
-}
-
 export const cacheKeys = {
   dailyDashboard: (tz, date) =>
-    `${wsPrefix()}dashboard:daily:tz=${tz}:date=${normalizeDateParam(date)}${noiseSuffix()}`,
+    `${wsPrefix()}dashboard:daily:tz=${tz}:date=${normalizeDateParam(date)}`,
 
   weeklyStats: (tz, weekStart) =>
-    `${wsPrefix()}dashboard:weekStats:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}${noiseSuffix()}`,
+    `${wsPrefix()}dashboard:weekStats:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
 
   weeklyDashboard: (tz, weekStart) =>
-    `${wsPrefix()}dashboard:weekly:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}${noiseSuffix()}`,
+    `${wsPrefix()}dashboard:weekly:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
 
   monthlyDashboard: (tz, monthStart) =>
-    `${wsPrefix()}dashboard:monthly:tz=${tz}:monthStart=${normalizeDateParam(monthStart)}${noiseSuffix()}`,
+    `${wsPrefix()}dashboard:monthly:tz=${tz}:monthStart=${normalizeDateParam(monthStart)}`,
 
   techDaily: (id, tz, date) =>
-    `${wsPrefix()}tech:daily:id=${id}:tz=${tz}:date=${normalizeDateParam(date)}${noiseSuffix()}`,
+    `${wsPrefix()}tech:daily:id=${id}:tz=${tz}:date=${normalizeDateParam(date)}`,
 
   techWeekly: (id, tz, weekStart) =>
-    `${wsPrefix()}tech:weekly:id=${id}:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}${noiseSuffix()}`,
+    `${wsPrefix()}tech:weekly:id=${id}:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
 
   techCSAT: (id) =>
     `${wsPrefix()}tech:csat:id=${id}`,

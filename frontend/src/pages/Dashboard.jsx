@@ -4,6 +4,7 @@ import { useDashboard } from '../contexts/DashboardContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
+import { dataCache } from '../services/dataCache';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
 import SearchBox from '../components/SearchBox';
@@ -395,8 +396,8 @@ export default function Dashboard() {
     const newValue = !excludeNoise;
     setExcludeNoise(newValue);
     setGlobalExcludeNoise(newValue);
-    invalidateCurrentView();
-    await new Promise(resolve => setTimeout(resolve, 200));
+    dataCache.clear();
+    await new Promise(resolve => setTimeout(resolve, 100));
     if (viewMode === 'weekly') {
       const weekStartStr = formatDateLocal(selectedWeek);
       await fetchWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
@@ -410,7 +411,7 @@ export default function Dashboard() {
     }
     const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
     await fetchWeeklyStats('America/Los_Angeles', formatDateLocal(dateToUse));
-  }, [excludeNoise, viewMode, selectedDate, selectedWeek, selectedMonth, invalidateCurrentView, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard, fetchWeeklyStats, formatDateLocal]);
+  }, [excludeNoise, viewMode, selectedDate, selectedWeek, selectedMonth, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard, fetchWeeklyStats, formatDateLocal]);
 
   const handleRetryLoad = useCallback(async () => {
     await refreshCurrentView();
