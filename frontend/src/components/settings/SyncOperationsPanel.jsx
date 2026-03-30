@@ -99,15 +99,25 @@ function TimelineStrip() {
     const fetchTimeline = async () => {
       try {
         const cutoff = new Date(Date.now() - 48 * 3600000);
-        const res = await syncAPI.getLogs({
-          startDate: cutoff.toISOString(),
-          status: 'completed',
-          limit: 1000,
-        });
-        if (mounted) {
-          const logs = res?.data || res?.logs || [];
-          setTimelineLogs(Array.isArray(logs) ? logs : []);
+        const allLogs = [];
+        let offset = 0;
+        const pageSize = 200;
+
+        while (true) {
+          const res = await syncAPI.getLogs({
+            startDate: cutoff.toISOString(),
+            status: 'completed',
+            limit: pageSize,
+            offset,
+          });
+          const page = res?.data || [];
+          if (!Array.isArray(page) || page.length === 0) break;
+          allLogs.push(...page);
+          if (!res?.pagination?.hasMore) break;
+          offset += pageSize;
         }
+
+        if (mounted) setTimelineLogs(allLogs);
       } catch { /* empty */ }
     };
     fetchTimeline();
