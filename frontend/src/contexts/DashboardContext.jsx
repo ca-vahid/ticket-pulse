@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import api, { dashboardAPI, getWorkspaceId } from '../services/api';
+import api, { dashboardAPI, getWorkspaceId, getGlobalExcludeNoise } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { dataCache, cacheKeys, policyForDate, TECH_POLICY, CSAT_POLICY, TTL } from '../services/dataCache';
 import { formatDateLocal } from '../utils/dateHelpers';
@@ -90,10 +90,12 @@ export function DashboardProvider({ children }) {
     monday.setHours(0, 0, 0, 0);
     const weekStr = formatDateLocal(monday);
 
+    const noiseParam = getGlobalExcludeNoise() ? { excludeNoise: 'true' } : {};
+
     const weeklyKey = cacheKeys.weeklyDashboard(TZ, weekStr);
     dataCache.prefetch(
       weeklyKey,
-      () => api.get('/dashboard/weekly', { params: { timezone: TZ, weekStart: weekStr }, _speculative: true }),
+      () => api.get('/dashboard/weekly', { params: { timezone: TZ, weekStart: weekStr, ...noiseParam }, _speculative: true }),
       { ttl: TTL.HIST, softTtl: TTL.HIST_SOFT },
     );
 
@@ -101,14 +103,14 @@ export function DashboardProvider({ children }) {
     const todayPolicy = policyForDate(null);
     dataCache.prefetch(
       todayKey,
-      () => api.get('/dashboard', { params: { timezone: TZ }, _speculative: true }),
+      () => api.get('/dashboard', { params: { timezone: TZ, ...noiseParam }, _speculative: true }),
       todayPolicy,
     );
 
     const weekStatsKey = cacheKeys.weeklyStats(TZ, null);
     dataCache.prefetch(
       weekStatsKey,
-      () => api.get('/dashboard/weekly-stats', { params: { timezone: TZ }, _speculative: true }),
+      () => api.get('/dashboard/weekly-stats', { params: { timezone: TZ, ...noiseParam }, _speculative: true }),
       { ttl: TTL.HIST, softTtl: TTL.HIST_SOFT },
     );
   }, []);
