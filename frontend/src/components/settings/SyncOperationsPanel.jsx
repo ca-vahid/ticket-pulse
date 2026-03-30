@@ -91,14 +91,35 @@ function StatCard({ icon: Icon, label, value, sub, color = 'blue' }) {
   );
 }
 
-function TimelineStrip({ logs }) {
-  if (!logs || logs.length === 0) return null;
+function TimelineStrip() {
+  const [timelineLogs, setTimelineLogs] = useState([]);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchTimeline = async () => {
+      try {
+        const cutoff = new Date(Date.now() - 48 * 3600000);
+        const res = await syncAPI.getLogs({
+          startDate: cutoff.toISOString(),
+          status: 'completed',
+          limit: 1000,
+        });
+        if (mounted) {
+          const logs = res?.data || res?.logs || [];
+          setTimelineLogs(Array.isArray(logs) ? logs : []);
+        }
+      } catch { /* empty */ }
+    };
+    fetchTimeline();
+    const interval = setInterval(fetchTimeline, 30000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, []);
 
   const now = Date.now();
   const windowMs = 48 * 3600000;
   const windowStart = now - windowMs;
 
-  const completedLogs = logs
+  const completedLogs = timelineLogs
     .filter(l => l.status === 'completed' && l.completedAt)
     .map(l => ({
       start: Math.max(new Date(l.startedAt).getTime(), windowStart),
@@ -392,7 +413,7 @@ export default function SyncOperationsPanel() {
           </div>
         )}
 
-        <TimelineStrip logs={logs} />
+        <TimelineStrip />
       </div>
 
       {/* Log Viewer */}
