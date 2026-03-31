@@ -77,7 +77,7 @@ export function useSSE(options = {}) {
         };
 
         eventSource.addEventListener('connected', (event) => {
-          console.log('SSE connected:', event.data);
+          // SSE connection established
           retryAttemptRef.current = 0;
           setConnectionStatus('connected');
           if (onConnected) {
@@ -86,7 +86,7 @@ export function useSSE(options = {}) {
         });
 
         eventSource.addEventListener('sync-completed', (event) => {
-          console.log('Sync completed:', event.data);
+          // Sync completed event received
           const data = JSON.parse(event.data);
           setLastEvent({ type: 'sync-completed', data, timestamp: Date.now() });
           if (onSyncCompleted) {
@@ -95,7 +95,7 @@ export function useSSE(options = {}) {
         });
 
         eventSource.onmessage = (event) => {
-          console.log('SSE message:', event.data);
+          // SSE message received
           const data = JSON.parse(event.data);
           setLastEvent({ type: 'message', data, timestamp: Date.now() });
           if (onMessage) {

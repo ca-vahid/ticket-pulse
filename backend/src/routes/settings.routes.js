@@ -200,7 +200,7 @@ router.get(
   '/technicians',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const techs = await technicianRepository.getAll(req.workspaceId);
+    const techs = await technicianRepository.getAll(req.workspaceId, { lite: true });
     res.json({
       success: true,
       data: techs.map(t => ({

@@ -75,7 +75,7 @@ export default function AutoResponseTestInteractive() {
         timeout: 90000, // 90 second timeout for slow LLM calls
       });
       
-      console.log('Dry-run response:', response.data);
+      // Dry-run completed
       
       // Include success flag from parent response
       setDryRunResult({

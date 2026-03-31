@@ -1,6 +1,20 @@
-export const APP_VERSION = '1.5.1-preview';
+export const APP_VERSION = '1.5.2-preview';
 
 export const changelog = [
+  {
+    version: '1.5.2-preview',
+    date: 'March 31, 2026',
+    entries: [
+      { type: 'fix', text: 'Tech Visibility panel now loads reliably -- replaced heavy query (loaded all tickets + requesters for every technician) with a lightweight query that fetches only the fields needed; eliminates timeouts on large workspaces' },
+      { type: 'fix', text: 'Database connection stability -- removed prisma.$disconnect() calls from photo sync route handlers that were severing the shared DB connection for the entire application; visiting Profile Photos no longer causes other pages to lose data on refresh' },
+      { type: 'fix', text: 'Noise filter toggle reliability -- sync service now re-evaluates isNoise/noiseRuleMatched for every ticket during upsert using workspace-scoped rules; backfilled IT workspace (2,809 noise tickets updated); Open/Pending counts now visible in weekly view header for clearer filter feedback' },
+      { type: 'fix', text: 'Backend crash prevention -- 404 routes now use operational NotFoundError instead of generic errors that triggered restart warnings; added placeholder /api/notifications endpoint to prevent recurring 404s' },
+      { type: 'improved', text: 'Tech Visibility panel shows clear error messages with Retry button when loading fails (auth errors, network issues) instead of silently showing an empty list' },
+      { type: 'improved', text: 'Frontend code cleanup -- removed 20+ debug console.log statements from Dashboard, DashboardContext, SSE hooks, Visuals, and LLM panels; all sync progress is now communicated through the UI sync log panel' },
+      { type: 'improved', text: 'Resolved all 81 ESLint errors across frontend -- fixed unused imports, unescaped JSX entities, indentation issues, and constant conditions in BackfillPanel, SyncOperationsPanel, VacationTrackerPanel, Dashboard, TimelineExplorer, and WorkspacePicker' },
+      { type: 'database', text: 'No schema changes -- all fixes are code-level. No migration or prisma db push required for this release.' },
+    ],
+  },
   {
     version: '1.5.1-preview',
     date: 'March 27, 2026',

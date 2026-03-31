@@ -21,7 +21,7 @@ export default function TechDetailHeader({
   isToday,
   isCurrentWeek,
   isCurrentMonth,
-  monthLabel,
+  monthLabel: _monthLabel,
 }) {
   const weekDisplayLabel = (() => {
     const ws = technician.weekStart

@@ -51,9 +51,9 @@ function PriorityDot({ priority }) {
 function CSATDot({ score, totalScore, feedback }) {
   const color =
     score >= 4 ? 'text-emerald-600' :
-    score === 3 ? 'text-amber-600' :
-    score === 2 ? 'text-orange-600' :
-    'text-red-600';
+      score === 3 ? 'text-amber-600' :
+        score === 2 ? 'text-orange-600' :
+          'text-red-600';
   const emoji = score >= 4 ? '😊' : score === 3 ? '😐' : score === 2 ? '😕' : '😞';
   return (
     <span className={`text-[11px] font-semibold ${color}`} title={feedback || 'Customer satisfaction'}>

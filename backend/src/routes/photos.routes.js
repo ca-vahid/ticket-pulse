@@ -85,8 +85,6 @@ router.post(
       }
     }
 
-    await prisma.$disconnect();
-
     logger.info(`Photo sync completed: ${synced} synced, ${failed} failed`);
     clearReadCache();
 
@@ -135,7 +133,6 @@ router.post(
     });
 
     if (!technician) {
-      await prisma.$disconnect();
       return res.status(404).json({
         success: false,
         message: 'Technician not found',
@@ -143,7 +140,6 @@ router.post(
     }
 
     if (!technician.email) {
-      await prisma.$disconnect();
       return res.status(400).json({
         success: false,
         message: 'Technician has no email address',
@@ -163,8 +159,6 @@ router.post(
         photoSyncedAt: new Date(),
       },
     });
-
-    await prisma.$disconnect();
 
     res.json({
       success: true,
@@ -197,8 +191,6 @@ router.get(
         name: 'asc',
       },
     });
-
-    await prisma.$disconnect();
 
     const withPhotos = technicians.filter(t => t.photoUrl).length;
     const withoutPhotos = technicians.filter(t => !t.photoUrl).length;

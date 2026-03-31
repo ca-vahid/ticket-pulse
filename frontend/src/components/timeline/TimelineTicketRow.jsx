@@ -12,7 +12,7 @@ import { isOvernight } from './timelineUtils';
  *   onExcludeCategory — callback(category) to add category to exclude filter
  *   idx              — list index (used for key uniqueness)
  */
-export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeCategory, idx, showFullDate }) {
+export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeCategory, idx: _idx, showFullDate }) {
   const picked = ticket._picked;
   const overnight = isOvernight(ticket);
   const wait = fmtWaitTime(ticket);

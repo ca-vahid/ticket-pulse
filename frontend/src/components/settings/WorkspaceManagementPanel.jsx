@@ -232,7 +232,7 @@ export default function WorkspaceManagementPanel() {
       {!workspaces && !isDiscovering && (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
           <Globe className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-500 text-sm">Click "Discover Workspaces" to fetch all workspaces from your FreshService account.</p>
+          <p className="text-gray-500 text-sm">Click &quot;Discover Workspaces&quot; to fetch all workspaces from your FreshService account.</p>
           <p className="text-gray-400 text-xs mt-1">New workspaces can be activated with one click. Use the Backfill tab to import historical data.</p>
         </div>
       )}

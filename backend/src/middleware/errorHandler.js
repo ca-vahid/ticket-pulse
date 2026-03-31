@@ -1,5 +1,6 @@
 import logger from '../utils/logger.js';
 import { formatErrorResponse, isOperationalError } from '../utils/errors.js';
+import { NotFoundError } from '../utils/errors.js';
 
 /**
  * Global error handling middleware
@@ -49,7 +50,6 @@ export function asyncHandler(fn) {
  * 404 handler for undefined routes
  */
 export function notFoundHandler(req, res, next) {
-  const error = new Error(`Route not found: ${req.method} ${req.path}`);
-  error.statusCode = 404;
+  const error = new NotFoundError(`Route not found: ${req.method} ${req.path}`);
   next(error);
 }

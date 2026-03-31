@@ -142,8 +142,6 @@ export default function LlmAdminPanel() {
       setPublishedConfig(published);
       
       const hasChanges = computeHasUnpublishedChanges(draftConfig, published);
-      console.log('Draft config version:', draftConfig?.version, 'Published version:', published?.version);
-      console.log('Has unpublished changes:', hasChanges);
       setHasUnpublishedChanges(hasChanges);
     } catch (error) {
       console.error('Failed to fetch config:', error);

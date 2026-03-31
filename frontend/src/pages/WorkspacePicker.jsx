@@ -7,7 +7,7 @@ import { Layers, LogOut, ArrowRight } from 'lucide-react';
 export default function WorkspacePicker() {
   const { availableWorkspaces, selectWorkspace } = useWorkspace();
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
   const [selecting, setSelecting] = useState(null);
   const [error, setError] = useState(null);
 
@@ -59,9 +59,9 @@ export default function WorkspacePicker() {
               className={`
                 w-full text-left p-5 bg-white rounded-xl border-2 transition-all
                 ${selecting === ws.id
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
-                }
+              ? 'border-blue-500 bg-blue-50'
+              : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
+            }
                 ${selecting !== null && selecting !== ws.id ? 'opacity-50' : ''}
                 disabled:cursor-not-allowed
               `}

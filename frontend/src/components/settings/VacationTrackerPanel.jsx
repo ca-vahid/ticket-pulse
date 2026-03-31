@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { vacationTrackerAPI, dashboardAPI } from '../../services/api';
 import {
   CalendarDays, Key, CheckCircle, XCircle, Loader, RefreshCw,
-  Users, Link2, Unlink, Save, Zap, ArrowRight,
+  Users, Link2, Unlink, Save, Zap,
 } from 'lucide-react';
 
 const CATEGORIES = [
@@ -313,7 +313,7 @@ export default function VacationTrackerPanel() {
           {leaveTypes.length === 0 ? (
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
               <CalendarDays className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500 text-sm">No leave types synced yet. Click "Fetch from VT" to load them.</p>
+              <p className="text-gray-500 text-sm">No leave types synced yet. Click &quot;Fetch from VT&quot; to load them.</p>
             </div>
           ) : (
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -389,7 +389,7 @@ export default function VacationTrackerPanel() {
           {userMappings.length === 0 ? (
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
               <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500 text-sm">No users synced yet. Click "Sync & Auto-Match" to fetch VT users and auto-match by email.</p>
+              <p className="text-gray-500 text-sm">No users synced yet. Click &quot;Sync &amp; Auto-Match&quot; to fetch VT users and auto-match by email.</p>
             </div>
           ) : (
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">

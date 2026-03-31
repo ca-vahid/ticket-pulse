@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import api, { dashboardAPI, getWorkspaceId } from '../services/api';
+import { dashboardAPI, getWorkspaceId } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { dataCache, cacheKeys, policyForDate, TECH_POLICY, CSAT_POLICY, TTL } from '../services/dataCache';
 import { formatDateLocal } from '../utils/dateHelpers';
@@ -422,6 +422,8 @@ export function DashboardProvider({ children }) {
   const forceRefreshNoCache = useCallback(async () => {
     dataCache.clear();
     const { viewMode, date, weekStart, monthStart } = currentViewRef.current;
+    setError(null);
+    setIsRefreshing(true);
     try {
       if (viewMode === 'weekly') {
         const res = await dashboardAPI.getWeeklyDashboard(weekStart, TZ);
@@ -444,14 +446,19 @@ export function DashboardProvider({ children }) {
       }
     } catch (err) {
       console.error('Force refresh error:', err);
+      setError(err.message || 'Failed to refresh dashboard data');
+      throw err;
+    } finally {
+      setIsColdLoading(false);
+      setIsRefreshing(false);
     }
   }, []);
 
   // ------------------------------------------------------------------
   // SSE sync-completed handler with targeted invalidation
   // ------------------------------------------------------------------
-  const handleSyncCompleted = useCallback((data) => {
-    console.log('Sync completed, invalidating cache and refreshing:', data);
+  const handleSyncCompleted = useCallback((_data) => {
+    // Invalidate cache and refresh after sync completion
 
     // Invalidate today + current week + current month
     invalidateToday();
@@ -470,7 +477,7 @@ export function DashboardProvider({ children }) {
   }, [invalidateToday, invalidateCurrentWeek, invalidateCurrentMonth, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard]);
 
   const handleConnected = useCallback(() => {
-    console.log('SSE connected');
+    // SSE connection established
   }, []);
 
   const handleError = useCallback((error) => {

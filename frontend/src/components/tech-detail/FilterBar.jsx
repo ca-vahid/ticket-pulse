@@ -3,7 +3,7 @@ import { Filter, X, Check } from 'lucide-react';
 
 // ── Debounced text input ──────────────────────────────────────────────────────
 
-function DebouncedInput({ value: externalValue, onChange, delay = 400, ...props }) {
+function DebouncedInput({ value: externalValue, onChange, delay = 400, ..._props }) {
   const [localValue, setLocalValue] = useState(externalValue);
   const timerRef = useRef(null);
 

@@ -813,7 +813,7 @@ export default function Settings() {
                             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-colors shadow-sm"
                           >
                             <Save className="w-4 h-4" />
-                            {isSavingAll ? 'Saving...' : `Save All Schedules`}
+                            {isSavingAll ? 'Saving...' : 'Save All Schedules'}
                           </button>
                           <span className="text-xs text-gray-400">{activeTechs.length} active technicians</span>
                         </div>

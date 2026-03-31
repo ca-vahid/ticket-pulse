@@ -8,14 +8,17 @@ import { DatabaseError, NotFoundError } from '../utils/errors.js';
 class TechnicianRepository {
   /**
    * Get all technicians (active and inactive)
+   * @param {number|null} workspaceId
+   * @param {object} options
+   * @param {boolean} options.lite - If true, skip ticket/requester includes (for settings panels)
    * @returns {Promise<Array>} Array of all technicians
    */
-  async getAll(workspaceId = null) {
+  async getAll(workspaceId = null, { lite = false } = {}) {
     try {
       const where = workspaceId ? { workspaceId } : {};
       return await prisma.technician.findMany({
         where,
-        include: {
+        include: lite ? undefined : {
           tickets: {
             include: {
               requester: true,

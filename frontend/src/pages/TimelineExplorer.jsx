@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, Layers, RefreshCw,
-  Users, Check, X as XIcon, Search, PanelLeftClose, PanelLeftOpen,
+  Users, Check, Search, PanelLeftClose, PanelLeftOpen,
   EyeOff, Eye, VolumeX, Volume2,
 } from 'lucide-react';
 import { dashboardAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
@@ -507,7 +507,7 @@ export default function TimelineExplorer() {
     const allNotPicked = [];
 
     if (techDataArray.length === 1) {
-      const av = techDataArray[0].avoidance;
+      const _av = techDataArray[0].avoidance;
       const firstName = tcs[0].firstName;
       const photoUrl = tcs[0].photoUrl;
       const accent = tcs[0].accent;

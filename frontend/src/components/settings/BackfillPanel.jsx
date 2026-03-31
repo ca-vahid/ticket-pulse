@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { syncAPI } from '../../services/api';
 import {
-  Download, Play, Square, CheckCircle, XCircle, Loader,
+  Download, Play, CheckCircle, XCircle, Loader,
   Calendar, Clock, SkipForward, Zap, BarChart3, AlertTriangle,
 } from 'lucide-react';
 
@@ -98,10 +98,9 @@ export default function BackfillPanel() {
       const decoder = new TextDecoder();
       let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
+      let readResult = await reader.read();
+      while (!readResult.done) {
+        const { value } = readResult;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
@@ -118,6 +117,7 @@ export default function BackfillPanel() {
             currentEvent = null;
           }
         }
+        readResult = await reader.read();
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -241,7 +241,7 @@ export default function BackfillPanel() {
                   <SkipForward className="w-3.5 h-3.5" />
                   Skip existing tickets
                 </span>
-                <span className="text-xs text-gray-500 block">Won't re-process tickets already in the database</span>
+                <span className="text-xs text-gray-500 block">Won&apos;t re-process tickets already in the database</span>
               </div>
             </label>
 
@@ -403,8 +403,8 @@ export default function BackfillPanel() {
                 {logs.map((log, i) => (
                   <div key={i} className={`${
                     log.type === 'error' ? 'text-red-400' :
-                    log.type === 'success' ? 'text-green-400' :
-                    'text-gray-300'
+                      log.type === 'success' ? 'text-green-400' :
+                        'text-gray-300'
                   }`}>
                     <span className="text-gray-600">[{log.time}]</span> {log.msg}
                   </div>

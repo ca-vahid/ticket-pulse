@@ -486,6 +486,15 @@ class SyncService {
       for (const ticket of ticketsWithTechIds) {
         try {
           const existingTicket = existingTicketsMap.get(ticket.freshserviceTicketId.toString());
+          const ticketWorkspaceId = ticket.workspaceId ?? options.workspaceId ?? 1;
+
+          // Always re-evaluate noise classification on sync so rule changes
+          // and workspace-specific rules are reflected in current data.
+          const { isNoise, ruleId } = await noiseRuleService.evaluate(
+            ticket.subject,
+            ticket.createdAt ? new Date(ticket.createdAt) : null,
+            ticketWorkspaceId,
+          );
 
           // Get analysis from map or use existing/default values
           let isSelfPicked = false;
@@ -506,6 +515,9 @@ class SyncService {
           // Upsert ticket
           const upsertedTicket = await ticketRepository.upsert({
             ...ticket,
+            workspaceId: ticketWorkspaceId,
+            isNoise,
+            noiseRuleMatched: ruleId,
             isSelfPicked,
             assignedBy,
             firstAssignedAt,

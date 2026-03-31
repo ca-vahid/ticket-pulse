@@ -178,15 +178,10 @@ export default function Visuals() {
   // Save selections to database
   const saveSelections = async (newSelectedIds, newManagerId) => {
     try {
-      console.log('Saving selections:', {
-        selectedIds: Array.from(newSelectedIds),
-        managerId: newManagerId,
-      });
       await visualsAPI.batchUpdateVisibility(
         Array.from(newSelectedIds),
         newManagerId,
       );
-      console.log('Selections saved successfully');
     } catch (err) {
       console.error('Failed to save selections:', err);
     }

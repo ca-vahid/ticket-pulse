@@ -3,8 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
-import { syncAPI, dashboardAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
-import { dataCache } from '../services/dataCache';
+import { syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
 import SearchBox from '../components/SearchBox';
@@ -34,8 +33,6 @@ import {
   Calendar,
   Eye,
   EyeOff,
-  Maximize2,
-  Minimize2,
   TrendingUp,
   TrendingDown,
   Minus,
@@ -45,8 +42,6 @@ import {
   CheckSquare,
   Clock,
   Map,
-  Layers,
-  GitBranch,
   LayoutGrid,
   List,
   VolumeX,
@@ -397,7 +392,13 @@ export default function Dashboard() {
     const newValue = !excludeNoise;
     setExcludeNoise(newValue);
     setGlobalExcludeNoise(newValue);
-    await forceRefreshNoCache();
+    try {
+      await forceRefreshNoCache();
+    } catch (err) {
+      // Roll back toggle if refresh fails, so UI state matches server data.
+      setExcludeNoise(!newValue);
+      setGlobalExcludeNoise(!newValue);
+    }
   }, [excludeNoise, forceRefreshNoCache]);
 
   const handleRetryLoad = useCallback(async () => {
@@ -405,7 +406,6 @@ export default function Dashboard() {
   }, [refreshCurrentView]);
 
   const handleRefresh = useCallback(async () => {
-    console.log('[SYNC] Starting sync process...');
     setSyncLogs([]); // Clear previous logs
     setShowSyncDetails(true); // Auto-show details panel
     addSyncLog('Starting sync process...', 'info');
@@ -418,11 +418,9 @@ export default function Dashboard() {
 
       // Check initial status
       const initialStatus = await syncAPI.getStatus();
-      console.log('[SYNC] Initial status:', initialStatus.data);
       addSyncLog(`Initial status: ${initialStatus.data?.sync?.isRunning ? 'Sync already running' : 'Ready to sync'}`, 'info');
 
       // Trigger the sync (this waits for completion)
-      console.log('[SYNC] Calling trigger API...');
       addSyncLog('Calling sync API endpoint...', 'info');
       addSyncLog('⏱ This may take several minutes due to FreshService API rate limits (1 request/second)', 'warn');
       addSyncLog('The backend will process each ticket sequentially to avoid hitting rate limits', 'info');
@@ -430,8 +428,6 @@ export default function Dashboard() {
       const startTime = Date.now();
       const triggerResult = await syncAPI.trigger();
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-
-      console.log('[SYNC] Trigger result:', triggerResult.data);
 
       // Check if sync was skipped because one is already running
       if (triggerResult.data?.status === 'skipped') {
@@ -502,12 +498,8 @@ export default function Dashboard() {
 
       // After trigger returns, sync should be complete
       // Get the final status
-      console.log('[SYNC] Fetching final status...');
       const finalStatus = await syncAPI.getStatus();
-      console.log('[SYNC] Final status:', finalStatus.data);
-
       const latestSync = finalStatus.data?.latestSync;
-      console.log('[SYNC] Latest sync record:', latestSync);
 
       if (latestSync?.status === 'completed') {
         const techCount = triggerResult.data?.techniciansSynced || 0;
@@ -520,7 +512,6 @@ export default function Dashboard() {
         setSyncStatus('success');
         setSyncMessage(`Sync completed! Synced ${techCount} technicians and ${ticketCount} tickets.`);
 
-        console.log('[SYNC] Refreshing dashboard data...');
         addSyncLog('Refreshing dashboard data...', 'info');
         await refreshCurrentView();
         addSyncLog('Dashboard data refreshed successfully', 'success');
@@ -577,7 +568,6 @@ export default function Dashboard() {
   }, [selectedDate, selectedWeek, viewMode, fetchDashboard, formatDateLocal, refreshCurrentView]);
 
   const handleSyncWeek = useCallback(async () => {
-    console.log('[SYNC WEEK] Starting week sync process...');
     setSyncLogs([]); // Clear previous logs
     setShowSyncDetails(true); // Auto-show details panel
     addSyncLog('Starting week sync process...', 'info');
@@ -1638,27 +1628,31 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Open - Daily only */}
-                {viewMode === 'daily' && (
+                {/* Open - Daily and Weekly */}
+                {(viewMode === 'daily' || viewMode === 'weekly') && (
                   <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
                     <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-yellow-500 bg-opacity-30 flex-none">
                       <FolderOpen className="w-3.5 h-3.5 text-white" />
                     </div>
                     <div>
-                      <div className="text-base font-bold leading-tight">{displayStats.openOnlyCount || 0}</div>
+                      <div className="text-base font-bold leading-tight">
+                        {viewMode === 'weekly' ? (displayStats.weeklyOpenOnly || 0) : (displayStats.openOnlyCount || 0)}
+                      </div>
                       <div className="text-[9px] text-blue-100 uppercase font-medium">Open</div>
                     </div>
                   </div>
                 )}
 
-                {/* Pending - Daily only */}
-                {viewMode === 'daily' && (
+                {/* Pending - Daily and Weekly */}
+                {(viewMode === 'daily' || viewMode === 'weekly') && (
                   <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
                     <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-orange-500 bg-opacity-30 flex-none">
                       <Clock className="w-3.5 h-3.5 text-white" />
                     </div>
                     <div>
-                      <div className="text-base font-bold leading-tight">{displayStats.pendingCount || 0}</div>
+                      <div className="text-base font-bold leading-tight">
+                        {viewMode === 'weekly' ? (displayStats.weeklyPending || 0) : (displayStats.pendingCount || 0)}
+                      </div>
                       <div className="text-[9px] text-blue-100 uppercase font-medium">Pending</div>
                     </div>
                   </div>

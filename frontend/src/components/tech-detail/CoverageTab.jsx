@@ -204,7 +204,7 @@ export default function CoverageTab({
                           <div className="text-[9px] text-slate-300 mb-0.5">{dayLabel}</div>
                           {hInfo.isHoliday && (
                             <div className={`text-[7px] font-semibold mb-0.5 truncate ${hInfo.isCanadian ? 'text-rose-600' : 'text-indigo-500'}`}>
-                              {hInfo.isCanadian ? `🍁` : `🇺🇸`}
+                              {hInfo.isCanadian ? '🍁' : '🇺🇸'}
                             </div>
                           )}
                           <div className="text-base font-bold text-slate-800">{dayTotal}</div>

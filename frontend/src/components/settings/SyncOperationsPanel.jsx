@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CheckCircle, XCircle, Loader, Clock, Activity, AlertTriangle,
-  Download, Search, ChevronDown, ChevronUp, RefreshCw, X,
+  Download, Search, RefreshCw, X,
   BarChart3, Zap, Timer, Star,
 } from 'lucide-react';
 import { syncAPI, healthCheck } from '../../services/api';
@@ -103,7 +103,8 @@ function TimelineStrip() {
         let offset = 0;
         const pageSize = 200;
 
-        while (true) {
+        let hasMorePages = true;
+        while (hasMorePages) {
           const res = await syncAPI.getLogs({
             startDate: cutoff.toISOString(),
             status: 'completed',
@@ -111,10 +112,16 @@ function TimelineStrip() {
             offset,
           });
           const page = res?.data || [];
-          if (!Array.isArray(page) || page.length === 0) break;
-          allLogs.push(...page);
-          if (!res?.pagination?.hasMore) break;
-          offset += pageSize;
+          if (!Array.isArray(page) || page.length === 0) {
+            hasMorePages = false;
+          } else {
+            allLogs.push(...page);
+            if (!res?.pagination?.hasMore) {
+              hasMorePages = false;
+            } else {
+              offset += pageSize;
+            }
+          }
         }
 
         if (mounted) setTimelineLogs(allLogs);
