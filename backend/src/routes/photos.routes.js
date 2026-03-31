@@ -4,10 +4,9 @@ import { requireAuth } from '../middleware/auth.js';
 import azureAdService from '../services/azureAdService.js';
 import { clearReadCache } from '../services/dashboardReadCache.js';
 import logger from '../utils/logger.js';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../services/prisma.js';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Protect all photo routes with authentication
 router.use(requireAuth);

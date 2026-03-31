@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
-
-const prisma = new PrismaClient();
+import prisma from './prisma.js';
 
 /**
  * Get FreshService config for a specific workspace by reading the Workspace row

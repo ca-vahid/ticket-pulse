@@ -1,10 +1,8 @@
-import { PrismaClient } from '@prisma/client';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import availabilityService from './availabilityService.js';
-
-const prisma = new PrismaClient();
+import prisma from './prisma.js';
 
 function buildZonedLocalInstantUtc({ referenceDate, timezone, hhmm }) {
   const dateStr = formatInTimeZone(referenceDate, timezone, 'yyyy-MM-dd');

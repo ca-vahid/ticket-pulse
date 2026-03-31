@@ -1,9 +1,7 @@
-import { PrismaClient } from '@prisma/client';
 import logger from '../utils/logger.js';
 import { getTodayRange } from '../utils/timezone.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
-
-const prisma = new PrismaClient();
+import prisma from './prisma.js';
 
 /**
  * Repository for Ticket operations

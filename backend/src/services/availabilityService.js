@@ -1,10 +1,9 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import logger from '../utils/logger.js';
 import llmConfigService from './llmConfigService.js';
 import { getTodayRange } from '../utils/timezone.js';
-
-const prisma = new PrismaClient();
+import prisma from './prisma.js';
 
 /**
  * Availability Service
