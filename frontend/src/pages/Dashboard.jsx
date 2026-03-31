@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
-import { syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
+import { syncAPI, dashboardAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import { dataCache } from '../services/dataCache';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
@@ -74,6 +74,7 @@ export default function Dashboard() {
     invalidateCurrentView,
     invalidateDateRange,
     clearCacheOnLogout,
+    forceRefreshNoCache,
   } = useDashboard();
   const { user, logout } = useAuth();
   const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
@@ -396,22 +397,8 @@ export default function Dashboard() {
     const newValue = !excludeNoise;
     setExcludeNoise(newValue);
     setGlobalExcludeNoise(newValue);
-    dataCache.clear();
-    await new Promise(resolve => setTimeout(resolve, 100));
-    if (viewMode === 'weekly') {
-      const weekStartStr = formatDateLocal(selectedWeek);
-      await fetchWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
-    } else if (viewMode === 'monthly') {
-      const monthStartStr = formatDateLocal(selectedMonth);
-      await fetchMonthlyDashboard(monthStartStr, 'America/Los_Angeles');
-    } else {
-      const dateStr = formatDateLocal(selectedDate);
-      const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
-      await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
-    }
-    const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
-    await fetchWeeklyStats('America/Los_Angeles', formatDateLocal(dateToUse));
-  }, [excludeNoise, viewMode, selectedDate, selectedWeek, selectedMonth, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard, fetchWeeklyStats, formatDateLocal]);
+    await forceRefreshNoCache();
+  }, [excludeNoise, forceRefreshNoCache]);
 
   const handleRetryLoad = useCallback(async () => {
     await refreshCurrentView();

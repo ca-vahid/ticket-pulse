@@ -419,6 +419,34 @@ export function DashboardProvider({ children }) {
     }
   }, []);
 
+  const forceRefreshNoCache = useCallback(async () => {
+    dataCache.clear();
+    const { viewMode, date, weekStart, monthStart } = currentViewRef.current;
+    try {
+      if (viewMode === 'weekly') {
+        const res = await dashboardAPI.getWeeklyDashboard(weekStart, TZ);
+        const payload = res?.data || res;
+        setWeeklyData(payload);
+        const statsRes = await dashboardAPI.getWeeklyStats(TZ, weekStart);
+        const statsPayload = statsRes?.data || statsRes;
+        setWeeklyStats(statsPayload?.dailyCounts ?? statsPayload);
+      } else if (viewMode === 'monthly') {
+        const res = await dashboardAPI.getMonthlyDashboard(monthStart, TZ);
+        const payload = res?.data || res;
+        setMonthlyData(payload);
+      } else {
+        const res = await dashboardAPI.getDashboard(TZ, date);
+        const payload = res?.data || res;
+        setDashboardData(payload);
+        const statsRes = await dashboardAPI.getWeeklyStats(TZ, date);
+        const statsPayload = statsRes?.data || statsRes;
+        setWeeklyStats(statsPayload?.dailyCounts ?? statsPayload);
+      }
+    } catch (err) {
+      console.error('Force refresh error:', err);
+    }
+  }, []);
+
   // ------------------------------------------------------------------
   // SSE sync-completed handler with targeted invalidation
   // ------------------------------------------------------------------
@@ -501,6 +529,7 @@ export function DashboardProvider({ children }) {
     invalidateCurrentView,
     invalidateAllForTimezoneChange,
     clearCacheOnLogout,
+    forceRefreshNoCache,
   };
 
   return (

@@ -6,6 +6,7 @@ import {
   EyeOff, Eye, VolumeX, Volume2,
 } from 'lucide-react';
 import { dashboardAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
+import { dataCache } from '../services/dataCache';
 import FilterBar, { applyNotPickedFilters, applyPickedFilters } from '../components/tech-detail/FilterBar';
 import TimelineCore, { TimelineLegend } from '../components/timeline/TimelineCore';
 import {
@@ -567,9 +568,8 @@ export default function TimelineExplorer() {
     const newValue = !excludeNoise;
     setExcludeNoise(newValue);
     setGlobalExcludeNoise(newValue);
-    // Re-fetch will happen because fetchTimeline is called on data deps
-    // but we need to manually trigger since excludeNoise isn't in the useCallback deps
-    setTimeout(() => fetchTimeline(), 100);
+    dataCache.clear();
+    setTimeout(() => fetchTimeline(), 150);
   }, [excludeNoise, fetchTimeline]);
 
   const isMultiDay = days.length > 1;
