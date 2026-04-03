@@ -10,6 +10,7 @@ import llmConfigService from '../services/llmConfigService.js';
 import noiseRuleService from '../services/noiseRuleService.js';
 import scheduledSyncService from '../services/scheduledSyncService.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
+import azureAdService from '../services/azureAdService.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -152,6 +153,27 @@ router.post(
     await initializeWorkspace(ws);
 
     res.status(201).json({ success: true, data: ws });
+  }),
+);
+
+/**
+ * GET /api/workspaces/users/search?q=<query>
+ * Search Azure AD (GAL) for users by name or email prefix.
+ * Used by the workspace access panel for autocomplete.
+ */
+router.get(
+  '/users/search',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const q = (req.query.q || '').trim();
+    if (q.length < 2) {
+      return res.json({ success: true, data: [] });
+    }
+    if (!azureAdService.isConfigured()) {
+      return res.status(400).json({ success: false, message: 'Azure AD is not configured' });
+    }
+    const results = await azureAdService.searchUsers(q, 8);
+    res.json({ success: true, data: results });
   }),
 );
 

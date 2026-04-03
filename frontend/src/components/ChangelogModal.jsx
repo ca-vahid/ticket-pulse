@@ -50,6 +50,16 @@ const TYPE_CONFIG = {
   },
 };
 
+const FALLBACK_CONFIG = {
+  label: 'Other',
+  icon: Info,
+  badgeBg: 'bg-gray-50',
+  badgeText: 'text-gray-700',
+  badgeBorder: 'border-gray-200',
+  pillBg: 'bg-gray-500',
+  dotColor: 'bg-gray-500',
+};
+
 export default function ChangelogModal({ isOpen, onClose }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilters, setActiveFilters] = useState(new Set());
@@ -180,7 +190,7 @@ export default function ChangelogModal({ isOpen, onClose }) {
                 {/* Entries */}
                 <div className="space-y-2.5 ml-1">
                   {filtered.map((entry, idx) => {
-                    const config = TYPE_CONFIG[entry.type];
+                    const config = TYPE_CONFIG[entry.type] || FALLBACK_CONFIG;
                     return (
                       <div key={idx} className="flex items-start gap-3 group">
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border whitespace-nowrap mt-0.5 ${config.badgeBg} ${config.badgeText} ${config.badgeBorder}`}>

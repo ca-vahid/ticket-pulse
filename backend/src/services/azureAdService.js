@@ -143,6 +143,49 @@ class AzureAdService {
   }
 
   /**
+   * Search users in Azure AD by display name or email prefix.
+   * Uses Microsoft Graph /users endpoint with $filter.
+   * @param {string} query - Search term (min 2 chars)
+   * @param {number} top - Max results (default 10)
+   * @returns {Promise<Array<{displayName, mail, userPrincipalName, jobTitle}>>}
+   */
+  async searchUsers(query, top = 10) {
+    if (!query || query.length < 2) return [];
+
+    try {
+      const token = await this.getAccessToken();
+      const escaped = query.replace(/'/g, "''");
+
+      const response = await axios.get(`${this.graphApiUrl}/users`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ConsistencyLevel: 'eventual',
+        },
+        params: {
+          $filter: `startsWith(displayName,'${escaped}') or startsWith(mail,'${escaped}') or startsWith(userPrincipalName,'${escaped}')`,
+          $select: 'displayName,mail,userPrincipalName,jobTitle,department',
+          $top: top,
+          $orderby: 'displayName',
+        },
+      });
+
+      return (response.data?.value || []).map(u => ({
+        displayName: u.displayName,
+        mail: (u.mail || u.userPrincipalName || '').toLowerCase(),
+        jobTitle: u.jobTitle || null,
+        department: u.department || null,
+      }));
+    } catch (error) {
+      logger.error('Azure AD user search failed', {
+        query,
+        error: error.message,
+        status: error.response?.status,
+      });
+      return [];
+    }
+  }
+
+  /**
    * Check if Azure AD is configured
    * @returns {boolean}
    */

@@ -436,6 +436,10 @@ export const workspaceAPI = {
   revokeAccess: async (workspaceId, email) => {
     return await api.delete(`/workspaces/${workspaceId}/access/${encodeURIComponent(email)}`);
   },
+
+  searchUsers: async (query) => {
+    return await api.get('/workspaces/users/search', { params: { q: query } });
+  },
 };
 
 /**
