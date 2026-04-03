@@ -154,18 +154,19 @@ class AzureAdService {
 
     try {
       const token = await this.getAccessToken();
-      const escaped = query.replace(/'/g, "''");
+      const sanitized = query.replace(/"/g, '\\"');
 
+      // Use $search for typeahead — requires ConsistencyLevel: eventual and $count=true
       const response = await axios.get(`${this.graphApiUrl}/users`, {
         headers: {
           Authorization: `Bearer ${token}`,
           ConsistencyLevel: 'eventual',
         },
         params: {
-          $filter: `startsWith(displayName,'${escaped}') or startsWith(mail,'${escaped}') or startsWith(userPrincipalName,'${escaped}')`,
+          $search: `"displayName:${sanitized}" OR "mail:${sanitized}"`,
           $select: 'displayName,mail,userPrincipalName,jobTitle,department',
           $top: top,
-          $orderby: 'displayName',
+          $count: true,
         },
       });
 
@@ -180,8 +181,41 @@ class AzureAdService {
         query,
         error: error.message,
         status: error.response?.status,
+        detail: error.response?.data?.error?.message,
       });
-      return [];
+
+      // Fallback: try simpler $filter if $search fails (some tenants lack search index)
+      try {
+        const token = await this.getAccessToken();
+        const escaped = query.replace(/'/g, "''");
+
+        const fallback = await axios.get(`${this.graphApiUrl}/users`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ConsistencyLevel: 'eventual',
+          },
+          params: {
+            $filter: `startsWith(displayName,'${escaped}')`,
+            $select: 'displayName,mail,userPrincipalName,jobTitle,department',
+            $top: top,
+            $count: true,
+          },
+        });
+
+        return (fallback.data?.value || []).map(u => ({
+          displayName: u.displayName,
+          mail: (u.mail || u.userPrincipalName || '').toLowerCase(),
+          jobTitle: u.jobTitle || null,
+          department: u.department || null,
+        }));
+      } catch (fallbackErr) {
+        logger.error('Azure AD user search fallback also failed', {
+          query,
+          error: fallbackErr.message,
+          detail: fallbackErr.response?.data?.error?.message,
+        });
+        return [];
+      }
     }
   }
 
