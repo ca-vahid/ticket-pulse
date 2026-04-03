@@ -97,7 +97,7 @@ export function requireWorkspaceAccess(req, res, next) {
 
   const email = req.session?.user?.email;
   if (!email || !req.workspaceId) {
-    logger.warn(`Workspace access denied: no email or workspaceId`);
+    logger.warn('Workspace access denied: no email or workspaceId');
     return next(new AuthenticationError('You do not have access to this workspace'));
   }
 
