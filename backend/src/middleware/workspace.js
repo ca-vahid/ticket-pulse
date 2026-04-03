@@ -1,9 +1,8 @@
 import logger from '../utils/logger.js';
 
 const WORKSPACE_EXEMPT_PATHS = [
-  '/api/auth',
-  '/api/workspaces',
-  '/api/health',
+  '/auth',
+  '/workspaces',
   '/health',
 ];
 
@@ -11,8 +10,9 @@ const WORKSPACE_EXEMPT_PATHS = [
  * Middleware that resolves the active workspace from the session or header.
  * Attaches req.workspaceId (Int) for use by downstream handlers.
  *
- * Exempt paths (auth, workspace selection, health) skip the check.
- * During the transition period, defaults to workspace 1 (IT) if none is set.
+ * Note: Auth, workspace, and health routes are mounted BEFORE this middleware
+ * in the router chain (index.js), so they never reach this middleware.
+ * The exempt paths list is a safety net only.
  */
 export function requireWorkspace(req, res, next) {
   if (WORKSPACE_EXEMPT_PATHS.some(p => req.path.startsWith(p))) {
