@@ -14,7 +14,7 @@ import noiseRoutes from './noise.routes.js';
 import vacationTrackerRoutes from './vacationTracker.routes.js';
 import notificationsRoutes from './notifications.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { requireWorkspaceAccess } from '../middleware/auth.js';
+import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -27,16 +27,18 @@ router.get('/health', (req, res) => {
   });
 });
 
-// Auth & workspace selection (exempt from workspace requirement)
+// Auth & workspace selection (handle their own auth internally)
 router.use('/auth', authRoutes);
 router.use('/workspaces', workspaceRoutes);
 
-// Workspace resolution + access check — all routes below require a workspace
-// and the caller must have access to it
+// All routes below require authentication, a workspace, and access to it.
+// requireAuth MUST run first so req.session.user is populated from JWT
+// before requireWorkspaceAccess checks the user's email against the DB.
+router.use(requireAuth);
 router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 
-// Mount route modules
+// Mount route modules (individual route files no longer need requireAuth)
 router.use('/dashboard', dashboardRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/sync', syncRoutes);

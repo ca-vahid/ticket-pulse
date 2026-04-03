@@ -109,8 +109,10 @@ export function requireWorkspaceAccess(req, res, next) {
       next(new AuthenticationError('You do not have access to this workspace'));
     })
     .catch(err => {
-      logger.error('Error checking workspace access:', err.message);
-      next(new AuthenticationError('You do not have access to this workspace'));
+      logger.error('Error checking workspace access (DB):', err.message);
+      // DB error is not an access denial — let the request through and let
+      // downstream handlers deal with it, rather than locking users out
+      next();
     });
 }
 

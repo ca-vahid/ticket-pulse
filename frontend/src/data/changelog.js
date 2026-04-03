@@ -3,7 +3,7 @@ export const APP_VERSION = '1.6.0-preview';
 export const changelog = [
   {
     version: '1.6.0-preview',
-    date: 'March 31, 2026',
+    date: 'April 3, 2026',
     entries: [
       { type: 'new', text: 'Workspace access control -- new requireWorkspaceAccess middleware enforces that users can only access workspaces they have been granted access to; global admins bypass the check' },
       { type: 'new', text: 'Per-workspace admin roles -- requireAdmin now checks workspace_access.role in addition to the global admin list; workspace admins can manage settings for their workspace without global admin privileges' },
