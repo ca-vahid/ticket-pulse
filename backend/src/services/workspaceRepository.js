@@ -104,6 +104,22 @@ class WorkspaceRepository {
     }
   }
 
+  /**
+   * Check if a user has access to a specific workspace. Returns the role
+   * ('viewer'|'admin') or null if no access.
+   */
+  async getAccessRole(email, workspaceId) {
+    try {
+      const record = await prisma.workspaceAccess.findUnique({
+        where: { email_workspaceId: { email: email.toLowerCase(), workspaceId } },
+      });
+      return record?.role || null;
+    } catch (error) {
+      logger.error(`Error checking workspace access for ${email}:`, error);
+      return null;
+    }
+  }
+
   async grantAccess(email, workspaceId, role = 'viewer') {
     try {
       return await prisma.workspaceAccess.upsert({

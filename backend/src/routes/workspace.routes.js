@@ -248,11 +248,12 @@ router.post(
 
     const ws = await workspaceRepository.getById(Number(workspaceId));
 
-    // Verify the user has access to this workspace
-    const role = req.session?.user?.role;
-    if (role !== 'admin') {
-      const available = req.session?.user?.availableWorkspaces || [];
-      if (!available.some(w => w.id === ws.id)) {
+    // Verify the user has access to this workspace (live DB check)
+    const userRole = req.session?.user?.role;
+    if (userRole !== 'admin') {
+      const email = req.session?.user?.email;
+      const wsRole = email ? await workspaceRepository.getAccessRole(email, ws.id) : null;
+      if (!wsRole) {
         return res.status(403).json({ success: false, message: 'You do not have access to this workspace' });
       }
     }

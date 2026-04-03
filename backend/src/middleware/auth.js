@@ -3,6 +3,16 @@ import config from '../config/index.js';
 import { AuthenticationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 
+// Lazy import to avoid circular dependency (workspaceRepository → prisma → ...)
+let _wsRepo = null;
+async function getWsRepo() {
+  if (!_wsRepo) {
+    const mod = await import('../services/workspaceRepository.js');
+    _wsRepo = mod.default;
+  }
+  return _wsRepo;
+}
+
 /**
  * Permission constants for future use (ticket assignment, granular access).
  */
@@ -47,17 +57,24 @@ export function requireAuth(req, res, next) {
 
 /**
  * Middleware to check if user is admin — either globally or for the
- * current workspace (via workspace_access.role).
+ * current workspace (live DB check via workspace_access.role).
  */
-export function requireAdmin(req, res, next) {
+export async function requireAdmin(req, res, next) {
   if (req.session?.user?.role === 'admin') {
     return next();
   }
 
-  const available = req.session?.user?.availableWorkspaces || [];
-  const wsMatch = available.find(w => w.id === req.workspaceId);
-  if (wsMatch && wsMatch.role === 'admin') {
-    return next();
+  const email = req.session?.user?.email;
+  if (email && req.workspaceId) {
+    try {
+      const wsRepo = await getWsRepo();
+      const wsRole = await wsRepo.getAccessRole(email, req.workspaceId);
+      if (wsRole === 'admin') {
+        return next();
+      }
+    } catch (err) {
+      logger.error('Error checking workspace admin role:', err.message);
+    }
   }
 
   logger.warn(`Unauthorized admin access attempt to ${req.path}`);
@@ -66,20 +83,28 @@ export function requireAdmin(req, res, next) {
 
 /**
  * Middleware to verify the authenticated user has access to req.workspaceId.
- * Global admins are always allowed. Viewers must have a workspace_access row.
- * Apply after requireWorkspace in the router chain.
+ * Global admins are always allowed. Viewers must have a workspace_access row
+ * (checked live against the DB, not the stale session cache).
  */
-export function requireWorkspaceAccess(req, res, next) {
+export async function requireWorkspaceAccess(req, res, next) {
   if (req.session?.user?.role === 'admin') {
     return next();
   }
 
-  const available = req.session?.user?.availableWorkspaces || [];
-  if (available.some(w => w.id === req.workspaceId)) {
-    return next();
+  const email = req.session?.user?.email;
+  if (email && req.workspaceId) {
+    try {
+      const wsRepo = await getWsRepo();
+      const wsRole = await wsRepo.getAccessRole(email, req.workspaceId);
+      if (wsRole) {
+        return next();
+      }
+    } catch (err) {
+      logger.error('Error checking workspace access:', err.message);
+    }
   }
 
-  logger.warn(`Workspace access denied for ${req.session?.user?.email} to workspace ${req.workspaceId}`);
+  logger.warn(`Workspace access denied for ${email} to workspace ${req.workspaceId}`);
   throw new AuthenticationError('You do not have access to this workspace');
 }
 
