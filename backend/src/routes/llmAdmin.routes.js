@@ -1,44 +1,30 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import * as llmAdminController from '../controllers/llmAdmin.controller.js';
 
 const router = express.Router();
 
-// Protect all routes with authentication
 router.use(requireAuth);
-// Ensures req.workspaceId for controller → llmConfigService (also set on parent /api router)
 router.use(requireWorkspace);
 
-/**
- * Configuration management
- */
+// Read-only endpoints — any authenticated user
 router.get('/config', asyncHandler(llmAdminController.getConfig));
 router.get('/defaults', asyncHandler(llmAdminController.getDefaults));
-
-/**
- * Update specific sections
- */
-router.put('/prompts', asyncHandler(llmAdminController.updatePrompts));
-router.put('/templates', asyncHandler(llmAdminController.updateTemplates));
-router.put('/eta-rules', asyncHandler(llmAdminController.updateEtaRules));
-router.put('/overrides', asyncHandler(llmAdminController.updateOverrides));
-router.put('/runtime', asyncHandler(llmAdminController.updateRuntimeSettings));
-
-/**
- * Publishing and versioning
- */
-router.post('/publish', asyncHandler(llmAdminController.publishConfig));
-router.post('/reset', asyncHandler(llmAdminController.resetToDefaults));
 router.get('/history', asyncHandler(llmAdminController.getHistory));
-router.post('/revert', asyncHandler(llmAdminController.revertToVersion));
 
-/**
- * Validation and preview
- */
-router.post('/validate', asyncHandler(llmAdminController.validatePlaceholders));
-router.post('/preview', asyncHandler(llmAdminController.previewPrompt));
+// Mutation endpoints — admin only
+router.put('/prompts', requireAdmin, asyncHandler(llmAdminController.updatePrompts));
+router.put('/templates', requireAdmin, asyncHandler(llmAdminController.updateTemplates));
+router.put('/eta-rules', requireAdmin, asyncHandler(llmAdminController.updateEtaRules));
+router.put('/overrides', requireAdmin, asyncHandler(llmAdminController.updateOverrides));
+router.put('/runtime', requireAdmin, asyncHandler(llmAdminController.updateRuntimeSettings));
+router.post('/publish', requireAdmin, asyncHandler(llmAdminController.publishConfig));
+router.post('/reset', requireAdmin, asyncHandler(llmAdminController.resetToDefaults));
+router.post('/revert', requireAdmin, asyncHandler(llmAdminController.revertToVersion));
+router.post('/validate', requireAdmin, asyncHandler(llmAdminController.validatePlaceholders));
+router.post('/preview', requireAdmin, asyncHandler(llmAdminController.previewPrompt));
 
 export default router;
 

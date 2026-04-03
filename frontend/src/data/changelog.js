@@ -1,6 +1,26 @@
-export const APP_VERSION = '1.5.2-preview';
+export const APP_VERSION = '1.6.0-preview';
 
 export const changelog = [
+  {
+    version: '1.6.0-preview',
+    date: 'March 31, 2026',
+    entries: [
+      { type: 'new', text: 'Workspace access control -- new requireWorkspaceAccess middleware enforces that users can only access workspaces they have been granted access to; global admins bypass the check' },
+      { type: 'new', text: 'Per-workspace admin roles -- requireAdmin now checks workspace_access.role in addition to the global admin list; workspace admins can manage settings for their workspace without global admin privileges' },
+      { type: 'new', text: 'Workspace Access panel in Settings -- admin UI to grant/revoke user access per workspace with viewer or admin roles; visible only to workspace admins' },
+      { type: 'new', text: 'Role-based Settings navigation -- viewers see only Dashboard config; workspace admins see Sync, Noise Rules, LLM, Vacation Tracker, etc.; global admins see FreshService credentials, Workspace Management, and Admin Management' },
+      { type: 'new', text: 'Role badges in workspace picker -- dropdown shows "[admin]" or "[viewer]" next to each workspace name so users can see their access level' },
+      { type: 'new', text: 'Shared technician workspace indicator -- new API endpoint GET /api/settings/technicians/:id/workspaces shows which workspaces a technician appears in' },
+      { type: 'new', text: 'Ticket assignment scaffolding -- TicketAssignment model added to database (not yet active in UI); FreshService assignTicket() API wrapper prepared; PERMISSIONS constants defined for future use' },
+      { type: 'security', text: 'All sensitive mutation routes now require admin -- sync trigger/reset/backfill, noise rule CRUD, LLM config mutations, visuals edits, photo sync, and settings updates are all gated behind requireAdmin' },
+      { type: 'security', text: 'Workspace selection enforced -- POST /api/workspaces/select now verifies the user has access before allowing workspace switch; previously any authenticated user could switch to any workspace by ID' },
+      { type: 'security', text: 'Default workspace fallback removed -- requests without explicit workspace context now return 400 instead of silently defaulting to workspace 1' },
+      { type: 'improved', text: 'LLM config workspace scoping -- autoResponseService, llmService, and availabilityService.calculateETA now pass the correct workspace ID to getPublishedConfig() instead of defaulting to workspace 1' },
+      { type: 'improved', text: 'Auto-response records now include workspaceId on creation, ensuring proper workspace isolation' },
+      { type: 'improved', text: 'Technician getById hardened -- ticket includes now filter by the technician workspace, preventing potential cross-workspace data leakage from DB inconsistencies' },
+      { type: 'database', text: 'New table: ticket_assignments -- stores assignment history with ticket, technician, assigner email, workspace, source (manual/auto/freshservice), and optional notes; migration applied' },
+    ],
+  },
   {
     version: '1.5.2-preview',
     date: 'March 31, 2026',

@@ -110,12 +110,18 @@ class TechnicianRepository {
    */
   async getById(id, { excludeNoise = false } = {}) {
     try {
-      const ticketWhere = excludeNoise ? { isNoise: false } : undefined;
+      const tech = await prisma.technician.findUnique({ where: { id } });
+      if (!tech) return null;
+
+      const ticketWhere = {};
+      if (tech.workspaceId) ticketWhere.workspaceId = tech.workspaceId;
+      if (excludeNoise) ticketWhere.isNoise = false;
+
       return await prisma.technician.findUnique({
         where: { id },
         include: {
           tickets: {
-            where: ticketWhere,
+            where: Object.keys(ticketWhere).length > 0 ? ticketWhere : undefined,
             include: {
               requester: true,
             },

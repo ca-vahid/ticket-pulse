@@ -1,6 +1,6 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import technicianRepository from '../services/technicianRepository.js';
 import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
 import logger from '../utils/logger.js';
@@ -52,6 +52,7 @@ router.get(
  */
 router.patch(
   '/agents/:id/location',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const agentId = parseInt(req.params.id, 10);
     const { location } = req.body;
@@ -93,6 +94,7 @@ router.patch(
  */
 router.patch(
   '/agents/:id/visibility',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const agentId = parseInt(req.params.id, 10);
     const { showOnMap, isMapManager } = req.body;
@@ -130,6 +132,7 @@ router.patch(
  */
 router.patch(
   '/agents/:id/schedule',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const agentId = parseInt(req.params.id, 10);
     const { workStartTime, workEndTime, timezone } = req.body;
@@ -176,6 +179,7 @@ router.patch(
  */
 router.post(
   '/agents/batch-visibility',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { selectedIds, managerId } = req.body;
 

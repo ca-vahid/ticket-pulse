@@ -333,8 +333,7 @@ class AvailabilityService {
     const activeAgentCount = stats.activeAgentCount ?? 1;
     const minutesSinceBusinessStart = stats.minutesSinceBusinessStart ?? 0;
 
-    // Get ETA configuration
-    const llmConfig = await llmConfigService.getPublishedConfig();
+    const llmConfig = await llmConfigService.getPublishedConfig(workspaceId);
     const baseMinutes = llmConfig.baseResponseMinutes || 30;
     const perTicketDelay = llmConfig.perTicketDelayMinutes || 10;
 

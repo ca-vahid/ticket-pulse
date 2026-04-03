@@ -4,25 +4,30 @@ import { AuthenticationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 
 /**
+ * Permission constants for future use (ticket assignment, granular access).
+ */
+export const PERMISSIONS = {
+  VIEW_DASHBOARD: 'view_dashboard',
+  MANAGE_SETTINGS: 'manage_settings',
+  ASSIGN_TICKETS: 'assign_tickets',
+  MANAGE_WORKSPACE: 'manage_workspace',
+};
+
+/**
  * Middleware to check if user is authenticated.
  * Checks session cookie first, then falls back to JWT in Authorization header.
- * The JWT fallback is critical for cross-origin deployments where third-party
- * cookies are blocked (e.g., Chrome incognito with frontend and backend on
- * different domains).
  */
 export function requireAuth(req, res, next) {
   if (req.session && req.session.user) {
     return next();
   }
 
-  // Fallback: check for JWT bearer token
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
     try {
       const token = authHeader.substring(7);
       const decoded = jwt.verify(token, config.session.secret, { algorithms: ['HS256'] });
       req.user = decoded;
-      // Merge JWT user data without overwriting workspace fields
       if (!req.session.user) {
         req.session.user = decoded;
       } else {
@@ -41,11 +46,17 @@ export function requireAuth(req, res, next) {
 }
 
 /**
- * Middleware to check if user is admin (for future role-based access)
+ * Middleware to check if user is admin — either globally or for the
+ * current workspace (via workspace_access.role).
  */
 export function requireAdmin(req, res, next) {
-  if (req.session && req.session.user && req.session.user.role === 'admin') {
-    // User is admin
+  if (req.session?.user?.role === 'admin') {
+    return next();
+  }
+
+  const available = req.session?.user?.availableWorkspaces || [];
+  const wsMatch = available.find(w => w.id === req.workspaceId);
+  if (wsMatch && wsMatch.role === 'admin') {
     return next();
   }
 
@@ -54,9 +65,27 @@ export function requireAdmin(req, res, next) {
 }
 
 /**
+ * Middleware to verify the authenticated user has access to req.workspaceId.
+ * Global admins are always allowed. Viewers must have a workspace_access row.
+ * Apply after requireWorkspace in the router chain.
+ */
+export function requireWorkspaceAccess(req, res, next) {
+  if (req.session?.user?.role === 'admin') {
+    return next();
+  }
+
+  const available = req.session?.user?.availableWorkspaces || [];
+  if (available.some(w => w.id === req.workspaceId)) {
+    return next();
+  }
+
+  logger.warn(`Workspace access denied for ${req.session?.user?.email} to workspace ${req.workspaceId}`);
+  throw new AuthenticationError('You do not have access to this workspace');
+}
+
+/**
  * Optional auth middleware - doesn't throw error if not authenticated
  */
 export function optionalAuth(req, res, next) {
-  // Just pass through, req.session.user will be available if authenticated
   next();
 }

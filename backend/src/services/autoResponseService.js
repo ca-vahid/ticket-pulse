@@ -47,7 +47,8 @@ class AutoResponseService {
 
       // STEP 0: Get current config version for tracking
       const stepStartConfig = Date.now();
-      const llmConfig = await llmConfigService.getPublishedConfig();
+      const wsId = webhookPayload.workspaceId ?? 1;
+      const llmConfig = await llmConfigService.getPublishedConfig(wsId);
       const configVersion = llmConfig.version || 1;
 
       addStep(0, 'Load Configuration', Date.now() - stepStartConfig,
@@ -104,6 +105,7 @@ class AutoResponseService {
           classification: 'pending',
           responseSent: false,
           configVersionUsed: configVersion,
+          workspaceId: wsId,
         });
       }
 

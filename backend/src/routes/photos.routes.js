@@ -1,6 +1,6 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import azureAdService from '../services/azureAdService.js';
 import { clearReadCache } from '../services/dashboardReadCache.js';
 import logger from '../utils/logger.js';
@@ -17,6 +17,7 @@ router.use(requireAuth);
  */
 router.post(
   '/sync',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     // Check if Azure AD is configured
     if (!azureAdService.isConfigured()) {

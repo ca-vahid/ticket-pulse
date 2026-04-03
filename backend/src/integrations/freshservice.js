@@ -414,6 +414,24 @@ class FreshServiceClient {
    * @param {number} ms - Milliseconds to sleep
    * @returns {Promise<void>}
    */
+  /**
+   * Assign a ticket to an agent (scaffolding for future ticket assignment feature)
+   * @param {number} ticketId - FreshService ticket ID
+   * @param {number} agentId - FreshService agent ID to assign to
+   * @returns {Promise<Object>} Updated ticket object
+   */
+  async assignTicket(ticketId, agentId) {
+    try {
+      const response = await this.client.put(`/tickets/${ticketId}`, {
+        ticket: { responder_id: agentId },
+      });
+      return response.data.ticket;
+    } catch (error) {
+      logger.error(`Error assigning ticket ${ticketId} to agent ${agentId}:`, error);
+      throw error;
+    }
+  }
+
   _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }

@@ -36,6 +36,7 @@ model Workspace {
   vtLeaveTypes           VtLeaveType[]
   vtUserMappings         VtUserMapping[]
   technicianLeaves       TechnicianLeave[]
+  ticketAssignments      TicketAssignment[]
 
   @@map("workspaces")
 }
@@ -72,9 +73,10 @@ model Technician {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  tickets         Ticket[]
-  leaves          TechnicianLeave[]
-  vtUserMappings  VtUserMapping[]
+  tickets              Ticket[]
+  leaves               TechnicianLeave[]
+  vtUserMappings       VtUserMapping[]
+  assignmentsReceived  TicketAssignment[] @relation("assignedTo")
 
   @@unique([freshserviceId, workspaceId])
   @@map("technicians")
@@ -169,14 +171,10 @@ model Ticket {
   csatSubmittedAt       DateTime? @map("csat_submitted_at") // When survey was submitted
 
   // Noise detection
-  isNoise           Boolean   @default(false) @map("is_noise")
-  noiseRuleMatched  String?   @db.VarChar(100) @map("noise_rule_matched")
+  isNoise              Boolean   @default(false) @map("is_noise")
+  noiseRuleMatched     String?   @db.VarChar(100) @map("noise_rule_matched")
 
-  // Computed fields (handled in application logic)
-  // isToday: computed based on createdAt and PST timezone
-  // timeToResolve: computed as resolvedAt - createdAt
-  // timeToFirstResponse: computed from activities
-  // timeToClose: computed as closedAt - createdAt
+  ticketAssignments    TicketAssignment[]
 
   @@map("tickets")
   @@index([workspaceId])
@@ -456,4 +454,24 @@ model TechnicianLeave {
   @@map("technician_leaves")
   @@index([workspaceId, leaveDate])
   @@index([technicianId, leaveDate])
+}
+
+// Scaffolding for future ticket assignment feature (not yet used in UI/API)
+model TicketAssignment {
+  id              Int        @id @default(autoincrement())
+  ticketId        Int        @map("ticket_id")
+  ticket          Ticket     @relation(fields: [ticketId], references: [id])
+  assignedToId    Int        @map("assigned_to_id")
+  assignedTo      Technician @relation("assignedTo", fields: [assignedToId], references: [id])
+  assignedByEmail String     @map("assigned_by_email") @db.VarChar(255)
+  workspaceId     Int        @map("workspace_id")
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id])
+  source          String     @default("manual") @db.VarChar(20)
+  note            String?    @db.Text
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  @@map("ticket_assignments")
+  @@index([ticketId])
+  @@index([assignedToId])
+  @@index([workspaceId, createdAt])
 }

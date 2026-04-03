@@ -14,6 +14,7 @@ import noiseRoutes from './noise.routes.js';
 import vacationTrackerRoutes from './vacationTracker.routes.js';
 import notificationsRoutes from './notifications.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
+import { requireWorkspaceAccess } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -30,8 +31,10 @@ router.get('/health', (req, res) => {
 router.use('/auth', authRoutes);
 router.use('/workspaces', workspaceRoutes);
 
-// Workspace resolution middleware — all routes below require a workspace
+// Workspace resolution + access check — all routes below require a workspace
+// and the caller must have access to it
 router.use(requireWorkspace);
+router.use(requireWorkspaceAccess);
 
 // Mount route modules
 router.use('/dashboard', dashboardRoutes);

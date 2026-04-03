@@ -226,6 +226,15 @@ router.post(
 
     const ws = await workspaceRepository.getById(Number(workspaceId));
 
+    // Verify the user has access to this workspace
+    const role = req.session?.user?.role;
+    if (role !== 'admin') {
+      const available = req.session?.user?.availableWorkspaces || [];
+      if (!available.some(w => w.id === ws.id)) {
+        return res.status(403).json({ success: false, message: 'You do not have access to this workspace' });
+      }
+    }
+
     if (req.session?.user) {
       req.session.user.selectedWorkspaceId = ws.id;
       req.session.user.selectedWorkspaceName = ws.name;

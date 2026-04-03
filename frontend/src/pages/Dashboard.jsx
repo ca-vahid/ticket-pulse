@@ -1158,7 +1158,7 @@ export default function Dashboard() {
                     title="Switch workspace"
                   >
                     {availableWorkspaces.map(ws => (
-                      <option key={ws.id} value={ws.id}>{ws.name}</option>
+                      <option key={ws.id} value={ws.id}>{ws.name}{ws.role ? ` [${ws.role}]` : ''}</option>
                     ))}
                   </select>
                 )}

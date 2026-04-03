@@ -35,8 +35,7 @@ class LLMService {
 
     const { subject, body, senderEmail, senderName } = ticketData;
 
-    // Get published config for classification prompt
-    const llmConfig = await llmConfigService.getPublishedConfig();
+    const llmConfig = await llmConfigService.getPublishedConfig(ticketData.workspaceId);
 
     // Check for override rules first
     const override = llmConfigService.applyOverrideRules(ticketData, llmConfig.overrideRules);
@@ -156,8 +155,7 @@ class LLMService {
       holidayName,
     } = params;
 
-    // Get published config for response generation
-    const llmConfig = await llmConfigService.getPublishedConfig();
+    const llmConfig = await llmConfigService.getPublishedConfig(params.workspaceId);
 
     // Build context for response generation
     const contextParts = [];

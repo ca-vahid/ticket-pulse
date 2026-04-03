@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../contexts/SettingsContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { useAuth } from '../contexts/AuthContext';
 import { syncAPI, visualsAPI } from '../services/api';
 import api from '../services/api';
 import { dataCache } from '../services/dataCache';
@@ -15,6 +16,7 @@ import WorkspaceManagementPanel from '../components/settings/WorkspaceManagement
 import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
 import TechnicianVisibilityPanel from '../components/settings/TechnicianVisibilityPanel';
+import WorkspaceAccessPanel from '../components/settings/WorkspaceAccessPanel';
 import {
   ArrowLeft,
   Save,
@@ -37,14 +39,24 @@ import {
   Globe,
   Shield,
   EyeOff,
+  KeyRound,
 } from 'lucide-react';
 
 export default function Settings() {
   const navigate = useNavigate();
   const { settings, isLoading, fetchSettings, updateSettings, testConnection } = useSettings();
   const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
+  const { user } = useAuth();
 
-  const validSections = ['freshservice', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker'];
+  const isGlobalAdmin = user?.role === 'admin';
+  const wsRole = (() => {
+    if (isGlobalAdmin) return 'admin';
+    const ws = availableWorkspaces?.find(w => w.id === currentWorkspace?.id);
+    return ws?.role || 'viewer';
+  })();
+  const isWsAdmin = wsRole === 'admin';
+
+  const validSections = ['freshservice', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -77,23 +89,31 @@ export default function Settings() {
   const [scheduleStatus, setScheduleStatus] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
 
-  const navigationItems = [
-    { id: 'freshservice', label: 'FreshService', Icon: Plug },
-    { id: 'sync', label: 'Sync Settings', Icon: RefreshCw },
-    { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3 },
-    { id: 'backfill', label: 'Backfill', Icon: Download },
-    { id: 'workspaces', label: 'Workspaces', Icon: Globe },
-    { id: 'admins', label: 'Admins', Icon: Shield },
-    { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
-    { id: 'photos', label: 'Profile Photos', Icon: Camera },
-    { id: 'business-hours', label: 'Business Hours', Icon: Clock },
-    { id: 'tech-schedules', label: 'Tech Schedules', Icon: CalendarDays },
-    { id: 'tech-visibility', label: 'Tech Visibility', Icon: EyeOff },
-    { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX },
-    { id: 'llm-config', label: 'LLM Config', Icon: Bot },
-    { id: 'auto-response-test', label: 'Test Auto-Response', Icon: FlaskConical },
-    { id: 'vacation-tracker', label: 'Vacation Tracker', Icon: CalendarDays },
+  // role: 'global' = global admin only, 'admin' = workspace admin+, 'viewer' = anyone
+  const allNavigationItems = [
+    { id: 'freshservice', label: 'FreshService', Icon: Plug, minRole: 'global' },
+    { id: 'sync', label: 'Sync Settings', Icon: RefreshCw, minRole: 'admin' },
+    { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3, minRole: 'admin' },
+    { id: 'backfill', label: 'Backfill', Icon: Download, minRole: 'admin' },
+    { id: 'workspaces', label: 'Workspaces', Icon: Globe, minRole: 'global' },
+    { id: 'admins', label: 'Admins', Icon: Shield, minRole: 'global' },
+    { id: 'workspace-access', label: 'Workspace Access', Icon: KeyRound, minRole: 'admin' },
+    { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard, minRole: 'viewer' },
+    { id: 'photos', label: 'Profile Photos', Icon: Camera, minRole: 'admin' },
+    { id: 'business-hours', label: 'Business Hours', Icon: Clock, minRole: 'admin' },
+    { id: 'tech-schedules', label: 'Tech Schedules', Icon: CalendarDays, minRole: 'admin' },
+    { id: 'tech-visibility', label: 'Tech Visibility', Icon: EyeOff, minRole: 'admin' },
+    { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX, minRole: 'admin' },
+    { id: 'llm-config', label: 'LLM Config', Icon: Bot, minRole: 'admin' },
+    { id: 'auto-response-test', label: 'Test Auto-Response', Icon: FlaskConical, minRole: 'admin' },
+    { id: 'vacation-tracker', label: 'Vacation Tracker', Icon: CalendarDays, minRole: 'admin' },
   ];
+
+  const navigationItems = allNavigationItems.filter(item => {
+    if (item.minRole === 'global') return isGlobalAdmin;
+    if (item.minRole === 'admin') return isWsAdmin;
+    return true; // viewer
+  });
 
   useEffect(() => {
     fetchSettings();
@@ -343,7 +363,7 @@ export default function Settings() {
             title="Switch workspace"
           >
             {availableWorkspaces.map(ws => (
-              <option key={ws.id} value={ws.id}>{ws.name}</option>
+              <option key={ws.id} value={ws.id}>{ws.name}{ws.role ? ` [${ws.role}]` : ''}</option>
             ))}
           </select>
         )}
@@ -547,6 +567,13 @@ export default function Settings() {
             {activeSection === 'admins' && (
               <div className="p-6">
                 <AdminManagementPanel />
+              </div>
+            )}
+
+            {/* Workspace Access */}
+            {activeSection === 'workspace-access' && (
+              <div className="p-6">
+                <WorkspaceAccessPanel />
               </div>
             )}
 

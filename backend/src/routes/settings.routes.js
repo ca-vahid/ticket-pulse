@@ -41,6 +41,7 @@ router.get(
  */
 router.put(
   '/',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { settings } = req.body;
 
@@ -88,6 +89,7 @@ router.put(
  */
 router.put(
   '/:key',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { key } = req.params;
     const { value } = req.body;
@@ -231,6 +233,41 @@ router.put(
     clearReadCache();
     logger.info(`Technician ${tech.name} (${id}) ${isActive ? 'enabled' : 'disabled'}`);
     res.json({ success: true, data: { id: tech.id, name: tech.name, isActive: tech.isActive } });
+  }),
+);
+
+/**
+ * GET /api/settings/technicians/:id/workspaces
+ * List workspaces where a technician (same freshserviceId) is active.
+ * Useful for identifying shared technicians across workspaces.
+ */
+router.get(
+  '/technicians/:id/workspaces',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const tech = await technicianRepository.getById(id);
+    if (!tech) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+    const prismaClient = (await import('../services/prisma.js')).default;
+    const siblings = await prismaClient.technician.findMany({
+      where: {
+        freshserviceId: tech.freshserviceId,
+        isActive: true,
+      },
+      include: { workspace: { select: { id: true, name: true, slug: true } } },
+    });
+    res.json({
+      success: true,
+      data: siblings.map(s => ({
+        workspaceId: s.workspace.id,
+        workspaceName: s.workspace.name,
+        workspaceSlug: s.workspace.slug,
+        technicianId: s.id,
+        isCurrent: s.id === id,
+      })),
+    });
   }),
 );
 

@@ -1,6 +1,6 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import syncService from '../services/syncService.js';
 import scheduledSyncService from '../services/scheduledSyncService.js';
 import syncLogRepository from '../services/syncLogRepository.js';
@@ -23,6 +23,7 @@ router.use(requireAuth);
  */
 router.post(
   '/trigger',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const fullSync = req.query.fullSync === 'true';
     const daysToSync = parseInt(req.query.daysToSync, 10) || 30;
@@ -130,6 +131,7 @@ router.get(
  */
 router.post(
   '/start-schedule',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     logger.info('Starting scheduled sync via API');
 
@@ -148,6 +150,7 @@ router.post(
  */
 router.post(
   '/stop-schedule',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     logger.info('Stopping scheduled sync via API');
 
@@ -172,6 +175,7 @@ router.post(
  */
 router.post(
   '/backfill-pickup-times',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 100;
     const daysToSync = parseInt(req.query.daysToSync, 10) || 30;
@@ -203,6 +207,7 @@ router.post(
  */
 router.post(
   '/reset',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const wasRunning = syncService.getSyncStatus().isRunning;
 
@@ -249,6 +254,7 @@ router.post(
  */
 router.post(
   '/week',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { startDate, endDate } = req.body;
 
@@ -284,6 +290,7 @@ router.post(
  */
 router.post(
   '/backfill',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { startDate, endDate, skipExisting = true, activityConcurrency = 3 } = req.body;
 

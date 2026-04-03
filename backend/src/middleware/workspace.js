@@ -33,9 +33,6 @@ export function requireWorkspace(req, res, next) {
     return next();
   }
 
-  // Backward compatibility: default to workspace 1 (IT) when nothing is set.
-  // Remove this fallback once all clients send a workspace header.
-  req.workspaceId = 1;
-  logger.debug(`No workspace specified for ${req.method} ${req.path}, defaulting to 1`);
-  next();
+  logger.warn(`No workspace specified for ${req.method} ${req.path}`);
+  return res.status(400).json({ success: false, message: 'Workspace selection required' });
 }

@@ -1,6 +1,6 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import noiseRuleService from '../services/noiseRuleService.js';
 import logger from '../utils/logger.js';
 
@@ -38,6 +38,7 @@ router.get(
  */
 router.post(
   '/',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { name, pattern, description, category, isEnabled } = req.body;
 
@@ -74,6 +75,7 @@ router.post(
  */
 router.put(
   '/:id',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -99,6 +101,7 @@ router.put(
  */
 router.delete(
   '/:id',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -145,6 +148,7 @@ router.post(
  */
 router.post(
   '/backfill',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     logger.info('Starting noise rule backfill...');
     const result = await noiseRuleService.backfillAll((progress) => {
@@ -162,6 +166,7 @@ router.post(
  */
 router.post(
   '/seed',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const count = await noiseRuleService.seedDefaults(req.workspaceId);
     res.json({
