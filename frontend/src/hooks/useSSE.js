@@ -103,24 +103,18 @@ export function useSSE(options = {}) {
           }
         };
 
-        eventSource.onerror = (error) => {
-          console.error('SSE error:', error);
-
+        eventSource.onerror = () => {
           if (eventSource.readyState === EventSource.CLOSED) {
-            // EventSource is fully closed (often after auth/network hiccup).
-            // Recreate it ourselves so first-load status can recover automatically.
             scheduleReconnect();
           } else {
-            // Browser is retrying handshake automatically.
             setConnectionStatus('connecting');
           }
 
           if (onError) {
-            onError(error);
+            onError(new Error('SSE connection interrupted'));
           }
         };
       } catch (error) {
-        console.error('Failed to create SSE connection:', error);
         scheduleReconnect();
         if (onError) {
           onError(error);

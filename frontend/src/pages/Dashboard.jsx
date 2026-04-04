@@ -137,7 +137,7 @@ export default function Dashboard() {
   // Compact view state - persisted in localStorage
   const [isCompactView, setIsCompactView] = useState(() => {
     const stored = localStorage.getItem('compactView');
-    return stored ? JSON.parse(stored) : false;
+    return stored !== null ? JSON.parse(stored) : true;
   });
 
   // Expand-all override for compact view: null = individual control, true/false = forced

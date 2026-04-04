@@ -302,7 +302,6 @@ export default function Settings() {
 
       if (response.success) {
         dataCache.clear();
-        sessionStorage.clear();
 
         setPhotoSyncStatus({
           success: true,

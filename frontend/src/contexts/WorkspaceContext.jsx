@@ -137,7 +137,17 @@ export function WorkspaceProvider({ children }) {
     setCurrentWorkspace(selected);
 
     dataCache.clear();
-    sessionStorage.clear();
+
+    // Clear only app-owned sessionStorage keys. Do NOT call sessionStorage.clear()
+    // because that wipes MSAL's token cache, causing logout in incognito mode.
+    const appKeys = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k && (k.startsWith('tp_cache:') || k.startsWith('dashboard_') || k.startsWith('techDetail') || k.startsWith('tl_'))) {
+        appKeys.push(k);
+      }
+    }
+    appKeys.forEach(k => sessionStorage.removeItem(k));
 
     selectWorkspace(targetId).catch(() => {});
   }, [availableWorkspaces, selectWorkspace]);

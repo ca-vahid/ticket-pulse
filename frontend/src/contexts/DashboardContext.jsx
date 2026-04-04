@@ -147,7 +147,7 @@ export function DashboardProvider({ children }) {
       if (payload?.timestamp) setLastFreshAt(new Date(payload.timestamp));
     } catch (err) {
       if (mySeq !== dailySeqRef.current) return;
-      console.error('Dashboard fetch error:', err);
+      console.warn('Dashboard fetch error:', err.message);
       setError(err.message);
     } finally {
       if (mySeq === dailySeqRef.current) {
@@ -176,7 +176,7 @@ export function DashboardProvider({ children }) {
       setWeeklyStats(payload?.dailyCounts ?? payload);
     } catch (err) {
       if (mySeq !== weeklyStatsSeqRef.current) return;
-      console.error('Weekly stats fetch error:', err);
+      console.warn('Weekly stats fetch error:', err.message);
       setWeeklyStats(null);
     }
   }, []);
@@ -211,7 +211,7 @@ export function DashboardProvider({ children }) {
       setWeeklyData(payload);
     } catch (err) {
       if (mySeq !== weeklySeqRef.current) return;
-      console.error('Weekly dashboard fetch error:', err);
+      console.warn('Weekly dashboard fetch error:', err.message);
       setWeeklyData(null);
     } finally {
       if (mySeq === weeklySeqRef.current) {
@@ -251,7 +251,7 @@ export function DashboardProvider({ children }) {
       setMonthlyData(payload);
     } catch (err) {
       if (mySeq !== monthlySeqRef.current) return;
-      console.error('Monthly dashboard fetch error:', err);
+      console.warn('Monthly dashboard fetch error:', err.message);
       setMonthlyData(null);
     } finally {
       if (mySeq === monthlySeqRef.current) {
@@ -281,7 +281,7 @@ export function DashboardProvider({ children }) {
       );
       return result.data;
     } catch (err) {
-      console.error('Technician fetch error:', err);
+      console.warn('Technician fetch error:', err.message);
       throw err;
     }
   }, []);
@@ -305,7 +305,7 @@ export function DashboardProvider({ children }) {
       );
       return result.data;
     } catch (err) {
-      console.error('Technician weekly fetch error:', err);
+      console.warn('Technician weekly fetch error:', err.message);
       throw err;
     }
   }, []);
@@ -324,7 +324,7 @@ export function DashboardProvider({ children }) {
       );
       return result.data;
     } catch (err) {
-      console.error('Technician CSAT fetch error:', err);
+      console.warn('Technician CSAT fetch error:', err.message);
       throw err;
     }
   }, []);
@@ -480,8 +480,9 @@ export function DashboardProvider({ children }) {
     // SSE connection established
   }, []);
 
-  const handleError = useCallback((error) => {
-    console.error('SSE error:', error);
+  const handleError = useCallback(() => {
+    // SSE errors are handled by useSSE (reconnect with backoff).
+    // No additional logging needed here.
   }, []);
 
   const { isConnected: sseConnected, connectionStatus: sseConnectionStatus } = useSSE({
