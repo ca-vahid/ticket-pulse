@@ -31,6 +31,15 @@ router.get('/health', (req, res) => {
 router.use('/auth', authRoutes);
 router.use('/workspaces', workspaceRoutes);
 
+// Promote JWT from query param for SSE requests (EventSource can't set headers).
+// Must run before requireAuth so the token is available for authentication.
+router.use((req, _res, next) => {
+  if (req.query.token && !req.headers.authorization) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  next();
+});
+
 // All routes below require authentication, a workspace, and access to it.
 // requireAuth MUST run first so req.session.user is populated from JWT
 // before requireWorkspaceAccess checks the user's email against the DB.
