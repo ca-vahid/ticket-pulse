@@ -93,6 +93,40 @@ const US_HOLIDAYS = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Dynamic holiday registry — populated at runtime from the backend API.
+// Entries are keyed by 'YYYY-MM-DD' → holiday name string.
+// These are merged with the hardcoded lists when getHolidayInfo is called.
+// ---------------------------------------------------------------------------
+const _dynamicHolidays = {};
+
+/**
+ * Register holidays fetched from the backend (holidays DB table).
+ * Call once after fetching GET /api/autoresponse/holidays.
+ * @param {Array<{name: string, date: string}>} holidays - from API
+ */
+export const registerDynamicHolidays = (holidays) => {
+  // Clear existing dynamic entries
+  for (const key of Object.keys(_dynamicHolidays)) {
+    delete _dynamicHolidays[key];
+  }
+  if (!Array.isArray(holidays)) return;
+  for (const h of holidays) {
+    if (!h.date || !h.name) continue;
+    const dateKey = typeof h.date === 'string' ? h.date.substring(0, 10) : '';
+    if (dateKey) _dynamicHolidays[dateKey] = h.name;
+  }
+};
+
+/**
+ * Get a dynamic (DB-sourced) holiday name for a date.
+ * @returns {string|null}
+ */
+const getDynamicHoliday = (date) => {
+  const dateKey = formatDateToKey(date);
+  return _dynamicHolidays[dateKey] || null;
+};
+
 /**
  * Format a Date object to YYYY-MM-DD string
  * @param {Date|string} date - Date object or date string
@@ -154,13 +188,16 @@ export const getUSHoliday = (date) => {
 export const getHolidayInfo = (date) => {
   const canadianName = getCanadianHoliday(date);
   const usName = getUSHoliday(date);
+  const dynamicName = getDynamicHoliday(date);
   
   return {
     isCanadian: !!canadianName,
     isUS: !!usName,
+    isDynamic: !!dynamicName && !canadianName && !usName,
     canadianName,
     usName,
-    isHoliday: !!canadianName || !!usName,
+    dynamicName,
+    isHoliday: !!canadianName || !!usName || !!dynamicName,
   };
 };
 
@@ -177,13 +214,11 @@ export const getHolidayTooltip = (date) => {
   if (info.canadianName) {
     parts.push(`🍁 ${info.canadianName} (CA)`);
   }
-  if (info.usName) {
-    // Don't duplicate if same name
-    if (info.usName !== info.canadianName) {
-      parts.push(`🇺🇸 ${info.usName} (US)`);
-    } else if (!info.canadianName) {
-      parts.push(`🇺🇸 ${info.usName} (US)`);
-    }
+  if (info.usName && info.usName !== info.canadianName) {
+    parts.push(`🇺🇸 ${info.usName} (US)`);
+  }
+  if (info.isDynamic) {
+    parts.push(`📅 ${info.dynamicName}`);
   }
   
   return parts.join(' • ');
@@ -292,6 +327,24 @@ export const getDateStyling = (date, options = {}) => {
     }
   }
   
+  if (info.isDynamic) {
+    const base = {
+      isHoliday: true,
+      isCanadian: false,
+      isUS: false,
+      isDynamic: true,
+      isWeekend: weekend,
+    };
+    switch (variant) {
+    case 'cell':
+      return { ...base, bgClass: 'bg-violet-50/60', borderClass: 'border-violet-200', indicatorClass: 'bg-violet-500' };
+    case 'box':
+      return { ...base, bgClass: 'bg-violet-50/40', borderClass: 'border-violet-300', indicatorClass: 'bg-violet-500' };
+    default:
+      return { ...base, bgClass: 'bg-violet-50/50', borderClass: 'border-violet-200', indicatorClass: 'bg-violet-500' };
+    }
+  }
+
   if (weekend) {
     switch (variant) {
     case 'cell':

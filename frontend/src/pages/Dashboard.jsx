@@ -11,8 +11,8 @@ import CategoryFilter from '../components/CategoryFilter';
 import MonthlyCalendar from '../components/MonthlyCalendar';
 import ExportButton from '../components/ExportButton';
 import { filterTickets } from '../utils/ticketFilter';
-import { getHolidayTooltip, getHolidayInfo } from '../utils/holidays';
-// formatDateLocal is defined locally via useCallback
+import { getHolidayTooltip, getHolidayInfo, registerDynamicHolidays } from '../utils/holidays';
+import api from '../services/api';
 import ChangelogModal from '../components/ChangelogModal';
 import { APP_VERSION } from '../data/changelog';
 import { usePrefetch } from '../hooks/usePrefetch';
@@ -227,6 +227,13 @@ export default function Dashboard() {
   useEffect(() => {
     localStorage.setItem('dashboardViewMode', viewMode);
   }, [viewMode]);
+
+  // Fetch workspace holidays from DB and register them for calendar display
+  useEffect(() => {
+    api.get('/autoresponse/holidays').then(res => {
+      registerDynamicHolidays(res?.data || []);
+    }).catch(() => {});
+  }, [currentWorkspace?.id]);
 
   // Persist search term to sessionStorage whenever it changes
   useEffect(() => {
@@ -1553,17 +1560,20 @@ export default function Dashboard() {
                   const getButtonClasses = () => {
                     if (isSelectedDay) {
                       if (isHolidayDay && holidayInfo.isCanadian) return 'bg-rose-100 text-rose-700 shadow-md scale-110 ring-2 ring-rose-300';
+                      if (isHolidayDay && holidayInfo.isDynamic) return 'bg-violet-100 text-violet-700 shadow-md scale-110 ring-2 ring-violet-300';
                       if (isHolidayDay) return 'bg-indigo-100 text-indigo-700 shadow-md scale-110 ring-2 ring-indigo-300';
                       if (isWeekendDay) return 'bg-slate-100 text-slate-700 shadow-md scale-110';
                       return 'bg-white text-blue-600 shadow-md scale-110';
                     }
                     if (viewMode === 'weekly') {
                       if (isHolidayDay && holidayInfo.isCanadian) return 'text-rose-300 hover:text-rose-100 hover:bg-rose-400 hover:bg-opacity-30 cursor-pointer';
+                      if (isHolidayDay && holidayInfo.isDynamic) return 'text-violet-300 hover:text-violet-100 hover:bg-violet-400 hover:bg-opacity-30 cursor-pointer';
                       if (isHolidayDay) return 'text-indigo-300 hover:text-indigo-100 hover:bg-indigo-400 hover:bg-opacity-30 cursor-pointer';
                       if (isWeekendDay) return 'text-slate-300 hover:text-white hover:bg-slate-400 hover:bg-opacity-30 cursor-pointer';
                       return 'text-white opacity-90 hover:opacity-100 hover:bg-white hover:bg-opacity-20 cursor-pointer';
                     }
                     if (isHolidayDay && holidayInfo.isCanadian) return 'text-rose-300 hover:text-rose-100 hover:bg-rose-400 hover:bg-opacity-30 cursor-pointer';
+                    if (isHolidayDay && holidayInfo.isDynamic) return 'text-violet-300 hover:text-violet-100 hover:bg-violet-400 hover:bg-opacity-30 cursor-pointer';
                     if (isHolidayDay) return 'text-indigo-300 hover:text-indigo-100 hover:bg-indigo-400 hover:bg-opacity-30 cursor-pointer';
                     if (isWeekendDay) return 'text-slate-300 hover:text-white hover:bg-slate-400 hover:bg-opacity-30 cursor-pointer';
                     return 'text-white opacity-90 hover:opacity-100 hover:bg-white hover:bg-opacity-20 cursor-pointer';
@@ -1577,7 +1587,7 @@ export default function Dashboard() {
                       title={buttonTooltip}
                     >
                       {isHolidayDay && (
-                        <div className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${holidayInfo.isCanadian ? 'bg-rose-400' : 'bg-indigo-400'}`} />
+                        <div className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${holidayInfo.isCanadian ? 'bg-rose-400' : holidayInfo.isDynamic ? 'bg-violet-400' : 'bg-indigo-400'}`} />
                       )}
                       <span>{day}</span>
                       <span className="text-[7px] opacity-60 -mt-0.5">{dayDate.getDate()}</span>
