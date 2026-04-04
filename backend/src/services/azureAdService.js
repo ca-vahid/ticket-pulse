@@ -143,6 +143,68 @@ class AzureAdService {
   }
 
   /**
+   * Get user profile from Azure AD (officeLocation, city, department, jobTitle).
+   * @param {string} email - User email address
+   * @returns {Promise<{officeLocation, city, department, jobTitle}|null>}
+   */
+  async getUserProfile(email) {
+    if (!email) return null;
+
+    try {
+      const token = await this.getAccessToken();
+      const response = await axios.get(
+        `${this.graphApiUrl}/users/${encodeURIComponent(email)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { $select: 'officeLocation,city,department,jobTitle,state,country' },
+        },
+      );
+      return {
+        officeLocation: response.data.officeLocation || null,
+        city: response.data.city || null,
+        department: response.data.department || null,
+        jobTitle: response.data.jobTitle || null,
+        state: response.data.state || null,
+        country: response.data.country || null,
+      };
+    } catch (error) {
+      if (error.response?.status === 404) {
+        logger.info(`No AD profile found for ${email}`);
+      } else {
+        logger.warn(`Failed to fetch AD profile for ${email}`, { status: error.response?.status });
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Get profiles for multiple users (officeLocation, city, etc.)
+   * @param {Array<{email: string, id: number}>} users
+   * @param {number} concurrency
+   * @returns {Promise<Array<{id, email, officeLocation, city}>>}
+   */
+  async getUserProfiles(users, concurrency = 3) {
+    const results = [];
+
+    for (let i = 0; i < users.length; i += concurrency) {
+      const batch = users.slice(i, i + concurrency);
+      const batchResults = await Promise.all(
+        batch.map(async (user) => {
+          const profile = await this.getUserProfile(user.email);
+          return { id: user.id, email: user.email, ...profile };
+        }),
+      );
+      results.push(...batchResults);
+
+      if (i + concurrency < users.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Search users in Azure AD by display name or email prefix.
    * Uses Microsoft Graph /users endpoint with $filter.
    * @param {string} query - Search term (min 2 chars)

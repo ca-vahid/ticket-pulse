@@ -99,7 +99,7 @@ export default function Settings() {
     { id: 'admins', label: 'Admins', Icon: Shield, minRole: 'global' },
     { id: 'workspace-access', label: 'Workspace Access', Icon: KeyRound, minRole: 'admin' },
     { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard, minRole: 'viewer' },
-    { id: 'photos', label: 'Profile Photos', Icon: Camera, minRole: 'admin' },
+    { id: 'photos', label: 'Photos & Locations', Icon: Camera, minRole: 'admin' },
     { id: 'business-hours', label: 'Business Hours', Icon: Clock, minRole: 'admin' },
     { id: 'tech-schedules', label: 'Tech Schedules', Icon: CalendarDays, minRole: 'admin' },
     { id: 'tech-visibility', label: 'Tech Visibility', Icon: EyeOff, minRole: 'admin' },
@@ -303,23 +303,26 @@ export default function Settings() {
       if (response.success) {
         dataCache.clear();
 
-        setPhotoSyncStatus({
-          success: true,
-          message: `Photo sync completed! ${response.synced} photos synced, ${response.failed} failed.`,
-        });
+        const p = response.photos || {};
+        const l = response.locations || {};
+        const parts = [];
+        parts.push(`Photos: ${p.synced || 0} synced, ${p.failed || 0} missing`);
+        parts.push(`Locations: ${l.synced || 0} updated, ${l.skipped || 0} kept (manual), ${l.failed || 0} not in AD`);
+
+        setPhotoSyncStatus({ success: true, message: parts.join(' · ') });
 
         const statusResponse = await api.get('/photos/status');
         setPhotoStatus(statusResponse.data);
       } else {
         setPhotoSyncStatus({
           success: false,
-          message: response.message || 'Photo sync failed',
+          message: response.message || 'Sync failed',
         });
       }
     } catch (err) {
       setPhotoSyncStatus({
         success: false,
-        message: err.response?.data?.message || err.message || 'Failed to sync photos',
+        message: err.message || 'Failed to sync from Azure AD',
       });
     } finally {
       setIsPhotoSyncing(false);
@@ -603,53 +606,58 @@ export default function Settings() {
               </div>
             )}
 
-            {/* Profile Photos */}
+            {/* Photos & Locations */}
             {activeSection === 'photos' && (
               <div className="p-6">
                 <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
-                  <h2 className="text-base font-semibold mb-4 text-gray-900">Profile Photos</h2>
+                  <h2 className="text-base font-semibold mb-1 text-gray-900">Photos &amp; Locations</h2>
+                  <p className="text-sm text-gray-500 mb-4">
+                    Sync technician profile photos and office locations from Azure AD (Entra ID). Locations are only updated for technicians without a manually set location.
+                  </p>
 
-                  <div className="space-y-4">
-                    <p className="text-sm text-gray-600">
-                Sync technician profile photos from Azure AD (Entra ID) using email matching.
-                    </p>
-
-                    {photoStatus && (
-                      <div className="p-4 bg-blue-50 rounded-lg">
-                        <div className="grid grid-cols-3 gap-4 text-center">
-                          <div>
-                            <p className="text-2xl font-bold text-gray-900">{photoStatus.total}</p>
-                            <p className="text-xs text-gray-600 uppercase font-medium">Total Techs</p>
-                          </div>
-                          <div>
-                            <p className="text-2xl font-bold text-green-600">{photoStatus.withPhotos}</p>
-                            <p className="text-xs text-gray-600 uppercase font-medium">With Photos</p>
-                          </div>
-                          <div>
-                            <p className="text-2xl font-bold text-gray-500">{photoStatus.withoutPhotos}</p>
-                            <p className="text-xs text-gray-600 uppercase font-medium">Without Photos</p>
-                          </div>
+                  {photoStatus && (
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div className="p-3 bg-blue-50 rounded-lg">
+                        <p className="text-xs text-gray-500 uppercase font-medium mb-2">Photos</p>
+                        <div className="flex items-baseline gap-3">
+                          <span className="text-2xl font-bold text-green-600">{photoStatus.withPhotos}</span>
+                          <span className="text-xs text-gray-500">with photos</span>
+                          <span className="text-lg font-semibold text-gray-400">{photoStatus.withoutPhotos}</span>
+                          <span className="text-xs text-gray-500">missing</span>
                         </div>
                       </div>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={handlePhotoSync}
-                      disabled={isPhotoSyncing}
-                      className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
-                    >
-                      <Users className="w-4 h-4" />
-                      {isPhotoSyncing ? 'Syncing Photos...' : 'Sync Photos from Azure AD'}
-                    </button>
-
-                    {photoSyncStatus && (
-                      <div className={`flex items-center gap-2 p-3 rounded-lg ${photoSyncStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-                        {photoSyncStatus.success ? <CheckCircle className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
-                        <span>{photoSyncStatus.message}</span>
+                      <div className="p-3 bg-indigo-50 rounded-lg">
+                        <p className="text-xs text-gray-500 uppercase font-medium mb-2">Locations</p>
+                        <div className="flex items-baseline gap-3">
+                          <span className="text-2xl font-bold text-indigo-600">{photoStatus.withLocation ?? '—'}</span>
+                          <span className="text-xs text-gray-500">with location</span>
+                          <span className="text-lg font-semibold text-gray-400">{photoStatus.withoutLocation ?? '—'}</span>
+                          <span className="text-xs text-gray-500">missing</span>
+                        </div>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
+
+                  {photoStatus && (
+                    <p className="text-xs text-gray-400 mb-4">{photoStatus.total} active technician{photoStatus.total !== 1 ? 's' : ''} in this workspace</p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handlePhotoSync}
+                    disabled={isPhotoSyncing}
+                    className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+                  >
+                    <Users className="w-4 h-4" />
+                    {isPhotoSyncing ? 'Syncing from Azure AD...' : 'Sync Photos & Locations from Azure AD'}
+                  </button>
+
+                  {photoSyncStatus && (
+                    <div className={`flex items-start gap-2 p-3 rounded-lg mt-3 ${photoSyncStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                      {photoSyncStatus.success ? <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0" /> : <XCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />}
+                      <span className="text-sm">{photoSyncStatus.message}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
