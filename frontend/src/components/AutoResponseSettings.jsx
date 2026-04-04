@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 import { Clock, Plus, Trash2, CheckCircle, XCircle, Calendar, Globe } from 'lucide-react';
 
 export default function AutoResponseSettings() {
@@ -19,16 +19,16 @@ export default function AutoResponseSettings() {
     setIsLoading(true);
     try {
       const [hoursRes, holidaysRes, availRes] = await Promise.all([
-        axios.get('/api/autoresponse/business-hours'),
-        axios.get('/api/autoresponse/holidays'),
-        axios.get('/api/autoresponse/availability/check'),
+        api.get('/autoresponse/business-hours'),
+        api.get('/autoresponse/holidays'),
+        api.get('/autoresponse/availability/check'),
       ]);
 
-      setBusinessHours(hoursRes.data.data || []);
-      setHolidays(holidaysRes.data.data || []);
-      setAvailability(availRes.data.data || null);
+      setBusinessHours(hoursRes.data || []);
+      setHolidays(holidaysRes.data || []);
+      setAvailability(availRes.data || null);
     } catch (error) {
-      console.error('Failed to fetch auto-response settings:', error);
+      console.warn('Failed to fetch auto-response settings:', error.message);
       setSaveStatus({ success: false, message: 'Failed to load settings' });
     } finally {
       setIsLoading(false);
@@ -60,11 +60,11 @@ export default function AutoResponseSettings() {
 
   const handleSaveBusinessHours = async () => {
     try {
-      await axios.put('/api/autoresponse/business-hours', { hours: businessHours });
+      await api.put('/autoresponse/business-hours', { hours: businessHours });
       setSaveStatus({ success: true, message: 'Business hours saved successfully!' });
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (error) {
-      setSaveStatus({ success: false, message: 'Failed to save business hours' });
+      setSaveStatus({ success: false, message: error.message || 'Failed to save business hours' });
     }
   };
 
@@ -75,7 +75,7 @@ export default function AutoResponseSettings() {
     if (!name || !date) return;
 
     try {
-      await axios.post('/api/autoresponse/holidays', {
+      await api.post('/autoresponse/holidays', {
         name,
         date,
         isRecurring: false,
@@ -84,7 +84,7 @@ export default function AutoResponseSettings() {
       setSaveStatus({ success: true, message: 'Holiday added!' });
       fetchData();
     } catch (error) {
-      setSaveStatus({ success: false, message: 'Failed to add holiday' });
+      setSaveStatus({ success: false, message: error.message || 'Failed to add holiday' });
     }
   };
 
@@ -92,11 +92,11 @@ export default function AutoResponseSettings() {
     if (!confirm('Delete this holiday?')) return;
 
     try {
-      await axios.delete(`/api/autoresponse/holidays/${id}`);
+      await api.delete(`/autoresponse/holidays/${id}`);
       setSaveStatus({ success: true, message: 'Holiday deleted!' });
       fetchData();
     } catch (error) {
-      setSaveStatus({ success: false, message: 'Failed to delete holiday' });
+      setSaveStatus({ success: false, message: error.message || 'Failed to delete holiday' });
     }
   };
 
@@ -105,11 +105,11 @@ export default function AutoResponseSettings() {
     if (!confirm(`Load Canadian holidays for ${year}?`)) return;
 
     try {
-      await axios.post('/api/autoresponse/holidays/load-canadian', { year });
+      await api.post('/autoresponse/holidays/load-canadian', { year });
       setSaveStatus({ success: true, message: `Canadian holidays loaded for ${year}!` });
       fetchData();
     } catch (error) {
-      setSaveStatus({ success: false, message: 'Failed to load holidays' });
+      setSaveStatus({ success: false, message: error.message || 'Failed to load holidays' });
     }
   };
 

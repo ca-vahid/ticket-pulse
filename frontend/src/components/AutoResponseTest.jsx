@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 import { Send, CheckCircle, XCircle, Loader, AlertCircle, Clock, Mail } from 'lucide-react';
 
 export default function AutoResponseTest() {
@@ -29,17 +29,17 @@ export default function AutoResponseTest() {
     setTestResult(null);
 
     try {
-      const response = await axios.post('/api/autoresponse/test', formData);
+      const response = await api.post('/autoresponse/test', formData);
 
       setTestResult({
         success: true,
         message: 'Auto-response test completed successfully!',
-        data: response.data.data,
+        data: response.data,
       });
     } catch (error) {
       setTestResult({
         success: false,
-        message: error.response?.data?.message || error.message || 'Test failed',
+        message: error.message || 'Test failed',
         error: error.response?.data?.error,
       });
     } finally {

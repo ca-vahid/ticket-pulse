@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 import { 
   Save, 
   RotateCcw, 
@@ -131,12 +131,12 @@ export default function LlmAdminPanel() {
     setIsLoading(true);
     try {
       const [draftResponse, publishedResponse] = await Promise.all([
-        axios.get('/api/admin/llm-settings/config?type=draft'),
-        axios.get('/api/admin/llm-settings/config?type=published'),
+        api.get('/admin/llm-settings/config', { params: { type: 'draft' } }),
+        api.get('/admin/llm-settings/config', { params: { type: 'published' } }),
       ]);
 
-      const draftConfig = draftResponse.data.data;
-      const published = publishedResponse.data.data;
+      const draftConfig = draftResponse.data;
+      const published = publishedResponse.data;
 
       setConfig(draftConfig);
       setPublishedConfig(published);
@@ -153,8 +153,8 @@ export default function LlmAdminPanel() {
 
   const fetchDefaults = async () => {
     try {
-      const response = await axios.get('/api/admin/llm-settings/defaults');
-      setDefaults(response.data.data);
+      const response = await api.get('/admin/llm-settings/defaults');
+      setDefaults(response.data);
     } catch (error) {
       console.error('Failed to fetch defaults:', error);
     }
@@ -165,13 +165,13 @@ export default function LlmAdminPanel() {
     setToast(null);
 
     try {
-      await axios.put(`/api/admin/llm-settings/${section}`, data);
+      await api.put(`/admin/llm-settings/${section}`, data);
       setToast({ type: 'success', message: 'Settings saved successfully' });
       fetchConfigs();
     } catch (error) {
       setToast({ 
         type: 'error', 
-        message: error.response?.data?.message || 'Failed to save settings',
+        message: error.message || 'Failed to save settings',
       });
     } finally {
       setIsSaving(false);
@@ -211,7 +211,7 @@ export default function LlmAdminPanel() {
     setToast(null);
 
     try {
-      await axios.post('/api/admin/llm-settings/publish', {
+      await api.post('/admin/llm-settings/publish', {
         notes: `Published from UI on ${new Date().toLocaleString()}`,
       });
       setToast({ type: 'success', message: 'Configuration published successfully' });
@@ -219,7 +219,7 @@ export default function LlmAdminPanel() {
     } catch (error) {
       setToast({ 
         type: 'error', 
-        message: error.response?.data?.message || 'Failed to publish',
+        message: error.message || 'Failed to publish',
       });
     } finally {
       setIsSaving(false);
@@ -231,7 +231,7 @@ export default function LlmAdminPanel() {
     setToast(null);
 
     try {
-      await axios.post('/api/admin/llm-settings/reset');
+      await api.post('/admin/llm-settings/reset');
       setToast({ type: 'success', message: 'Configuration reset to defaults' });
       fetchConfigs();
     } catch (error) {
@@ -1106,8 +1106,8 @@ function HistoryTab({ config: _config, onRevert }) {
   const fetchHistory = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get('/api/admin/llm-settings/history?limit=20');
-      setHistory(response.data.data);
+      const response = await api.get('/admin/llm-settings/history', { params: { limit: 20 } });
+      setHistory(response.data);
     } catch (error) {
       console.error('Failed to fetch history:', error);
     } finally {
@@ -1121,11 +1121,11 @@ function HistoryTab({ config: _config, onRevert }) {
     }
 
     try {
-      await axios.post('/api/admin/llm-settings/revert', { historyId });
+      await api.post('/admin/llm-settings/revert', { historyId });
       alert('Reverted successfully!');
       onRevert();
     } catch (error) {
-      alert('Failed to revert: ' + (error.response?.data?.message || error.message));
+      alert('Failed to revert: ' + error.message);
     }
   };
 

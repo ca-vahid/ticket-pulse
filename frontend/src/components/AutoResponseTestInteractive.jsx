@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 import { 
   Send, 
   CheckCircle, 
@@ -71,16 +71,13 @@ export default function AutoResponseTestInteractive() {
     const stepSimulator4 = setTimeout(() => setCurrentStep('Preparing email preview...'), 30000);
 
     try {
-      const response = await axios.post('/api/autoresponse/test', formData, {
-        timeout: 90000, // 90 second timeout for slow LLM calls
-      });
+      const response = await api.post('/autoresponse/test', formData);
       
       // Dry-run completed
       
-      // Include success flag from parent response
       setDryRunResult({
-        success: response.data.success,
-        ...response.data.data,
+        success: response.success,
+        ...response.data,
       });
       setActiveStep(0);
       setCurrentStep('');
@@ -112,14 +109,14 @@ export default function AutoResponseTestInteractive() {
     setSendResult(null);
 
     try {
-      const response = await axios.post('/api/autoresponse/test/send', {
+      const response = await api.post('/autoresponse/test/send', {
         sendData: dryRunResult.sendData,
       });
-      setSendResult(response.data);
+      setSendResult(response);
     } catch (error) {
       setSendResult({
         success: false,
-        error: error.response?.data?.message || error.message,
+        error: error.message,
       });
     } finally {
       setIsSending(false);
