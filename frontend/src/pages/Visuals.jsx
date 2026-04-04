@@ -6,18 +6,70 @@ import { visualsAPI } from '../services/api';
 import { ArrowLeft, Users, Crown, Activity, Loader, ChevronLeft, ChevronRight, Edit2, Check, X, Maximize } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
-// Office locations (lat/lng coordinates)
+// Office locations (lat/lng coordinates) — Canadian cities + major North American cities
 const OFFICE_LOCATIONS = {
+  // British Columbia
   Vancouver: { lat: 49.2827, lng: -123.1207, zoom: 10 },
+  Victoria: { lat: 48.4284, lng: -123.3656, zoom: 10 },
+  Kamloops: { lat: 50.6745, lng: -120.3273, zoom: 10 },
+  Kelowna: { lat: 49.8880, lng: -119.4960, zoom: 10 },
+  'Prince George': { lat: 53.9171, lng: -122.7497, zoom: 10 },
+  Nanaimo: { lat: 49.1659, lng: -123.9401, zoom: 10 },
+  Burnaby: { lat: 49.2488, lng: -122.9805, zoom: 10 },
+  Surrey: { lat: 49.1913, lng: -122.8490, zoom: 10 },
+  Richmond: { lat: 49.1666, lng: -123.1336, zoom: 10 },
+  // Alberta
   Calgary: { lat: 51.0447, lng: -114.0719, zoom: 10 },
-  Ottawa: { lat: 45.4215, lng: -75.6972, zoom: 10 },
-  Halifax: { lat: 44.6488, lng: -63.5752, zoom: 10 },
+  Edmonton: { lat: 53.5461, lng: -113.4938, zoom: 10 },
+  'Red Deer': { lat: 52.2681, lng: -113.8112, zoom: 10 },
+  Lethbridge: { lat: 49.6942, lng: -112.8328, zoom: 10 },
+  // Saskatchewan & Manitoba
+  Saskatoon: { lat: 52.1332, lng: -106.6700, zoom: 10 },
+  Regina: { lat: 50.4452, lng: -104.6189, zoom: 10 },
+  Winnipeg: { lat: 49.8951, lng: -97.1384, zoom: 10 },
+  // Ontario
   Toronto: { lat: 43.6532, lng: -79.3832, zoom: 10 },
-  Default: { lat: 54.5, lng: -105.0, zoom: 4 }, // Center of Canada
+  Ottawa: { lat: 45.4215, lng: -75.6972, zoom: 10 },
+  Mississauga: { lat: 43.5890, lng: -79.6441, zoom: 10 },
+  Hamilton: { lat: 43.2557, lng: -79.8711, zoom: 10 },
+  London: { lat: 42.9849, lng: -81.2453, zoom: 10 },
+  Kitchener: { lat: 43.4516, lng: -80.4925, zoom: 10 },
+  Waterloo: { lat: 43.4643, lng: -80.5204, zoom: 10 },
+  'Thunder Bay': { lat: 48.3809, lng: -89.2477, zoom: 10 },
+  // Quebec
+  Montreal: { lat: 45.5017, lng: -73.5673, zoom: 10 },
+  'Quebec City': { lat: 46.8139, lng: -71.2080, zoom: 10 },
+  // Atlantic
+  Halifax: { lat: 44.6488, lng: -63.5752, zoom: 10 },
+  'St. John\'s': { lat: 47.5615, lng: -52.7126, zoom: 10 },
+  Fredericton: { lat: 45.9636, lng: -66.6431, zoom: 10 },
+  Moncton: { lat: 46.0878, lng: -64.7782, zoom: 10 },
+  Charlottetown: { lat: 46.2382, lng: -63.1311, zoom: 10 },
+  // Territories
+  Whitehorse: { lat: 60.7212, lng: -135.0568, zoom: 10 },
+  Yellowknife: { lat: 62.4540, lng: -114.3718, zoom: 10 },
+  // Default fallback
+  Default: { lat: 54.5, lng: -105.0, zoom: 4 },
 };
 
-// Preset location options
-const PRESET_LOCATIONS = ['Vancouver', 'Calgary', 'Ottawa', 'Toronto', 'Halifax'];
+// Normalize location string to match OFFICE_LOCATIONS keys (case-insensitive)
+function resolveLocation(locationStr) {
+  if (!locationStr) return OFFICE_LOCATIONS.Default;
+  const exact = OFFICE_LOCATIONS[locationStr];
+  if (exact) return exact;
+  const lower = locationStr.toLowerCase();
+  for (const [key, val] of Object.entries(OFFICE_LOCATIONS)) {
+    if (key.toLowerCase() === lower) return val;
+  }
+  return OFFICE_LOCATIONS.Default;
+}
+
+// Preset location options for the dropdown
+const PRESET_LOCATIONS = [
+  'Vancouver', 'Calgary', 'Edmonton', 'Ottawa', 'Toronto',
+  'Halifax', 'Kamloops', 'Kelowna', 'Montreal', 'Winnipeg',
+  'Victoria', 'Saskatoon', 'Regina',
+];
 
 // Get initials from name (e.g., "Vahid Haeri" -> "VH")
 const getInitials = (name) => {
@@ -318,7 +370,7 @@ export default function Visuals() {
     const agentsByLocation = getAgentsByLocation();
     
     Object.entries(agentsByLocation).forEach(([location, locationAgents]) => {
-      const officeCoords = OFFICE_LOCATIONS[location] || OFFICE_LOCATIONS.Default;
+      const officeCoords = resolveLocation(location);
       
       // Check if this location has the manager
       const managerInLocation = locationAgents.find(a => a.id === managerId);
