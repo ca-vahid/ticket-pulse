@@ -28,7 +28,8 @@ router.post(
       });
     }
 
-    logger.info('Starting photo + location sync from Azure AD');
+    const forceLocations = req.body?.forceLocations === true;
+    logger.info(`Starting photo + location sync from Azure AD (forceLocations=${forceLocations})`);
 
     const technicians = await prisma.technician.findMany({
       where: {
@@ -51,12 +52,12 @@ router.post(
         photos: { synced: 0, failed: 0 },
         locations: { synced: 0, skipped: 0, failed: 0 },
         total: 0,
+        details: [],
       });
     }
 
     logger.info(`Syncing photos + locations for ${technicians.length} technicians`);
 
-    // Fetch photos and profiles in parallel batches
     const [photoResults, profileResults] = await Promise.all([
       azureAdService.getUserPhotos(technicians, 3),
       azureAdService.getUserProfiles(technicians, 3),
@@ -69,6 +70,7 @@ router.post(
     let locationsSynced = 0;
     let locationsSkipped = 0;
     let locationsFailed = 0;
+    const details = [];
 
     for (const result of photoResults) {
       try {
@@ -77,18 +79,23 @@ router.post(
           photoSyncedAt: new Date(),
         };
 
-        // Check if we should update location from AD
         const tech = technicians.find(t => t.id === result.id);
         const profile = profileMap.get(result.id);
         const adLocation = profile?.officeLocation || profile?.city || null;
+        const hadManualLocation = !!(tech?.location && tech.location.trim());
 
-        if (adLocation && (!tech?.location || tech.location.trim() === '')) {
+        let locationAction = 'none';
+
+        if (adLocation && (!hadManualLocation || forceLocations)) {
           updateData.location = adLocation;
           locationsSynced++;
-        } else if (adLocation && tech?.location) {
+          locationAction = hadManualLocation ? 'overwritten' : 'set';
+        } else if (adLocation && hadManualLocation) {
           locationsSkipped++;
+          locationAction = 'kept';
         } else if (!adLocation) {
           locationsFailed++;
+          locationAction = 'no_ad_data';
         }
 
         await prisma.technician.update({
@@ -101,14 +108,33 @@ router.post(
         } else {
           photosFailed++;
         }
+
+        details.push({
+          name: tech?.name || result.email,
+          email: result.email,
+          photo: !!result.photoUrl,
+          locationBefore: tech?.location || null,
+          locationAD: adLocation,
+          locationAfter: updateData.location || tech?.location || null,
+          locationAction,
+          adJobTitle: profile?.jobTitle || null,
+          adDepartment: profile?.department || null,
+        });
       } catch (error) {
         photosFailed++;
         locationsFailed++;
         logger.error(`Failed to update photo/location for ${result.email}`, { error: error.message });
+        details.push({
+          name: result.email,
+          email: result.email,
+          photo: false,
+          locationAction: 'error',
+          error: error.message,
+        });
       }
     }
 
-    logger.info(`Sync completed: photos ${photosSynced}/${technicians.length}, locations ${locationsSynced} new, ${locationsSkipped} kept`);
+    logger.info(`Sync completed: photos ${photosSynced}/${technicians.length}, locations ${locationsSynced} new/updated, ${locationsSkipped} kept`);
     clearReadCache();
 
     res.json({
@@ -117,6 +143,7 @@ router.post(
       total: technicians.length,
       photos: { synced: photosSynced, failed: photosFailed },
       locations: { synced: locationsSynced, skipped: locationsSkipped, failed: locationsFailed },
+      details,
     });
   }),
 );

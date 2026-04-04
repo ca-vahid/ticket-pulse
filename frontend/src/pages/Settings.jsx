@@ -293,12 +293,16 @@ export default function Settings() {
     }
   };
 
+  const [syncDetails, setSyncDetails] = useState(null);
+  const [forceLocations, setForceLocations] = useState(false);
+
   const handlePhotoSync = async () => {
     setIsPhotoSyncing(true);
     setPhotoSyncStatus(null);
+    setSyncDetails(null);
 
     try {
-      const response = await api.post('/photos/sync');
+      const response = await api.post('/photos/sync', { forceLocations });
 
       if (response.success) {
         dataCache.clear();
@@ -307,9 +311,10 @@ export default function Settings() {
         const l = response.locations || {};
         const parts = [];
         parts.push(`Photos: ${p.synced || 0} synced, ${p.failed || 0} missing`);
-        parts.push(`Locations: ${l.synced || 0} updated, ${l.skipped || 0} kept (manual), ${l.failed || 0} not in AD`);
+        parts.push(`Locations: ${l.synced || 0} updated, ${l.skipped || 0} kept, ${l.failed || 0} not in AD`);
 
         setPhotoSyncStatus({ success: true, message: parts.join(' · ') });
+        setSyncDetails(response.details || []);
 
         const statusResponse = await api.get('/photos/status');
         setPhotoStatus(statusResponse.data);
@@ -642,20 +647,73 @@ export default function Settings() {
                     <p className="text-xs text-gray-400 mb-4">{photoStatus.total} active technician{photoStatus.total !== 1 ? 's' : ''} in this workspace</p>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={handlePhotoSync}
-                    disabled={isPhotoSyncing}
-                    className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
-                  >
-                    <Users className="w-4 h-4" />
-                    {isPhotoSyncing ? 'Syncing from Azure AD...' : 'Sync Photos & Locations from Azure AD'}
-                  </button>
+                  <div className="flex items-center gap-4 mb-3">
+                    <button
+                      type="button"
+                      onClick={handlePhotoSync}
+                      disabled={isPhotoSyncing}
+                      className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+                    >
+                      <Users className="w-4 h-4" />
+                      {isPhotoSyncing ? 'Syncing from Azure AD...' : 'Sync Photos & Locations from Azure AD'}
+                    </button>
+                    <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={forceLocations}
+                        onChange={(e) => setForceLocations(e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      Overwrite existing locations with AD data
+                    </label>
+                  </div>
 
                   {photoSyncStatus && (
-                    <div className={`flex items-start gap-2 p-3 rounded-lg mt-3 ${photoSyncStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                    <div className={`flex items-start gap-2 p-3 rounded-lg ${photoSyncStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
                       {photoSyncStatus.success ? <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0" /> : <XCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />}
                       <span className="text-sm">{photoSyncStatus.message}</span>
+                    </div>
+                  )}
+
+                  {syncDetails && syncDetails.length > 0 && (
+                    <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                        <h3 className="text-xs font-semibold text-gray-600 uppercase">Sync Details</h3>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-gray-50 border-b">
+                              <th className="text-left px-3 py-1.5 font-medium text-gray-500">Name</th>
+                              <th className="text-center px-3 py-1.5 font-medium text-gray-500">Photo</th>
+                              <th className="text-left px-3 py-1.5 font-medium text-gray-500">Location (DB)</th>
+                              <th className="text-left px-3 py-1.5 font-medium text-gray-500">Location (AD)</th>
+                              <th className="text-left px-3 py-1.5 font-medium text-gray-500">AD Title</th>
+                              <th className="text-center px-3 py-1.5 font-medium text-gray-500">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {syncDetails.map((d, i) => (
+                              <tr key={i} className="hover:bg-gray-50/50">
+                                <td className="px-3 py-1.5 font-medium text-gray-900">{d.name}</td>
+                                <td className="px-3 py-1.5 text-center">
+                                  {d.photo ? <span className="text-green-600">&#10003;</span> : <span className="text-gray-300">&#10005;</span>}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-600">{d.locationBefore || <span className="text-gray-300 italic">none</span>}</td>
+                                <td className="px-3 py-1.5 text-gray-600">{d.locationAD || <span className="text-gray-300 italic">none</span>}</td>
+                                <td className="px-3 py-1.5 text-gray-500">{d.adJobTitle || '—'}</td>
+                                <td className="px-3 py-1.5 text-center">
+                                  {d.locationAction === 'set' && <span className="text-green-600 font-medium">Set</span>}
+                                  {d.locationAction === 'overwritten' && <span className="text-amber-600 font-medium">Updated</span>}
+                                  {d.locationAction === 'kept' && <span className="text-gray-400">Kept</span>}
+                                  {d.locationAction === 'no_ad_data' && <span className="text-gray-300 italic">No AD data</span>}
+                                  {d.locationAction === 'error' && <span className="text-red-500">Error</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </div>
