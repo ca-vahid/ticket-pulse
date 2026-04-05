@@ -297,6 +297,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
   const [error, setError] = useState(null);
   const [existingRun, setExistingRun] = useState(null);
   const [streaming, setStreaming] = useState(false);
+  const [progressKb, setProgressKb] = useState(null);
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -347,6 +348,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
     setExistingRun(null);
     setStatus('connecting');
     setEvents([]);
+    setProgressKb(null);
     setToolCalls([]);
     setRecommendation(null);
     setError(null);
@@ -363,7 +365,9 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
     let currentRunId = null;
 
     function processEvent(event) {
-      setEvents((prev) => [...prev, event]);
+      if (event.type !== 'progress' && event.type !== 'turn_start') {
+        setEvents((prev) => [...prev, event]);
+      }
 
       switch (event.type) {
       case 'run_started':
@@ -377,9 +381,14 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
         setError(null);
         break;
       case 'text':
+        setProgressKb(null);
         setTimeout(scrollToBottom, 10);
         break;
+      case 'progress':
+        setProgressKb(event.kb);
+        break;
       case 'tool_call':
+        setProgressKb(null);
         setToolCalls((prev) => [...prev, {
           id: event.toolUseId || `${event.name}-${Date.now()}`,
           name: event.name,
@@ -589,6 +598,9 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
         <div className="flex items-center gap-2">
           <StatusIcon className={`w-5 h-5 ${statusInfo.color} ${statusInfo.spin ? 'animate-spin' : ''}`} />
           <span className={`text-sm font-medium ${statusInfo.color}`}>{statusInfo.text}</span>
+          {progressKb !== null && status === 'running' && (
+            <span className="text-xs text-gray-400 font-mono tabular-nums">{progressKb.toFixed(1)} KB</span>
+          )}
           {runId && <CopyBadge label="Run" value={runId} />}
         </div>
         <div className="flex items-center gap-2">

@@ -38,8 +38,8 @@ class FreshServiceClient {
       error => {
         const status = error.response?.status;
 
-        // Let 429 errors pass through unwrapped for retry logic
-        if (status === 429) {
+        // Let 429/404/405 pass through unwrapped so callers can handle them directly
+        if (status === 429 || status === 404 || status === 405) {
           throw error;
         }
 
