@@ -297,7 +297,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
   const [error, setError] = useState(null);
   const [existingRun, setExistingRun] = useState(null);
   const [streaming, setStreaming] = useState(false);
-  const [progressKb, setProgressKb] = useState(null);
+  const [thinkingKb, setThinkingKb] = useState(null);
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -348,7 +348,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
     setExistingRun(null);
     setStatus('connecting');
     setEvents([]);
-    setProgressKb(null);
+    setThinkingKb(null);
     setToolCalls([]);
     setRecommendation(null);
     setError(null);
@@ -365,7 +365,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
     let currentRunId = null;
 
     function processEvent(event) {
-      if (event.type !== 'progress' && event.type !== 'turn_start') {
+      if (event.type !== 'thinking' && event.type !== 'turn_start') {
         setEvents((prev) => [...prev, event]);
       }
 
@@ -381,14 +381,14 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
         setError(null);
         break;
       case 'text':
-        setProgressKb(null);
+        setThinkingKb(null);
         setTimeout(scrollToBottom, 10);
         break;
-      case 'progress':
-        setProgressKb(event.kb);
+      case 'thinking':
+        setThinkingKb(event.kb);
         break;
       case 'tool_call':
-        setProgressKb(null);
+        setThinkingKb(null);
         setToolCalls((prev) => [...prev, {
           id: event.toolUseId || `${event.name}-${Date.now()}`,
           name: event.name,
@@ -598,9 +598,6 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
         <div className="flex items-center gap-2">
           <StatusIcon className={`w-5 h-5 ${statusInfo.color} ${statusInfo.spin ? 'animate-spin' : ''}`} />
           <span className={`text-sm font-medium ${statusInfo.color}`}>{statusInfo.text}</span>
-          {progressKb !== null && status === 'running' && (
-            <span className="text-xs text-gray-400 font-mono tabular-nums">{progressKb.toFixed(1)} KB</span>
-          )}
           {runId && <CopyBadge label="Run" value={runId} />}
         </div>
         <div className="flex items-center gap-2">
@@ -660,6 +657,15 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
           </div>
         )}
         {events.length > 0 && renderStream()}
+        {status === 'running' && thinkingKb !== null && (
+          <div className="flex items-center gap-2 py-1 text-xs text-gray-400">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span className="font-mono tabular-nums">processing {thinkingKb.toFixed(1)} KB...</span>
+          </div>
+        )}
+        {status === 'running' && thinkingKb === null && events.length > 0 && (
+          <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-0.5" />
+        )}
         {events.length === 0 && showExistingRun && existingRun.fullTranscript && (
           <div className="text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
             <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
@@ -671,9 +677,6 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
           <div className="text-sm text-gray-500 italic py-4 text-center">
             Analysis completed — transcript not available. Click &quot;Re-run Analysis&quot; to run again.
           </div>
-        )}
-        {status === 'running' && (
-          <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-0.5" />
         )}
       </div>
 
