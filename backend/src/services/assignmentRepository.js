@@ -407,7 +407,7 @@ class AssignmentRepository {
 
   // ─── Decision ─────────────────────────────────────────────────────────
 
-  async recordDecision(runId, { decision, assignedTechId, decidedByEmail, overrideReason }) {
+  async recordDecision(runId, { decision, assignedTechId, decidedByEmail, overrideReason, decisionNote }) {
     try {
       return await prisma.assignmentPipelineRun.update({
         where: { id: runId },
@@ -417,6 +417,7 @@ class AssignmentRepository {
           decidedByEmail,
           decidedAt: new Date(),
           overrideReason,
+          decisionNote: decisionNote || null,
         },
       });
     } catch (error) {

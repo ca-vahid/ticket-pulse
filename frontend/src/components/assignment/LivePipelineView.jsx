@@ -13,6 +13,7 @@ import {
 function RecommendationCards({ data, onDecide, deciding }) {
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [overrideReason, setOverrideReason] = useState('');
+  const [decisionNote, setDecisionNote] = useState('');
   const [showTechPicker, setShowTechPicker] = useState(false);
   const [allTechs, setAllTechs] = useState([]);
   const [techSearch, setTechSearch] = useState('');
@@ -35,118 +36,70 @@ function RecommendationCards({ data, onDecide, deciding }) {
 
   const topRec = data.recommendations[0];
   const recTechIds = new Set(data.recommendations.map((r) => r.techId));
+  const isOverride = selectedOverrideTech != null;
+  const effectiveTechId = isOverride ? selectedTechId : (selectedTechId || topRec?.techId);
+  const effectiveTechName = isOverride ? selectedOverrideTech.name : (data.recommendations.find((r) => r.techId === effectiveTechId)?.techName || topRec?.techName);
+
+  const loadTechs = async () => {
+    if (allTechs.length === 0) {
+      try { const res = await assignmentAPI.getCompetencyTechnicians(); setAllTechs(res?.data || []); } catch { /* ignore */ }
+    }
+  };
 
   return (
     <div className="mt-4 border-t pt-4">
-      <h4 className="text-sm font-semibold text-gray-700 mb-2">Recommendations</h4>
       {data.overallReasoning && (
-        <p className="text-sm text-gray-600 mb-3 bg-blue-50 rounded-lg p-3">{data.overallReasoning}</p>
+        <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
+          <h4 className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">Overall Reasoning</h4>
+          <p className="text-sm text-blue-900 leading-relaxed">{data.overallReasoning}</p>
+        </div>
       )}
-      <div className="space-y-2 mb-4">
-        {data.recommendations.map((rec, i) => (
-          <div
-            key={rec.techId || i}
-            onClick={() => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); }}
-            className={`border rounded-lg p-3 cursor-pointer transition-all ${
-              selectedTechId === rec.techId ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : 'hover:border-gray-300 bg-white'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">{rec.rank || i + 1}</span>
-                <User className="w-4 h-4 text-gray-400" />
-                <span className="font-medium text-sm">{rec.techName}</span>
-              </div>
-              {typeof rec.score === 'number' && (
-                <span className="text-sm font-mono font-bold text-blue-700">{(rec.score * 100).toFixed(0)}%</span>
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        {/* LEFT: Candidates (3/5 width) */}
+        <div className="lg:col-span-3 space-y-2">
+          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Recommendations</h4>
+
+          {!showTechPicker ? (
+            <>
+              {data.recommendations.map((rec, i) => {
+                const isSelected = effectiveTechId === rec.techId && !isOverride;
+                return (
+                  <div
+                    key={rec.techId || i}
+                    onClick={() => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); setShowTechPicker(false); }}
+                    className={`border rounded-lg p-3 cursor-pointer transition-all ${
+                      isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'hover:border-gray-300 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-6 h-6 rounded-full text-white text-xs flex items-center justify-center font-bold ${isSelected ? 'bg-blue-600' : 'bg-gray-400'}`}>{rec.rank || i + 1}</span>
+                        <User className="w-4 h-4 text-gray-400" />
+                        <span className="font-medium text-sm">{rec.techName}</span>
+                      </div>
+                      {typeof rec.score === 'number' && (
+                        <span className={`text-sm font-mono font-bold ${isSelected ? 'text-blue-700' : 'text-gray-500'}`}>{(rec.score * 100).toFixed(0)}%</span>
+                      )}
+                    </div>
+                    {rec.reasoning && <p className="text-xs text-gray-500 mt-1.5 ml-8 leading-relaxed">{rec.reasoning}</p>}
+                  </div>
+                );
+              })}
+
+              {onDecide && (
+                <button
+                  onClick={async () => { await loadTechs(); setShowTechPicker(true); }}
+                  className="w-full border border-dashed border-gray-300 rounded-lg p-3 text-sm text-gray-500 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50/50 transition-all flex items-center justify-center gap-2"
+                >
+                  <Users className="w-4 h-4" /> Choose a different technician
+                </button>
               )}
-            </div>
-            {rec.reasoning && <p className="text-xs text-gray-500 mt-1 ml-8">{rec.reasoning}</p>}
-          </div>
-        ))}
-      </div>
-
-      {onDecide && (
-        <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-          <h4 className="text-sm font-semibold text-gray-700">Make Decision</h4>
-
-          {selectedOverrideTech && (
-            <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-              {selectedOverrideTech.photoUrl ? (
-                <img src={selectedOverrideTech.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-blue-400" />
-              ) : (
-                <span className="w-8 h-8 rounded-full bg-blue-200 text-blue-700 text-xs font-bold flex items-center justify-center ring-2 ring-blue-400">
-                  {selectedOverrideTech.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                </span>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-blue-900">{selectedOverrideTech.name}</p>
-                {selectedOverrideTech.location && <p className="text-xs text-blue-600 flex items-center gap-1"><MapPin className="w-3 h-3" />{selectedOverrideTech.location}</p>}
-              </div>
-              <button onClick={() => { setSelectedTechId(null); setSelectedOverrideTech(null); }} className="p-1 hover:bg-blue-100 rounded-full transition-colors"><X className="w-4 h-4 text-blue-400" /></button>
-            </div>
-          )}
-
-          {selectedTechId && selectedTechId !== topRec?.techId && (
-            <div className="space-y-2">
-              <textarea
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg p-2.5 text-sm resize-none h-16 focus:ring-2 focus:ring-blue-200 focus:border-blue-300 transition-all"
-                placeholder="Why assign to a different technician? (required)"
-              />
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {!selectedOverrideTech ? (
-              <button
-                onClick={() => onDecide({ decision: 'approved', assignedTechId: topRec?.techId })}
-                disabled={deciding}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm"
-              >
-                {deciding ? 'Processing...' : `Approve (${topRec?.techName})`}
-              </button>
-            ) : (
-              <button
-                onClick={() => onDecide({ decision: 'modified', assignedTechId: selectedTechId, overrideReason })}
-                disabled={deciding || !overrideReason.trim()}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
-              >
-                {deciding ? 'Processing...' : `Assign to ${selectedOverrideTech.name.split(' ')[0]}`}
-              </button>
-            )}
-            <button
-              onClick={() => onDecide({ decision: 'rejected' })}
-              disabled={deciding}
-              className="px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 disabled:opacity-50 transition-colors"
-            >
-              Reject
-            </button>
-            <div className="flex-1" />
-            <button
-              onClick={async () => {
-                if (!showTechPicker && allTechs.length === 0) {
-                  try {
-                    const res = await assignmentAPI.getCompetencyTechnicians();
-                    setAllTechs(res?.data || []);
-                  } catch { /* ignore */ }
-                }
-                setShowTechPicker(!showTechPicker);
-              }}
-              className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
-                showTechPicker ? 'bg-gray-200 text-gray-700' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300'
-              }`}
-            >
-              <Users className="w-3.5 h-3.5" />
-              {showTechPicker ? 'Close' : 'Choose different tech'}
-            </button>
-          </div>
-
-          {showTechPicker && (
-            <div className="border border-gray-200 rounded-lg bg-white overflow-hidden shadow-sm">
-              <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
-                <div className="relative">
+            </>
+          ) : (
+            <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
+              <div className="px-3 py-2 bg-gray-50 border-b flex items-center gap-2">
+                <div className="relative flex-1">
                   <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
@@ -157,8 +110,11 @@ function RecommendationCards({ data, onDecide, deciding }) {
                     autoFocus
                   />
                 </div>
+                <button onClick={() => { setShowTechPicker(false); setTechSearch(''); }} className="p-1.5 hover:bg-gray-200 rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
               </div>
-              <div className="max-h-56 overflow-y-auto">
+              <div className="max-h-72 overflow-y-auto">
                 {allTechs
                   .filter((t) => !techSearch || t.name.toLowerCase().includes(techSearch.toLowerCase()) || t.location?.toLowerCase().includes(techSearch.toLowerCase()))
                   .map((t) => {
@@ -188,7 +144,7 @@ function RecommendationCards({ data, onDecide, deciding }) {
                     );
                   })}
                 {allTechs.length === 0 && (
-                  <div className="px-3 py-4 text-center text-sm text-gray-400">
+                  <div className="px-3 py-6 text-center text-sm text-gray-400">
                     <Loader2 className="w-4 h-4 animate-spin mx-auto mb-1" /> Loading technicians...
                   </div>
                 )}
@@ -196,7 +152,83 @@ function RecommendationCards({ data, onDecide, deciding }) {
             </div>
           )}
         </div>
-      )}
+
+        {/* RIGHT: Decision Panel (2/5 width) */}
+        {onDecide && (
+          <div className="lg:col-span-2">
+            <div className="bg-gray-50 rounded-lg p-4 space-y-3 lg:sticky lg:top-4">
+              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Decision</h4>
+
+              {/* Selected tech banner (override) */}
+              {isOverride && (
+                <div className="flex items-center gap-2.5 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                  {selectedOverrideTech.photoUrl ? (
+                    <img src={selectedOverrideTech.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-blue-400" />
+                  ) : (
+                    <span className="w-8 h-8 rounded-full bg-blue-200 text-blue-700 text-xs font-bold flex items-center justify-center ring-2 ring-blue-400">
+                      {selectedOverrideTech.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                    </span>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-blue-900">{selectedOverrideTech.name}</p>
+                    {selectedOverrideTech.location && <p className="text-xs text-blue-600 flex items-center gap-0.5"><MapPin className="w-3 h-3" />{selectedOverrideTech.location}</p>}
+                  </div>
+                  <button onClick={() => { setSelectedTechId(null); setSelectedOverrideTech(null); }} className="p-1 hover:bg-blue-100 rounded-full"><X className="w-3.5 h-3.5 text-blue-400" /></button>
+                </div>
+              )}
+
+              {/* Override reason (only for non-recommended tech) */}
+              {isOverride && (
+                <textarea
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm resize-none h-14 focus:ring-2 focus:ring-blue-200 focus:border-blue-300 transition-all bg-white"
+                  placeholder="Why this technician instead? (required)"
+                />
+              )}
+
+              {/* Decision note (always visible) */}
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Triage Note <span className="text-gray-400">(optional)</span></label>
+                <textarea
+                  value={decisionNote}
+                  onChange={(e) => setDecisionNote(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm resize-none h-16 focus:ring-2 focus:ring-blue-200 focus:border-blue-300 transition-all bg-white"
+                  placeholder="Add context to improve future triage decisions..."
+                />
+              </div>
+
+              {/* Action buttons */}
+              <div className="space-y-2 pt-1">
+                {!isOverride ? (
+                  <button
+                    onClick={() => onDecide({ decision: 'approved', assignedTechId: effectiveTechId, decisionNote })}
+                    disabled={deciding}
+                    className="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm"
+                  >
+                    {deciding ? 'Processing...' : `Approve — ${effectiveTechName}`}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => onDecide({ decision: 'modified', assignedTechId: selectedTechId, overrideReason, decisionNote })}
+                    disabled={deciding || !overrideReason.trim()}
+                    className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+                  >
+                    {deciding ? 'Processing...' : `Assign to ${selectedOverrideTech.name.split(' ')[0]}`}
+                  </button>
+                )}
+                <button
+                  onClick={() => onDecide({ decision: 'rejected', decisionNote })}
+                  disabled={deciding}
+                  className="w-full px-4 py-2 bg-white text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

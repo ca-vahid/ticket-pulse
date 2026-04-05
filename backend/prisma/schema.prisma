@@ -573,6 +573,7 @@ model AssignmentPipelineRun {
   assignedTechId    Int?       @map("assigned_tech_id")
   assignedTech      Technician? @relation("pipelineAssignedTo", fields: [assignedTechId], references: [id])
   overrideReason    String?    @db.Text @map("override_reason")
+  decisionNote      String?    @db.Text @map("decision_note")
   fullTranscript    String?    @db.Text @map("full_transcript")
   promptVersionId   Int?       @map("prompt_version_id")
   promptVersion     AssignmentPromptVersion? @relation(fields: [promptVersionId], references: [id])

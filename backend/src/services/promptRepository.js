@@ -42,6 +42,14 @@ If you find a strong candidate, call **get_tech_ticket_history** on them to conf
 
 You can make multiple search calls if needed — search by keyword, then by category, then check individual tech histories. Take the time to build a thorough understanding.
 
+## Step 5b: Check Decision History (optional but valuable)
+Call **search_decision_notes** with keywords from the ticket (e.g., category name, key terms) to find past admin decisions on similar tickets. Look for:
+- Has an admin left notes about how tickets like this should be routed?
+- Were previous recommendations overridden? Why?
+- Are there routing preferences or patterns the admin has established?
+
+Admin decision notes carry high weight — if an admin has explicitly stated a routing preference, follow it unless circumstances have changed.
+
 ## Step 6: Check Seniority (for complex tickets)
 For HIGH priority or complex tickets, call **get_technician_ad_profile** on your top candidates to check their job title, IT level (IT 1-5), and seniority (Jr/Sr). Prefer senior technicians for complex/critical issues. For routine tickets, this step is optional.
 
@@ -69,6 +77,9 @@ function needsPromptUpgrade(systemPrompt = '') {
     return true;
   }
   if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('get_technician_ad_profile')) {
+    return true;
+  }
+  if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('search_decision_notes')) {
     return true;
   }
   return false;

@@ -141,7 +141,7 @@ router.get('/runs/:id', asyncHandler(async (req, res) => {
 
 router.post('/runs/:id/decide', asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
-  const { decision, assignedTechId, overrideReason } = req.body;
+  const { decision, assignedTechId, overrideReason, decisionNote } = req.body;
 
   if (!['approved', 'modified', 'rejected'].includes(decision)) {
     return res.status(400).json({ success: false, message: 'decision must be: approved, modified, or rejected' });
@@ -159,23 +159,32 @@ router.post('/runs/:id/decide', asyncHandler(async (req, res) => {
     assignedTechId: assignedTechId || run.recommendation?.recommendations?.[0]?.techId,
     decidedByEmail,
     overrideReason: decision === 'modified' ? overrideReason : null,
+    decisionNote: decisionNote?.trim() || null,
   });
 
-  // Record feedback for learning
+  // Record feedback for learning (include decision note for all decisions)
+  const ticket = run.ticket;
+  const ticketRef = `Ticket #${ticket?.freshserviceTicketId} (${ticket?.subject || 'unknown'})`;
+  const noteAppendix = decisionNote ? ` Admin note: ${decisionNote.trim()}` : '';
+
   if (decision === 'modified' && overrideReason) {
-    const ticket = run.ticket;
-    const feedbackEntry = `[${new Date().toISOString()}] Ticket #${ticket?.freshserviceTicketId} (${ticket?.subject}): Admin overrode recommendation. Chosen tech ID: ${assignedTechId}. Reason: ${overrideReason}`;
+    const feedbackEntry = `[${new Date().toISOString()}] ${ticketRef}: Admin overrode recommendation. Chosen tech ID: ${assignedTechId}. Reason: ${overrideReason}.${noteAppendix}`;
     await assignmentRepository.appendFeedback(req.workspaceId, feedbackEntry).catch((err) =>
       logger.warn('Failed to append feedback', { error: err.message }),
     );
   } else if (decision === 'approved') {
     const topRec = run.recommendation?.recommendations?.[0];
     if (topRec) {
-      const feedbackEntry = `[${new Date().toISOString()}] Ticket #${run.ticket?.freshserviceTicketId}: Approved assignment to ${topRec.techName} (confidence: ${run.recommendation?.confidence || 'N/A'})`;
+      const feedbackEntry = `[${new Date().toISOString()}] ${ticketRef}: Approved assignment to ${topRec.techName}.${noteAppendix}`;
       await assignmentRepository.appendFeedback(req.workspaceId, feedbackEntry).catch((err) =>
         logger.warn('Failed to append feedback', { error: err.message }),
       );
     }
+  } else if (decision === 'rejected' && decisionNote) {
+    const feedbackEntry = `[${new Date().toISOString()}] ${ticketRef}: Rejected recommendation.${noteAppendix}`;
+    await assignmentRepository.appendFeedback(req.workspaceId, feedbackEntry).catch((err) =>
+      logger.warn('Failed to append feedback', { error: err.message }),
+    );
   }
 
   // FreshService write-back (fire-and-forget)

@@ -134,6 +134,18 @@ export const TOOL_SCHEMAS = [
     },
   },
   {
+    name: 'search_decision_notes',
+    description: 'Search past admin decision notes from the assignment pipeline. Returns notes where admins explained why they approved, modified, or rejected recommendations for similar tickets. Use this to learn from past decisions and understand admin preferences for routing patterns.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Keywords to search in decision notes and ticket subjects (e.g., "BST", "VPN", "security", "Vancouver")' },
+        limit: { type: 'integer', description: 'Max results to return (default 10, max 20)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'submit_recommendation',
     description: 'Submit your final assignment recommendation. You MUST call this tool when you have completed your analysis. Provide ranked technician recommendations with scores and reasoning. For noise/FYI tickets, submit with an empty recommendations array — the system will auto-dismiss them.',
     input_schema: {
@@ -194,6 +206,8 @@ export async function executeTool(toolName, toolInput, context) {
     return await getTechTicketHistory(workspaceId, toolInput);
   case 'get_technician_ad_profile':
     return await getTechnicianAdProfile(toolInput.email);
+  case 'search_decision_notes':
+    return await searchDecisionNotes(workspaceId, toolInput);
   default:
     return { error: `Unknown tool: ${toolName}` };
   }
@@ -818,6 +832,74 @@ async function getCompetencies(workspaceId) {
     categories: categories.map((c) => c.name),
     technicianSkills: Object.values(byTech),
   };
+}
+
+async function searchDecisionNotes(workspaceId, input) {
+  const limit = Math.min(input.limit || 10, 20);
+  const query = input.query?.trim();
+  if (!query) return { error: 'query is required' };
+
+  const keywords = query.split(/\s+/).filter(Boolean);
+  const conditions = keywords.map((kw) => {
+    const pattern = `%${kw}%`;
+    return prisma.$queryRaw`(
+      r."decision_note" ILIKE ${pattern}
+      OR r."override_reason" ILIKE ${pattern}
+      OR t."subject" ILIKE ${pattern}
+      OR t."ticket_category" ILIKE ${pattern}
+      OR t."category" ILIKE ${pattern}
+    )`;
+  });
+
+  try {
+    const runs = await prisma.assignmentPipelineRun.findMany({
+      where: {
+        workspaceId,
+        decidedAt: { not: null },
+        OR: keywords.flatMap((kw) => [
+          { decisionNote: { contains: kw, mode: 'insensitive' } },
+          { overrideReason: { contains: kw, mode: 'insensitive' } },
+          { ticket: { subject: { contains: kw, mode: 'insensitive' } } },
+          { ticket: { ticketCategory: { contains: kw, mode: 'insensitive' } } },
+        ]),
+      },
+      orderBy: { decidedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        decision: true,
+        decisionNote: true,
+        overrideReason: true,
+        decidedByEmail: true,
+        decidedAt: true,
+        assignedTechId: true,
+        assignedTech: { select: { name: true } },
+        ticket: { select: { freshserviceTicketId: true, subject: true, ticketCategory: true, category: true } },
+        recommendation: true,
+      },
+    });
+
+    return {
+      query,
+      totalMatches: runs.length,
+      notes: runs.map((r) => ({
+        runId: r.id,
+        ticketId: r.ticket?.freshserviceTicketId,
+        ticketSubject: r.ticket?.subject,
+        ticketCategory: r.ticket?.ticketCategory || r.ticket?.category,
+        decision: r.decision,
+        decisionNote: r.decisionNote,
+        overrideReason: r.overrideReason,
+        assignedTo: r.assignedTech?.name,
+        decidedBy: r.decidedByEmail,
+        decidedAt: r.decidedAt,
+        originalTopRecommendation: r.recommendation?.recommendations?.[0]?.techName,
+      })),
+    };
+  } catch (error) {
+    logger.error('Error searching decision notes:', error);
+    return { error: `Search failed: ${error.message}` };
+  }
 }
 
 async function getFreshserviceActivities(freshserviceTicketId, workspaceId) {
