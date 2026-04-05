@@ -840,16 +840,6 @@ async function searchDecisionNotes(workspaceId, input) {
   if (!query) return { error: 'query is required' };
 
   const keywords = query.split(/\s+/).filter(Boolean);
-  const conditions = keywords.map((kw) => {
-    const pattern = `%${kw}%`;
-    return prisma.$queryRaw`(
-      r."decision_note" ILIKE ${pattern}
-      OR r."override_reason" ILIKE ${pattern}
-      OR t."subject" ILIKE ${pattern}
-      OR t."ticket_category" ILIKE ${pattern}
-      OR t."category" ILIKE ${pattern}
-    )`;
-  });
 
   try {
     const runs = await prisma.assignmentPipelineRun.findMany({
