@@ -647,19 +647,19 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
             <p className="text-xs text-gray-500 mt-2">This ticket will be processed automatically when business hours resume.</p>
           </div>
         )}
-        {showExistingRun && existingRun.fullTranscript && (
+        {events.length > 0 && renderStream()}
+        {events.length === 0 && showExistingRun && existingRun.fullTranscript && (
           <div className="text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
             <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
               {cleanTranscript(existingRun.fullTranscript)}
             </Markdown>
           </div>
         )}
-        {showExistingRun && !existingRun.fullTranscript && existingRun.status === 'completed' && (
+        {events.length === 0 && showExistingRun && !existingRun.fullTranscript && existingRun.status === 'completed' && (
           <div className="text-sm text-gray-500 italic py-4 text-center">
             Analysis completed — transcript not available. Click &quot;Re-run Analysis&quot; to run again.
           </div>
         )}
-        {events.length > 0 && renderStream()}
         {status === 'running' && (
           <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-0.5" />
         )}

@@ -249,16 +249,8 @@ class AssignmentPipelineService {
           emit({ type: 'text', text });
         });
 
-        let toolJsonLength = 0;
-        let lastProgressAt = 0;
-        stream.on('inputJson', (partialJson) => {
-          toolJsonLength += partialJson.length;
-          const now = Date.now();
-          if (now - lastProgressAt > 3000) {
-            lastProgressAt = now;
-            const kb = (toolJsonLength / 1024).toFixed(1);
-            emit({ type: 'text', text: ` *(${kb}KB)*` });
-          }
+        stream.on('inputJson', () => {
+          // Tool input JSON is streaming — tool cards provide visual feedback
         });
 
         const finalMessage = await stream.finalMessage();
