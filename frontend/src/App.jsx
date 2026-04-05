@@ -11,6 +11,7 @@ import TechnicianDetailNew from './pages/TechnicianDetailNew';
 import Settings from './pages/Settings';
 import Visuals from './pages/Visuals';
 import TimelineExplorer from './pages/TimelineExplorer';
+import AssignmentReview from './pages/AssignmentReview';
 import { Activity } from 'lucide-react';
 
 /**
@@ -162,6 +163,63 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <TimelineExplorer />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/assignments"
+                  element={
+                    <ProtectedRoute>
+                      <AssignmentReview />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/assignments/:tab"
+                  element={
+                    <ProtectedRoute>
+                      <AssignmentReview />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/assignments/run/:runId"
+                  element={
+                    <ProtectedRoute>
+                      <AssignmentReview />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/assignments/history/:historyRunId"
+                  element={
+                    <ProtectedRoute>
+                      <AssignmentReview />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/assignments/live/:ticketId"
+                  element={
+                    <ProtectedRoute>
+                      <AssignmentReview />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/assignments/competency-run/:competencyRunId"
+                  element={
+                    <ProtectedRoute>
+                      <AssignmentReview />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/assignments/competency-live/:analyzeTechId"
+                  element={
+                    <ProtectedRoute>
+                      <AssignmentReview />
                     </ProtectedRoute>
                   }
                 />

@@ -15,6 +15,10 @@ export function clearAuthToken() {
   _authToken = null;
 }
 
+export function getAuthToken() {
+  return _authToken;
+}
+
 export function setWorkspaceId(id) {
   _workspaceId = id;
 }
@@ -460,6 +464,63 @@ export const vacationTrackerAPI = {
 
   triggerSync: () => api.post('/vacation-tracker/sync'),
   getSyncStatus: () => api.get('/vacation-tracker/sync/status'),
+};
+
+/**
+ * Assignment Pipeline API
+ */
+export const assignmentAPI = {
+  getConfig: () => api.get('/assignment/config'),
+  updateConfig: (data) => api.put('/assignment/config', data),
+
+  getQueuedRuns: () => api.get('/assignment/queued'),
+  runNow: (id) => api.post(`/assignment/runs/${id}/run-now`),
+  getQueue: (params) => api.get('/assignment/queue', { params }),
+  getRuns: (params) => api.get('/assignment/runs', { params }),
+  getRun: (id) => api.get(`/assignment/runs/${id}`),
+  getLatestRunForTicket: (ticketId) => api.get(`/assignment/ticket/${ticketId}/latest-run`),
+  decide: (id, data) => api.post(`/assignment/runs/${id}/decide`, data),
+  deleteRun: (id) => api.delete(`/assignment/runs/${id}`),
+  dismissRun: (id) => api.post(`/assignment/runs/${id}/dismiss`),
+  bulkDeleteRuns: (data) => api.post('/assignment/runs/bulk-delete', data),
+  syncRun: (id) => api.post(`/assignment/runs/${id}/sync`),
+  syncPreview: (id) => api.post(`/assignment/runs/${id}/sync-preview`),
+  triggerPipeline: (ticketId) => api.post(`/assignment/trigger/${ticketId}`),
+  getRecentTickets: (params) => api.get('/assignment/recent-tickets', { params }),
+
+  emailTest: (mailbox) => api.post('/assignment/email/test', { mailbox }),
+  emailStatus: () => api.get('/assignment/email/status'),
+  emailPollNow: () => api.post('/assignment/email/poll-now'),
+
+  getPrompts: () => api.get('/assignment/prompts'),
+  getPrompt: (id) => api.get(`/assignment/prompts/${id}`),
+  createPrompt: (data) => api.post('/assignment/prompts', data),
+  publishPrompt: (id) => api.post(`/assignment/prompts/${id}/publish`),
+  restorePrompt: (id) => api.post(`/assignment/prompts/${id}/restore`),
+
+  getTools: () => api.get('/assignment/tools'),
+
+  getCompetencyTechnicians: () => api.get('/assignment/competencies/technicians'),
+  analyzeCompetency: (techId) => api.post(`/assignment/competencies/analyze/${techId}`),
+  getCompetencyRuns: (params) => api.get('/assignment/competencies/runs', { params }),
+  getCompetencyRun: (id) => api.get(`/assignment/competencies/runs/${id}`),
+  rollbackCompetencyRun: (id) => api.post(`/assignment/competencies/runs/${id}/rollback`),
+  cancelCompetencyRun: (id) => api.post(`/assignment/competencies/runs/${id}/cancel`),
+  getCompetencyPrompts: () => api.get('/assignment/competency-prompts'),
+  getCompetencyPrompt: (id) => api.get(`/assignment/competency-prompts/${id}`),
+  createCompetencyPrompt: (data) => api.post('/assignment/competency-prompts', data),
+  publishCompetencyPrompt: (id) => api.post(`/assignment/competency-prompts/${id}/publish`),
+  restoreCompetencyPrompt: (id) => api.post(`/assignment/competency-prompts/${id}/restore`),
+  getCompetencyTools: () => api.get('/assignment/competency-tools'),
+  detectDuplicateCategories: () => api.get('/assignment/competencies/duplicates'),
+  mergeCategories: (data) => api.post('/assignment/competencies/merge', data),
+  getCompetencies: () => api.get('/assignment/competencies'),
+  createCategory: (data) => api.post('/assignment/competencies/categories', data),
+  updateCategory: (id, data) => api.put(`/assignment/competencies/categories/${id}`, data),
+  deleteCategory: (id) => api.delete(`/assignment/competencies/categories/${id}`),
+  getTechCompetencies: (techId) => api.get(`/assignment/competencies/technician/${techId}`),
+  updateTechCompetencies: (techId, competencies) =>
+    api.put(`/assignment/competencies/technician/${techId}`, { competencies }),
 };
 
 /**

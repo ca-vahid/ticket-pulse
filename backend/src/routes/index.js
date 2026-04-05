@@ -13,6 +13,7 @@ import visualsRoutes from './visuals.routes.js';
 import noiseRoutes from './noise.routes.js';
 import vacationTrackerRoutes from './vacationTracker.routes.js';
 import notificationsRoutes from './notifications.routes.js';
+import assignmentRoutes from './assignment.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
 
@@ -30,6 +31,10 @@ router.get('/health', (req, res) => {
 // Auth & workspace selection (handle their own auth internally)
 router.use('/auth', authRoutes);
 router.use('/workspaces', workspaceRoutes);
+
+// External webhooks: uses shared-secret auth, NOT session/JWT auth.
+// Must be mounted BEFORE requireAuth so FreshService can reach them.
+router.use('/webhook', webhookRoutes);
 
 // Promote JWT from query param for SSE requests (EventSource can't set headers).
 // Must run before requireAuth so the token is available for authentication.
@@ -53,12 +58,12 @@ router.use('/settings', settingsRoutes);
 router.use('/sync', syncRoutes);
 router.use('/sse', sseRoutes);
 router.use('/photos', photosRoutes);
-router.use('/webhook', webhookRoutes);
 router.use('/autoresponse', autoresponseRoutes);
 router.use('/admin/llm-settings', llmAdminRoutes);
 router.use('/visuals', visualsRoutes);
 router.use('/noise-rules', noiseRoutes);
 router.use('/vacation-tracker', vacationTrackerRoutes);
 router.use('/notifications', notificationsRoutes);
+router.use('/assignment', assignmentRoutes);
 
 export default router;

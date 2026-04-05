@@ -1,13 +1,10 @@
 import autoResponseService from '../services/autoResponseService.js';
+import assignmentPipelineService from '../services/assignmentPipelineService.js';
+import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
 /**
- * Webhook Controller
- * Handles incoming webhook requests for ticket auto-responses
- */
-
-/**
- * POST /api/webhook/ticket
+ * POST /api/webhook/:workspaceSlug/ticket
  * Receive incoming ticket webhook and trigger auto-response
  */
 export const handleTicketWebhook = async (req, res) => {
@@ -19,7 +16,6 @@ export const handleTicketWebhook = async (req, res) => {
       senderEmail: payload.senderEmail || payload.requester?.email,
     });
 
-    // Normalize payload structure (support different webhook formats)
     const normalizedPayload = {
       ticketId: payload.ticketId || payload.ticket_id || payload.id,
       freshserviceTicketId: payload.freshserviceTicketId || payload.ticket_id || payload.id,
@@ -34,7 +30,6 @@ export const handleTicketWebhook = async (req, res) => {
       workspaceId: req.workspaceId,
     };
 
-    // Process auto-response asynchronously
     const result = await autoResponseService.processIncomingTicket(normalizedPayload);
 
     if (result.success) {
@@ -70,8 +65,71 @@ export const handleTicketWebhook = async (req, res) => {
 };
 
 /**
+ * POST /api/webhook/:workspaceSlug/assignment
+ * Trigger the assignment pipeline for an incoming ticket
+ */
+export const handleAssignmentWebhook = async (req, res) => {
+  try {
+    const payload = req.body;
+    const workspaceId = req.workspaceId;
+
+    const freshserviceTicketId = payload.freshserviceTicketId || payload.ticket_id || payload.id;
+
+    logger.info('Received assignment webhook', {
+      freshserviceTicketId,
+      workspaceId,
+    });
+
+    if (!freshserviceTicketId) {
+      return res.status(400).json({ success: false, message: 'Missing ticket ID in payload' });
+    }
+
+    // Find the ticket in our DB by FreshService ID
+    const ticket = await prisma.ticket.findFirst({
+      where: {
+        freshserviceTicketId: BigInt(freshserviceTicketId),
+        workspaceId,
+      },
+      select: { id: true },
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: `Ticket with FreshService ID ${freshserviceTicketId} not found in workspace. It may not be synced yet.`,
+      });
+    }
+
+    // Run the pipeline asynchronously -- respond immediately
+    res.status(202).json({
+      success: true,
+      message: 'Assignment pipeline triggered',
+      data: { ticketId: ticket.id, freshserviceTicketId },
+    });
+
+    // Fire-and-forget pipeline execution
+    assignmentPipelineService.runPipeline(ticket.id, workspaceId, 'webhook').catch((error) => {
+      logger.error('Assignment pipeline webhook execution failed', {
+        ticketId: ticket.id,
+        error: error.message,
+      });
+    });
+  } catch (error) {
+    logger.error('Assignment webhook handling error', {
+      error: error.message,
+      stack: error.stack,
+    });
+
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+/**
  * GET /api/webhook/test
- * Test endpoint to verify webhook is accessible
  */
 export const testWebhook = async (req, res) => {
   res.json({
@@ -80,4 +138,3 @@ export const testWebhook = async (req, res) => {
     timestamp: new Date().toISOString(),
   });
 };
-

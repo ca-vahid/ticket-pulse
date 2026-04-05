@@ -13,6 +13,8 @@ import settingsRepository from './settingsRepository.js';
 import syncLogRepository from './syncLogRepository.js';
 import csatService from './csatService.js';
 import noiseRuleService from './noiseRuleService.js';
+import assignmentRepository from './assignmentRepository.js';
+import assignmentPipelineService from './assignmentPipelineService.js';
 import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
@@ -710,6 +712,11 @@ class SyncService {
         logger.error('Failed to broadcast SSE update:', error);
       }
 
+      // Assignment pipeline polling: check for unassigned tickets (fire-and-forget)
+      this._pollForUnassignedTickets(workspaceId).catch((err) => {
+        logger.warn('Assignment polling failed (non-fatal)', { workspaceId, error: err.message });
+      });
+
       return summary;
     } catch (error) {
       logger.error('Full sync failed:', error);
@@ -1268,6 +1275,53 @@ class SyncService {
     } catch (error) {
       logger.error('Error syncing recent CSAT:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Post-sync polling: find unassigned tickets that haven't been processed
+   * by the assignment pipeline and trigger it for them.
+   * Rate-limited to avoid overwhelming the LLM.
+   */
+  async _pollForUnassignedTickets(workspaceId) {
+    const config = await assignmentRepository.getConfig(workspaceId);
+    if (!config?.isEnabled || !config?.pollForUnassigned) return;
+
+    const maxPerCycle = config.pollMaxPerCycle || 5;
+
+    // Only look at tickets created in the last 24 hours that are unassigned
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const { default: prisma } = await import('./prisma.js');
+    const unassignedTickets = await prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        assignedTechId: null,
+        createdAt: { gte: cutoff },
+        isNoise: false,
+        pipelineRuns: { none: {} },
+      },
+      select: { id: true, freshserviceTicketId: true, subject: true },
+      orderBy: { createdAt: 'desc' },
+      take: maxPerCycle,
+    });
+
+    if (unassignedTickets.length === 0) return;
+
+    logger.info('Assignment polling found unassigned tickets', {
+      workspaceId,
+      count: unassignedTickets.length,
+    });
+
+    for (const ticket of unassignedTickets) {
+      try {
+        await assignmentPipelineService.runPipeline(ticket.id, workspaceId, 'poll');
+      } catch (err) {
+        logger.warn('Assignment polling: pipeline failed for ticket', {
+          ticketId: ticket.id,
+          error: err.message,
+        });
+      }
     }
   }
 }

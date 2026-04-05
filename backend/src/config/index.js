@@ -19,6 +19,10 @@ const envSchema = z.object({
   AZURE_KEY_VAULT_URL: z.string().optional(),
   APPLICATION_INSIGHTS_CONNECTION_STRING: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  AZURE_GRAPH_TENANT_ID: z.string().optional(),
+  AZURE_GRAPH_CLIENT_ID: z.string().optional(),
+  AZURE_GRAPH_CLIENT_SECRET: z.string().optional(),
   WEBHOOK_SECRET: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.string().optional(),
@@ -94,10 +98,23 @@ export default {
     defaultTimezone: 'America/Los_Angeles',
   },
 
-  // OpenAI
+  // OpenAI (auto-response)
   openai: {
     apiKey: config.OPENAI_API_KEY,
-    model: 'gpt-5.1', // Default GPT-5.1 thinking model (overridable)
+    model: 'gpt-5.1',
+  },
+
+  // Anthropic (assignment pipeline)
+  anthropic: {
+    apiKey: config.ANTHROPIC_API_KEY,
+    defaultModel: 'claude-sonnet-4-6-20260217',
+  },
+
+  // Azure Graph API (email monitoring)
+  graph: {
+    tenantId: config.AZURE_GRAPH_TENANT_ID,
+    clientId: config.AZURE_GRAPH_CLIENT_ID,
+    clientSecret: config.AZURE_GRAPH_CLIENT_SECRET,
   },
 
   // Webhook

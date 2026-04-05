@@ -4,6 +4,10 @@ import vtService from './vacationTrackerService.js';
 import vtRepo from './vacationTrackerRepository.js';
 import syncLogRepository from './syncLogRepository.js';
 import workspaceRepository from './workspaceRepository.js';
+import emailPollingService from './emailPollingService.js';
+import availabilityService from './availabilityService.js';
+import assignmentPipelineService from './assignmentPipelineService.js';
+import assignmentRepository from './assignmentRepository.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -34,6 +38,9 @@ class ScheduledSyncService {
         await this.startVTSyncForWorkspace(ws);
       }
 
+      // Start email polling for assignment pipeline
+      await emailPollingService.startAll();
+
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
     } catch (error) {
@@ -61,19 +68,42 @@ class ScheduledSyncService {
 
     logger.info(`Starting scheduled sync for workspace "${wsName}" (id=${wsId}) every ${intervalMinutes}m`);
 
+    const tz = workspace.defaultTimezone || 'America/Los_Angeles';
+
     const job = cron.schedule(
       cronExpression,
       async () => {
+        let syncSucceeded = false;
         try {
           logger.info(`Scheduled sync triggered for workspace "${wsName}"`);
           await syncService.performFullSync({ workspaceId: wsId });
+          syncSucceeded = true;
         } catch (error) {
           logger.error(`Scheduled sync failed for workspace "${wsName}":`, error);
+        }
+
+        // Drain queued assignment runs if inside business hours
+        try {
+          if (!syncSucceeded) {
+            return;
+          }
+          const queuedCount = await assignmentRepository.countQueuedRuns(wsId);
+          if (queuedCount > 0) {
+            const bh = await availabilityService.isBusinessHours(new Date(), tz, wsId);
+            if (bh.isBusinessHours) {
+              logger.info(`[${wsName}] Draining ${queuedCount} queued assignment run(s)`);
+              await assignmentPipelineService.drainQueuedRuns(wsId, 5);
+            } else {
+              logger.debug(`[${wsName}] ${queuedCount} queued run(s) waiting — still outside business hours`);
+            }
+          }
+        } catch (error) {
+          logger.error(`[${wsName}] Queue drain failed:`, error);
         }
       },
       {
         scheduled: true,
-        timezone: workspace.defaultTimezone || 'America/Los_Angeles',
+        timezone: tz,
       },
     );
 
@@ -99,6 +129,15 @@ class ScheduledSyncService {
         } else {
           logger.info(`[${wsName}] No previous sync found. Running initial full sync`);
           await syncService.performFullSync({ workspaceId: wsId, fullSync: true, daysToSync: 30 });
+        }
+
+        const queuedCount = await assignmentRepository.countQueuedRuns(wsId);
+        if (queuedCount > 0) {
+          const bh = await availabilityService.isBusinessHours(new Date(), tz, wsId);
+          if (bh.isBusinessHours) {
+            logger.info(`[${wsName}] Draining ${queuedCount} queued assignment run(s) after initial sync`);
+            await assignmentPipelineService.drainQueuedRuns(wsId, 5);
+          }
         }
       } catch (error) {
         logger.error(`[${wsName}] Initial sync failed:`, error);

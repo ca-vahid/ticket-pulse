@@ -432,6 +432,50 @@ class FreshServiceClient {
     }
   }
 
+  async closeTicket(ticketId, status = 4) {
+    try {
+      const response = await this.client.put(`/tickets/${ticketId}`, {
+        ticket: { status },
+      });
+      return response.data.ticket;
+    } catch (error) {
+      // If 400/422, FreshService may require fields like category/department for closure
+      const httpStatus = error.response?.status || error.statusCode;
+      if (httpStatus === 400 || httpStatus === 422) {
+        logger.warn(`Ticket ${ticketId} close requires additional fields, retrying with defaults`);
+        try {
+          const response = await this.client.put(`/tickets/${ticketId}`, {
+            ticket: { status, category: 'Other' },
+          });
+          return response.data.ticket;
+        } catch (retryError) {
+          logger.error(`Error closing ticket ${ticketId} (retry with defaults):`, retryError);
+          throw retryError;
+        }
+      }
+      // 405 means ticket is already closed/in terminal state
+      if (httpStatus === 405) {
+        logger.info(`Ticket ${ticketId} is already in a terminal state, skipping close`);
+        return { id: ticketId, status, alreadyClosed: true };
+      }
+      logger.error(`Error closing ticket ${ticketId}:`, error);
+      throw error;
+    }
+  }
+
+  async addPrivateNote(ticketId, body) {
+    try {
+      const response = await this.client.post(`/tickets/${ticketId}/notes`, {
+        body,
+        private: true,
+      });
+      return response.data;
+    } catch (error) {
+      logger.error(`Error adding note to ticket ${ticketId}:`, error);
+      throw error;
+    }
+  }
+
   _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }

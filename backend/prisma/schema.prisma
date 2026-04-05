@@ -37,6 +37,13 @@ model Workspace {
   vtUserMappings         VtUserMapping[]
   technicianLeaves       TechnicianLeave[]
   ticketAssignments      TicketAssignment[]
+  assignmentConfig       AssignmentConfig?
+  competencyCategories   CompetencyCategory[]
+  technicianCompetencies TechnicianCompetency[]
+  assignmentPipelineRuns AssignmentPipelineRun[]
+  assignmentPrompts      AssignmentPromptVersion[]
+  competencyPrompts      CompetencyPromptVersion[]
+  competencyRuns         CompetencyAnalysisRun[]
 
   @@map("workspaces")
 }
@@ -77,6 +84,9 @@ model Technician {
   leaves               TechnicianLeave[]
   vtUserMappings       VtUserMapping[]
   assignmentsReceived  TicketAssignment[] @relation("assignedTo")
+  competencies         TechnicianCompetency[]
+  pipelineAssignments  AssignmentPipelineRun[] @relation("pipelineAssignedTo")
+  competencyRuns       CompetencyAnalysisRun[]
 
   @@unique([freshserviceId, workspaceId])
   @@map("technicians")
@@ -175,6 +185,7 @@ model Ticket {
   noiseRuleMatched     String?   @db.VarChar(100) @map("noise_rule_matched")
 
   ticketAssignments    TicketAssignment[]
+  pipelineRuns         AssignmentPipelineRun[]
 
   @@map("tickets")
   @@index([workspaceId])
@@ -456,22 +467,254 @@ model TechnicianLeave {
   @@index([technicianId, leaveDate])
 }
 
-// Scaffolding for future ticket assignment feature (not yet used in UI/API)
 model TicketAssignment {
-  id              Int        @id @default(autoincrement())
-  ticketId        Int        @map("ticket_id")
-  ticket          Ticket     @relation(fields: [ticketId], references: [id])
-  assignedToId    Int        @map("assigned_to_id")
-  assignedTo      Technician @relation("assignedTo", fields: [assignedToId], references: [id])
-  assignedByEmail String     @map("assigned_by_email") @db.VarChar(255)
-  workspaceId     Int        @map("workspace_id")
-  workspace       Workspace  @relation(fields: [workspaceId], references: [id])
-  source          String     @default("manual") @db.VarChar(20)
-  note            String?    @db.Text
-  createdAt       DateTime   @default(now()) @map("created_at")
+  id              Int                   @id @default(autoincrement())
+  ticketId        Int                   @map("ticket_id")
+  ticket          Ticket                @relation(fields: [ticketId], references: [id])
+  assignedToId    Int                   @map("assigned_to_id")
+  assignedTo      Technician            @relation("assignedTo", fields: [assignedToId], references: [id])
+  assignedByEmail String                @map("assigned_by_email") @db.VarChar(255)
+  workspaceId     Int                   @map("workspace_id")
+  workspace       Workspace             @relation(fields: [workspaceId], references: [id])
+  source          String                @default("manual") @db.VarChar(20) // manual | pipeline | auto
+  pipelineRunId   Int?                  @map("pipeline_run_id")
+  pipelineRun     AssignmentPipelineRun? @relation(fields: [pipelineRunId], references: [id])
+  note            String?               @db.Text
+  createdAt       DateTime              @default(now()) @map("created_at")
 
   @@map("ticket_assignments")
   @@index([ticketId])
   @@index([assignedToId])
   @@index([workspaceId, createdAt])
+  @@index([pipelineRunId])
+}
+
+// ─── Ticket Assignment Pipeline ─────────────────────────────────────────────
+
+model AssignmentConfig {
+  id                      Int       @id @default(autoincrement())
+  workspaceId             Int       @unique @map("workspace_id")
+  workspace               Workspace @relation(fields: [workspaceId], references: [id])
+  isEnabled               Boolean   @default(false) @map("is_enabled")
+  autoAssign              Boolean   @default(false) @map("auto_assign")
+  llmModel                String    @default("claude-sonnet-4-6-20260217") @db.VarChar(100) @map("llm_model")
+  maxRecommendations      Int       @default(3) @map("max_recommendations")
+  scoringWeights          Json?     @map("scoring_weights") // { competency: 0.35, workload: 0.30, location: 0.20, recency: 0.15 }
+  classificationPrompt    String?   @db.Text @map("classification_prompt")
+  categorizationPrompt    String?   @db.Text @map("categorization_prompt")
+  recommendationPrompt    String?   @db.Text @map("recommendation_prompt")
+  feedbackContext         String?   @db.Text @map("feedback_context") // accumulated knowledge from admin overrides
+  pollForUnassigned       Boolean   @default(true) @map("poll_for_unassigned")
+  pollMaxPerCycle         Int       @default(5) @map("poll_max_per_cycle")
+  monitoredMailbox        String?   @db.VarChar(255) @map("monitored_mailbox")
+  emailPollingEnabled     Boolean   @default(false) @map("email_polling_enabled")
+  emailPollingIntervalSec Int       @default(60) @map("email_polling_interval_sec")
+  lastEmailCheckAt        DateTime? @map("last_email_check_at")
+  autoCloseNoise          Boolean   @default(false) @map("auto_close_noise")
+  dryRunMode              Boolean   @default(true) @map("dry_run_mode")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  @@map("assignment_configs")
+}
+
+model CompetencyCategory {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  name        String    @db.VarChar(100)
+  description String?   @db.Text
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  technicianCompetencies TechnicianCompetency[]
+
+  @@unique([workspaceId, name])
+  @@map("competency_categories")
+  @@index([workspaceId])
+}
+
+model TechnicianCompetency {
+  id                   Int                @id @default(autoincrement())
+  technicianId         Int                @map("technician_id")
+  technician           Technician         @relation(fields: [technicianId], references: [id])
+  workspaceId          Int                @map("workspace_id")
+  workspace            Workspace          @relation(fields: [workspaceId], references: [id])
+  competencyCategoryId Int                @map("competency_category_id")
+  competencyCategory   CompetencyCategory @relation(fields: [competencyCategoryId], references: [id], onDelete: Cascade)
+  proficiencyLevel     String             @default("intermediate") @db.VarChar(20) @map("proficiency_level") // basic | intermediate | expert
+  notes                String?            @db.Text
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  @@unique([technicianId, competencyCategoryId])
+  @@map("technician_competencies")
+  @@index([workspaceId])
+  @@index([technicianId])
+  @@index([competencyCategoryId])
+}
+
+model AssignmentPipelineRun {
+  id                Int        @id @default(autoincrement())
+  ticketId          Int        @map("ticket_id")
+  ticket            Ticket     @relation(fields: [ticketId], references: [id])
+  workspaceId       Int        @map("workspace_id")
+  workspace         Workspace  @relation(fields: [workspaceId], references: [id])
+  status            String     @default("running") @db.VarChar(20) // queued | running | completed | failed | cancelled | superseded | skipped_stale
+  triggerSource     String     @db.VarChar(20) @map("trigger_source") // webhook | poll | manual | email
+  llmModel          String?    @db.VarChar(100) @map("llm_model")
+  totalDurationMs   Int?       @map("total_duration_ms")
+  totalTokensUsed   Int?       @map("total_tokens_used")
+  recommendation    Json?      // ranked list: [{ techId, name, score, breakdown, reasoning }]
+  decision          String?    @db.VarChar(20) @map("decision") // pending_review | approved | modified | rejected | auto_assigned | noise_dismissed
+  decidedByEmail    String?    @db.VarChar(255) @map("decided_by_email")
+  decidedAt         DateTime?  @map("decided_at")
+  assignedTechId    Int?       @map("assigned_tech_id")
+  assignedTech      Technician? @relation("pipelineAssignedTo", fields: [assignedTechId], references: [id])
+  overrideReason    String?    @db.Text @map("override_reason")
+  fullTranscript    String?    @db.Text @map("full_transcript")
+  promptVersionId   Int?       @map("prompt_version_id")
+  promptVersion     AssignmentPromptVersion? @relation(fields: [promptVersionId], references: [id])
+  errorMessage      String?    @db.Text @map("error_message")
+  queuedAt          DateTime?  @map("queued_at")
+  queuedReason      String?    @db.VarChar(255) @map("queued_reason")
+  claimedAt         DateTime?  @map("claimed_at")
+  syncStatus        String?    @db.VarChar(20) @map("sync_status") // pending | synced | failed | dry_run | skipped
+  syncedAt          DateTime?  @map("synced_at")
+  syncError         String?    @db.Text @map("sync_error")
+  syncPayload       Json?      @map("sync_payload")
+  feedbackApplied   Boolean    @default(false) @map("feedback_applied")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  steps             AssignmentPipelineStep[]
+  ticketAssignments TicketAssignment[]
+
+  @@map("assignment_pipeline_runs")
+  @@index([ticketId])
+  @@index([workspaceId])
+  @@index([status])
+  @@index([decision])
+  @@index([createdAt])
+}
+
+model AssignmentPipelineStep {
+  id              Int                  @id @default(autoincrement())
+  pipelineRunId   Int                  @map("pipeline_run_id")
+  pipelineRun     AssignmentPipelineRun @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+  stepNumber      Int                  @map("step_number")
+  stepName        String               @db.VarChar(50) @map("step_name") // classification | categorization | location | availability | competency | workload | recommendation
+  status          String               @default("running") @db.VarChar(20) // running | completed | failed | skipped
+  durationMs      Int?                 @map("duration_ms")
+  input           Json?
+  output          Json?
+  llmPrompt       String?              @db.Text @map("llm_prompt")
+  llmResponse     String?              @db.Text @map("llm_response")
+  tokensUsed      Int?                 @map("tokens_used")
+  errorMessage    String?              @db.Text @map("error_message")
+  createdAt       DateTime             @default(now()) @map("created_at")
+
+  @@map("assignment_pipeline_steps")
+  @@index([pipelineRunId])
+  @@index([stepName])
+}
+
+model AssignmentPromptVersion {
+  id              Int        @id @default(autoincrement())
+  workspaceId     Int        @map("workspace_id")
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id])
+  version         Int
+  status          String     @default("draft") @db.VarChar(20) // draft | published | archived
+  systemPrompt    String     @db.Text @map("system_prompt")
+  toolConfig      Json?      @map("tool_config")
+  createdBy       String?    @db.VarChar(255) @map("created_by")
+  publishedBy     String?    @db.VarChar(255) @map("published_by")
+  publishedAt     DateTime?  @map("published_at")
+  notes           String?    @db.Text
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  pipelineRuns    AssignmentPipelineRun[]
+
+  @@unique([workspaceId, version])
+  @@map("assignment_prompt_versions")
+  @@index([workspaceId])
+  @@index([status])
+}
+
+// ─── Competency Analysis Pipeline ────────────────────────────────────────
+
+model CompetencyPromptVersion {
+  id              Int        @id @default(autoincrement())
+  workspaceId     Int        @map("workspace_id")
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id])
+  version         Int
+  status          String     @default("draft") @db.VarChar(20)
+  systemPrompt    String     @db.Text @map("system_prompt")
+  toolConfig      Json?      @map("tool_config")
+  createdBy       String?    @db.VarChar(255) @map("created_by")
+  publishedBy     String?    @db.VarChar(255) @map("published_by")
+  publishedAt     DateTime?  @map("published_at")
+  notes           String?    @db.Text
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  competencyRuns  CompetencyAnalysisRun[]
+
+  @@unique([workspaceId, version])
+  @@map("competency_prompt_versions")
+  @@index([workspaceId])
+  @@index([status])
+}
+
+model CompetencyAnalysisRun {
+  id                Int        @id @default(autoincrement())
+  workspaceId       Int        @map("workspace_id")
+  workspace         Workspace  @relation(fields: [workspaceId], references: [id])
+  technicianId      Int        @map("technician_id")
+  technician        Technician @relation(fields: [technicianId], references: [id])
+  status            String     @default("running") @db.VarChar(20) // running | completed | failed | cancelled | rolled_back
+  decision          String?    @db.VarChar(20) // auto_applied | rolled_back
+  promptVersionId   Int?       @map("prompt_version_id")
+  promptVersion     CompetencyPromptVersion? @relation(fields: [promptVersionId], references: [id])
+  llmModel          String?    @db.VarChar(100) @map("llm_model")
+  fullTranscript    String?    @db.Text @map("full_transcript")
+  structuredResult  Json?      @map("structured_result")
+  beforeSnapshot    Json?      @map("before_snapshot")
+  afterSnapshot     Json?      @map("after_snapshot")
+  errorMessage      String?    @db.Text @map("error_message")
+  totalTokensUsed   Int?       @map("total_tokens_used")
+  totalDurationMs   Int?       @map("total_duration_ms")
+  triggeredBy       String?    @db.VarChar(255) @map("triggered_by")
+  rolledBackBy      String?    @db.VarChar(255) @map("rolled_back_by")
+  rolledBackAt      DateTime?  @map("rolled_back_at")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  steps             CompetencyAnalysisStep[]
+
+  @@map("competency_analysis_runs")
+  @@index([workspaceId])
+  @@index([technicianId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CompetencyAnalysisStep {
+  id              Int                   @id @default(autoincrement())
+  runId           Int                   @map("run_id")
+  run             CompetencyAnalysisRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stepNumber      Int                   @map("step_number")
+  stepName        String                @db.VarChar(50) @map("step_name")
+  status          String                @default("running") @db.VarChar(20)
+  durationMs      Int?                  @map("duration_ms")
+  input           Json?
+  output          Json?
+  llmResponse     String?               @db.Text @map("llm_response")
+  tokensUsed      Int?                  @map("tokens_used")
+  errorMessage    String?               @db.Text @map("error_message")
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  @@map("competency_analysis_steps")
+  @@index([runId])
+  @@index([stepName])
 }

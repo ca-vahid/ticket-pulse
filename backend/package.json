@@ -1,14 +1,14 @@
 {
   "name": "ticket-pulse-backend",
-  "version": "1.6.0-preview",
+  "version": "1.7.0-preview",
   "type": "module",
   "description": "FreshService Real-Time IT Dashboard - Backend API",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon --exec \"node --max-old-space-size=4096\" src/app.js",
-    "test": "jest --coverage",
-    "test:watch": "jest --watch",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage",
+    "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch",
     "lint": "eslint src/**/*.js",
     "format": "prettier --write \"src/**/*.js\"",
     "prisma:generate": "prisma generate",
@@ -24,6 +24,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@azure/identity": "^4.13.1",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
     "@prisma/client": "^5.19.0",
     "axios": "^1.12.2",
     "bcrypt": "^5.1.1",
