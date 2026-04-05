@@ -59,98 +59,30 @@ export function RecommendationCards({ data, onDecide, deciding }) {
         {/* LEFT: Candidates (3/5 width) */}
         <div className="lg:col-span-3 space-y-2">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Recommendations</h4>
-
-          {!showTechPicker ? (
-            <>
-              {data.recommendations.map((rec, i) => {
-                const isSelected = effectiveTechId === rec.techId && !isOverride;
-                return (
-                  <div
-                    key={rec.techId || i}
-                    onClick={() => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); setShowTechPicker(false); }}
-                    className={`border rounded-lg p-3 cursor-pointer transition-all ${
-                      isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'hover:border-gray-300 bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-6 h-6 rounded-full text-white text-xs flex items-center justify-center font-bold ${isSelected ? 'bg-blue-600' : 'bg-gray-400'}`}>{rec.rank || i + 1}</span>
-                        <User className="w-4 h-4 text-gray-400" />
-                        <span className="font-medium text-sm">{rec.techName}</span>
-                      </div>
-                      {typeof rec.score === 'number' && (
-                        <span className={`text-sm font-mono font-bold ${isSelected ? 'text-blue-700' : 'text-gray-500'}`}>{(rec.score * 100).toFixed(0)}%</span>
-                      )}
-                    </div>
-                    {rec.reasoning && <p className="text-xs text-gray-500 mt-1.5 ml-8 leading-relaxed">{rec.reasoning}</p>}
+          {data.recommendations.map((rec, i) => {
+            const isSelected = effectiveTechId === rec.techId && !isOverride;
+            return (
+              <div
+                key={rec.techId || i}
+                onClick={() => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); setShowTechPicker(false); }}
+                className={`border rounded-lg p-3 cursor-pointer transition-all ${
+                  isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'hover:border-gray-300 bg-white'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-6 h-6 rounded-full text-white text-xs flex items-center justify-center font-bold ${isSelected ? 'bg-blue-600' : 'bg-gray-400'}`}>{rec.rank || i + 1}</span>
+                    <User className="w-4 h-4 text-gray-400" />
+                    <span className="font-medium text-sm">{rec.techName}</span>
                   </div>
-                );
-              })}
-
-              {onDecide && (
-                <button
-                  onClick={async () => { await loadTechs(); setShowTechPicker(true); }}
-                  className="w-full border border-dashed border-gray-300 rounded-lg p-3 text-sm text-gray-500 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50/50 transition-all flex items-center justify-center gap-2"
-                >
-                  <Users className="w-4 h-4" /> Choose a different technician
-                </button>
-              )}
-            </>
-          ) : (
-            <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
-              <div className="px-3 py-2 bg-gray-50 border-b flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    value={techSearch}
-                    onChange={(e) => setTechSearch(e.target.value)}
-                    placeholder="Search by name or location..."
-                    className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-md text-sm bg-white focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
-                    autoFocus
-                  />
+                  {typeof rec.score === 'number' && (
+                    <span className={`text-sm font-mono font-bold ${isSelected ? 'text-blue-700' : 'text-gray-500'}`}>{(rec.score * 100).toFixed(0)}%</span>
+                  )}
                 </div>
-                <button onClick={() => { setShowTechPicker(false); setTechSearch(''); }} className="p-1.5 hover:bg-gray-200 rounded-lg transition-colors">
-                  <X className="w-4 h-4 text-gray-500" />
-                </button>
+                {rec.reasoning && <p className="text-xs text-gray-500 mt-1.5 ml-8 leading-relaxed">{rec.reasoning}</p>}
               </div>
-              <div className="max-h-72 overflow-y-auto">
-                {allTechs
-                  .filter((t) => !techSearch || t.name.toLowerCase().includes(techSearch.toLowerCase()) || t.location?.toLowerCase().includes(techSearch.toLowerCase()))
-                  .map((t) => {
-                    const isRecommended = recTechIds.has(t.id);
-                    const isActive = selectedTechId === t.id;
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => { setSelectedTechId(t.id); setSelectedOverrideTech(t); setShowTechPicker(false); setTechSearch(''); }}
-                        className={`w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors border-b border-gray-100 last:border-0 ${
-                          isActive ? 'bg-blue-50' : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        {t.photoUrl ? (
-                          <img src={t.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
-                        ) : (
-                          <span className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
-                            {t.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                          </span>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">{t.name}</p>
-                          {t.location && <p className="text-xs text-gray-400 flex items-center gap-1"><MapPin className="w-3 h-3 flex-shrink-0" />{t.location}</p>}
-                        </div>
-                        {isRecommended && <span className="text-[10px] font-medium bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded flex-shrink-0">recommended</span>}
-                      </button>
-                    );
-                  })}
-                {allTechs.length === 0 && (
-                  <div className="px-3 py-6 text-center text-sm text-gray-400">
-                    <Loader2 className="w-4 h-4 animate-spin mx-auto mb-1" /> Loading technicians...
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+            );
+          })}
         </div>
 
         {/* RIGHT: Decision Panel (2/5 width) */}
@@ -224,6 +156,72 @@ export function RecommendationCards({ data, onDecide, deciding }) {
                 >
                   Reject
                 </button>
+              </div>
+
+              {/* Choose different tech */}
+              <div className="border-t border-gray-200 pt-3">
+                <button
+                  onClick={async () => { await loadTechs(); setShowTechPicker(!showTechPicker); }}
+                  className={`w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
+                    showTechPicker ? 'bg-gray-200 text-gray-700' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  {showTechPicker ? 'Close' : 'Choose a different technician'}
+                </button>
+
+                {showTechPicker && (
+                  <div className="mt-2 border border-gray-200 rounded-lg bg-white overflow-hidden shadow-sm">
+                    <div className="px-3 py-2 bg-gray-50 border-b">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          value={techSearch}
+                          onChange={(e) => setTechSearch(e.target.value)}
+                          placeholder="Search by name or location..."
+                          className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-md text-sm bg-white focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                      {allTechs
+                        .filter((t) => !techSearch || t.name.toLowerCase().includes(techSearch.toLowerCase()) || t.location?.toLowerCase().includes(techSearch.toLowerCase()))
+                        .map((t) => {
+                          const isRecommended = recTechIds.has(t.id);
+                          const isActive = selectedTechId === t.id;
+                          return (
+                            <button
+                              key={t.id}
+                              onClick={() => { setSelectedTechId(t.id); setSelectedOverrideTech(t); setShowTechPicker(false); setTechSearch(''); }}
+                              className={`w-full text-left px-3 py-2 flex items-center gap-2.5 transition-colors border-b border-gray-100 last:border-0 ${
+                                isActive ? 'bg-blue-50' : 'hover:bg-gray-50'
+                              }`}
+                            >
+                              {t.photoUrl ? (
+                                <img src={t.photoUrl} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+                              ) : (
+                                <span className="w-7 h-7 rounded-full bg-gray-100 text-gray-500 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                                  {t.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                                </span>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-gray-900 truncate">{t.name}</p>
+                                {t.location && <p className="text-[10px] text-gray-400">{t.location}</p>}
+                              </div>
+                              {isRecommended && <span className="text-[9px] font-medium bg-blue-100 text-blue-700 px-1 py-0.5 rounded flex-shrink-0">rec</span>}
+                            </button>
+                          );
+                        })}
+                      {allTechs.length === 0 && (
+                        <div className="px-3 py-4 text-center text-xs text-gray-400">
+                          <Loader2 className="w-3 h-3 animate-spin mx-auto mb-1" /> Loading...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
