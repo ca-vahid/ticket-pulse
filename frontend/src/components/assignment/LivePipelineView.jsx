@@ -12,7 +12,6 @@ import {
 
 export function RecommendationCards({ data, onDecide, deciding }) {
   const [selectedTechId, setSelectedTechId] = useState(null);
-  const [overrideReason, setOverrideReason] = useState('');
   const [decisionNote, setDecisionNote] = useState('');
   const [showTechPicker, setShowTechPicker] = useState(false);
   const [allTechs, setAllTechs] = useState([]);
@@ -109,24 +108,14 @@ export function RecommendationCards({ data, onDecide, deciding }) {
                 </div>
               )}
 
-              {/* Override reason (only for non-recommended tech) */}
-              {isOverride && (
-                <textarea
-                  value={overrideReason}
-                  onChange={(e) => setOverrideReason(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm resize-none h-14 focus:ring-2 focus:ring-blue-200 focus:border-blue-300 transition-all bg-white"
-                  placeholder="Why this technician instead? (required)"
-                />
-              )}
-
-              {/* Decision note (always visible) */}
+              {/* Decision / triage note */}
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">Triage Note <span className="text-gray-400">(optional)</span></label>
+                <label className="text-xs text-gray-500 mb-1 block">Triage Note <span className="text-gray-400">(optional — helps future AI decisions)</span></label>
                 <textarea
                   value={decisionNote}
                   onChange={(e) => setDecisionNote(e.target.value)}
                   className="w-full border border-gray-200 rounded-lg p-2.5 text-sm resize-none h-16 focus:ring-2 focus:ring-blue-200 focus:border-blue-300 transition-all bg-white"
-                  placeholder="Add context to improve future triage decisions..."
+                  placeholder={isOverride ? 'Why this technician? Any routing preferences for similar tickets...' : 'Add context to improve future triage decisions...'}
                 />
               </div>
 
@@ -142,8 +131,8 @@ export function RecommendationCards({ data, onDecide, deciding }) {
                   </button>
                 ) : (
                   <button
-                    onClick={() => onDecide({ decision: 'modified', assignedTechId: selectedTechId, overrideReason, decisionNote })}
-                    disabled={deciding || !overrideReason.trim()}
+                    onClick={() => onDecide({ decision: 'modified', assignedTechId: selectedTechId, overrideReason: decisionNote || null, decisionNote })}
+                    disabled={deciding}
                     className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
                   >
                     {deciding ? 'Processing...' : `Assign to ${selectedOverrideTech.name.split(' ')[0]}`}

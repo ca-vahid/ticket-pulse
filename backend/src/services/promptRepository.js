@@ -85,9 +85,36 @@ function needsPromptUpgrade(systemPrompt = '') {
   return false;
 }
 
+const DECISION_NOTES_STEP = `
+
+## Step 5b: Check Decision History (optional but valuable)
+Call **search_decision_notes** with keywords from the ticket (e.g., category name, key terms) to find past admin decisions on similar tickets. Look for:
+- Has an admin left notes about how tickets like this should be routed?
+- Were previous recommendations overridden? Why?
+- Are there routing preferences or patterns the admin has established?
+
+Admin decision notes carry high weight — if an admin has explicitly stated a routing preference, follow it unless circumstances have changed.`;
+
 function upgradeLegacyPrompt(systemPrompt = '') {
   if (!needsPromptUpgrade(systemPrompt)) {
     return systemPrompt;
+  }
+
+  // If only missing search_decision_notes, inject the step rather than replacing
+  if (!systemPrompt.includes('search_decision_notes') && systemPrompt.includes('get_technician_ad_profile')) {
+    let upgraded = systemPrompt;
+    const seniorityMatch = upgraded.match(/## Step \d+:.*(?:Seniority|Check Seniority|Senior)/i);
+    if (seniorityMatch) {
+      upgraded = upgraded.replace(seniorityMatch[0], DECISION_NOTES_STEP.trim() + '\n\n' + seniorityMatch[0]);
+    } else {
+      const submitMatch = upgraded.match(/## Step \d+:.*(?:Submit|Recommendation)/i);
+      if (submitMatch) {
+        upgraded = upgraded.replace(submitMatch[0], DECISION_NOTES_STEP.trim() + '\n\n' + submitMatch[0]);
+      } else {
+        upgraded += DECISION_NOTES_STEP;
+      }
+    }
+    return upgraded;
   }
 
   if (systemPrompt.includes('You are an IT helpdesk ticket assignment assistant.')) {
