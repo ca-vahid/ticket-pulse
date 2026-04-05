@@ -453,9 +453,8 @@ class FreshServiceClient {
           throw retryError;
         }
       }
-      // 405 means ticket is already closed/in terminal state
-      if (httpStatus === 405) {
-        logger.info(`Ticket ${ticketId} is already in a terminal state, skipping close`);
+      if (httpStatus === 404 || httpStatus === 405) {
+        logger.info(`Ticket ${ticketId} is deleted or in terminal state (${httpStatus}), skipping close`);
         return { id: ticketId, status, alreadyClosed: true };
       }
       logger.error(`Error closing ticket ${ticketId}:`, error);
@@ -471,6 +470,11 @@ class FreshServiceClient {
       });
       return response.data;
     } catch (error) {
+      const httpStatus = error.response?.status || error.statusCode;
+      if (httpStatus === 404 || httpStatus === 405) {
+        logger.info(`Ticket ${ticketId} is deleted or in terminal state, skipping note`);
+        return { ticketId, skipped: true, reason: 'ticket_deleted_or_terminal' };
+      }
       logger.error(`Error adding note to ticket ${ticketId}:`, error);
       throw error;
     }

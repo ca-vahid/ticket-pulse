@@ -131,27 +131,38 @@ class FreshServiceActionService {
       }
 
       const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+      let ticketGone = false;
 
       for (const action of actions) {
+        if (ticketGone) {
+          logger.info(`FreshService: skipping ${action.type} — ticket already deleted/terminal`, { ticketId: action.ticketId, runId });
+          continue;
+        }
+
         if (action.type === 'assign') {
-          await client.assignTicket(action.ticketId, action.agentId);
+          const result = await client.assignTicket(action.ticketId, action.agentId);
+          if (result?.alreadyClosed) { ticketGone = true; continue; }
           logger.info('FreshService: ticket assigned', { ticketId: action.ticketId, agentId: action.agentId, runId });
         } else if (action.type === 'close') {
-          await client.closeTicket(action.ticketId, action.status);
+          const result = await client.closeTicket(action.ticketId, action.status);
+          if (result?.alreadyClosed) { ticketGone = true; }
           logger.info('FreshService: ticket closed', { ticketId: action.ticketId, runId });
         } else if (action.type === 'note') {
-          await client.addPrivateNote(action.ticketId, action.body);
+          const result = await client.addPrivateNote(action.ticketId, action.body);
+          if (result?.skipped) { ticketGone = true; continue; }
           logger.info('FreshService: note added', { ticketId: action.ticketId, runId });
         }
       }
 
+      const syncNote = ticketGone ? 'Ticket already deleted or closed in FreshService — no action needed' : null;
+
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },
-        data: { syncStatus: 'synced', syncedAt: new Date(), syncPayload: payloadData, syncError: null },
+        data: { syncStatus: 'synced', syncedAt: new Date(), syncPayload: payloadData, syncError: syncNote },
       });
 
-      logger.info('FreshService sync completed', { runId, preview });
-      return { success: true, preview, actions };
+      logger.info('FreshService sync completed', { runId, preview, ticketGone });
+      return { success: true, preview, actions, ticketGone, syncNote };
 
     } catch (err) {
       await prisma.assignmentPipelineRun.update({
