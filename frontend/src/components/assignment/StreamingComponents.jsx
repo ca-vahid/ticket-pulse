@@ -154,6 +154,9 @@ export function StreamContent({ events, toolCalls, thinkingKb, status, accentCol
 export function cleanTranscript(raw) {
   if (!raw) return '';
   return raw
+    .replace(/\[Tool: ([\w_]+)\] → \{[\s\S]*?\}(?:\.\.\.)?\n*/g, '\n> **Tool:** `$1` — *data returned*\n\n')
+    .replace(/\[Server Tool: ([\w_]+)\] query="([^"]*)"\n*/g, '\n> **Web Search:** `$2`\n\n')
+    .replace(/\[Web Search Results: (\d+) results\]\n*/g, '> *$1 search results returned*\n\n')
     .replace(/```json\n([\s\S]*?)```/g, (_, json) => {
       try { const parsed = JSON.parse(json); return '```json\n' + JSON.stringify(parsed, null, 2) + '\n```'; } catch { return _; }
     })
