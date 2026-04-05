@@ -332,7 +332,7 @@ function MatrixTab({ onAnalyze }) {
       <DuplicateDetector onMerged={fetchData} />
 
       {/* Swapped-axis matrix: categories as rows, technicians as columns */}
-      {technicians.length > 0 && categories.length > 0 && (
+      {technicians.length > 0 && (
         <div className="overflow-x-auto border rounded-lg">
           <table className="text-sm border-collapse">
             <thead className="bg-slate-50">
@@ -357,6 +357,13 @@ function MatrixTab({ onAnalyze }) {
               </tr>
             </thead>
             <tbody>
+              {categories.length === 0 && (
+                <tr>
+                  <td colSpan={technicians.length + 1} className="px-4 py-8 text-center text-sm text-slate-400">
+                    No competency categories yet. Add categories below to start mapping skills, or run LLM analysis on a technician to auto-generate them.
+                  </td>
+                </tr>
+              )}
               {categories.map((cat) => (
                 <tr key={cat.id} className="border-t hover:bg-slate-50">
                   <td className="px-3 py-2 sticky left-0 bg-white z-10 text-xs font-medium text-slate-700" title={cat.description || ''}>
@@ -371,7 +378,6 @@ function MatrixTab({ onAnalyze }) {
                       const currentIdx = CYCLE.indexOf(level);
                       const nextLevel = CYCLE[(currentIdx + 1) % CYCLE.length];
 
-                      // Optimistic local update — no full refetch
                       setMappings((prev) => {
                         const filtered = prev.filter((m) => !(m.technicianId === tech.id && m.competencyCategoryId === cat.id));
                         if (nextLevel) {
@@ -380,7 +386,6 @@ function MatrixTab({ onAnalyze }) {
                         return filtered;
                       });
 
-                      // Save to backend silently
                       const techMappings = { ...(mappingMap[tech.id] || {}) };
                       if (nextLevel === '') delete techMappings[cat.id];
                       else techMappings[cat.id] = nextLevel;
@@ -460,8 +465,8 @@ function MatrixTab({ onAnalyze }) {
         </div>
       </details>
 
-      {technicians.length === 0 && categories.length === 0 && (
-        <p className="text-slate-500 text-sm text-center py-4">No competency categories or technicians found.</p>
+      {technicians.length === 0 && (
+        <p className="text-slate-500 text-sm text-center py-4">No active technicians found in this workspace.</p>
       )}
     </div>
   );
