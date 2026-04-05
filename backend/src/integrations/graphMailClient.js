@@ -102,12 +102,13 @@ class GraphMailClient {
         latestReceivedAt: latest?.receivedDateTime,
       };
     } catch (error) {
-      const msg = error.body ? JSON.parse(error.body)?.error?.message : null;
-      logger.error('Graph API testConnection failed', { mailbox, error: msg || error.message, code: error.code || error.statusCode });
+      const msg = error.body ? (() => { try { return JSON.parse(error.body)?.error?.message; } catch { return null; } })() : null;
+      const code = error.code || error.statusCode;
+      logger.error('Graph API testConnection failed', { mailbox, error: msg || error.message, code });
       return {
         success: false,
         message: msg || error.message || 'Connection failed',
-        code: error.code || error.statusCode,
+        code,
       };
     }
   }
