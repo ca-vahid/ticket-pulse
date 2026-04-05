@@ -4,18 +4,10 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
-  User, Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare, Copy, Check,
+  Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
 } from 'lucide-react';
-
-function cleanTranscript(raw) {
-  if (!raw) return '';
-  return raw
-    .replace(/\[Tool: ([\w_]+)\] → \{[\s\S]*?\}(?:\.\.\.)?\n*/g, '\n> **Tool:** `$1` — *data returned (see Pipeline Steps above for details)*\n\n')
-    .replace(/\[Server Tool: ([\w_]+)\] query="([^"]*)"\n*/g, '\n> **Web Search:** `$2`\n\n')
-    .replace(/\[Web Search Results: (\d+) results\]\n*/g, '> *$1 search results returned*\n\n')
-    .replace(/\s*\*\(\d+\.\d+KB\)\*\s*/g, ' ')
-    .replace(/\n{3,}/g, '\n\n');
-}
+import { CopyBadge, cleanTranscript } from './StreamingComponents';
+import { RecommendationCards } from './LivePipelineView';
 
 const STEP_ICONS = {
   classification: Brain,
@@ -123,68 +115,6 @@ function StepCard({ step }) {
   );
 }
 
-function RecommendationCard({ rec, rank, isSelected, onSelect }) {
-  return (
-    <div
-      onClick={onSelect}
-      className={`border rounded-lg p-3 cursor-pointer transition-all ${
-        isSelected ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : 'border-gray-200 hover:border-gray-300 bg-white'
-      }`}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">
-            {rank}
-          </span>
-          <User className="w-4 h-4 text-gray-400" />
-          <span className="font-medium text-sm">{rec.techName}</span>
-        </div>
-        <span className="text-sm font-mono font-bold text-blue-700">
-          {typeof rec.score === 'number' ? (rec.score * 100).toFixed(0) : rec.compositeScore ? (rec.compositeScore * 100).toFixed(0) : '?'}%
-        </span>
-      </div>
-      {rec.reasoning && <p className="text-xs text-gray-600 mb-2">{rec.reasoning}</p>}
-      {rec.breakdown && (
-        <div className="grid grid-cols-3 gap-1 text-xs">
-          <div className="text-center">
-            <div className="text-gray-400">Competency</div>
-            <div className="font-medium">{((rec.breakdown.competency || 0) * 100).toFixed(0)}%</div>
-          </div>
-          <div className="text-center">
-            <div className="text-gray-400">Workload</div>
-            <div className="font-medium">{((rec.breakdown.workload || 0) * 100).toFixed(0)}%</div>
-          </div>
-          <div className="text-center">
-            <div className="text-gray-400">Location</div>
-            <div className="font-medium">{((rec.breakdown.location || 0) * 100).toFixed(0)}%</div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CopyBadge({ label, value }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(String(value));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-xs text-gray-500 font-mono transition-colors"
-      title={`Copy ${label}`}
-    >
-      {label} #{value}
-      {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-    </button>
-  );
-}
-
 const DECISION_BADGES = {
   pending_review: { label: 'Pending Review', style: 'bg-yellow-100 text-yellow-800' },
   approved: { label: 'Approved', style: 'bg-green-100 text-green-800' },
@@ -278,35 +208,12 @@ function SyncStatusCard({ run, onSyncComplete }) {
 }
 
 export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete }) {
-  const [selectedTechId, setSelectedTechId] = useState(null);
-  const [overrideReason, setOverrideReason] = useState('');
-  const [showTechPicker, setShowTechPicker] = useState(false);
-  const [allTechs, setAllTechs] = useState([]);
-  const [techSearch, setTechSearch] = useState('');
-
   if (!run) return null;
 
-  const recommendations = run.recommendation?.recommendations || [];
-  const topRec = recommendations[0];
   const decisionBadge = run.status === 'completed'
     ? (DECISION_BADGES[run.decision] || DECISION_BADGES.pending_review)
     : (RUN_STATUS_BADGES[run.status] || RUN_STATUS_BADGES.running);
   const isPending = run.decision === 'pending_review' && run.status === 'completed';
-
-  const handleApprove = () => {
-    const techId = topRec?.techId;
-    if (techId) onDecide({ decision: 'approved', assignedTechId: techId });
-  };
-
-  const handleModify = () => {
-    if (selectedTechId && overrideReason.trim()) {
-      onDecide({ decision: 'modified', assignedTechId: selectedTechId, overrideReason: overrideReason.trim() });
-    }
-  };
-
-  const handleReject = () => {
-    onDecide({ decision: 'rejected' });
-  };
 
   return (
     <div className="space-y-6">
@@ -344,126 +251,13 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         <SyncStatusCard run={run} onSyncComplete={onSyncComplete} />
       )}
 
-      {/* Overall reasoning */}
-      {run.recommendation?.overallReasoning && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-          <h4 className="text-xs font-semibold text-blue-700 uppercase mb-1">Overall Reasoning</h4>
-          <p className="text-sm text-blue-900">{run.recommendation.overallReasoning}</p>
-          {run.recommendation.severity && (
-            <span className="text-xs text-blue-600 mt-1 inline-block">Severity: {run.recommendation.severity}</span>
-          )}
-        </div>
-      )}
-
-      {/* Recommendations */}
-      {recommendations.length > 0 && (
-        <div>
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">Recommendations</h4>
-          <div className="grid gap-2">
-            {recommendations.map((rec, i) => (
-              <RecommendationCard
-                key={rec.techId || i}
-                rec={rec}
-                rank={rec.rank || i + 1}
-                isSelected={selectedTechId === rec.techId}
-                onSelect={() => setSelectedTechId(rec.techId)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Decision actions */}
-      {isPending && (
-        <div className="bg-gray-50 border rounded-lg p-4 space-y-3">
-          <h4 className="text-sm font-semibold text-gray-700">Make Decision</h4>
-          <div className="flex gap-2">
-            <button
-              onClick={handleApprove}
-              disabled={deciding || !topRec}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
-            >
-              {deciding ? 'Processing...' : `Approve (${topRec?.techName || '?'})`}
-            </button>
-            <button
-              onClick={handleReject}
-              disabled={deciding}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition-colors"
-            >
-              Reject
-            </button>
-          </div>
-
-          {selectedTechId && selectedTechId !== topRec?.techId && (
-            <div className="space-y-2 mt-2">
-              <p className="text-xs text-gray-500">
-                You selected a different technician. Provide a reason for the override:
-              </p>
-              <textarea
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.target.value)}
-                placeholder="Why are you choosing a different technician?"
-                className="w-full border rounded-lg p-2 text-sm resize-none h-20"
-              />
-              <button
-                onClick={handleModify}
-                disabled={deciding || !overrideReason.trim()}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
-                Override Assignment
-              </button>
-            </div>
-          )}
-
-          {/* Assign to someone else */}
-          <div className="border-t pt-3 mt-3">
-            <button
-              onClick={async () => {
-                if (!showTechPicker && allTechs.length === 0) {
-                  try {
-                    const res = await assignmentAPI.getCompetencyTechnicians();
-                    setAllTechs(res?.data || []);
-                  } catch { /* ignore */ }
-                }
-                setShowTechPicker(!showTechPicker);
-              }}
-              className="text-xs text-blue-600 hover:underline"
-            >
-              {showTechPicker ? 'Hide technician list' : 'Assign to someone else...'}
-            </button>
-
-            {showTechPicker && (
-              <div className="mt-2 space-y-2">
-                <input
-                  type="text"
-                  value={techSearch}
-                  onChange={(e) => setTechSearch(e.target.value)}
-                  placeholder="Search technicians..."
-                  className="w-full border rounded-lg px-3 py-1.5 text-sm"
-                />
-                <div className="max-h-48 overflow-y-auto border rounded-lg divide-y">
-                  {allTechs
-                    .filter((t) => !techSearch || t.name.toLowerCase().includes(techSearch.toLowerCase()) || t.location?.toLowerCase().includes(techSearch.toLowerCase()))
-                    .map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => { setSelectedTechId(t.id); setShowTechPicker(false); setTechSearch(''); }}
-                        className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-blue-50 text-sm ${selectedTechId === t.id ? 'bg-blue-50' : ''}`}
-                      >
-                        {t.photoUrl ? (
-                          <img src={t.photoUrl} alt="" className="w-6 h-6 rounded-full object-cover" />
-                        ) : (
-                          <span className="w-6 h-6 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold flex items-center justify-center">{t.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}</span>
-                        )}
-                        <span className="font-medium">{t.name}</span>
-                        {t.location && <span className="text-xs text-gray-400">({t.location})</span>}
-                      </button>
-                    ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Recommendations + Decision (shared component) */}
+      {run.recommendation && (
+        <RecommendationCards
+          data={run.recommendation}
+          onDecide={isPending ? onDecide : null}
+          deciding={deciding}
+        />
       )}
 
       {/* Decided info */}

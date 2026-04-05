@@ -10,7 +10,7 @@ import {
   CopyBadge, mdComponents, StreamContent, cleanTranscript, processStreamEvent,
 } from './StreamingComponents';
 
-function RecommendationCards({ data, onDecide, deciding }) {
+export function RecommendationCards({ data, onDecide, deciding }) {
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [overrideReason, setOverrideReason] = useState('');
   const [decisionNote, setDecisionNote] = useState('');
