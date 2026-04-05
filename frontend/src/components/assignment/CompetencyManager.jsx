@@ -5,19 +5,13 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Plus, Trash2, Loader2, Brain, CheckCircle, XCircle, RotateCcw,
-  ChevronDown, ChevronRight, Wrench, AlertTriangle, Copy, Check,
-  Search, Clock, Save, Upload, Eye, FileText, X, User, MapPin, History,
+  ChevronDown, ChevronRight, AlertTriangle,
+  Search, Clock, Save, Upload, FileText, X, User, MapPin, History,
 } from 'lucide-react';
-
-function cleanTranscript(raw) {
-  if (!raw) return '';
-  return raw
-    .replace(/\[Tool: ([\w_]+)\] → \{[\s\S]*?\}(?:\.\.\.)?\n*/g, '\n> **Tool:** `$1` — *data returned (see Pipeline Steps for details)*\n\n')
-    .replace(/\[Server Tool: ([\w_]+)\] query="([^"]*)"\n*/g, '\n> **Web Search:** `$2`\n\n')
-    .replace(/\[Web Search Results: (\d+) results\]\n*/g, '> *$1 search results returned*\n\n')
-    .replace(/\s*\*\(\d+\.\d+KB\)\*\s*/g, ' ')
-    .replace(/\n{3,}/g, '\n\n');
-}
+import {
+  CopyBadge, ToolCallCard, mdComponents, StreamContent,
+  cleanTranscript, processStreamEvent,
+} from './StreamingComponents';
 
 const PROFICIENCY_LEVELS = [
   { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 text-yellow-800' },
@@ -41,16 +35,6 @@ function getCategoryGroup(name) {
     if (group.keywords.some((kw) => lower.includes(kw))) return group.label;
   }
   return 'Other';
-}
-
-function CopyBadge({ label, value }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button onClick={() => { navigator.clipboard.writeText(String(value)); setCopied(true); setTimeout(() => setCopied(false), 1500); }} className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-xs text-gray-500 font-mono transition-colors">
-      {label} #{value}
-      {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-    </button>
-  );
 }
 
 // ─── Duplicate Detector ──────────────────────────────────────────────────
@@ -484,6 +468,7 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
   const [completedRun, setCompletedRun] = useState(null);
   const [error, setError] = useState(null);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [thinkingKb, setThinkingKb] = useState(null);
   const scrollRef = useRef(null);
   const timerRef = useRef(null);
   const startTimeRef = useRef(null);
@@ -505,6 +490,7 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
     setError(null);
     setRunId(null);
     setElapsedSec(0);
+    setThinkingKb(null);
 
     const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
     const authToken = getAuthToken();
@@ -521,40 +507,17 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     }
 
-    function processEvent(event) {
-      setEvents((prev) => [...prev, event]);
-      switch (event.type) {
-      case 'run_started': setRunId(event.runId); break;
-      case 'text': setTimeout(scrollToBottom, 10); break;
-      case 'tool_call':
-        setToolCalls((prev) => [...prev, { id: event.toolUseId || `${event.name}-${Date.now()}`, name: event.name, input: event.input, result: null, durationMs: null }]);
-        setTimeout(scrollToBottom, 10);
-        break;
-      case 'tool_result':
-        setToolCalls((prev) => prev.map((tc) => {
-          if (event.toolUseId && tc.id === event.toolUseId) return { ...tc, result: event.data, durationMs: event.durationMs };
-          if (!event.toolUseId && tc.name === event.name && !tc.result) return { ...tc, result: event.data, durationMs: event.durationMs };
-          return tc;
-        }));
-        break;
-      case 'assessment':
-        setAssessment(event.data);
-        currentStatus = 'completed';
-        setStatus('completed');
-        stopTimer();
-        setTimeout(scrollToBottom, 50);
-        break;
-      case 'error':
-        setError(event.message);
-        if (currentStatus !== 'completed') { currentStatus = 'error'; setStatus('error'); stopTimer(); }
-        break;
-      case 'complete':
-      case 'done':
-        if (currentStatus !== 'error' && currentStatus !== 'completed') { currentStatus = 'completed'; setStatus('completed'); }
-        stopTimer();
-        break;
-      default: break;
-      }
+    function handleEvent(event) {
+      processStreamEvent(event, {
+        setEvents,
+        setToolCalls,
+        setThinkingKb,
+        scrollToBottom,
+        onRunStarted: (e) => { setRunId(e.runId); },
+        onResult: (e) => { setAssessment(e.data); currentStatus = 'completed'; setStatus('completed'); stopTimer(); setTimeout(scrollToBottom, 50); },
+        onError: (e) => { setError(e.message); if (currentStatus !== 'completed') { currentStatus = 'error'; setStatus('error'); stopTimer(); } },
+        onComplete: () => { if (currentStatus !== 'error' && currentStatus !== 'completed') { currentStatus = 'completed'; setStatus('completed'); } stopTimer(); },
+      });
     }
 
     (async () => {
@@ -591,9 +554,9 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
-          for (const line of lines) { if (line.startsWith('data: ')) { try { processEvent(JSON.parse(line.slice(6))); } catch { /* skip */ } } }
+          for (const line of lines) { if (line.startsWith('data: ')) { try { handleEvent(JSON.parse(line.slice(6))); } catch { /* skip */ } } }
         }
-        if (buffer.startsWith('data: ')) { try { processEvent(JSON.parse(buffer.slice(6))); } catch { /* skip */ } }
+        if (buffer.startsWith('data: ')) { try { handleEvent(JSON.parse(buffer.slice(6))); } catch { /* skip */ } }
 
         if (currentStatus === 'completed') {
           await new Promise((r) => setTimeout(r, 500));
@@ -606,31 +569,13 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
       } catch (err) {
         if (err.name !== 'AbortError') { setStatus('error'); setError(err.message); }
         stopTimer();
+      } finally {
+        setThinkingKb(null);
       }
     })();
 
     return () => { abortController.abort(); stopTimer(); };
   }, [techId, scrollToBottom]);
-
-  const renderStream = () => {
-    const segments = [];
-    let textSoFar = '';
-    let toolIndex = 0;
-    for (const event of events) {
-      if (event.type === 'text') { textSoFar += event.text; }
-      else if (event.type === 'tool_call') {
-        if (textSoFar) { segments.push({ type: 'text', content: textSoFar }); textSoFar = ''; }
-        segments.push({ type: 'tool', ...(toolCalls[toolIndex] || { name: event.name, input: event.input }) });
-        toolIndex++;
-      }
-    }
-    if (textSoFar) segments.push({ type: 'text', content: textSoFar });
-    return segments.map((seg, i) => {
-      if (seg.type === 'text') return <div key={i} className="text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none"><Markdown remarkPlugins={[remarkGfm]}>{seg.content}</Markdown></div>;
-      if (seg.type === 'tool') return <ToolCallCard key={i} name={seg.name} input={seg.input} result={seg.result} durationMs={seg.durationMs} />;
-      return null;
-    });
-  };
 
   const STATUS_MAP = {
     checking: { icon: Loader2, text: 'Checking for existing analysis...', color: 'text-gray-500', spin: true },
@@ -669,8 +614,9 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
             <button onClick={() => navigate(`/assignments/competency-live/${techId}?force=true`)} className="mt-3 text-xs text-purple-600 hover:underline">Run new analysis instead</button>
           </div>
         )}
-        {renderStream()}
-        {status === 'running' && <span className="inline-block w-2 h-4 bg-purple-500 animate-pulse ml-0.5" />}
+        {events.length > 0 && (
+          <StreamContent events={events} toolCalls={toolCalls} thinkingKb={thinkingKb} status={status} accentColor="purple" />
+        )}
       </div>
 
       {error && (
@@ -709,27 +655,6 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
             <button onClick={() => { onComplete?.(); }} className="text-sm text-blue-600 hover:underline">Back to matrix</button>
             {runId && <button onClick={() => navigate(`/assignments/competency-run/${runId}`)} className="text-sm text-purple-600 hover:underline">View full run details</button>}
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ToolCallCard({ name, input, result, durationMs }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="my-2 border rounded-lg bg-gray-50 overflow-hidden">
-      <button onClick={() => setExpanded(!expanded)} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-100 transition-colors">
-        <Wrench className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
-        <span className="text-xs font-medium text-purple-700">{name}</span>
-        {result ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : <Loader2 className="w-3.5 h-3.5 text-purple-400 animate-spin" />}
-        {durationMs != null && <span className="text-xs text-gray-400 ml-auto">{durationMs}ms</span>}
-        {expanded ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
-      </button>
-      {expanded && (
-        <div className="px-3 pb-2 space-y-1">
-          {input && <div><span className="text-xs text-gray-400 font-medium">Input:</span><pre className="text-xs bg-white rounded p-1.5 border overflow-x-auto max-h-28">{JSON.stringify(input, null, 2)}</pre></div>}
-          {result && <div><span className="text-xs text-gray-400 font-medium">Result:</span><pre className="text-xs bg-white rounded p-1.5 border overflow-x-auto max-h-40">{JSON.stringify(result, null, 2)}</pre></div>}
         </div>
       )}
     </div>

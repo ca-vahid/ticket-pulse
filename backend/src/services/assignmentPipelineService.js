@@ -244,10 +244,8 @@ class AssignmentPipelineService {
           messages,
         });
 
-        let turnHasText = false;
         stream.on('text', (text) => {
           fullTranscript += text;
-          turnHasText = true;
           emit({ type: 'text', text });
         });
 
@@ -256,10 +254,10 @@ class AssignmentPipelineService {
         stream.on('inputJson', (partialJson) => {
           toolJsonLength += partialJson.length;
           const now = Date.now();
-          if (now - lastProgressAt > 1500) {
+          if (now - lastProgressAt > 1000) {
             lastProgressAt = now;
             const kb = (toolJsonLength / 1024).toFixed(1);
-            emit({ type: 'thinking', kb: parseFloat(kb), hasText: turnHasText });
+            emit({ type: 'thinking', kb: parseFloat(kb) });
           }
         });
 

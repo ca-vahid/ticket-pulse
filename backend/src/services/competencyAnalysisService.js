@@ -111,10 +111,10 @@ class CompetencyAnalysisService {
         stream.on('inputJson', (partialJson) => {
           toolJsonLength += partialJson.length;
           const now = Date.now();
-          if (now - lastProgressAt > 3000) {
+          if (now - lastProgressAt > 1000) {
             lastProgressAt = now;
             const kb = (toolJsonLength / 1024).toFixed(1);
-            emit({ type: 'text', text: ` *(${kb}KB)*` });
+            emit({ type: 'thinking', kb: parseFloat(kb) });
           }
         });
 
