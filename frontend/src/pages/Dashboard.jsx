@@ -46,6 +46,7 @@ import {
   List,
   VolumeX,
   Volume2,
+  Sparkles,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -721,6 +722,10 @@ export default function Dashboard() {
     navigate('/timeline');
   };
 
+  const handleAssignments = () => {
+    navigate('/assignments');
+  };
+
   if (isLoading && !dashboardData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
@@ -1283,6 +1288,18 @@ export default function Dashboard() {
                   <Clock className="w-3 h-3 text-white" />
                 </span>
                 Timeline Explorer
+              </button>
+
+              {/* Ticket Assignment */}
+              <button
+                onClick={handleAssignments}
+                className="group flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300 hover:shadow-sm whitespace-nowrap"
+                title="AI Ticket Assignment"
+              >
+                <span className="w-5 h-5 rounded-full bg-purple-600 flex items-center justify-center group-hover:bg-purple-700 transition-colors">
+                  <Sparkles className="w-3 h-3 text-white" />
+                </span>
+                Assignment
               </button>
 
               {/* Visuals Button */}
