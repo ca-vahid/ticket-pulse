@@ -208,8 +208,7 @@ class AssignmentPipelineService {
 
     const toolAllowlist = promptVersion.toolConfig?.allowedTools || null;
     let tools = TOOL_SCHEMAS
-      .filter((t) => !toolAllowlist || toolAllowlist.includes(t.name))
-      .map((t) => ({ ...t, eager_input_streaming: true }));
+      .filter((t) => !toolAllowlist || toolAllowlist.includes(t.name));
 
     const enableWebSearch = promptVersion.toolConfig?.enableWebSearch !== false;
     if (enableWebSearch) {

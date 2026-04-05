@@ -294,6 +294,7 @@ router.post('/trigger/:ticketId', asyncHandler(async (req, res) => {
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  res.flushHeaders();
 
   const abortController = new AbortController();
   let clientDisconnected = false;
@@ -623,6 +624,7 @@ router.post('/competencies/analyze/:techId', asyncHandler(async (req, res) => {
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  res.flushHeaders();
 
   let clientDisconnected = false;
   const onEvent = (event) => {
