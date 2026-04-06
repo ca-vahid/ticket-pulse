@@ -154,12 +154,14 @@ class AssignmentRepository {
     }
   }
 
-  async getPipelineRuns(workspaceId, { limit = 50, offset = 0, status, decision } = {}) {
+  async getPipelineRuns(workspaceId, { limit = 50, offset = 0, status, decision, since, decisions } = {}) {
     try {
       await this.sweepStaleRunningRuns(workspaceId);
       const where = { workspaceId };
       if (status) where.status = status;
       if (decision) where.decision = decision;
+      if (decisions) where.decision = { in: decisions };
+      if (since) where.createdAt = { gte: new Date(since) };
 
       const [items, total] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({

@@ -132,6 +132,7 @@ function ManualTriggerPanel() {
 function QueueTab({ deepRunId }) {
   const navigate = useNavigate();
   const [queue, setQueue] = useState({ items: [], total: 0 });
+  const [assignedRuns, setAssignedRuns] = useState({ items: [], total: 0 });
   const [queuedRuns, setQueuedRuns] = useState([]);
   const [selectedRun, setSelectedRun] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -141,26 +142,41 @@ function QueueTab({ deepRunId }) {
   const [sortDir, setSortDir] = useState('desc');
   const [filterPriority, setFilterPriority] = useState('all');
   const [queueStatus, setQueueStatus] = useState(null);
+  const [subView, setSubView] = useState('pending');
+  const [timeRange, setTimeRange] = useState('7d');
+
+  const getSince = (range) => {
+    if (range === 'all') return undefined;
+    const now = new Date();
+    if (range === '24h') return new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    if (range === '7d') return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    if (range === '30d') return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    return undefined;
+  };
 
   const fetchQueue = useCallback(async () => {
     try {
       setLoading(true);
-      const [queueRes, queuedRes, statusRes] = await Promise.all([
+      const since = getSince(timeRange);
+      const [queueRes, assignedRes, queuedRes, statusRes] = await Promise.all([
         assignmentAPI.getQueue(),
+        assignmentAPI.getRuns({ decisions: 'approved,modified,auto_assigned', since, limit: 50 }),
         assignmentAPI.getQueuedRuns(),
         assignmentAPI.getQueueStatus().catch(() => null),
       ]);
       setQueue({ items: queueRes?.items || [], total: queueRes?.total || 0 });
+      setAssignedRuns({ items: assignedRes?.items || [], total: assignedRes?.total || 0 });
       setQueuedRuns(queuedRes?.data || []);
       if (statusRes?.data) setQueueStatus(statusRes.data);
     } catch (err) {
       console.error('Failed to fetch queue:', err);
       setQueue({ items: [], total: 0 });
+      setAssignedRuns({ items: [], total: 0 });
       setQueuedRuns([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [timeRange]);
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
 
@@ -187,6 +203,7 @@ function QueueTab({ deepRunId }) {
       setDeciding(true);
       await assignmentAPI.decide(selectedRun.id, decisionData);
       setSelectedRun(null);
+      navigate('/assignments/queue');
       await fetchQueue();
     } catch (err) {
       console.error('Failed to submit decision:', err);
@@ -299,6 +316,56 @@ function QueueTab({ deepRunId }) {
       return 0;
     });
 
+  const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', rejected: 'Rejected', pending_review: 'Pending' };
+  const DECISION_PILL = { approved: 'bg-green-100 text-green-800', modified: 'bg-blue-100 text-blue-800', auto_assigned: 'bg-purple-100 text-purple-800', noise_dismissed: 'bg-slate-100 text-slate-500', rejected: 'bg-red-100 text-red-800' };
+
+  const activeItems = subView === 'pending' ? filteredItems : (subView === 'assigned' ? assignedRuns.items : [...queue.items, ...assignedRuns.items]).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const showActions = subView === 'pending';
+
+  const renderRunCard = (run) => {
+    const topRec = run.recommendation?.recommendations?.[0];
+    return (
+      <div key={run.id} onClick={() => handleSelectRun(run.id)} className="px-3 py-3 active:bg-blue-50 transition-colors touch-manipulation cursor-pointer">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span className="text-xs text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
+                {PRIORITY_LABELS[run.ticket?.priority] || '—'}
+              </span>
+              {subView !== 'pending' && run.decision && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
+                  {DECISION_LABELS[run.decision] || run.decision}
+                </span>
+              )}
+            </div>
+            <p className="font-medium text-slate-800 text-sm leading-snug line-clamp-2">{run.ticket?.subject || 'No subject'}</p>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <span className="text-xs text-slate-400">{run.ticket?.requester?.name || '—'}</span>
+              {(run.assignedTech?.name || topRec?.techName) && (
+                <span className="text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">→ {run.assignedTech?.name || topRec?.techName}</span>
+              )}
+              <span className="text-xs text-slate-300">{(run.decidedAt || run.updatedAt) ? new Date(run.decidedAt || run.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {showActions && (
+              <>
+                <button onClick={(e) => handleDismiss(e, run.id)} className="p-2 text-yellow-500 hover:bg-yellow-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Dismiss">
+                  <XCircle className="w-4 h-4" />
+                </button>
+                <button onClick={(e) => handleDelete(e, run.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Delete">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </>
+            )}
+            <ChevronRight className="w-4 h-4 text-slate-300" />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4">
       {actionMsg && (
@@ -317,9 +384,7 @@ function QueueTab({ deepRunId }) {
               {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow ? (
                 <div className="bg-amber-100 border border-amber-200 rounded-full px-3 py-1 flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
-                  <span className="text-xs font-semibold text-amber-700">
-                    Starts {queueStatus.nextWindow.label}
-                  </span>
+                  <span className="text-xs font-semibold text-amber-700">Starts {queueStatus.nextWindow.label}</span>
                 </div>
               ) : queueStatus?.isBusinessHours ? (
                 <div className="bg-green-50 border border-green-200 rounded-full px-3 py-1 flex items-center gap-1.5">
@@ -329,7 +394,6 @@ function QueueTab({ deepRunId }) {
               ) : null}
             </div>
           </div>
-          {/* Mobile cards */}
           <div className="md:hidden divide-y divide-amber-50 bg-white">
             {queuedRuns.map((run) => (
               <div key={run.id} className="px-3 py-3 space-y-2">
@@ -349,33 +413,23 @@ function QueueTab({ deepRunId }) {
               </div>
             ))}
           </div>
-          {/* Desktop table */}
           <table className="hidden md:table w-full text-sm">
-            <thead>
-              <tr className="text-xs text-amber-600 border-b border-amber-100 bg-amber-50/50">
-                <th className="text-left px-4 py-1.5 font-medium">Ticket</th>
-                <th className="text-left px-4 py-1.5 font-medium">Reason</th>
-                <th className="text-left px-4 py-1.5 font-medium">Queued At</th>
-                <th className="px-4 py-1.5 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
+            <thead><tr className="text-xs text-amber-600 border-b border-amber-100 bg-amber-50/50">
+              <th className="text-left px-4 py-1.5 font-medium">Ticket</th>
+              <th className="text-left px-4 py-1.5 font-medium">Reason</th>
+              <th className="text-left px-4 py-1.5 font-medium">Queued At</th>
+              <th className="px-4 py-1.5 text-right font-medium">Actions</th>
+            </tr></thead>
             <tbody>
               {queuedRuns.map((run) => (
                 <tr key={run.id} className="border-t border-amber-50 hover:bg-amber-50 transition-colors">
-                  <td className="px-4 py-3">
-                    <span className="text-xs text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
-                    <span className="ml-2 font-semibold text-slate-800">{run.ticket?.subject || 'No subject'}</span>
-                  </td>
+                  <td className="px-4 py-3"><span className="text-xs text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span><span className="ml-2 font-semibold text-slate-800">{run.ticket?.subject || 'No subject'}</span></td>
                   <td className="px-4 py-3 text-xs text-slate-500">{run.queuedReason || 'Outside business hours'} · via {run.triggerSource}</td>
                   <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{run.queuedAt ? new Date(run.queuedAt).toLocaleString() : ''}</td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={(e) => handleRunNow(e, run.id)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center gap-1.5 shadow-sm">
-                        <Play className="w-3.5 h-3.5" /> Run Now
-                      </button>
-                      <button onClick={(e) => handleDelete(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg" title="Delete">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <button onClick={(e) => handleRunNow(e, run.id)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center gap-1.5 shadow-sm"><Play className="w-3.5 h-3.5" /> Run Now</button>
+                      <button onClick={(e) => handleDelete(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg" title="Delete"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </td>
                 </tr>
@@ -385,135 +439,134 @@ function QueueTab({ deepRunId }) {
         </div>
       )}
 
-      {/* Pending review table */}
-      {queue.items.length === 0 && queuedRuns.length === 0 ? (
-        <div className="text-center py-12">
-          <Inbox className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500 font-medium">No pending assignments</p>
-          <p className="text-slate-400 text-sm mt-1">Trigger the pipeline manually below, or wait for incoming emails.</p>
-          <button onClick={fetchQueue} className="mt-3 text-sm text-blue-600 hover:underline inline-flex items-center gap-1">
-            <RefreshCw className="w-4 h-4" /> Refresh
-          </button>
-        </div>
-      ) : queue.items.length > 0 && (
-        <div className="border border-slate-200 rounded-lg overflow-hidden">
-          {/* Toolbar */}
-          <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2.5 flex items-center gap-2 sm:gap-3 flex-wrap">
-            <span className="text-sm font-medium text-slate-700">{queue.total} pending</span>
-            <div className="flex-1" />
-            <div className="flex items-center gap-1.5 text-xs text-slate-500">
-              <Filter className="w-3.5 h-3.5" />
-              <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="border border-slate-200 rounded px-2 py-1.5 text-xs bg-white touch-manipulation">
-                <option value="all">All</option>
-                <option value="4">Urgent</option>
-                <option value="3">High</option>
-                <option value="2">Medium</option>
-                <option value="1">Low</option>
-              </select>
+      {/* Sub-view tabs + time filter + toolbar */}
+      <div className="border border-slate-200 rounded-lg overflow-hidden">
+        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2.5">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            {/* Sub-view pills */}
+            <div className="inline-flex items-center gap-0.5 bg-slate-200 rounded-lg p-0.5">
+              {[
+                { id: 'pending', label: 'Pending', count: queue.total },
+                { id: 'assigned', label: 'Assigned', count: assignedRuns.total },
+                { id: 'all', label: 'All', count: null },
+              ].map((tab) => (
+                <button key={tab.id} onClick={() => setSubView(tab.id)} className={`px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-colors touch-manipulation ${subView === tab.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {tab.label}{tab.count != null ? ` (${tab.count})` : ''}
+                </button>
+              ))}
             </div>
-            <button onClick={handleClearAll} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 p-1 touch-manipulation">
-              <Trash2 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Clear all</span>
-            </button>
-            <button onClick={fetchQueue} className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 p-1 touch-manipulation">
-              <RefreshCw className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Refresh</span>
-            </button>
-          </div>
 
-          {/* Mobile cards */}
-          <div className="md:hidden divide-y divide-slate-100">
-            {filteredItems.map((run) => (
-              <div key={run.id} onClick={() => handleSelectRun(run.id)} className="px-3 py-3 active:bg-blue-50 transition-colors touch-manipulation cursor-pointer">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <span className="text-xs text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
-                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
-                        {PRIORITY_LABELS[run.ticket?.priority] || '—'}
-                      </span>
-                    </div>
-                    <p className="font-medium text-slate-800 text-sm leading-snug line-clamp-2">{run.ticket?.subject || 'No subject'}</p>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <span className="text-xs text-slate-400">{run.ticket?.requester?.name || '—'}</span>
-                      {run.recommendation?.recommendations?.[0]?.techName && (
-                        <span className="text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">→ {run.recommendation.recommendations[0].techName}</span>
-                      )}
-                      <span className="text-xs text-slate-300">{run.updatedAt ? new Date(run.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <button onClick={(e) => handleDismiss(e, run.id)} className="p-2 text-yellow-500 hover:bg-yellow-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Dismiss">
-                      <XCircle className="w-4 h-4" />
-                    </button>
-                    <button onClick={(e) => handleDelete(e, run.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Delete">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                    <ChevronRight className="w-4 h-4 text-slate-300" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+            <div className="flex-1" />
 
-          {/* Desktop table */}
-          <table className="hidden md:table w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('subject')}>
-                  <span className="flex items-center gap-1">Ticket <SortIcon field="subject" /></span>
-                </th>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('requester')}>
-                  <span className="flex items-center gap-1">Requester <SortIcon field="requester" /></span>
-                </th>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('priority')}>
-                  <span className="flex items-center gap-1">Priority <SortIcon field="priority" /></span>
-                </th>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs">Suggested</th>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('createdAt')}>
-                  <span className="flex items-center gap-1">Analyzed <SortIcon field="createdAt" /></span>
-                </th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredItems.map((run) => (
-                <tr key={run.id} className="hover:bg-blue-50 cursor-pointer group" onClick={() => handleSelectRun(run.id)}>
-                  <td className="px-4 py-3">
-                    <span className="text-xs text-slate-400 font-mono mr-1.5">#{run.ticket?.freshserviceTicketId}</span>
-                    <span className="font-medium text-slate-800">{run.ticket?.subject || 'No subject'}</span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600 text-xs">{run.ticket?.requester?.name || '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
-                      {PRIORITY_LABELS[run.ticket?.priority] || '—'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs">
-                    {run.recommendation?.recommendations?.[0] ? (
-                      <span className="font-medium text-blue-700">{run.recommendation.recommendations[0].techName}</span>
-                    ) : (
-                      <span className="text-slate-300">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{run.updatedAt ? new Date(run.updatedAt).toLocaleString() : new Date(run.createdAt).toLocaleString()}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={(e) => { e.stopPropagation(); handleSelectRun(run.id); }} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-100 rounded" title="View details">
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 rounded" title="Dismiss as noise">
-                        <XCircle className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={(e) => handleDelete(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+            {/* Time range pills */}
+            <div className="inline-flex items-center gap-0.5 bg-slate-200 rounded-lg p-0.5">
+              {['24h', '7d', '30d', 'all'].map((range) => (
+                <button key={range} onClick={() => setTimeRange(range)} className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors touch-manipulation ${timeRange === range ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
+                  {range === 'all' ? 'All' : range}
+                </button>
               ))}
-            </tbody>
-          </table>
+            </div>
+
+            {/* Priority + actions */}
+            <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="border border-slate-200 rounded px-2 py-1.5 text-xs bg-white touch-manipulation">
+              <option value="all">All</option>
+              <option value="4">Urgent</option>
+              <option value="3">High</option>
+              <option value="2">Medium</option>
+              <option value="1">Low</option>
+            </select>
+
+            {subView === 'pending' && queue.total > 0 && (
+              <button onClick={handleClearAll} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 p-1 touch-manipulation">
+                <Trash2 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Clear all</span>
+              </button>
+            )}
+            <button onClick={fetchQueue} className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 p-1 touch-manipulation">
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
-      )}
+
+        {/* List content */}
+        {activeItems.length === 0 ? (
+          <div className="text-center py-10">
+            <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+            <p className="text-slate-500 text-sm font-medium">{subView === 'pending' ? 'No pending assignments' : subView === 'assigned' ? 'No assignments in this period' : 'No runs found'}</p>
+            <button onClick={fetchQueue} className="mt-2 text-xs text-blue-600 hover:underline inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
+          </div>
+        ) : (
+          <>
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {activeItems.map(renderRunCard)}
+            </div>
+
+            {/* Desktop table */}
+            <table className="hidden md:table w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('subject')}>
+                    <span className="flex items-center gap-1">Ticket <SortIcon field="subject" /></span>
+                  </th>
+                  <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('requester')}>
+                    <span className="flex items-center gap-1">Requester <SortIcon field="requester" /></span>
+                  </th>
+                  <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('priority')}>
+                    <span className="flex items-center gap-1">Priority <SortIcon field="priority" /></span>
+                  </th>
+                  <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs">{subView === 'pending' ? 'Suggested' : 'Assigned To'}</th>
+                  {subView !== 'pending' && <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs">Decision</th>}
+                  <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('createdAt')}>
+                    <span className="flex items-center gap-1">{subView === 'pending' ? 'Analyzed' : 'Decided'} <SortIcon field="createdAt" /></span>
+                  </th>
+                  {showActions && <th className="px-4 py-2.5 font-medium text-slate-500 text-xs text-right">Actions</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {activeItems.map((run) => {
+                  const topRec = run.recommendation?.recommendations?.[0];
+                  return (
+                    <tr key={run.id} className="hover:bg-blue-50 cursor-pointer group" onClick={() => handleSelectRun(run.id)}>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-slate-400 font-mono mr-1.5">#{run.ticket?.freshserviceTicketId}</span>
+                        <span className="font-medium text-slate-800">{run.ticket?.subject || 'No subject'}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 text-xs">{run.ticket?.requester?.name || '—'}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
+                          {PRIORITY_LABELS[run.ticket?.priority] || '—'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs">
+                        {(run.assignedTech?.name || topRec?.techName) ? (
+                          <span className="font-medium text-blue-700">{run.assignedTech?.name || topRec?.techName}</span>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      {subView !== 'pending' && (
+                        <td className="px-4 py-3 text-xs">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
+                            {DECISION_LABELS[run.decision] || run.decision}
+                          </span>
+                        </td>
+                      )}
+                      <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{(run.decidedAt || run.updatedAt) ? new Date(run.decidedAt || run.updatedAt).toLocaleString() : new Date(run.createdAt).toLocaleString()}</td>
+                      {showActions && (
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={(e) => { e.stopPropagation(); handleSelectRun(run.id); }} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-100 rounded" title="View"><Eye className="w-3.5 h-3.5" /></button>
+                            <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 rounded" title="Dismiss"><XCircle className="w-3.5 h-3.5" /></button>
+                            <button onClick={(e) => handleDelete(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
 
       <ManualTriggerPanel />
     </div>

@@ -205,8 +205,9 @@ router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
 router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
-  const { status, decision } = req.query;
-  const result = await assignmentRepository.getPipelineRuns(req.workspaceId, { limit, offset, status, decision });
+  const { status, decision, since, decisions } = req.query;
+  const decisionsArr = decisions ? decisions.split(',') : undefined;
+  const result = await assignmentRepository.getPipelineRuns(req.workspaceId, { limit, offset, status, decision, since, decisions: decisionsArr });
   res.json({ success: true, ...result });
 }));
 
