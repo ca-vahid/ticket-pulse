@@ -11,6 +11,7 @@ import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
 import graphMailClient from '../integrations/graphMailClient.js';
+import availabilityService from '../services/availabilityService.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
@@ -87,6 +88,69 @@ router.put('/config', asyncHandler(async (req, res) => {
 router.get('/queued', asyncHandler(async (req, res) => {
   const runs = await assignmentRepository.listQueuedRuns(req.workspaceId, 50);
   res.json({ success: true, data: runs, total: runs.length });
+}));
+
+router.get('/queue-status', asyncHandler(async (req, res) => {
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: req.workspaceId },
+    select: { defaultTimezone: true },
+  });
+  const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const bh = await availabilityService.isBusinessHours(new Date(), tz, req.workspaceId);
+  const queuedCount = await assignmentRepository.countQueuedRuns(req.workspaceId);
+
+  let nextWindow = null;
+  if (!bh.isBusinessHours) {
+    const now = new Date();
+    const hours = await availabilityService.getBusinessHours(req.workspaceId);
+    const enabledDays = hours.filter((h) => h.isEnabled).sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+
+    if (enabledDays.length > 0) {
+      const { toZonedTime } = await import('date-fns-tz');
+      const zoned = toZonedTime(now, tz);
+      const todayDow = zoned.getDay();
+      const currentMinutes = zoned.getHours() * 60 + zoned.getMinutes();
+
+      for (let offset = 0; offset < 7; offset++) {
+        const checkDow = (todayDow + offset) % 7;
+        const dayConfig = enabledDays.find((d) => d.dayOfWeek === checkDow);
+        if (!dayConfig) continue;
+
+        const [sh, sm] = dayConfig.startTime.split(':').map(Number);
+        const startMinutes = sh * 60 + sm;
+
+        if (offset === 0 && currentMinutes >= startMinutes) continue;
+
+        const daysUntil = offset;
+        const nextDate = new Date(now.getTime() + daysUntil * 86400000);
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+        nextWindow = {
+          dayName: dayNames[checkDow],
+          startTime: dayConfig.startTime,
+          timezone: tz,
+          daysUntil,
+          label: daysUntil === 0
+            ? `Today at ${dayConfig.startTime}`
+            : daysUntil === 1
+              ? `Tomorrow at ${dayConfig.startTime}`
+              : `${dayNames[checkDow]} at ${dayConfig.startTime}`,
+        };
+        break;
+      }
+    }
+  }
+
+  res.json({
+    success: true,
+    data: {
+      isBusinessHours: bh.isBusinessHours,
+      reason: bh.reason,
+      timezone: tz,
+      queuedCount,
+      nextWindow,
+    },
+  });
 }));
 
 router.post('/runs/:id/run-now', asyncHandler(async (req, res) => {

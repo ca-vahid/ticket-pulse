@@ -138,16 +138,19 @@ function QueueTab({ deepRunId }) {
   const [sortField, setSortField] = useState('createdAt');
   const [sortDir, setSortDir] = useState('desc');
   const [filterPriority, setFilterPriority] = useState('all');
+  const [queueStatus, setQueueStatus] = useState(null);
 
   const fetchQueue = useCallback(async () => {
     try {
       setLoading(true);
-      const [queueRes, queuedRes] = await Promise.all([
+      const [queueRes, queuedRes, statusRes] = await Promise.all([
         assignmentAPI.getQueue(),
         assignmentAPI.getQueuedRuns(),
+        assignmentAPI.getQueueStatus().catch(() => null),
       ]);
       setQueue({ items: queueRes?.items || [], total: queueRes?.total || 0 });
       setQueuedRuns(queuedRes?.data || []);
+      if (statusRes?.data) setQueueStatus(statusRes.data);
     } catch (err) {
       console.error('Failed to fetch queue:', err);
       setQueue({ items: [], total: 0 });
@@ -304,10 +307,18 @@ function QueueTab({ deepRunId }) {
       {queuedRuns.length > 0 && (
         <div className="border-2 border-orange-300 rounded-lg overflow-hidden">
           <div className="bg-orange-100 px-3 sm:px-4 py-2.5 flex items-center gap-2 border-b border-orange-200 flex-wrap">
-            <AlertCircle className="w-4 h-4 text-orange-600" />
+            <AlertCircle className="w-4 h-4 text-orange-600 flex-shrink-0" />
             <span className="text-sm font-bold text-orange-800">Queued for Business Hours</span>
             <span className="bg-orange-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{queuedRuns.length}</span>
-            <span className="text-xs text-orange-600 hidden sm:inline">Auto-processes when business hours resume.</span>
+            {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow ? (
+              <span className="text-xs text-orange-700 font-medium">
+                Processing starts {queueStatus.nextWindow.label} ({queueStatus.nextWindow.timezone?.replace('America/', '')})
+              </span>
+            ) : queueStatus?.isBusinessHours ? (
+              <span className="text-xs text-green-700 font-medium">Business hours active — processing on next sync</span>
+            ) : (
+              <span className="text-xs text-orange-600 hidden sm:inline">Auto-processes when business hours resume.</span>
+            )}
           </div>
           {/* Mobile cards */}
           <div className="md:hidden divide-y divide-orange-100 bg-orange-50">
