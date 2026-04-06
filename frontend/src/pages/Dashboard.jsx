@@ -1139,10 +1139,29 @@ export default function Dashboard() {
         </div>
       )}
       
-      {/* Compact Header - Single Row Grid */}
+      {/* Compact Header */}
       <header className="sticky top-0 z-40 bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-2">
-          <div className="grid grid-cols-12 gap-4 items-center">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2">
+          {/* Mobile: two-row header */}
+          <div className="flex items-center justify-between gap-2 md:hidden">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-base font-bold text-gray-800 truncate">Ticket Pulse</h1>
+                <button onClick={() => setShowChangelog(true)} className="text-[9px] font-semibold text-blue-600 bg-blue-50 px-1 py-0.5 rounded border border-blue-200 flex-shrink-0">v{APP_VERSION}</button>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <button onClick={handleAssignments} className="flex items-center gap-1 px-2.5 py-2 rounded-full text-xs font-semibold border border-purple-200 bg-purple-50 text-purple-700 touch-manipulation" title="Assignment">
+                <Sparkles className="w-4 h-4" /> <span className="hidden xs:inline">Assign</span>
+              </button>
+              <button onClick={handleTimeline} className="p-2 hover:bg-gray-100 rounded-lg touch-manipulation" title="Timeline"><Clock className="w-4 h-4 text-indigo-600" /></button>
+              <button onClick={handleSettings} className="p-2 hover:bg-gray-100 rounded-lg touch-manipulation" title="Settings"><Settings className="w-4 h-4" /></button>
+              <button onClick={handleLogout} className="p-2 hover:bg-gray-100 rounded-lg touch-manipulation text-red-600" title="Logout"><LogOut className="w-4 h-4" /></button>
+            </div>
+          </div>
+
+          {/* Desktop: full 12-col grid */}
+          <div className="hidden md:grid grid-cols-12 gap-4 items-center">
             {/* Left: Title + User - 3 cols */}
             <div className="col-span-3">
               <div className="flex items-center gap-2">
@@ -1443,10 +1462,10 @@ export default function Dashboard() {
       )}
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-3">
+      <main className="max-w-7xl mx-auto px-2 sm:px-4 py-3">
         {/* Stats Bar: Date Navigation (left) + Stats + Self-Pick + View Toggle (right) */}
-        <div className="sticky top-[52px] z-30 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-3 mb-4">
-          <div className="flex items-stretch gap-3 text-white">
+        <div className="sticky top-[44px] md:top-[52px] z-30 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-2 sm:p-3 mb-3 sm:mb-4 overflow-x-auto">
+          <div className="flex items-stretch gap-3 text-white min-w-[700px] md:min-w-0">
 
             {/* LEFT ZONE: Date Navigation + Day Grid */}
             <div className="flex-none w-80">
@@ -1818,10 +1837,10 @@ export default function Dashboard() {
 
         {/* Technicians List - Cascading */}
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
               <div className="flex items-baseline gap-2">
-                <h2 className="text-lg font-semibold">Technicians</h2>
+                <h2 className="text-base sm:text-lg font-semibold">Technicians</h2>
                 <span className="text-xs text-gray-500">
                   ({searchTerm || selectedCategories.length > 0 ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
                 </span>
@@ -1885,7 +1904,7 @@ export default function Dashboard() {
                 </button>
               )}
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-500 hidden md:block">
               <span className="font-semibold">Legend:</span>
               {/* Only show "Open" metric when viewing today (current workload) */}
               {isToday && <span className="ml-2">Open = All Open Tickets</span>}
