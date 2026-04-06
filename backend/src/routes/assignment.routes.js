@@ -13,10 +13,17 @@ import promptRepository from '../services/promptRepository.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import availabilityService from '../services/availabilityService.js';
 import { requireReviewer, requireAdmin } from '../middleware/auth.js';
+import appConfig from '../config/index.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
+
+router.get('/freshservice-domain', requireReviewer, (req, res) => {
+  const domain = appConfig.freshservice.domain;
+  const fullDomain = domain?.includes('.freshservice.com') ? domain : domain ? `${domain}.freshservice.com` : null;
+  res.json({ success: true, domain: fullDomain });
+});
 
 // ─── Assignment Config ──────────────────────────────────────────────────
 

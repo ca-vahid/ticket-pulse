@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { assignmentAPI } from '../../services/api';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
+  ExternalLink, AlertCircle, User,
 } from 'lucide-react';
 import { CopyBadge, cleanTranscript } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
@@ -208,36 +209,98 @@ function SyncStatusCard({ run, onSyncComplete }) {
 }
 
 export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete }) {
+  const [fsDomain, setFsDomain] = useState(null);
+
+  useEffect(() => {
+    assignmentAPI.getFreshServiceDomain().then(res => setFsDomain(res?.domain)).catch(() => {});
+  }, []);
+
   if (!run) return null;
 
+  const ticket = run.ticket;
   const decisionBadge = run.status === 'completed'
     ? (DECISION_BADGES[run.decision] || DECISION_BADGES.pending_review)
     : (RUN_STATUS_BADGES[run.status] || RUN_STATUS_BADGES.running);
   const isPending = run.decision === 'pending_review' && run.status === 'completed';
 
+  const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
+  const PRIORITY_PILL = { 1: 'bg-slate-100 text-slate-600', 2: 'bg-yellow-100 text-yellow-800', 3: 'bg-orange-100 text-orange-800', 4: 'bg-red-100 text-red-800' };
+
+  const ticketUrl = fsDomain && ticket?.freshserviceTicketId ? `https://${fsDomain}/a/tickets/${ticket.freshserviceTicketId}` : null;
+
+  const isTicketStale = ticket && (
+    (ticket.status && !['Open', 'open', '2'].includes(String(ticket.status))) ||
+    (ticket.assignedTechId && ticket.assignedTech && isPending)
+  );
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-lg font-semibold">
-              Pipeline Run #{run.id}
+    <div className="space-y-4 sm:space-y-6">
+      {/* Header: Ticket-first */}
+      <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="text-xs text-slate-400 font-mono">#{ticket?.freshserviceTicketId}</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${PRIORITY_PILL[ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
+                {PRIORITY_LABELS[ticket?.priority] || '—'}
+              </span>
+              {ticket?.ticketCategory && <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{ticket.ticketCategory}</span>}
+            </div>
+            <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
+              {ticket?.subject || 'No subject'}
             </h3>
-            <CopyBadge label="Run" value={run.id} />
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap text-xs text-slate-500">
+              {ticket?.requester && (
+                <span className="flex items-center gap-1">
+                  <User className="w-3 h-3" />
+                  {ticket.requester.name}
+                  {ticket.requester.department && <span className="text-slate-400">· {ticket.requester.department}</span>}
+                </span>
+              )}
+              <span className="text-slate-300">·</span>
+              <span>{ticket?.createdAt ? new Date(ticket.createdAt).toLocaleString() : ''}</span>
+              {ticketUrl && (
+                <>
+                  <span className="text-slate-300">·</span>
+                  <a href={ticketUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-0.5">
+                    Open in FreshService <ExternalLink className="w-3 h-3" />
+                  </a>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
+              <CopyBadge label="Run" value={run.id} />
+              <span>· {run.triggerSource}</span>
+              <span>· {new Date(run.createdAt).toLocaleString()}</span>
+              {run.totalDurationMs && <span>· {(run.totalDurationMs / 1000).toFixed(1)}s</span>}
+              {run.totalTokensUsed && <span>· {run.totalTokensUsed.toLocaleString()} tokens</span>}
+            </div>
           </div>
-          <p className="text-sm text-gray-500">
-            Ticket #{run.ticket?.freshserviceTicketId} &mdash; {run.ticket?.subject || 'No subject'}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            Triggered: {run.triggerSource} &bull; {new Date(run.createdAt).toLocaleString()} &bull; {run.totalDurationMs ? `${(run.totalDurationMs / 1000).toFixed(1)}s` : ''}
-            {run.totalTokensUsed ? ` &bull; ${run.totalTokensUsed} tokens` : ''}
-          </p>
+          <span className={`px-3 py-1 rounded-full text-xs font-medium flex-shrink-0 ${decisionBadge.style}`}>
+            {decisionBadge.label}
+          </span>
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-medium ${decisionBadge.style}`}>
-          {decisionBadge.label}
-        </span>
       </div>
+
+      {/* Staleness banner */}
+      {isTicketStale && isPending && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2.5">
+          <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            {ticket.assignedTech && (
+              <p className="text-sm font-medium text-amber-800">
+                This ticket was assigned to <strong>{ticket.assignedTech.name}</strong> outside of this pipeline.
+              </p>
+            )}
+            {ticket.status && !['Open', 'open', '2'].includes(String(ticket.status)) && (
+              <p className="text-sm font-medium text-amber-800">
+                This ticket is now <strong>{ticket.status}</strong> — it may have been resolved or closed.
+              </p>
+            )}
+            <p className="text-xs text-amber-600 mt-1">You can still approve the recommendation, dismiss this run, or add a triage note.</p>
+          </div>
+        </div>
+      )}
 
       {run.status !== 'completed' && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
@@ -267,6 +330,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           <p><span className="text-gray-500">At:</span> {new Date(run.decidedAt).toLocaleString()}</p>
           {run.assignedTech && <p><span className="text-gray-500">Assigned to:</span> {run.assignedTech.name}</p>}
           {run.overrideReason && <p><span className="text-gray-500">Override reason:</span> {run.overrideReason}</p>}
+          {run.decisionNote && <p><span className="text-gray-500">Triage note:</span> {run.decisionNote}</p>}
         </div>
       )}
 

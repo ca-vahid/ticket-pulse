@@ -18,6 +18,13 @@ export function RecommendationCards({ data, onDecide, deciding }) {
   const [techSearch, setTechSearch] = useState('');
   const [selectedOverrideTech, setSelectedOverrideTech] = useState(null);
 
+  useEffect(() => {
+    assignmentAPI.getCompetencyTechnicians().then(res => setAllTechs(res?.data || [])).catch(() => {});
+  }, []);
+
+  const techMap = {};
+  for (const t of allTechs) techMap[t.id] = t;
+
   if (!data?.recommendations?.length) {
     return (
       <div className="mt-4 border-t pt-4">
@@ -60,25 +67,43 @@ export function RecommendationCards({ data, onDecide, deciding }) {
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Recommendations</h4>
           {data.recommendations.map((rec, i) => {
             const isSelected = effectiveTechId === rec.techId && !isOverride;
+            const tech = techMap[rec.techId];
+            const initials = rec.techName?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
             return (
               <div
                 key={rec.techId || i}
                 onClick={() => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); setShowTechPicker(false); }}
-                className={`border rounded-lg p-2.5 sm:p-3 cursor-pointer transition-all touch-manipulation ${
+                className={`border rounded-lg p-3 sm:p-4 cursor-pointer transition-all touch-manipulation ${
                   isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'hover:border-gray-300 active:bg-blue-50 bg-white'
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-6 h-6 rounded-full text-white text-xs flex items-center justify-center font-bold ${isSelected ? 'bg-blue-600' : 'bg-gray-400'}`}>{rec.rank || i + 1}</span>
-                    <User className="w-4 h-4 text-gray-400" />
-                    <span className="font-medium text-sm">{rec.techName}</span>
-                  </div>
-                  {typeof rec.score === 'number' && (
-                    <span className={`text-sm font-mono font-bold ${isSelected ? 'text-blue-700' : 'text-gray-500'}`}>{(rec.score * 100).toFixed(0)}%</span>
+                <div className="flex items-start gap-3">
+                  <span className={`w-5 h-5 rounded-full text-white text-[10px] flex items-center justify-center font-bold flex-shrink-0 mt-0.5 ${isSelected ? 'bg-blue-600' : 'bg-gray-400'}`}>{rec.rank || i + 1}</span>
+                  {tech?.photoUrl ? (
+                    <img src={tech.photoUrl} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                  ) : (
+                    <span className="w-9 h-9 rounded-full bg-gray-200 text-gray-500 text-xs font-bold flex items-center justify-center flex-shrink-0">{initials}</span>
                   )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-sm text-slate-900">{rec.techName}</span>
+                      {typeof rec.score === 'number' && (
+                        <span className={`text-sm font-mono font-bold flex-shrink-0 ${isSelected ? 'text-blue-700' : 'text-gray-500'}`}>{(rec.score * 100).toFixed(0)}%</span>
+                      )}
+                    </div>
+                    {tech?.location && (
+                      <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                        <MapPin className="w-3 h-3 flex-shrink-0" /> {tech.location}
+                      </p>
+                    )}
+                    {rec.reasoning && (
+                      <>
+                        <div className="border-t border-gray-100 mt-2 mb-1.5" />
+                        <p className="text-xs text-gray-500 leading-relaxed">{rec.reasoning}</p>
+                      </>
+                    )}
+                  </div>
                 </div>
-                    {rec.reasoning && <p className="text-xs text-gray-500 mt-1 sm:mt-1.5 ml-8 leading-relaxed">{rec.reasoning}</p>}
               </div>
             );
           })}

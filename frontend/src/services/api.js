@@ -501,6 +501,7 @@ export const assignmentAPI = {
 
   getTools: () => api.get('/assignment/tools'),
 
+  getFreshServiceDomain: () => api.get('/assignment/freshservice-domain'),
   getCompetencyTechnicians: () => api.get('/assignment/competencies/technicians'),
   analyzeCompetency: (techId) => api.post(`/assignment/competencies/analyze/${techId}`),
   getCompetencyRuns: (params) => api.get('/assignment/competencies/runs', { params }),
