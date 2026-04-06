@@ -60,17 +60,17 @@ function ManualTriggerPanel() {
   const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
   return (
-    <div className="border rounded-lg bg-gray-50 p-4 mt-4">
-      <div className="flex items-center justify-between mb-3">
+    <div className="border rounded-lg bg-gray-50 p-3 sm:p-4 mt-4">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
-          <Zap className="w-4 h-4" /> Manual Pipeline Trigger
+          <Zap className="w-4 h-4" /> Manual Trigger
         </h4>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1 text-xs text-gray-500">
-            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="rounded" />
-            Show assigned
+          <label className="flex items-center gap-1 text-xs text-gray-500 touch-manipulation">
+            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="rounded w-4 h-4" />
+            Assigned
           </label>
-          <button onClick={fetchTickets} className="text-xs text-blue-600 hover:underline">Refresh</button>
+          <button onClick={fetchTickets} className="text-xs text-blue-600 hover:underline p-1 touch-manipulation">Refresh</button>
         </div>
       </div>
 
@@ -80,8 +80,8 @@ function ManualTriggerPanel() {
           type="text"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Search by ticket #, subject, or requester..."
-          className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm bg-white"
+          placeholder="Search tickets..."
+          className="w-full pl-9 pr-3 py-2.5 sm:py-2 border rounded-lg text-sm bg-white"
         />
       </div>
 
@@ -95,34 +95,29 @@ function ManualTriggerPanel() {
             const hasPipeline = ticket.pipelineRuns?.length > 0;
             const pipelineStatus = ticket.pipelineRuns?.[0]?.status;
             return (
-              <div key={ticket.id} className="flex items-center justify-between bg-white border rounded-lg px-3 py-2">
+              <div key={ticket.id} className="flex items-center justify-between bg-white border rounded-lg px-3 py-2.5 sm:py-2 gap-2">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm truncate">
                     <span className="text-gray-400 font-mono text-xs">#{ticket.freshserviceTicketId}</span>{' '}
                     {ticket.subject || 'No subject'}
                   </p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-400 truncate">
                     {ticket.requester?.name || 'Unknown'}
-                    {ticket.assignedTech ? ` | Assigned: ${ticket.assignedTech.name}` : ' | Unassigned'}
-                    {' | '}{PRIORITY_LABELS[ticket.priority] || `P${ticket.priority}`}
+                    {ticket.assignedTech ? ` · ${ticket.assignedTech.name}` : ''}
+                    {' · '}{PRIORITY_LABELS[ticket.priority] || `P${ticket.priority}`}
                   </p>
                 </div>
-                <div className="ml-2 flex-shrink-0 flex items-center gap-1.5">
-                  {hasPipeline && (
-                    <span className={`text-xs italic ${pipelineStatus === 'failed' ? 'text-red-400' : 'text-gray-400'}`}>{pipelineStatus}</span>
-                  )}
-                  <button
-                    onClick={() => handleTrigger(ticket.id)}
-                    className={`px-3 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
-                      hasPipeline
-                        ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                    }`}
-                  >
-                    {hasPipeline ? <RotateCcw className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                    {hasPipeline ? 'Re-run' : 'Run'}
-                  </button>
-                </div>
+                <button
+                  onClick={() => handleTrigger(ticket.id)}
+                  className={`px-3 py-2 sm:py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation min-h-[36px] flex-shrink-0 ${
+                    hasPipeline
+                      ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  {hasPipeline ? <RotateCcw className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                  {hasPipeline ? 'Re-run' : 'Run'}
+                </button>
               </div>
             );
           })}
@@ -308,13 +303,34 @@ function QueueTab({ deepRunId }) {
       {/* Queued for business hours */}
       {queuedRuns.length > 0 && (
         <div className="border-2 border-orange-300 rounded-lg overflow-hidden">
-          <div className="bg-orange-100 px-4 py-2.5 flex items-center gap-2 border-b border-orange-200">
+          <div className="bg-orange-100 px-3 sm:px-4 py-2.5 flex items-center gap-2 border-b border-orange-200 flex-wrap">
             <AlertCircle className="w-4 h-4 text-orange-600" />
             <span className="text-sm font-bold text-orange-800">Queued for Business Hours</span>
-            <span className="ml-1 bg-orange-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{queuedRuns.length}</span>
-            <span className="ml-2 text-xs text-orange-600">These tickets will auto-process when business hours resume. Click Run Now to process immediately.</span>
+            <span className="bg-orange-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{queuedRuns.length}</span>
+            <span className="text-xs text-orange-600 hidden sm:inline">Auto-processes when business hours resume.</span>
           </div>
-          <table className="w-full text-sm bg-orange-50">
+          {/* Mobile cards */}
+          <div className="md:hidden divide-y divide-orange-100 bg-orange-50">
+            {queuedRuns.map((run) => (
+              <div key={run.id} className="px-3 py-3 space-y-2">
+                <div>
+                  <span className="text-xs text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                  <p className="font-semibold text-slate-800 text-sm leading-snug">{run.ticket?.subject || 'No subject'}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{run.queuedReason || 'Outside business hours'}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={(e) => handleRunNow(e, run.id)} className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center justify-center gap-1.5 shadow-sm touch-manipulation min-h-[44px]">
+                    <Play className="w-3.5 h-3.5" /> Run Now
+                  </button>
+                  <button onClick={(e) => handleDelete(e, run.id)} className="p-2.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg touch-manipulation min-h-[44px]" title="Delete">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Desktop table */}
+          <table className="hidden md:table w-full text-sm bg-orange-50">
             <thead>
               <tr className="text-xs text-orange-600 border-b border-orange-100">
                 <th className="text-left px-4 py-1.5 font-medium">Ticket</th>
@@ -334,10 +350,7 @@ function QueueTab({ deepRunId }) {
                   <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{run.queuedAt ? new Date(run.queuedAt).toLocaleString() : ''}</td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={(e) => handleRunNow(e, run.id)}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center gap-1.5 shadow-sm"
-                      >
+                      <button onClick={(e) => handleRunNow(e, run.id)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center gap-1.5 shadow-sm">
                         <Play className="w-3.5 h-3.5" /> Run Now
                       </button>
                       <button onClick={(e) => handleDelete(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg" title="Delete">
@@ -365,28 +378,58 @@ function QueueTab({ deepRunId }) {
       ) : queue.items.length > 0 && (
         <div className="border border-slate-200 rounded-lg overflow-hidden">
           {/* Toolbar */}
-          <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center gap-3">
-            <span className="text-sm font-medium text-slate-700">{queue.total} pending review{queue.total !== 1 ? 's' : ''}</span>
+          <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2.5 flex items-center gap-2 sm:gap-3 flex-wrap">
+            <span className="text-sm font-medium text-slate-700">{queue.total} pending</span>
             <div className="flex-1" />
             <div className="flex items-center gap-1.5 text-xs text-slate-500">
               <Filter className="w-3.5 h-3.5" />
-              <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="border border-slate-200 rounded px-2 py-1 text-xs bg-white">
-                <option value="all">All priorities</option>
+              <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="border border-slate-200 rounded px-2 py-1.5 text-xs bg-white touch-manipulation">
+                <option value="all">All</option>
                 <option value="4">Urgent</option>
                 <option value="3">High</option>
                 <option value="2">Medium</option>
                 <option value="1">Low</option>
               </select>
             </div>
-            <button onClick={handleClearAll} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1">
-              <Trash2 className="w-3.5 h-3.5" /> Clear all
+            <button onClick={handleClearAll} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 p-1 touch-manipulation">
+              <Trash2 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Clear all</span>
             </button>
-            <button onClick={fetchQueue} className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            <button onClick={fetchQueue} className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 p-1 touch-manipulation">
+              <RefreshCw className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Refresh</span>
             </button>
           </div>
 
-          <table className="w-full text-sm">
+          {/* Mobile cards */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {filteredItems.map((run) => (
+              <div key={run.id} onClick={() => handleSelectRun(run.id)} className="px-3 py-3 active:bg-blue-50 transition-colors touch-manipulation cursor-pointer">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-xs text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
+                        {PRIORITY_LABELS[run.ticket?.priority] || '—'}
+                      </span>
+                    </div>
+                    <p className="font-medium text-slate-800 text-sm leading-snug line-clamp-2">{run.ticket?.subject || 'No subject'}</p>
+                    <p className="text-xs text-slate-400 mt-1">{run.ticket?.requester?.name || '—'} · {new Date(run.createdAt).toLocaleDateString()}</p>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button onClick={(e) => handleDismiss(e, run.id)} className="p-2 text-yellow-500 hover:bg-yellow-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Dismiss">
+                      <XCircle className="w-4 h-4" />
+                    </button>
+                    <button onClick={(e) => handleDelete(e, run.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Delete">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                    <ChevronRight className="w-4 h-4 text-slate-300" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <table className="hidden md:table w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('subject')}>
@@ -931,8 +974,8 @@ export default function AssignmentReview() {
             <h1 className="text-sm font-bold text-slate-900">Pipeline Analysis</h1>
           </div>
         </header>
-        <div className="flex-1 px-4 py-3 pb-4 overflow-auto">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-6 py-5">
+        <div className="flex-1 px-2 py-2 pb-2 sm:px-4 sm:py-3 sm:pb-4 overflow-auto">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-3 py-3 sm:px-6 sm:py-5">
             <LivePipelineView
               ticketId={liveTicketId}
               onComplete={() => navigate('/assignments/queue')}
@@ -948,8 +991,8 @@ export default function AssignmentReview() {
     <div className="min-h-screen bg-slate-100 flex flex-col">
       {/* White top bar */}
       <header className="bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
-        <div className="px-4 py-2 flex items-center gap-3">
-          <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors text-sm font-medium">
+        <div className="px-3 sm:px-4 py-2 flex items-center gap-2 sm:gap-3">
+          <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors text-sm font-medium p-1 -ml-1 touch-manipulation min-h-[44px]">
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
           <div className="w-px h-5 bg-slate-200" />
@@ -959,8 +1002,8 @@ export default function AssignmentReview() {
       </header>
 
       {/* Purple gradient tab bar */}
-      <div className="flex-shrink-0 px-4 pt-3 pb-2">
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-2 py-1 flex items-center gap-1">
+      <div className="flex-shrink-0 px-2 sm:px-4 pt-3 pb-2">
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-1.5 sm:px-2 py-1 flex items-center gap-0.5 sm:gap-1 overflow-x-auto">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -968,24 +1011,24 @@ export default function AssignmentReview() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap touch-manipulation ${
                   isActive
                     ? 'bg-white bg-opacity-25 text-white shadow-sm'
                     : 'text-white opacity-70 hover:bg-white hover:bg-opacity-15 hover:opacity-100'
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                {tab.label}
+                <Icon className="w-5 h-5 sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">{tab.label}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Content — fills remaining height, matches Timeline Explorer body style */}
-      <div className="flex-1 px-4 pb-4 overflow-auto">
+      {/* Content */}
+      <div className="flex-1 px-2 pb-2 sm:px-4 sm:pb-4 overflow-auto">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-full">
-          <div className="px-6 py-5">
+          <div className="px-3 py-3 sm:px-6 sm:py-5">
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} />}

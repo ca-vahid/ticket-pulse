@@ -46,17 +46,17 @@ export function RecommendationCards({ data, onDecide, deciding }) {
   };
 
   return (
-    <div className="mt-4 border-t pt-4">
+    <div className="mt-3 sm:mt-4 border-t pt-3 sm:pt-4">
       {data.overallReasoning && (
-        <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
+        <div className="bg-blue-50 border border-blue-100 rounded-lg p-2.5 sm:p-3 mb-3 sm:mb-4">
           <h4 className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">Overall Reasoning</h4>
-          <p className="text-sm text-blue-900 leading-relaxed">{data.overallReasoning}</p>
+          <p className="text-xs sm:text-sm text-blue-900 leading-relaxed">{data.overallReasoning}</p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">
         {/* LEFT: Candidates (3/5 width) */}
-        <div className="lg:col-span-3 space-y-2">
+        <div className="lg:col-span-3 space-y-1.5 sm:space-y-2">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Recommendations</h4>
           {data.recommendations.map((rec, i) => {
             const isSelected = effectiveTechId === rec.techId && !isOverride;
@@ -64,8 +64,8 @@ export function RecommendationCards({ data, onDecide, deciding }) {
               <div
                 key={rec.techId || i}
                 onClick={() => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); setShowTechPicker(false); }}
-                className={`border rounded-lg p-3 cursor-pointer transition-all ${
-                  isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'hover:border-gray-300 bg-white'
+                className={`border rounded-lg p-2.5 sm:p-3 cursor-pointer transition-all touch-manipulation ${
+                  isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'hover:border-gray-300 active:bg-blue-50 bg-white'
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -78,7 +78,7 @@ export function RecommendationCards({ data, onDecide, deciding }) {
                     <span className={`text-sm font-mono font-bold ${isSelected ? 'text-blue-700' : 'text-gray-500'}`}>{(rec.score * 100).toFixed(0)}%</span>
                   )}
                 </div>
-                {rec.reasoning && <p className="text-xs text-gray-500 mt-1.5 ml-8 leading-relaxed">{rec.reasoning}</p>}
+                    {rec.reasoning && <p className="text-xs text-gray-500 mt-1 sm:mt-1.5 ml-8 leading-relaxed">{rec.reasoning}</p>}
               </div>
             );
           })}
@@ -87,7 +87,7 @@ export function RecommendationCards({ data, onDecide, deciding }) {
         {/* RIGHT: Decision Panel (2/5 width) */}
         {onDecide && (
           <div className="lg:col-span-2">
-            <div className="bg-gray-50 rounded-lg p-4 space-y-3 lg:sticky lg:top-4">
+            <div className="bg-gray-50 rounded-lg p-3 sm:p-4 space-y-2.5 sm:space-y-3 lg:sticky lg:top-4">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Decision</h4>
                 <button
@@ -179,8 +179,8 @@ export function RecommendationCards({ data, onDecide, deciding }) {
                 <textarea
                   value={decisionNote}
                   onChange={(e) => setDecisionNote(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm resize-none h-16 focus:ring-2 focus:ring-blue-200 focus:border-blue-300 transition-all bg-white"
-                  placeholder={isOverride ? 'Why this technician? Any routing preferences for similar tickets...' : 'Add context to improve future triage decisions...'}
+                  className="w-full border border-gray-200 rounded-lg p-2 sm:p-2.5 text-sm resize-none h-12 sm:h-16 focus:ring-2 focus:ring-blue-200 focus:border-blue-300 transition-all bg-white"
+                  placeholder={isOverride ? 'Why this technician?' : 'Add triage context...'}
                 />
               </div>
 
@@ -190,7 +190,7 @@ export function RecommendationCards({ data, onDecide, deciding }) {
                   <button
                     onClick={() => onDecide({ decision: 'approved', assignedTechId: effectiveTechId, decisionNote })}
                     disabled={deciding}
-                    className="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm"
+                    className="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm touch-manipulation min-h-[44px]"
                   >
                     {deciding ? 'Processing...' : `Approve — ${effectiveTechName}`}
                   </button>
@@ -198,7 +198,7 @@ export function RecommendationCards({ data, onDecide, deciding }) {
                   <button
                     onClick={() => onDecide({ decision: 'modified', assignedTechId: selectedTechId, overrideReason: decisionNote || null, decisionNote })}
                     disabled={deciding}
-                    className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+                    className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm touch-manipulation min-h-[44px]"
                   >
                     {deciding ? 'Processing...' : `Assign to ${selectedOverrideTech.name.split(' ')[0]}`}
                   </button>
@@ -206,7 +206,7 @@ export function RecommendationCards({ data, onDecide, deciding }) {
                 <button
                   onClick={() => onDecide({ decision: 'rejected', decisionNote })}
                   disabled={deciding}
-                  className="w-full px-4 py-2 bg-white text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors"
+                  className="w-full px-4 py-2 bg-white text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors touch-manipulation min-h-[44px]"
                 >
                   Reject
                 </button>
@@ -432,7 +432,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
 
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto border rounded-lg bg-white p-4 min-h-[300px] max-h-[600px]"
+        className="flex-1 overflow-y-auto border rounded-lg bg-white p-2.5 sm:p-4 min-h-[200px] sm:min-h-[300px] max-h-[60vh] sm:max-h-[600px]"
       >
         {status === 'loading' && (
           <div className="flex items-center justify-center h-full text-gray-400">

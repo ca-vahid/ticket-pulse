@@ -599,7 +599,7 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
         {onBack && <button onClick={onBack} className="text-sm text-blue-600 hover:underline">Back</button>}
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto border rounded-lg bg-white p-4 min-h-[300px] max-h-[600px]">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto border rounded-lg bg-white p-2.5 sm:p-4 min-h-[200px] sm:min-h-[300px] max-h-[60vh] sm:max-h-[600px]">
         {events.length === 0 && (status === 'connecting' || status === 'checking') && <div className="flex items-center justify-center h-full text-gray-400"><Loader2 className="w-6 h-6 animate-spin" /></div>}
         {events.length === 0 && status === 'completed' && completedRun && (
           <div className="text-sm text-gray-600">

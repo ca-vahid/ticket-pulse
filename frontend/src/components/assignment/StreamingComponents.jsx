@@ -58,10 +58,10 @@ export function ToolCallCard({ name, input, result, durationMs }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="my-2 border rounded-lg bg-gray-50 overflow-hidden">
+    <div className="my-1.5 sm:my-2 border rounded-lg bg-gray-50 overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-100 transition-colors"
+        className="w-full flex items-center gap-2 px-2.5 sm:px-3 py-2 text-left hover:bg-gray-100 transition-colors touch-manipulation min-h-[40px]"
       >
         <Wrench className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
         <span className="text-xs font-medium text-blue-700">{name}</span>
@@ -118,7 +118,7 @@ export function StreamContent({ events, toolCalls, thinkingKb, status, accentCol
       {segments.map((seg, i) => {
         if (seg.type === 'text') {
           return (
-            <div key={i} className="text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
+            <div key={i} className="text-xs sm:text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
               <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                 {seg.content}
               </Markdown>
