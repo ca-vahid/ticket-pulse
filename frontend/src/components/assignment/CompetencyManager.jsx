@@ -5,7 +5,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Plus, Trash2, Loader2, Brain, CheckCircle, XCircle, RotateCcw,
-  ChevronDown, ChevronRight, AlertTriangle,
+  ChevronDown, ChevronRight, Wrench, AlertTriangle,
   Search, Clock, Save, Upload, FileText, X, User, MapPin, History,
 } from 'lucide-react';
 import {
