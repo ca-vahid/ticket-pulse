@@ -124,16 +124,31 @@ router.get('/queue-status', asyncHandler(async (req, res) => {
         const daysUntil = offset;
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+        const hour12 = sh === 0 ? 12 : sh > 12 ? sh - 12 : sh;
+        const ampm = sh >= 12 ? 'PM' : 'AM';
+        const timeLabel = sm > 0 ? `${hour12}:${String(sm).padStart(2, '0')} ${ampm}` : `${hour12} ${ampm}`;
+
+        const TZ_ABBREV = {
+          'America/Los_Angeles': 'PT', 'America/Vancouver': 'PT',
+          'America/Denver': 'MT', 'America/Edmonton': 'MT', 'America/Calgary': 'MT',
+          'America/Chicago': 'CT', 'America/Winnipeg': 'CT',
+          'America/New_York': 'ET', 'America/Toronto': 'ET',
+          'America/Halifax': 'AT', 'America/St_Johns': 'NT',
+        };
+        const tzAbbrev = TZ_ABBREV[tz] || tz.replace('America/', '');
+
         nextWindow = {
           dayName: dayNames[checkDow],
           startTime: dayConfig.startTime,
+          timeLabel,
           timezone: tz,
+          tzAbbrev,
           daysUntil,
           label: daysUntil === 0
-            ? `Today at ${dayConfig.startTime}`
+            ? `Today at ${timeLabel} ${tzAbbrev}`
             : daysUntil === 1
-              ? `Tomorrow at ${dayConfig.startTime}`
-              : `${dayNames[checkDow]} at ${dayConfig.startTime}`,
+              ? `Tomorrow at ${timeLabel} ${tzAbbrev}`
+              : `${dayNames[checkDow]} at ${timeLabel} ${tzAbbrev}`,
         };
         break;
       }

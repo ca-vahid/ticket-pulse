@@ -306,19 +306,25 @@ function QueueTab({ deepRunId }) {
       {/* Queued for business hours */}
       {queuedRuns.length > 0 && (
         <div className="border-2 border-orange-300 rounded-lg overflow-hidden">
-          <div className="bg-orange-100 px-3 sm:px-4 py-2.5 flex items-center gap-2 border-b border-orange-200 flex-wrap">
-            <AlertCircle className="w-4 h-4 text-orange-600 flex-shrink-0" />
-            <span className="text-sm font-bold text-orange-800">Queued for Business Hours</span>
-            <span className="bg-orange-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{queuedRuns.length}</span>
+          <div className="bg-orange-100 px-3 sm:px-4 py-2.5 border-b border-orange-200">
+            <div className="flex items-center gap-2 flex-wrap">
+              <AlertCircle className="w-4 h-4 text-orange-600 flex-shrink-0" />
+              <span className="text-sm font-bold text-orange-800">Queued for Business Hours</span>
+              <span className="bg-orange-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{queuedRuns.length}</span>
+            </div>
             {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow ? (
-              <span className="text-xs text-orange-700 font-medium">
-                Processing starts {queueStatus.nextWindow.label} ({queueStatus.nextWindow.timezone?.replace('America/', '')})
-              </span>
+              <div className="mt-2 bg-orange-200 rounded-md px-3 py-2 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse flex-shrink-0" />
+                <span className="text-sm font-semibold text-orange-900">
+                  Processing starts {queueStatus.nextWindow.label}
+                </span>
+              </div>
             ) : queueStatus?.isBusinessHours ? (
-              <span className="text-xs text-green-700 font-medium">Business hours active — processing on next sync</span>
-            ) : (
-              <span className="text-xs text-orange-600 hidden sm:inline">Auto-processes when business hours resume.</span>
-            )}
+              <div className="mt-2 bg-green-100 border border-green-200 rounded-md px-3 py-2 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
+                <span className="text-sm font-semibold text-green-800">Business hours active — processing on next sync</span>
+              </div>
+            ) : null}
           </div>
           {/* Mobile cards */}
           <div className="md:hidden divide-y divide-orange-100 bg-orange-50">
