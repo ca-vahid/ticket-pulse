@@ -1464,11 +1464,11 @@ export default function Dashboard() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-2 sm:px-4 py-3">
         {/* Stats Bar: Date Navigation (left) + Stats + Self-Pick + View Toggle (right) */}
-        <div className="md:sticky md:top-[52px] z-30 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-2 sm:p-3 mb-3 sm:mb-4 overflow-x-auto">
-          <div className="flex items-stretch gap-3 text-white min-w-[700px] md:min-w-0">
+        <div className="md:sticky md:top-[52px] z-30 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-2 sm:p-3 mb-3 sm:mb-4">
+          <div className="flex items-stretch gap-3 text-white">
 
             {/* LEFT ZONE: Date Navigation + Day Grid */}
-            <div className="flex-none w-80">
+            <div className="flex-none w-full md:w-80">
               {/* Navigation Controls */}
               <div className="flex items-center gap-1.5 mb-1.5">
                 <button
@@ -1535,8 +1535,8 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* Day of Week Indicators - Clickable (Monday to Sunday) */}
-              <div className="flex justify-between gap-0.5">
+              {/* Day of Week Indicators - Clickable (Monday to Sunday) -- hidden on mobile */}
+              <div className="hidden sm:flex justify-between gap-0.5">
                 {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
                   const currentDay = (selectedDate.getDay() + 6) % 7;
                   const dayStats = weeklyStats?.[index];
@@ -1637,13 +1637,24 @@ export default function Dashboard() {
                   );
                 })}
               </div>
+              {/* Mobile view toggle */}
+              <div className="flex md:hidden items-center justify-between mt-2">
+                <div className="inline-flex items-center gap-0.5 bg-white bg-opacity-20 rounded-lg p-0.5">
+                  <button onClick={handleSwitchToDaily} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors touch-manipulation ${viewMode === 'daily' ? 'bg-white text-blue-600 shadow-sm' : 'text-white'}`}>Daily</button>
+                  <button onClick={handleSwitchToWeekly} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors touch-manipulation ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white'}`}>Weekly</button>
+                  <button onClick={handleSwitchToMonthly} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors touch-manipulation ${viewMode === 'monthly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white'}`}>Monthly</button>
+                </div>
+                <div className="text-xs text-blue-100 font-medium">
+                  {viewMode === 'daily' ? (displayStats.totalTicketsToday || 0) : viewMode === 'weekly' ? (displayStats.weeklyTotalCreated || 0) : (displayStats.monthTotalCreated || 0)} tickets
+                </div>
+              </div>
             </div>
 
             {/* Vertical Divider */}
-            <div className="w-px bg-white bg-opacity-20 flex-none self-stretch" />
+            <div className="hidden md:block w-px bg-white bg-opacity-20 flex-none self-stretch" />
 
             {/* RIGHT ZONE: Stats Cards + Self-Pick + View Toggle */}
-            <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+            <div className="hidden md:flex items-center gap-2 flex-1 min-w-0 justify-end">
 
               {/* Stats Cards */}
               <div className="flex items-center gap-1.5">
