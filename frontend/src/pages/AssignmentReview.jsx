@@ -634,7 +634,7 @@ function HistoryTab({ deepRunId }) {
         >
           <ChevronLeft className="w-4 h-4" /> Back to history
         </button>
-        <PipelineRunDetail run={selectedRun} onDecide={() => {}} deciding={false} onSyncComplete={refreshSelectedRun} />
+        <PipelineRunDetail run={selectedRun} onDecide={null} deciding={false} onSyncComplete={refreshSelectedRun} />
       </div>
     );
   }
@@ -1063,6 +1063,22 @@ export default function AssignmentReview() {
   const setActiveTab = (tabId) => {
     navigate(`/assignments/${tabId}`);
   };
+
+  // Viewer guard -- redirect to dashboard if no review access
+  if (!isReviewer) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center max-w-sm">
+          <Brain className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <h2 className="text-lg font-semibold text-slate-800 mb-1">Access Restricted</h2>
+          <p className="text-sm text-slate-500 mb-4">Ticket Assignment requires Reviewer or Admin access to this workspace.</p>
+          <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Live pipeline view (dedicated URL)
   if (liveTicketId) {

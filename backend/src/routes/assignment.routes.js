@@ -175,7 +175,7 @@ router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {
   });
 }));
 
-router.post('/runs/:id/run-now', requireReviewer, asyncHandler(async (req, res) => {
+router.post('/runs/:id/run-now', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -293,7 +293,7 @@ router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) =
   res.json({ success: true, data: updated });
 }));
 
-router.delete('/runs/:id', requireReviewer, asyncHandler(async (req, res) => {
+router.delete('/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -306,13 +306,13 @@ router.delete('/runs/:id', requireReviewer, asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Pipeline run deleted' });
 }));
 
-router.post('/runs/bulk-delete', requireReviewer, asyncHandler(async (req, res) => {
+router.post('/runs/bulk-delete', requireAdmin, asyncHandler(async (req, res) => {
   const { status, decision } = req.body;
   const result = await assignmentRepository.bulkDeleteRuns(req.workspaceId, { status, decision });
   res.json({ success: true, ...result });
 }));
 
-router.post('/runs/:id/dismiss', requireReviewer, asyncHandler(async (req, res) => {
+router.post('/runs/:id/dismiss', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -329,7 +329,7 @@ router.post('/runs/:id/dismiss', requireReviewer, asyncHandler(async (req, res) 
   res.json({ success: true, message: 'Run dismissed' });
 }));
 
-router.post('/runs/:id/sync', requireReviewer, asyncHandler(async (req, res) => {
+router.post('/runs/:id/sync', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -339,7 +339,7 @@ router.post('/runs/:id/sync', requireReviewer, asyncHandler(async (req, res) => 
   res.json({ success: true, data: result });
 }));
 
-router.post('/runs/:id/sync-preview', requireReviewer, asyncHandler(async (req, res) => {
+router.post('/runs/:id/sync-preview', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
