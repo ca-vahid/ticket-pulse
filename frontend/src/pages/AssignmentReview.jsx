@@ -305,29 +305,30 @@ function QueueTab({ deepRunId }) {
 
       {/* Queued for business hours */}
       {queuedRuns.length > 0 && (
-        <div className="border-2 border-orange-300 rounded-lg overflow-hidden">
-          <div className="bg-orange-100 px-3 sm:px-4 py-2.5 border-b border-orange-200">
+        <div className="border border-amber-200 rounded-lg overflow-hidden">
+          <div className="bg-amber-50 px-3 sm:px-4 py-2.5 border-b border-amber-100">
             <div className="flex items-center gap-2 flex-wrap">
-              <AlertCircle className="w-4 h-4 text-orange-600 flex-shrink-0" />
-              <span className="text-sm font-bold text-orange-800">Queued for Business Hours</span>
-              <span className="bg-orange-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{queuedRuns.length}</span>
+              <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+              <span className="text-sm font-bold text-amber-800">Queued for Business Hours</span>
+              <span className="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{queuedRuns.length}</span>
+              <div className="flex-1" />
+              {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow ? (
+                <div className="bg-amber-100 border border-amber-200 rounded-full px-3 py-1 flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
+                  <span className="text-xs font-semibold text-amber-700">
+                    Starts {queueStatus.nextWindow.label}
+                  </span>
+                </div>
+              ) : queueStatus?.isBusinessHours ? (
+                <div className="bg-green-50 border border-green-200 rounded-full px-3 py-1 flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
+                  <span className="text-xs font-semibold text-green-700">Active — processing on next sync</span>
+                </div>
+              ) : null}
             </div>
-            {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow ? (
-              <div className="mt-2 bg-orange-200 rounded-md px-3 py-2 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse flex-shrink-0" />
-                <span className="text-sm font-semibold text-orange-900">
-                  Processing starts {queueStatus.nextWindow.label}
-                </span>
-              </div>
-            ) : queueStatus?.isBusinessHours ? (
-              <div className="mt-2 bg-green-100 border border-green-200 rounded-md px-3 py-2 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
-                <span className="text-sm font-semibold text-green-800">Business hours active — processing on next sync</span>
-              </div>
-            ) : null}
           </div>
           {/* Mobile cards */}
-          <div className="md:hidden divide-y divide-orange-100 bg-orange-50">
+          <div className="md:hidden divide-y divide-amber-50 bg-white">
             {queuedRuns.map((run) => (
               <div key={run.id} className="px-3 py-3 space-y-2">
                 <div>
@@ -347,9 +348,9 @@ function QueueTab({ deepRunId }) {
             ))}
           </div>
           {/* Desktop table */}
-          <table className="hidden md:table w-full text-sm bg-orange-50">
+          <table className="hidden md:table w-full text-sm">
             <thead>
-              <tr className="text-xs text-orange-600 border-b border-orange-100">
+              <tr className="text-xs text-amber-600 border-b border-amber-100 bg-amber-50/50">
                 <th className="text-left px-4 py-1.5 font-medium">Ticket</th>
                 <th className="text-left px-4 py-1.5 font-medium">Reason</th>
                 <th className="text-left px-4 py-1.5 font-medium">Queued At</th>
@@ -358,7 +359,7 @@ function QueueTab({ deepRunId }) {
             </thead>
             <tbody>
               {queuedRuns.map((run) => (
-                <tr key={run.id} className="border-t border-orange-100 hover:bg-orange-100 transition-colors">
+                <tr key={run.id} className="border-t border-amber-50 hover:bg-amber-50 transition-colors">
                   <td className="px-4 py-3">
                     <span className="text-xs text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
                     <span className="ml-2 font-semibold text-slate-800">{run.ticket?.subject || 'No subject'}</span>
