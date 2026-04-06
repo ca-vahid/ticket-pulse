@@ -1,6 +1,30 @@
-export const APP_VERSION = '1.9.0-preview';
+export const APP_VERSION = '1.9.1-preview';
 
 export const changelog = [
+  {
+    version: '1.9.1-preview',
+    date: 'April 6, 2026',
+    entries: [
+      { type: 'new', text: 'Reviewer RBAC role -- new workspace role between viewer and admin; reviewers can view the assignment queue, approve/reject recommendations, and add triage notes but cannot access admin settings, trigger pipelines, or manage competencies/prompts' },
+      { type: 'new', text: 'Enhanced Review Queue -- Pending/Assigned/All sub-view tabs with counts, time-range filters (24h/7d/30d/All), and ticket status filters (Open/Assigned/Closed with live counts) to focus on actionable tickets' },
+      { type: 'new', text: 'Decision page redesign -- ticket subject is now the prominent heading with requester, department, priority badge, category tag, and clickable FreshService link; run metadata demoted to secondary line' },
+      { type: 'new', text: 'Staleness detection banner -- amber warning appears on pending tickets that were assigned outside the pipeline or changed status since analysis, with the assigned tech name shown' },
+      { type: 'new', text: 'Recommendation cards with avatars -- technician photos, location with MapPin icon, visual separator before reasoning text; data loaded from technician API on mount' },
+      { type: 'new', text: 'Shift-aware agent availability -- LLM now sees each agent timezone, local time, on-shift status, and hours remaining; system prompt updated with on-shift preference as decision rule' },
+      { type: 'new', text: 'Queue business hours countdown -- amber pill shows "Starts Tomorrow at 5 AM PT" with pulsing dot; green pill when business hours are active; human-friendly time format with timezone abbreviations' },
+      { type: 'new', text: 'Pending queue shows suggested agent and analysis timestamp for each ticket awaiting review' },
+      { type: 'improved', text: 'Mobile-friendly dashboard header -- compact layout with prominent Assignment button, icons-only navigation, stats bar stacked vertically with Daily/Weekly/Monthly toggle and ticket count' },
+      { type: 'improved', text: 'Queue table tightened -- text-xs font, compact padding, Status column showing Open/Assigned/Closed badges inline with assigned tech name for pre-triaged tickets' },
+      { type: 'improved', text: 'Post-decision redirect -- approving or rejecting now returns to the queue list instead of staying on the run detail page' },
+      { type: 'improved', text: 'Queue styling softened -- heavy orange replaced with amber tones, inline status pill on the right, cleaner table backgrounds' },
+      { type: 'fixed', text: 'Stats bar overlap on mobile -- no longer sticky on small screens, date navigation buttons enlarged for touch' },
+      { type: 'security', text: 'Reviewer role restricted from destructive operations -- run-now, delete, bulk-delete, dismiss, sync, and sync-preview routes require admin; reviewers limited to read + decide' },
+      { type: 'security', text: 'Viewer access guard on Assignment page -- viewers see a clean "Access Restricted" page instead of an empty confusing state' },
+      { type: 'security', text: 'History detail view now read-only -- decision panel properly hidden (onDecide=null instead of no-op handler)' },
+      { type: 'database', text: 'Pending queue query expanded to include ticket.status, ticket.assignedTechId, and ticket.assignedTech for inline staleness detection' },
+      { type: 'database', text: 'Production prompt upgraded to v10 with shift-aware availability step injected into custom prompt' },
+    ],
+  },
   {
     version: '1.9.0-preview',
     date: 'April 6, 2026',
