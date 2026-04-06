@@ -430,7 +430,13 @@ function QueueTab({ deepRunId }) {
                       </span>
                     </div>
                     <p className="font-medium text-slate-800 text-sm leading-snug line-clamp-2">{run.ticket?.subject || 'No subject'}</p>
-                    <p className="text-xs text-slate-400 mt-1">{run.ticket?.requester?.name || '—'} · {new Date(run.createdAt).toLocaleDateString()}</p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="text-xs text-slate-400">{run.ticket?.requester?.name || '—'}</span>
+                      {run.recommendation?.recommendations?.[0]?.techName && (
+                        <span className="text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">→ {run.recommendation.recommendations[0].techName}</span>
+                      )}
+                      <span className="text-xs text-slate-300">{run.updatedAt ? new Date(run.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}</span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button onClick={(e) => handleDismiss(e, run.id)} className="p-2 text-yellow-500 hover:bg-yellow-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Dismiss">
@@ -459,8 +465,9 @@ function QueueTab({ deepRunId }) {
                 <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('priority')}>
                   <span className="flex items-center gap-1">Priority <SortIcon field="priority" /></span>
                 </th>
+                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs">Suggested</th>
                 <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('createdAt')}>
-                  <span className="flex items-center gap-1">Queued <SortIcon field="createdAt" /></span>
+                  <span className="flex items-center gap-1">Analyzed <SortIcon field="createdAt" /></span>
                 </th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs text-right">Actions</th>
               </tr>
@@ -478,7 +485,14 @@ function QueueTab({ deepRunId }) {
                       {PRIORITY_LABELS[run.ticket?.priority] || '—'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{new Date(run.createdAt).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-xs">
+                    {run.recommendation?.recommendations?.[0] ? (
+                      <span className="font-medium text-blue-700">{run.recommendation.recommendations[0].techName}</span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{run.updatedAt ? new Date(run.updatedAt).toLocaleString() : new Date(run.createdAt).toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={(e) => { e.stopPropagation(); handleSelectRun(run.id); }} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-100 rounded" title="View details">

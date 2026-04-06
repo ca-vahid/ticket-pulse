@@ -137,6 +137,7 @@ class AssignmentRepository {
                 requester: { select: { name: true, email: true } },
               },
             },
+            assignedTech: { select: { id: true, name: true } },
           },
           orderBy: { createdAt: 'desc' },
           take: limit,
