@@ -122,7 +122,6 @@ router.get('/queue-status', asyncHandler(async (req, res) => {
         if (offset === 0 && currentMinutes >= startMinutes) continue;
 
         const daysUntil = offset;
-        const nextDate = new Date(now.getTime() + daysUntil * 86400000);
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
         nextWindow = {
