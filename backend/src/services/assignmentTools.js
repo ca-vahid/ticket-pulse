@@ -22,7 +22,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'get_agent_availability',
-    description: 'Get detailed availability for all technicians today. Returns three groups: agents who are OFF (vacation/sick — fully unavailable), agents who are WFH (working from home — available for remote tasks only, NOT for physical presence), and agents who are IN-OFFICE (available for everything). Includes each agent\'s location and scheduled work hours.',
+    description: 'Get detailed availability for all technicians right now. Returns three groups: OFF (on leave), WFH (remote only), and IN-OFFICE. Each agent includes their timezone, local time, personal schedule (start/end), whether they are currently on shift, and how much time remains in their shift. Use this to avoid assigning tickets to agents whose shift has ended or hasn\'t started yet.',
     input_schema: {
       type: 'object',
       properties: {},
@@ -215,19 +215,58 @@ export async function executeTool(toolName, toolInput, context) {
 
 // ── New tools ────────────────────────────────────────────────────────────
 
+function getAgentShiftStatus(tech, hqTimezone) {
+  const tz = tech.timezone || hqTimezone;
+  const now = new Date();
+  let localTimeStr;
+  try {
+    localTimeStr = now.toLocaleTimeString('en-US', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' });
+  } catch {
+    localTimeStr = now.toLocaleTimeString('en-US', { timeZone: hqTimezone, hour12: false, hour: '2-digit', minute: '2-digit' });
+  }
+  const [h, m] = localTimeStr.split(':').map(Number);
+  const nowMinutes = h * 60 + m;
+
+  const startTime = tech.workStartTime || '09:00';
+  const endTime = tech.workEndTime || '17:00';
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  const startMinutes = sh * 60 + sm;
+  const endMinutes = eh * 60 + em;
+
+  const onShift = nowMinutes >= startMinutes && nowMinutes < endMinutes;
+  const minutesUntilStart = startMinutes > nowMinutes ? startMinutes - nowMinutes : 0;
+  const minutesRemaining = onShift ? endMinutes - nowMinutes : 0;
+
+  let shiftNote;
+  if (onShift) {
+    const hoursLeft = Math.floor(minutesRemaining / 60);
+    const minsLeft = minutesRemaining % 60;
+    shiftNote = `On shift — ${hoursLeft}h${minsLeft > 0 ? ` ${minsLeft}m` : ''} remaining`;
+  } else if (minutesUntilStart > 0) {
+    const hoursUntil = Math.floor(minutesUntilStart / 60);
+    const minsUntil = minutesUntilStart % 60;
+    shiftNote = `Not yet started — begins in ${hoursUntil}h${minsUntil > 0 ? ` ${minsUntil}m` : ''}`;
+  } else {
+    shiftNote = 'Shift ended for today';
+  }
+
+  return { localTime: localTimeStr, timezone: tz, onShift, shiftNote, startTime, endTime };
+}
+
 async function getAgentAvailability(workspaceId) {
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
     select: { defaultTimezone: true },
   });
-  const timezone = workspace?.defaultTimezone || 'America/Los_Angeles';
-  const { start, end } = getTodayRange(timezone);
+  const hqTimezone = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const { start, end } = getTodayRange(hqTimezone);
 
   const [techs, leaves] = await Promise.all([
     prisma.technician.findMany({
       where: { workspaceId, isActive: true },
       select: {
-        id: true, name: true, email: true, location: true,
+        id: true, name: true, email: true, location: true, timezone: true,
         workStartTime: true, workEndTime: true,
       },
       orderBy: { name: 'asc' },
@@ -249,11 +288,16 @@ async function getAgentAvailability(workspaceId) {
 
   for (const t of techs) {
     const leave = leaveMap[t.id];
+    const shift = getAgentShiftStatus(t, hqTimezone);
     const agentInfo = {
       techId: t.id,
       techName: t.name,
       location: t.location || 'Not set',
-      schedule: t.workStartTime && t.workEndTime ? `${t.workStartTime}-${t.workEndTime}` : 'Default hours',
+      timezone: shift.timezone,
+      localTime: shift.localTime,
+      schedule: `${shift.startTime}-${shift.endTime}`,
+      onShift: shift.onShift,
+      shiftStatus: shift.shiftNote,
     };
 
     if (leave) {
@@ -273,7 +317,7 @@ async function getAgentAvailability(workspaceId) {
 
   return {
     date: start.toISOString().slice(0, 10),
-    timezone,
+    timezone: hqTimezone,
     summary: {
       totalAgents: techs.length,
       inOffice: inOffice.length,
@@ -354,7 +398,7 @@ async function findMatchingAgents(workspaceId, criteria) {
   const [techs, competencies, leaves, openTickets, todayTickets] = await Promise.all([
     prisma.technician.findMany({
       where: { workspaceId, isActive: true },
-      select: { id: true, name: true, location: true, workStartTime: true, workEndTime: true },
+      select: { id: true, name: true, location: true, timezone: true, workStartTime: true, workEndTime: true },
     }),
     prisma.technicianCompetency.findMany({
       where: { workspaceId },
@@ -429,11 +473,16 @@ async function findMatchingAgents(workspaceId, criteria) {
       ? (t.location || '').toLowerCase().includes(preferred_location.toLowerCase())
       : null;
 
+    const shift = getAgentShiftStatus(t, timezone);
     results.push({
       techId: t.id,
       techName: t.name,
       location: t.location || 'Not set',
-      schedule: t.workStartTime && t.workEndTime ? `${t.workStartTime}-${t.workEndTime}` : 'Default hours',
+      timezone: shift.timezone,
+      localTime: shift.localTime,
+      schedule: `${shift.startTime}-${shift.endTime}`,
+      onShift: shift.onShift,
+      shiftStatus: shift.shiftNote,
       availability: leaveCategory === 'WFH' ? 'WFH (remote only)' : 'In office',
       competencyMatch: matchingSkill ? { category: matchingSkill.category, level: matchingSkill.level } : null,
       locationMatch,
