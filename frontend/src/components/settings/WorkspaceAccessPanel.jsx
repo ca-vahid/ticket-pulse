@@ -5,6 +5,7 @@ import { Users, Loader, Plus, Trash2, AlertTriangle, ShieldCheck, Eye, Search, C
 
 const ROLE_OPTIONS = [
   { value: 'viewer', label: 'Viewer' },
+  { value: 'reviewer', label: 'Reviewer' },
   { value: 'admin', label: 'Admin' },
 ];
 
@@ -284,6 +285,10 @@ export default function WorkspaceAccessPanel() {
                     ) : item.role === 'admin' ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 border border-amber-300 rounded">
                         <ShieldCheck className="w-3 h-3" /> Admin
+                      </span>
+                    ) : item.role === 'reviewer' ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-purple-100 text-purple-700 border border-purple-300 rounded">
+                        <Check className="w-3 h-3" /> Reviewer
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 border border-blue-300 rounded">

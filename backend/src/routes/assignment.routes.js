@@ -12,6 +12,7 @@ import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import availabilityService from '../services/availabilityService.js';
+import { requireReviewer, requireAdmin } from '../middleware/auth.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
@@ -19,7 +20,7 @@ const router = express.Router();
 
 // ─── Assignment Config ──────────────────────────────────────────────────
 
-router.get('/config', asyncHandler(async (req, res) => {
+router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
   const config = await assignmentRepository.getConfig(req.workspaceId);
   res.json({
     success: true,
@@ -43,7 +44,7 @@ router.get('/config', asyncHandler(async (req, res) => {
   });
 }));
 
-router.put('/config', asyncHandler(async (req, res) => {
+router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   const {
     isEnabled, autoAssign, llmModel, maxRecommendations,
     scoringWeights, classificationPrompt, categorizationPrompt,
@@ -85,12 +86,12 @@ router.put('/config', asyncHandler(async (req, res) => {
 
 // ─── Pipeline Runs ──────────────────────────────────────────────────────
 
-router.get('/queued', asyncHandler(async (req, res) => {
+router.get('/queued', requireReviewer, asyncHandler(async (req, res) => {
   const runs = await assignmentRepository.listQueuedRuns(req.workspaceId, 50);
   res.json({ success: true, data: runs, total: runs.length });
 }));
 
-router.get('/queue-status', asyncHandler(async (req, res) => {
+router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {
   const workspace = await prisma.workspace.findUnique({
     where: { id: req.workspaceId },
     select: { defaultTimezone: true },
@@ -167,7 +168,7 @@ router.get('/queue-status', asyncHandler(async (req, res) => {
   });
 }));
 
-router.post('/runs/:id/run-now', asyncHandler(async (req, res) => {
+router.post('/runs/:id/run-now', requireReviewer, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -194,14 +195,14 @@ router.post('/runs/:id/run-now', asyncHandler(async (req, res) => {
   });
 }));
 
-router.get('/queue', asyncHandler(async (req, res) => {
+router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
   const result = await assignmentRepository.getPendingQueue(req.workspaceId, { limit, offset });
   res.json({ success: true, ...result });
 }));
 
-router.get('/runs', asyncHandler(async (req, res) => {
+router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
   const { status, decision } = req.query;
@@ -209,7 +210,7 @@ router.get('/runs', asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
-router.get('/runs/:id', asyncHandler(async (req, res) => {
+router.get('/runs/:id', requireReviewer, asyncHandler(async (req, res) => {
   const run = await assignmentRepository.getPipelineRun(parseInt(req.params.id));
   if (run.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Pipeline run belongs to a different workspace' });
@@ -217,7 +218,7 @@ router.get('/runs/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: run });
 }));
 
-router.post('/runs/:id/decide', asyncHandler(async (req, res) => {
+router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const { decision, assignedTechId, overrideReason, decisionNote } = req.body;
 
@@ -284,7 +285,7 @@ router.post('/runs/:id/decide', asyncHandler(async (req, res) => {
   res.json({ success: true, data: updated });
 }));
 
-router.delete('/runs/:id', asyncHandler(async (req, res) => {
+router.delete('/runs/:id', requireReviewer, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -297,13 +298,13 @@ router.delete('/runs/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Pipeline run deleted' });
 }));
 
-router.post('/runs/bulk-delete', asyncHandler(async (req, res) => {
+router.post('/runs/bulk-delete', requireReviewer, asyncHandler(async (req, res) => {
   const { status, decision } = req.body;
   const result = await assignmentRepository.bulkDeleteRuns(req.workspaceId, { status, decision });
   res.json({ success: true, ...result });
 }));
 
-router.post('/runs/:id/dismiss', asyncHandler(async (req, res) => {
+router.post('/runs/:id/dismiss', requireReviewer, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -320,7 +321,7 @@ router.post('/runs/:id/dismiss', asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Run dismissed' });
 }));
 
-router.post('/runs/:id/sync', asyncHandler(async (req, res) => {
+router.post('/runs/:id/sync', requireReviewer, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -330,7 +331,7 @@ router.post('/runs/:id/sync', asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
-router.post('/runs/:id/sync-preview', asyncHandler(async (req, res) => {
+router.post('/runs/:id/sync-preview', requireReviewer, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -340,7 +341,7 @@ router.post('/runs/:id/sync-preview', asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
-router.get('/ticket/:ticketId/latest-run', asyncHandler(async (req, res) => {
+router.get('/ticket/:ticketId/latest-run', requireReviewer, asyncHandler(async (req, res) => {
   const ticketId = parseInt(req.params.ticketId);
   const run = await prisma.assignmentPipelineRun.findFirst({
     where: { ticketId, workspaceId: req.workspaceId },
@@ -360,7 +361,7 @@ router.get('/ticket/:ticketId/latest-run', asyncHandler(async (req, res) => {
   res.json({ success: true, data: run });
 }));
 
-router.post('/trigger/:ticketId', asyncHandler(async (req, res) => {
+router.post('/trigger/:ticketId', requireAdmin, asyncHandler(async (req, res) => {
   const ticketId = parseInt(req.params.ticketId);
   const stream = req.query.stream === 'true';
 
@@ -417,7 +418,7 @@ router.post('/trigger/:ticketId', asyncHandler(async (req, res) => {
 
 // ─── Email Monitoring ───────────────────────────────────────────────────
 
-router.post('/email/test', asyncHandler(async (req, res) => {
+router.post('/email/test', requireAdmin, asyncHandler(async (req, res) => {
   const mailbox = req.body.mailbox;
   if (!mailbox) {
     return res.status(400).json({ success: false, message: 'mailbox is required' });
@@ -432,12 +433,12 @@ router.post('/email/test', asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
-router.get('/email/status', asyncHandler(async (req, res) => {
+router.get('/email/status', requireAdmin, asyncHandler(async (req, res) => {
   const status = emailPollingService.getStatus(req.workspaceId);
   res.json({ success: true, data: status });
 }));
 
-router.post('/email/poll-now', asyncHandler(async (req, res) => {
+router.post('/email/poll-now', requireAdmin, asyncHandler(async (req, res) => {
   if (!graphMailClient.isConfigured()) {
     return res.status(400).json({ success: false, message: 'Azure Graph API credentials not configured' });
   }
@@ -448,7 +449,7 @@ router.post('/email/poll-now', asyncHandler(async (req, res) => {
 
 // ─── Recent Tickets (for manual trigger UI) ─────────────────────────────
 
-router.get('/recent-tickets', asyncHandler(async (req, res) => {
+router.get('/recent-tickets', requireAdmin, asyncHandler(async (req, res) => {
   await assignmentRepository.sweepStaleRunningRuns(req.workspaceId);
   const limit = parseInt(req.query.limit) || 20;
   const onlyUnassigned = req.query.unassigned === 'true';
@@ -480,13 +481,13 @@ router.get('/recent-tickets', asyncHandler(async (req, res) => {
 
 // ─── Prompt Management ──────────────────────────────────────────────────
 
-router.get('/prompts', asyncHandler(async (req, res) => {
+router.get('/prompts', requireAdmin, asyncHandler(async (req, res) => {
   const versions = await promptRepository.getVersions(req.workspaceId);
   const published = await promptRepository.getPublished(req.workspaceId);
   res.json({ success: true, data: { versions, published } });
 }));
 
-router.get('/prompts/:id', asyncHandler(async (req, res) => {
+router.get('/prompts/:id', requireAdmin, asyncHandler(async (req, res) => {
   const version = await promptRepository.getVersion(parseInt(req.params.id));
   if (version.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Prompt belongs to a different workspace' });
@@ -494,7 +495,7 @@ router.get('/prompts/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: version });
 }));
 
-router.post('/prompts', asyncHandler(async (req, res) => {
+router.post('/prompts', requireAdmin, asyncHandler(async (req, res) => {
   const { systemPrompt, toolConfig, notes } = req.body;
   if (!systemPrompt?.trim()) {
     return res.status(400).json({ success: false, message: 'systemPrompt is required' });
@@ -508,7 +509,7 @@ router.post('/prompts', asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: version });
 }));
 
-router.post('/prompts/:id/publish', asyncHandler(async (req, res) => {
+router.post('/prompts/:id/publish', requireAdmin, asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   const version = await promptRepository.getVersion(id);
   if (version.workspaceId !== req.workspaceId) {
@@ -518,7 +519,7 @@ router.post('/prompts/:id/publish', asyncHandler(async (req, res) => {
   res.json({ success: true, data: published });
 }));
 
-router.post('/prompts/:id/restore', asyncHandler(async (req, res) => {
+router.post('/prompts/:id/restore', requireAdmin, asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   const version = await promptRepository.getVersion(id);
   if (version.workspaceId !== req.workspaceId) {
@@ -530,7 +531,7 @@ router.post('/prompts/:id/restore', asyncHandler(async (req, res) => {
 
 // ─── Tool Schemas (for UI display) ──────────────────────────────────────
 
-router.get('/tools', asyncHandler(async (req, res) => {
+router.get('/tools', requireAdmin, asyncHandler(async (req, res) => {
   const { TOOL_SCHEMAS } = await import('../services/assignmentTools.js');
   const tools = TOOL_SCHEMAS.map((t) => ({
     name: t.name,
@@ -544,7 +545,7 @@ router.get('/tools', asyncHandler(async (req, res) => {
 
 // ─── Category Deduplication ──────────────────────────────────────────────
 
-router.get('/competencies/duplicates', asyncHandler(async (req, res) => {
+router.get('/competencies/duplicates', requireAdmin, asyncHandler(async (req, res) => {
   const { findDuplicateGroups } = await import('../utils/categoryMatcher.js');
   const categories = await competencyRepository.getCategories(req.workspaceId);
   const groups = findDuplicateGroups(categories.map((c) => ({ id: c.id, name: c.name })));
@@ -561,7 +562,7 @@ router.get('/competencies/duplicates', asyncHandler(async (req, res) => {
   res.json({ success: true, data: groups });
 }));
 
-router.post('/competencies/merge', asyncHandler(async (req, res) => {
+router.post('/competencies/merge', requireAdmin, asyncHandler(async (req, res) => {
   const { keepId, mergeIds } = req.body;
   if (!keepId || !Array.isArray(mergeIds) || mergeIds.length === 0) {
     return res.status(400).json({ success: false, message: 'keepId and mergeIds[] are required' });
@@ -579,13 +580,13 @@ router.post('/competencies/merge', asyncHandler(async (req, res) => {
 
 // ─── Competency Categories ──────────────────────────────────────────────
 
-router.get('/competencies', asyncHandler(async (req, res) => {
+router.get('/competencies', requireAdmin, asyncHandler(async (req, res) => {
   const categories = await competencyRepository.getCategories(req.workspaceId);
   const mappings = await competencyRepository.getAllCompetenciesForWorkspace(req.workspaceId);
   res.json({ success: true, data: { categories, mappings } });
 }));
 
-router.post('/competencies/categories', asyncHandler(async (req, res) => {
+router.post('/competencies/categories', requireAdmin, asyncHandler(async (req, res) => {
   const { name, description } = req.body;
   if (!name?.trim()) {
     return res.status(400).json({ success: false, message: 'Category name is required' });
@@ -594,7 +595,7 @@ router.post('/competencies/categories', asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: category });
 }));
 
-router.put('/competencies/categories/:id', asyncHandler(async (req, res) => {
+router.put('/competencies/categories/:id', requireAdmin, asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   const category = await competencyRepository.getCategoryById(id);
   if (category.workspaceId !== req.workspaceId) {
@@ -604,7 +605,7 @@ router.put('/competencies/categories/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: updated });
 }));
 
-router.delete('/competencies/categories/:id', asyncHandler(async (req, res) => {
+router.delete('/competencies/categories/:id', requireAdmin, asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   const category = await competencyRepository.getCategoryById(id);
   if (category.workspaceId !== req.workspaceId) {
@@ -616,13 +617,13 @@ router.delete('/competencies/categories/:id', asyncHandler(async (req, res) => {
 
 // ─── Technician Competency Mappings ─────────────────────────────────────
 
-router.get('/competencies/technician/:techId', asyncHandler(async (req, res) => {
+router.get('/competencies/technician/:techId', requireAdmin, asyncHandler(async (req, res) => {
   const techId = parseInt(req.params.techId);
   const competencies = await competencyRepository.getTechnicianCompetencies(techId, req.workspaceId);
   res.json({ success: true, data: competencies });
 }));
 
-router.put('/competencies/technician/:techId', asyncHandler(async (req, res) => {
+router.put('/competencies/technician/:techId', requireAdmin, asyncHandler(async (req, res) => {
   const techId = parseInt(req.params.techId);
   const { competencies } = req.body;
 
@@ -637,13 +638,13 @@ router.put('/competencies/technician/:techId', asyncHandler(async (req, res) => 
 
 // ─── Competency Analysis Pipeline ───────────────────────────────────────
 
-router.get('/competency-prompts', asyncHandler(async (req, res) => {
+router.get('/competency-prompts', requireAdmin, asyncHandler(async (req, res) => {
   const versions = await competencyPromptRepository.getVersions(req.workspaceId);
   const published = await competencyPromptRepository.getPublished(req.workspaceId);
   res.json({ success: true, data: { versions, published } });
 }));
 
-router.get('/competency-prompts/:id', asyncHandler(async (req, res) => {
+router.get('/competency-prompts/:id', requireAdmin, asyncHandler(async (req, res) => {
   const version = await competencyPromptRepository.getVersion(parseInt(req.params.id));
   if (version.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Prompt belongs to a different workspace' });
@@ -651,7 +652,7 @@ router.get('/competency-prompts/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: version });
 }));
 
-router.post('/competency-prompts', asyncHandler(async (req, res) => {
+router.post('/competency-prompts', requireAdmin, asyncHandler(async (req, res) => {
   const { systemPrompt, toolConfig, notes } = req.body;
   if (!systemPrompt?.trim()) {
     return res.status(400).json({ success: false, message: 'systemPrompt is required' });
@@ -662,7 +663,7 @@ router.post('/competency-prompts', asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: version });
 }));
 
-router.post('/competency-prompts/:id/publish', asyncHandler(async (req, res) => {
+router.post('/competency-prompts/:id/publish', requireAdmin, asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   const version = await competencyPromptRepository.getVersion(id);
   if (version.workspaceId !== req.workspaceId) {
@@ -672,7 +673,7 @@ router.post('/competency-prompts/:id/publish', asyncHandler(async (req, res) => 
   res.json({ success: true, data: published });
 }));
 
-router.post('/competency-prompts/:id/restore', asyncHandler(async (req, res) => {
+router.post('/competency-prompts/:id/restore', requireAdmin, asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   const version = await competencyPromptRepository.getVersion(id);
   if (version.workspaceId !== req.workspaceId) {
@@ -682,7 +683,7 @@ router.post('/competency-prompts/:id/restore', asyncHandler(async (req, res) => 
   res.json({ success: true, data: draft });
 }));
 
-router.get('/competency-tools', asyncHandler(async (req, res) => {
+router.get('/competency-tools', requireAdmin, asyncHandler(async (req, res) => {
   const { COMPETENCY_TOOL_SCHEMAS } = await import('../services/competencyTools.js');
   const tools = COMPETENCY_TOOL_SCHEMAS.map((t) => ({
     name: t.name, description: t.description,
@@ -692,7 +693,7 @@ router.get('/competency-tools', asyncHandler(async (req, res) => {
   res.json({ success: true, data: tools });
 }));
 
-router.post('/competencies/analyze/:techId', asyncHandler(async (req, res) => {
+router.post('/competencies/analyze/:techId', requireAdmin, asyncHandler(async (req, res) => {
   const techId = parseInt(req.params.techId);
   const stream = req.query.stream === 'true';
   const triggeredBy = req.session?.user?.email || 'admin';
@@ -735,7 +736,7 @@ router.post('/competencies/analyze/:techId', asyncHandler(async (req, res) => {
   }
 }));
 
-router.get('/competencies/runs', asyncHandler(async (req, res) => {
+router.get('/competencies/runs', requireAdmin, asyncHandler(async (req, res) => {
   const techId = req.query.techId ? parseInt(req.query.techId) : undefined;
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
@@ -743,7 +744,7 @@ router.get('/competencies/runs', asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
-router.get('/competencies/runs/:id', asyncHandler(async (req, res) => {
+router.get('/competencies/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
   const run = await competencyAnalysisService._getRunWithSteps(parseInt(req.params.id));
   if (!run) return res.status(404).json({ success: false, message: 'Run not found' });
   if (run.workspaceId !== req.workspaceId) {
@@ -752,14 +753,14 @@ router.get('/competencies/runs/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: run });
 }));
 
-router.post('/competencies/runs/:id/rollback', asyncHandler(async (req, res) => {
+router.post('/competencies/runs/:id/rollback', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const rolledBackBy = req.session?.user?.email || 'admin';
   const result = await competencyAnalysisService.rollback(runId, rolledBackBy);
   res.json({ success: true, data: result });
 }));
 
-router.post('/competencies/runs/:id/cancel', asyncHandler(async (req, res) => {
+router.post('/competencies/runs/:id/cancel', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await prisma.competencyAnalysisRun.findUnique({ where: { id: runId }, select: { status: true, workspaceId: true } });
   if (!run) return res.status(404).json({ success: false, message: 'Run not found' });
@@ -770,7 +771,7 @@ router.post('/competencies/runs/:id/cancel', asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Run cancelled' });
 }));
 
-router.get('/competencies/technicians', asyncHandler(async (req, res) => {
+router.get('/competencies/technicians', requireReviewer, asyncHandler(async (req, res) => {
   const technicians = await prisma.technician.findMany({
     where: { workspaceId: req.workspaceId, isActive: true },
     select: {

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { assignmentAPI } from '../services/api';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import { useAuth } from '../contexts/AuthContext';
 import PipelineRunDetail from '../components/assignment/PipelineRunDetail';
 import CompetencyManager from '../components/assignment/CompetencyManager';
 import PromptManager from '../components/assignment/PromptManager';
@@ -12,12 +14,12 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown, Eye, Filter, Save,
 } from 'lucide-react';
 
-const TABS = [
-  { id: 'queue', label: 'Review Queue', icon: Inbox },
-  { id: 'history', label: 'History', icon: History },
-  { id: 'competencies', label: 'Competencies', icon: Award },
-  { id: 'prompts', label: 'Prompts', icon: FileText },
-  { id: 'config', label: 'Configuration', icon: Settings2 },
+const ALL_TABS = [
+  { id: 'queue', label: 'Review Queue', icon: Inbox, minRole: 'reviewer' },
+  { id: 'history', label: 'History', icon: History, minRole: 'reviewer' },
+  { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
+  { id: 'prompts', label: 'Prompts', icon: FileText, minRole: 'admin' },
+  { id: 'config', label: 'Configuration', icon: Settings2, minRole: 'admin' },
 ];
 
 function ManualTriggerPanel() {
@@ -960,6 +962,23 @@ function ConfigTab() {
 export default function AssignmentReview() {
   const navigate = useNavigate();
   const params = useParams();
+  const { currentWorkspace, availableWorkspaces } = useWorkspace();
+  const { user } = useAuth();
+
+  const isGlobalAdmin = user?.role === 'admin';
+  const wsRole = (() => {
+    if (isGlobalAdmin) return 'admin';
+    const ws = availableWorkspaces?.find(w => w.id === currentWorkspace?.id);
+    return ws?.role || 'viewer';
+  })();
+  const isWsAdmin = wsRole === 'admin';
+  const isReviewer = wsRole === 'reviewer' || isWsAdmin;
+
+  const TABS = ALL_TABS.filter(tab => {
+    if (tab.minRole === 'admin') return isWsAdmin;
+    if (tab.minRole === 'reviewer') return isReviewer;
+    return true;
+  });
 
   // Determine active tab and deep-link context from URL
   let activeTab = 'queue';
@@ -969,10 +988,10 @@ export default function AssignmentReview() {
   let competencyRunId = null;
   let analyzeTechId = null;
 
-  if (params.competencyRunId) {
+  if (params.competencyRunId && isWsAdmin) {
     activeTab = 'competencies';
     competencyRunId = params.competencyRunId;
-  } else if (params.analyzeTechId) {
+  } else if (params.analyzeTechId && isWsAdmin) {
     activeTab = 'competencies';
     analyzeTechId = parseInt(params.analyzeTechId);
   } else if (params.historyRunId) {
@@ -981,7 +1000,7 @@ export default function AssignmentReview() {
   } else if (params.runId) {
     activeTab = 'queue';
     deepRunId = params.runId;
-  } else if (params.ticketId) {
+  } else if (params.ticketId && isWsAdmin) {
     activeTab = 'queue';
     liveTicketId = parseInt(params.ticketId);
   } else if (params.tab && TABS.some((t) => t.id === params.tab)) {

@@ -56,6 +56,35 @@ export function requireAuth(req, res, next) {
 }
 
 /**
+ * Middleware to check if user is reviewer or admin — allows access to
+ * ticket assignment features (view queue, approve/reject, add notes).
+ * Global admins always pass. Workspace admins and reviewers pass.
+ */
+export function requireReviewer(req, res, next) {
+  if (req.session?.user?.role === 'admin') {
+    return next();
+  }
+
+  const email = req.session?.user?.email;
+  if (!email || !req.workspaceId) {
+    logger.warn(`Unauthorized reviewer access attempt to ${req.path}`);
+    return next(new AuthenticationError('Reviewer access required'));
+  }
+
+  getWsRepo()
+    .then(wsRepo => wsRepo.getAccessRole(email, req.workspaceId))
+    .then(wsRole => {
+      if (wsRole === 'admin' || wsRole === 'reviewer') return next();
+      logger.warn(`Unauthorized reviewer access attempt to ${req.path} by ${email}`);
+      next(new AuthenticationError('Reviewer access required'));
+    })
+    .catch(err => {
+      logger.error('Error checking workspace reviewer role:', err.message);
+      next(new AuthenticationError('Reviewer access required'));
+    });
+}
+
+/**
  * Middleware to check if user is admin — either globally or for the
  * current workspace (live DB check via workspace_access.role).
  * Wrapped to ensure async errors are forwarded to Express error handler.
