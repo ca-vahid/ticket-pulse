@@ -1,6 +1,35 @@
-export const APP_VERSION = '1.7.0-preview';
+export const APP_VERSION = '1.9.0-preview';
 
 export const changelog = [
+  {
+    version: '1.9.0-preview',
+    date: 'April 6, 2026',
+    entries: [
+      { type: 'new', text: 'Mobile-responsive assignment pages -- Review Queue, Pipeline Analysis, and Decision Panel are fully usable on phones; icons-only tab bar, card layout for queue, viewport-relative heights, 44px touch targets, and touch-manipulation on all buttons' },
+      { type: 'new', text: 'Split-view decision panel -- recommendations on the left (60%), decision actions on the right (40%) with sticky positioning; replaces the old stacked layout' },
+      { type: 'new', text: 'Triage notes on every decision -- optional note field on approve, reject, and override decisions; saved to database and injected into LLM feedback context for continuous improvement' },
+      { type: 'new', text: 'LLM decision history search -- new search_decision_notes tool lets Claude search past admin triage notes to learn routing preferences and patterns; system prompt updated with Step 5b for decision history' },
+      { type: 'new', text: 'AI Assignment button on dashboard header -- purple pill-shaped button with Sparkles icon next to Timeline Explorer for quick access to the assignment pipeline' },
+      { type: 'new', text: 'Shared streaming components -- CopyBadge, ToolCallCard, StreamContent, and processStreamEvent extracted into StreamingComponents.jsx; both Pipeline Analysis and Competency Analysis use the same rendering module' },
+      { type: 'new', text: 'Inline thinking indicator during pipeline streaming -- shows "processing X.X KB..." with spinner during silent gaps when Claude is building tool inputs' },
+      { type: 'improved', text: 'Pipeline streaming events persist after completion -- tool cards and text no longer vanish when the stream ends; formatted events take priority over raw transcript on revisit' },
+      { type: 'improved', text: 'Clean transcript formatting on revisit -- raw [Tool: name] JSON dumps replaced with readable blockquote summaries; old *(KB)* markers stripped' },
+      { type: 'improved', text: 'Tech override picker moved to right decision panel -- searchable list with avatars, locations, and "recommended" badges opens at the top of the panel, not at the bottom' },
+      { type: 'improved', text: 'Competency matrix shows technicians even with zero categories -- empty-state message guides users to add categories or run LLM analysis' },
+      { type: 'improved', text: 'Prompt auto-upgrade preserves custom prompts -- injects new tool steps into existing customized prompts instead of replacing them with the default' },
+      { type: 'fixed', text: 'Pipeline streaming blank page after completion -- events gated behind streaming boolean disappeared when fetch ended; changed to events.length check' },
+      { type: 'fixed', text: 'FreshService sync crash on deleted tickets -- 404/405 errors from notes and close API calls now handled gracefully; sync marked as successful with informational note' },
+      { type: 'fixed', text: 'Sync retry 405 crash -- axios interceptor wrapped errors in ExternalAPIError before catch blocks could inspect status; now 404/405 pass through unwrapped' },
+      { type: 'fixed', text: 'Email test crash when Graph API returns non-JSON error -- testConnection wrapped JSON.parse in try/catch like getUserProfile already does' },
+      { type: 'fixed', text: 'SSE Connecting status for non-admin users on production -- JWT query parameter promoted to Authorization header before requireAuth runs' },
+      { type: 'fixed', text: 'Competency Prompt tab blank screen -- missing Wrench icon import after modularization refactor' },
+      { type: 'security', text: 'Anthropic API key and Azure Graph credentials deployed to production App Service environment variables -- no longer missing from server configuration' },
+      { type: 'security', text: 'Decision notes stored server-side only -- triage context saved to assignment_pipeline_runs.decision_note column, never exposed beyond the admin who wrote it' },
+      { type: 'database', text: 'New column: assignment_pipeline_runs.decision_note (TEXT) -- stores admin triage context for any pipeline decision; migration applied to production' },
+      { type: 'database', text: 'Production competency data synced -- 25 categories and 182 technician competency mappings copied from dev to prod by FreshService ID matching' },
+      { type: 'database', text: 'Production prompt upgraded to v9 -- search_decision_notes step injected into custom prompt, preserving all admin customizations from v8' },
+    ],
+  },
   {
     version: '1.7.0-preview',
     date: 'April 5, 2026',
