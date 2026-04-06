@@ -1464,7 +1464,7 @@ export default function Dashboard() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-2 sm:px-4 py-3">
         {/* Stats Bar: Date Navigation (left) + Stats + Self-Pick + View Toggle (right) */}
-        <div className="sticky top-[44px] md:top-[52px] z-30 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-2 sm:p-3 mb-3 sm:mb-4 overflow-x-auto">
+        <div className="md:sticky md:top-[52px] z-30 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-2 sm:p-3 mb-3 sm:mb-4 overflow-x-auto">
           <div className="flex items-stretch gap-3 text-white min-w-[700px] md:min-w-0">
 
             {/* LEFT ZONE: Date Navigation + Day Grid */}
@@ -1473,10 +1473,10 @@ export default function Dashboard() {
               <div className="flex items-center gap-1.5 mb-1.5">
                 <button
                   onClick={viewMode === 'daily' ? goToPreviousDay : viewMode === 'weekly' ? goToPreviousWeek : goToPreviousMonth}
-                  className="p-1.5 hover:bg-white hover:bg-opacity-20 rounded transition-colors flex-none"
+                  className="p-2 sm:p-1.5 hover:bg-white hover:bg-opacity-20 rounded transition-colors flex-none touch-manipulation"
                   title={viewMode === 'daily' ? 'Previous day' : viewMode === 'weekly' ? 'Previous week' : 'Previous month'}
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-5 h-5 sm:w-4 sm:h-4" />
                 </button>
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
                   <Calendar className="w-3.5 h-3.5 flex-none opacity-80" />
@@ -1504,10 +1504,10 @@ export default function Dashboard() {
                 <button
                   onClick={viewMode === 'daily' ? goToNextDay : viewMode === 'weekly' ? goToNextWeek : goToNextMonth}
                   disabled={viewMode === 'daily' && isToday}
-                  className={`p-1.5 rounded transition-colors flex-none ${(viewMode === 'daily' && isToday) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white hover:bg-opacity-20'}`}
+                  className={`p-2 sm:p-1.5 rounded transition-colors flex-none touch-manipulation ${(viewMode === 'daily' && isToday) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white hover:bg-opacity-20'}`}
                   title={viewMode === 'daily' ? 'Next day' : viewMode === 'weekly' ? 'Next week' : 'Next month'}
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-5 h-5 sm:w-4 sm:h-4" />
                 </button>
                 {!isToday && viewMode === 'daily' && (
                   <button
