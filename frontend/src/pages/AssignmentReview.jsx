@@ -293,7 +293,7 @@ function QueueTab({ deepRunId }) {
     3: 'bg-orange-100 text-orange-800',
     4: 'bg-red-100 text-red-800',
   };
-  const PRIORITY_BORDER = { 1: 'border-l-slate-300', 2: 'border-l-yellow-400', 3: 'border-l-orange-400', 4: 'border-l-red-500' };
+  const PRIORITY_BORDER = { 1: 'border-l-slate-200', 2: 'border-l-slate-200', 3: 'border-l-slate-200', 4: 'border-l-slate-200' };
 
   const fmtDate = (d) => {
     if (!d) return '';
@@ -358,12 +358,12 @@ function QueueTab({ deepRunId }) {
     const topRec = run.recommendation?.recommendations?.[0];
     const flag = getTicketFlag(run);
     const flagInfo = FLAG_PILL[flag];
-    const isStale = flag !== 'open';
+    const rowStyle = flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
     return (
       <div
         key={run.id}
         onClick={() => handleSelectRun(run.id)}
-        className={`px-3 py-2.5 active:bg-blue-50 transition-colors touch-manipulation cursor-pointer border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${isStale ? 'opacity-60' : ''}`}
+        className={`px-3 py-2.5 active:bg-blue-50 transition-colors touch-manipulation cursor-pointer border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${rowStyle}`}
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
@@ -371,7 +371,7 @@ function QueueTab({ deepRunId }) {
             <div className="flex items-center gap-1 mt-0.5 flex-wrap">
               <span className="text-[11px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
               <span className="text-[11px] text-slate-400">{run.ticket?.requester?.name || '—'}</span>
-              {run.ticket?.requester?.email && <span className="text-[10px] text-slate-300 hidden sm:inline">· {run.ticket.requester.department || run.ticket.requester.email.split('@')[0]}</span>}
+              {run.ticket?.requester?.department && <span className="text-[10px] text-slate-300">· {run.ticket.requester.department}</span>}
             </div>
             <div className="flex items-center gap-1 mt-1 flex-wrap">
               {subView === 'pending' && flag === 'open' && topRec?.techName && (
@@ -600,7 +600,7 @@ function QueueTab({ deepRunId }) {
                   const flag = getTicketFlag(run);
                   const isStale = flag !== 'open';
                   return (
-                    <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${isStale && subView === 'pending' ? 'opacity-60' : ''}`} onClick={() => handleSelectRun(run.id)}>
+                    <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'closed' ? 'opacity-50 bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : ''}`} onClick={() => handleSelectRun(run.id)}>
                       <td className="px-3 py-1.5">
                         <span className="font-medium text-slate-800 block leading-snug">{run.ticket?.subject || 'No subject'}</span>
                         <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
@@ -609,6 +609,7 @@ function QueueTab({ deepRunId }) {
                       <td className="px-3 py-1.5">
                         <span className="text-slate-700">{run.ticket?.requester?.name || '—'}</span>
                         {run.ticket?.requester?.department && <span className="block text-[10px] text-slate-400">{run.ticket.requester.department}</span>}
+                        {run.ticket?.requester?.email && !run.ticket?.requester?.department && <span className="block text-[10px] text-slate-300">{run.ticket.requester.email}</span>}
                       </td>
                       <td className="px-3 py-1.5">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
