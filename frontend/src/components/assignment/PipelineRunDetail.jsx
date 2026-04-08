@@ -208,7 +208,7 @@ function SyncStatusCard({ run, onSyncComplete }) {
   );
 }
 
-export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete }) {
+export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete, isAdmin = false }) {
   const [fsDomain, setFsDomain] = useState(null);
 
   useEffect(() => {
@@ -290,14 +290,22 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
             {ticket.assignedTech && (
               <p className="text-sm font-medium text-amber-800">
                 This ticket was assigned to <strong>{ticket.assignedTech.name}</strong> outside of this pipeline.
+                {run.recommendation?.recommendations?.[0]?.techName && (
+                  <span className="text-amber-600 font-normal"> AI had suggested <strong>{run.recommendation.recommendations[0].techName}</strong>.</span>
+                )}
               </p>
             )}
             {ticket.status && !['Open', 'open', '2'].includes(String(ticket.status)) && (
               <p className="text-sm font-medium text-amber-800">
                 This ticket is now <strong>{ticket.status}</strong> — it may have been resolved or closed.
+                {ticket.assignedTech && <span className="text-amber-600 font-normal"> Handled by <strong>{ticket.assignedTech.name}</strong>.</span>}
               </p>
             )}
-            <p className="text-xs text-amber-600 mt-1">You can still approve the recommendation, dismiss this run, or add a triage note.</p>
+            <p className="text-xs text-amber-600 mt-1">
+              {isAdmin
+                ? 'You can approve the recommendation, dismiss this run, or add a triage note.'
+                : 'You can approve the recommendation, leave it, or add a triage note.'}
+            </p>
           </div>
         </div>
       )}

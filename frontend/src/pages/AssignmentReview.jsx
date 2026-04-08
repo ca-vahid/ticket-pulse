@@ -129,7 +129,7 @@ function ManualTriggerPanel() {
   );
 }
 
-function QueueTab({ deepRunId }) {
+function QueueTab({ deepRunId, isAdmin = false }) {
   const navigate = useNavigate();
   const [queue, setQueue] = useState({ items: [], total: 0 });
   const [assignedRuns, setAssignedRuns] = useState({ items: [], total: 0 });
@@ -145,6 +145,7 @@ function QueueTab({ deepRunId }) {
   const [queueStatus, setQueueStatus] = useState(null);
   const [subView, setSubView] = useState('pending');
   const [timeRange, setTimeRange] = useState('7d');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const getSince = (range) => {
     if (range === 'all') return undefined;
@@ -161,7 +162,7 @@ function QueueTab({ deepRunId }) {
       const since = getSince(timeRange);
       const [queueRes, assignedRes, queuedRes, statusRes] = await Promise.all([
         assignmentAPI.getQueue(),
-        assignmentAPI.getRuns({ decisions: 'approved,modified,auto_assigned', since, limit: 50 }),
+        assignmentAPI.getRuns({ decisions: 'approved,modified,auto_assigned', since, sinceField: 'decidedAt', limit: 50 }),
         assignmentAPI.getQueuedRuns(),
         assignmentAPI.getQueueStatus().catch(() => null),
       ]);
@@ -225,8 +226,14 @@ function QueueTab({ deepRunId }) {
     }
   };
 
-  const handleDelete = async (e, runId) => {
+  const handleDeleteClick = (e, runId) => {
     e.stopPropagation();
+    setConfirmDeleteId(confirmDeleteId === runId ? null : runId);
+  };
+
+  const handleDeleteConfirm = async (e, runId) => {
+    e.stopPropagation();
+    setConfirmDeleteId(null);
     try {
       await assignmentAPI.deleteRun(runId);
       setActionMsg('Deleted');
@@ -258,7 +265,7 @@ function QueueTab({ deepRunId }) {
         >
           <ChevronLeft className="w-4 h-4" /> Back to queue
         </button>
-        <PipelineRunDetail run={selectedRun} onDecide={handleDecide} deciding={deciding} onSyncComplete={async () => {
+        <PipelineRunDetail run={selectedRun} onDecide={handleDecide} deciding={deciding} isAdmin={isAdmin} onSyncComplete={async () => {
           try { const res = await assignmentAPI.getRun(selectedRun.id); setSelectedRun(res?.data || null); } catch { /* ignore */ }
         }} />
       </div>
@@ -378,10 +385,19 @@ function QueueTab({ deepRunId }) {
                 <span className="text-[11px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">→ {topRec.techName}</span>
               )}
               {subView === 'pending' && flag === 'assigned' && run.ticket?.assignedTech && (
-                <span className="text-[11px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Assigned: {run.ticket.assignedTech.name}</span>
+                <>
+                  <span className="text-[11px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Assigned: {run.ticket.assignedTech.name}</span>
+                  {topRec?.techName && topRec.techName !== run.ticket.assignedTech.name && (
+                    <span className="text-[10px] text-blue-400">(AI: {topRec.techName})</span>
+                  )}
+                </>
               )}
               {subView === 'pending' && flag === 'closed' && (
-                <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{run.ticket?.status}</span>
+                <>
+                  <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{run.ticket?.status}</span>
+                  {run.ticket?.assignedTech && <span className="text-[10px] text-slate-400 ml-0.5">by {run.ticket.assignedTech.name}</span>}
+                  {topRec?.techName && <span className="text-[10px] text-blue-400 ml-0.5">(AI: {topRec.techName})</span>}
+                </>
               )}
               {subView !== 'pending' && run.assignedTech?.name && (
                 <span className="text-[11px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">→ {run.assignedTech.name}</span>
@@ -400,9 +416,13 @@ function QueueTab({ deepRunId }) {
                 <button onClick={(e) => handleDismiss(e, run.id)} className="p-2 text-yellow-500 hover:bg-yellow-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Dismiss">
                   <XCircle className="w-4 h-4" />
                 </button>
-                <button onClick={(e) => handleDelete(e, run.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Delete">
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {confirmDeleteId === run.id ? (
+                  <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1.5 bg-red-500 text-white rounded-lg text-[10px] font-semibold touch-manipulation min-h-[36px]">Delete?</button>
+                ) : (
+                  <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Delete">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </>
             )}
             <ChevronRight className="w-4 h-4 text-slate-300" />
@@ -452,9 +472,13 @@ function QueueTab({ deepRunId }) {
                   <button onClick={(e) => handleRunNow(e, run.id)} className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center justify-center gap-1.5 shadow-sm touch-manipulation min-h-[44px]">
                     <Play className="w-3.5 h-3.5" /> Run Now
                   </button>
-                  <button onClick={(e) => handleDelete(e, run.id)} className="p-2.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg touch-manipulation min-h-[44px]" title="Delete">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {confirmDeleteId === run.id ? (
+                    <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-semibold touch-manipulation min-h-[44px]">Delete?</button>
+                  ) : (
+                    <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-2.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg touch-manipulation min-h-[44px]" title="Delete">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -475,7 +499,11 @@ function QueueTab({ deepRunId }) {
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={(e) => handleRunNow(e, run.id)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center gap-1.5 shadow-sm"><Play className="w-3.5 h-3.5" /> Run Now</button>
-                      <button onClick={(e) => handleDelete(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                      {confirmDeleteId === run.id ? (
+                        <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
+                      ) : (
+                        <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -537,9 +565,9 @@ function QueueTab({ deepRunId }) {
               <option value="1">Low</option>
             </select>
 
-            {subView === 'pending' && queue.total > 0 && (
-              <button onClick={handleClearAll} className="text-[11px] text-red-500 hover:text-red-700 flex items-center gap-0.5 p-1 touch-manipulation">
-                <Trash2 className="w-3 h-3" />
+            {subView === 'pending' && queue.total > 0 && isAdmin && (
+              <button onClick={handleClearAll} className="text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 flex items-center gap-1 px-2 py-1 rounded touch-manipulation border border-red-200">
+                <Trash2 className="w-3 h-3" /> Clear all
               </button>
             )}
             <button onClick={fetchQueue} className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-0.5 p-1 touch-manipulation">
@@ -621,9 +649,18 @@ function QueueTab({ deepRunId }) {
                           {flag === 'open' && topRec?.techName ? (
                             <span className="font-medium text-blue-700">→ {topRec.techName}</span>
                           ) : flag === 'assigned' && run.ticket?.assignedTech ? (
-                            <span className="text-amber-600 font-medium">Assigned: {run.ticket.assignedTech.name}</span>
+                            <span>
+                              <span className="text-amber-600 font-medium">Assigned: {run.ticket.assignedTech.name}</span>
+                              {topRec?.techName && topRec.techName !== run.ticket.assignedTech.name && (
+                                <span className="text-blue-400 ml-1">(AI: {topRec.techName})</span>
+                              )}
+                            </span>
                           ) : flag === 'closed' ? (
-                            <span className="text-slate-400">{run.ticket?.status}</span>
+                            <span>
+                              <span className="text-slate-400">{run.ticket?.status}</span>
+                              {run.ticket?.assignedTech && <span className="text-slate-400 ml-1">by {run.ticket.assignedTech.name}</span>}
+                              {topRec?.techName && <span className="text-blue-400 ml-1">(AI: {topRec.techName})</span>}
+                            </span>
                           ) : <span className="text-slate-300">—</span>}
                         </td>
                       ) : (
@@ -645,7 +682,11 @@ function QueueTab({ deepRunId }) {
                         <td className="px-3 py-1.5">
                           <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={(e) => handleDismiss(e, run.id)} className="p-1 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 rounded" title="Dismiss"><XCircle className="w-3.5 h-3.5" /></button>
-                            <button onClick={(e) => handleDelete(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                            {confirmDeleteId === run.id ? (
+                              <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
+                            ) : (
+                              <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                            )}
                           </div>
                         </td>
                       )}
@@ -1239,7 +1280,7 @@ export default function AssignmentReview() {
       <div className="flex-1 px-2 pb-2 sm:px-4 sm:pb-4 overflow-auto">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-full">
           <div className="px-3 py-3 sm:px-6 sm:py-5">
-            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} />}
+            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} />}
             {activeTab === 'prompts' && <PromptManager />}

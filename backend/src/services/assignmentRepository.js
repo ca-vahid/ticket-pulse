@@ -159,14 +159,17 @@ class AssignmentRepository {
     }
   }
 
-  async getPipelineRuns(workspaceId, { limit = 50, offset = 0, status, decision, since, decisions } = {}) {
+  async getPipelineRuns(workspaceId, { limit = 50, offset = 0, status, decision, since, sinceField, decisions } = {}) {
     try {
       await this.sweepStaleRunningRuns(workspaceId);
       const where = { workspaceId };
       if (status) where.status = status;
       if (decision) where.decision = decision;
       if (decisions) where.decision = { in: decisions };
-      if (since) where.createdAt = { gte: new Date(since) };
+      if (since) {
+        const field = sinceField === 'decidedAt' ? 'decidedAt' : 'createdAt';
+        where[field] = { gte: new Date(since) };
+      }
 
       const [items, total] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({
@@ -177,10 +180,14 @@ class AssignmentRepository {
                 id: true,
                 freshserviceTicketId: true,
                 subject: true,
+                status: true,
                 priority: true,
                 category: true,
+                ticketCategory: true,
+                assignedTechId: true,
                 createdAt: true,
-                requester: { select: { name: true, email: true } },
+                requester: { select: { name: true, email: true, department: true } },
+                assignedTech: { select: { id: true, name: true } },
               },
             },
             assignedTech: { select: { id: true, name: true } },
