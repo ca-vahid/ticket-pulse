@@ -608,98 +608,119 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const renderRunCard = (run) => {
     const topRec = run.recommendation?.recommendations?.[0];
     const flag = getTicketFlag(run);
-    const flagInfo = FLAG_PILL[flag];
-    const rowStyle = flag === 'deleted' ? 'opacity-40 bg-red-50/30' : flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
+    const recs = run.recommendation?.recommendations || [];
+    const priLabel = PRIORITY_LABELS[run.ticket?.priority];
+    const priPill = PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500';
+    const flagPill = FLAG_PILL[flag];
+    const rowBg = flag === 'deleted' ? 'opacity-40 bg-red-50/30' : flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
+
+    const renderTechInline = (techId, name, prefix) => {
+      if (avatarView) return <TechBadge techId={techId} name={name} />;
+      return <span>{prefix ? <span className="text-slate-400">{prefix} </span> : ''}{name?.split(' ')[0]}</span>;
+    };
+
     return (
       <div
         key={run.id}
         onClick={() => handleSelectRun(run.id)}
-        className={`px-3 py-2.5 active:bg-blue-50 transition-colors touch-manipulation cursor-pointer border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${rowStyle}`}
+        className={`px-3 py-2 active:bg-blue-50/60 touch-manipulation cursor-pointer ${rowBg}`}
       >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-slate-800 text-sm leading-snug line-clamp-1 flex items-center gap-1.5">
-              {run.ticket?.subject || 'No subject'}
-              {flag === 'deleted' && <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />}
-            </p>
-            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-              <span className="text-[11px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
-              <span className="text-[11px] text-slate-400">{run.ticket?.requester?.name || '—'}</span>
-              {run.ticket?.requester?.department && <span className="text-[10px] text-slate-300">· {run.ticket.requester.department}</span>}
-            </div>
-            <div className="flex items-center gap-1 mt-1 flex-wrap">
-              {subView === 'pending' && flag === 'open' && (
-                <span className="inline-flex items-center gap-1.5">
-                  <AiPicks recommendations={run.recommendation?.recommendations || []} />
+        {/* Row 1: subject + priority pill + chevron */}
+        <div className="flex items-center gap-1.5">
+          <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold leading-none ${priPill}`}>{priLabel || '—'}</span>
+          <p className="flex-1 min-w-0 text-[13px] font-medium text-slate-800 leading-snug truncate">
+            {run.ticket?.subject || 'No subject'}
+          </p>
+          {flag === 'deleted' && <Trash2 className="w-3 h-3 text-red-400 shrink-0" />}
+          <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+        </div>
+
+        {/* Row 2: metadata + status/tech */}
+        <div className="flex items-center gap-1.5 mt-1 text-[10px] leading-none">
+          <span className="text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+          <span className="text-slate-300">·</span>
+          <span className="text-slate-400 truncate max-w-[100px]">{run.ticket?.requester?.name || '—'}</span>
+          <span className="text-slate-300">·</span>
+          <span className="text-slate-300">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</span>
+
+          <span className="ml-auto" />
+
+          {subView === 'pending' && flag !== 'deleted' && (
+            <>
+              {flag !== 'open' && flagPill && (
+                <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${flagPill.style}`}>{flagPill.label}</span>
+              )}
+              {(flag === 'assigned' || flag === 'closed') && run.ticket?.assignedTech && (
+                <span className="text-amber-700 font-medium inline-flex items-center gap-0.5">
+                  {renderTechInline(run.ticket.assignedTech.id, run.ticket.assignedTech.name, '→')}
                 </span>
               )}
-              {subView === 'pending' && flag === 'assigned' && run.ticket?.assignedTech && (
-                <span className="text-[11px] inline-flex items-center gap-1.5">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[10px] font-semibold">
-                    <span className="uppercase tracking-wide">Live</span>
-                    <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
-                    <span>{run.ticket.assignedTech.name?.split(' ')[0]}</span>
-                  </span>
-                  {run.recommendation?.recommendations?.length > 0 && (
-                    <AiPicks recommendations={run.recommendation.recommendations} />
-                  )}
-                </span>
-              )}
-              {subView === 'pending' && flag === 'closed' && (
-                <span className="text-[10px] inline-flex items-center gap-1.5">
-                  <span className="text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{run.ticket?.status}</span>
-                  {run.ticket?.assignedTech && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 px-1.5 py-0.5 text-[10px] font-medium">
-                      <span className="uppercase tracking-wide">Live</span>
-                      <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
-                      <span>{run.ticket.assignedTech.name?.split(' ')[0]}</span>
-                    </span>
-                  )}
-                  {run.recommendation?.recommendations?.length > 0 && (
-                    <AiPicks recommendations={run.recommendation.recommendations} />
-                  )}
-                </span>
-              )}
-              {subView === 'pending' && flag === 'deleted' && (
-                <span className="text-[10px] inline-flex items-center gap-1.5">
-                  <span className="text-red-500 bg-red-50 px-1.5 py-0.5 rounded font-medium">Deleted in FS</span>
-                </span>
-              )}
-              {subView !== 'pending' && run.assignedTech?.name && (
-                <span className="text-[11px] font-medium text-blue-600 inline-flex items-center gap-1"><TechBadge techId={run.assignedTech.id} name={run.assignedTech.name} /></span>
-              )}
-              {subView !== 'pending' && run.decision && (
-                <span className={`px-1 py-0.5 rounded text-[9px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
-                  {DECISION_LABELS[run.decision] || run.decision}
-                </span>
-              )}
-              <span className="text-[10px] text-slate-300">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-0.5 flex-shrink-0 relative">
+            </>
+          )}
+          {subView === 'pending' && flag === 'deleted' && (
+            <span className="text-red-500 bg-red-50 rounded px-1 py-0.5 text-[9px] font-medium">Deleted</span>
+          )}
+          {subView !== 'pending' && run.decision && (
+            <span className={`px-1 py-0.5 rounded text-[9px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
+              {DECISION_LABELS[run.decision] || run.decision}
+            </span>
+          )}
+          {subView !== 'pending' && run.assignedTech?.name && (
+            <span className="text-blue-700 font-medium inline-flex items-center gap-0.5">
+              {renderTechInline(run.assignedTech.id, run.assignedTech.name)}
+            </span>
+          )}
+        </div>
+
+        {/* Row 3: AI suggestion + quick actions (only pending) */}
+        {subView === 'pending' && recs.length > 0 && flag !== 'deleted' && (
+          <div className="flex items-center gap-1.5 mt-1.5 relative">
+            {avatarView ? (
+              <AiPicks recommendations={recs} />
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] text-blue-700 font-medium">
+                <span className="text-[9px] font-bold uppercase tracking-wider bg-blue-50 text-blue-600 px-1 rounded">AI</span>
+                {topRec.techName}
+                {recs.length > 1 && <span className="text-blue-400">+{recs.length - 1}</span>}
+              </span>
+            )}
+
             {showActions && (
-              <>
-                {run.recommendation?.recommendations?.length > 0 && flag !== 'deleted' && (
-                  <button onClick={(e) => openQuickApprove(e, run)} className={`p-2 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 hover:bg-green-50'}`} title="Quick approve">
-                    <Check className="w-4 h-4" />
-                  </button>
-                )}
-                <button onClick={(e) => handleDismiss(e, run.id)} className="p-2 text-yellow-500 hover:bg-yellow-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Dismiss">
+              <div className="ml-auto flex items-center gap-0">
+                <button onClick={(e) => openQuickApprove(e, run)} className={`p-1.5 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 active:bg-green-50'}`} aria-label="Quick approve">
+                  <Check className="w-4 h-4" />
+                </button>
+                <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
                   <XCircle className="w-4 h-4" />
                 </button>
                 {confirmDeleteId === run.id ? (
-                  <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1.5 bg-red-500 text-white rounded-lg text-[10px] font-semibold touch-manipulation min-h-[36px]">Delete?</button>
+                  <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold touch-manipulation min-h-[32px]">Delete?</button>
                 ) : (
-                  <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Delete">
+                  <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 )}
-              </>
+              </div>
             )}
-            <ChevronRight className="w-4 h-4 text-slate-300" />
-            <QuickApprovePopover run={run} />
+            <QuickApprovePopover run={run} align="left" />
           </div>
-        </div>
+        )}
+
+        {/* Pending with no recs (noise/deleted) — still show actions */}
+        {subView === 'pending' && (recs.length === 0 || flag === 'deleted') && showActions && (
+          <div className="flex items-center justify-end gap-0 mt-1.5 relative">
+            <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
+              <XCircle className="w-4 h-4" />
+            </button>
+            {confirmDeleteId === run.id ? (
+              <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold touch-manipulation min-h-[32px]">Delete?</button>
+            ) : (
+              <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   };
