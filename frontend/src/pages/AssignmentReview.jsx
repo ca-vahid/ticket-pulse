@@ -661,12 +661,12 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         </div>
       )}
 
-      {/* Sub-view tabs + filters + toolbar */}
+      {/* Sub-view tabs + filters + toolbar (single compact row; ticket status only on Pending) */}
       <div className="border border-slate-200 rounded-lg overflow-hidden">
-        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2 space-y-1.5">
-          {/* Row 1: Decision view tabs + right-side controls */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            <div className="inline-flex items-center gap-0.5 bg-slate-200 rounded-lg p-0.5">
+        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+            {/* Queue (decision) scope */}
+            <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-200/90 p-0.5 ring-1 ring-slate-300/40 shadow-sm">
               {[
                 { id: 'pending', label: 'Pending', count: queue.total, dot: 'bg-yellow-400' },
                 { id: 'assigned', label: 'Assigned', count: assignedRuns.total, dot: 'bg-green-400' },
@@ -674,96 +674,94 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                 { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-red-400' },
                 { id: 'all', label: 'All', count: null, dot: null },
               ].filter((tab) => tab.id === 'pending' || tab.id === 'all' || tab.count > 0).map((tab) => (
-                <button key={tab.id} onClick={() => { setSubView(tab.id); setFilterTicketStatus('all'); }} className={`px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors touch-manipulation flex items-center gap-1 ${subView === tab.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                  {tab.dot && <span className={`w-1.5 h-1.5 rounded-full ${tab.dot}`} />}
+                <button key={tab.id} onClick={() => { setSubView(tab.id); setFilterTicketStatus('all'); }} className={`rounded-md px-2 py-1 text-[11px] font-medium transition-all touch-manipulation flex items-center gap-1 sm:px-2.5 ${subView === tab.id ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80' : 'text-slate-600 hover:text-slate-800'}`}>
+                  {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot}`} />}
                   {tab.label}{tab.count != null ? ` (${tab.count})` : ''}
                 </button>
               ))}
             </div>
 
-            <div className="flex-1" />
-
-            <div className="inline-flex items-center gap-0.5 bg-slate-200 rounded-lg p-0.5">
-              {['24h', '7d', '30d', 'all'].map((range) => (
-                <button key={range} onClick={() => setTimeRange(range)} className={`px-1.5 py-1 rounded-md text-[11px] font-medium transition-colors touch-manipulation ${timeRange === range ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
-                  {range === 'all' ? 'All' : range}
-                </button>
-              ))}
-            </div>
-
-            <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="border border-slate-200 rounded px-1.5 py-1 text-[11px] bg-white touch-manipulation">
-              <option value="all">Priority</option>
-              <option value="4">Urgent</option>
-              <option value="3">High</option>
-              <option value="2">Medium</option>
-              <option value="1">Low</option>
-            </select>
-
-            {subView === 'pending' && queue.total > 0 && isAdmin && (
-              <button onClick={() => setShowClearConfirm(true)} className="text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 flex items-center gap-1 px-2 py-1 rounded touch-manipulation border border-red-200">
-                <Trash2 className="w-3 h-3" /> Clear all
-              </button>
+            {subView === 'pending' && pendingStats.total > 0 && (
+              <>
+                <div className="hidden h-5 w-px shrink-0 bg-gradient-to-b from-transparent via-slate-300 to-transparent sm:block" aria-hidden />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Ticket</span>
+                  <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-100/90 p-0.5 ring-1 ring-slate-200/60">
+                    {[
+                      { id: 'all', label: 'All', count: pendingStats.total, tint: '' },
+                      { id: 'open', label: 'Open', count: pendingStats.open, tint: 'text-emerald-700' },
+                      { id: 'assigned', label: 'Assigned', count: pendingStats.assigned, tint: 'text-amber-800' },
+                      { id: 'closed', label: 'Closed', count: pendingStats.closed, tint: 'text-slate-600' },
+                      { id: 'deleted', label: 'Deleted', count: pendingStats.deleted, tint: 'text-red-600' },
+                    ].filter((f) => f.id === 'all' || f.count > 0).map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setFilterTicketStatus(f.id)}
+                        className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-all touch-manipulation ${
+                          filterTicketStatus === f.id
+                            ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/70'
+                            : 'text-slate-600 hover:bg-white/60 hover:text-slate-800'
+                        }`}
+                      >
+                        {f.label}
+                        {f.id !== 'all' && (
+                          <span className={filterTicketStatus === f.id ? 'text-slate-700' : f.tint}> ({f.count})</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  {(filterTicketStatus !== 'all' || filterPriority !== 'all') && (
+                    <button
+                      type="button"
+                      onClick={() => { setFilterTicketStatus('all'); setFilterPriority('all'); }}
+                      className="text-[10px] font-medium text-blue-600 hover:text-blue-800"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </>
             )}
-            <button
-              onClick={() => setAvatarView(v => !v)}
-              className={`text-[10px] px-2 py-1 rounded border touch-manipulation font-medium transition-colors ${avatarView ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}
-              title={avatarView ? 'Switch to text view' : 'Switch to avatar view'}
-            >
-              {avatarView ? '≡ Text' : '⊙ Avatars'}
-            </button>
-            <button onClick={fetchQueue} disabled={refreshing} className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-0.5 p-1 touch-manipulation disabled:opacity-50">
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
 
-          {/* Row 2: Ticket status sub-filters (pending view) */}
-          {subView === 'pending' && pendingStats.total > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">Ticket:</span>
-              <div className="inline-flex items-center gap-0.5 bg-slate-200/70 rounded-lg p-0.5">
-                {[
-                  { id: 'all', label: 'All', count: pendingStats.total, style: '' },
-                  { id: 'open', label: 'Open', count: pendingStats.open, style: 'text-green-700' },
-                  { id: 'assigned', label: 'Assigned', count: pendingStats.assigned, style: 'text-amber-700' },
-                  { id: 'closed', label: 'Closed', count: pendingStats.closed, style: 'text-slate-500' },
-                  { id: 'deleted', label: 'Deleted', count: pendingStats.deleted, style: 'text-red-600' },
-                ].filter((f) => f.id === 'all' || f.count > 0).map((f) => (
-                  <button
-                    key={f.id}
-                    onClick={() => setFilterTicketStatus(f.id)}
-                    className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors touch-manipulation ${
-                      filterTicketStatus === f.id
-                        ? 'bg-white text-slate-800 shadow-sm'
-                        : `text-slate-500 hover:text-slate-700`
-                    }`}
-                  >
-                    {f.label} {f.id !== 'all' && <span className={`${filterTicketStatus === f.id ? '' : f.style}`}>({f.count})</span>}
+            <div className="hidden min-w-[0.5rem] flex-1 lg:block" />
+
+            <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:gap-2 lg:ml-auto">
+              <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-200/90 p-0.5 ring-1 ring-slate-300/30">
+                {['24h', '7d', '30d', 'all'].map((range) => (
+                  <button key={range} type="button" onClick={() => setTimeRange(range)} className={`rounded-md px-1.5 py-1 text-[11px] font-medium transition-all touch-manipulation ${timeRange === range ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/70' : 'text-slate-600 hover:text-slate-800'}`}>
+                    {range === 'all' ? 'All' : range}
                   </button>
                 ))}
               </div>
-              {(filterTicketStatus !== 'all' || filterPriority !== 'all') && (
-                <button
-                  onClick={() => { setFilterTicketStatus('all'); setFilterPriority('all'); }}
-                  className="text-[10px] text-blue-600 hover:text-blue-800 font-medium ml-1"
-                >
-                  Clear filters
+
+              <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="touch-manipulation rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] shadow-sm">
+                <option value="all">Priority</option>
+                <option value="4">Urgent</option>
+                <option value="3">High</option>
+                <option value="2">Medium</option>
+                <option value="1">Low</option>
+              </select>
+
+              {subView === 'pending' && queue.total > 0 && isAdmin && (
+                <button type="button" onClick={() => setShowClearConfirm(true)} className="flex touch-manipulation items-center gap-1 rounded border border-red-200 px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 hover:text-red-700">
+                  <Trash2 className="h-3 w-3" /> Clear all
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setAvatarView((v) => !v)}
+                className={`touch-manipulation rounded border px-2 py-1 text-[10px] font-medium transition-colors ${avatarView ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
+                title={avatarView ? 'Switch to text view' : 'Switch to avatar view'}
+              >
+                {avatarView ? '≡ Text' : '⊙ Avatars'}
+              </button>
+              <button type="button" onClick={fetchQueue} disabled={refreshing} className="touch-manipulation p-1 text-blue-600 hover:text-blue-800 disabled:opacity-50">
+                <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              </button>
             </div>
-          )}
-        </div>
-
-        {/* Stats strip */}
-        {subView === 'pending' && pendingStats.total > 0 && (
-          <div className="bg-white border-b border-slate-100 px-3 py-1.5 flex items-center gap-3 text-[11px] text-slate-500 overflow-x-auto">
-            <span>{pendingStats.total} pending</span>
-            <span className="text-slate-300">·</span>
-            <span className="text-green-600 font-medium">{pendingStats.open} open</span>
-            {pendingStats.assigned > 0 && <><span className="text-slate-300">·</span><span className="text-amber-600">{pendingStats.assigned} assigned</span></>}
-            {pendingStats.closed > 0 && <><span className="text-slate-300">·</span><span className="text-slate-400">{pendingStats.closed} closed</span></>}
-            {pendingStats.deleted > 0 && <><span className="text-slate-300">·</span><span className="text-red-500">{pendingStats.deleted} deleted</span></>}
           </div>
-        )}
+        </div>
 
         {/* Clear all confirmation */}
         {showClearConfirm && (
@@ -802,13 +800,17 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         {activeItems.length === 0 ? (
           <div className="text-center py-10">
             <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-            <p className="text-slate-500 text-sm font-medium">{
-              subView === 'pending' ? 'No pending assignments' :
-              subView === 'assigned' ? 'No assignments in this period' :
-              subView === 'dismissed' ? 'No dismissed runs in this period' :
-              subView === 'rejected' ? 'No rejected runs in this period' :
-              'No runs found'
-            }</p>
+            <p className="text-slate-500 text-sm font-medium">
+              {subView === 'pending'
+                ? 'No pending assignments'
+                : subView === 'assigned'
+                  ? 'No assignments in this period'
+                  : subView === 'dismissed'
+                    ? 'No dismissed runs in this period'
+                    : subView === 'rejected'
+                      ? 'No rejected runs in this period'
+                      : 'No runs found'}
+            </p>
             <button onClick={fetchQueue} className="mt-2 text-xs text-blue-600 hover:underline inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
           </div>
         ) : (
@@ -1148,12 +1150,17 @@ function HistoryTab({ deepRunId }) {
                         </span>
                       )}
                       {run.syncStatus && (
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          run.syncStatus === 'synced' ? 'bg-green-100 text-green-700' :
-                          run.syncStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                          run.syncStatus === 'dry_run' ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-slate-100 text-slate-500'
-                        }`}>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            run.syncStatus === 'synced'
+                              ? 'bg-green-100 text-green-700'
+                              : run.syncStatus === 'failed'
+                                ? 'bg-red-100 text-red-700'
+                                : run.syncStatus === 'dry_run'
+                                  ? 'bg-yellow-100 text-yellow-700'
+                                  : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
                           {run.syncStatus === 'synced' ? '✓ synced' : run.syncStatus === 'dry_run' ? '◑ dry run' : run.syncStatus === 'failed' ? '✗ sync failed' : run.syncStatus}
                         </span>
                       )}
