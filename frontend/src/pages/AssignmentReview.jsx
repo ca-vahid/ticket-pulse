@@ -201,6 +201,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
           console.error('Failed to load deep-linked run:', err);
         }
       })();
+    } else {
+      setSelectedRun(null);
     }
   }, [deepRunId]);
 
@@ -270,7 +272,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       <div>
         <button
           onClick={() => { setSelectedRun(null); navigate('/assignments/queue'); }}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:underline mb-4"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-3 py-1.5 mb-4 transition-colors"
         >
           <ChevronLeft className="w-4 h-4" /> Back to queue
         </button>
@@ -765,6 +767,8 @@ function HistoryTab({ deepRunId }) {
           console.error('Failed to load deep-linked run:', err);
         }
       })();
+    } else {
+      setSelectedRun(null);
     }
   }, [deepRunId]);
 
@@ -785,7 +789,7 @@ function HistoryTab({ deepRunId }) {
       <div>
         <button
           onClick={() => { setSelectedRun(null); navigate('/assignments/history'); }}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:underline mb-4"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-3 py-1.5 mb-4 transition-colors"
         >
           <ChevronLeft className="w-4 h-4" /> Back to history
         </button>
@@ -1262,13 +1266,25 @@ export default function AssignmentReview() {
     );
   }
 
+  const isDetailView = !!(deepRunId || historyRunId);
+  const handleHeaderBack = () => {
+    if (deepRunId) {
+      navigate('/assignments/queue');
+    } else if (historyRunId) {
+      navigate('/assignments/history');
+    } else {
+      navigate('/dashboard');
+    }
+  };
+  const headerBackLabel = deepRunId ? 'Back to Queue' : historyRunId ? 'Back to History' : 'Back';
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
       {/* White top bar */}
       <header className="bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
         <div className="px-3 sm:px-4 py-2 flex items-center gap-2 sm:gap-3">
-          <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors text-sm font-medium p-1 -ml-1 touch-manipulation min-h-[44px]">
-            <ArrowLeft className="w-4 h-4" /> Back
+          <button onClick={handleHeaderBack} className={`flex items-center gap-1.5 transition-colors text-sm font-medium p-1 -ml-1 touch-manipulation min-h-[44px] ${isDetailView ? 'text-blue-600 hover:text-blue-800' : 'text-slate-500 hover:text-slate-800'}`}>
+            <ArrowLeft className="w-4 h-4" /> {headerBackLabel}
           </button>
           <div className="w-px h-5 bg-slate-200" />
           <Brain className="w-4 h-4 text-blue-600" />
