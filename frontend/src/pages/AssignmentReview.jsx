@@ -753,31 +753,30 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                       </td>
                       {subView === 'pending' ? (
                         <td className="px-3 py-1.5">
-                          <div className="flex items-center gap-1.5 min-h-[20px]">
-                            {flag === 'open' ? (
-                              <AiPicks recommendations={run.recommendation?.recommendations || []} />
-                            ) : flag === 'assigned' && run.ticket?.assignedTech ? (
-                              <>
-                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[10px] font-semibold">
+                          <div className="grid grid-cols-[auto_1fr] gap-x-2 items-center min-h-[24px]">
+                            {/* Column 1: Status/Live pill (fixed position) */}
+                            <div className="flex items-center">
+                              {flag === 'assigned' && run.ticket?.assignedTech ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap">
                                   <span className="uppercase tracking-wide">Live</span>
                                   <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
-                                  <span>{run.ticket.assignedTech.name?.split(' ')[0]}</span>
+                                  <span className="max-w-[50px] truncate">{run.ticket.assignedTech.name?.split(' ')[0]}</span>
                                 </span>
-                                {run.recommendation?.recommendations?.length > 0 && <AiPicks recommendations={run.recommendation.recommendations} />}
-                              </>
-                            ) : flag === 'closed' ? (
-                              <>
-                                <span className="text-slate-400 text-[10px]">{run.ticket?.status}</span>
-                                {run.ticket?.assignedTech && (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 px-1.5 py-0.5 text-[10px] font-medium">
-                                    <span className="uppercase tracking-wide">Live</span>
-                                    <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
-                                    <span>{run.ticket.assignedTech.name?.split(' ')[0]}</span>
-                                  </span>
-                                )}
-                                {run.recommendation?.recommendations?.length > 0 && <AiPicks recommendations={run.recommendation.recommendations} />}
-                              </>
-                            ) : <span className="text-slate-300">—</span>}
+                              ) : flag === 'closed' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px]">
+                                  <span className="text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded whitespace-nowrap">{run.ticket?.status}</span>
+                                  {run.ticket?.assignedTech && (
+                                    <span className="inline-flex items-center gap-0.5 text-slate-500">
+                                      <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
+                                    </span>
+                                  )}
+                                </span>
+                              ) : null}
+                            </div>
+                            {/* Column 2: AI picks (always aligned) */}
+                            <div className="flex items-center">
+                              {run.recommendation?.recommendations?.length > 0 && <AiPicks recommendations={run.recommendation.recommendations} />}
+                            </div>
                           </div>
                         </td>
                       ) : (
