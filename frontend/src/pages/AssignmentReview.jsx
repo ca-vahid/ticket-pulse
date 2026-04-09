@@ -146,6 +146,15 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const [subView, setSubView] = useState('pending');
   const [timeRange, setTimeRange] = useState('7d');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [techPhotos, setTechPhotos] = useState({});
+
+  useEffect(() => {
+    assignmentAPI.getCompetencyTechnicians().then(res => {
+      const map = {};
+      for (const t of (res?.data || [])) map[t.id] = t;
+      setTechPhotos(map);
+    }).catch(() => {});
+  }, []);
 
   const getSince = (range) => {
     if (range === 'all') return undefined;
@@ -358,6 +367,21 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     closed: queue.items.filter((r) => !isTicketOpen(r)).length,
   };
 
+  const TechBadge = ({ techId, name, className = '' }) => {
+    const tech = techPhotos[techId];
+    const initials = name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
+    return (
+      <span className={`inline-flex items-center gap-1 ${className}`} title={name}>
+        {tech?.photoUrl ? (
+          <img src={tech.photoUrl} alt="" className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
+        ) : (
+          <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-500 text-[7px] font-bold flex items-center justify-center flex-shrink-0">{initials}</span>
+        )}
+        <span className="truncate max-w-[80px]">{name?.split(' ')[0]}</span>
+      </span>
+    );
+  };
+
   const activeItems = subView === 'pending' ? filteredItems : (subView === 'assigned' ? assignedRuns.items : [...queue.items, ...assignedRuns.items]).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const showActions = subView === 'pending';
 
@@ -382,25 +406,25 @@ function QueueTab({ deepRunId, isAdmin = false }) {
             </div>
             <div className="flex items-center gap-1 mt-1 flex-wrap">
               {subView === 'pending' && flag === 'open' && topRec?.techName && (
-                <span className="text-[11px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">→ {topRec.techName}</span>
+                <span className="text-[11px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5">→ <TechBadge techId={topRec.techId} name={topRec.techName} /></span>
               )}
               {subView === 'pending' && flag === 'assigned' && run.ticket?.assignedTech && (
-                <>
-                  <span className="text-[11px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Assigned: {run.ticket.assignedTech.name}</span>
+                <span className="text-[11px] inline-flex items-center gap-1 flex-wrap">
+                  <span className="font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>
                   {topRec?.techName && topRec.techName !== run.ticket.assignedTech.name && (
-                    <span className="text-[10px] text-blue-400">(AI: {topRec.techName})</span>
+                    <span className="text-[10px] text-blue-400 inline-flex items-center gap-0.5">AI: <TechBadge techId={topRec.techId} name={topRec.techName} /></span>
                   )}
-                </>
+                </span>
               )}
               {subView === 'pending' && flag === 'closed' && (
-                <>
-                  <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{run.ticket?.status}</span>
-                  {run.ticket?.assignedTech && <span className="text-[10px] text-slate-400 ml-0.5">by {run.ticket.assignedTech.name}</span>}
-                  {topRec?.techName && <span className="text-[10px] text-blue-400 ml-0.5">(AI: {topRec.techName})</span>}
-                </>
+                <span className="text-[10px] inline-flex items-center gap-1 flex-wrap">
+                  <span className="text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{run.ticket?.status}</span>
+                  {run.ticket?.assignedTech && <span className="text-slate-400 inline-flex items-center gap-0.5"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>}
+                  {topRec?.techName && <span className="text-blue-400 inline-flex items-center gap-0.5">AI: <TechBadge techId={topRec.techId} name={topRec.techName} /></span>}
+                </span>
               )}
               {subView !== 'pending' && run.assignedTech?.name && (
-                <span className="text-[11px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">→ {run.assignedTech.name}</span>
+                <span className="text-[11px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5">→ <TechBadge techId={run.assignedTech.id} name={run.assignedTech.name} /></span>
               )}
               {subView !== 'pending' && run.decision && (
                 <span className={`px-1 py-0.5 rounded text-[9px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
@@ -647,26 +671,26 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                       {subView === 'pending' ? (
                         <td className="px-3 py-1.5">
                           {flag === 'open' && topRec?.techName ? (
-                            <span className="font-medium text-blue-700">→ {topRec.techName}</span>
+                            <span className="font-medium text-blue-700 inline-flex items-center gap-1">→ <TechBadge techId={topRec.techId} name={topRec.techName} /></span>
                           ) : flag === 'assigned' && run.ticket?.assignedTech ? (
-                            <span>
-                              <span className="text-amber-600 font-medium">Assigned: {run.ticket.assignedTech.name}</span>
+                            <span className="inline-flex items-center gap-1.5 flex-wrap">
+                              <span className="text-amber-600 font-medium inline-flex items-center gap-0.5"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>
                               {topRec?.techName && topRec.techName !== run.ticket.assignedTech.name && (
-                                <span className="text-blue-400 ml-1">(AI: {topRec.techName})</span>
+                                <span className="text-blue-400 text-[10px] inline-flex items-center gap-0.5">AI: <TechBadge techId={topRec.techId} name={topRec.techName} /></span>
                               )}
                             </span>
                           ) : flag === 'closed' ? (
-                            <span>
+                            <span className="inline-flex items-center gap-1.5 flex-wrap">
                               <span className="text-slate-400">{run.ticket?.status}</span>
-                              {run.ticket?.assignedTech && <span className="text-slate-400 ml-1">by {run.ticket.assignedTech.name}</span>}
-                              {topRec?.techName && <span className="text-blue-400 ml-1">(AI: {topRec.techName})</span>}
+                              {run.ticket?.assignedTech && <span className="text-slate-400 inline-flex items-center gap-0.5"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>}
+                              {topRec?.techName && <span className="text-blue-400 text-[10px] inline-flex items-center gap-0.5">AI: <TechBadge techId={topRec.techId} name={topRec.techName} /></span>}
                             </span>
                           ) : <span className="text-slate-300">—</span>}
                         </td>
                       ) : (
                         <td className="px-3 py-1.5">
                           {(run.assignedTech?.name || topRec?.techName) ? (
-                            <span className="font-medium text-blue-700">{run.assignedTech?.name || topRec?.techName}</span>
+                            <span className="font-medium text-blue-700 inline-flex items-center gap-1"><TechBadge techId={run.assignedTech?.id || topRec?.techId} name={run.assignedTech?.name || topRec?.techName} /></span>
                           ) : <span className="text-slate-300">—</span>}
                         </td>
                       )}
