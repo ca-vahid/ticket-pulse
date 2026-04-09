@@ -145,6 +145,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const [queueStatus, setQueueStatus] = useState(null);
   const [subView, setSubView] = useState('pending');
   const [timeRange, setTimeRange] = useState('7d');
+  const [dismissedRuns, setDismissedRuns] = useState({ items: [], total: 0 });
+  const [rejectedRuns, setRejectedRuns] = useState({ items: [], total: 0 });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [techPhotos, setTechPhotos] = useState({});
   const [avatarView, setAvatarView] = useState(false);
@@ -170,20 +172,26 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     try {
       setLoading(true);
       const since = getSince(timeRange);
-      const [queueRes, assignedRes, queuedRes, statusRes] = await Promise.all([
+      const [queueRes, assignedRes, dismissedRes, rejectedRes, queuedRes, statusRes] = await Promise.all([
         assignmentAPI.getQueue(),
         assignmentAPI.getRuns({ decisions: 'approved,modified,auto_assigned', since, sinceField: 'decidedAt', limit: 50 }),
+        assignmentAPI.getRuns({ decisions: 'noise_dismissed', since, sinceField: 'decidedAt', limit: 50 }),
+        assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: 50 }),
         assignmentAPI.getQueuedRuns(),
         assignmentAPI.getQueueStatus().catch(() => null),
       ]);
       setQueue({ items: queueRes?.items || [], total: queueRes?.total || 0 });
       setAssignedRuns({ items: assignedRes?.items || [], total: assignedRes?.total || 0 });
+      setDismissedRuns({ items: dismissedRes?.items || [], total: dismissedRes?.total || 0 });
+      setRejectedRuns({ items: rejectedRes?.items || [], total: rejectedRes?.total || 0 });
       setQueuedRuns(queuedRes?.data || []);
       if (statusRes?.data) setQueueStatus(statusRes.data);
     } catch (err) {
       console.error('Failed to fetch queue:', err);
       setQueue({ items: [], total: 0 });
       setAssignedRuns({ items: [], total: 0 });
+      setDismissedRuns({ items: [], total: 0 });
+      setRejectedRuns({ items: [], total: 0 });
       setQueuedRuns([]);
     } finally {
       setLoading(false);
@@ -456,7 +464,14 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     );
   };
 
-  const activeItems = subView === 'pending' ? filteredItems : (subView === 'assigned' ? assignedRuns.items : [...queue.items, ...assignedRuns.items]).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const activeItems = (() => {
+    if (subView === 'pending') return filteredItems;
+    if (subView === 'assigned') return assignedRuns.items;
+    if (subView === 'dismissed') return dismissedRuns.items;
+    if (subView === 'rejected') return rejectedRuns.items;
+    return [...queue.items, ...assignedRuns.items, ...dismissedRuns.items, ...rejectedRuns.items]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  })();
   const showActions = subView === 'pending';
 
   const renderRunCard = (run) => {
@@ -633,43 +648,28 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         </div>
       )}
 
-      {/* Sub-view tabs + time filter + toolbar */}
+      {/* Sub-view tabs + filters + toolbar */}
       <div className="border border-slate-200 rounded-lg overflow-hidden">
-        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2">
+        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2 space-y-1.5">
+          {/* Row 1: Decision view tabs + right-side controls */}
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            {/* Sub-view pills */}
             <div className="inline-flex items-center gap-0.5 bg-slate-200 rounded-lg p-0.5">
               {[
-                { id: 'pending', label: 'Pending', count: queue.total },
-                { id: 'assigned', label: 'Assigned', count: assignedRuns.total },
-                { id: 'all', label: 'All', count: null },
-              ].map((tab) => (
-                <button key={tab.id} onClick={() => setSubView(tab.id)} className={`px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors touch-manipulation ${subView === tab.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                { id: 'pending', label: 'Pending', count: queue.total, dot: 'bg-yellow-400' },
+                { id: 'assigned', label: 'Assigned', count: assignedRuns.total, dot: 'bg-green-400' },
+                { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400' },
+                { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-red-400' },
+                { id: 'all', label: 'All', count: null, dot: null },
+              ].filter((tab) => tab.id === 'pending' || tab.id === 'all' || tab.count > 0).map((tab) => (
+                <button key={tab.id} onClick={() => { setSubView(tab.id); setFilterTicketStatus('all'); }} className={`px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors touch-manipulation flex items-center gap-1 ${subView === tab.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {tab.dot && <span className={`w-1.5 h-1.5 rounded-full ${tab.dot}`} />}
                   {tab.label}{tab.count != null ? ` (${tab.count})` : ''}
                 </button>
               ))}
             </div>
 
-            {/* Ticket status filter (pending view only) */}
-            {subView === 'pending' && pendingStats.total > 0 && (
-              <div className="inline-flex items-center gap-0.5 bg-slate-200 rounded-lg p-0.5">
-                {[
-                  { id: 'all', label: 'All' },
-                  { id: 'open', label: `Open (${pendingStats.open})` },
-                  { id: 'assigned', label: `Assigned (${pendingStats.assigned})` },
-                  { id: 'closed', label: `Closed (${pendingStats.closed})` },
-                  { id: 'deleted', label: `Deleted (${pendingStats.deleted})` },
-                ].filter((f) => f.id === 'all' || (f.id === 'open' && pendingStats.open) || (f.id === 'assigned' && pendingStats.assigned) || (f.id === 'closed' && pendingStats.closed) || (f.id === 'deleted' && pendingStats.deleted)).map((f) => (
-                  <button key={f.id} onClick={() => setFilterTicketStatus(f.id)} className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors touch-manipulation ${filterTicketStatus === f.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
             <div className="flex-1" />
 
-            {/* Time range pills */}
             <div className="inline-flex items-center gap-0.5 bg-slate-200 rounded-lg p-0.5">
               {['24h', '7d', '30d', 'all'].map((range) => (
                 <button key={range} onClick={() => setTimeRange(range)} className={`px-1.5 py-1 rounded-md text-[11px] font-medium transition-colors touch-manipulation ${timeRange === range ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
@@ -702,6 +702,42 @@ function QueueTab({ deepRunId, isAdmin = false }) {
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          {/* Row 2: Ticket status sub-filters (pending view) */}
+          {subView === 'pending' && pendingStats.total > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">Ticket:</span>
+              <div className="inline-flex items-center gap-0.5 bg-slate-200/70 rounded-lg p-0.5">
+                {[
+                  { id: 'all', label: 'All', count: pendingStats.total, style: '' },
+                  { id: 'open', label: 'Open', count: pendingStats.open, style: 'text-green-700' },
+                  { id: 'assigned', label: 'Assigned', count: pendingStats.assigned, style: 'text-amber-700' },
+                  { id: 'closed', label: 'Closed', count: pendingStats.closed, style: 'text-slate-500' },
+                  { id: 'deleted', label: 'Deleted', count: pendingStats.deleted, style: 'text-red-600' },
+                ].filter((f) => f.id === 'all' || f.count > 0).map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setFilterTicketStatus(f.id)}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors touch-manipulation ${
+                      filterTicketStatus === f.id
+                        ? 'bg-white text-slate-800 shadow-sm'
+                        : `text-slate-500 hover:text-slate-700`
+                    }`}
+                  >
+                    {f.label} {f.id !== 'all' && <span className={`${filterTicketStatus === f.id ? '' : f.style}`}>({f.count})</span>}
+                  </button>
+                ))}
+              </div>
+              {(filterTicketStatus !== 'all' || filterPriority !== 'all') && (
+                <button
+                  onClick={() => { setFilterTicketStatus('all'); setFilterPriority('all'); }}
+                  className="text-[10px] text-blue-600 hover:text-blue-800 font-medium ml-1"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Stats strip */}
@@ -720,7 +756,13 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         {activeItems.length === 0 ? (
           <div className="text-center py-10">
             <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-            <p className="text-slate-500 text-sm font-medium">{subView === 'pending' ? 'No pending assignments' : subView === 'assigned' ? 'No assignments in this period' : 'No runs found'}</p>
+            <p className="text-slate-500 text-sm font-medium">{
+              subView === 'pending' ? 'No pending assignments' :
+              subView === 'assigned' ? 'No assignments in this period' :
+              subView === 'dismissed' ? 'No dismissed runs in this period' :
+              subView === 'rejected' ? 'No rejected runs in this period' :
+              'No runs found'
+            }</p>
             <button onClick={fetchQueue} className="mt-2 text-xs text-blue-600 hover:underline inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
           </div>
         ) : (
