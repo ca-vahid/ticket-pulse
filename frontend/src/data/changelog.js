@@ -1,6 +1,25 @@
-export const APP_VERSION = '1.9.1-preview';
+export const APP_VERSION = '1.10.0-preview';
 
 export const changelog = [
+  {
+    version: '1.10.0-preview',
+    date: 'April 8, 2026',
+    entries: [
+      { type: 'improved', text: 'Assignment pipeline audit hardening -- end-to-end review of queue, decision, sync, and polling flows closed multiple state gaps so the pipeline behaves deterministically instead of relying on operator workarounds' },
+      { type: 'fixed', text: 'Open-run concurrency guard -- queued/running assignment runs are now protected by a database partial unique index on ticket_id, and pipeline start/queue paths gracefully recover when a concurrent request already claimed the ticket' },
+      { type: 'fixed', text: 'Long-running pipeline heartbeat -- active LLM runs now refresh the parent run heartbeat during streaming and tool execution so stale-run cleanup no longer marks healthy runs as failed mid-analysis' },
+      { type: 'fixed', text: 'Decision transition enforcement -- approve/modify/reject/dismiss actions now require a completed run that is still pending review, preventing double-decides and late mutations on already-resolved runs' },
+      { type: 'fixed', text: 'Manual FreshService sync safety -- sync and sync-preview now require a syncable completed decision, and already-synced runs reject repeat real writes unless an explicit force flag is used' },
+      { type: 'fixed', text: 'Email polling dedupe repaired -- mailbox-triggered assignment checks now use the same active-run guard as the rest of the pipeline instead of calling a missing repository method' },
+      { type: 'fixed', text: 'Retry polling for failed assignment runs -- post-sync unassigned ticket polling now retries only when the latest pipeline run failed, was cancelled, was superseded, or was marked stale; pending/completed runs no longer block or duplicate reprocessing incorrectly' },
+      { type: 'fixed', text: 'Deleted-ticket reconciliation -- when a FreshService ticket disappears, pending-review assignment runs are now superseded automatically so reviewers cannot keep acting on dead tickets' },
+      { type: 'improved', text: 'Queued business-hours drain resiliency -- queued assignment runs are now drained during business hours even if the preceding sync cycle failed, reducing unnecessary queue stalls' },
+      { type: 'security', text: 'Assignment review UI now matches reviewer RBAC -- non-admin reviewers no longer see invalid dismiss/delete/run-now/manual-trigger/sync controls that the backend would reject' },
+      { type: 'improved', text: 'Queue copy and status messaging aligned with real behavior -- "Delete all" now accurately describes the bulk action, FreshService sync controls honor admin access, and Pending ticket status is treated consistently across queue/detail views' },
+      { type: 'improved', text: 'Live pipeline empty-state wording clarified -- runs with no technician recommendations now explain the outcome without implying every such run was auto-dismissed' },
+      { type: 'database', text: 'New migration: partial unique index on assignment_pipeline_runs(ticket_id) for rows with status IN (queued, running); run `prisma migrate deploy` before deploying this release' },
+    ],
+  },
   {
     version: '1.9.1-preview',
     date: 'April 6, 2026',

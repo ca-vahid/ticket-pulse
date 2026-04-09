@@ -238,16 +238,25 @@ router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) =
   if (run.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Pipeline run belongs to a different workspace' });
   }
+  if (run.status !== 'completed' || run.decision !== 'pending_review') {
+    return res.status(409).json({
+      success: false,
+      message: `Run is not awaiting review (status: ${run.status}, decision: ${run.decision || 'none'})`,
+    });
+  }
 
   const decidedByEmail = req.session?.user?.email || 'unknown';
 
-  const updated = await assignmentRepository.recordDecision(runId, {
+  const updated = await assignmentRepository.recordDecisionIfPending(runId, {
     decision,
     assignedTechId: assignedTechId || run.recommendation?.recommendations?.[0]?.techId,
     decidedByEmail,
     overrideReason: decision === 'modified' ? overrideReason : null,
     decisionNote: decisionNote?.trim() || null,
   });
+  if (!updated) {
+    return res.status(409).json({ success: false, message: 'Run was already decided or is no longer pending review' });
+  }
 
   // Record feedback for learning (include decision note for all decisions)
   const ticket = run.ticket;
@@ -318,22 +327,44 @@ router.post('/runs/:id/dismiss', requireAdmin, asyncHandler(async (req, res) => 
   if (run.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Pipeline run belongs to a different workspace' });
   }
-  await assignmentRepository.updatePipelineRun(runId, { decision: 'noise_dismissed', decidedAt: new Date(), decidedByEmail: req.session?.user?.email || 'admin' });
+  if (run.status !== 'completed' || run.decision !== 'pending_review') {
+    return res.status(409).json({
+      success: false,
+      message: `Run is not awaiting review (status: ${run.status}, decision: ${run.decision || 'none'})`,
+    });
+  }
+  const dismissed = await assignmentRepository.dismissRunIfPending(runId, req.session?.user?.email || 'admin');
+  if (!dismissed) {
+    return res.status(409).json({ success: false, message: 'Run was already decided or is no longer pending review' });
+  }
 
-  // FreshService write-back: close noise ticket
-  const config = await assignmentRepository.getConfig(req.workspaceId);
-  freshServiceActionService.execute(runId, req.workspaceId, config?.dryRunMode ?? true).catch((err) =>
-    logger.warn('FreshService sync failed after dismiss', { runId, error: err.message }),
-  );
+  const hadRecommendations = run.recommendation?.recommendations?.length > 0;
+
+  if (!hadRecommendations) {
+    // True noise (LLM produced no candidates) — sync to FreshService to close
+    const config = await assignmentRepository.getConfig(req.workspaceId);
+    freshServiceActionService.execute(runId, req.workspaceId, config?.dryRunMode ?? true).catch((err) =>
+      logger.warn('FreshService sync failed after dismiss', { runId, error: err.message }),
+    );
+  } else {
+    logger.info('Dismiss skipped FreshService sync: run had valid recommendations', { runId, recCount: run.recommendation.recommendations.length });
+  }
 
   res.json({ success: true, message: 'Run dismissed' });
 }));
 
 router.post('/runs/:id/sync', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
+  const force = req.query.force === 'true';
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+  }
+  if (run.status !== 'completed' || !['approved', 'modified', 'auto_assigned', 'noise_dismissed'].includes(run.decision)) {
+    return res.status(400).json({ success: false, message: 'Run is not in a syncable state' });
+  }
+  if (run.syncStatus === 'synced' && !force) {
+    return res.status(409).json({ success: false, message: 'Run already synced. Use force=true to resync intentionally.' });
   }
   const result = await freshServiceActionService.execute(runId, req.workspaceId, false);
   res.json({ success: true, data: result });
@@ -344,6 +375,9 @@ router.post('/runs/:id/sync-preview', requireAdmin, asyncHandler(async (req, res
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+  }
+  if (run.status !== 'completed' || !['approved', 'modified', 'auto_assigned', 'noise_dismissed'].includes(run.decision)) {
+    return res.status(400).json({ success: false, message: 'Run is not in a syncable state' });
   }
   const result = await freshServiceActionService.execute(runId, req.workspaceId, true);
   res.json({ success: true, data: result });

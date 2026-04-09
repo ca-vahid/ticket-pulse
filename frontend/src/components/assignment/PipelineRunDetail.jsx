@@ -390,7 +390,7 @@ const SYNC_BADGES = {
   skipped: { label: 'Sync skipped', style: 'bg-gray-100 text-gray-500', icon: '–' },
 };
 
-function SyncStatusCard({ run, onSyncComplete }) {
+function SyncStatusCard({ run, onSyncComplete, isAdmin = false }) {
   const [syncing, setSyncing] = useState(false);
   const [localSyncStatus, setLocalSyncStatus] = useState(run.syncStatus);
   const [localSyncedAt, setLocalSyncedAt] = useState(run.syncedAt);
@@ -432,18 +432,20 @@ function SyncStatusCard({ run, onSyncComplete }) {
           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${badge.style}`}>{badge.icon} {badge.label}</span>
           {localSyncedAt && <span className="text-xs text-gray-400">{new Date(localSyncedAt).toLocaleString()}</span>}
         </div>
-        <div className="flex gap-1.5">
-          {(localSyncStatus === 'dry_run' || localSyncStatus === 'failed') && (
-            <button onClick={() => handleSync(false)} disabled={syncing} className="px-2.5 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
-              {syncing ? 'Syncing...' : localSyncStatus === 'failed' ? 'Retry Sync' : 'Execute for Real'}
-            </button>
-          )}
-          {!localSyncStatus && (
-            <button onClick={() => handleSync(true)} disabled={syncing} className="px-2.5 py-1 border rounded text-xs font-medium hover:bg-slate-50 disabled:opacity-50">
-              Preview Sync
-            </button>
-          )}
-        </div>
+        {isAdmin && (
+          <div className="flex gap-1.5">
+            {(localSyncStatus === 'dry_run' || localSyncStatus === 'failed') && (
+              <button onClick={() => handleSync(false)} disabled={syncing} className="px-2.5 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
+                {syncing ? 'Syncing...' : localSyncStatus === 'failed' ? 'Retry Sync' : 'Execute for Real'}
+              </button>
+            )}
+            {!localSyncStatus && (
+              <button onClick={() => handleSync(true)} disabled={syncing} className="px-2.5 py-1 border rounded text-xs font-medium hover:bg-slate-50 disabled:opacity-50">
+                Preview Sync
+              </button>
+            )}
+          </div>
+        )}
       </div>
       {localSyncError && <p className="text-xs text-red-600 mt-1.5">{localSyncError}</p>}
       {run.syncPayload?.preview && <p className="text-xs text-slate-500 mt-1.5">Actions: {run.syncPayload.preview}</p>}
@@ -521,7 +523,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const ticketUrl = fsDomain && ticket?.freshserviceTicketId ? `https://${fsDomain}/a/tickets/${ticket.freshserviceTicketId}` : null;
 
   const isTicketStale = ticket && (
-    (ticket.status && !['Open', 'open', '2'].includes(String(ticket.status))) ||
+    (ticket.status && !['Open', 'open', '2', 'Pending', 'pending', '3'].includes(String(ticket.status))) ||
     (ticket.assignedTechId && ticket.assignedTech && isPending)
   );
 
@@ -629,7 +631,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
 
       {/* FreshService Sync Status */}
       {run.syncStatus && (
-        <SyncStatusCard run={run} onSyncComplete={onSyncComplete} />
+        <SyncStatusCard run={run} onSyncComplete={onSyncComplete} isAdmin={isAdmin} />
       )}
 
       {/* Recommendations + Decision (shared component) */}

@@ -73,20 +73,15 @@ class ScheduledSyncService {
     const job = cron.schedule(
       cronExpression,
       async () => {
-        let syncSucceeded = false;
         try {
           logger.info(`Scheduled sync triggered for workspace "${wsName}"`);
           await syncService.performFullSync({ workspaceId: wsId });
-          syncSucceeded = true;
         } catch (error) {
           logger.error(`Scheduled sync failed for workspace "${wsName}":`, error);
         }
 
         // Drain queued assignment runs if inside business hours
         try {
-          if (!syncSucceeded) {
-            return;
-          }
           const queuedCount = await assignmentRepository.countQueuedRuns(wsId);
           if (queuedCount > 0) {
             const bh = await availabilityService.isBusinessHours(new Date(), tz, wsId);

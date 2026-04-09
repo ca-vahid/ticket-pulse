@@ -16,7 +16,7 @@ describe('competency prompt default', () => {
   });
 
   test('instructs to reuse existing categories', () => {
-    expect(DEFAULT_COMPETENCY_PROMPT).toContain('Reuse existing workspace categories');
+    expect(DEFAULT_COMPETENCY_PROMPT).toContain('reuse existing categories whenever they fit');
   });
 
   test('does not reference removed tools', () => {

@@ -1,6 +1,7 @@
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import settingsRepository from './settingsRepository.js';
 import prisma from './prisma.js';
+import { shouldCloseNoiseDismissedRun } from './assignmentFlowGuards.js';
 import logger from '../utils/logger.js';
 
 class FreshServiceActionService {
@@ -51,6 +52,13 @@ class FreshServiceActionService {
       actions.push({ type: 'note', ticketId: fsTicketId, body: noteBody, private: true });
 
     } else if (decision === 'noise_dismissed') {
+      if (!shouldCloseNoiseDismissedRun(run)) {
+        logger.info('FreshService sync: skipping close for noise_dismissed run that had valid recommendations', {
+          runId: run.id, recCount: run.recommendation.recommendations.length,
+        });
+        return { actions: [], preview: 'Skipped: run had valid recommendations — admin dismissed the pipeline run, not the ticket', error: null };
+      }
+
       const classification = run.recommendation?.ticketClassification || 'noise';
       const reasoning = run.recommendation?.overallReasoning || 'Classified as non-actionable';
 

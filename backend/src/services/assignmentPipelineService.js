@@ -62,9 +62,26 @@ class AssignmentPipelineService {
 
       if (!bh.isBusinessHours) {
         const queuedReason = bh.reason || 'Outside business hours';
-        const run = await assignmentRepository.createQueuedRun({
-          ticketId, workspaceId, triggerSource, queuedReason,
-        });
+        let run;
+        try {
+          run = await assignmentRepository.createQueuedRun({
+            ticketId, workspaceId, triggerSource, queuedReason,
+          });
+        } catch (error) {
+          const existingRun = await assignmentRepository.getOpenPipelineRun(ticketId);
+          if (existingRun) {
+            logger.info('Pipeline queue skipped: open run was created concurrently', {
+              ticketId,
+              existingRunId: existingRun.id,
+              existingStatus: existingRun.status,
+              triggerSource,
+            });
+            emit({ type: 'error', message: `Pipeline already ${existingRun.status} for this ticket (run #${existingRun.id})` });
+            emit({ type: 'complete' });
+            return { skipped: true, reason: 'open_run_exists', existingRunId: existingRun.id };
+          }
+          throw error;
+        }
         logger.info('Pipeline queued (outside business hours)', {
           runId: run.id, ticketId, workspaceId, triggerSource, queuedReason,
         });
@@ -76,14 +93,31 @@ class AssignmentPipelineService {
 
     // ── Create running run and execute ──────────────────────────────────
     const promptVersion = await promptRepository.getPublished(workspaceId);
-    const run = await assignmentRepository.createPipelineRun({
-      ticketId,
-      workspaceId,
-      status: 'running',
-      triggerSource,
-      llmModel: assignmentConfig.llmModel,
-      promptVersionId: promptVersion.id,
-    });
+    let run;
+    try {
+      run = await assignmentRepository.createPipelineRun({
+        ticketId,
+        workspaceId,
+        status: 'running',
+        triggerSource,
+        llmModel: assignmentConfig.llmModel,
+        promptVersionId: promptVersion.id,
+      });
+    } catch (error) {
+      const existingRun = await assignmentRepository.getOpenPipelineRun(ticketId);
+      if (existingRun) {
+        logger.info('Pipeline start skipped: open run was created concurrently', {
+          ticketId,
+          existingRunId: existingRun.id,
+          existingStatus: existingRun.status,
+          triggerSource,
+        });
+        emit({ type: 'error', message: `Pipeline already ${existingRun.status} for this ticket (run #${existingRun.id})` });
+        emit({ type: 'complete' });
+        return { skipped: true, reason: 'open_run_exists', existingRunId: existingRun.id };
+      }
+      throw error;
+    }
 
     return this._executeRun(run.id, ticketId, workspaceId, triggerSource, pipelineStart, emit, signal);
   }
@@ -198,9 +232,23 @@ class AssignmentPipelineService {
     }
 
     const client = new Anthropic({ apiKey });
-    const totalTokens = 0;
+    let totalTokens = 0;
     let stepCounter = 0;
     let fullTranscript = '';
+    let lastHeartbeatAt = Date.now();
+    let heartbeatPromise = Promise.resolve();
+
+    const queueHeartbeat = () => {
+      const now = Date.now();
+      if (now - lastHeartbeatAt < 10000) {
+        return;
+      }
+
+      lastHeartbeatAt = now;
+      heartbeatPromise = heartbeatPromise
+        .then(() => assignmentRepository.touchPipelineRun(runId))
+        .catch((error) => logger.debug('Pipeline heartbeat failed', { runId, error: error.message }));
+    };
 
     const messages = [
       { role: 'user', content: `Analyze ticket ID ${ticketId} (use get_ticket_details to read it) and recommend the best technician for assignment. When you have completed your analysis, you MUST call the submit_recommendation tool with your final recommendation.` },
@@ -247,12 +295,14 @@ class AssignmentPipelineService {
         stream.on('text', (text) => {
           fullTranscript += text;
           emit({ type: 'text', text });
+          queueHeartbeat();
         });
 
         let toolJsonLength = 0;
         let lastProgressAt = 0;
         stream.on('inputJson', (partialJson) => {
           toolJsonLength += partialJson.length;
+          queueHeartbeat();
           const now = Date.now();
           if (now - lastProgressAt > 1000) {
             lastProgressAt = now;
@@ -262,6 +312,10 @@ class AssignmentPipelineService {
         });
 
         const finalMessage = await stream.finalMessage();
+        const usage = finalMessage?.usage || {};
+        totalTokens += Object.values(usage).reduce((sum, value) => (
+          typeof value === 'number' ? sum + value : sum
+        ), 0);
 
         const toolResultMap = new Map();
 
@@ -295,6 +349,7 @@ class AssignmentPipelineService {
             });
 
             emit({ type: 'tool_call', name: block.name, input: block.input, toolUseId: block.id });
+            queueHeartbeat();
 
             const toolStart = Date.now();
             let toolResult;
@@ -312,6 +367,7 @@ class AssignmentPipelineService {
               durationMs: toolDuration,
               output: toolResult,
             });
+            queueHeartbeat();
 
             emit({ type: 'tool_result', name: block.name, data: toolResult, durationMs: toolDuration, toolUseId: block.id });
 

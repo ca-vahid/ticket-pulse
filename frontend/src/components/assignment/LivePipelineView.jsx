@@ -3,7 +3,7 @@ import { assignmentAPI, getAuthToken, getWorkspaceId } from '../../services/api'
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  Loader2, CheckCircle, XCircle, User, AlertTriangle, Brain,
+  Loader2, CheckCircle, XCircle, AlertTriangle, Brain,
   Users, Search, MapPin, X, ChevronDown, ChevronRight, Star, Sparkles,
 } from 'lucide-react';
 import {
@@ -62,7 +62,7 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
           {data?.ticketClassification && (
             <p className="text-xs text-yellow-600 mt-2">Classification: {data.ticketClassification}</p>
           )}
-          <p className="text-xs text-gray-400 mt-2">This run has been auto-dismissed.</p>
+          <p className="text-xs text-gray-400 mt-2">No technician recommendations were produced for this run.</p>
         </div>
       </div>
     );
@@ -503,7 +503,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
           {runId && <CopyBadge label="Run" value={runId} />}
         </div>
         <div className="flex items-center gap-2">
-          {showExistingRun && (
+          {showExistingRun && existingRun?.status !== 'queued' && (
             <button
               onClick={startStream}
               className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors flex items-center gap-1"

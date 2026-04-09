@@ -222,6 +222,11 @@ class AssignmentRepository {
     }
   }
 
+  async hasActivePipelineRun(ticketId) {
+    const run = await this.getOpenPipelineRun(ticketId);
+    return Boolean(run);
+  }
+
   // ─── Queue-specific methods ────────────────────────────────────────────
 
   async createQueuedRun({ ticketId, workspaceId, triggerSource, queuedReason }) {
@@ -321,6 +326,17 @@ class AssignmentRepository {
     } catch (error) {
       logger.error('Error counting queued runs:', error);
       return 0;
+    }
+  }
+
+  async touchPipelineRun(id) {
+    try {
+      await prisma.$executeRawUnsafe(
+        'UPDATE assignment_pipeline_runs SET updated_at = NOW() WHERE id = $1',
+        id,
+      );
+    } catch (error) {
+      logger.warn('Error touching pipeline run heartbeat:', { id, error: error.message });
     }
   }
 
@@ -439,6 +455,64 @@ class AssignmentRepository {
     } catch (error) {
       logger.error('Error recording decision:', error);
       throw new DatabaseError('Failed to record decision', error);
+    }
+  }
+
+  async recordDecisionIfPending(runId, {
+    decision,
+    assignedTechId,
+    decidedByEmail,
+    overrideReason,
+    decisionNote,
+  }) {
+    try {
+      const decidedAt = new Date();
+      const result = await prisma.assignmentPipelineRun.updateMany({
+        where: {
+          id: runId,
+          status: 'completed',
+          decision: 'pending_review',
+        },
+        data: {
+          decision,
+          assignedTechId,
+          decidedByEmail,
+          decidedAt,
+          overrideReason,
+          decisionNote: decisionNote || null,
+        },
+      });
+
+      if (result.count === 0) {
+        return null;
+      }
+
+      return await prisma.assignmentPipelineRun.findUnique({ where: { id: runId } });
+    } catch (error) {
+      logger.error('Error recording guarded decision:', error);
+      throw new DatabaseError('Failed to record decision', error);
+    }
+  }
+
+  async dismissRunIfPending(runId, decidedByEmail) {
+    try {
+      const result = await prisma.assignmentPipelineRun.updateMany({
+        where: {
+          id: runId,
+          status: 'completed',
+          decision: 'pending_review',
+        },
+        data: {
+          decision: 'noise_dismissed',
+          decidedAt: new Date(),
+          decidedByEmail,
+        },
+      });
+
+      return result.count > 0;
+    } catch (error) {
+      logger.error('Error dismissing guarded run:', error);
+      throw new DatabaseError('Failed to dismiss run', error);
     }
   }
 }

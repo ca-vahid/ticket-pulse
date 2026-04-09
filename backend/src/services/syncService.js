@@ -15,6 +15,7 @@ import csatService from './csatService.js';
 import noiseRuleService from './noiseRuleService.js';
 import assignmentRepository from './assignmentRepository.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
+import { shouldTriggerAssignmentForLatestRun } from './assignmentFlowGuards.js';
 import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
@@ -1298,18 +1299,31 @@ class SyncService {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const { default: prisma } = await import('./prisma.js');
-    const unassignedTickets = await prisma.ticket.findMany({
+    const candidateTickets = await prisma.ticket.findMany({
       where: {
         workspaceId,
         assignedTechId: null,
         createdAt: { gte: cutoff },
         isNoise: false,
-        pipelineRuns: { none: {} },
       },
-      select: { id: true, freshserviceTicketId: true, subject: true },
+      select: {
+        id: true,
+        freshserviceTicketId: true,
+        subject: true,
+        pipelineRuns: {
+          select: { id: true, status: true, decision: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
       orderBy: { createdAt: 'desc' },
-      take: maxPerCycle,
+      take: Math.max(maxPerCycle * 3, maxPerCycle),
     });
+
+    const unassignedTickets = candidateTickets
+      .filter((ticket) => shouldTriggerAssignmentForLatestRun(ticket.pipelineRuns?.[0] || null))
+      .slice(0, maxPerCycle)
+      .map(({ pipelineRuns: _pipelineRuns, ...ticket }) => ticket);
 
     if (unassignedTickets.length === 0) return;
 
@@ -1384,6 +1398,17 @@ class SyncService {
               oldStatus: ticket.status,
               newStatus: 'Deleted',
               note: reason,
+            },
+          });
+          await prisma.assignmentPipelineRun.updateMany({
+            where: {
+              ticketId: ticket.id,
+              status: 'completed',
+              decision: 'pending_review',
+            },
+            data: {
+              status: 'superseded',
+              errorMessage: reason,
             },
           });
           deletedCount++;

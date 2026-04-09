@@ -11,7 +11,7 @@ import {
   ArrowLeft, Inbox, History, Settings2, Award, RefreshCw, Loader2,
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
-  ArrowUpDown, ArrowUp, ArrowDown, Eye, Filter, Save, Check,
+  ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -22,7 +22,7 @@ const ALL_TABS = [
   { id: 'config', label: 'Configuration', icon: Settings2, minRole: 'admin' },
 ];
 
-function ManualTriggerPanel() {
+function ManualTriggerPanel({ isAdmin = false }) {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -34,8 +34,7 @@ function ManualTriggerPanel() {
       setLoading(true);
       const res = await assignmentAPI.getRecentTickets({ limit: 30, unassigned: showAll ? 'false' : 'true' });
       setTickets(res?.data || []);
-    } catch (err) {
-      console.error('Failed to fetch tickets:', err);
+    } catch {
       setTickets([]);
     } finally {
       setLoading(false);
@@ -43,6 +42,10 @@ function ManualTriggerPanel() {
   }, [showAll]);
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
+
+  if (!isAdmin) {
+    return null;
+  }
 
   const handleTrigger = (ticketId) => {
     navigate(`/assignments/live/${ticketId}`);
@@ -95,7 +98,6 @@ function ManualTriggerPanel() {
         <div className="space-y-1.5 max-h-72 overflow-y-auto">
           {filtered.map((ticket) => {
             const hasPipeline = ticket.pipelineRuns?.length > 0;
-            const pipelineStatus = ticket.pipelineRuns?.[0]?.status;
             return (
               <div key={ticket.id} className="flex items-center justify-between bg-white border rounded-lg px-3 py-2.5 sm:py-2 gap-2">
                 <div className="flex-1 min-w-0">
@@ -195,8 +197,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       setQueuedRuns(queuedRes?.data || []);
       if (statusRes?.data) setQueueStatus(statusRes.data);
       hasLoadedOnce.current = true;
-    } catch (err) {
-      console.error('Failed to fetch queue:', err);
+    } catch {
       setQueue({ items: [], total: 0 });
       setAssignedRuns({ items: [], total: 0 });
       setDismissedRuns({ items: [], total: 0 });
@@ -216,8 +217,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         try {
           const res = await assignmentAPI.getRun(parseInt(deepRunId));
           setSelectedRun(res?.data || null);
-        } catch (err) {
-          console.error('Failed to load deep-linked run:', err);
+        } catch {
+          setSelectedRun(null);
         }
       })();
     } else {
@@ -238,7 +239,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       navigate('/assignments/queue');
       await fetchQueue();
     } catch (err) {
-      console.error('Failed to submit decision:', err);
+      setActionMsg(`Failed: ${err.message}`);
+      setTimeout(() => setActionMsg(null), 3000);
     } finally {
       setDeciding(false);
     }
@@ -252,7 +254,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       await fetchQueue();
       setTimeout(() => setActionMsg(null), 2000);
     } catch (err) {
-      console.error('Failed to dismiss run:', err);
+      setActionMsg(`Failed: ${err.message}`);
+      setTimeout(() => setActionMsg(null), 3000);
     }
   };
 
@@ -270,7 +273,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       await fetchQueue();
       setTimeout(() => setActionMsg(null), 2000);
     } catch (err) {
-      console.error('Failed to delete run:', err);
+      setActionMsg(`Failed: ${err.message}`);
+      setTimeout(() => setActionMsg(null), 3000);
     }
   };
 
@@ -279,11 +283,12 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     try {
       await assignmentAPI.bulkDeleteRuns({ decision: 'pending_review' });
       setShowClearConfirm(false);
-      setActionMsg('All cleared');
+      setActionMsg('Deleted pending runs');
       await fetchQueue();
       setTimeout(() => setActionMsg(null), 2000);
     } catch (err) {
-      console.error('Failed to clear all:', err);
+      setActionMsg(`Failed: ${err.message}`);
+      setTimeout(() => setActionMsg(null), 3000);
     } finally {
       setClearing(false);
     }
@@ -330,7 +335,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       await fetchQueue();
       setTimeout(() => setActionMsg(null), 2000);
     } catch (err) {
-      console.error('Quick approve failed:', err);
+      setActionMsg(`Failed: ${err.message}`);
+      setTimeout(() => setActionMsg(null), 3000);
     } finally {
       setQuickApproving(false);
     }
@@ -462,10 +468,10 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   );
 
   const AiPicks = ({ recommendations = [] }) => {
-    if (!recommendations.length) return null;
-    const [top, ...rest] = recommendations;
     const [open, setOpen] = useState(false);
     const hoverTimeoutRef = useRef(null);
+    if (!recommendations.length) return null;
+    const [top, ...rest] = recommendations;
 
     const showPopover = () => {
       if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
@@ -690,15 +696,19 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                 <button onClick={(e) => openQuickApprove(e, run)} className={`p-1.5 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 active:bg-green-50'}`} aria-label="Quick approve">
                   <Check className="w-4 h-4" />
                 </button>
-                <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
-                  <XCircle className="w-4 h-4" />
-                </button>
-                {confirmDeleteId === run.id ? (
-                  <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold touch-manipulation min-h-[32px]">Delete?</button>
-                ) : (
-                  <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                {isAdmin && (
+                  <>
+                    <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
+                      <XCircle className="w-4 h-4" />
+                    </button>
+                    {confirmDeleteId === run.id ? (
+                      <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold touch-manipulation min-h-[32px]">Delete?</button>
+                    ) : (
+                      <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -707,7 +717,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         )}
 
         {/* Pending with no recs (noise/deleted) — still show actions */}
-        {subView === 'pending' && (recs.length === 0 || flag === 'deleted') && showActions && (
+        {subView === 'pending' && (recs.length === 0 || flag === 'deleted') && showActions && isAdmin && (
           <div className="flex items-center justify-end gap-0 mt-1.5 relative">
             <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
               <XCircle className="w-4 h-4" />
@@ -728,7 +738,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   return (
     <div className="space-y-4">
       {actionMsg && (
-        <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{actionMsg}</div>
+        <div className={`text-sm rounded-lg px-3 py-2 border ${actionMsg.startsWith('Failed:') ? 'text-red-700 bg-red-50 border-red-200' : 'text-green-700 bg-green-50 border-green-200'}`}>{actionMsg}</div>
       )}
 
       {/* Queued for business hours */}
@@ -761,18 +771,20 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                   <p className="font-semibold text-slate-800 text-sm leading-snug">{run.ticket?.subject || 'No subject'}</p>
                   <p className="text-xs text-slate-500 mt-0.5">{run.queuedReason || 'Outside business hours'}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={(e) => handleRunNow(e, run.id)} className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center justify-center gap-1.5 shadow-sm touch-manipulation min-h-[44px]">
-                    <Play className="w-3.5 h-3.5" /> Run Now
-                  </button>
-                  {confirmDeleteId === run.id ? (
-                    <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-semibold touch-manipulation min-h-[44px]">Delete?</button>
-                  ) : (
-                    <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-2.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg touch-manipulation min-h-[44px]" title="Delete">
-                      <Trash2 className="w-4 h-4" />
+                {isAdmin && (
+                  <div className="flex items-center gap-2">
+                    <button onClick={(e) => handleRunNow(e, run.id)} className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center justify-center gap-1.5 shadow-sm touch-manipulation min-h-[44px]">
+                      <Play className="w-3.5 h-3.5" /> Run Now
                     </button>
-                  )}
-                </div>
+                    {confirmDeleteId === run.id ? (
+                      <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-semibold touch-manipulation min-h-[44px]">Delete?</button>
+                    ) : (
+                      <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-2.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg touch-manipulation min-h-[44px]" title="Delete">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -781,7 +793,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
               <th className="text-left px-4 py-1.5 font-medium">Ticket</th>
               <th className="text-left px-4 py-1.5 font-medium">Reason</th>
               <th className="text-left px-4 py-1.5 font-medium">Queued At</th>
-              <th className="px-4 py-1.5 text-right font-medium">Actions</th>
+              {isAdmin && <th className="px-4 py-1.5 text-right font-medium">Actions</th>}
             </tr></thead>
             <tbody>
               {queuedRuns.map((run) => (
@@ -789,16 +801,18 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                   <td className="px-4 py-3"><span className="text-xs text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span><span className="ml-2 font-semibold text-slate-800">{run.ticket?.subject || 'No subject'}</span></td>
                   <td className="px-4 py-3 text-xs text-slate-500">{run.queuedReason || 'Outside business hours'} · via {run.triggerSource}</td>
                   <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{run.queuedAt ? new Date(run.queuedAt).toLocaleString() : ''}</td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-2">
-                      <button onClick={(e) => handleRunNow(e, run.id)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center gap-1.5 shadow-sm"><Play className="w-3.5 h-3.5" /> Run Now</button>
-                      {confirmDeleteId === run.id ? (
-                        <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
-                      ) : (
-                        <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg" title="Delete"><Trash2 className="w-4 h-4" /></button>
-                      )}
-                    </div>
-                  </td>
+                  {isAdmin && (
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={(e) => handleRunNow(e, run.id)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center gap-1.5 shadow-sm"><Play className="w-3.5 h-3.5" /> Run Now</button>
+                        {confirmDeleteId === run.id ? (
+                          <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
+                        ) : (
+                          <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -890,7 +904,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
 
               {subView === 'pending' && queue.total > 0 && isAdmin && (
                 <button type="button" onClick={() => setShowClearConfirm(true)} className="flex touch-manipulation items-center gap-1 rounded border border-red-200 px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 hover:text-red-700">
-                  <Trash2 className="h-3 w-3" /> Clear all
+                  <Trash2 className="h-3 w-3" /> Delete all
                 </button>
               )}
               <button
@@ -913,7 +927,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
           <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center gap-3 flex-wrap">
             <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
             <p className="text-sm text-red-800 flex-1 min-w-0">
-              Dismiss all <strong>{queue.total}</strong> pending reviews? This marks them as noise and cannot be undone.
+              Delete all <strong>{queue.total}</strong> pending reviews? This permanently removes these pipeline runs from Ticket Pulse and does not change the FreshService tickets.
             </p>
             <div className="flex items-center gap-2">
               <button
@@ -928,7 +942,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                 className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
               >
                 {clearing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                {clearing ? 'Clearing...' : 'Yes, dismiss all'}
+                {clearing ? 'Deleting...' : 'Yes, delete all'}
               </button>
             </div>
           </div>
@@ -990,7 +1004,6 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                 {activeItems.map((run) => {
                   const topRec = run.recommendation?.recommendations?.[0];
                   const flag = getTicketFlag(run);
-                  const isStale = flag !== 'open';
                   return (
                     <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'deleted' ? 'opacity-40 bg-red-50/30' : subView === 'pending' && flag === 'closed' ? 'opacity-50 bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : ''}`} onClick={() => handleSelectRun(run.id)}>
                       <td className="px-3 py-1.5">
@@ -1080,11 +1093,15 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                             {run.recommendation?.recommendations?.length > 0 && flag !== 'deleted' && (
                               <button onClick={(e) => openQuickApprove(e, run)} className={`p-1 rounded transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 hover:text-green-700 hover:bg-green-50'}`} title="Quick approve"><Check className="w-3.5 h-3.5" /></button>
                             )}
-                            <button onClick={(e) => handleDismiss(e, run.id)} className="p-1 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 rounded" title="Dismiss"><XCircle className="w-3.5 h-3.5" /></button>
-                            {confirmDeleteId === run.id ? (
-                              <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
-                            ) : (
-                              <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                            {isAdmin && (
+                              <>
+                                <button onClick={(e) => handleDismiss(e, run.id)} className="p-1 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 rounded" title="Dismiss"><XCircle className="w-3.5 h-3.5" /></button>
+                                {confirmDeleteId === run.id ? (
+                                  <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
+                                ) : (
+                                  <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                                )}
+                              </>
                             )}
                           </div>
                           <QuickApprovePopover run={run} />
@@ -1099,12 +1116,12 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         )}
       </div>
 
-      <ManualTriggerPanel />
+      <ManualTriggerPanel isAdmin={isAdmin} />
     </div>
   );
 }
 
-function HistoryTab({ deepRunId }) {
+function HistoryTab({ deepRunId, isAdmin = false }) {
   const navigate = useNavigate();
   const [runs, setRuns] = useState({ items: [], total: 0 });
   const [selectedRun, setSelectedRun] = useState(null);
@@ -1121,8 +1138,7 @@ function HistoryTab({ deepRunId }) {
       setLoading(true);
       const res = await assignmentAPI.getRuns({ limit, offset: page * limit });
       setRuns({ items: res?.items || [], total: res?.total || 0 });
-    } catch (err) {
-      console.error('Failed to fetch runs:', err);
+    } catch {
       setRuns({ items: [], total: 0 });
     } finally {
       setLoading(false);
@@ -1137,8 +1153,8 @@ function HistoryTab({ deepRunId }) {
         try {
           const res = await assignmentAPI.getRun(parseInt(deepRunId));
           setSelectedRun(res?.data || null);
-        } catch (err) {
-          console.error('Failed to load deep-linked run:', err);
+        } catch {
+          setSelectedRun(null);
         }
       })();
     } else {
@@ -1167,7 +1183,7 @@ function HistoryTab({ deepRunId }) {
         >
           <ChevronLeft className="w-4 h-4" /> Back to history
         </button>
-        <PipelineRunDetail run={selectedRun} onDecide={null} deciding={false} onSyncComplete={refreshSelectedRun} />
+        <PipelineRunDetail run={selectedRun} onDecide={null} deciding={false} isAdmin={isAdmin} onSyncComplete={refreshSelectedRun} />
       </div>
     );
   }
@@ -1399,8 +1415,7 @@ function ConfigTab() {
       });
       setAnthropicConfigured(res?.anthropicConfigured ?? false);
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
-    } catch (err) {
-      console.error('Failed to fetch config:', err);
+    } catch {
       setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60 });
     } finally { setLoading(false); }
   }, []);
@@ -1409,7 +1424,7 @@ function ConfigTab() {
 
   const handleSave = async () => {
     try { setSaving(true); setSaveSuccess(false); const res = await assignmentAPI.updateConfig(config); setConfig(res?.data || config); setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); }
-    catch (err) { console.error('Failed to save config:', err); }
+    catch { /* keep current config visible on save failure */ }
     finally { setSaving(false); }
   };
 
@@ -1511,7 +1526,7 @@ function ConfigTab() {
                 </span>
                 {emailStatus.lastCheck && <p className="text-[10px] text-slate-400 mt-0.5">Last: {new Date(emailStatus.lastCheck).toLocaleString()}</p>}
               </div>
-              <button onClick={async () => { setPolling(true); try { await assignmentAPI.emailPollNow(); const r = await assignmentAPI.emailStatus(); setEmailStatus(r?.data || null); } catch {} finally { setPolling(false); } }} disabled={polling} className="px-2.5 py-1 border border-slate-200 rounded text-xs font-medium hover:bg-white disabled:opacity-50 flex items-center gap-1">
+              <button onClick={async () => { setPolling(true); try { await assignmentAPI.emailPollNow(); const r = await assignmentAPI.emailStatus(); setEmailStatus(r?.data || null); } catch { /* ignore polling refresh errors */ } finally { setPolling(false); } }} disabled={polling} className="px-2.5 py-1 border border-slate-200 rounded text-xs font-medium hover:bg-white disabled:opacity-50 flex items-center gap-1">
                 {polling ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Poll Now
               </button>
             </div>
@@ -1700,7 +1715,7 @@ export default function AssignmentReview() {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-full">
           <div className="px-3 py-3 sm:px-6 sm:py-5">
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} />}
-            {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} />}
+            {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} />}
             {activeTab === 'prompts' && <PromptManager />}
             {activeTab === 'config' && <ConfigTab />}
