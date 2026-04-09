@@ -369,17 +369,45 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     closed: queue.items.filter((r) => !isTicketOpen(r)).length,
   };
 
-  const TechBadge = ({ techId, name, className = '' }) => {
+  const TechAvatar = ({ techId, name, size = 'sm', ring = '' }) => {
     const tech = techPhotos[techId];
     const initials = name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
+    const sz = size === 'sm' ? 'w-5 h-5' : 'w-4 h-4';
+    const textSz = size === 'sm' ? 'text-[8px]' : 'text-[7px]';
+    return tech?.photoUrl ? (
+      <img src={tech.photoUrl} alt={name} title={name} className={`${sz} rounded-full object-cover flex-shrink-0 ${ring}`} />
+    ) : (
+      <span title={name} className={`${sz} rounded-full bg-slate-200 text-slate-500 ${textSz} font-bold flex items-center justify-center flex-shrink-0 ${ring}`}>{initials}</span>
+    );
+  };
+
+  const TechBadge = ({ techId, name }) => (
+    <span className="inline-flex items-center gap-1" title={name}>
+      <TechAvatar techId={techId} name={name} />
+      <span className="truncate max-w-[70px] text-[11px]">{name?.split(' ')[0]}</span>
+    </span>
+  );
+
+  const AiPicks = ({ recommendations = [] }) => {
+    if (!recommendations.length) return null;
+    const [top, ...rest] = recommendations;
     return (
-      <span className={`inline-flex items-center gap-1 ${className}`} title={name}>
-        {tech?.photoUrl ? (
-          <img src={tech.photoUrl} alt="" className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
-        ) : (
-          <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-500 text-[7px] font-bold flex items-center justify-center flex-shrink-0">{initials}</span>
+      <span className="inline-flex items-center gap-1">
+        <TechAvatar techId={top.techId} name={top.techName} ring="ring-2 ring-blue-400" />
+        {rest.length > 0 && (
+          <span className="inline-flex -space-x-1.5 relative group">
+            {rest.slice(0, 2).map((r) => (
+              <TechAvatar key={r.techId} techId={r.techId} name={r.techName} size="xs" ring="ring-1 ring-white" />
+            ))}
+            <span className="invisible group-hover:visible absolute left-0 top-full mt-1 z-50 bg-slate-800 text-white text-[10px] rounded-lg py-1.5 px-2.5 shadow-lg whitespace-nowrap">
+              {recommendations.map((r, i) => (
+                <span key={r.techId} className="block py-0.5">
+                  {i + 1}. {r.techName} — {typeof r.score === 'number' ? `${(r.score * 100).toFixed(0)}%` : ''}
+                </span>
+              ))}
+            </span>
+          </span>
         )}
-        <span className="truncate max-w-[80px]">{name?.split(' ')[0]}</span>
       </span>
     );
   };
@@ -407,26 +435,30 @@ function QueueTab({ deepRunId, isAdmin = false }) {
               {run.ticket?.requester?.department && <span className="text-[10px] text-slate-300">· {run.ticket.requester.department}</span>}
             </div>
             <div className="flex items-center gap-1 mt-1 flex-wrap">
-              {subView === 'pending' && flag === 'open' && topRec?.techName && (
-                <span className="text-[11px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5">→ <TechBadge techId={topRec.techId} name={topRec.techName} /></span>
+              {subView === 'pending' && flag === 'open' && (
+                <span className="inline-flex items-center gap-1.5">
+                  <AiPicks recommendations={run.recommendation?.recommendations || []} />
+                </span>
               )}
               {subView === 'pending' && flag === 'assigned' && run.ticket?.assignedTech && (
-                <span className="text-[11px] inline-flex items-center gap-1 flex-wrap">
-                  <span className="font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>
-                  {topRec?.techName && topRec.techName !== run.ticket.assignedTech.name && (
-                    <span className="text-[10px] text-blue-400 inline-flex items-center gap-0.5">AI: <TechBadge techId={topRec.techId} name={topRec.techName} /></span>
+                <span className="text-[11px] inline-flex items-center gap-1.5">
+                  <span className="font-medium text-amber-600 inline-flex items-center gap-1"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>
+                  {run.recommendation?.recommendations?.length > 0 && (
+                    <AiPicks recommendations={run.recommendation.recommendations} />
                   )}
                 </span>
               )}
               {subView === 'pending' && flag === 'closed' && (
-                <span className="text-[10px] inline-flex items-center gap-1 flex-wrap">
+                <span className="text-[10px] inline-flex items-center gap-1.5">
                   <span className="text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{run.ticket?.status}</span>
-                  {run.ticket?.assignedTech && <span className="text-slate-400 inline-flex items-center gap-0.5"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>}
-                  {topRec?.techName && <span className="text-blue-400 inline-flex items-center gap-0.5">AI: <TechBadge techId={topRec.techId} name={topRec.techName} /></span>}
+                  {run.ticket?.assignedTech && <TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} />}
+                  {run.recommendation?.recommendations?.length > 0 && (
+                    <AiPicks recommendations={run.recommendation.recommendations} />
+                  )}
                 </span>
               )}
               {subView !== 'pending' && run.assignedTech?.name && (
-                <span className="text-[11px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5">→ <TechBadge techId={run.assignedTech.id} name={run.assignedTech.name} /></span>
+                <span className="text-[11px] font-medium text-blue-600 inline-flex items-center gap-1"><TechBadge techId={run.assignedTech.id} name={run.assignedTech.name} /></span>
               )}
               {subView !== 'pending' && run.decision && (
                 <span className={`px-1 py-0.5 rounded text-[9px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
@@ -672,28 +704,30 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                       </td>
                       {subView === 'pending' ? (
                         <td className="px-3 py-1.5">
-                          {flag === 'open' && topRec?.techName ? (
-                            <span className="font-medium text-blue-700 inline-flex items-center gap-1">→ <TechBadge techId={topRec.techId} name={topRec.techName} /></span>
-                          ) : flag === 'assigned' && run.ticket?.assignedTech ? (
-                            <span className="inline-flex items-center gap-1.5 flex-wrap">
-                              <span className="text-amber-600 font-medium inline-flex items-center gap-0.5"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>
-                              {topRec?.techName && topRec.techName !== run.ticket.assignedTech.name && (
-                                <span className="text-blue-400 text-[10px] inline-flex items-center gap-0.5">AI: <TechBadge techId={topRec.techId} name={topRec.techName} /></span>
-                              )}
-                            </span>
-                          ) : flag === 'closed' ? (
-                            <span className="inline-flex items-center gap-1.5 flex-wrap">
-                              <span className="text-slate-400">{run.ticket?.status}</span>
-                              {run.ticket?.assignedTech && <span className="text-slate-400 inline-flex items-center gap-0.5"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>}
-                              {topRec?.techName && <span className="text-blue-400 text-[10px] inline-flex items-center gap-0.5">AI: <TechBadge techId={topRec.techId} name={topRec.techName} /></span>}
-                            </span>
-                          ) : <span className="text-slate-300">—</span>}
+                          <div className="flex items-center gap-1.5 min-h-[20px]">
+                            {flag === 'open' ? (
+                              <AiPicks recommendations={run.recommendation?.recommendations || []} />
+                            ) : flag === 'assigned' && run.ticket?.assignedTech ? (
+                              <>
+                                <span className="text-amber-600 font-medium inline-flex items-center gap-1 text-[11px]"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>
+                                {run.recommendation?.recommendations?.length > 0 && <AiPicks recommendations={run.recommendation.recommendations} />}
+                              </>
+                            ) : flag === 'closed' ? (
+                              <>
+                                <span className="text-slate-400 text-[10px]">{run.ticket?.status}</span>
+                                {run.ticket?.assignedTech && <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} />}
+                                {run.recommendation?.recommendations?.length > 0 && <AiPicks recommendations={run.recommendation.recommendations} />}
+                              </>
+                            ) : <span className="text-slate-300">—</span>}
+                          </div>
                         </td>
                       ) : (
                         <td className="px-3 py-1.5">
-                          {(run.assignedTech?.name || topRec?.techName) ? (
-                            <span className="font-medium text-blue-700 inline-flex items-center gap-1"><TechBadge techId={run.assignedTech?.id || topRec?.techId} name={run.assignedTech?.name || topRec?.techName} /></span>
-                          ) : <span className="text-slate-300">—</span>}
+                          <div className="flex items-center gap-1 min-h-[20px]">
+                            {(run.assignedTech?.name || topRec?.techName) ? (
+                              <span className="font-medium text-blue-700 inline-flex items-center gap-1 text-[11px]"><TechBadge techId={run.assignedTech?.id || topRec?.techId} name={run.assignedTech?.name || topRec?.techName} /></span>
+                            ) : <span className="text-slate-300">—</span>}
+                          </div>
                         </td>
                       )}
                       {subView !== 'pending' && (
