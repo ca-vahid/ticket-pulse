@@ -472,7 +472,10 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <p className="font-medium text-slate-800 text-sm leading-snug line-clamp-1">{run.ticket?.subject || 'No subject'}</p>
+            <p className="font-medium text-slate-800 text-sm leading-snug line-clamp-1 flex items-center gap-1.5">
+              {run.ticket?.subject || 'No subject'}
+              {flag === 'deleted' && <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />}
+            </p>
             <div className="flex items-center gap-1 mt-0.5 flex-wrap">
               <span className="text-[11px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
               <span className="text-[11px] text-slate-400">{run.ticket?.requester?.name || '—'}</span>
@@ -756,7 +759,10 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                   return (
                     <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'deleted' ? 'opacity-40 bg-red-50/30' : subView === 'pending' && flag === 'closed' ? 'opacity-50 bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : ''}`} onClick={() => handleSelectRun(run.id)}>
                       <td className="px-3 py-1.5">
-                        <span className="font-medium text-slate-800 block leading-snug">{run.ticket?.subject || 'No subject'}</span>
+                        <span className="font-medium text-slate-800 leading-snug flex items-center gap-1.5">
+                          {run.ticket?.subject || 'No subject'}
+                          {flag === 'deleted' && <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />}
+                        </span>
                         <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
                         {run.ticket?.ticketCategory && <span className="text-[10px] text-slate-300 ml-1.5">{run.ticket.ticketCategory}</span>}
                       </td>
