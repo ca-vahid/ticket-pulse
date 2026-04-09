@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import logger from '../utils/logger.js';
 import llmConfigService from './llmConfigService.js';
-import { getTodayRange } from '../utils/timezone.js';
+import { getTodayRange, getLocalDateBounds } from '../utils/timezone.js';
 import prisma from './prisma.js';
 
 /**
@@ -263,8 +263,9 @@ class AvailabilityService {
   async isHoliday(date, timezone = 'America/Los_Angeles', workspaceId = null) {
     const checkDate = new Date(date);
 
-    // Determine the start/end of the local day in the given timezone and query by range.
-    const { start, end } = getTodayRange(timezone, checkDate);
+    // Holiday.date is a @db.Date column (PostgreSQL DATE), stored as midnight UTC.
+    // Use getLocalDateBounds to produce UTC-midnight boundaries that match DATE values.
+    const { start, end } = getLocalDateBounds(timezone, checkDate);
 
     const workspaceScope = workspaceId !== null
       ? {

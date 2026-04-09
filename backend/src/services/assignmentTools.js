@@ -1,5 +1,5 @@
 import prisma from './prisma.js';
-import { getTodayRange } from '../utils/timezone.js';
+import { getTodayRange, getLocalDateBounds, formatDateInTimezone } from '../utils/timezone.js';
 import settingsRepository from './settingsRepository.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import graphMailClient from '../integrations/graphMailClient.js';
@@ -260,7 +260,7 @@ async function getAgentAvailability(workspaceId) {
     select: { defaultTimezone: true },
   });
   const hqTimezone = workspace?.defaultTimezone || 'America/Los_Angeles';
-  const { start, end } = getTodayRange(hqTimezone);
+  const { start: dateStart, end: dateEnd, dateStr: todayStr } = getLocalDateBounds(hqTimezone);
 
   const [techs, leaves] = await Promise.all([
     prisma.technician.findMany({
@@ -272,7 +272,7 @@ async function getAgentAvailability(workspaceId) {
       orderBy: { name: 'asc' },
     }),
     prisma.technicianLeave.findMany({
-      where: { workspaceId, leaveDate: { gte: start, lte: end }, status: 'APPROVED' },
+      where: { workspaceId, leaveDate: { gte: dateStart, lte: dateEnd }, status: 'APPROVED' },
       include: { technician: { select: { id: true, name: true } } },
     }),
   ]);
@@ -316,7 +316,7 @@ async function getAgentAvailability(workspaceId) {
   }
 
   return {
-    date: start.toISOString().slice(0, 10),
+    date: todayStr,
     timezone: hqTimezone,
     summary: {
       totalAgents: techs.length,
@@ -389,12 +389,12 @@ async function findMatchingAgents(workspaceId, criteria) {
     select: { defaultTimezone: true },
   });
   const timezone = workspace?.defaultTimezone || 'America/Los_Angeles';
-  const { start, end } = getTodayRange(timezone);
+  const { start: dateStart, end: dateEnd } = getLocalDateBounds(timezone);
+  const { start: todayStart, end: todayEnd } = getTodayRange(timezone);
 
   const proficiencyOrder = { basic: 1, intermediate: 2, expert: 3 };
   const minLevel = proficiencyOrder[min_proficiency] || 0;
 
-  // Load all active techs with competencies and today's leaves
   const [techs, competencies, leaves, openTickets, todayTickets] = await Promise.all([
     prisma.technician.findMany({
       where: { workspaceId, isActive: true },
@@ -405,7 +405,7 @@ async function findMatchingAgents(workspaceId, criteria) {
       include: { competencyCategory: { select: { name: true } } },
     }),
     prisma.technicianLeave.findMany({
-      where: { workspaceId, leaveDate: { gte: start, lte: end }, status: 'APPROVED' },
+      where: { workspaceId, leaveDate: { gte: dateStart, lte: dateEnd }, status: 'APPROVED' },
     }),
     prisma.ticket.groupBy({
       by: ['assignedTechId'],
@@ -414,7 +414,7 @@ async function findMatchingAgents(workspaceId, criteria) {
     }),
     prisma.ticket.groupBy({
       by: ['assignedTechId'],
-      where: { workspaceId, createdAt: { gte: start, lte: end } },
+      where: { workspaceId, createdAt: { gte: todayStart, lte: todayEnd } },
       _count: true,
     }),
   ]);
@@ -529,6 +529,12 @@ async function searchTickets(workspaceId, params) {
   } = params;
   const limit = Math.min(params.limit || 15, 25);
 
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { defaultTimezone: true },
+  });
+  const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+
   const where = { workspaceId };
 
   if (sub_category) where.subCategory = sub_category;
@@ -538,8 +544,14 @@ async function searchTickets(workspaceId, params) {
 
   if (date_from || date_to) {
     where.createdAt = {};
-    if (date_from) where.createdAt.gte = new Date(date_from);
-    if (date_to) where.createdAt.lte = new Date(date_to + 'T23:59:59Z');
+    if (date_from) {
+      const { start } = getTodayRange(tz, new Date(date_from + 'T12:00:00Z'));
+      where.createdAt.gte = start;
+    }
+    if (date_to) {
+      const { end } = getTodayRange(tz, new Date(date_to + 'T12:00:00Z'));
+      where.createdAt.lte = end;
+    }
   }
 
   const andClauses = [];
@@ -597,8 +609,8 @@ async function searchTickets(workspaceId, params) {
       priority: t.priority,
       category: t.category,
       subCategory: t.subCategory,
-      createdAt: t.createdAt?.toISOString()?.slice(0, 10),
-      resolvedAt: t.resolvedAt?.toISOString()?.slice(0, 10),
+      createdAt: t.createdAt ? formatDateInTimezone(t.createdAt, tz) : null,
+      resolvedAt: t.resolvedAt ? formatDateInTimezone(t.resolvedAt, tz) : null,
       assignedTo: t.assignedTech?.name || 'Unassigned',
       assignedTechId: t.assignedTechId,
       selfPicked: t.isSelfPicked,
@@ -616,6 +628,12 @@ async function getTechTicketHistory(workspaceId, params) {
   const days = Math.min(params.days || 30, 90);
   const since = new Date();
   since.setDate(since.getDate() - days);
+
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { defaultTimezone: true },
+  });
+  const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
 
   const tech = await prisma.technician.findFirst({
     where: { id: tech_id, workspaceId },
@@ -682,8 +700,8 @@ async function getTechTicketHistory(workspaceId, params) {
       status: t.status,
       priority: t.priority,
       category: t.ticketCategory || t.category,
-      createdAt: t.createdAt?.toISOString()?.slice(0, 10),
-      resolvedAt: t.resolvedAt?.toISOString()?.slice(0, 10),
+      createdAt: t.createdAt ? formatDateInTimezone(t.createdAt, tz) : null,
+      resolvedAt: t.resolvedAt ? formatDateInTimezone(t.resolvedAt, tz) : null,
       selfPicked: t.isSelfPicked,
     })),
     insight: categoryBreakdown.length > 0
@@ -806,6 +824,7 @@ async function getWorkloadStats(workspaceId) {
   });
   const timezone = workspace?.defaultTimezone || 'America/Los_Angeles';
   const { start, end } = getTodayRange(timezone);
+  const todayStr = formatDateInTimezone(null, timezone);
 
   const techs = await prisma.technician.findMany({
     where: { workspaceId, isActive: true },
@@ -836,7 +855,7 @@ async function getWorkloadStats(workspaceId) {
   const selfMap = Object.fromEntries(selfPicked.map((r) => [r.assignedTechId, r._count]));
 
   return {
-    date: start.toISOString().slice(0, 10),
+    date: todayStr,
     stats: techs.map((t) => ({
       techId: t.id,
       techName: t.name,

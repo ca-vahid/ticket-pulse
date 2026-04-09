@@ -6,6 +6,8 @@ import availabilityService from './availabilityService.js';
 import { TOOL_SCHEMAS, executeTool } from './assignmentTools.js';
 import freshServiceActionService from './freshServiceActionService.js';
 import competencyFeedbackService from './competencyFeedbackService.js';
+import { formatDateInTimezone } from '../utils/timezone.js';
+import { formatInTimeZone } from 'date-fns-tz';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 
@@ -213,6 +215,16 @@ class AssignmentPipelineService {
       systemPrompt += `\n\n## Historical Admin Feedback\n${assignmentConfig.feedbackContext.slice(-4000)}`;
     }
 
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { defaultTimezone: true },
+    });
+    const wsTz = workspace?.defaultTimezone || 'America/Los_Angeles';
+    const now = new Date();
+    const localDate = formatDateInTimezone(now, wsTz);
+    const localTime = formatInTimeZone(now, wsTz, 'HH:mm');
+    const dayOfWeek = formatInTimeZone(now, wsTz, 'EEEE');
+
     // Ensure run is in running state (may already be if created as running)
     await assignmentRepository.updatePipelineRun(runId, {
       status: 'running',
@@ -251,7 +263,7 @@ class AssignmentPipelineService {
     };
 
     const messages = [
-      { role: 'user', content: `Analyze ticket ID ${ticketId} (use get_ticket_details to read it) and recommend the best technician for assignment. When you have completed your analysis, you MUST call the submit_recommendation tool with your final recommendation.` },
+      { role: 'user', content: `Current date/time: ${dayOfWeek}, ${localDate} at ${localTime} (${wsTz})\n\nAnalyze ticket ID ${ticketId} (use get_ticket_details to read it) and recommend the best technician for assignment. When you have completed your analysis, you MUST call the submit_recommendation tool with your final recommendation.` },
     ];
 
     const toolAllowlist = promptVersion.toolConfig?.allowedTools || null;

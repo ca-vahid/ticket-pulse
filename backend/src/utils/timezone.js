@@ -108,6 +108,31 @@ export function formatDateInTimezone(date = null, timezone = config.sync.default
 }
 
 /**
+ * Get date boundaries for querying Prisma @db.Date columns in a specific timezone.
+ *
+ * PostgreSQL DATE columns store only the date part. Prisma represents them as
+ * midnight UTC (e.g. 2026-04-09 → 2026-04-09T00:00:00Z). Using getTodayRange()
+ * with a Pacific timezone produces start = 2026-04-09T07:00:00Z which is AFTER
+ * midnight UTC, so DATE column comparisons silently miss the matching row.
+ *
+ * This function resolves "today" in the target timezone and returns UTC-midnight
+ * boundaries that correctly match @db.Date values.
+ *
+ * @param {string} timezone - IANA timezone string (e.g., 'America/Los_Angeles')
+ * @param {Date} date - Optional reference date (defaults to now)
+ * @returns {Object} { start: Date, end: Date, dateStr: string }
+ */
+export function getLocalDateBounds(timezone = config.sync.defaultTimezone, date = null) {
+  const referenceDate = date || new Date();
+  const dateStr = formatInTimeZone(referenceDate, timezone, 'yyyy-MM-dd');
+  return {
+    start: new Date(dateStr + 'T00:00:00.000Z'),
+    end: new Date(dateStr + 'T23:59:59.999Z'),
+    dateStr,
+  };
+}
+
+/**
  * Format duration in minutes to human-readable string
  * @param {number} minutes - Duration in minutes
  * @returns {string} Formatted duration (e.g., "2h 30m", "45m")
