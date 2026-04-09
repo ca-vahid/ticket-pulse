@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { assignmentAPI } from '../../services/api';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,8 +7,54 @@ import {
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
   ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag, Sparkles,
 } from 'lucide-react';
-import { CopyBadge, cleanTranscript, mdComponents } from './StreamingComponents';
+import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
+
+const ticketDescriptionMdComponents = {
+  ...transcriptMdComponents,
+  a: ({ href, children, ...props }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-medium text-blue-600 hover:text-blue-800 underline decoration-blue-200 underline-offset-2 break-words"
+      {...props}
+    >
+      {children}
+    </a>
+  ),
+};
+
+function looksLikeTicketHtml(s) {
+  if (!s || typeof s !== 'string') return false;
+  const t = s.trim();
+  if (t.length < 3 || t.charAt(0) !== '<') return false;
+  return /<\/?[a-z][a-z0-9-]*\b/i.test(t);
+}
+
+/** Strip obvious script/event-handler vectors before rendering FreshService HTML. Not a full sanitizer. */
+function sanitizeTicketHtml(html) {
+  if (!html) return '';
+  return html
+    .replace(/<\/(?:script|style)[^>]*>[\s\S]*?<\/(?:script|style)>/gi, '')
+    .replace(/<(?:script|style)\b[^>]*>[\s\S]*?<\/(?:script|style)>/gi, '')
+    .replace(/<\?[\s\S]*?\?>/g, '')
+    .replace(/on\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/on\w+\s*=\s*'[^']*'/gi, '')
+    .replace(/on\w+\s*=\s*[^\s>]+/gi, '')
+    .replace(/javascript:\s*/gi, '')
+    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, '');
+}
+
+/** Normalize plain-text / email bodies so Markdown + GFM render cleanly (bold, rules, links). */
+function prepareTicketDescriptionMarkdown(text) {
+  if (!text) return '';
+  let t = text.replace(/\r\n/g, '\n');
+  t = t.replace(/^[=*_~]{4,}\s*$/gm, '\n\n---\n\n');
+  t = t.replace(/^-{4,}\s*$/gm, '\n\n---\n\n');
+  t = t.replace(/\n{3,}/g, '\n\n');
+  return t.trim();
+}
 
 const STEP_ICONS = {
   classification: Brain,
@@ -181,26 +227,53 @@ function ReasoningCard({ reasoning, recommendations }) {
 
 function TicketDetailsCard({ ticket }) {
   const [expanded, setExpanded] = useState(false);
+  const htmlHostRef = useRef(null);
+
+  const useHtml = Boolean(ticket?.description && looksLikeTicketHtml(ticket.description));
+  const rawPlain = !ticket || useHtml
+    ? ''
+    : (ticket.descriptionText || ticket.description || '').trim();
+  const markdownSource = prepareTicketDescriptionMarkdown(
+    looksLikeTicketHtml(rawPlain) ? stripHtml(rawPlain) : rawPlain,
+  );
+  const safeHtml = useHtml && ticket?.description ? sanitizeTicketHtml(ticket.description) : '';
+
+  const plainForMeasure = !ticket ? '' : (useHtml ? stripHtml(ticket.description || '') : rawPlain);
+
+  const needsClamp = plainForMeasure.length > 550 || plainForMeasure.split('\n').length > 12;
+  const showToggle = needsClamp;
+
+  useEffect(() => {
+    if (!useHtml || !htmlHostRef.current) return;
+    htmlHostRef.current.querySelectorAll('a[href]').forEach((a) => {
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+      a.classList.add('text-blue-600', 'underline', 'underline-offset-2', 'break-words', 'hover:text-blue-800');
+    });
+  }, [useHtml, safeHtml]);
+
   if (!ticket) return null;
 
-  const description = ticket.descriptionText || stripHtml(ticket.description) || '';
-  const isLong = description.length > 300;
-  const displayText = expanded || !isLong ? description : description.slice(0, 300) + '...';
-
   return (
-    <div className="border border-slate-200 rounded-lg overflow-hidden">
+    <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
       <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+        type="button"
+        onClick={() => { if (showToggle) setExpanded(!expanded); }}
+        className={`w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 transition-colors text-left ${showToggle ? 'hover:bg-slate-100' : ''}`}
+        aria-expanded={showToggle ? expanded : undefined}
       >
         <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
           <FileText className="w-4 h-4 text-slate-400" />
           Ticket Details
         </span>
-        {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+        {showToggle ? (
+          expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />
+        ) : (
+          <span className="w-4 h-4" aria-hidden />
+        )}
       </button>
 
-      <div className={`px-4 py-3 space-y-3 ${expanded ? '' : ''}`}>
+      <div className="px-4 py-3 space-y-3">
         {/* Metadata grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
           {ticket.requester?.name && (
@@ -245,15 +318,40 @@ function TicketDetailsCard({ ticket }) {
         </div>
 
         {/* Description */}
-        {description && (
+        {(useHtml || markdownSource) && (
           <div>
             <div className="border-t border-slate-100 pt-2.5">
-              <p className="text-xs text-slate-400 uppercase font-medium mb-1">Description</p>
-              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{displayText}</p>
-              {isLong && (
+              <p className="text-xs text-slate-400 uppercase font-medium mb-2">Description</p>
+              <div
+                className={`relative rounded-md border border-slate-100 bg-slate-50/50 px-3 py-3 sm:px-4 sm:py-4 ${
+                  showToggle && !expanded ? 'max-h-72 overflow-hidden' : ''
+                }`}
+              >
+                {useHtml ? (
+                  <div
+                    ref={htmlHostRef}
+                    className="ticket-description-html text-sm text-slate-700 leading-relaxed [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_b]:font-semibold [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-sm [&_h2]:font-bold [&_br]:block [&_table]:my-2 [&_th]:border [&_td]:border [&_th]:px-2 [&_td]:px-2 [&_th]:text-left [&_td]:text-sm"
+                    dangerouslySetInnerHTML={{ __html: safeHtml }}
+                  />
+                ) : (
+                  <div className="max-w-none">
+                    <Markdown remarkPlugins={[remarkGfm]} components={ticketDescriptionMdComponents}>
+                      {markdownSource}
+                    </Markdown>
+                  </div>
+                )}
+                {showToggle && !expanded && (
+                  <div
+                    className="pointer-events-none absolute bottom-0 left-0 right-0 h-16 rounded-b-md bg-gradient-to-t from-white via-white/85 to-transparent"
+                    aria-hidden
+                  />
+                )}
+              </div>
+              {showToggle && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-1"
+                  type="button"
+                  onClick={() => setExpanded(!expanded)}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2"
                 >
                   {expanded ? 'Show less' : 'Show more'}
                 </button>
@@ -372,13 +470,14 @@ function TranscriptSection({ transcript }) {
     );
   }
 
-  const cleaned = cleanTranscript(transcript);
+  const markdown = prepareRunTranscriptMarkdown(transcript);
 
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <h4 className="text-sm font-semibold text-gray-700">Full Conversation</h4>
         <button
+          type="button"
           onClick={() => setExpanded(!expanded)}
           className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
         >
@@ -386,11 +485,15 @@ function TranscriptSection({ transcript }) {
           {expanded ? 'Collapse' : 'Expand'}
         </button>
       </div>
-      <div className={`border border-slate-200 rounded-lg bg-white overflow-hidden transition-all ${expanded ? '' : 'max-h-[500px] overflow-y-auto'}`}>
-        <div className="p-4 sm:p-5 prose prose-sm max-w-none prose-headings:text-slate-800 prose-p:text-slate-700 prose-p:leading-relaxed prose-li:text-slate-700 prose-strong:text-slate-900">
-          <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-            {cleaned}
-          </Markdown>
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm transition-all">
+        <div
+          className={`${expanded ? '' : 'max-h-[500px] overflow-y-auto overscroll-contain'} scroll-smooth`}
+        >
+          <div className="px-4 py-5 sm:px-6 sm:py-6 max-w-none [&>*:first-child]:mt-0">
+            <Markdown remarkPlugins={[remarkGfm]} components={transcriptMdComponents}>
+              {markdown}
+            </Markdown>
+          </div>
         </div>
       </div>
     </div>

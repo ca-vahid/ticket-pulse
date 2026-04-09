@@ -51,7 +51,28 @@ export const mdComponents = {
     }
     return <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono" {...props}>{children}</code>;
   },
-  blockquote: (props) => <blockquote className="border-l-3 border-blue-300 pl-3 my-1 text-gray-600 italic" {...props} />,
+  blockquote: (props) => <blockquote className="border-l-4 border-blue-300 pl-3 my-1 text-gray-600 italic" {...props} />,
+};
+
+/** Richer typography for saved run transcripts (step sections, lists, tools). */
+export const transcriptMdComponents = {
+  ...mdComponents,
+  h1: (props) => <h1 className="text-base font-bold text-slate-900 mt-8 mb-3 pb-2 border-b border-slate-200 first:mt-0" {...props} />,
+  h2: (props) => <h2 className="text-sm font-bold text-slate-900 mt-8 mb-3 pb-2 border-b border-slate-200 tracking-tight first:mt-0" {...props} />,
+  h3: (props) => <h3 className="text-sm font-semibold text-slate-800 mt-6 mb-2 first:mt-0" {...props} />,
+  h4: (props) => <h4 className="text-xs font-semibold text-slate-600 mt-5 mb-1.5 uppercase tracking-wide" {...props} />,
+  p: (props) => <p className="my-2.5 text-sm leading-relaxed text-slate-700" {...props} />,
+  ul: (props) => <ul className="list-disc pl-5 my-3 space-y-2 marker:text-slate-400" {...props} />,
+  ol: (props) => <ol className="list-decimal pl-5 my-3 space-y-2 marker:text-slate-500 marker:font-medium" {...props} />,
+  li: (props) => <li className="text-sm leading-relaxed text-slate-700" {...props} />,
+  hr: () => <hr className="my-8 border-slate-200" />,
+  strong: (props) => <strong className="font-semibold text-slate-900" {...props} />,
+  blockquote: (props) => (
+    <blockquote
+      className="border-l-4 border-indigo-400/80 bg-slate-50 pl-4 pr-3 py-2.5 my-4 rounded-r-lg text-slate-700 text-sm not-italic leading-relaxed"
+      {...props}
+    />
+  ),
 };
 
 export function ToolCallCard({ name, input, result, durationMs }) {
@@ -162,6 +183,18 @@ export function cleanTranscript(raw) {
     })
     .replace(/\s*\*\(\d+\.\d+KB\)\*\s*/g, ' ')
     .replace(/\n{3,}/g, '\n\n');
+}
+
+/** Turn lines like **Step 2 — Title** into ## headings so Markdown spacing/layout applies. */
+export function promoteTranscriptStepHeadings(text) {
+  if (!text) return '';
+  const stepLine = /^\*\*(Step \d+\s*[\u2014\u2013\-]\s*[^\n*]+)\*\*\s*:?\s*$/gm;
+  return text.replace(stepLine, (_, title) => `## ${title.trim()}`);
+}
+
+/** Full pipeline for rendering a completed run transcript in the UI. */
+export function prepareRunTranscriptMarkdown(raw) {
+  return promoteTranscriptStepHeadings(cleanTranscript(raw));
 }
 
 export function processStreamEvent(event, { setEvents, setToolCalls, setThinkingKb, scrollToBottom, onRunStarted, onQueued, onResult, onError, onComplete }) {
