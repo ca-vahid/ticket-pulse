@@ -136,8 +136,11 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const [queuedRuns, setQueuedRuns] = useState([]);
   const [selectedRun, setSelectedRun] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [deciding, setDeciding] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [sortField, setSortField] = useState('createdAt');
   const [sortDir, setSortDir] = useState('desc');
   const [filterPriority, setFilterPriority] = useState('all');
@@ -168,9 +171,14 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     return undefined;
   };
 
+  const hasLoadedOnce = useRef(false);
   const fetchQueue = useCallback(async () => {
     try {
-      setLoading(true);
+      if (hasLoadedOnce.current) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       const since = getSince(timeRange);
       const [queueRes, assignedRes, dismissedRes, rejectedRes, queuedRes, statusRes] = await Promise.all([
         assignmentAPI.getQueue(),
@@ -186,6 +194,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       setRejectedRuns({ items: rejectedRes?.items || [], total: rejectedRes?.total || 0 });
       setQueuedRuns(queuedRes?.data || []);
       if (statusRes?.data) setQueueStatus(statusRes.data);
+      hasLoadedOnce.current = true;
     } catch (err) {
       console.error('Failed to fetch queue:', err);
       setQueue({ items: [], total: 0 });
@@ -195,6 +204,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       setQueuedRuns([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [timeRange]);
 
@@ -265,14 +275,17 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   };
 
   const handleClearAll = async () => {
-    if (!confirm('Dismiss all pending reviews? This marks them as noise and removes them from the queue.')) return;
+    setClearing(true);
     try {
       await assignmentAPI.bulkDeleteRuns({ decision: 'pending_review' });
+      setShowClearConfirm(false);
       setActionMsg('All cleared');
       await fetchQueue();
       setTimeout(() => setActionMsg(null), 2000);
     } catch (err) {
       console.error('Failed to clear all:', err);
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -687,7 +700,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
             </select>
 
             {subView === 'pending' && queue.total > 0 && isAdmin && (
-              <button onClick={handleClearAll} className="text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 flex items-center gap-1 px-2 py-1 rounded touch-manipulation border border-red-200">
+              <button onClick={() => setShowClearConfirm(true)} className="text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 flex items-center gap-1 px-2 py-1 rounded touch-manipulation border border-red-200">
                 <Trash2 className="w-3 h-3" /> Clear all
               </button>
             )}
@@ -698,8 +711,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
             >
               {avatarView ? '≡ Text' : '⊙ Avatars'}
             </button>
-            <button onClick={fetchQueue} className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-0.5 p-1 touch-manipulation">
-              <RefreshCw className="w-3.5 h-3.5" />
+            <button onClick={fetchQueue} disabled={refreshing} className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-0.5 p-1 touch-manipulation disabled:opacity-50">
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
             </button>
           </div>
 
@@ -749,6 +762,39 @@ function QueueTab({ deepRunId, isAdmin = false }) {
             {pendingStats.assigned > 0 && <><span className="text-slate-300">·</span><span className="text-amber-600">{pendingStats.assigned} assigned</span></>}
             {pendingStats.closed > 0 && <><span className="text-slate-300">·</span><span className="text-slate-400">{pendingStats.closed} closed</span></>}
             {pendingStats.deleted > 0 && <><span className="text-slate-300">·</span><span className="text-red-500">{pendingStats.deleted} deleted</span></>}
+          </div>
+        )}
+
+        {/* Clear all confirmation */}
+        {showClearConfirm && (
+          <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center gap-3 flex-wrap">
+            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+            <p className="text-sm text-red-800 flex-1 min-w-0">
+              Dismiss all <strong>{queue.total}</strong> pending reviews? This marks them as noise and cannot be undone.
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearAll}
+                disabled={clearing}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              >
+                {clearing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                {clearing ? 'Clearing...' : 'Yes, dismiss all'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Refreshing indicator */}
+        {refreshing && (
+          <div className="bg-blue-50 border-b border-blue-100 px-3 py-1 flex items-center gap-2 text-[11px] text-blue-600">
+            <Loader2 className="w-3 h-3 animate-spin" /> Refreshing...
           </div>
         )}
 
