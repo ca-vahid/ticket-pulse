@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { assignmentAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -372,17 +372,17 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const TechAvatar = ({ techId, name, size = 'sm', ring = '' }) => {
     const tech = techPhotos[techId];
     const initials = name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
-    const sz = size === 'sm' ? 'w-5 h-5' : 'w-4 h-4';
-    const textSz = size === 'sm' ? 'text-[8px]' : 'text-[7px]';
+    const sz = size === 'sm' ? 'w-5 h-5' : size === 'xs' ? 'w-4 h-4' : 'w-6 h-6';
+    const textSz = size === 'sm' ? 'text-[8px]' : size === 'xs' ? 'text-[7px]' : 'text-[9px]';
     return tech?.photoUrl ? (
-      <img src={tech.photoUrl} alt={name} title={name} className={`${sz} rounded-full object-cover flex-shrink-0 ${ring}`} />
+      <img src={tech.photoUrl} alt="" className={`${sz} rounded-full object-cover flex-shrink-0 ${ring}`} />
     ) : (
-      <span title={name} className={`${sz} rounded-full bg-slate-200 text-slate-500 ${textSz} font-bold flex items-center justify-center flex-shrink-0 ${ring}`}>{initials}</span>
+      <span className={`${sz} rounded-full bg-slate-200 text-slate-500 ${textSz} font-bold flex items-center justify-center flex-shrink-0 ${ring}`}>{initials}</span>
     );
   };
 
   const TechBadge = ({ techId, name }) => (
-    <span className="inline-flex items-center gap-1" title={name}>
+    <span className="inline-flex items-center gap-1">
       <TechAvatar techId={techId} name={name} />
       <span className="truncate max-w-[70px] text-[11px]">{name?.split(' ')[0]}</span>
     </span>
@@ -391,22 +391,61 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const AiPicks = ({ recommendations = [] }) => {
     if (!recommendations.length) return null;
     const [top, ...rest] = recommendations;
+    const [open, setOpen] = useState(false);
+    const hoverTimeoutRef = useRef(null);
+
+    const showPopover = () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = setTimeout(() => setOpen(true), 350);
+    };
+
+    const hidePopover = () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      setOpen(false);
+    };
+
     return (
-      <span className="inline-flex items-center gap-1">
-        <TechAvatar techId={top.techId} name={top.techName} ring="ring-2 ring-blue-400" />
+      <span className="relative inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.5 text-[10px] font-semibold">
+          <span className="uppercase tracking-wide">AI</span>
+          <TechAvatar techId={top.techId} name={top.techName} size="xs" />
+          <span className="max-w-[58px] truncate">{top.techName?.split(' ')[0]}</span>
+        </span>
         {rest.length > 0 && (
-          <span className="inline-flex -space-x-1.5 relative group">
-            {rest.slice(0, 2).map((r) => (
-              <TechAvatar key={r.techId} techId={r.techId} name={r.techName} size="xs" ring="ring-1 ring-white" />
-            ))}
-            <span className="invisible group-hover:visible absolute left-0 top-full mt-1 z-50 bg-slate-800 text-white text-[10px] rounded-lg py-1.5 px-2.5 shadow-lg whitespace-nowrap">
-              {recommendations.map((r, i) => (
-                <span key={r.techId} className="block py-0.5">
-                  {i + 1}. {r.techName} — {typeof r.score === 'number' ? `${(r.score * 100).toFixed(0)}%` : ''}
-                </span>
+          <button
+            type="button"
+            onMouseEnter={showPopover}
+            onMouseLeave={hidePopover}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((v) => !v);
+            }}
+            className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 px-1.5 py-0.5 text-[10px] font-medium hover:bg-slate-200 touch-manipulation"
+            aria-label={`Show ${rest.length} more AI recommendations`}
+          >
+            <span>+{rest.length}</span>
+            <span className="inline-flex -space-x-1">
+              {rest.slice(0, 2).map((r) => (
+                <TechAvatar key={r.techId} techId={r.techId} name={r.techName} size="xs" ring="ring-1 ring-white" />
               ))}
             </span>
-          </span>
+          </button>
+        )}
+        {open && (
+          <div
+            onMouseEnter={showPopover}
+            onMouseLeave={hidePopover}
+            className="absolute left-0 top-full mt-1 z-50 min-w-[190px] max-w-[240px] bg-slate-900 text-white text-[10px] rounded-lg py-1.5 px-2 shadow-lg"
+          >
+            {recommendations.map((r, i) => (
+              <div key={r.techId} className="flex items-center gap-2 py-1">
+                <span className="w-4 text-slate-400">{i + 1}.</span>
+                <TechAvatar techId={r.techId} name={r.techName} size="xs" />
+                <span className="truncate flex-1">{r.techName}</span>
+                <span className="text-slate-300">{typeof r.score === 'number' ? `${(r.score * 100).toFixed(0)}%` : ''}</span>
+              </div>
+            ))}
+          </div>
         )}
       </span>
     );
@@ -442,7 +481,11 @@ function QueueTab({ deepRunId, isAdmin = false }) {
               )}
               {subView === 'pending' && flag === 'assigned' && run.ticket?.assignedTech && (
                 <span className="text-[11px] inline-flex items-center gap-1.5">
-                  <span className="font-medium text-amber-600 inline-flex items-center gap-1"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[10px] font-semibold">
+                    <span className="uppercase tracking-wide">Live</span>
+                    <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
+                    <span>{run.ticket.assignedTech.name?.split(' ')[0]}</span>
+                  </span>
                   {run.recommendation?.recommendations?.length > 0 && (
                     <AiPicks recommendations={run.recommendation.recommendations} />
                   )}
@@ -451,7 +494,13 @@ function QueueTab({ deepRunId, isAdmin = false }) {
               {subView === 'pending' && flag === 'closed' && (
                 <span className="text-[10px] inline-flex items-center gap-1.5">
                   <span className="text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{run.ticket?.status}</span>
-                  {run.ticket?.assignedTech && <TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} />}
+                  {run.ticket?.assignedTech && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 px-1.5 py-0.5 text-[10px] font-medium">
+                      <span className="uppercase tracking-wide">Live</span>
+                      <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
+                      <span>{run.ticket.assignedTech.name?.split(' ')[0]}</span>
+                    </span>
+                  )}
                   {run.recommendation?.recommendations?.length > 0 && (
                     <AiPicks recommendations={run.recommendation.recommendations} />
                   )}
@@ -709,13 +758,23 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                               <AiPicks recommendations={run.recommendation?.recommendations || []} />
                             ) : flag === 'assigned' && run.ticket?.assignedTech ? (
                               <>
-                                <span className="text-amber-600 font-medium inline-flex items-center gap-1 text-[11px]"><TechBadge techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} /></span>
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[10px] font-semibold">
+                                  <span className="uppercase tracking-wide">Live</span>
+                                  <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
+                                  <span>{run.ticket.assignedTech.name?.split(' ')[0]}</span>
+                                </span>
                                 {run.recommendation?.recommendations?.length > 0 && <AiPicks recommendations={run.recommendation.recommendations} />}
                               </>
                             ) : flag === 'closed' ? (
                               <>
                                 <span className="text-slate-400 text-[10px]">{run.ticket?.status}</span>
-                                {run.ticket?.assignedTech && <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} />}
+                                {run.ticket?.assignedTech && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 px-1.5 py-0.5 text-[10px] font-medium">
+                                    <span className="uppercase tracking-wide">Live</span>
+                                    <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
+                                    <span>{run.ticket.assignedTech.name?.split(' ')[0]}</span>
+                                  </span>
+                                )}
                                 {run.recommendation?.recommendations?.length > 0 && <AiPicks recommendations={run.recommendation.recommendations} />}
                               </>
                             ) : <span className="text-slate-300">—</span>}
