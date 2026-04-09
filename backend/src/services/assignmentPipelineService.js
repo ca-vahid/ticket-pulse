@@ -10,7 +10,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 
 const MAX_TURNS = 20;
-const CLOSED_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', '4', '5'];
+const CLOSED_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', '4', '5'];
 
 class AssignmentPipelineService {
   /**

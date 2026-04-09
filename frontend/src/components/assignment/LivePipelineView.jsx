@@ -10,7 +10,34 @@ import {
   CopyBadge, mdComponents, StreamContent, cleanTranscript, processStreamEvent,
 } from './StreamingComponents';
 
-export function RecommendationCards({ data, onDecide, deciding }) {
+function ScoreRing({ pct, selected = false, size = 52 }) {
+  if (pct === null || pct === undefined) return null;
+  const r = (size - 8) / 2;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - pct / 100);
+  const trackColor = '#e2e8f0';
+  const fillColor = selected ? '#3b82f6' : pct >= 80 ? '#10b981' : pct >= 60 ? '#6366f1' : pct >= 40 ? '#f59e0b' : '#94a3b8';
+  return (
+    <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={trackColor} strokeWidth="5" />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none"
+          stroke={fillColor} strokeWidth="5"
+          strokeDasharray={`${circ} ${circ}`}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{ transition: 'stroke-dashoffset 0.5s ease, stroke 0.3s ease' }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className={`text-[11px] font-bold tabular-nums leading-none ${selected ? 'text-blue-600' : 'text-slate-600'}`}>{pct}%</span>
+      </div>
+    </div>
+  );
+}
+
+export function RecommendationCards({ data, onDecide, deciding, hideReasoning = false }) {
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [decisionNote, setDecisionNote] = useState('');
   const [showTechPicker, setShowTechPicker] = useState(false);
@@ -73,74 +100,60 @@ export function RecommendationCards({ data, onDecide, deciding }) {
             const tech = techMap[rec.techId];
             const initials = rec.techName?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
             const pct = scorePercent(rec.score);
+            const rankColors = ['bg-amber-400', 'bg-slate-400', 'bg-slate-300'];
             return (
               <div
                 key={rec.techId || i}
                 onClick={() => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); setShowTechPicker(false); }}
                 className={`relative rounded-xl cursor-pointer transition-all touch-manipulation overflow-hidden ${
                   isSelected
-                    ? 'border-2 border-blue-500 bg-gradient-to-r from-blue-50 to-white shadow-md ring-1 ring-blue-100'
-                    : 'border border-slate-200 hover:border-slate-300 hover:shadow-sm active:bg-blue-50/50 bg-white'
+                    ? 'border-2 border-blue-500 bg-blue-50/60 shadow-md'
+                    : isTopPick
+                      ? 'border border-amber-200 bg-gradient-to-br from-amber-50/40 to-white hover:border-amber-300 hover:shadow-sm'
+                      : 'border border-slate-200 hover:border-slate-300 hover:shadow-sm bg-white'
                 }`}
               >
-                {/* Top pick badge */}
-                {isTopPick && (
-                  <div className="absolute top-0 right-0">
-                    <span className="inline-flex items-center gap-1 bg-gradient-to-r from-amber-400 to-amber-500 text-white text-[9px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-bl-lg">
-                      <Star className="w-2.5 h-2.5" /> Top Pick
+                {/* Selected indicator stripe */}
+                {isSelected && (
+                  <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-400 to-blue-600" />
+                )}
+
+                <div className="p-3 sm:p-4 flex items-center gap-3">
+                  {/* Avatar with rank badge */}
+                  <div className="relative flex-shrink-0">
+                    {tech?.photoUrl ? (
+                      <img src={tech.photoUrl} alt="" className={`w-12 h-12 rounded-full object-cover ${isSelected ? 'ring-2 ring-blue-400' : isTopPick ? 'ring-2 ring-amber-300' : 'ring-1 ring-slate-200'}`} />
+                    ) : (
+                      <span className={`w-12 h-12 rounded-full text-sm font-bold flex items-center justify-center ${isSelected ? 'bg-blue-100 text-blue-700' : isTopPick ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{initials}</span>
+                    )}
+                    <span className={`absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center ring-2 ring-white ${rankColors[i] || 'bg-slate-200 text-slate-600'} text-white`}>
+                      {i + 1}
                     </span>
                   </div>
-                )}
 
-                <div className="p-3 sm:p-4">
-                  <div className="flex items-start gap-3">
-                    {/* Radio indicator */}
-                    <div className="flex-shrink-0 mt-1">
-                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
-                        isSelected ? 'border-blue-500 bg-blue-500' : 'border-slate-300'
-                      }`}>
-                        {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                      </div>
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                      <span className={`font-semibold text-sm truncate ${isSelected ? 'text-blue-900' : 'text-slate-900'}`}>{rec.techName}</span>
+                      {isTopPick && (
+                        <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                          <Star className="w-2.5 h-2.5" /> Top Pick
+                        </span>
+                      )}
                     </div>
-
-                    {/* Avatar */}
-                    {tech?.photoUrl ? (
-                      <img src={tech.photoUrl} alt="" className={`w-10 h-10 rounded-full object-cover flex-shrink-0 ${isSelected ? 'ring-2 ring-blue-300' : 'ring-1 ring-slate-100'}`} />
-                    ) : (
-                      <span className={`w-10 h-10 rounded-full text-xs font-bold flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-300' : 'bg-slate-100 text-slate-500 ring-1 ring-slate-200'}`}>{initials}</span>
+                    {tech?.location && (
+                      <p className="text-[11px] text-slate-400 flex items-center gap-1 mb-1">
+                        <MapPin className="w-3 h-3 flex-shrink-0" /> {tech.location}
+                      </p>
                     )}
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`font-semibold text-sm truncate ${isSelected ? 'text-blue-900' : 'text-slate-900'}`}>{rec.techName}</span>
-                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>#{rec.rank || i + 1}</span>
-                        </div>
-                        {pct !== null && (
-                          <span className={`text-lg font-bold tabular-nums flex-shrink-0 ${isSelected ? 'text-blue-600' : 'text-slate-400'}`}>{pct}<span className="text-xs">%</span></span>
-                        )}
-                      </div>
-                      {tech?.location && (
-                        <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                          <MapPin className="w-3 h-3 flex-shrink-0" /> {tech.location}
-                        </p>
-                      )}
-                      {rec.reasoning && (
-                        <p className="text-xs text-slate-500 leading-relaxed mt-2">{rec.reasoning}</p>
-                      )}
-                    </div>
+                    {rec.reasoning && (
+                      <p className="text-xs text-slate-500 leading-relaxed">{rec.reasoning}</p>
+                    )}
                   </div>
+
+                  {/* Score ring */}
+                  {pct !== null && <ScoreRing pct={pct} selected={isSelected} />}
                 </div>
-
-                {/* Score bar */}
-                {pct !== null && (
-                  <div className="h-1 bg-slate-100">
-                    <div
-                      className={`h-full bg-gradient-to-r ${scoreBarColor(pct)} transition-all duration-500`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                )}
               </div>
             );
           })}
@@ -278,8 +291,8 @@ export function RecommendationCards({ data, onDecide, deciding }) {
         )}
       </div>
 
-      {/* AI Reasoning (moved below recommendations) */}
-      {data.overallReasoning && (
+      {/* AI Reasoning — shown here only when not displayed elsewhere (e.g. LivePipelineView) */}
+      {!hideReasoning && data.overallReasoning && (
         <div className="mt-4">
           <button
             onClick={() => setShowReasoning(!showReasoning)}

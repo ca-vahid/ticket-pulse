@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import {
   ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
-  ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag,
+  ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag, Sparkles,
 } from 'lucide-react';
 import { CopyBadge, cleanTranscript, mdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
@@ -119,6 +119,64 @@ function StepCard({ step }) {
 function stripHtml(html) {
   if (!html) return '';
   return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+}
+
+function HighlightText({ text, techNames = [] }) {
+  if (!text) return null;
+
+  const allMatches = [];
+  const ticketRegex = /#\d{4,}/g;
+  let m;
+  while ((m = ticketRegex.exec(text)) !== null) {
+    allMatches.push({ start: m.index, end: m.index + m[0].length, text: m[0], type: 'ticket' });
+  }
+  for (const name of techNames.filter(Boolean)) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
+    while ((m = regex.exec(text)) !== null) {
+      if (!allMatches.some(e => e.start <= m.index && e.end >= m.index + m[0].length)) {
+        allMatches.push({ start: m.index, end: m.index + m[0].length, text: m[0], type: 'tech' });
+      }
+    }
+  }
+  allMatches.sort((a, b) => a.start - b.start);
+
+  const parts = [];
+  let lastIndex = 0;
+  for (const match of allMatches) {
+    if (match.start > lastIndex) parts.push({ text: text.slice(lastIndex, match.start), type: 'plain' });
+    parts.push(match);
+    lastIndex = match.end;
+  }
+  if (lastIndex < text.length) parts.push({ text: text.slice(lastIndex), type: 'plain' });
+
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.type === 'ticket') return <mark key={i} className="bg-amber-100 text-amber-800 px-0.5 rounded font-mono text-[11px] not-italic">{part.text}</mark>;
+        if (part.type === 'tech') return <strong key={i} className="text-indigo-700 font-semibold">{part.text}</strong>;
+        return <span key={i}>{part.text}</span>;
+      })}
+    </>
+  );
+}
+
+function ReasoningCard({ reasoning, recommendations }) {
+  if (!reasoning) return null;
+  const techNames = recommendations?.map(r => r.techName).filter(Boolean) || [];
+  return (
+    <div className="bg-gradient-to-br from-indigo-50 via-blue-50 to-slate-50 border border-indigo-100 rounded-xl p-4 h-full flex flex-col">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+        </div>
+        <h4 className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Overall Reasoning</h4>
+      </div>
+      <p className="text-sm text-slate-700 leading-relaxed">
+        <HighlightText text={reasoning} techNames={techNames} />
+      </p>
+    </div>
+  );
 }
 
 function TicketDetailsCard({ ticket }) {
@@ -413,11 +471,34 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         </div>
       </div>
 
-      {/* Ticket Details (collapsible) */}
-      <TicketDetailsCard ticket={ticket} />
+      {/* Ticket Details + AI Reasoning side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4 items-start">
+        <div className="lg:col-span-3">
+          <TicketDetailsCard ticket={ticket} />
+        </div>
+        {run.recommendation?.overallReasoning && (
+          <div className="lg:col-span-2">
+            <ReasoningCard
+              reasoning={run.recommendation.overallReasoning}
+              recommendations={run.recommendation?.recommendations}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Deleted ticket banner */}
+      {String(ticket?.status || '').toLowerCase() === 'deleted' && isPending && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2.5">
+          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-red-800">This ticket has been deleted from FreshService.</p>
+            <p className="text-xs text-red-600 mt-1">You can dismiss this run or reject the recommendation.</p>
+          </div>
+        </div>
+      )}
 
       {/* Staleness banner */}
-      {isTicketStale && isPending && (
+      {isTicketStale && isPending && String(ticket?.status || '').toLowerCase() !== 'deleted' && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2.5">
           <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
           <div className="flex-1">
@@ -454,6 +535,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           data={run.recommendation}
           onDecide={isPending ? onDecide : null}
           deciding={deciding}
+          hideReasoning={!!run.recommendation?.overallReasoning}
         />
       )}
 

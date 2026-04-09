@@ -717,6 +717,11 @@ class SyncService {
         logger.warn('Assignment polling failed (non-fatal)', { workspaceId, error: err.message });
       });
 
+      // Check for deleted tickets in FreshService (fire-and-forget)
+      this._checkDeletedTickets(workspaceId).catch((err) => {
+        logger.warn('Deleted ticket check failed (non-fatal)', { workspaceId, error: err.message });
+      });
+
       return summary;
     } catch (error) {
       logger.error('Full sync failed:', error);
@@ -1322,6 +1327,76 @@ class SyncService {
           error: err.message,
         });
       }
+    }
+  }
+
+  /**
+   * Post-sync check: verify that tickets with pending pipeline runs
+   * still exist in FreshService. Marks tickets as "Deleted" if FS returns 404.
+   * Only checks non-terminal tickets to minimize API calls.
+   */
+  async _checkDeletedTickets(workspaceId) {
+    const { default: prisma } = await import('./prisma.js');
+    const TERMINAL_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', '4', '5'];
+
+    const ticketsToCheck = await prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        status: { notIn: TERMINAL_STATUSES },
+        pipelineRuns: {
+          some: { decision: 'pending_review', status: 'completed' },
+        },
+      },
+      select: { id: true, freshserviceTicketId: true, subject: true, status: true },
+    });
+
+    if (ticketsToCheck.length === 0) return;
+
+    let client;
+    try {
+      client = await this._initializeClient(workspaceId);
+    } catch {
+      return;
+    }
+
+    let deletedCount = 0;
+    for (const ticket of ticketsToCheck) {
+      try {
+        const fsTicket = await client.fetchTicketSafe(Number(ticket.freshserviceTicketId));
+        if (fsTicket === null) {
+          await prisma.ticket.update({
+            where: { id: ticket.id },
+            data: { status: 'Deleted', updatedAt: new Date() },
+          });
+          await ticketActivityRepository.create({
+            ticketId: ticket.id,
+            activityType: 'status_changed',
+            performedBy: 'System',
+            performedAt: new Date(),
+            details: {
+              oldStatus: ticket.status,
+              newStatus: 'Deleted',
+              note: 'Ticket no longer exists in FreshService (404)',
+            },
+          });
+          deletedCount++;
+          logger.info('Marked ticket as deleted (gone from FreshService)', {
+            ticketId: ticket.id,
+            fsId: Number(ticket.freshserviceTicketId),
+            subject: ticket.subject,
+          });
+        }
+      } catch (err) {
+        logger.warn('Error checking ticket existence in FreshService', {
+          ticketId: ticket.id,
+          fsId: Number(ticket.freshserviceTicketId),
+          error: err.message,
+        });
+      }
+    }
+
+    if (deletedCount > 0) {
+      logger.info(`Deleted ticket check: marked ${deletedCount} ticket(s) as Deleted`, { workspaceId });
     }
   }
 }

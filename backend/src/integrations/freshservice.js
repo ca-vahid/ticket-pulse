@@ -230,6 +230,23 @@ class FreshServiceClient {
   }
 
   /**
+   * Fetch a single ticket, returning null if deleted (404) instead of throwing.
+   * @param {number} ticketId - FreshService ticket ID
+   * @returns {Promise<Object|null>} Ticket object or null if deleted/not found
+   */
+  async fetchTicketSafe(ticketId) {
+    try {
+      const response = await this.client.get(`/tickets/${ticketId}`);
+      return response.data.ticket;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Fetch CSAT (Customer Satisfaction) response for a ticket
    * @param {number} ticketId - Ticket ID
    * @returns {Promise<Object|null>} CSAT response object or null if no response

@@ -147,6 +147,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const [timeRange, setTimeRange] = useState('7d');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [techPhotos, setTechPhotos] = useState({});
+  const [avatarView, setAvatarView] = useState(true);
 
   useEffect(() => {
     assignmentAPI.getCompetencyTechnicians().then(res => {
@@ -330,9 +331,11 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   };
 
   const isTicketOpen = (run) => ['Open', 'open', '2', 'Pending', 'pending', '3'].includes(String(run.ticket?.status || ''));
+  const isTicketDeleted = (run) => String(run.ticket?.status || '').toLowerCase() === 'deleted';
   const isTicketUnassigned = (run) => !run.ticket?.assignedTechId;
   const getTicketFlag = (run) => {
     if (!run.ticket) return null;
+    if (isTicketDeleted(run)) return 'deleted';
     if (!isTicketOpen(run)) return 'closed';
     if (run.ticket.assignedTechId) return 'assigned';
     return 'open';
@@ -344,7 +347,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       if (filterTicketStatus === 'all') return true;
       if (filterTicketStatus === 'open') return isTicketOpen(r) && isTicketUnassigned(r);
       if (filterTicketStatus === 'assigned') return isTicketOpen(r) && !isTicketUnassigned(r);
-      if (filterTicketStatus === 'closed') return !isTicketOpen(r);
+      if (filterTicketStatus === 'closed') return !isTicketOpen(r) && !isTicketDeleted(r);
+      if (filterTicketStatus === 'deleted') return isTicketDeleted(r);
       return true;
     })
     .sort((a, b) => {
@@ -360,13 +364,14 @@ function QueueTab({ deepRunId, isAdmin = false }) {
 
   const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', rejected: 'Rejected', pending_review: 'Pending' };
   const DECISION_PILL = { approved: 'bg-green-100 text-green-800', modified: 'bg-blue-100 text-blue-800', auto_assigned: 'bg-purple-100 text-purple-800', noise_dismissed: 'bg-slate-100 text-slate-500', rejected: 'bg-red-100 text-red-800' };
-  const FLAG_PILL = { open: { label: 'Open', style: 'bg-green-100 text-green-700' }, assigned: { label: 'Assigned', style: 'bg-amber-100 text-amber-700' }, closed: { label: 'Closed', style: 'bg-slate-100 text-slate-500' } };
+  const FLAG_PILL = { open: { label: 'Open', style: 'bg-green-100 text-green-700' }, assigned: { label: 'Assigned', style: 'bg-amber-100 text-amber-700' }, closed: { label: 'Closed', style: 'bg-slate-100 text-slate-500' }, deleted: { label: 'Deleted', style: 'bg-red-100 text-red-600' } };
 
   const pendingStats = {
     total: queue.items.length,
     open: queue.items.filter((r) => isTicketOpen(r) && isTicketUnassigned(r)).length,
     assigned: queue.items.filter((r) => isTicketOpen(r) && !isTicketUnassigned(r)).length,
-    closed: queue.items.filter((r) => !isTicketOpen(r)).length,
+    closed: queue.items.filter((r) => !isTicketOpen(r) && !isTicketDeleted(r)).length,
+    deleted: queue.items.filter((r) => isTicketDeleted(r)).length,
   };
 
   const TechAvatar = ({ techId, name, size = 'sm', ring = '' }) => {
@@ -458,7 +463,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     const topRec = run.recommendation?.recommendations?.[0];
     const flag = getTicketFlag(run);
     const flagInfo = FLAG_PILL[flag];
-    const rowStyle = flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
+    const rowStyle = flag === 'deleted' ? 'opacity-40 bg-red-50/30' : flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
     return (
       <div
         key={run.id}
@@ -504,6 +509,11 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                   {run.recommendation?.recommendations?.length > 0 && (
                     <AiPicks recommendations={run.recommendation.recommendations} />
                   )}
+                </span>
+              )}
+              {subView === 'pending' && flag === 'deleted' && (
+                <span className="text-[10px] inline-flex items-center gap-1.5">
+                  <span className="text-red-500 bg-red-50 px-1.5 py-0.5 rounded font-medium">Deleted in FS</span>
                 </span>
               )}
               {subView !== 'pending' && run.assignedTech?.name && (
@@ -645,7 +655,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                   { id: 'open', label: `Open (${pendingStats.open})` },
                   { id: 'assigned', label: `Assigned (${pendingStats.assigned})` },
                   { id: 'closed', label: `Closed (${pendingStats.closed})` },
-                ].filter((f) => f.id === 'all' || (f.id === 'open' && pendingStats.open) || (f.id === 'assigned' && pendingStats.assigned) || (f.id === 'closed' && pendingStats.closed)).map((f) => (
+                  { id: 'deleted', label: `Deleted (${pendingStats.deleted})` },
+                ].filter((f) => f.id === 'all' || (f.id === 'open' && pendingStats.open) || (f.id === 'assigned' && pendingStats.assigned) || (f.id === 'closed' && pendingStats.closed) || (f.id === 'deleted' && pendingStats.deleted)).map((f) => (
                   <button key={f.id} onClick={() => setFilterTicketStatus(f.id)} className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors touch-manipulation ${filterTicketStatus === f.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
                     {f.label}
                   </button>
@@ -677,6 +688,13 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                 <Trash2 className="w-3 h-3" /> Clear all
               </button>
             )}
+            <button
+              onClick={() => setAvatarView(v => !v)}
+              className={`text-[10px] px-2 py-1 rounded border touch-manipulation font-medium transition-colors ${avatarView ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}
+              title={avatarView ? 'Switch to text view' : 'Switch to avatar view'}
+            >
+              {avatarView ? '≡ Text' : '⊙ Avatars'}
+            </button>
             <button onClick={fetchQueue} className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-0.5 p-1 touch-manipulation">
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
@@ -691,6 +709,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
             <span className="text-green-600 font-medium">{pendingStats.open} open</span>
             {pendingStats.assigned > 0 && <><span className="text-slate-300">·</span><span className="text-amber-600">{pendingStats.assigned} assigned</span></>}
             {pendingStats.closed > 0 && <><span className="text-slate-300">·</span><span className="text-slate-400">{pendingStats.closed} closed</span></>}
+            {pendingStats.deleted > 0 && <><span className="text-slate-300">·</span><span className="text-red-500">{pendingStats.deleted} deleted</span></>}
           </div>
         )}
 
@@ -735,7 +754,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                   const flag = getTicketFlag(run);
                   const isStale = flag !== 'open';
                   return (
-                    <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'closed' ? 'opacity-50 bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : ''}`} onClick={() => handleSelectRun(run.id)}>
+                    <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'deleted' ? 'opacity-40 bg-red-50/30' : subView === 'pending' && flag === 'closed' ? 'opacity-50 bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : ''}`} onClick={() => handleSelectRun(run.id)}>
                       <td className="px-3 py-1.5">
                         <span className="font-medium text-slate-800 block leading-snug">{run.ticket?.subject || 'No subject'}</span>
                         <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
@@ -761,6 +780,10 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                                   <span className="uppercase tracking-wide">Live</span>
                                   <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
                                   <span className="max-w-[50px] truncate">{run.ticket.assignedTech.name?.split(' ')[0]}</span>
+                                </span>
+                              ) : flag === 'deleted' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px]">
+                                  <span className="text-red-500 bg-red-50 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">Deleted in FS</span>
                                 </span>
                               ) : flag === 'closed' ? (
                                 <span className="inline-flex items-center gap-1 text-[10px]">
