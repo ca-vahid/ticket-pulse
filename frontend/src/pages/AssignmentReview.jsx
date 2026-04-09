@@ -238,6 +238,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   }, [deepRunId]);
 
   const handleSelectRun = (runId) => {
+    if (Date.now() - quickApproveGuardRef.current < 800) return;
     navigate(`/assignments/run/${runId}`);
   };
 
@@ -312,6 +313,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const [quickApproving, setQuickApproving] = useState(false);
   const quickApproveRef = useRef(null);
   const quickApproveMobileRef = useRef(null);
+  const quickApproveGuardRef = useRef(0);
 
   useEffect(() => {
     if (!quickApproveId) return;
@@ -321,7 +323,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       if (!inDesktop && !inMobile) setQuickApproveId(null);
     };
     document.addEventListener('mousedown', onPointer);
-    document.addEventListener('touchstart', onPointer);
+    document.addEventListener('touchstart', onPointer, { passive: true });
     return () => { document.removeEventListener('mousedown', onPointer); document.removeEventListener('touchstart', onPointer); };
   }, [quickApproveId]);
 
@@ -347,6 +349,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         decisionNote: quickApproveNote || undefined,
         overrideReason: !isTopPick ? (quickApproveNote || 'Quick approve override') : undefined,
       });
+      quickApproveGuardRef.current = Date.now();
       setQuickApproveId(null);
       setActionMsg('Approved');
       await fetchQueue();
@@ -613,32 +616,38 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     const recs = run.recommendation?.recommendations || [];
     if (!recs.length) return null;
     return (
-      <>
-        {/* Desktop: absolute popover */}
+      <div
+        ref={quickApproveRef}
+        onClick={(e) => e.stopPropagation()}
+        className={`hidden md:block absolute z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
+        style={{ top: '100%' }}
+      >
+        <QuickApproveInner run={run} recs={recs} />
+      </div>
+    );
+  };
+
+  const MobileQuickApproveSheet = () => {
+    if (!quickApproveId) return null;
+    const run = activeItems.find((r) => r.id === quickApproveId);
+    if (!run) return null;
+    const recs = run.recommendation?.recommendations || [];
+    if (!recs.length) return null;
+    return (
+      <div className="md:hidden fixed inset-0 z-[100]" onClick={() => { quickApproveGuardRef.current = Date.now(); setQuickApproveId(null); }}>
+        <div className="absolute inset-0 bg-black/30" />
         <div
-          ref={quickApproveRef}
+          ref={quickApproveMobileRef}
           onClick={(e) => e.stopPropagation()}
-          className={`hidden md:block absolute z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
-          style={{ top: '100%' }}
+          className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl pb-safe max-h-[70vh] overflow-y-auto"
         >
+          <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-slate-300" /></div>
+          <p className="px-4 pt-1 pb-0 text-xs font-medium text-slate-500 truncate">
+            #{run.ticket?.freshserviceTicketId} — {run.ticket?.subject}
+          </p>
           <QuickApproveInner run={run} recs={recs} />
         </div>
-        {/* Mobile: fixed bottom sheet */}
-        <div className="md:hidden fixed inset-0 z-[100]" onClick={(e) => { e.stopPropagation(); setQuickApproveId(null); }}>
-          <div className="absolute inset-0 bg-black/30" />
-          <div
-            ref={quickApproveMobileRef}
-            onClick={(e) => e.stopPropagation()}
-            className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl pb-safe max-h-[70vh] overflow-y-auto"
-          >
-            <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-slate-300" /></div>
-            <p className="px-4 pt-1 pb-0 text-xs font-medium text-slate-500 truncate">
-              #{run.ticket?.freshserviceTicketId} — {run.ticket?.subject}
-            </p>
-            <QuickApproveInner run={run} recs={recs} />
-          </div>
-        </div>
-      </>
+      </div>
     );
   };
 
@@ -1166,6 +1175,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       </div>
 
       <ManualTriggerPanel isAdmin={isAdmin} />
+      <MobileQuickApproveSheet />
     </div>
   );
 }
