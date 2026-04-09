@@ -11,7 +11,7 @@ import {
   ArrowLeft, Inbox, History, Settings2, Award, RefreshCw, Loader2,
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
-  ArrowUpDown, ArrowUp, ArrowDown, Eye, Filter, Save,
+  ArrowUpDown, ArrowUp, ArrowDown, Eye, Filter, Save, Check,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -289,6 +289,53 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     }
   };
 
+  /* ─── Quick Approve ──────────────────────────────────── */
+  const [quickApproveId, setQuickApproveId] = useState(null);
+  const [quickApproveNote, setQuickApproveNote] = useState('');
+  const [quickApproveTechId, setQuickApproveTechId] = useState(null);
+  const [quickApproving, setQuickApproving] = useState(false);
+  const quickApproveRef = useRef(null);
+
+  useEffect(() => {
+    if (!quickApproveId) return;
+    const onClick = (e) => { if (quickApproveRef.current && !quickApproveRef.current.contains(e.target)) setQuickApproveId(null); };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [quickApproveId]);
+
+  const openQuickApprove = (e, run) => {
+    e.stopPropagation();
+    const topTech = run.recommendation?.recommendations?.[0]?.techId || null;
+    if (quickApproveId === run.id) { setQuickApproveId(null); return; }
+    setQuickApproveId(run.id);
+    setQuickApproveTechId(topTech);
+    setQuickApproveNote('');
+  };
+
+  const submitQuickApprove = async (e, run) => {
+    e.stopPropagation();
+    if (!quickApproveTechId) return;
+    const recs = run.recommendation?.recommendations || [];
+    const isTopPick = recs[0]?.techId === quickApproveTechId;
+    try {
+      setQuickApproving(true);
+      await assignmentAPI.decide(run.id, {
+        decision: isTopPick ? 'approved' : 'modified',
+        assignedTechId: quickApproveTechId,
+        decisionNote: quickApproveNote || undefined,
+        overrideReason: !isTopPick ? (quickApproveNote || 'Quick approve override') : undefined,
+      });
+      setQuickApproveId(null);
+      setActionMsg('Approved');
+      await fetchQueue();
+      setTimeout(() => setActionMsg(null), 2000);
+    } catch (err) {
+      console.error('Quick approve failed:', err);
+    } finally {
+      setQuickApproving(false);
+    }
+  };
+
   if (selectedRun) {
     return (
       <div>
@@ -477,6 +524,77 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     );
   };
 
+  const QuickApprovePopover = ({ run, align = 'right' }) => {
+    if (quickApproveId !== run.id) return null;
+    const recs = run.recommendation?.recommendations || [];
+    if (!recs.length) return null;
+    return (
+      <div
+        ref={quickApproveRef}
+        onClick={(e) => e.stopPropagation()}
+        className={`absolute z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
+        style={{ top: '100%' }}
+      >
+        <div className="px-3 pt-3 pb-1.5">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Assign to</p>
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {recs.map((r, i) => {
+              const isActive = quickApproveTechId === r.techId;
+              const tech = techPhotos[r.techId];
+              const initials = r.techName?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
+              const pct = typeof r.score === 'number' ? Math.round(r.score * 100) : null;
+              return (
+                <button
+                  key={r.techId}
+                  type="button"
+                  onClick={() => setQuickApproveTechId(r.techId)}
+                  className={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-all ${isActive ? 'bg-blue-50 ring-1 ring-blue-300' : 'hover:bg-slate-50'}`}
+                >
+                  {tech?.photoUrl ? (
+                    <img src={tech.photoUrl} alt="" className={`w-6 h-6 rounded-full object-cover flex-shrink-0 ${isActive ? 'ring-2 ring-blue-400' : ''}`} />
+                  ) : (
+                    <span className={`w-6 h-6 rounded-full text-[9px] font-bold flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-400' : 'bg-slate-100 text-slate-500'}`}>{initials}</span>
+                  )}
+                  <span className={`text-xs font-medium truncate flex-1 ${isActive ? 'text-blue-900' : 'text-slate-800'}`}>{r.techName}</span>
+                  {pct !== null && <span className="text-[10px] tabular-nums text-slate-400">{pct}%</span>}
+                  {i === 0 && <span className="text-[8px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 px-1 rounded flex-shrink-0">AI</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="px-3 pb-2">
+          <input
+            type="text"
+            value={quickApproveNote}
+            onChange={(e) => setQuickApproveNote(e.target.value)}
+            placeholder="Note (optional)"
+            className="w-full border border-slate-200 rounded-md px-2 py-1.5 text-xs focus:ring-2 focus:ring-blue-200 focus:border-blue-300 bg-slate-50"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+        <div className="border-t border-slate-100 px-3 py-2 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setQuickApproveId(null); }}
+            className="px-2.5 py-1.5 text-[11px] font-medium text-slate-500 hover:text-slate-700 rounded-md hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={(e) => submitQuickApprove(e, run)}
+            disabled={quickApproving || !quickApproveTechId}
+            className="px-3 py-1.5 bg-green-600 text-white rounded-md text-[11px] font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-1"
+          >
+            {quickApproving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            Approve
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const activeItems = (() => {
     if (subView === 'pending') return filteredItems;
     if (subView === 'assigned') return assignedRuns.items;
@@ -558,9 +676,14 @@ function QueueTab({ deepRunId, isAdmin = false }) {
               <span className="text-[10px] text-slate-300">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</span>
             </div>
           </div>
-          <div className="flex items-center gap-0.5 flex-shrink-0">
+          <div className="flex items-center gap-0.5 flex-shrink-0 relative">
             {showActions && (
               <>
+                {run.recommendation?.recommendations?.length > 0 && flag !== 'deleted' && (
+                  <button onClick={(e) => openQuickApprove(e, run)} className={`p-2 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 hover:bg-green-50'}`} title="Quick approve">
+                    <Check className="w-4 h-4" />
+                  </button>
+                )}
                 <button onClick={(e) => handleDismiss(e, run.id)} className="p-2 text-yellow-500 hover:bg-yellow-50 rounded-lg touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Dismiss">
                   <XCircle className="w-4 h-4" />
                 </button>
@@ -574,6 +697,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
               </>
             )}
             <ChevronRight className="w-4 h-4 text-slate-300" />
+            <QuickApprovePopover run={run} />
           </div>
         </div>
       </div>
@@ -930,8 +1054,11 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                       )}
                       <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</td>
                       {showActions && (
-                        <td className="px-3 py-1.5">
-                          <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <td className="px-3 py-1.5 relative">
+                          <div className={`flex items-center justify-end gap-0.5 transition-opacity ${quickApproveId === run.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                            {run.recommendation?.recommendations?.length > 0 && flag !== 'deleted' && (
+                              <button onClick={(e) => openQuickApprove(e, run)} className={`p-1 rounded transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 hover:text-green-700 hover:bg-green-50'}`} title="Quick approve"><Check className="w-3.5 h-3.5" /></button>
+                            )}
                             <button onClick={(e) => handleDismiss(e, run.id)} className="p-1 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 rounded" title="Dismiss"><XCircle className="w-3.5 h-3.5" /></button>
                             {confirmDeleteId === run.id ? (
                               <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
@@ -939,6 +1066,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                               <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
                             )}
                           </div>
+                          <QuickApprovePopover run={run} />
                         </td>
                       )}
                     </tr>
