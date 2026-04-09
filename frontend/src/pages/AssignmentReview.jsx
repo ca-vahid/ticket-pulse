@@ -147,7 +147,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const [timeRange, setTimeRange] = useState('7d');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [techPhotos, setTechPhotos] = useState({});
-  const [avatarView, setAvatarView] = useState(true);
+  const [avatarView, setAvatarView] = useState(false);
 
   useEffect(() => {
     assignmentAPI.getCompetencyTechnicians().then(res => {
