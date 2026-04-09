@@ -458,7 +458,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
 
   const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', rejected: 'Rejected', pending_review: 'Pending' };
   const DECISION_PILL = { approved: 'bg-green-100 text-green-800', modified: 'bg-blue-100 text-blue-800', auto_assigned: 'bg-purple-100 text-purple-800', noise_dismissed: 'bg-slate-100 text-slate-500', rejected: 'bg-red-100 text-red-800' };
-  const FLAG_PILL = { open: { label: 'Open', style: 'bg-green-100 text-green-700' }, assigned: { label: 'Assigned', style: 'bg-amber-100 text-amber-700' }, closed: { label: 'Closed', style: 'bg-slate-100 text-slate-500' }, deleted: { label: 'Deleted', style: 'bg-red-100 text-red-600' } };
+  const FLAG_PILL = { open: { label: 'Unassigned', style: 'bg-green-100 text-green-700' }, assigned: { label: 'Assigned', style: 'bg-amber-100 text-amber-700' }, closed: { label: 'Closed', style: 'bg-slate-100 text-slate-500' }, deleted: { label: 'Deleted', style: 'bg-red-100 text-red-600' } };
 
   const pendingStats = {
     total: queue.items.length,
@@ -879,8 +879,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       )}
 
       {/* Sub-view tabs + filters + toolbar (single compact row; ticket status only on Pending) */}
-      <div className="border border-slate-200 rounded-lg overflow-hidden">
-        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2">
+      <div className="border border-slate-200 rounded-lg">
+        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2 rounded-t-lg">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
             {/* Queue (decision) scope */}
             <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-200/90 p-0.5 ring-1 ring-slate-300/40 shadow-sm">
@@ -906,7 +906,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                   <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-100/90 p-0.5 ring-1 ring-slate-200/60">
                     {[
                       { id: 'all', label: 'All', count: pendingStats.total, tint: '' },
-                      { id: 'open', label: 'Open', count: pendingStats.open, tint: 'text-emerald-700' },
+                      { id: 'open', label: 'Unassigned', count: pendingStats.open, tint: 'text-emerald-700' },
                       { id: 'assigned', label: 'Assigned', count: pendingStats.assigned, tint: 'text-amber-800' },
                       { id: 'closed', label: 'Closed', count: pendingStats.closed, tint: 'text-slate-600' },
                       { id: 'deleted', label: 'Deleted', count: pendingStats.deleted, tint: 'text-red-600' },
