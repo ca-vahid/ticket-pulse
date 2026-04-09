@@ -28,6 +28,7 @@ function ManualTriggerPanel({ isAdmin = false }) {
   const [loading, setLoading] = useState(false);
   const [showAll, setShowAll] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [expanded, setExpanded] = useState(false);
 
   const fetchTickets = useCallback(async () => {
     try {
@@ -41,7 +42,7 @@ function ManualTriggerPanel({ isAdmin = false }) {
     }
   }, [showAll]);
 
-  useEffect(() => { fetchTickets(); }, [fetchTickets]);
+  useEffect(() => { if (expanded) fetchTickets(); }, [fetchTickets, expanded]);
 
   if (!isAdmin) {
     return null;
@@ -65,66 +66,76 @@ function ManualTriggerPanel({ isAdmin = false }) {
   const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
   return (
-    <div className="border rounded-lg bg-gray-50 p-3 sm:p-4 mt-4">
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+    <div className="border rounded-lg bg-gray-50 mt-4">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between p-3 sm:p-4 touch-manipulation text-left"
+      >
         <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
           <Zap className="w-4 h-4" /> Manual Trigger
         </h4>
-        <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1 text-xs text-gray-500 touch-manipulation">
-            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="rounded w-4 h-4" />
-            Assigned
-          </label>
-          <button onClick={fetchTickets} className="text-xs text-blue-600 hover:underline p-1 touch-manipulation">Refresh</button>
-        </div>
-      </div>
+        {expanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+      </button>
 
-      <div className="relative mb-3">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Search tickets..."
-          className="w-full pl-9 pr-3 py-2.5 sm:py-2 border rounded-lg text-sm bg-white"
-        />
-      </div>
+      {expanded && (
+        <div className="px-3 pb-3 sm:px-4 sm:pb-4">
+          <div className="flex items-center justify-end gap-2 mb-3">
+            <label className="flex items-center gap-1 text-xs text-gray-500 touch-manipulation">
+              <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="rounded w-4 h-4" />
+              Assigned
+            </label>
+            <button onClick={fetchTickets} className="text-xs text-blue-600 hover:underline p-1 touch-manipulation">Refresh</button>
+          </div>
 
-      {loading ? (
-        <div className="flex justify-center p-4"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
-      ) : filtered.length === 0 ? (
-        <p className="text-gray-400 text-sm text-center py-4">No tickets found.</p>
-      ) : (
-        <div className="space-y-1.5 max-h-72 overflow-y-auto">
-          {filtered.map((ticket) => {
-            const hasPipeline = ticket.pipelineRuns?.length > 0;
-            return (
-              <div key={ticket.id} className="flex items-center justify-between bg-white border rounded-lg px-3 py-2.5 sm:py-2 gap-2">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm truncate">
-                    <span className="text-gray-400 font-mono text-xs">#{ticket.freshserviceTicketId}</span>{' '}
-                    {ticket.subject || 'No subject'}
-                  </p>
-                  <p className="text-xs text-gray-400 truncate">
-                    {ticket.requester?.name || 'Unknown'}
-                    {ticket.assignedTech ? ` · ${ticket.assignedTech.name}` : ''}
-                    {' · '}{PRIORITY_LABELS[ticket.priority] || `P${ticket.priority}`}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleTrigger(ticket.id)}
-                  className={`px-3 py-2 sm:py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation min-h-[36px] flex-shrink-0 ${
-                    hasPipeline
-                      ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
-                  }`}
-                >
-                  {hasPipeline ? <RotateCcw className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                  {hasPipeline ? 'Re-run' : 'Run'}
-                </button>
-              </div>
-            );
-          })}
+          <div className="relative mb-3">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search tickets..."
+              className="w-full pl-9 pr-3 py-2.5 sm:py-2 border rounded-lg text-sm bg-white"
+            />
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center p-4"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+          ) : filtered.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-4">No tickets found.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-72 overflow-y-auto">
+              {filtered.map((ticket) => {
+                const hasPipeline = ticket.pipelineRuns?.length > 0;
+                return (
+                  <div key={ticket.id} className="flex items-center justify-between bg-white border rounded-lg px-3 py-2.5 sm:py-2 gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm truncate">
+                        <span className="text-gray-400 font-mono text-xs">#{ticket.freshserviceTicketId}</span>{' '}
+                        {ticket.subject || 'No subject'}
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {ticket.requester?.name || 'Unknown'}
+                        {ticket.assignedTech ? ` · ${ticket.assignedTech.name}` : ''}
+                        {' · '}{PRIORITY_LABELS[ticket.priority] || `P${ticket.priority}`}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleTrigger(ticket.id)}
+                      className={`px-3 py-2 sm:py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation min-h-[36px] flex-shrink-0 ${
+                        hasPipeline
+                          ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          : 'bg-blue-600 text-white hover:bg-blue-700'
+                      }`}
+                    >
+                      {hasPipeline ? <RotateCcw className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                      {hasPipeline ? 'Re-run' : 'Run'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -300,12 +311,18 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const [quickApproveTechId, setQuickApproveTechId] = useState(null);
   const [quickApproving, setQuickApproving] = useState(false);
   const quickApproveRef = useRef(null);
+  const quickApproveMobileRef = useRef(null);
 
   useEffect(() => {
     if (!quickApproveId) return;
-    const onClick = (e) => { if (quickApproveRef.current && !quickApproveRef.current.contains(e.target)) setQuickApproveId(null); };
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
+    const onPointer = (e) => {
+      const inDesktop = quickApproveRef.current?.contains(e.target);
+      const inMobile = quickApproveMobileRef.current?.contains(e.target);
+      if (!inDesktop && !inMobile) setQuickApproveId(null);
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('touchstart', onPointer);
+    return () => { document.removeEventListener('mousedown', onPointer); document.removeEventListener('touchstart', onPointer); };
   }, [quickApproveId]);
 
   const openQuickApprove = (e, run) => {
@@ -530,74 +547,98 @@ function QueueTab({ deepRunId, isAdmin = false }) {
     );
   };
 
+  const QuickApproveInner = ({ run, recs }) => (
+    <>
+      <div className="px-3 pt-3 pb-1.5 sm:px-3">
+        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Assign to</p>
+        <div className="space-y-1 max-h-52 overflow-y-auto">
+          {recs.map((r, i) => {
+            const isActive = quickApproveTechId === r.techId;
+            const tech = techPhotos[r.techId];
+            const initials = r.techName?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
+            const pct = typeof r.score === 'number' ? Math.round(r.score * 100) : null;
+            return (
+              <button
+                key={r.techId}
+                type="button"
+                onClick={() => setQuickApproveTechId(r.techId)}
+                className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 sm:py-1.5 text-left transition-all touch-manipulation ${isActive ? 'bg-blue-50 ring-1 ring-blue-300' : 'hover:bg-slate-50 active:bg-slate-100'}`}
+              >
+                {tech?.photoUrl ? (
+                  <img src={tech.photoUrl} alt="" className={`w-8 h-8 sm:w-6 sm:h-6 rounded-full object-cover flex-shrink-0 ${isActive ? 'ring-2 ring-blue-400' : ''}`} />
+                ) : (
+                  <span className={`w-8 h-8 sm:w-6 sm:h-6 rounded-full text-[10px] sm:text-[9px] font-bold flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-400' : 'bg-slate-100 text-slate-500'}`}>{initials}</span>
+                )}
+                <span className={`text-sm sm:text-xs font-medium truncate flex-1 ${isActive ? 'text-blue-900' : 'text-slate-800'}`}>{r.techName}</span>
+                {pct !== null && <span className="text-xs sm:text-[10px] tabular-nums text-slate-400">{pct}%</span>}
+                {i === 0 && <span className="text-[9px] sm:text-[8px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 px-1.5 sm:px-1 rounded flex-shrink-0">AI</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="px-3 pb-2">
+        <input
+          type="text"
+          value={quickApproveNote}
+          onChange={(e) => setQuickApproveNote(e.target.value)}
+          placeholder="Note (optional)"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs focus:ring-2 focus:ring-blue-200 focus:border-blue-300 bg-slate-50"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
+      <div className="border-t border-slate-100 px-3 py-2.5 sm:py-2 flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setQuickApproveId(null); }}
+          className="px-3 py-2 sm:py-1.5 text-sm sm:text-[11px] font-medium text-slate-500 hover:text-slate-700 rounded-md hover:bg-slate-50 touch-manipulation"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={(e) => submitQuickApprove(e, run)}
+          disabled={quickApproving || !quickApproveTechId}
+          className="px-4 py-2 sm:px-3 sm:py-1.5 bg-green-600 text-white rounded-lg sm:rounded-md text-sm sm:text-[11px] font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-1.5 sm:gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+        >
+          {quickApproving ? <Loader2 className="w-4 h-4 sm:w-3 sm:h-3 animate-spin" /> : <Check className="w-4 h-4 sm:w-3 sm:h-3" />}
+          Approve
+        </button>
+      </div>
+    </>
+  );
+
   const QuickApprovePopover = ({ run, align = 'right' }) => {
     if (quickApproveId !== run.id) return null;
     const recs = run.recommendation?.recommendations || [];
     if (!recs.length) return null;
     return (
-      <div
-        ref={quickApproveRef}
-        onClick={(e) => e.stopPropagation()}
-        className={`absolute z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
-        style={{ top: '100%' }}
-      >
-        <div className="px-3 pt-3 pb-1.5">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Assign to</p>
-          <div className="space-y-1 max-h-40 overflow-y-auto">
-            {recs.map((r, i) => {
-              const isActive = quickApproveTechId === r.techId;
-              const tech = techPhotos[r.techId];
-              const initials = r.techName?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
-              const pct = typeof r.score === 'number' ? Math.round(r.score * 100) : null;
-              return (
-                <button
-                  key={r.techId}
-                  type="button"
-                  onClick={() => setQuickApproveTechId(r.techId)}
-                  className={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-all ${isActive ? 'bg-blue-50 ring-1 ring-blue-300' : 'hover:bg-slate-50'}`}
-                >
-                  {tech?.photoUrl ? (
-                    <img src={tech.photoUrl} alt="" className={`w-6 h-6 rounded-full object-cover flex-shrink-0 ${isActive ? 'ring-2 ring-blue-400' : ''}`} />
-                  ) : (
-                    <span className={`w-6 h-6 rounded-full text-[9px] font-bold flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-400' : 'bg-slate-100 text-slate-500'}`}>{initials}</span>
-                  )}
-                  <span className={`text-xs font-medium truncate flex-1 ${isActive ? 'text-blue-900' : 'text-slate-800'}`}>{r.techName}</span>
-                  {pct !== null && <span className="text-[10px] tabular-nums text-slate-400">{pct}%</span>}
-                  {i === 0 && <span className="text-[8px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 px-1 rounded flex-shrink-0">AI</span>}
-                </button>
-              );
-            })}
+      <>
+        {/* Desktop: absolute popover */}
+        <div
+          ref={quickApproveRef}
+          onClick={(e) => e.stopPropagation()}
+          className={`hidden md:block absolute z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
+          style={{ top: '100%' }}
+        >
+          <QuickApproveInner run={run} recs={recs} />
+        </div>
+        {/* Mobile: fixed bottom sheet */}
+        <div className="md:hidden fixed inset-0 z-[100]" onClick={(e) => { e.stopPropagation(); setQuickApproveId(null); }}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div
+            ref={quickApproveMobileRef}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl pb-safe max-h-[70vh] overflow-y-auto"
+          >
+            <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-slate-300" /></div>
+            <p className="px-4 pt-1 pb-0 text-xs font-medium text-slate-500 truncate">
+              #{run.ticket?.freshserviceTicketId} — {run.ticket?.subject}
+            </p>
+            <QuickApproveInner run={run} recs={recs} />
           </div>
         </div>
-        <div className="px-3 pb-2">
-          <input
-            type="text"
-            value={quickApproveNote}
-            onChange={(e) => setQuickApproveNote(e.target.value)}
-            placeholder="Note (optional)"
-            className="w-full border border-slate-200 rounded-md px-2 py-1.5 text-xs focus:ring-2 focus:ring-blue-200 focus:border-blue-300 bg-slate-50"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-        <div className="border-t border-slate-100 px-3 py-2 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setQuickApproveId(null); }}
-            className="px-2.5 py-1.5 text-[11px] font-medium text-slate-500 hover:text-slate-700 rounded-md hover:bg-slate-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={(e) => submitQuickApprove(e, run)}
-            disabled={quickApproving || !quickApproveTechId}
-            className="px-3 py-1.5 bg-green-600 text-white rounded-md text-[11px] font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-1"
-          >
-            {quickApproving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-            Approve
-          </button>
-        </div>
-      </div>
+      </>
     );
   };
 
@@ -625,56 +666,64 @@ function QueueTab({ deepRunId, isAdmin = false }) {
       return <span>{prefix ? <span className="text-slate-400">{prefix} </span> : ''}{name?.split(' ')[0]}</span>;
     };
 
+    const cardBorder = flag === 'deleted' ? 'border-red-200' : flag === 'closed' ? 'border-slate-200' : flag === 'assigned' ? 'border-amber-200' : 'border-slate-300';
+
     return (
       <div
         key={run.id}
         onClick={() => handleSelectRun(run.id)}
-        className={`px-3 py-2 active:bg-blue-50/60 touch-manipulation cursor-pointer ${rowBg}`}
+        className={`px-3.5 py-3 active:bg-blue-50/60 touch-manipulation cursor-pointer border ${cardBorder} rounded-xl bg-white shadow-sm ${rowBg}`}
       >
-        {/* Row 1: subject + priority pill + chevron */}
-        <div className="flex items-center gap-1.5">
-          <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold leading-none ${priPill}`}>{priLabel || '—'}</span>
-          <p className="flex-1 min-w-0 text-[13px] font-medium text-slate-800 leading-snug truncate">
-            {run.ticket?.subject || 'No subject'}
-          </p>
-          {flag === 'deleted' && <Trash2 className="w-3 h-3 text-red-400 shrink-0" />}
-          <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-        </div>
-
-        {/* Row 2: metadata + status/tech */}
-        <div className="flex items-center gap-1.5 mt-1 text-[10px] leading-none">
-          <span className="text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
-          <span className="text-slate-300">·</span>
-          <span className="text-slate-400 truncate max-w-[100px]">{run.ticket?.requester?.name || '—'}</span>
-          <span className="text-slate-300">·</span>
-          <span className="text-slate-300">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</span>
-
+        {/* Row 1: priority pill + ticket ID + status badges */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${priPill}`}>{priLabel || '—'}</span>
+          <span className="text-slate-400 font-mono text-[11px]">#{run.ticket?.freshserviceTicketId}</span>
+          {run.ticket?.ticketCategory && <span className="text-[10px] text-slate-400 bg-slate-100 rounded px-1 py-0.5">{run.ticket.ticketCategory}</span>}
           <span className="ml-auto" />
-
-          {subView === 'pending' && flag !== 'deleted' && (
-            <>
-              {flag !== 'open' && flagPill && (
-                <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${flagPill.style}`}>{flagPill.label}</span>
-              )}
-              {(flag === 'assigned' || flag === 'closed') && run.ticket?.assignedTech && (
-                <span className="text-amber-700 font-medium inline-flex items-center gap-0.5">
-                  {renderTechInline(run.ticket.assignedTech.id, run.ticket.assignedTech.name, '→')}
-                </span>
-              )}
-            </>
+          {flag === 'deleted' && <Trash2 className="w-3.5 h-3.5 text-red-400 shrink-0" />}
+          {flag !== 'open' && flag !== 'deleted' && flagPill && subView === 'pending' && (
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${flagPill.style}`}>{flagPill.label}</span>
           )}
           {subView === 'pending' && flag === 'deleted' && (
-            <span className="text-red-500 bg-red-50 rounded px-1 py-0.5 text-[9px] font-medium">Deleted</span>
+            <span className="text-red-500 bg-red-50 rounded px-1.5 py-0.5 text-[10px] font-medium">Deleted</span>
           )}
           {subView !== 'pending' && run.decision && (
-            <span className={`px-1 py-0.5 rounded text-[9px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
               {DECISION_LABELS[run.decision] || run.decision}
             </span>
           )}
+          <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+        </div>
+
+        {/* Row 2: full subject — no truncation, wraps naturally */}
+        <p className="text-sm font-semibold text-slate-800 leading-snug mt-1.5 break-words">
+          {run.ticket?.subject || 'No subject'}
+        </p>
+
+        {/* Row 3: requester + tech assignment + date */}
+        <div className="flex items-center gap-1.5 mt-1.5 text-[11px] leading-none flex-wrap">
+          <span className="text-slate-500 font-medium">{run.ticket?.requester?.name || '—'}</span>
+          {run.ticket?.requester?.department && (
+            <><span className="text-slate-300">·</span><span className="text-slate-400">{run.ticket.requester.department}</span></>
+          )}
+          <span className="text-slate-300">·</span>
+          <span className="text-slate-400">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</span>
+
+          {subView === 'pending' && flag !== 'deleted' && (flag === 'assigned' || flag === 'closed') && run.ticket?.assignedTech && (
+            <>
+              <span className="text-slate-300">·</span>
+              <span className="text-amber-700 font-medium inline-flex items-center gap-0.5">
+                {renderTechInline(run.ticket.assignedTech.id, run.ticket.assignedTech.name, '→')}
+              </span>
+            </>
+          )}
           {subView !== 'pending' && run.assignedTech?.name && (
-            <span className="text-blue-700 font-medium inline-flex items-center gap-0.5">
-              {renderTechInline(run.assignedTech.id, run.assignedTech.name)}
-            </span>
+            <>
+              <span className="text-slate-300">·</span>
+              <span className="text-blue-700 font-medium inline-flex items-center gap-0.5">
+                {renderTechInline(run.assignedTech.id, run.assignedTech.name)}
+              </span>
+            </>
           )}
         </div>
 
@@ -975,7 +1024,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         ) : (
           <>
             {/* Mobile cards */}
-            <div className="md:hidden divide-y divide-slate-100">
+            <div className="md:hidden space-y-3 py-3 px-1">
               {activeItems.map(renderRunCard)}
             </div>
 

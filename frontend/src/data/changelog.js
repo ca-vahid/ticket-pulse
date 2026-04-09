@@ -1,8 +1,8 @@
-export const APP_VERSION = '1.10.0-preview';
+export const APP_VERSION = '1.9.2-preview';
 
 export const changelog = [
   {
-    version: '1.10.0-preview',
+    version: '1.9.2-preview',
     date: 'April 8, 2026',
     entries: [
       { type: 'improved', text: 'Assignment pipeline audit hardening -- end-to-end review of queue, decision, sync, and polling flows closed multiple state gaps so the pipeline behaves deterministically instead of relying on operator workarounds' },
