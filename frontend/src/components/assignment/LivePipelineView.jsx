@@ -4,7 +4,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Loader2, CheckCircle, XCircle, User, AlertTriangle, Brain,
-  Users, Search, MapPin, X,
+  Users, Search, MapPin, X, ChevronDown, ChevronRight, Star, Sparkles,
 } from 'lucide-react';
 import {
   CopyBadge, mdComponents, StreamContent, cleanTranscript, processStreamEvent,

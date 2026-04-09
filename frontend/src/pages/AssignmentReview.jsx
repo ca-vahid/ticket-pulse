@@ -372,8 +372,8 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   const TechAvatar = ({ techId, name, size = 'sm', ring = '' }) => {
     const tech = techPhotos[techId];
     const initials = name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
-    const sz = size === 'sm' ? 'w-5 h-5' : size === 'xs' ? 'w-4 h-4' : 'w-6 h-6';
-    const textSz = size === 'sm' ? 'text-[8px]' : size === 'xs' ? 'text-[7px]' : 'text-[9px]';
+    const sz = size === 'sm' ? 'w-6 h-6' : size === 'xs' ? 'w-5 h-5' : 'w-7 h-7';
+    const textSz = size === 'sm' ? 'text-[9px]' : size === 'xs' ? 'text-[8px]' : 'text-[10px]';
     return tech?.photoUrl ? (
       <img src={tech.photoUrl} alt="" className={`${sz} rounded-full object-cover flex-shrink-0 ${ring}`} />
     ) : (

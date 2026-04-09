@@ -97,6 +97,7 @@ class AssignmentRepository {
               freshserviceTicketId: true,
               subject: true,
               description: true,
+              descriptionText: true,
               status: true,
               priority: true,
               category: true,

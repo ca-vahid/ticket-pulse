@@ -5,9 +5,9 @@ import remarkGfm from 'remark-gfm';
 import {
   ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
-  ExternalLink, AlertCircle, User,
+  ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag,
 } from 'lucide-react';
-import { CopyBadge, cleanTranscript } from './StreamingComponents';
+import { CopyBadge, cleanTranscript, mdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
 
 const STEP_ICONS = {
@@ -116,6 +116,98 @@ function StepCard({ step }) {
   );
 }
 
+function stripHtml(html) {
+  if (!html) return '';
+  return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+}
+
+function TicketDetailsCard({ ticket }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!ticket) return null;
+
+  const description = ticket.descriptionText || stripHtml(ticket.description) || '';
+  const isLong = description.length > 300;
+  const displayText = expanded || !isLong ? description : description.slice(0, 300) + '...';
+
+  return (
+    <div className="border border-slate-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <FileText className="w-4 h-4 text-slate-400" />
+          Ticket Details
+        </span>
+        {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+      </button>
+
+      <div className={`px-4 py-3 space-y-3 ${expanded ? '' : ''}`}>
+        {/* Metadata grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+          {ticket.requester?.name && (
+            <div className="flex items-start gap-1.5">
+              <User className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-400 uppercase font-medium">Requester</p>
+                <p className="text-xs font-medium text-slate-800 truncate">{ticket.requester.name}</p>
+              </div>
+            </div>
+          )}
+          {ticket.requester?.email && (
+            <div className="flex items-start gap-1.5">
+              <Mail className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-400 uppercase font-medium">Email</p>
+                <p className="text-xs text-slate-600 truncate">{ticket.requester.email}</p>
+              </div>
+            </div>
+          )}
+          {ticket.requester?.department && (
+            <div className="flex items-start gap-1.5">
+              <Building2 className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-400 uppercase font-medium">Department</p>
+                <p className="text-xs text-slate-600 truncate">{ticket.requester.department}</p>
+              </div>
+            </div>
+          )}
+          {(ticket.category || ticket.ticketCategory) && (
+            <div className="flex items-start gap-1.5">
+              <Tag className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-400 uppercase font-medium">Category</p>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {ticket.category && <span className="text-xs text-slate-600">{ticket.category}</span>}
+                  {ticket.ticketCategory && <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-medium">{ticket.ticketCategory}</span>}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Description */}
+        {description && (
+          <div>
+            <div className="border-t border-slate-100 pt-2.5">
+              <p className="text-xs text-slate-400 uppercase font-medium mb-1">Description</p>
+              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{displayText}</p>
+              {isLong && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-1"
+                >
+                  {expanded ? 'Show less' : 'Show more'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const DECISION_BADGES = {
   pending_review: { label: 'Pending Review', style: 'bg-yellow-100 text-yellow-800' },
   approved: { label: 'Approved', style: 'bg-green-100 text-green-800' },
@@ -208,6 +300,45 @@ function SyncStatusCard({ run, onSyncComplete }) {
   );
 }
 
+function TranscriptSection({ transcript }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!transcript) {
+    return (
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 mb-2">Full Conversation</h4>
+        <div className="border rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
+          No full transcript was captured for this run.
+        </div>
+      </div>
+    );
+  }
+
+  const cleaned = cleanTranscript(transcript);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-sm font-semibold text-gray-700">Full Conversation</h4>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+        >
+          {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+          {expanded ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+      <div className={`border border-slate-200 rounded-lg bg-white overflow-hidden transition-all ${expanded ? '' : 'max-h-[500px] overflow-y-auto'}`}>
+        <div className="p-4 sm:p-5 prose prose-sm max-w-none prose-headings:text-slate-800 prose-p:text-slate-700 prose-p:leading-relaxed prose-li:text-slate-700 prose-strong:text-slate-900">
+          <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+            {cleaned}
+          </Markdown>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete, isAdmin = false }) {
   const [fsDomain, setFsDomain] = useState(null);
 
@@ -282,6 +413,9 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         </div>
       </div>
 
+      {/* Ticket Details (collapsible) */}
+      <TicketDetailsCard ticket={ticket} />
+
       {/* Staleness banner */}
       {isTicketStale && isPending && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2.5">
@@ -290,22 +424,14 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
             {ticket.assignedTech && (
               <p className="text-sm font-medium text-amber-800">
                 This ticket was assigned to <strong>{ticket.assignedTech.name}</strong> outside of this pipeline.
-                {run.recommendation?.recommendations?.[0]?.techName && (
-                  <span className="text-amber-600 font-normal"> AI had suggested <strong>{run.recommendation.recommendations[0].techName}</strong>.</span>
-                )}
               </p>
             )}
             {ticket.status && !['Open', 'open', '2'].includes(String(ticket.status)) && (
               <p className="text-sm font-medium text-amber-800">
                 This ticket is now <strong>{ticket.status}</strong> — it may have been resolved or closed.
-                {ticket.assignedTech && <span className="text-amber-600 font-normal"> Handled by <strong>{ticket.assignedTech.name}</strong>.</span>}
               </p>
             )}
-            <p className="text-xs text-amber-600 mt-1">
-              {isAdmin
-                ? 'You can approve the recommendation, dismiss this run, or add a triage note.'
-                : 'You can approve the recommendation, leave it, or add a triage note.'}
-            </p>
+            <p className="text-xs text-amber-600 mt-1">You can still approve the recommendation, dismiss this run, or add a triage note.</p>
           </div>
         </div>
       )}
@@ -350,21 +476,8 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         ))}
       </div>
 
-      {/* Full Transcript */}
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2">Full Conversation</h4>
-        {run.fullTranscript ? (
-          <div className="border rounded-lg bg-white p-4 prose prose-sm max-w-none">
-            <Markdown remarkPlugins={[remarkGfm]}>
-              {cleanTranscript(run.fullTranscript)}
-            </Markdown>
-          </div>
-        ) : (
-          <div className="border rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
-            No full transcript was captured for this run.
-          </div>
-        )}
-      </div>
+      {/* Full Conversation */}
+      <TranscriptSection transcript={run.fullTranscript} />
 
       {/* Error */}
       {run.errorMessage && (
