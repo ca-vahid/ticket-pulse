@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import logger from '../utils/logger.js';
 import llmConfigService from './llmConfigService.js';
-import { getTodayRange, getLocalDateBounds } from '../utils/timezone.js';
+import { getLocalDateBounds } from '../utils/timezone.js';
 import prisma from './prisma.js';
 
 /**
