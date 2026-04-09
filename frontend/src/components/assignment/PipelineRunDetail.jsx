@@ -550,6 +550,9 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         </div>
       )}
 
+      {/* Full Conversation */}
+      <TranscriptSection transcript={run.fullTranscript} />
+
       {/* Pipeline Steps */}
       <div>
         <h4 className="text-sm font-semibold text-gray-700 mb-2">Pipeline Steps</h4>
@@ -557,9 +560,6 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           <StepCard key={step.id} step={step} />
         ))}
       </div>
-
-      {/* Full Conversation */}
-      <TranscriptSection transcript={run.fullTranscript} />
 
       {/* Error */}
       {run.errorMessage && (

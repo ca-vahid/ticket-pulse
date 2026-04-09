@@ -1332,7 +1332,8 @@ class SyncService {
 
   /**
    * Post-sync check: verify that tickets with pending pipeline runs
-   * still exist in FreshService. Marks tickets as "Deleted" if FS returns 404.
+   * still exist in FreshService. Marks tickets as "Deleted" if the FS API
+   * returns 404 (hard delete) OR the ticket has `deleted: true` (soft delete / trash).
    * Only checks non-terminal tickets to minimize API calls.
    */
   async _checkDeletedTickets(workspaceId) {
@@ -1363,7 +1364,13 @@ class SyncService {
     for (const ticket of ticketsToCheck) {
       try {
         const fsTicket = await client.fetchTicketSafe(Number(ticket.freshserviceTicketId));
-        if (fsTicket === null) {
+        const isGone = fsTicket === null;
+        const isSoftDeleted = fsTicket?.deleted === true;
+
+        if (isGone || isSoftDeleted) {
+          const reason = isGone
+            ? 'Ticket no longer exists in FreshService (hard deleted / 404)'
+            : 'Ticket was trashed/soft-deleted in FreshService (deleted=true)';
           await prisma.ticket.update({
             where: { id: ticket.id },
             data: { status: 'Deleted', updatedAt: new Date() },
@@ -1376,14 +1383,15 @@ class SyncService {
             details: {
               oldStatus: ticket.status,
               newStatus: 'Deleted',
-              note: 'Ticket no longer exists in FreshService (404)',
+              note: reason,
             },
           });
           deletedCount++;
-          logger.info('Marked ticket as deleted (gone from FreshService)', {
+          logger.info('Marked ticket as deleted', {
             ticketId: ticket.id,
             fsId: Number(ticket.freshserviceTicketId),
             subject: ticket.subject,
+            reason: isGone ? 'hard_delete_404' : 'soft_delete_flag',
           });
         }
       } catch (err) {

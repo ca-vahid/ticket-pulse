@@ -44,7 +44,7 @@ export function transformTicket(fsTicket, { categoryCustomField = 'security' } =
       subject: fsTicket.subject || 'No Subject',
       description: fsTicket.description || null,
       descriptionText: fsTicket.description_text || null,
-      status: STATUS_MAP[fsTicket.status] || 'Open',
+      status: fsTicket.deleted ? 'Deleted' : (STATUS_MAP[fsTicket.status] || 'Open'),
       priority: PRIORITY_MAP[fsTicket.priority] || 3,
       assignedTechId: null,
       assignedFreshserviceId: fsTicket.responder_id || null,
