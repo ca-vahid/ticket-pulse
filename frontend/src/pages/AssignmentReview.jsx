@@ -772,41 +772,55 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                       </td>
                       {subView === 'pending' ? (
                         <td className="px-3 py-1.5">
-                          <div className="grid grid-cols-[auto_1fr] gap-x-2 items-center min-h-[24px]">
-                            {/* Column 1: Status/Live pill (fixed position) */}
-                            <div className="flex items-center">
-                              {flag === 'assigned' && run.ticket?.assignedTech ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap">
-                                  <span className="uppercase tracking-wide">Live</span>
-                                  <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
-                                  <span className="max-w-[50px] truncate">{run.ticket.assignedTech.name?.split(' ')[0]}</span>
-                                </span>
-                              ) : flag === 'deleted' ? (
-                                <span className="inline-flex items-center gap-1 text-[10px]">
-                                  <span className="text-red-500 bg-red-50 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">Deleted in FS</span>
-                                </span>
-                              ) : flag === 'closed' ? (
-                                <span className="inline-flex items-center gap-1 text-[10px]">
-                                  <span className="text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded whitespace-nowrap">{run.ticket?.status}</span>
-                                  {run.ticket?.assignedTech && (
-                                    <span className="inline-flex items-center gap-0.5 text-slate-500">
-                                      <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" />
-                                    </span>
+                          {avatarView ? (
+                            /* Avatar mode: 3 fixed pixel columns → perfect vertical alignment */
+                            <div style={{ display: 'grid', gridTemplateColumns: '20px 24px 1fr', gap: '4px', alignItems: 'center' }}>
+                              {/* Col 1: closed badge (✕) or empty */}
+                              <div className="flex justify-center">
+                                {flag === 'closed' ? <span className="text-[8px] text-slate-400 leading-none">✕</span> : null}
+                              </div>
+                              {/* Col 2: Live assignee avatar (ring) or empty */}
+                              <div className="flex justify-center">
+                                {(flag === 'assigned' || flag === 'closed') && run.ticket?.assignedTech ? (
+                                  <span title={`Assigned to: ${run.ticket.assignedTech.name}`}>
+                                    <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" ring="ring-2 ring-amber-400" />
+                                  </span>
+                                ) : null}
+                              </div>
+                              {/* Col 3: AI picks — always at the same x position */}
+                              <div className="flex items-center">
+                                {run.recommendation?.recommendations?.length > 0
+                                  ? <AiPicks recommendations={run.recommendation.recommendations} />
+                                  : <span className="text-slate-300">—</span>}
+                              </div>
+                            </div>
+                          ) : (
+                            /* Text mode */
+                            <div className="text-[11px] leading-snug">
+                              {(flag === 'assigned' || flag === 'closed') && run.ticket?.assignedTech && (
+                                <div className="text-amber-700 font-medium">
+                                  {flag === 'closed' && <span className="text-slate-400 mr-1">{run.ticket.status}</span>}
+                                  {run.ticket.assignedTech.name}
+                                </div>
+                              )}
+                              {topRec?.techName ? (
+                                <div className="text-blue-700">
+                                  {topRec.techName}
+                                  {run.recommendation?.recommendations?.length > 1 && (
+                                    <span className="text-blue-400 ml-1 text-[10px]">+{run.recommendation.recommendations.length - 1}</span>
                                   )}
-                                </span>
-                              ) : null}
+                                </div>
+                              ) : (flag !== 'assigned' && flag !== 'closed') ? <span className="text-slate-300">—</span> : null}
                             </div>
-                            {/* Column 2: AI picks (always aligned) */}
-                            <div className="flex items-center">
-                              {run.recommendation?.recommendations?.length > 0 && <AiPicks recommendations={run.recommendation.recommendations} />}
-                            </div>
-                          </div>
+                          )}
                         </td>
                       ) : (
                         <td className="px-3 py-1.5">
                           <div className="flex items-center gap-1 min-h-[20px]">
                             {(run.assignedTech?.name || topRec?.techName) ? (
-                              <span className="font-medium text-blue-700 inline-flex items-center gap-1 text-[11px]"><TechBadge techId={run.assignedTech?.id || topRec?.techId} name={run.assignedTech?.name || topRec?.techName} /></span>
+                              avatarView
+                                ? <span className="font-medium text-blue-700 inline-flex items-center gap-1 text-[11px]"><TechBadge techId={run.assignedTech?.id || topRec?.techId} name={run.assignedTech?.name || topRec?.techName} /></span>
+                                : <span className="text-[11px] text-blue-700 font-medium">{run.assignedTech?.name || topRec?.techName}</span>
                             ) : <span className="text-slate-300">—</span>}
                           </div>
                         </td>

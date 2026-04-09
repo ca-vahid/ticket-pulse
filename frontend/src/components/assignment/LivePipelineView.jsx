@@ -81,12 +81,6 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
   };
 
   const scorePercent = (score) => typeof score === 'number' ? Math.round(score * 100) : null;
-  const scoreBarColor = (pct) => {
-    if (pct >= 80) return 'from-emerald-400 to-emerald-500';
-    if (pct >= 60) return 'from-blue-400 to-blue-500';
-    if (pct >= 40) return 'from-amber-400 to-amber-500';
-    return 'from-slate-300 to-slate-400';
-  };
 
   return (
     <div className="mt-3 sm:mt-4 border-t pt-3 sm:pt-4">
