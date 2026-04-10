@@ -81,7 +81,7 @@ class CompetencyAnalysisService {
     let userMsg = `Analyze the competencies of technician ID ${technicianId} (${tech.name}). Use the available tools to research their ticket history, then call submit_competency_assessment with your final assessment.`;
 
     if (calibrationContext) {
-      userMsg += `\n\nIMPORTANT: This analysis was triggered by a calibration run. Call get_calibration_signals FIRST to see specific signals about this technician's assignment outcomes. Pay special attention to:\n- Tickets they handled OUTSIDE of AI recommendations (may indicate skills not yet captured in the matrix)\n- Tickets where they were recommended but NOT assigned (may indicate their competency level needs adjustment)\nUse these signals alongside their ticket history to produce a more accurate assessment.`;
+      userMsg += '\n\nIMPORTANT: This analysis was triggered by a calibration run. Call get_calibration_signals FIRST to see specific signals about this technician\'s assignment outcomes. Pay special attention to:\n- Tickets they handled OUTSIDE of AI recommendations (may indicate skills not yet captured in the matrix)\n- Tickets where they were recommended but NOT assigned (may indicate their competency level needs adjustment)\nUse these signals alongside their ticket history to produce a more accurate assessment.';
     }
 
     const messages = [
