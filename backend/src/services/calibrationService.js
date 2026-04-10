@@ -144,13 +144,7 @@ class CalibrationService {
               workspaceId,
               `calibration_run_${run.id}`,
               (event) => {
-                if (event.type === 'text') {
-                  emit({ type: 'competency_text', techId: tech.techId, text: event.text });
-                } else if (event.type === 'tool_call') {
-                  emit({ type: 'competency_tool_call', techId: tech.techId, name: event.name });
-                } else if (event.type === 'assessment') {
-                  emit({ type: 'competency_assessment', techId: tech.techId, data: event.data });
-                }
+                emit({ ...event, type: `competency_${event.type}`, techId: tech.techId });
               },
               calibrationContext,
             );
@@ -409,6 +403,17 @@ Analyze the data step by step, explain your findings, then call submit_calibrati
       stream.on('text', (text) => {
         transcript += text;
         emit({ type: 'prompt_analysis_text', text });
+      });
+
+      let toolJsonLength = 0;
+      let lastProgressAt = 0;
+      stream.on('inputJson', (partialJson) => {
+        toolJsonLength += partialJson.length;
+        const now = Date.now();
+        if (now - lastProgressAt > 1000) {
+          lastProgressAt = now;
+          emit({ type: 'prompt_analysis_thinking', kb: parseFloat((toolJsonLength / 1024).toFixed(1)) });
+        }
       });
 
       const finalMessage = await stream.finalMessage();

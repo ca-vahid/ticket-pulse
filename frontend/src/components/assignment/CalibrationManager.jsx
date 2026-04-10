@@ -10,7 +10,7 @@ import {
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { mdComponents } from './StreamingComponents';
+import { mdComponents, StreamContent } from './StreamingComponents';
 
 const PRESETS = [
   { label: 'Last 2 weeks', days: 14 },
@@ -94,24 +94,31 @@ function LiveCalibrationView({ periodStart, periodEnd, mode = 'full', onComplete
   const [flaggedTechs, setFlaggedTechs] = useState([]);
   const [techProgress, setTechProgress] = useState({ current: 0, total: 0, currentName: '' });
   const [promptText, setPromptText] = useState('');
+  const [promptThinkingKb, setPromptThinkingKb] = useState(null);
   const [completedTechs, setCompletedTechs] = useState([]);
+  const [techEvents, setTechEvents] = useState([]);
+  const [techToolCalls, setTechToolCalls] = useState([]);
+  const [techThinkingKb, setTechThinkingKb] = useState(null);
 
-  const scrollRef = useRef(null);
   const promptScrollRef = useRef(null);
+  const techScrollRef = useRef(null);
   const navigate = useNavigate();
 
-  const isNearBottom = (el) => {
-    if (!el) return true;
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-  };
-
-  const scrollToBottom = useCallback(() => {
-    if (promptScrollRef.current && isNearBottom(promptScrollRef.current)) {
-      promptScrollRef.current.scrollTop = promptScrollRef.current.scrollHeight;
+  const scrollPrompt = useCallback(() => {
+    if (promptScrollRef.current) {
+      const el = promptScrollRef.current;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 60) {
+        el.scrollTop = el.scrollHeight;
+      }
     }
-    const outer = scrollRef.current?.parentElement;
-    if (!outer || isNearBottom(outer)) {
-      scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, []);
+
+  const scrollTech = useCallback(() => {
+    if (techScrollRef.current) {
+      const el = techScrollRef.current;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 60) {
+        el.scrollTop = el.scrollHeight;
+      }
     }
   }, []);
 
@@ -131,32 +138,65 @@ function LiveCalibrationView({ periodStart, periodEnd, mode = 'full', onComplete
     case 'classification_complete':
       setStats({ totalRuns: event.totalRuns, outcome1: event.outcome1, outcome2: event.outcome2, outcome3: event.outcome3, unresolved: event.unresolved });
       break;
+
+    // Prompt analysis events
     case 'prompt_analysis_text':
       setPromptText(prev => prev + event.text);
-      scrollToBottom();
+      setPromptThinkingKb(null);
+      scrollPrompt();
+      break;
+    case 'prompt_analysis_thinking':
+      setPromptThinkingKb(event.kb);
       break;
     case 'prompt_draft_created':
       setPromptDraftId(event.draftId || null);
+      setPromptThinkingKb(null);
       if (Array.isArray(event.findings) && event.findings.length > 0) {
         setPromptFindings(event.findings);
       }
       break;
+
+    // Competency phase events
     case 'competency_flagged':
       setFlaggedTechs(event.techs || []);
       setTechProgress({ current: 0, total: event.total, currentName: '' });
       break;
     case 'competency_tech_start':
       setTechProgress({ current: event.index, total: event.total, currentName: event.techName });
-      scrollToBottom();
+      setTechEvents([]);
+      setTechToolCalls([]);
+      setTechThinkingKb(null);
+      break;
+    case 'competency_text':
+      setTechEvents(prev => [...prev, { type: 'text', text: event.text }]);
+      setTechThinkingKb(null);
+      scrollTech();
+      break;
+    case 'competency_thinking':
+      setTechThinkingKb(event.kb);
+      break;
+    case 'competency_tool_call':
+      setTechEvents(prev => [...prev, { type: 'tool_call', name: event.name, input: event.input, toolUseId: event.toolUseId }]);
+      setTechToolCalls(prev => [...prev, { id: event.toolUseId || `${event.name}-${Date.now()}`, name: event.name, input: event.input, result: null, durationMs: null }]);
+      setTechThinkingKb(null);
+      scrollTech();
+      break;
+    case 'competency_tool_result':
+      setTechToolCalls(prev => prev.map(tc => {
+        if (event.toolUseId && tc.id === event.toolUseId) return { ...tc, result: event.data, durationMs: event.durationMs };
+        if (!event.toolUseId && tc.name === event.name && !tc.result) return { ...tc, result: event.data, durationMs: event.durationMs };
+        return tc;
+      }));
       break;
     case 'competency_tech_complete':
       setCompletedTechs(prev => [...prev, { id: event.techId, name: event.techName, runId: event.runId }]);
-      scrollToBottom();
+      setTechThinkingKb(null);
       break;
     case 'competency_tech_error':
       setCompletedTechs(prev => [...prev, { id: event.techId, name: event.techName, error: event.error }]);
-      scrollToBottom();
+      setTechThinkingKb(null);
       break;
+
     case 'error':
       setStreamError(event.message);
       break;
@@ -166,7 +206,7 @@ function LiveCalibrationView({ periodStart, periodEnd, mode = 'full', onComplete
     default:
       break;
     }
-  }, [scrollToBottom]);
+  }, [scrollPrompt, scrollTech]);
 
   const { status, elapsedSec, error } = useStreamingFetch({
     url: '/assignment/calibration?stream=true',
@@ -256,9 +296,22 @@ function LiveCalibrationView({ periodStart, periodEnd, mode = 'full', onComplete
           </div>
           <div ref={promptScrollRef} className="p-3 max-h-80 overflow-y-auto text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
             {promptText ? (
-              <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{promptText}</Markdown>
+              <>
+                <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{promptText}</Markdown>
+                {phase === 'analyzing_prompt' && promptThinkingKb !== null && (
+                  <div className="flex items-center gap-2 py-1 text-xs text-gray-400">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span className="font-mono tabular-nums">processing {promptThinkingKb.toFixed(1)} KB...</span>
+                  </div>
+                )}
+                {phase === 'analyzing_prompt' && promptThinkingKb === null && (
+                  <span className="inline-block w-2 h-4 bg-purple-500 animate-pulse ml-0.5" />
+                )}
+              </>
             ) : (
-              <span className="text-gray-400 text-xs">Analyzing patterns...</span>
+              <div className="flex items-center gap-2 text-gray-400 text-xs">
+                <Loader2 className="w-3 h-3 animate-spin" /> Analyzing patterns...
+              </div>
             )}
           </div>
           {promptFindings.length > 0 && (
@@ -297,12 +350,6 @@ function LiveCalibrationView({ periodStart, periodEnd, mode = 'full', onComplete
                 {flaggedTechs.length} technician{flaggedTechs.length !== 1 ? 's' : ''} flagged for re-evaluation
               </div>
             )}
-            {techProgress.currentName && phase === 'analyzing_competencies' && (
-              <div className="flex items-center gap-2 text-sm text-indigo-700 bg-indigo-50 rounded px-2 py-1.5">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Analyzing {techProgress.currentName}...
-              </div>
-            )}
             {completedTechs.map((tech) => (
               <div key={tech.id} className="flex items-center justify-between text-sm bg-white rounded px-2 py-1.5 border border-gray-100">
                 <div className="flex items-center gap-2">
@@ -317,10 +364,27 @@ function LiveCalibrationView({ periodStart, periodEnd, mode = 'full', onComplete
                 {tech.error && <span className="text-xs text-red-500">{tech.error}</span>}
               </div>
             ))}
+            {techProgress.currentName && phase === 'analyzing_competencies' && (
+              <div className="mt-1">
+                <div className="flex items-center gap-2 text-sm text-indigo-700 bg-indigo-50 rounded-t px-2 py-1.5 border border-indigo-200 border-b-0">
+                  <Brain className="w-3.5 h-3.5 animate-spin" />
+                  <span className="font-medium">Analyzing {techProgress.currentName}...</span>
+                  <span className="text-xs text-indigo-400 ml-auto">{techProgress.current}/{techProgress.total}</span>
+                </div>
+                <div ref={techScrollRef} className="border border-indigo-200 rounded-b bg-white p-2.5 overflow-y-auto max-h-[400px] min-h-[100px]">
+                  {techEvents.length === 0 ? (
+                    <div className="flex items-center gap-2 text-xs text-gray-400 py-4 justify-center">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Starting analysis...
+                    </div>
+                  ) : (
+                    <StreamContent events={techEvents} toolCalls={techToolCalls} thinkingKb={techThinkingKb} status="running" accentColor="purple" />
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
-      <div ref={scrollRef} />
     </div>
   );
 }
@@ -500,6 +564,8 @@ function RunDetail({ run, workspaceTimezone }) {
   );
 }
 
+const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing_prompt', 'analyzing_competencies'];
+
 export default function CalibrationManager({ workspaceTimezone }) {
   const [view, setView] = useState('trigger'); // trigger | live | detail | history
   const [periodStart, setPeriodStart] = useState('');
@@ -509,6 +575,7 @@ export default function CalibrationManager({ workspaceTimezone }) {
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [activeRun, setActiveRun] = useState(null);
   const navigate = useNavigate();
 
   const applyPreset = (days) => {
@@ -523,12 +590,21 @@ export default function CalibrationManager({ workspaceTimezone }) {
     setLoadingRuns(true);
     try {
       const res = await assignmentAPI.getCalibrationRuns({ limit: 20 });
-      setRuns(res?.items || []);
+      const items = res?.items || [];
+      setRuns(items);
+      const active = items.find(r => ACTIVE_STATUSES.includes(r.status));
+      setActiveRun(active || null);
     } catch { /* ignore */ }
     setLoadingRuns(false);
   }, []);
 
   useEffect(() => { loadRuns(); }, [loadRuns]);
+
+  useEffect(() => {
+    if (!activeRun || view === 'live') return;
+    const interval = setInterval(loadRuns, 10000);
+    return () => clearInterval(interval);
+  }, [activeRun, view, loadRuns]);
 
   const loadRunDetail = async (id) => {
     setLoadingDetail(true);
@@ -596,6 +672,33 @@ export default function CalibrationManager({ workspaceTimezone }) {
         <p className="text-sm text-slate-500 mb-4">
           Analyze assignment outcomes over a period to improve the AI assigner prompt and update technician competencies based on real-world results.
         </p>
+
+        {activeRun && view !== 'live' && (
+          <div className="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Brain className="w-5 h-5 text-indigo-600 animate-spin" />
+              <div>
+                <div className="text-sm font-semibold text-indigo-800">
+                  Run #{activeRun.id} in progress — {activeRun.status.replace(/_/g, ' ')}
+                </div>
+                <div className="text-xs text-indigo-500">
+                  {new Date(activeRun.periodStart).toLocaleDateString()} — {new Date(activeRun.periodEnd).toLocaleDateString()}
+                  {activeRun.techsProcessed != null && activeRun.techsTotal != null && activeRun.techsTotal > 0 && (
+                    <span className="ml-2">({activeRun.techsProcessed}/{activeRun.techsTotal} technicians)</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => loadRunDetail(activeRun.id)} className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors">
+                View Progress
+              </button>
+              <button onClick={(e) => cancelRun(e, activeRun.id)} className="text-xs px-3 py-1.5 text-red-600 border border-red-200 rounded-lg font-medium hover:bg-red-50 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200 rounded-xl p-4">
           <div className="flex flex-wrap items-end gap-3 mb-3">
