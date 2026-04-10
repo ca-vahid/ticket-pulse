@@ -891,6 +891,20 @@ router.get('/calibration/runs', requireAdmin, asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
+router.post('/calibration/runs/:id/cancel', requireAdmin, asyncHandler(async (req, res) => {
+  const runId = parseInt(req.params.id);
+  const run = await prisma.calibrationRun.findUnique({ where: { id: runId }, select: { status: true, workspaceId: true } });
+  if (!run) return res.status(404).json({ success: false, message: 'Calibration run not found' });
+  if (run.workspaceId !== req.workspaceId) return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+  const activeStatuses = ['running', 'collecting', 'analyzing_prompt', 'analyzing_competencies'];
+  if (!activeStatuses.includes(run.status)) {
+    return res.status(400).json({ success: false, message: `Run is not active (status: ${run.status})` });
+  }
+  await prisma.calibrationRun.update({ where: { id: runId }, data: { status: 'failed', errorMessage: 'Manually cancelled by admin' } });
+  logger.info('Calibration run manually cancelled', { runId });
+  res.json({ success: true, message: 'Calibration run cancelled' });
+}));
+
 router.get('/calibration/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
   const run = await calibrationService._getRun(parseInt(req.params.id));
   if (!run) return res.status(404).json({ success: false, message: 'Calibration run not found' });

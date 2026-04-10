@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { assignmentAPI } from '../../services/api';
 import { useStreamingFetch } from '../../hooks/useStreamingFetch';
 import {
-  Loader2, Brain, CheckCircle, XCircle, Play,
+  Loader2, Brain, CheckCircle, XCircle, Play, StopCircle,
   ChevronDown, ChevronRight, ArrowRight, FileText, Users, AlertTriangle,
   Target, TrendingUp, BarChart3, History,
 } from 'lucide-react';
@@ -539,6 +539,14 @@ export default function CalibrationManager({ workspaceTimezone }) {
     setLoadingDetail(false);
   };
 
+  const cancelRun = async (e, id) => {
+    e.stopPropagation();
+    try {
+      await assignmentAPI.cancelCalibrationRun(id);
+      loadRuns();
+    } catch { /* ignore */ }
+  };
+
   const startCalibration = () => {
     if (!periodStart || !periodEnd) return;
     setView('live');
@@ -682,6 +690,15 @@ export default function CalibrationManager({ workspaceTimezone }) {
                     {run.outcome1Count != null && <span className="text-green-600">{run.outcome1Count} top</span>}
                     {run.outcome3Count != null && run.outcome3Count > 0 && <span className="text-orange-600">{run.outcome3Count} outside</span>}
                     {run.totalDurationMs && <span>{(run.totalDurationMs / 1000).toFixed(0)}s</span>}
+                    {['running', 'collecting', 'analyzing_prompt', 'analyzing_competencies'].includes(run.status) && (
+                      <button
+                        onClick={(e) => cancelRun(e, run.id)}
+                        className="flex items-center gap-1 px-2 py-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Cancel this run"
+                      >
+                        <StopCircle className="w-3.5 h-3.5" /> Cancel
+                      </button>
+                    )}
                     <ChevronRight className="w-4 h-4 group-hover:text-purple-500 transition-colors" />
                   </div>
                 </div>

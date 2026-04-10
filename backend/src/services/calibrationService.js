@@ -10,10 +10,10 @@ class CalibrationService {
     const pipelineStart = Date.now();
     const emit = (event) => { try { onEvent?.(event); } catch { /* non-fatal */ } };
 
-    const staleBefore = new Date(Date.now() - 60 * 60 * 1000);
+    const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
     await prisma.calibrationRun.updateMany({
       where: { status: { in: ['running', 'collecting', 'analyzing_prompt', 'analyzing_competencies'] }, updatedAt: { lt: staleBefore } },
-      data: { status: 'failed', errorMessage: 'Marked stale after 60 minutes without completion' },
+      data: { status: 'failed', errorMessage: 'Marked stale after 15 minutes without progress' },
     });
 
     const existing = await prisma.calibrationRun.findFirst({

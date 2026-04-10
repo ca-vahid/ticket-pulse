@@ -526,6 +526,7 @@ export const assignmentAPI = {
 
   getCalibrationRuns: (params) => api.get('/assignment/calibration/runs', { params }),
   getCalibrationRun: (id) => api.get(`/assignment/calibration/runs/${id}`),
+  cancelCalibrationRun: (id) => api.post(`/assignment/calibration/runs/${id}/cancel`),
 };
 
 /**
