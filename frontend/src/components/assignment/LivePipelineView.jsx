@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { assignmentAPI, getAuthToken, getWorkspaceId } from '../../services/api';
+import { assignmentAPI } from '../../services/api';
+import { readSSEStream } from '../../hooks/useStreamingFetch';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -376,9 +377,6 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
     const abortController = new AbortController();
     abortRef.current = abortController;
 
-    const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
-    const authToken = getAuthToken();
-    const wsId = getWorkspaceId();
     let currentStatus = 'connecting';
     let currentRecommendation = null;
     let currentRunId = null;
@@ -399,46 +397,13 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
 
     (async () => {
       try {
-        const response = await fetch(`${API_BASE}/assignment/trigger/${ticketId}?stream=true`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-            ...(wsId ? { 'X-Workspace-Id': String(wsId) } : {}),
-          },
-          signal: abortController.signal,
-        });
-
-        if (!response.ok) {
-          setStatus('error');
-          setError(`HTTP ${response.status}`);
-          setStreaming(false);
-          return;
-        }
-
         currentStatus = 'running';
         setStatus('running');
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let reading = true;
-
-        while (reading) {
-          const { done, value } = await reader.read();
-          if (done) { reading = false; break; }
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try { handleEvent(JSON.parse(line.slice(6))); } catch { /* skip malformed */ }
-          }
-        }
-        if (buffer.startsWith('data: ')) {
-          try { handleEvent(JSON.parse(buffer.slice(6))); } catch { /* skip */ }
-        }
+        await readSSEStream(`/assignment/trigger/${ticketId}?stream=true`, {
+          signal: abortController.signal,
+          onEvent: handleEvent,
+        });
       } catch (err) {
         if (err.name !== 'AbortError') {
           setStatus('error');

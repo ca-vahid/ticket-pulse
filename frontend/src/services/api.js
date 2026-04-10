@@ -523,6 +523,9 @@ export const assignmentAPI = {
   getTechCompetencies: (techId) => api.get(`/assignment/competencies/technician/${techId}`),
   updateTechCompetencies: (techId, competencies) =>
     api.put(`/assignment/competencies/technician/${techId}`, { competencies }),
+
+  getCalibrationRuns: (params) => api.get('/assignment/calibration/runs', { params }),
+  getCalibrationRun: (id) => api.get(`/assignment/calibration/runs/${id}`),
 };
 
 /**

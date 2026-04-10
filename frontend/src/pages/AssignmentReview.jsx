@@ -5,6 +5,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
 import PipelineRunDetail from '../components/assignment/PipelineRunDetail';
 import CompetencyManager from '../components/assignment/CompetencyManager';
+import CalibrationManager from '../components/assignment/CalibrationManager';
 import PromptManager from '../components/assignment/PromptManager';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
 import LivePipelineView from '../components/assignment/LivePipelineView';
@@ -12,12 +13,13 @@ import {
   ArrowLeft, Inbox, History, Settings2, Award, RefreshCw, Loader2,
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
-  ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
+  ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check, TrendingUp,
 } from 'lucide-react';
 
 const ALL_TABS = [
   { id: 'queue', label: 'Review Queue', icon: Inbox, minRole: 'reviewer' },
   { id: 'history', label: 'History', icon: History, minRole: 'reviewer' },
+  { id: 'calibration', label: 'Calibration', icon: TrendingUp, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'prompts', label: 'Prompts', icon: FileText, minRole: 'admin' },
   { id: 'config', label: 'Configuration', icon: Settings2, minRole: 'admin' },
@@ -1804,6 +1806,7 @@ export default function AssignmentReview() {
           <div className="px-3 py-3 sm:px-6 sm:py-5">
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'calibration' && <CalibrationManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'prompts' && <PromptManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'config' && <ConfigTab workspaceTimezone={workspaceTimezone} />}

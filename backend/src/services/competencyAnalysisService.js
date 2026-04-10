@@ -10,7 +10,7 @@ import logger from '../utils/logger.js';
 const MAX_TURNS = 15;
 
 class CompetencyAnalysisService {
-  async runAnalysis(technicianId, workspaceId, triggeredBy = 'admin', onEvent = null) {
+  async runAnalysis(technicianId, workspaceId, triggeredBy = 'admin', onEvent = null, calibrationContext = null) {
     const pipelineStart = Date.now();
     const emit = (event) => { try { onEvent?.(event); } catch { /* non-fatal */ } };
 
@@ -78,12 +78,18 @@ class CompetencyAnalysisService {
     let stepCounter = 0;
     let fullTranscript = '';
 
+    let userMsg = `Analyze the competencies of technician ID ${technicianId} (${tech.name}). Use the available tools to research their ticket history, then call submit_competency_assessment with your final assessment.`;
+
+    if (calibrationContext) {
+      userMsg += `\n\nIMPORTANT: This analysis was triggered by a calibration run. Call get_calibration_signals FIRST to see specific signals about this technician's assignment outcomes. Pay special attention to:\n- Tickets they handled OUTSIDE of AI recommendations (may indicate skills not yet captured in the matrix)\n- Tickets where they were recommended but NOT assigned (may indicate their competency level needs adjustment)\nUse these signals alongside their ticket history to produce a more accurate assessment.`;
+    }
+
     const messages = [
-      { role: 'user', content: `Analyze the competencies of technician ID ${technicianId} (${tech.name}). Use the available tools to research their ticket history, then call submit_competency_assessment with your final assessment.` },
+      { role: 'user', content: userMsg },
     ];
 
     const tools = COMPETENCY_TOOL_SCHEMAS.map((t) => ({ ...t, eager_input_streaming: true }));
-    const context = { workspaceId, technicianId };
+    const context = { workspaceId, technicianId, calibrationContext };
 
     try {
       let continueLoop = true;

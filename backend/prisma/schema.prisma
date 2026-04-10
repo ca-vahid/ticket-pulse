@@ -44,6 +44,7 @@ model Workspace {
   assignmentPrompts      AssignmentPromptVersion[]
   competencyPrompts      CompetencyPromptVersion[]
   competencyRuns         CompetencyAnalysisRun[]
+  calibrationRuns        CalibrationRun[]
 
   @@map("workspaces")
 }
@@ -696,6 +697,47 @@ model CompetencyAnalysisRun {
   @@map("competency_analysis_runs")
   @@index([workspaceId])
   @@index([technicianId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─── Calibration Run Pipeline ─────────────────────────────────────────────
+
+model CalibrationRun {
+  id                    Int       @id @default(autoincrement())
+  workspaceId           Int       @map("workspace_id")
+  workspace             Workspace @relation(fields: [workspaceId], references: [id])
+  status                String    @default("running") @db.VarChar(30) @map("status")
+  periodStart           DateTime  @map("period_start")
+  periodEnd             DateTime  @map("period_end")
+  triggeredBy           String?   @db.VarChar(255) @map("triggered_by")
+
+  totalRuns             Int?      @map("total_runs")
+  outcome1Count         Int?      @map("outcome_1_count")
+  outcome2Count         Int?      @map("outcome_2_count")
+  outcome3Count         Int?      @map("outcome_3_count")
+  unresolvedCount       Int?      @map("unresolved_count")
+  classifiedData        Json?     @map("classified_data")
+
+  promptFindings        Json?     @map("prompt_findings")
+  promptDraftId         Int?      @map("prompt_draft_id")
+  promptAnalysisTokens  Int?      @map("prompt_analysis_tokens")
+
+  flaggedTechIds        Json?     @map("flagged_tech_ids")
+  competencyRunIds      Json?     @map("competency_run_ids")
+  techsProcessed        Int?      @map("techs_processed")
+  techsTotal            Int?      @map("techs_total")
+
+  totalDurationMs       Int?      @map("total_duration_ms")
+  totalTokensUsed       Int?      @map("total_tokens_used")
+  errorMessage          String?   @db.Text @map("error_message")
+  fullTranscript        String?   @db.Text @map("full_transcript")
+  llmModel              String?   @db.VarChar(100) @map("llm_model")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@map("calibration_runs")
+  @@index([workspaceId])
   @@index([status])
   @@index([createdAt])
 }

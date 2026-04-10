@@ -1,6 +1,20 @@
-export const APP_VERSION = '1.9.2-preview';
+export const APP_VERSION = '1.9.3-preview';
 
 export const changelog = [
+  {
+    version: '1.9.3-preview',
+    date: 'April 9, 2026',
+    entries: [
+      { type: 'new', text: 'Calibration Run system -- kick off an automated self-improvement process over a selectable date range that classifies every assignment outcome (top recommendation, in pool, or outside pool), analyzes patterns in mismatches and admin feedback to generate a draft prompt update, and runs targeted competency re-evaluation for technicians with discrepancies' },
+      { type: 'new', text: 'Calibration tab in Ticket Assignment (admin-only) -- date-range picker with presets (last 2 weeks, last month, last 3 months), live streaming progress through data collection, prompt analysis, and per-tech competency phases, and a history list of past calibration runs' },
+      { type: 'new', text: 'Outcome classification engine -- auto-compares ticket.assignedTechId (from FreshService sync) against pipeline recommendation pool to determine if the actual assignee was the top recommendation, in the pool, or outside the pool entirely' },
+      { type: 'new', text: 'Prompt self-improvement -- calibration LLM analyzes outcome-3 cases and admin decision notes to find routing patterns, then generates a complete updated assignment prompt saved as a draft version for admin review in Prompt Manager' },
+      { type: 'new', text: 'Calibration-driven competency updates -- technicians who were assigned tickets outside recommendations or whose top-recommendation was repeatedly overridden are flagged and run through the existing competency analysis pipeline with enriched calibration context' },
+      { type: 'new', text: 'get_calibration_signals competency tool -- new tool available during calibration-triggered competency analysis that surfaces the specific assignment signals (tickets handled outside recs, tickets where tech was recommended but passed over) for the technician being analyzed' },
+      { type: 'improved', text: 'Shared SSE streaming infrastructure -- extracted readSSEStream utility and useStreamingFetch hook from duplicated fetch/reader/buffer code; LivePipelineView, CompetencyManager, and CalibrationManager all share the same SSE plumbing' },
+      { type: 'database', text: 'New migration: calibration_runs table for tracking calibration run state, outcome classifications, prompt findings, and competency update progress; run `prisma migrate deploy` before deploying this release' },
+    ],
+  },
   {
     version: '1.9.2-preview',
     date: 'April 8, 2026',

@@ -7,6 +7,7 @@ import competencyAnalysisService from '../services/competencyAnalysisService.js'
 import competencyPromptRepository from '../services/competencyPromptRepository.js';
 import freshServiceActionService from '../services/freshServiceActionService.js';
 import competencyFeedbackService from '../services/competencyFeedbackService.js';
+import calibrationService from '../services/calibrationService.js';
 import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
@@ -837,6 +838,60 @@ router.get('/competencies/technicians', requireReviewer, asyncHandler(async (req
     orderBy: { name: 'asc' },
   });
   res.json({ success: true, data: technicians });
+}));
+
+// ─── Calibration ────────────────────────────────────────────────────────
+
+router.post('/calibration', requireAdmin, asyncHandler(async (req, res) => {
+  const { periodStart, periodEnd } = req.body;
+  if (!periodStart || !periodEnd) {
+    return res.status(400).json({ success: false, message: 'periodStart and periodEnd are required' });
+  }
+
+  const stream = req.query.stream === 'true';
+  const triggeredBy = req.session?.user?.email || 'admin';
+
+  if (!stream) {
+    const result = await calibrationService.runCalibration(req.workspaceId, periodStart, periodEnd, triggeredBy, null);
+    return res.json({ success: true, data: result });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  let clientDisconnected = false;
+  req.on('close', () => { clientDisconnected = true; });
+
+  await calibrationService.runCalibration(req.workspaceId, periodStart, periodEnd, triggeredBy, (event) => {
+    if (clientDisconnected) return;
+    try {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch { /* client gone */ }
+  });
+
+  if (!clientDisconnected) {
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    res.end();
+  }
+}));
+
+router.get('/calibration/runs', requireAdmin, asyncHandler(async (req, res) => {
+  const limit = parseInt(req.query.limit) || 20;
+  const offset = parseInt(req.query.offset) || 0;
+  const result = await calibrationService.getRuns(req.workspaceId, { limit, offset });
+  res.json({ success: true, ...result });
+}));
+
+router.get('/calibration/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const run = await calibrationService._getRun(parseInt(req.params.id));
+  if (!run) return res.status(404).json({ success: false, message: 'Calibration run not found' });
+  if (run.workspaceId !== req.workspaceId) {
+    return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+  }
+  res.json({ success: true, data: run });
 }));
 
 export default router;

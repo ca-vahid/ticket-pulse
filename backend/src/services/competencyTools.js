@@ -60,6 +60,11 @@ export const COMPETENCY_TOOL_SCHEMAS = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
+    name: 'get_calibration_signals',
+    description: 'Get calibration signals for this technician from an active calibration run. Shows tickets they handled outside of AI recommendations (suggesting uncaptured skills) and tickets where they were recommended but not assigned (suggesting possible overestimation). Only returns data when triggered from a calibration run.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
     name: 'submit_competency_assessment',
     description: 'Submit your final competency assessment for this technician. You MUST call this tool when done. Provide competency categories with proficiency levels and evidence.',
     input_schema: {
@@ -91,7 +96,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
 ];
 
 export async function executeCompetencyTool(toolName, toolInput, context) {
-  const { workspaceId, technicianId } = context;
+  const { workspaceId, technicianId, calibrationContext } = context;
 
   switch (toolName) {
   case 'get_technician_profile':
@@ -108,9 +113,38 @@ export async function executeCompetencyTool(toolName, toolInput, context) {
     return await getComparableTechnicians(workspaceId, technicianId);
   case 'get_technician_ad_profile':
     return await getTechnicianAdProfile(workspaceId, technicianId);
+  case 'get_calibration_signals':
+    return getCalibrationSignals(calibrationContext);
   default:
     return { error: `Unknown tool: ${toolName}` };
   }
+}
+
+function getCalibrationSignals(calibrationContext) {
+  if (!calibrationContext) {
+    return { available: false, message: 'No active calibration data. This tool only returns data when competency analysis is triggered from a calibration run.' };
+  }
+
+  const { signals, reasons, periodStart, periodEnd } = calibrationContext;
+  return {
+    available: true,
+    period: { start: periodStart, end: periodEnd },
+    reasons,
+    assignedOutsideRecommendations: (signals?.assignedOutside || []).map(s => ({
+      ticketSubject: s.subject,
+      ticketCategory: s.category,
+      adminNote: s.note || null,
+      overrideReason: s.overrideReason || null,
+      interpretation: 'This technician was assigned a ticket that the AI did NOT recommend them for. This may indicate a competency the system has not captured.',
+    })),
+    recommendedButNotAssigned: (signals?.recommendedNotAssigned || []).map(s => ({
+      ticketSubject: s.subject,
+      ticketCategory: s.category,
+      actualAssignee: s.actualAssignee,
+      interpretation: 'This technician was recommended by the AI but someone else was assigned instead. Consider whether their competency level in this area is accurate.',
+    })),
+    instructions: 'Use these signals alongside ticket history to assess whether this technician\'s competency profile needs adjustment. Tickets they handled outside recommendations suggest skills not yet captured. Tickets where they were passed over may indicate overestimated skills or other factors.',
+  };
 }
 
 async function getTechnicianProfile(workspaceId, technicianId) {
