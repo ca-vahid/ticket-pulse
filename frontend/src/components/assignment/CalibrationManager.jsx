@@ -97,10 +97,22 @@ function LiveCalibrationView({ periodStart, periodEnd, onComplete }) {
   const [completedTechs, setCompletedTechs] = useState([]);
 
   const scrollRef = useRef(null);
+  const promptScrollRef = useRef(null);
   const navigate = useNavigate();
 
+  const isNearBottom = (el) => {
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  };
+
   const scrollToBottom = useCallback(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (promptScrollRef.current && isNearBottom(promptScrollRef.current)) {
+      promptScrollRef.current.scrollTop = promptScrollRef.current.scrollHeight;
+    }
+    const outer = scrollRef.current?.parentElement;
+    if (!outer || isNearBottom(outer)) {
+      scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
   }, []);
 
   const handleEvent = useCallback((event, { setStatus: setStreamStatus, setError: setStreamError, stopTimer }) => {
@@ -135,12 +147,15 @@ function LiveCalibrationView({ periodStart, periodEnd, onComplete }) {
       break;
     case 'competency_tech_start':
       setTechProgress({ current: event.index, total: event.total, currentName: event.techName });
+      scrollToBottom();
       break;
     case 'competency_tech_complete':
       setCompletedTechs(prev => [...prev, { id: event.techId, name: event.techName, runId: event.runId }]);
+      scrollToBottom();
       break;
     case 'competency_tech_error':
       setCompletedTechs(prev => [...prev, { id: event.techId, name: event.techName, error: event.error }]);
+      scrollToBottom();
       break;
     case 'error':
       setStreamError(event.message);
@@ -239,7 +254,7 @@ function LiveCalibrationView({ periodStart, periodEnd, onComplete }) {
               </span>
             )}
           </div>
-          <div className="p-3 max-h-80 overflow-y-auto text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
+          <div ref={promptScrollRef} className="p-3 max-h-80 overflow-y-auto text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
             {promptText ? (
               <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{promptText}</Markdown>
             ) : (
