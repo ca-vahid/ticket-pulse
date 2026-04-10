@@ -6,7 +6,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 
 class CalibrationService {
-  async runCalibration(workspaceId, periodStart, periodEnd, triggeredBy, onEvent) {
+  async runCalibration(workspaceId, periodStart, periodEnd, triggeredBy, onEvent, { mode = 'full' } = {}) {
     const pipelineStart = Date.now();
     const emit = (event) => { try { onEvent?.(event); } catch { /* non-fatal */ } };
 
@@ -109,66 +109,70 @@ class CalibrationService {
         changeSummary: promptResult.changeSummary || null,
       });
 
-      // Phase 3: Competency updates
-      await prisma.calibrationRun.update({ where: { id: run.id }, data: { status: 'analyzing_competencies' } });
-      emit({ type: 'phase_update', phase: 'analyzing_competencies', message: 'Identifying technicians needing competency updates...' });
-
-      const flaggedTechs = this._identifyFlaggedTechs(classified);
-      const techsTotal = flaggedTechs.length;
-
-      await prisma.calibrationRun.update({
-        where: { id: run.id },
-        data: { flaggedTechIds: flaggedTechs, techsTotal, techsProcessed: 0 },
-      });
-
-      emit({ type: 'competency_flagged', techs: flaggedTechs.map(t => ({ id: t.techId, name: t.techName, reasons: t.reasons })), total: techsTotal });
-
+      // Phase 3: Competency updates (skipped in prompt_only mode)
       const competencyRunMap = {};
       let totalCompetencyTokens = 0;
 
-      for (let i = 0; i < flaggedTechs.length; i++) {
-        const tech = flaggedTechs[i];
-        emit({ type: 'competency_tech_start', techId: tech.techId, techName: tech.techName, index: i + 1, total: techsTotal });
+      if (mode === 'full') {
+        await prisma.calibrationRun.update({ where: { id: run.id }, data: { status: 'analyzing_competencies' } });
+        emit({ type: 'phase_update', phase: 'analyzing_competencies', message: 'Identifying technicians needing competency updates...' });
 
-        try {
-          const calibrationContext = {
-            periodStart,
-            periodEnd,
-            signals: tech.signals,
-            reasons: tech.reasons,
-          };
-
-          const result = await competencyAnalysisService.runAnalysis(
-            tech.techId,
-            workspaceId,
-            `calibration_run_${run.id}`,
-            (event) => {
-              if (event.type === 'text') {
-                emit({ type: 'competency_text', techId: tech.techId, text: event.text });
-              } else if (event.type === 'tool_call') {
-                emit({ type: 'competency_tool_call', techId: tech.techId, name: event.name });
-              } else if (event.type === 'assessment') {
-                emit({ type: 'competency_assessment', techId: tech.techId, data: event.data });
-              }
-            },
-            calibrationContext,
-          );
-
-          if (!result?.skipped) {
-            competencyRunMap[tech.techId] = result.id;
-            totalCompetencyTokens += result.totalTokensUsed || 0;
-          }
-
-          emit({ type: 'competency_tech_complete', techId: tech.techId, techName: tech.techName, index: i + 1, total: techsTotal, runId: result?.id });
-        } catch (err) {
-          logger.error('Calibration competency analysis failed for tech', { runId: run.id, techId: tech.techId, error: err.message });
-          emit({ type: 'competency_tech_error', techId: tech.techId, techName: tech.techName, error: err.message });
-        }
+        const flaggedTechs = this._identifyFlaggedTechs(classified);
+        const techsTotal = flaggedTechs.length;
 
         await prisma.calibrationRun.update({
           where: { id: run.id },
-          data: { techsProcessed: i + 1, competencyRunIds: competencyRunMap },
+          data: { flaggedTechIds: flaggedTechs, techsTotal, techsProcessed: 0 },
         });
+
+        emit({ type: 'competency_flagged', techs: flaggedTechs.map(t => ({ id: t.techId, name: t.techName, reasons: t.reasons })), total: techsTotal });
+
+        for (let i = 0; i < flaggedTechs.length; i++) {
+          const tech = flaggedTechs[i];
+          emit({ type: 'competency_tech_start', techId: tech.techId, techName: tech.techName, index: i + 1, total: techsTotal });
+
+          try {
+            const calibrationContext = {
+              periodStart,
+              periodEnd,
+              signals: tech.signals,
+              reasons: tech.reasons,
+            };
+
+            const result = await competencyAnalysisService.runAnalysis(
+              tech.techId,
+              workspaceId,
+              `calibration_run_${run.id}`,
+              (event) => {
+                if (event.type === 'text') {
+                  emit({ type: 'competency_text', techId: tech.techId, text: event.text });
+                } else if (event.type === 'tool_call') {
+                  emit({ type: 'competency_tool_call', techId: tech.techId, name: event.name });
+                } else if (event.type === 'assessment') {
+                  emit({ type: 'competency_assessment', techId: tech.techId, data: event.data });
+                }
+              },
+              calibrationContext,
+            );
+
+            if (!result?.skipped) {
+              competencyRunMap[tech.techId] = result.id;
+              totalCompetencyTokens += result.totalTokensUsed || 0;
+            }
+
+            emit({ type: 'competency_tech_complete', techId: tech.techId, techName: tech.techName, index: i + 1, total: techsTotal, runId: result?.id });
+          } catch (err) {
+            logger.error('Calibration competency analysis failed for tech', { runId: run.id, techId: tech.techId, error: err.message });
+            emit({ type: 'competency_tech_error', techId: tech.techId, techName: tech.techName, error: err.message });
+          }
+
+          await prisma.calibrationRun.update({
+            where: { id: run.id },
+            data: { techsProcessed: i + 1, competencyRunIds: competencyRunMap },
+          });
+        }
+      } else {
+        emit({ type: 'phase_update', phase: 'analyzing_competencies', message: 'Competency updates skipped (prompt-only mode).' });
       }
 
       // Finalize
@@ -183,13 +187,13 @@ class CalibrationService {
         },
       });
 
-      emit({ type: 'phase_update', phase: 'completed', message: 'Calibration complete.' });
+      emit({ type: 'phase_update', phase: 'completed', message: mode === 'prompt_only' ? 'Prompt calibration complete.' : 'Calibration complete.' });
       emit({ type: 'calibration_complete', runId: run.id });
 
       logger.info('Calibration run completed', {
         runId: run.id, workspaceId, totalRuns: classified.totalRuns,
         outcome1: classified.outcome1Count, outcome2: classified.outcome2Count,
-        outcome3: classified.outcome3Count, techsFlagged: techsTotal,
+        outcome3: classified.outcome3Count, mode,
         durationMs: Date.now() - pipelineStart, totalTokens,
       });
 

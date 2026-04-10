@@ -843,16 +843,17 @@ router.get('/competencies/technicians', requireReviewer, asyncHandler(async (req
 // ─── Calibration ────────────────────────────────────────────────────────
 
 router.post('/calibration', requireAdmin, asyncHandler(async (req, res) => {
-  const { periodStart, periodEnd } = req.body;
+  const { periodStart, periodEnd, mode } = req.body;
   if (!periodStart || !periodEnd) {
     return res.status(400).json({ success: false, message: 'periodStart and periodEnd are required' });
   }
+  const calibrationMode = mode === 'prompt_only' ? 'prompt_only' : 'full';
 
   const stream = req.query.stream === 'true';
   const triggeredBy = req.session?.user?.email || 'admin';
 
   if (!stream) {
-    const result = await calibrationService.runCalibration(req.workspaceId, periodStart, periodEnd, triggeredBy, null);
+    const result = await calibrationService.runCalibration(req.workspaceId, periodStart, periodEnd, triggeredBy, null, { mode: calibrationMode });
     return res.json({ success: true, data: result });
   }
 
@@ -875,7 +876,7 @@ router.post('/calibration', requireAdmin, asyncHandler(async (req, res) => {
     try {
       res.write(`data: ${JSON.stringify(event)}\n\n`);
     } catch { /* client gone */ }
-  });
+  }, { mode: calibrationMode });
 
   clearInterval(heartbeat);
   if (!clientDisconnected) {

@@ -84,7 +84,7 @@ function SummaryCards({ data }) {
   );
 }
 
-function LiveCalibrationView({ periodStart, periodEnd, onComplete }) {
+function LiveCalibrationView({ periodStart, periodEnd, mode = 'full', onComplete }) {
   const [phase, setPhase] = useState(null);
   const [phaseMessage, setPhaseMessage] = useState('');
   const [runId, setRunId] = useState(null);
@@ -170,15 +170,15 @@ function LiveCalibrationView({ periodStart, periodEnd, onComplete }) {
 
   const { status, elapsedSec, error } = useStreamingFetch({
     url: '/assignment/calibration?stream=true',
-    body: { periodStart, periodEnd },
+    body: { periodStart, periodEnd, mode },
     onEvent: handleEvent,
-    deps: [periodStart, periodEnd],
+    deps: [periodStart, periodEnd, mode],
   });
 
   const phaseSteps = [
     { key: 'collecting', label: 'Data Collection', icon: BarChart3 },
     { key: 'analyzing_prompt', label: 'Prompt Analysis', icon: FileText },
-    { key: 'analyzing_competencies', label: 'Competency Updates', icon: Users },
+    ...(mode === 'full' ? [{ key: 'analyzing_competencies', label: 'Competency Updates', icon: Users }] : []),
     { key: 'completed', label: 'Complete', icon: CheckCircle },
   ];
 
@@ -504,6 +504,7 @@ export default function CalibrationManager({ workspaceTimezone }) {
   const [view, setView] = useState('trigger'); // trigger | live | detail | history
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
+  const [mode, setMode] = useState('full'); // full | prompt_only
   const [runs, setRuns] = useState([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
@@ -547,8 +548,9 @@ export default function CalibrationManager({ workspaceTimezone }) {
     } catch { /* ignore */ }
   };
 
-  const startCalibration = () => {
+  const startCalibration = (selectedMode) => {
     if (!periodStart || !periodEnd) return;
+    if (selectedMode) setMode(selectedMode);
     setView('live');
   };
 
@@ -567,7 +569,7 @@ export default function CalibrationManager({ workspaceTimezone }) {
         <button onClick={() => { setView('trigger'); loadRuns(); }} className="text-sm text-blue-600 hover:text-blue-800 mb-3 flex items-center gap-1">
           ← Back to Calibration
         </button>
-        <LiveCalibrationView periodStart={periodStart} periodEnd={periodEnd} onComplete={handleLiveComplete} />
+        <LiveCalibrationView periodStart={periodStart} periodEnd={periodEnd} mode={mode} onComplete={handleLiveComplete} />
       </div>
     );
   }
@@ -628,22 +630,34 @@ export default function CalibrationManager({ workspaceTimezone }) {
             </div>
           </div>
 
-          <button
-            onClick={startCalibration}
-            disabled={!periodStart || !periodEnd}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
-          >
-            <Play className="w-4 h-4" />
-            Start Calibration
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => startCalibration('prompt_only')}
+              disabled={!periodStart || !periodEnd}
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
+            >
+              <FileText className="w-4 h-4" />
+              Prompt Only
+            </button>
+            <button
+              onClick={() => startCalibration('full')}
+              disabled={!periodStart || !periodEnd}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white border-2 border-purple-300 text-purple-700 rounded-lg text-sm font-semibold hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
+            >
+              <Play className="w-4 h-4" />
+              Full Calibration
+            </button>
+          </div>
 
-          <div className="mt-3 text-xs text-slate-500 space-y-1">
-            <p>This process will:</p>
-            <ul className="list-disc list-inside space-y-0.5 ml-1">
-              <li>Collect all decided pipeline runs in the period and classify outcomes</li>
-              <li>Analyze patterns and create a draft prompt with improvements</li>
-              <li>Run competency analysis for technicians with discrepancies</li>
-            </ul>
+          <div className="mt-3 text-xs text-slate-500 space-y-1.5">
+            <div className="flex items-start gap-2">
+              <FileText className="w-3.5 h-3.5 mt-0.5 text-purple-400 flex-shrink-0" />
+              <span><span className="font-medium text-slate-600">Prompt Only</span> — Classify outcomes, analyze patterns, create a draft prompt (~1-2 min). Run this frequently.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <Users className="w-3.5 h-3.5 mt-0.5 text-indigo-400 flex-shrink-0" />
+              <span><span className="font-medium text-slate-600">Full Calibration</span> — Everything above, plus competency re-evaluation for flagged technicians (~5-15 min).</span>
+            </div>
           </div>
         </div>
       </div>
