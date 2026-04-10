@@ -1,5 +1,10 @@
 import prisma from './prisma.js';
-import { getTodayRange, getLocalDateBounds, formatDateInTimezone } from '../utils/timezone.js';
+import {
+  getTodayRange,
+  getLocalDateBounds,
+  formatDateInTimezone,
+  convertToTimezone,
+} from '../utils/timezone.js';
 import settingsRepository from './settingsRepository.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import graphMailClient from '../integrations/graphMailClient.js';
@@ -11,7 +16,7 @@ import logger from '../utils/logger.js';
 export const TOOL_SCHEMAS = [
   {
     name: 'get_ticket_details',
-    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, category, and timestamps.',
+    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, category, and creation timestamps in workspace-local time.',
     input_schema: {
       type: 'object',
       properties: {
@@ -22,7 +27,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'get_agent_availability',
-    description: 'Get detailed availability for all technicians right now. Returns three groups: OFF (on leave), WFH (remote only), and IN-OFFICE. Each agent includes their timezone, local time, personal schedule (start/end), whether they are currently on shift, and how much time remains in their shift. Use this to avoid assigning tickets to agents whose shift has ended or hasn\'t started yet.',
+    description: 'Get detailed availability for all technicians right now. Returns three groups: OFF (on leave), WFH (remote only), and IN-OFFICE. Each agent includes their timezone, local date/time, personal schedule (start/end), whether they are currently on shift, and how much time remains in their shift. Use this to avoid assigning tickets to agents whose shift has ended or hasn\'t started yet.',
     input_schema: {
       type: 'object',
       properties: {},
@@ -215,13 +220,30 @@ export async function executeTool(toolName, toolInput, context) {
 
 // ── New tools ────────────────────────────────────────────────────────────
 
+async function getWorkspaceTimezone(workspaceId) {
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { defaultTimezone: true },
+  });
+  return workspace?.defaultTimezone || 'America/Los_Angeles';
+}
+
 function getAgentShiftStatus(tech, hqTimezone) {
   const tz = tech.timezone || hqTimezone;
   const now = new Date();
+  let localDateStr;
+  let localDayOfWeek;
+  let localDateTimeStr;
   let localTimeStr;
   try {
+    localDateStr = formatDateInTimezone(now, tz);
+    localDayOfWeek = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(now);
+    localDateTimeStr = convertToTimezone(now, tz);
     localTimeStr = now.toLocaleTimeString('en-US', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' });
   } catch {
+    localDateStr = formatDateInTimezone(now, hqTimezone);
+    localDayOfWeek = new Intl.DateTimeFormat('en-US', { timeZone: hqTimezone, weekday: 'long' }).format(now);
+    localDateTimeStr = convertToTimezone(now, hqTimezone);
     localTimeStr = now.toLocaleTimeString('en-US', { timeZone: hqTimezone, hour12: false, hour: '2-digit', minute: '2-digit' });
   }
   const [h, m] = localTimeStr.split(':').map(Number);
@@ -233,10 +255,23 @@ function getAgentShiftStatus(tech, hqTimezone) {
   const [eh, em] = endTime.split(':').map(Number);
   const startMinutes = sh * 60 + sm;
   const endMinutes = eh * 60 + em;
+  const isOvernightShift = endMinutes <= startMinutes;
 
-  const onShift = nowMinutes >= startMinutes && nowMinutes < endMinutes;
-  const minutesUntilStart = startMinutes > nowMinutes ? startMinutes - nowMinutes : 0;
-  const minutesRemaining = onShift ? endMinutes - nowMinutes : 0;
+  const onShift = isOvernightShift
+    ? nowMinutes >= startMinutes || nowMinutes < endMinutes
+    : nowMinutes >= startMinutes && nowMinutes < endMinutes;
+
+  const minutesUntilStart = onShift
+    ? 0
+    : isOvernightShift
+      ? (nowMinutes < startMinutes ? startMinutes - nowMinutes : (24 * 60) - nowMinutes + startMinutes)
+      : (startMinutes > nowMinutes ? startMinutes - nowMinutes : 0);
+
+  const minutesRemaining = onShift
+    ? isOvernightShift
+      ? (nowMinutes >= startMinutes ? (24 * 60) - nowMinutes + endMinutes : endMinutes - nowMinutes)
+      : endMinutes - nowMinutes
+    : 0;
 
   let shiftNote;
   if (onShift) {
@@ -251,7 +286,18 @@ function getAgentShiftStatus(tech, hqTimezone) {
     shiftNote = 'Shift ended for today';
   }
 
-  return { localTime: localTimeStr, timezone: tz, onShift, shiftNote, startTime, endTime };
+  return {
+    localDate: localDateStr,
+    localDayOfWeek,
+    localDateTime: localDateTimeStr,
+    localTime: localTimeStr,
+    timezone: tz,
+    onShift,
+    shiftNote,
+    startTime,
+    endTime,
+    isOvernightShift,
+  };
 }
 
 async function getAgentAvailability(workspaceId) {
@@ -294,6 +340,9 @@ async function getAgentAvailability(workspaceId) {
       techName: t.name,
       location: t.location || 'Not set',
       timezone: shift.timezone,
+      localDate: shift.localDate,
+      localDayOfWeek: shift.localDayOfWeek,
+      localDateTime: shift.localDateTime,
       localTime: shift.localTime,
       schedule: `${shift.startTime}-${shift.endTime}`,
       onShift: shift.onShift,
@@ -479,6 +528,9 @@ async function findMatchingAgents(workspaceId, criteria) {
       techName: t.name,
       location: t.location || 'Not set',
       timezone: shift.timezone,
+      localDate: shift.localDate,
+      localDayOfWeek: shift.localDayOfWeek,
+      localDateTime: shift.localDateTime,
       localTime: shift.localTime,
       schedule: `${shift.startTime}-${shift.endTime}`,
       onShift: shift.onShift,
@@ -774,6 +826,7 @@ async function getTicketDetails(ticketId) {
   });
 
   if (!ticket) return { error: 'Ticket not found' };
+  const timezone = await getWorkspaceTimezone(ticket.workspaceId);
 
   return {
     id: ticket.id,
@@ -789,7 +842,10 @@ async function getTicketDetails(ticketId) {
     department: ticket.department,
     source: ticket.source,
     isEscalated: ticket.isEscalated,
-    createdAt: ticket.createdAt?.toISOString(),
+    createdAt: ticket.createdAt ? convertToTimezone(ticket.createdAt, timezone) : null,
+    createdAtUtc: ticket.createdAt?.toISOString?.() || null,
+    createdDate: ticket.createdAt ? formatDateInTimezone(ticket.createdAt, timezone) : null,
+    workspaceTimezone: timezone,
     requester: ticket.requester || null,
     currentlyAssignedTo: ticket.assignedTech?.name || 'Unassigned',
   };
@@ -906,6 +962,7 @@ async function searchDecisionNotes(workspaceId, input) {
   const limit = Math.min(input.limit || 10, 20);
   const query = input.query?.trim();
   if (!query) return { error: 'query is required' };
+  const timezone = await getWorkspaceTimezone(workspaceId);
 
   const keywords = query.split(/\s+/).filter(Boolean);
 
@@ -950,7 +1007,9 @@ async function searchDecisionNotes(workspaceId, input) {
         overrideReason: r.overrideReason,
         assignedTo: r.assignedTech?.name,
         decidedBy: r.decidedByEmail,
-        decidedAt: r.decidedAt,
+        decidedAt: r.decidedAt ? convertToTimezone(r.decidedAt, timezone) : null,
+        decidedAtUtc: r.decidedAt?.toISOString?.() || null,
+        workspaceTimezone: timezone,
         originalTopRecommendation: r.recommendation?.recommendations?.[0]?.techName,
       })),
     };
@@ -962,7 +1021,10 @@ async function searchDecisionNotes(workspaceId, input) {
 
 async function getFreshserviceActivities(freshserviceTicketId, workspaceId) {
   try {
-    const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+    const [fsConfig, timezone] = await Promise.all([
+      settingsRepository.getFreshServiceConfigForWorkspace(workspaceId),
+      getWorkspaceTimezone(workspaceId),
+    ]);
     if (!fsConfig?.domain || !fsConfig?.apiKey) {
       return { error: 'FreshService not configured for this workspace' };
     }
@@ -973,11 +1035,13 @@ async function getFreshserviceActivities(freshserviceTicketId, workspaceId) {
     return {
       ticketId: freshserviceTicketId,
       activityCount: activities.length,
+      workspaceTimezone: timezone,
       activities: activities.slice(0, 20).map((a) => ({
         type: a.actor?.type || 'unknown',
         performer: a.actor?.name || 'System',
         action: a.content || a.note?.content || '',
-        createdAt: a.created_at,
+        createdAt: a.created_at ? convertToTimezone(a.created_at, timezone) : null,
+        createdAtRaw: a.created_at || null,
       })),
     };
   } catch (error) {

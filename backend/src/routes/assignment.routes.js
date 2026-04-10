@@ -12,6 +12,7 @@ import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import availabilityService from '../services/availabilityService.js';
+import { convertToTimezone } from '../utils/timezone.js';
 import { requireReviewer, requireAdmin } from '../middleware/auth.js';
 import appConfig from '../config/index.js';
 import prisma from '../services/prisma.js';
@@ -262,22 +263,28 @@ router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) =
   const ticket = run.ticket;
   const ticketRef = `Ticket #${ticket?.freshserviceTicketId} (${ticket?.subject || 'unknown'})`;
   const noteAppendix = decisionNote ? ` Admin note: ${decisionNote.trim()}` : '';
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: req.workspaceId },
+    select: { defaultTimezone: true },
+  });
+  const workspaceTimezone = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const feedbackTimestamp = convertToTimezone(new Date(), workspaceTimezone);
 
   if (decision === 'modified' && overrideReason) {
-    const feedbackEntry = `[${new Date().toISOString()}] ${ticketRef}: Admin overrode recommendation. Chosen tech ID: ${assignedTechId}. Reason: ${overrideReason}.${noteAppendix}`;
+    const feedbackEntry = `[${feedbackTimestamp}] ${ticketRef}: Admin overrode recommendation. Chosen tech ID: ${assignedTechId}. Reason: ${overrideReason}.${noteAppendix}`;
     await assignmentRepository.appendFeedback(req.workspaceId, feedbackEntry).catch((err) =>
       logger.warn('Failed to append feedback', { error: err.message }),
     );
   } else if (decision === 'approved') {
     const topRec = run.recommendation?.recommendations?.[0];
     if (topRec) {
-      const feedbackEntry = `[${new Date().toISOString()}] ${ticketRef}: Approved assignment to ${topRec.techName}.${noteAppendix}`;
+      const feedbackEntry = `[${feedbackTimestamp}] ${ticketRef}: Approved assignment to ${topRec.techName}.${noteAppendix}`;
       await assignmentRepository.appendFeedback(req.workspaceId, feedbackEntry).catch((err) =>
         logger.warn('Failed to append feedback', { error: err.message }),
       );
     }
   } else if (decision === 'rejected' && decisionNote) {
-    const feedbackEntry = `[${new Date().toISOString()}] ${ticketRef}: Rejected recommendation.${noteAppendix}`;
+    const feedbackEntry = `[${feedbackTimestamp}] ${ticketRef}: Rejected recommendation.${noteAppendix}`;
     await assignmentRepository.appendFeedback(req.workspaceId, feedbackEntry).catch((err) =>
       logger.warn('Failed to append feedback', { error: err.message }),
     );

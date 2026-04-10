@@ -215,6 +215,8 @@ class AssignmentPipelineService {
       systemPrompt += `\n\n## Historical Admin Feedback\n${assignmentConfig.feedbackContext.slice(-4000)}`;
     }
 
+    systemPrompt += '\n\n## Time Handling\nTreat the workspace current date/time supplied in the user message as the source of truth for what "today" means. Tool outputs expose ticket and decision timestamps in workspace-local time unless explicitly labeled as UTC. Agent availability includes each technician\'s own local date/time. Historical admin feedback may contain legacy UTC timestamps from older runs, so prefer current workspace-local timestamps when there is any ambiguity.';
+
     const workspace = await prisma.workspace.findUnique({
       where: { id: workspaceId },
       select: { defaultTimezone: true },

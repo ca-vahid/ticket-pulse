@@ -4,6 +4,7 @@ import {
   Save, Upload, RotateCcw, Clock, Loader2, Eye, FileText, CheckCircle,
   Wrench, ChevronDown, ChevronRight,
 } from 'lucide-react';
+import { formatDateOnlyInTimezone } from '../../utils/dateHelpers';
 
 function ToolListPanel() {
   const [tools, setTools] = useState([]);
@@ -90,7 +91,7 @@ function ToolListPanel() {
   );
 }
 
-export default function PromptManager() {
+export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles' }) {
   const [versions, setVersions] = useState([]);
   const [published, setPublished] = useState(null);
   const [editText, setEditText] = useState('');
@@ -269,7 +270,7 @@ export default function PromptManager() {
                       {v.status}
                     </span>
                     {v.notes && <span className="text-xs text-gray-400 truncate">{v.notes}</span>}
-                    <span className="text-xs text-gray-300">{new Date(v.createdAt).toLocaleDateString()}</span>
+                    <span className="text-xs text-gray-300">{formatDateOnlyInTimezone(v.createdAt, workspaceTimezone)}</span>
                   </div>
                   <div className="flex items-center gap-1 ml-2">
                     <button

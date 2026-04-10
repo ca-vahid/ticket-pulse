@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { assignmentAPI } from '../../services/api';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 import {
   ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
@@ -390,7 +391,7 @@ const SYNC_BADGES = {
   skipped: { label: 'Sync skipped', style: 'bg-gray-100 text-gray-500', icon: '–' },
 };
 
-function SyncStatusCard({ run, onSyncComplete, isAdmin = false }) {
+function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const [syncing, setSyncing] = useState(false);
   const [localSyncStatus, setLocalSyncStatus] = useState(run.syncStatus);
   const [localSyncedAt, setLocalSyncedAt] = useState(run.syncedAt);
@@ -430,7 +431,7 @@ function SyncStatusCard({ run, onSyncComplete, isAdmin = false }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${badge.style}`}>{badge.icon} {badge.label}</span>
-          {localSyncedAt && <span className="text-xs text-gray-400">{new Date(localSyncedAt).toLocaleString()}</span>}
+          {localSyncedAt && <span className="text-xs text-gray-400">{formatDateTimeInTimezone(localSyncedAt, workspaceTimezone)}</span>}
         </div>
         {isAdmin && (
           <div className="flex gap-1.5">
@@ -502,7 +503,7 @@ function TranscriptSection({ transcript }) {
   );
 }
 
-export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete, isAdmin = false }) {
+export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const [fsDomain, setFsDomain] = useState(null);
 
   useEffect(() => {
@@ -552,7 +553,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
                 </span>
               )}
               <span className="text-slate-300">·</span>
-              <span>{ticket?.createdAt ? new Date(ticket.createdAt).toLocaleString() : ''}</span>
+              <span>{formatDateTimeInTimezone(ticket?.createdAt, workspaceTimezone)}</span>
               {ticketUrl && (
                 <>
                   <span className="text-slate-300">·</span>
@@ -565,7 +566,8 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
             <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
               <CopyBadge label="Run" value={run.id} />
               <span>· {run.triggerSource}</span>
-              <span>· {new Date(run.createdAt).toLocaleString()}</span>
+              <span>· {formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}</span>
+              <span>· {workspaceTimezone}</span>
               {run.totalDurationMs && <span>· {(run.totalDurationMs / 1000).toFixed(1)}s</span>}
               {run.totalTokensUsed && <span>· {run.totalTokensUsed.toLocaleString()} tokens</span>}
             </div>
@@ -631,7 +633,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
 
       {/* FreshService Sync Status */}
       {run.syncStatus && (
-        <SyncStatusCard run={run} onSyncComplete={onSyncComplete} isAdmin={isAdmin} />
+        <SyncStatusCard run={run} onSyncComplete={onSyncComplete} isAdmin={isAdmin} workspaceTimezone={workspaceTimezone} />
       )}
 
       {/* Recommendations + Decision (shared component) */}
@@ -648,7 +650,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
       {run.decidedAt && (
         <div className="bg-gray-50 border rounded-lg p-3 text-sm">
           <p><span className="text-gray-500">Decided by:</span> {run.decidedByEmail}</p>
-          <p><span className="text-gray-500">At:</span> {new Date(run.decidedAt).toLocaleString()}</p>
+          <p><span className="text-gray-500">At:</span> {formatDateTimeInTimezone(run.decidedAt, workspaceTimezone)}</p>
           {run.assignedTech && <p><span className="text-gray-500">Assigned to:</span> {run.assignedTech.name}</p>}
           {run.overrideReason && <p><span className="text-gray-500">Override reason:</span> {run.overrideReason}</p>}
           {run.decisionNote && <p><span className="text-gray-500">Triage note:</span> {run.decisionNote}</p>}

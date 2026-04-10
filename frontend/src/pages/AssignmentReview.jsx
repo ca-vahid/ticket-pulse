@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assignmentAPI } from '../services/api';
+import { assignmentAPI, workspaceAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
 import PipelineRunDetail from '../components/assignment/PipelineRunDetail';
 import CompetencyManager from '../components/assignment/CompetencyManager';
 import PromptManager from '../components/assignment/PromptManager';
+import { formatDateTimeInTimezone } from '../utils/dateHelpers';
 import LivePipelineView from '../components/assignment/LivePipelineView';
 import {
   ArrowLeft, Inbox, History, Settings2, Award, RefreshCw, Loader2,
@@ -142,7 +143,7 @@ function ManualTriggerPanel({ isAdmin = false }) {
   );
 }
 
-function QueueTab({ deepRunId, isAdmin = false }) {
+function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const navigate = useNavigate();
   const [queue, setQueue] = useState({ items: [], total: 0 });
   const [assignedRuns, setAssignedRuns] = useState({ items: [], total: 0 });
@@ -371,7 +372,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
         >
           <ChevronLeft className="w-4 h-4" /> Back to queue
         </button>
-        <PipelineRunDetail run={selectedRun} onDecide={handleDecide} deciding={deciding} isAdmin={isAdmin} onSyncComplete={async () => {
+        <PipelineRunDetail run={selectedRun} workspaceTimezone={workspaceTimezone} onDecide={handleDecide} deciding={deciding} isAdmin={isAdmin} onSyncComplete={async () => {
           try { const res = await assignmentAPI.getRun(selectedRun.id); setSelectedRun(res?.data || null); } catch { /* ignore */ }
         }} />
       </div>
@@ -408,11 +409,13 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   };
   const PRIORITY_BORDER = { 1: 'border-l-slate-200', 2: 'border-l-slate-200', 3: 'border-l-slate-200', 4: 'border-l-slate-200' };
 
-  const fmtDate = (d) => {
-    if (!d) return '';
-    const dt = new Date(d);
-    return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  };
+  const fmtDate = (d) => formatDateTimeInTimezone(d, workspaceTimezone, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 
   const toggleSort = (field) => {
     if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -858,7 +861,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
                 <tr key={run.id} className="border-t border-amber-50 hover:bg-amber-50 transition-colors">
                   <td className="px-4 py-3"><span className="text-xs text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span><span className="ml-2 font-semibold text-slate-800">{run.ticket?.subject || 'No subject'}</span></td>
                   <td className="px-4 py-3 text-xs text-slate-500">{run.queuedReason || 'Outside business hours'} · via {run.triggerSource}</td>
-                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{run.queuedAt ? new Date(run.queuedAt).toLocaleString() : ''}</td>
+                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{formatDateTimeInTimezone(run.queuedAt, workspaceTimezone)}</td>
                   {isAdmin && (
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-2">
@@ -1180,7 +1183,7 @@ function QueueTab({ deepRunId, isAdmin = false }) {
   );
 }
 
-function HistoryTab({ deepRunId, isAdmin = false }) {
+function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const navigate = useNavigate();
   const [runs, setRuns] = useState({ items: [], total: 0 });
   const [selectedRun, setSelectedRun] = useState(null);
@@ -1242,7 +1245,7 @@ function HistoryTab({ deepRunId, isAdmin = false }) {
         >
           <ChevronLeft className="w-4 h-4" /> Back to history
         </button>
-        <PipelineRunDetail run={selectedRun} onDecide={null} deciding={false} isAdmin={isAdmin} onSyncComplete={refreshSelectedRun} />
+        <PipelineRunDetail run={selectedRun} workspaceTimezone={workspaceTimezone} onDecide={null} deciding={false} isAdmin={isAdmin} onSyncComplete={refreshSelectedRun} />
       </div>
     );
   }
@@ -1390,7 +1393,7 @@ function HistoryTab({ deepRunId, isAdmin = false }) {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{new Date(run.createdAt).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}</td>
                   <td className="px-4 py-3 text-right">
                     <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-500 ml-auto transition-colors" />
                   </td>
@@ -1449,7 +1452,7 @@ function ConfigSection({ icon: Icon, title, children, defaultOpen = true }) {
   );
 }
 
-function ConfigTab() {
+function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1583,7 +1586,7 @@ function ConfigTab() {
                   <span className={`w-2 h-2 rounded-full ${emailStatus.running ? 'bg-green-500' : 'bg-slate-300'}`} />
                   {emailStatus.running ? 'Polling active' : 'Polling inactive'}
                 </span>
-                {emailStatus.lastCheck && <p className="text-[10px] text-slate-400 mt-0.5">Last: {new Date(emailStatus.lastCheck).toLocaleString()}</p>}
+                {emailStatus.lastCheck && <p className="text-[10px] text-slate-400 mt-0.5">Last: {formatDateTimeInTimezone(emailStatus.lastCheck, workspaceTimezone)}</p>}
               </div>
               <button onClick={async () => { setPolling(true); try { await assignmentAPI.emailPollNow(); const r = await assignmentAPI.emailStatus(); setEmailStatus(r?.data || null); } catch { /* ignore polling refresh errors */ } finally { setPolling(false); } }} disabled={polling} className="px-2.5 py-1 border border-slate-200 rounded text-xs font-medium hover:bg-white disabled:opacity-50 flex items-center gap-1">
                 {polling ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Poll Now
@@ -1629,6 +1632,7 @@ export default function AssignmentReview() {
   const params = useParams();
   const { currentWorkspace, availableWorkspaces } = useWorkspace();
   const { user } = useAuth();
+  const [workspaceTimezone, setWorkspaceTimezone] = useState('America/Los_Angeles');
 
   const isGlobalAdmin = user?.role === 'admin';
   const wsRole = (() => {
@@ -1638,6 +1642,31 @@ export default function AssignmentReview() {
   })();
   const isWsAdmin = wsRole === 'admin';
   const isReviewer = wsRole === 'reviewer' || isWsAdmin;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!currentWorkspace?.id) {
+      setWorkspaceTimezone('America/Los_Angeles');
+      return undefined;
+    }
+
+    workspaceAPI.getById(currentWorkspace.id)
+      .then((res) => {
+        if (!cancelled) {
+          setWorkspaceTimezone(res?.data?.defaultTimezone || 'America/Los_Angeles');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkspaceTimezone('America/Los_Angeles');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkspace?.id]);
 
   const TABS = ALL_TABS.filter(tab => {
     if (tab.minRole === 'admin') return isWsAdmin;
@@ -1773,11 +1802,11 @@ export default function AssignmentReview() {
       <div className="flex-1 px-2 pb-2 sm:px-4 sm:pb-4 overflow-auto">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-full">
           <div className="px-3 py-3 sm:px-6 sm:py-5">
-            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} />}
-            {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} />}
-            {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} />}
-            {activeTab === 'prompts' && <PromptManager />}
-            {activeTab === 'config' && <ConfigTab />}
+            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'prompts' && <PromptManager workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'config' && <ConfigTab workspaceTimezone={workspaceTimezone} />}
           </div>
         </div>
       </div>

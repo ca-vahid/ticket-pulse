@@ -12,6 +12,7 @@ import {
   CopyBadge, ToolCallCard, mdComponents, StreamContent,
   cleanTranscript, processStreamEvent,
 } from './StreamingComponents';
+import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 
 const PROFICIENCY_LEVELS = [
   { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 text-yellow-800' },
@@ -458,7 +459,7 @@ function MatrixTab({ onAnalyze }) {
 
 // ─── Sub-tab: Live Analysis View ─────────────────────────────────────────
 
-function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
+function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew, workspaceTimezone = 'America/Los_Angeles' }) {
   const navigate = useNavigate();
   const [status, setStatus] = useState('checking');
   const [events, setEvents] = useState([]);
@@ -603,7 +604,7 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew }) {
         {events.length === 0 && (status === 'connecting' || status === 'checking') && <div className="flex items-center justify-center h-full text-gray-400"><Loader2 className="w-6 h-6 animate-spin" /></div>}
         {events.length === 0 && status === 'completed' && completedRun && (
           <div className="text-sm text-gray-600">
-            <p className="mb-2 text-xs text-gray-400">Showing results from previous analysis (run CR-{completedRun.id}, {new Date(completedRun.createdAt).toLocaleString()})</p>
+            <p className="mb-2 text-xs text-gray-400">Showing results from previous analysis (run CR-{completedRun.id}, {formatDateTimeInTimezone(completedRun.createdAt, workspaceTimezone)})</p>
             {completedRun.structuredResult?.competencies?.map((comp, i) => (
               <div key={i} className="mb-1">
                 <span className="font-medium">{comp.categoryName}</span>
@@ -730,7 +731,7 @@ function CompetencyDiff({ before, after }) {
 
 // ─── Sub-tab: Run History ─────────────────────────────────────────────────
 
-function RunHistoryTab({ deepRunId }) {
+function RunHistoryTab({ deepRunId, workspaceTimezone = 'America/Los_Angeles' }) {
   const navigate = useNavigate();
   const [runs, setRuns] = useState({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
@@ -774,7 +775,7 @@ function RunHistoryTab({ deepRunId }) {
                 <h3 className="text-lg font-semibold">Competency Run CR-{selectedRun.id}</h3>
                 <CopyBadge label="CR" value={selectedRun.id} />
               </div>
-              <p className="text-sm text-gray-500">{selectedRun.technician?.name} | {new Date(selectedRun.createdAt).toLocaleString()}</p>
+              <p className="text-sm text-gray-500">{selectedRun.technician?.name} | {formatDateTimeInTimezone(selectedRun.createdAt, workspaceTimezone)}</p>
               <p className="text-xs text-gray-400">{selectedRun.totalDurationMs ? `${(selectedRun.totalDurationMs / 1000).toFixed(1)}s` : ''} {selectedRun.totalTokensUsed ? `| ${selectedRun.totalTokensUsed} tokens` : ''}</p>
             </div>
             <div className="flex items-center gap-2">
@@ -825,7 +826,7 @@ function RunHistoryTab({ deepRunId }) {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium text-sm">{run.technician?.name || `Tech #${run.technicianId}`}</p>
-                  <p className="text-xs text-gray-500">{new Date(run.createdAt).toLocaleString()}</p>
+                  <p className="text-xs text-gray-500">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-0.5 rounded text-xs font-medium ${run.decision === 'auto_applied' ? 'bg-green-100 text-green-800' : run.decision === 'rolled_back' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-600'}`}>
@@ -956,7 +957,7 @@ const COMPETENCY_TABS = [
   { id: 'prompt', label: 'Prompt', icon: FileText },
 ];
 
-export default function CompetencyManager({ deepRunId, deepAnalyzeTechId }) {
+export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, workspaceTimezone = 'America/Los_Angeles' }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState('matrix');
@@ -970,6 +971,7 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId }) {
         techId={deepAnalyzeTechId}
         techName={`Technician #${deepAnalyzeTechId}`}
         forceNew={forceNew}
+        workspaceTimezone={workspaceTimezone}
         onBack={() => navigate('/assignments/competencies')}
         onComplete={() => navigate('/assignments/competencies')}
       />
@@ -996,7 +998,7 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId }) {
       </div>
 
       {effectiveTab === 'matrix' && <MatrixTab onAnalyze={(id) => handleAnalyze(id)} />}
-      {effectiveTab === 'history' && <RunHistoryTab deepRunId={deepRunId} />}
+      {effectiveTab === 'history' && <RunHistoryTab deepRunId={deepRunId} workspaceTimezone={workspaceTimezone} />}
       {effectiveTab === 'prompt' && <CompetencyPromptTab />}
     </div>
   );
