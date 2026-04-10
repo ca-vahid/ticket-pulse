@@ -579,6 +579,19 @@ router.post('/prompts/:id/restore', requireAdmin, asyncHandler(async (req, res) 
   res.json({ success: true, data: draft });
 }));
 
+router.delete('/prompts/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const id = parseInt(req.params.id);
+  const version = await promptRepository.getVersion(id);
+  if (version.workspaceId !== req.workspaceId) {
+    return res.status(403).json({ success: false, message: 'Prompt belongs to a different workspace' });
+  }
+  if (version.status === 'published') {
+    return res.status(400).json({ success: false, message: 'Cannot delete the published prompt version' });
+  }
+  await promptRepository.deleteVersion(id);
+  res.json({ success: true, message: 'Prompt version deleted' });
+}));
+
 // ─── Tool Schemas (for UI display) ──────────────────────────────────────
 
 router.get('/tools', requireAdmin, asyncHandler(async (req, res) => {

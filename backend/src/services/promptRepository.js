@@ -255,6 +255,22 @@ class PromptRepository {
     }
   }
 
+  async deleteVersion(id) {
+    try {
+      const version = await this.getVersion(id);
+      if (version.status === 'published') {
+        throw new Error('Cannot delete the published prompt version');
+      }
+      await prisma.assignmentPromptVersion.delete({ where: { id } });
+      return { deleted: true };
+    } catch (error) {
+      if (error instanceof NotFoundError) throw error;
+      if (error.message?.includes('Cannot delete')) throw error;
+      logger.error('Error deleting prompt version:', error);
+      throw new DatabaseError('Failed to delete prompt version', error);
+    }
+  }
+
   async restore(id, createdBy) {
     try {
       const source = await this.getVersion(id);

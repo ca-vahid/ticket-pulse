@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { assignmentAPI } from '../../services/api';
 import {
   Save, Upload, RotateCcw, Clock, Loader2, Eye, FileText, CheckCircle,
-  Wrench, ChevronDown, ChevronRight,
+  Wrench, ChevronDown, ChevronRight, Trash2,
 } from 'lucide-react';
 import { formatDateOnlyInTimezone } from '../../utils/dateHelpers';
 
@@ -166,6 +166,18 @@ export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles
     }
   };
 
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this prompt version? This cannot be undone.')) return;
+    try {
+      await assignmentAPI.deletePrompt(id);
+      setSaveMsg('Version deleted');
+      await fetchData();
+      setTimeout(() => setSaveMsg(null), 3000);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message);
+    }
+  };
+
   const handleViewVersion = async (id) => {
     if (selectedVersion?.id === id) {
       setSelectedVersion(null);
@@ -297,6 +309,15 @@ export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles
                     >
                       <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
                     </button>
+                    {v.status !== 'published' && (
+                      <button
+                        onClick={() => handleDelete(v.id)}
+                        className="p-1.5 hover:bg-red-50 rounded transition-colors"
+                        title="Delete version"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-600" />
+                      </button>
+                    )}
                   </div>
                 </div>
 

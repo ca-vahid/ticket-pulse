@@ -390,6 +390,8 @@ Analyze the data step by step, explain your findings, then call submit_calibrati
     const messages = [{ role: 'user', content: userMessage }];
     const tools = [CALIBRATION_TOOL];
     let submission = null;
+    let toolJsonLength = 0;
+    let lastProgressAt = 0;
 
     for (let turn = 0; turn < 5 && !submission; turn++) {
       const stream = client.messages.stream({
@@ -405,18 +407,19 @@ Analyze the data step by step, explain your findings, then call submit_calibrati
         emit({ type: 'prompt_analysis_text', text });
       });
 
-      let toolJsonLength = 0;
-      let lastProgressAt = 0;
       stream.on('inputJson', (partialJson) => {
         toolJsonLength += partialJson.length;
         const now = Date.now();
-        if (now - lastProgressAt > 1000) {
+        if (now - lastProgressAt > 200) {
           lastProgressAt = now;
           emit({ type: 'prompt_analysis_thinking', kb: parseFloat((toolJsonLength / 1024).toFixed(1)) });
         }
       });
 
       const finalMessage = await stream.finalMessage();
+      if (toolJsonLength > 0) {
+        emit({ type: 'prompt_analysis_thinking', kb: parseFloat((toolJsonLength / 1024).toFixed(1)) });
+      }
       totalTokens += (finalMessage.usage?.input_tokens || 0) + (finalMessage.usage?.output_tokens || 0);
 
       const toolUseBlock = finalMessage.content.find(b => b.type === 'tool_use' && b.name === 'submit_calibration_findings');

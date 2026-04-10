@@ -498,6 +498,7 @@ export const assignmentAPI = {
   createPrompt: (data) => api.post('/assignment/prompts', data),
   publishPrompt: (id) => api.post(`/assignment/prompts/${id}/publish`),
   restorePrompt: (id) => api.post(`/assignment/prompts/${id}/restore`),
+  deletePrompt: (id) => api.delete(`/assignment/prompts/${id}`),
 
   getTools: () => api.get('/assignment/tools'),
 
