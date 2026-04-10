@@ -8,6 +8,9 @@ import {
   Target, TrendingUp, BarChart3, History,
 } from 'lucide-react';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { mdComponents } from './StreamingComponents';
 
 const PRESETS = [
   { label: 'Last 2 weeks', days: 14 },
@@ -236,8 +239,12 @@ function LiveCalibrationView({ periodStart, periodEnd, onComplete }) {
               </span>
             )}
           </div>
-          <div className="p-3 max-h-64 overflow-y-auto text-xs text-gray-700 font-mono whitespace-pre-wrap bg-gray-50">
-            {promptText || 'Analyzing patterns...'}
+          <div className="p-3 max-h-80 overflow-y-auto text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
+            {promptText ? (
+              <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{promptText}</Markdown>
+            ) : (
+              <span className="text-gray-400 text-xs">Analyzing patterns...</span>
+            )}
           </div>
           {promptFindings.length > 0 && (
             <div className="px-3 pb-3 space-y-2">

@@ -330,39 +330,49 @@ class CalibrationService {
       })),
     };
 
+    const CALIBRATION_TOOL = {
+      name: 'submit_calibration_findings',
+      description: 'Submit your calibration findings and the updated assignment prompt. You MUST call this tool when your analysis is complete.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          findings: {
+            type: 'array',
+            description: 'List of patterns found in the calibration data',
+            items: {
+              type: 'object',
+              properties: {
+                pattern: { type: 'string', description: 'Brief description of the pattern found' },
+                evidence: { type: 'string', description: 'Specific examples from the data' },
+                confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+                suggestedChange: { type: 'string', description: 'What should change in the prompt' },
+              },
+              required: ['pattern', 'evidence', 'confidence', 'suggestedChange'],
+            },
+          },
+          updatedPrompt: { type: 'string', description: 'The COMPLETE updated system prompt with amendments applied. Preserve existing structure.' },
+          changeSummary: { type: 'string', description: 'Brief summary of all changes made' },
+        },
+        required: ['findings', 'updatedPrompt', 'changeSummary'],
+      },
+    };
+
     const systemPrompt = `You are an expert IT operations analyst tasked with improving an AI ticket assignment system.
 
-You will receive:
-1. Performance data from a calibration period showing how well the assignment AI performed
-2. Cases where the AI's recommendation was overridden or incorrect
-3. Admin feedback and notes about assignment decisions
-4. The current system prompt used by the assignment AI
+You will receive performance data from a calibration period and the current system prompt.
 
-Your job is to:
-1. Identify patterns in the mismatches and admin feedback
-2. Propose specific, actionable amendments to the assignment system prompt
-3. Output the COMPLETE updated prompt with your changes integrated
-
-## Output Format
-You MUST respond with a valid JSON object (no markdown fencing) with this structure:
-{
-  "findings": [
-    {
-      "pattern": "Brief description of the pattern found",
-      "evidence": "Specific examples from the data",
-      "confidence": "high|medium|low",
-      "suggestedChange": "What should change in the prompt"
-    }
-  ],
-  "updatedPrompt": "The COMPLETE updated system prompt with all amendments applied. Keep the existing structure and add/modify sections as needed. Do NOT remove existing functionality.",
-  "changeSummary": "Brief summary of all changes made to the prompt"
-}
+## Your Process
+1. Walk through the data systematically — explain what patterns you see in the mismatches and admin feedback
+2. For each pattern, cite the specific tickets and decisions that support it
+3. Explain what prompt changes would address each pattern
+4. Call **submit_calibration_findings** with your structured findings and the complete updated prompt
 
 ## Rules
+- Think out loud — explain your reasoning step by step before submitting
 - Be conservative: only suggest changes supported by clear evidence
 - Preserve all existing prompt structure and steps
 - Add new guidelines as subsections or bullet points within existing steps
-- If no changes are needed, return the original prompt unchanged with an empty findings array
+- If no changes are needed, submit the original prompt unchanged with an empty findings array
 - Focus on routing logic, not formatting or style changes`;
 
     const userMessage = `## Current Assignment System Prompt
@@ -373,52 +383,75 @@ ${currentPrompt}
 ## Calibration Period Performance Data
 ${JSON.stringify(analysisContext, null, 2)}
 
-Analyze the data and provide your findings and updated prompt.`;
+Analyze the data step by step, explain your findings, then call submit_calibration_findings.`;
 
     const client = new Anthropic({ apiKey });
     let transcript = '';
+    let totalTokens = 0;
 
-    const stream = client.messages.stream({
-      model: llmModel,
-      max_tokens: 16384,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
-    });
+    const messages = [{ role: 'user', content: userMessage }];
+    const tools = [CALIBRATION_TOOL];
+    let submission = null;
 
-    stream.on('text', (text) => {
-      transcript += text;
-      emit({ type: 'prompt_analysis_text', text });
-    });
+    for (let turn = 0; turn < 5 && !submission; turn++) {
+      const stream = client.messages.stream({
+        model: llmModel,
+        max_tokens: 16384,
+        system: systemPrompt,
+        tools,
+        messages,
+      });
 
-    const finalMessage = await stream.finalMessage();
-    const tokens = (finalMessage.usage?.input_tokens || 0) + (finalMessage.usage?.output_tokens || 0);
+      stream.on('text', (text) => {
+        transcript += text;
+        emit({ type: 'prompt_analysis_text', text });
+      });
 
-    let parsed;
-    try {
-      const jsonStr = transcript.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-      parsed = JSON.parse(jsonStr);
-    } catch {
-      logger.warn('Calibration prompt analysis returned non-JSON', { preview: transcript.slice(0, 200) });
-      return { findings: [{ pattern: 'Raw analysis', evidence: transcript.slice(0, 2000), confidence: 'medium', suggestedChange: 'Review raw output' }], draftId: null, tokens, transcript };
+      const finalMessage = await stream.finalMessage();
+      totalTokens += (finalMessage.usage?.input_tokens || 0) + (finalMessage.usage?.output_tokens || 0);
+
+      const toolUseBlock = finalMessage.content.find(b => b.type === 'tool_use' && b.name === 'submit_calibration_findings');
+      if (toolUseBlock) {
+        submission = toolUseBlock.input;
+        emit({ type: 'prompt_analysis_text', text: '\n\n---\n*Findings submitted.*\n' });
+      }
+
+      if (finalMessage.stop_reason === 'tool_use') {
+        messages.push({ role: 'assistant', content: finalMessage.content });
+        messages.push({
+          role: 'user',
+          content: finalMessage.content
+            .filter(b => b.type === 'tool_use')
+            .map(b => ({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify({ accepted: true }) })),
+        });
+        if (submission) break;
+      } else {
+        break;
+      }
+    }
+
+    if (!submission) {
+      logger.warn('Calibration prompt analysis did not call submit_calibration_findings', { preview: transcript.slice(0, 200) });
+      return { findings: [{ pattern: 'Analysis completed without structured submission', evidence: transcript.slice(0, 2000), confidence: 'medium', suggestedChange: 'Review the analysis text above' }], draftId: null, tokens: totalTokens, transcript };
     }
 
     let draftId = null;
-    if (parsed.updatedPrompt && parsed.updatedPrompt !== currentPrompt) {
+    if (submission.updatedPrompt && submission.updatedPrompt !== currentPrompt) {
       const draft = await promptRepository.createVersion(workspaceId, {
-        systemPrompt: parsed.updatedPrompt,
+        systemPrompt: submission.updatedPrompt,
         toolConfig: published.toolConfig,
-        notes: `Calibration run auto-generated draft. ${parsed.changeSummary || ''}`.trim(),
+        notes: `Calibration run auto-generated draft. ${submission.changeSummary || ''}`.trim(),
         createdBy: 'calibration_system',
       });
       draftId = draft.id;
     }
 
     return {
-      findings: parsed.findings || [],
+      findings: submission.findings || [],
       draftId,
-      tokens,
+      tokens: totalTokens,
       transcript,
-      changeSummary: parsed.changeSummary || null,
+      changeSummary: submission.changeSummary || null,
     };
   }
 
