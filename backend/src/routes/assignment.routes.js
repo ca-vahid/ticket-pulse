@@ -863,7 +863,12 @@ router.post('/calibration', requireAdmin, asyncHandler(async (req, res) => {
   res.flushHeaders?.();
 
   let clientDisconnected = false;
-  req.on('close', () => { clientDisconnected = true; });
+  req.on('close', () => { clientDisconnected = true; clearInterval(heartbeat); });
+
+  const heartbeat = setInterval(() => {
+    if (clientDisconnected) return;
+    try { res.write(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`); } catch { /* client gone */ }
+  }, 15000);
 
   await calibrationService.runCalibration(req.workspaceId, periodStart, periodEnd, triggeredBy, (event) => {
     if (clientDisconnected) return;
@@ -872,6 +877,7 @@ router.post('/calibration', requireAdmin, asyncHandler(async (req, res) => {
     } catch { /* client gone */ }
   });
 
+  clearInterval(heartbeat);
   if (!clientDisconnected) {
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
     res.end();
