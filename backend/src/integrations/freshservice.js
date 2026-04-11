@@ -231,18 +231,28 @@ class FreshServiceClient {
 
   /**
    * Fetch a single ticket, returning null if deleted (404) instead of throwing.
+   * Retries on 429 (rate limit) with exponential backoff.
    * @param {number} ticketId - FreshService ticket ID
    * @returns {Promise<Object|null>} Ticket object or null if deleted/not found
    */
   async fetchTicketSafe(ticketId) {
-    try {
-      const response = await this.client.get(`/tickets/${ticketId}`);
-      return response.data.ticket;
-    } catch (error) {
-      if (error.response?.status === 404) {
-        return null;
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await this.client.get(`/tickets/${ticketId}`);
+        return response.data.ticket;
+      } catch (error) {
+        if (error.response?.status === 404) {
+          return null;
+        }
+        if (error.response?.status === 429 && attempt < maxRetries) {
+          const delayMs = 5000 * Math.pow(2, attempt - 1);
+          logger.warn(`Rate limit hit on /tickets/${ticketId}, retrying in ${delayMs / 1000}s (${attempt}/${maxRetries})`);
+          await this._sleep(delayMs);
+          continue;
+        }
+        throw error;
       }
-      throw error;
     }
   }
 

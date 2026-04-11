@@ -718,9 +718,9 @@ class SyncService {
         logger.warn('Assignment polling failed (non-fatal)', { workspaceId, error: err.message });
       });
 
-      // Check for deleted tickets in FreshService (fire-and-forget)
-      this._checkDeletedTickets(workspaceId).catch((err) => {
-        logger.warn('Deleted ticket check failed (non-fatal)', { workspaceId, error: err.message });
+      // Reconcile ticket statuses: detect deleted/spam tickets not returned by list API (fire-and-forget)
+      this._reconcileTicketStatuses(workspaceId).catch((err) => {
+        logger.warn('Ticket status reconciliation failed (non-fatal)', { workspaceId, error: err.message });
       });
 
       return summary;
@@ -1345,49 +1345,69 @@ class SyncService {
   }
 
   /**
-   * Post-sync check: verify that tickets with pending pipeline runs
-   * still exist in FreshService. Marks tickets as "Deleted" if the FS API
-   * returns 404 (hard delete) OR the ticket has `deleted: true` (soft delete / trash).
-   * Only checks non-terminal tickets to minimize API calls.
+   * Post-sync reconciliation: verify non-terminal tickets still exist and are
+   * active in FreshService. The list API silently excludes deleted and spam
+   * tickets, so tickets trashed/spammed after initial sync become stale.
+   *
+   * Checks a batch of 200 tickets per cycle (sorted by updatedAt ASC so the
+   * stalest tickets are verified first) with a 250ms inter-call delay to stay
+   * under the 160 req/min API rate limit. fetchTicketSafe retries on 429.
+   * Tickets confirmed OK get their updatedAt touched so they rotate to the
+   * back of the queue.
    */
-  async _checkDeletedTickets(workspaceId) {
+  async _reconcileTicketStatuses(workspaceId) {
     const { default: prisma } = await import('./prisma.js');
-    const TERMINAL_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', '4', '5'];
+    const TERMINAL_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
+    const BATCH_SIZE = 200;
 
     const ticketsToCheck = await prisma.ticket.findMany({
       where: {
         workspaceId,
         status: { notIn: TERMINAL_STATUSES },
-        pipelineRuns: {
-          some: { decision: 'pending_review', status: 'completed' },
-        },
       },
       select: { id: true, freshserviceTicketId: true, subject: true, status: true },
+      orderBy: { updatedAt: 'asc' },
+      take: BATCH_SIZE,
     });
 
     if (ticketsToCheck.length === 0) return;
 
     let client;
     try {
-      client = await this._initializeClient(workspaceId);
+      client = await this._initializeClient();
     } catch {
       return;
     }
 
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     let deletedCount = 0;
+    let spamCount = 0;
+    let verifiedCount = 0;
     for (const ticket of ticketsToCheck) {
       try {
         const fsTicket = await client.fetchTicketSafe(Number(ticket.freshserviceTicketId));
+        await sleep(250);
         const isGone = fsTicket === null;
         const isSoftDeleted = fsTicket?.deleted === true;
+        const isSpam = fsTicket?.spam === true;
 
-        if (isGone || isSoftDeleted) {
-          const reason = isGone
-            ? 'Ticket no longer exists in FreshService (hard deleted / 404)'
-            : 'Ticket was trashed/soft-deleted in FreshService (deleted=true)';
+        if (isGone || isSoftDeleted || isSpam) {
+          let newStatus;
+          let reason;
+          if (isGone) {
+            newStatus = 'Deleted';
+            reason = 'Ticket no longer exists in FreshService (hard deleted / 404)';
+          } else if (isSoftDeleted) {
+            newStatus = 'Deleted';
+            reason = 'Ticket was trashed/soft-deleted in FreshService (deleted=true)';
+          } else {
+            newStatus = 'Spam';
+            reason = 'Ticket was marked as spam in FreshService (spam=true)';
+          }
+
           await prisma.ticket.update({
             where: { id: ticket.id },
-            data: { status: 'Deleted', updatedAt: new Date() },
+            data: { status: newStatus, updatedAt: new Date() },
           });
           await ticketActivityRepository.create({
             ticketId: ticket.id,
@@ -1396,10 +1416,12 @@ class SyncService {
             performedAt: new Date(),
             details: {
               oldStatus: ticket.status,
-              newStatus: 'Deleted',
+              newStatus,
               note: reason,
             },
           });
+
+          // Supersede any pending assignment pipeline runs for this ticket
           await prisma.assignmentPipelineRun.updateMany({
             where: {
               ticketId: ticket.id,
@@ -1411,16 +1433,26 @@ class SyncService {
               errorMessage: reason,
             },
           });
-          deletedCount++;
-          logger.info('Marked ticket as deleted', {
+
+          if (isSpam) spamCount++;
+          else deletedCount++;
+
+          logger.info('Reconciliation: marked ticket as ' + newStatus, {
             ticketId: ticket.id,
             fsId: Number(ticket.freshserviceTicketId),
             subject: ticket.subject,
-            reason: isGone ? 'hard_delete_404' : 'soft_delete_flag',
+            reason: isGone ? 'hard_delete_404' : isSoftDeleted ? 'soft_delete_flag' : 'spam_flag',
           });
+        } else {
+          // Ticket still active — touch updatedAt to rotate it to the back of the queue
+          await prisma.ticket.update({
+            where: { id: ticket.id },
+            data: { updatedAt: new Date() },
+          });
+          verifiedCount++;
         }
       } catch (err) {
-        logger.warn('Error checking ticket existence in FreshService', {
+        logger.warn('Reconciliation: error checking ticket in FreshService', {
           ticketId: ticket.id,
           fsId: Number(ticket.freshserviceTicketId),
           error: err.message,
@@ -1428,8 +1460,14 @@ class SyncService {
       }
     }
 
-    if (deletedCount > 0) {
-      logger.info(`Deleted ticket check: marked ${deletedCount} ticket(s) as Deleted`, { workspaceId });
+    if (deletedCount > 0 || spamCount > 0 || verifiedCount > 0) {
+      logger.info('Ticket reconciliation complete', {
+        workspaceId,
+        checked: ticketsToCheck.length,
+        deleted: deletedCount,
+        spam: spamCount,
+        verified: verifiedCount,
+      });
     }
   }
 }

@@ -145,6 +145,113 @@ function ManualTriggerPanel({ isAdmin = false }) {
   );
 }
 
+// These three components are defined at module level (outside QueueTab) so their
+// identity stays stable across QueueTab re-renders. Defining them inside QueueTab
+// would create a new function reference on every render, causing React to unmount +
+// remount the component (and lose input focus) each time state changes.
+
+function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTechSelect, approving, onCancel, onSubmit, techPhotos }) {
+  return (
+    <>
+      <div className="px-3 pt-3 pb-1.5 sm:px-3">
+        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Assign to</p>
+        <div className="space-y-1 max-h-52 overflow-y-auto">
+          {recs.map((r, i) => {
+            const isActive = selectedTechId === r.techId;
+            const tech = techPhotos[r.techId];
+            const initials = r.techName?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
+            const pct = typeof r.score === 'number' ? Math.round(r.score * 100) : null;
+            return (
+              <button
+                key={r.techId}
+                type="button"
+                onClick={() => onTechSelect(r.techId)}
+                className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 sm:py-1.5 text-left transition-all touch-manipulation ${isActive ? 'bg-blue-50 ring-1 ring-blue-300' : 'hover:bg-slate-50 active:bg-slate-100'}`}
+              >
+                {tech?.photoUrl ? (
+                  <img src={tech.photoUrl} alt="" className={`w-8 h-8 sm:w-6 sm:h-6 rounded-full object-cover flex-shrink-0 ${isActive ? 'ring-2 ring-blue-400' : ''}`} />
+                ) : (
+                  <span className={`w-8 h-8 sm:w-6 sm:h-6 rounded-full text-[10px] sm:text-[9px] font-bold flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-400' : 'bg-slate-100 text-slate-500'}`}>{initials}</span>
+                )}
+                <span className={`text-sm sm:text-xs font-medium truncate flex-1 ${isActive ? 'text-blue-900' : 'text-slate-800'}`}>{r.techName}</span>
+                {pct !== null && <span className="text-xs sm:text-[10px] tabular-nums text-slate-400">{pct}%</span>}
+                {i === 0 && <span className="text-[9px] sm:text-[8px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 px-1.5 sm:px-1 rounded flex-shrink-0">AI</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="px-3 pb-2">
+        <input
+          type="text"
+          value={note}
+          onChange={(e) => onNoteChange(e.target.value)}
+          placeholder="Note (optional)"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs focus:ring-2 focus:ring-blue-200 focus:border-blue-300 bg-slate-50"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
+      <div className="border-t border-slate-100 px-3 py-2.5 sm:py-2 flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onCancel(); }}
+          className="px-3 py-2 sm:py-1.5 text-sm sm:text-[11px] font-medium text-slate-500 hover:text-slate-700 rounded-md hover:bg-slate-50 touch-manipulation"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={(e) => onSubmit(e, run)}
+          disabled={approving || !selectedTechId}
+          className="px-4 py-2 sm:px-3 sm:py-1.5 bg-green-600 text-white rounded-lg sm:rounded-md text-sm sm:text-[11px] font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-1.5 sm:gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+        >
+          {approving ? <Loader2 className="w-4 h-4 sm:w-3 sm:h-3 animate-spin" /> : <Check className="w-4 h-4 sm:w-3 sm:h-3" />}
+          Approve
+        </button>
+      </div>
+    </>
+  );
+}
+
+function QuickApprovePopover({ run, align = 'right', quickApproveId, popoverRef, ...innerProps }) {
+  const recs = run.recommendation?.recommendations || [];
+  if (quickApproveId !== run.id || !recs.length) return null;
+  return (
+    <div
+      ref={popoverRef}
+      onClick={(e) => e.stopPropagation()}
+      className={`hidden md:block absolute z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
+      style={{ top: '100%' }}
+    >
+      <QuickApproveInner run={run} recs={recs} {...innerProps} />
+    </div>
+  );
+}
+
+function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClose, sheetRef, ...innerProps }) {
+  if (!quickApproveId) return null;
+  const run = activeItems.find((r) => r.id === quickApproveId);
+  if (!run) return null;
+  const recs = run.recommendation?.recommendations || [];
+  if (!recs.length) return null;
+  return (
+    <div className="md:hidden fixed inset-0 z-[100]" onClick={() => { guardRef.current = Date.now(); onClose(); }}>
+      <div className="absolute inset-0 bg-black/30" />
+      <div
+        ref={sheetRef}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl pb-safe max-h-[70vh] overflow-y-auto"
+      >
+        <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-slate-300" /></div>
+        <p className="px-4 pt-1 pb-0 text-xs font-medium text-slate-500 truncate">
+          #{run.ticket?.freshserviceTicketId} — {run.ticket?.subject}
+        </p>
+        <QuickApproveInner run={run} recs={recs} {...innerProps} />
+      </div>
+    </div>
+  );
+}
+
 function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const navigate = useNavigate();
   const [queue, setQueue] = useState({ items: [], total: 0 });
@@ -169,6 +276,20 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [techPhotos, setTechPhotos] = useState({});
   const [avatarView, setAvatarView] = useState(false);
+  const [removingIds, setRemovingIds] = useState(new Set());
+  const [newIds, setNewIds] = useState(new Set());
+  const seenIdsRef = useRef(null);
+
+  const animateOut = useCallback((runId) => {
+    setRemovingIds(prev => new Set([...prev, runId]));
+    setTimeout(() => {
+      setQueue(prev => ({
+        items: prev.items.filter(r => r.id !== runId),
+        total: Math.max(0, prev.total - 1),
+      }));
+      setRemovingIds(prev => { const s = new Set(prev); s.delete(runId); return s; });
+    }, 240);
+  }, []);
 
   useEffect(() => {
     assignmentAPI.getCompetencyTechnicians().then(res => {
@@ -188,12 +309,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   };
 
   const hasLoadedOnce = useRef(false);
-  const fetchQueue = useCallback(async () => {
+  const fetchQueue = useCallback(async ({ silent = false } = {}) => {
     try {
-      if (hasLoadedOnce.current) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
+      if (!silent) {
+        if (hasLoadedOnce.current) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
       }
       const since = getSince(timeRange);
       const [queueRes, assignedRes, dismissedRes, rejectedRes, queuedRes, statusRes] = await Promise.all([
@@ -212,18 +335,50 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       if (statusRes?.data) setQueueStatus(statusRes.data);
       hasLoadedOnce.current = true;
     } catch {
-      setQueue({ items: [], total: 0 });
-      setAssignedRuns({ items: [], total: 0 });
-      setDismissedRuns({ items: [], total: 0 });
-      setRejectedRuns({ items: [], total: 0 });
-      setQueuedRuns([]);
+      if (!silent) {
+        setQueue({ items: [], total: 0 });
+        setAssignedRuns({ items: [], total: 0 });
+        setDismissedRuns({ items: [], total: 0 });
+        setRejectedRuns({ items: [], total: 0 });
+        setQueuedRuns([]);
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (!silent) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [timeRange]);
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
+
+  // Detect new items arriving via silent polls
+  useEffect(() => {
+    const currentIds = new Set(queue.items.map(r => r.id));
+    if (seenIdsRef.current === null) {
+      // First load — just record what's here, don't highlight anything
+      seenIdsRef.current = currentIds;
+      return;
+    }
+    const added = queue.items.filter(r => !seenIdsRef.current.has(r.id)).map(r => r.id);
+    seenIdsRef.current = currentIds;
+    if (added.length === 0) return;
+    setNewIds(prev => new Set([...prev, ...added]));
+    const timer = setTimeout(() => {
+      setNewIds(prev => {
+        const next = new Set(prev);
+        added.forEach(id => next.delete(id));
+        return next;
+      });
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [queue.items]);
+
+  // Auto-poll every 30 seconds (matches backend sync interval)
+  useEffect(() => {
+    const id = setInterval(() => fetchQueue({ silent: true }), 30_000);
+    return () => clearInterval(id);
+  }, [fetchQueue]);
 
   useEffect(() => {
     if (deepRunId) {
@@ -263,13 +418,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   const handleDismiss = async (e, runId) => {
     e.stopPropagation();
+    animateOut(runId);
     try {
       await assignmentAPI.dismissRun(runId);
       setActionMsg('Dismissed');
-      await fetchQueue();
+      fetchQueue({ silent: true });
       setTimeout(() => setActionMsg(null), 2000);
     } catch (err) {
       setActionMsg(`Failed: ${err.message}`);
+      fetchQueue();
       setTimeout(() => setActionMsg(null), 3000);
     }
   };
@@ -282,13 +439,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const handleDeleteConfirm = async (e, runId) => {
     e.stopPropagation();
     setConfirmDeleteId(null);
+    animateOut(runId);
     try {
       await assignmentAPI.deleteRun(runId);
       setActionMsg('Deleted');
-      await fetchQueue();
+      fetchQueue({ silent: true });
       setTimeout(() => setActionMsg(null), 2000);
     } catch (err) {
       setActionMsg(`Failed: ${err.message}`);
+      fetchQueue();
       setTimeout(() => setActionMsg(null), 3000);
     }
   };
@@ -344,6 +503,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     if (!quickApproveTechId) return;
     const recs = run.recommendation?.recommendations || [];
     const isTopPick = recs[0]?.techId === quickApproveTechId;
+    animateOut(run.id);
+    quickApproveGuardRef.current = Date.now();
+    setQuickApproveId(null);
     try {
       setQuickApproving(true);
       await assignmentAPI.decide(run.id, {
@@ -352,13 +514,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         decisionNote: quickApproveNote || undefined,
         overrideReason: !isTopPick ? (quickApproveNote || 'Quick approve override') : undefined,
       });
-      quickApproveGuardRef.current = Date.now();
-      setQuickApproveId(null);
       setActionMsg('Approved');
-      await fetchQueue();
+      fetchQueue({ silent: true });
       setTimeout(() => setActionMsg(null), 2000);
     } catch (err) {
       setActionMsg(`Failed: ${err.message}`);
+      fetchQueue();
       setTimeout(() => setActionMsg(null), 3000);
     } finally {
       setQuickApproving(false);
@@ -430,7 +591,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   };
 
   const isTicketOpen = (run) => ['Open', 'open', '2', 'Pending', 'pending', '3'].includes(String(run.ticket?.status || ''));
-  const isTicketDeleted = (run) => String(run.ticket?.status || '').toLowerCase() === 'deleted';
+  const isTicketDeleted = (run) => ['deleted', 'spam'].includes(String(run.ticket?.status || '').toLowerCase());
   const isTicketUnassigned = (run) => !run.ticket?.assignedTechId;
   const getTicketFlag = (run) => {
     if (!run.ticket) return null;
@@ -555,105 +716,16 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     );
   };
 
-  const QuickApproveInner = ({ run, recs }) => (
-    <>
-      <div className="px-3 pt-3 pb-1.5 sm:px-3">
-        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Assign to</p>
-        <div className="space-y-1 max-h-52 overflow-y-auto">
-          {recs.map((r, i) => {
-            const isActive = quickApproveTechId === r.techId;
-            const tech = techPhotos[r.techId];
-            const initials = r.techName?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
-            const pct = typeof r.score === 'number' ? Math.round(r.score * 100) : null;
-            return (
-              <button
-                key={r.techId}
-                type="button"
-                onClick={() => setQuickApproveTechId(r.techId)}
-                className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 sm:py-1.5 text-left transition-all touch-manipulation ${isActive ? 'bg-blue-50 ring-1 ring-blue-300' : 'hover:bg-slate-50 active:bg-slate-100'}`}
-              >
-                {tech?.photoUrl ? (
-                  <img src={tech.photoUrl} alt="" className={`w-8 h-8 sm:w-6 sm:h-6 rounded-full object-cover flex-shrink-0 ${isActive ? 'ring-2 ring-blue-400' : ''}`} />
-                ) : (
-                  <span className={`w-8 h-8 sm:w-6 sm:h-6 rounded-full text-[10px] sm:text-[9px] font-bold flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-400' : 'bg-slate-100 text-slate-500'}`}>{initials}</span>
-                )}
-                <span className={`text-sm sm:text-xs font-medium truncate flex-1 ${isActive ? 'text-blue-900' : 'text-slate-800'}`}>{r.techName}</span>
-                {pct !== null && <span className="text-xs sm:text-[10px] tabular-nums text-slate-400">{pct}%</span>}
-                {i === 0 && <span className="text-[9px] sm:text-[8px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 px-1.5 sm:px-1 rounded flex-shrink-0">AI</span>}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="px-3 pb-2">
-        <input
-          type="text"
-          value={quickApproveNote}
-          onChange={(e) => setQuickApproveNote(e.target.value)}
-          placeholder="Note (optional)"
-          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs focus:ring-2 focus:ring-blue-200 focus:border-blue-300 bg-slate-50"
-          onClick={(e) => e.stopPropagation()}
-        />
-      </div>
-      <div className="border-t border-slate-100 px-3 py-2.5 sm:py-2 flex items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); setQuickApproveId(null); }}
-          className="px-3 py-2 sm:py-1.5 text-sm sm:text-[11px] font-medium text-slate-500 hover:text-slate-700 rounded-md hover:bg-slate-50 touch-manipulation"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={(e) => submitQuickApprove(e, run)}
-          disabled={quickApproving || !quickApproveTechId}
-          className="px-4 py-2 sm:px-3 sm:py-1.5 bg-green-600 text-white rounded-lg sm:rounded-md text-sm sm:text-[11px] font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-1.5 sm:gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
-        >
-          {quickApproving ? <Loader2 className="w-4 h-4 sm:w-3 sm:h-3 animate-spin" /> : <Check className="w-4 h-4 sm:w-3 sm:h-3" />}
-          Approve
-        </button>
-      </div>
-    </>
-  );
-
-  const QuickApprovePopover = ({ run, align = 'right' }) => {
-    if (quickApproveId !== run.id) return null;
-    const recs = run.recommendation?.recommendations || [];
-    if (!recs.length) return null;
-    return (
-      <div
-        ref={quickApproveRef}
-        onClick={(e) => e.stopPropagation()}
-        className={`hidden md:block absolute z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
-        style={{ top: '100%' }}
-      >
-        <QuickApproveInner run={run} recs={recs} />
-      </div>
-    );
-  };
-
-  const MobileQuickApproveSheet = () => {
-    if (!quickApproveId) return null;
-    const run = activeItems.find((r) => r.id === quickApproveId);
-    if (!run) return null;
-    const recs = run.recommendation?.recommendations || [];
-    if (!recs.length) return null;
-    return (
-      <div className="md:hidden fixed inset-0 z-[100]" onClick={() => { quickApproveGuardRef.current = Date.now(); setQuickApproveId(null); }}>
-        <div className="absolute inset-0 bg-black/30" />
-        <div
-          ref={quickApproveMobileRef}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl pb-safe max-h-[70vh] overflow-y-auto"
-        >
-          <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-slate-300" /></div>
-          <p className="px-4 pt-1 pb-0 text-xs font-medium text-slate-500 truncate">
-            #{run.ticket?.freshserviceTicketId} — {run.ticket?.subject}
-          </p>
-          <QuickApproveInner run={run} recs={recs} />
-        </div>
-      </div>
-    );
+  // Shared props passed to the stable module-level QuickApprove components
+  const qaInnerProps = {
+    note: quickApproveNote,
+    onNoteChange: setQuickApproveNote,
+    selectedTechId: quickApproveTechId,
+    onTechSelect: setQuickApproveTechId,
+    approving: quickApproving,
+    onCancel: () => setQuickApproveId(null),
+    onSubmit: submitQuickApprove,
+    techPhotos,
   };
 
   const activeItems = (() => {
@@ -674,19 +746,22 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const priPill = PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500';
     const flagPill = FLAG_PILL[flag];
     const rowBg = flag === 'deleted' ? 'opacity-40 bg-red-50/30' : flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
+    const isNew = newIds.has(run.id);
 
     const renderTechInline = (techId, name, prefix) => {
       if (avatarView) return <TechBadge techId={techId} name={name} />;
       return <span>{prefix ? <span className="text-slate-400">{prefix} </span> : ''}{name?.split(' ')[0]}</span>;
     };
 
-    const cardBorder = flag === 'deleted' ? 'border-red-200' : flag === 'closed' ? 'border-slate-200' : flag === 'assigned' ? 'border-amber-200' : 'border-slate-300';
+    const cardBorder = isNew
+      ? 'border-emerald-300'
+      : flag === 'deleted' ? 'border-red-200' : flag === 'closed' ? 'border-slate-200' : flag === 'assigned' ? 'border-amber-200' : 'border-slate-300';
 
     return (
       <div
         key={run.id}
         onClick={() => handleSelectRun(run.id)}
-        className={`px-3.5 py-3 active:bg-blue-50/60 touch-manipulation cursor-pointer border ${cardBorder} rounded-xl bg-white shadow-sm ${rowBg}`}
+        className={`px-3.5 py-3 active:bg-blue-50/60 touch-manipulation cursor-pointer border ${cardBorder} rounded-xl bg-white shadow-sm ${rowBg} transition-[border-color,box-shadow] duration-[2000ms] ${isNew ? 'shadow-emerald-100 shadow-md' : ''}`}
       >
         {/* Row 1: priority pill + ticket ID + status badges */}
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -775,7 +850,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 )}
               </div>
             )}
-            <QuickApprovePopover run={run} align="left" />
+            <QuickApprovePopover run={run} align="left" quickApproveId={quickApproveId} popoverRef={quickApproveRef} {...qaInnerProps} />
           </div>
         )}
 
@@ -978,7 +1053,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               >
                 {avatarView ? '≡ Text' : '⊙ Avatars'}
               </button>
-              <button type="button" onClick={fetchQueue} disabled={refreshing} className="touch-manipulation p-1 text-blue-600 hover:text-blue-800 disabled:opacity-50">
+              <span className="hidden sm:flex items-center gap-1 text-[10px] font-medium text-emerald-600 select-none" title="Auto-refreshes every 30 seconds">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live
+              </span>
+              <button type="button" onClick={fetchQueue} disabled={refreshing} className="touch-manipulation p-1 text-blue-600 hover:text-blue-800 disabled:opacity-50" title="Refresh now">
                 <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               </button>
             </div>
@@ -1018,6 +1097,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         )}
 
+        {/* New arrivals banner */}
+        {newIds.size > 0 && subView === 'pending' && (
+          <div className="bg-emerald-50 border-b border-emerald-200 px-3 py-1.5 flex items-center gap-2 text-[11px] text-emerald-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+            {newIds.size} new ticket{newIds.size > 1 ? 's' : ''} arrived
+          </div>
+        )}
+
         {/* List content */}
         {activeItems.length === 0 ? (
           <div className="text-center py-10">
@@ -1038,8 +1125,23 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         ) : (
           <>
             {/* Mobile cards */}
-            <div className="md:hidden space-y-3 py-3 px-1">
-              {activeItems.map(renderRunCard)}
+            <div className="md:hidden space-y-0 py-3 px-1">
+              {activeItems.map((run) => (
+                <div
+                  key={run.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateRows: removingIds.has(run.id) ? '0fr' : '1fr',
+                    opacity: removingIds.has(run.id) ? 0 : 1,
+                    transition: 'grid-template-rows 240ms ease, opacity 200ms ease',
+                    marginBottom: removingIds.has(run.id) ? 0 : '0.75rem',
+                  }}
+                >
+                  <div style={{ overflow: 'hidden' }}>
+                    {renderRunCard(run)}
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* Desktop table */}
@@ -1068,7 +1170,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   const topRec = run.recommendation?.recommendations?.[0];
                   const flag = getTicketFlag(run);
                   return (
-                    <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'deleted' ? 'opacity-40 bg-red-50/30' : subView === 'pending' && flag === 'closed' ? 'opacity-50 bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : ''}`} onClick={() => handleSelectRun(run.id)}>
+                    <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'deleted' ? 'opacity-40 bg-red-50/30' : subView === 'pending' && flag === 'closed' ? 'opacity-50 bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : newIds.has(run.id) ? 'bg-emerald-50/60' : ''} transition-[opacity,background-color] duration-[240ms] ${removingIds.has(run.id) ? 'opacity-0' : ''}`} onClick={() => handleSelectRun(run.id)}>
                       <td className="px-3 py-1.5">
                         <span className="font-medium text-slate-800 leading-snug flex items-center gap-1.5">
                           {run.ticket?.subject || 'No subject'}
@@ -1167,7 +1269,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                               </>
                             )}
                           </div>
-                          <QuickApprovePopover run={run} />
+                          <QuickApprovePopover run={run} quickApproveId={quickApproveId} popoverRef={quickApproveRef} {...qaInnerProps} />
                         </td>
                       )}
                     </tr>
@@ -1180,7 +1282,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       </div>
 
       <ManualTriggerPanel isAdmin={isAdmin} />
-      <MobileQuickApproveSheet />
+      <MobileQuickApproveSheet
+        activeItems={activeItems}
+        quickApproveId={quickApproveId}
+        guardRef={quickApproveGuardRef}
+        onClose={() => setQuickApproveId(null)}
+        sheetRef={quickApproveMobileRef}
+        {...qaInnerProps}
+      />
     </div>
   );
 }
