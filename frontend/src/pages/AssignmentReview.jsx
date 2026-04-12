@@ -1174,9 +1174,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 {activeItems.map((run) => {
                   const topRec = run.recommendation?.recommendations?.[0];
                   const flag = getTicketFlag(run);
+                  const rowDim = subView === 'pending' && flag === 'deleted' ? 'opacity-40' : subView === 'pending' && flag === 'closed' ? 'opacity-50' : '';
                   return (
-                    <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'deleted' ? 'opacity-40 bg-red-50/30' : subView === 'pending' && flag === 'closed' ? 'opacity-50 bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : newIds.has(run.id) ? 'bg-emerald-50/60' : ''} transition-[opacity,background-color] duration-[240ms] ${removingIds.has(run.id) ? 'opacity-0' : ''}`} onClick={() => handleSelectRun(run.id)}>
-                      <td className="px-3 py-1.5">
+                    <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'deleted' ? 'bg-red-50/30' : subView === 'pending' && flag === 'closed' ? 'bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : newIds.has(run.id) ? 'bg-emerald-50/60' : ''} transition-[opacity,background-color] duration-[240ms] ${removingIds.has(run.id) ? 'opacity-0' : ''}`} onClick={() => handleSelectRun(run.id)}>
+                      <td className={`px-3 py-1.5 ${rowDim}`}>
                         <span className="font-medium text-slate-800 leading-snug flex items-center gap-1.5">
                           {run.ticket?.subject || 'No subject'}
                           {flag === 'deleted' && <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />}
@@ -1184,18 +1185,18 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                         <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
                         {run.ticket?.ticketCategory && <span className="text-[10px] text-slate-300 ml-1.5">{run.ticket.ticketCategory}</span>}
                       </td>
-                      <td className="px-3 py-1.5">
+                      <td className={`px-3 py-1.5 ${rowDim}`}>
                         <span className="text-slate-700">{run.ticket?.requester?.name || '—'}</span>
                         {run.ticket?.requester?.department && <span className="block text-[10px] text-slate-400">{run.ticket.requester.department}</span>}
                         {run.ticket?.requester?.email && !run.ticket?.requester?.department && <span className="block text-[10px] text-slate-300">{run.ticket.requester.email}</span>}
                       </td>
-                      <td className="px-3 py-1.5">
+                      <td className={`px-3 py-1.5 ${rowDim}`}>
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
                           {PRIORITY_LABELS[run.ticket?.priority] || '—'}
                         </span>
                       </td>
                       {/* Status column */}
-                      <td className={`px-3 py-1.5 ${flag === 'closed' || flag === 'deleted' ? 'opacity-50' : ''}`}>
+                      <td className={`px-3 py-1.5 ${rowDim}`}>
                         <div className="flex flex-col gap-0.5">
                           <span className={`inline-flex self-start rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${getStatusPillStyle(getStatusLabel(run.ticket?.status))}`}>
                             {getStatusLabel(run.ticket?.status)}
@@ -1216,7 +1217,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                         </div>
                       </td>
                       {/* AI Suggestion column */}
-                      <td className="px-3 py-1.5">
+                      <td className={`px-3 py-1.5 ${rowDim}`}>
                         {run.recommendation?.recommendations?.length > 0 ? (
                           avatarView ? (
                             <AiPicks recommendations={run.recommendation.recommendations} />
@@ -1231,13 +1232,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                         ) : <span className="text-slate-300">—</span>}
                       </td>
                       {subView !== 'pending' && (
-                        <td className="px-3 py-1.5">
+                        <td className={`px-3 py-1.5 ${rowDim}`}>
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
                             {DECISION_LABELS[run.decision] || run.decision}
                           </span>
                         </td>
                       )}
-                      <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</td>
+                      <td className={`px-3 py-1.5 text-slate-400 whitespace-nowrap ${rowDim}`}>{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</td>
                       {showActions && (
                         <td className="px-3 py-1.5 relative">
                           <div className={`flex items-center justify-end gap-0.5 transition-opacity ${quickApproveId === run.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
