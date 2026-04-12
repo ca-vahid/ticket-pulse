@@ -624,7 +624,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', rejected: 'Rejected', pending_review: 'Pending' };
   const DECISION_PILL = { approved: 'bg-green-100 text-green-800', modified: 'bg-blue-100 text-blue-800', auto_assigned: 'bg-purple-100 text-purple-800', noise_dismissed: 'bg-slate-100 text-slate-500', rejected: 'bg-red-100 text-red-800' };
-  const FLAG_PILL = { open: { label: 'Unassigned', style: 'bg-green-100 text-green-700' }, assigned: { label: 'Assigned', style: 'bg-amber-100 text-amber-700' }, closed: { label: 'Closed', style: 'bg-slate-100 text-slate-500' }, deleted: { label: 'Deleted', style: 'bg-red-100 text-red-600' } };
+  const _FLAG_PILL = { open: { label: 'Unassigned', style: 'bg-green-100 text-green-700' }, assigned: { label: 'Assigned', style: 'bg-amber-100 text-amber-700' }, closed: { label: 'Closed', style: 'bg-slate-100 text-slate-500' }, deleted: { label: 'Deleted', style: 'bg-red-100 text-red-600' } };
+  const STATUS_PILL_STYLE = { Open: 'bg-green-100 text-green-700', Pending: 'bg-yellow-100 text-yellow-700', Closed: 'bg-slate-100 text-slate-500', Resolved: 'bg-slate-100 text-slate-500', Deleted: 'bg-red-100 text-red-600', Spam: 'bg-red-100 text-red-600', 'Waiting on Customer': 'bg-blue-100 text-blue-600', 'Waiting on Third Party': 'bg-blue-100 text-blue-600' };
+  const getStatusPillStyle = (status) => STATUS_PILL_STYLE[status] || 'bg-slate-100 text-slate-500';
+  const getStatusLabel = (status) => {
+    if (!status) return 'Unknown';
+    if (status === '2' || status === 'open') return 'Open';
+    if (status === '3' || status === 'pending') return 'Pending';
+    if (status === '4' || status === 'resolved') return 'Resolved';
+    if (status === '5' || status === 'closed') return 'Closed';
+    return status;
+  };
 
   const pendingStats = {
     total: queue.items.length,
@@ -646,7 +656,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     );
   };
 
-  const TechBadge = ({ techId, name }) => (
+  const _TechBadge = ({ techId, name }) => (
     <span className="inline-flex items-center gap-1">
       <TechAvatar techId={techId} name={name} />
       <span className="truncate max-w-[70px] text-[11px]">{name?.split(' ')[0]}</span>
@@ -744,18 +754,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const recs = run.recommendation?.recommendations || [];
     const priLabel = PRIORITY_LABELS[run.ticket?.priority];
     const priPill = PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500';
-    const flagPill = FLAG_PILL[flag];
     const rowBg = flag === 'deleted' ? 'opacity-40 bg-red-50/30' : flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
     const isNew = newIds.has(run.id);
-
-    const renderTechInline = (techId, name, prefix) => {
-      if (avatarView) return <TechBadge techId={techId} name={name} />;
-      return <span>{prefix ? <span className="text-slate-400">{prefix} </span> : ''}{name?.split(' ')[0]}</span>;
-    };
-
     const cardBorder = isNew
       ? 'border-emerald-300'
       : flag === 'deleted' ? 'border-red-200' : flag === 'closed' ? 'border-slate-200' : flag === 'assigned' ? 'border-amber-200' : 'border-slate-300';
+    const statusLabel = getStatusLabel(run.ticket?.status);
+    const assignee = subView !== 'pending' ? (run.assignedTech || run.ticket?.assignedTech) : run.ticket?.assignedTech;
 
     return (
       <div
@@ -763,19 +768,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         onClick={() => handleSelectRun(run.id)}
         className={`px-3.5 py-3 active:bg-blue-50/60 touch-manipulation cursor-pointer border ${cardBorder} rounded-xl bg-white shadow-sm ${rowBg} transition-[border-color,box-shadow] duration-[2000ms] ${isNew ? 'shadow-emerald-100 shadow-md' : ''}`}
       >
-        {/* Row 1: priority pill + ticket ID + status badges */}
+        {/* Row 1: priority + ticket ID + category + decision (non-pending) + chevron */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${priPill}`}>{priLabel || '—'}</span>
           <span className="text-slate-400 font-mono text-[11px]">#{run.ticket?.freshserviceTicketId}</span>
           {run.ticket?.ticketCategory && <span className="text-[10px] text-slate-400 bg-slate-100 rounded px-1 py-0.5">{run.ticket.ticketCategory}</span>}
           <span className="ml-auto" />
-          {flag === 'deleted' && <Trash2 className="w-3.5 h-3.5 text-red-400 shrink-0" />}
-          {flag !== 'open' && flag !== 'deleted' && flagPill && subView === 'pending' && (
-            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${flagPill.style}`}>{flagPill.label}</span>
-          )}
-          {subView === 'pending' && flag === 'deleted' && (
-            <span className="text-red-500 bg-red-50 rounded px-1.5 py-0.5 text-[10px] font-medium">Deleted</span>
-          )}
           {subView !== 'pending' && run.decision && (
             <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
               {DECISION_LABELS[run.decision] || run.decision}
@@ -784,12 +782,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
         </div>
 
-        {/* Row 2: full subject — no truncation, wraps naturally */}
+        {/* Row 2: subject */}
         <p className="text-sm font-semibold text-slate-800 leading-snug mt-1.5 break-words">
           {run.ticket?.subject || 'No subject'}
         </p>
 
-        {/* Row 3: requester + tech assignment + date */}
+        {/* Row 3: requester + date */}
         <div className="flex items-center gap-1.5 mt-1.5 text-[11px] leading-none flex-wrap">
           <span className="text-slate-500 font-medium">{run.ticket?.requester?.name || '—'}</span>
           {run.ticket?.requester?.department && (
@@ -797,65 +795,71 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           )}
           <span className="text-slate-300">·</span>
           <span className="text-slate-400">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</span>
+        </div>
 
-          {subView === 'pending' && flag !== 'deleted' && (flag === 'assigned' || flag === 'closed') && run.ticket?.assignedTech && (
-            <>
-              <span className="text-slate-300">·</span>
-              <span className="text-amber-700 font-medium inline-flex items-center gap-0.5">
-                {renderTechInline(run.ticket.assignedTech.id, run.ticket.assignedTech.name, '→')}
-              </span>
-            </>
-          )}
-          {subView !== 'pending' && run.assignedTech?.name && (
-            <>
-              <span className="text-slate-300">·</span>
-              <span className="text-blue-700 font-medium inline-flex items-center gap-0.5">
-                {renderTechInline(run.assignedTech.id, run.assignedTech.name)}
-              </span>
-            </>
+        {/* Row 4: Status + AI Suggestion side by side */}
+        <div className="flex items-start gap-3 mt-2">
+          {/* Status section */}
+          <div className={`flex items-center gap-1.5 ${flag === 'closed' || flag === 'deleted' ? 'opacity-50' : ''}`}>
+            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${getStatusPillStyle(statusLabel)}`}>{statusLabel}</span>
+            {assignee ? (
+              avatarView ? (
+                <span className="inline-flex items-center gap-1">
+                  <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
+                  <span className="text-[10px] text-slate-600">{assignee.name?.split(' ')[0]}</span>
+                </span>
+              ) : (
+                <span className="text-[10px] text-amber-700 font-medium">{assignee.name?.split(' ')[0]}</span>
+              )
+            ) : run.ticket?.assignedTechId ? (
+              <span className="text-[10px] text-slate-400 italic">External</span>
+            ) : (
+              <span className="text-[10px] text-slate-300">Unassigned</span>
+            )}
+          </div>
+
+          {/* AI Suggestion section */}
+          {recs.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              {avatarView ? (
+                <AiPicks recommendations={recs} />
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[10px] text-blue-700 font-medium">
+                  <span className="text-[9px] font-bold uppercase tracking-wider bg-blue-50 text-blue-600 px-1 rounded">AI</span>
+                  {topRec.techName?.split(' ')[0]}
+                  {recs.length > 1 && <span className="text-blue-400">+{recs.length - 1}</span>}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
-        {/* Row 3: AI suggestion + quick actions (only pending) */}
-        {subView === 'pending' && recs.length > 0 && flag !== 'deleted' && (
-          <div className="flex items-center gap-1.5 mt-1.5 relative">
-            {avatarView ? (
-              <AiPicks recommendations={recs} />
-            ) : (
-              <span className="inline-flex items-center gap-1 text-[10px] text-blue-700 font-medium">
-                <span className="text-[9px] font-bold uppercase tracking-wider bg-blue-50 text-blue-600 px-1 rounded">AI</span>
-                {topRec.techName}
-                {recs.length > 1 && <span className="text-blue-400">+{recs.length - 1}</span>}
-              </span>
-            )}
-
-            {showActions && (
-              <div className="ml-auto flex items-center gap-0">
-                <button onClick={(e) => openQuickApprove(e, run)} className={`p-1.5 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 active:bg-green-50'}`} aria-label="Quick approve">
-                  <Check className="w-4 h-4" />
+        {/* Row 5: Quick actions (pending only) */}
+        {showActions && recs.length > 0 && flag !== 'deleted' && (
+          <div className="flex items-center justify-end gap-0 mt-1.5 relative">
+            <button onClick={(e) => openQuickApprove(e, run)} className={`p-1.5 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 active:bg-green-50'}`} aria-label="Quick approve">
+              <Check className="w-4 h-4" />
+            </button>
+            {isAdmin && (
+              <>
+                <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
+                  <XCircle className="w-4 h-4" />
                 </button>
-                {isAdmin && (
-                  <>
-                    <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
-                      <XCircle className="w-4 h-4" />
-                    </button>
-                    {confirmDeleteId === run.id ? (
-                      <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold touch-manipulation min-h-[32px]">Delete?</button>
-                    ) : (
-                      <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </>
+                {confirmDeleteId === run.id ? (
+                  <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold touch-manipulation min-h-[32px]">Delete?</button>
+                ) : (
+                  <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 )}
-              </div>
+              </>
             )}
             <QuickApprovePopover run={run} align="left" quickApproveId={quickApproveId} popoverRef={quickApproveRef} {...qaInnerProps} />
           </div>
         )}
 
-        {/* Pending with no recs (noise/deleted) — still show actions */}
-        {subView === 'pending' && (recs.length === 0 || flag === 'deleted') && showActions && isAdmin && (
+        {/* Pending with no recs or deleted — still show admin actions */}
+        {showActions && (recs.length === 0 || flag === 'deleted') && isAdmin && (
           <div className="flex items-center justify-end gap-0 mt-1.5 relative">
             <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
               <XCircle className="w-4 h-4" />
@@ -1157,7 +1161,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   <th className="text-left px-3 py-2 font-medium text-slate-500 cursor-pointer select-none w-12" onClick={() => toggleSort('priority')}>
                     <span className="flex items-center gap-1">Pri <SortIcon field="priority" /></span>
                   </th>
-                  <th className="text-left px-3 py-2 font-medium text-slate-500">{subView === 'pending' ? 'Status / Suggested' : 'Assigned To'}</th>
+                  <th className="text-left px-3 py-2 font-medium text-slate-500">Status</th>
+                  <th className="text-left px-3 py-2 font-medium text-slate-500">AI Suggestion</th>
                   {subView !== 'pending' && <th className="text-left px-3 py-2 font-medium text-slate-500">Decision</th>}
                   <th className="text-left px-3 py-2 font-medium text-slate-500 cursor-pointer select-none" onClick={() => toggleSort('createdAt')}>
                     <span className="flex items-center gap-1">{subView === 'pending' ? 'Analyzed' : 'Decided'} <SortIcon field="createdAt" /></span>
@@ -1189,61 +1194,42 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                           {PRIORITY_LABELS[run.ticket?.priority] || '—'}
                         </span>
                       </td>
-                      {subView === 'pending' ? (
-                        <td className="px-3 py-1.5">
-                          {avatarView ? (
-                            /* Avatar mode: 3 fixed pixel columns → perfect vertical alignment */
-                            <div style={{ display: 'grid', gridTemplateColumns: '20px 24px 1fr', gap: '4px', alignItems: 'center' }}>
-                              {/* Col 1: closed badge (✕) or empty */}
-                              <div className="flex justify-center">
-                                {flag === 'closed' ? <span className="text-[8px] text-slate-400 leading-none">✕</span> : null}
-                              </div>
-                              {/* Col 2: Live assignee avatar (ring) or empty */}
-                              <div className="flex justify-center">
-                                {(flag === 'assigned' || flag === 'closed') && run.ticket?.assignedTech ? (
-                                  <span title={`Assigned to: ${run.ticket.assignedTech.name}`}>
-                                    <TechAvatar techId={run.ticket.assignedTech.id} name={run.ticket.assignedTech.name} size="xs" ring="ring-2 ring-amber-400" />
-                                  </span>
-                                ) : null}
-                              </div>
-                              {/* Col 3: AI picks — always at the same x position */}
-                              <div className="flex items-center">
-                                {run.recommendation?.recommendations?.length > 0
-                                  ? <AiPicks recommendations={run.recommendation.recommendations} />
-                                  : <span className="text-slate-300">—</span>}
-                              </div>
-                            </div>
+                      {/* Status column */}
+                      <td className={`px-3 py-1.5 ${flag === 'closed' || flag === 'deleted' ? 'opacity-50' : ''}`}>
+                        <div className="flex flex-col gap-0.5">
+                          <span className={`inline-flex self-start rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${getStatusPillStyle(getStatusLabel(run.ticket?.status))}`}>
+                            {getStatusLabel(run.ticket?.status)}
+                          </span>
+                          {(() => {
+                            const assignee = subView !== 'pending' ? (run.assignedTech || run.ticket?.assignedTech) : run.ticket?.assignedTech;
+                            if (assignee) return avatarView ? (
+                              <span className="inline-flex items-center gap-1 mt-0.5" title={assignee.name}>
+                                <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
+                                <span className="text-[10px] text-slate-600 truncate max-w-[80px]">{assignee.name?.split(' ')[0]}</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-amber-700 font-medium truncate max-w-[100px]">{assignee.name}</span>
+                            );
+                            if (run.ticket?.assignedTechId) return <span className="text-[10px] text-slate-400 italic">External</span>;
+                            return <span className="text-[10px] text-slate-300">Unassigned</span>;
+                          })()}
+                        </div>
+                      </td>
+                      {/* AI Suggestion column */}
+                      <td className="px-3 py-1.5">
+                        {run.recommendation?.recommendations?.length > 0 ? (
+                          avatarView ? (
+                            <AiPicks recommendations={run.recommendation.recommendations} />
                           ) : (
-                            /* Text mode */
                             <div className="text-[11px] leading-snug">
-                              {(flag === 'assigned' || flag === 'closed') && run.ticket?.assignedTech && (
-                                <div className="text-amber-700 font-medium">
-                                  {flag === 'closed' && <span className="text-slate-400 mr-1">{run.ticket.status}</span>}
-                                  {run.ticket.assignedTech.name}
-                                </div>
+                              <span className="text-blue-700 font-medium">{topRec?.techName}</span>
+                              {run.recommendation.recommendations.length > 1 && (
+                                <span className="text-blue-400 ml-1 text-[10px]">+{run.recommendation.recommendations.length - 1}</span>
                               )}
-                              {topRec?.techName ? (
-                                <div className="text-blue-700">
-                                  {topRec.techName}
-                                  {run.recommendation?.recommendations?.length > 1 && (
-                                    <span className="text-blue-400 ml-1 text-[10px]">+{run.recommendation.recommendations.length - 1}</span>
-                                  )}
-                                </div>
-                              ) : (flag !== 'assigned' && flag !== 'closed') ? <span className="text-slate-300">—</span> : null}
                             </div>
-                          )}
-                        </td>
-                      ) : (
-                        <td className="px-3 py-1.5">
-                          <div className="flex items-center gap-1 min-h-[20px]">
-                            {(run.assignedTech?.name || topRec?.techName) ? (
-                              avatarView
-                                ? <span className="font-medium text-blue-700 inline-flex items-center gap-1 text-[11px]"><TechBadge techId={run.assignedTech?.id || topRec?.techId} name={run.assignedTech?.name || topRec?.techName} /></span>
-                                : <span className="text-[11px] text-blue-700 font-medium">{run.assignedTech?.name || topRec?.techName}</span>
-                            ) : <span className="text-slate-300">—</span>}
-                          </div>
-                        </td>
-                      )}
+                          )
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
                       {subView !== 'pending' && (
                         <td className="px-3 py-1.5">
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
