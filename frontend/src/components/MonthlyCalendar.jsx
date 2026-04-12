@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { filterTickets } from '../utils/ticketFilter';
 import { getHolidayTooltip, getDateStyling } from '../utils/holidays';
@@ -6,6 +7,7 @@ import { getLeaveForDate, getLeaveBadge, getLeaveTooltip } from '../utils/leaveI
 import { formatDateLocal } from '../utils/dateHelpers';
 
 export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthChange, technicians = [], searchTerm = '', selectedCategories = [], onClearSelections: _onClearSelections }) {
+  const navigate = useNavigate();
   const [hoveredDayDate, setHoveredDayDate] = useState(null);
   const [clickedDayDate, setClickedDayDate] = useState(null);
   const [selectedTechnicianIds, setSelectedTechnicianIds] = useState([]);
@@ -893,7 +895,14 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                         return (
                           <div
                             key={tech.technicianId}
-                            className="group rounded-3xl border border-gray-200 bg-white p-5 hover:border-blue-300 hover:shadow-lg transition-all duration-200"
+                            onClick={() => navigate(`/technician/${tech.technicianId}`, {
+                              state: {
+                                selectedDate: new Date(clickedDay.date + 'T12:00:00'),
+                                viewMode: 'daily',
+                                returnViewMode: 'monthly',
+                              },
+                            })}
+                            className="group rounded-3xl border border-gray-200 bg-white p-5 hover:border-blue-300 hover:shadow-lg transition-all duration-200 cursor-pointer"
                           >
                             <div className="flex flex-col items-center text-center gap-3">
                               {info?.photoUrl ? (
