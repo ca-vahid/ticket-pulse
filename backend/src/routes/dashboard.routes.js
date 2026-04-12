@@ -10,6 +10,7 @@ import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianD
 import { readCache } from '../services/dashboardReadCache.js';
 import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTechnicianAvoidanceDetail, computeTechnicianAvoidanceWeeklyDetail, computeTechnicianAvoidanceMonthlyDetail } from '../services/avoidanceAnalysisService.js';
 import vtService from '../services/vacationTrackerService.js';
+import settingsRepository from '../services/settingsRepository.js';
 
 const router = express.Router();
 
@@ -66,15 +67,18 @@ router.get(
       todayEnd = result.end;
     }
 
-    // Fetch active technicians with only relevant tickets (scoped to date range + open + CSAT)
-    const technicians = await technicianRepository.getAllActiveScoped(todayStart, todayEnd, { excludeNoise, workspaceId: req.workspaceId });
+    // Fetch active technicians and service account names in parallel
+    const [technicians, serviceAccountNames] = await Promise.all([
+      technicianRepository.getAllActiveScoped(todayStart, todayEnd, { excludeNoise, workspaceId: req.workspaceId }),
+      settingsRepository.getServiceAccountNames(),
+    ]);
 
     // Compute the date string for leave lookup
     const dashDateStr = dateParam || formatDateInTimezone(null, timezone);
 
     // Run stats calculation (sync), avoidance analysis, and leave info in parallel
     const [dashboardData, avoidanceMap, leaveInfoMap] = await Promise.all([
-      Promise.resolve(calculateDailyDashboard(technicians, todayStart, todayEnd, isViewingToday)),
+      Promise.resolve(calculateDailyDashboard(technicians, todayStart, todayEnd, isViewingToday, serviceAccountNames)),
       computeDashboardAvoidance(technicians, todayStart, todayEnd, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for daily dashboard:', err);
         return {};
@@ -105,6 +109,7 @@ router.get(
       data: {
         technicians: techsWithTransformedTickets,
         statistics: dashboardData.statistics,
+        serviceAccountNames,
         timestamp: new Date().toISOString(),
       },
     });
@@ -251,15 +256,18 @@ router.get(
     const weekStartRange = getTodayRange(timezone, weekStartDate);
     const weekEndRange = getTodayRange(timezone, weekEndDate);
 
-    // Fetch active technicians with only relevant tickets
-    const technicians = await technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end, { excludeNoise, workspaceId: req.workspaceId });
+    // Fetch active technicians and service account names in parallel
+    const [technicians, serviceAccountNames] = await Promise.all([
+      technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end, { excludeNoise, workspaceId: req.workspaceId }),
+      settingsRepository.getServiceAccountNames(),
+    ]);
 
     const weekStartStr = formatDateInTimezone(weekStartDate, timezone);
     const weekEndStr = formatDateInTimezone(weekEndDate, timezone);
 
     // Run stats calculation (sync), avoidance analysis, and leave info in parallel
     const [dashboardData, avoidanceMap, leaveInfoMap] = await Promise.all([
-      Promise.resolve(calculateWeeklyDashboard(technicians, weekStartDate, weekEndDate, timezone)),
+      Promise.resolve(calculateWeeklyDashboard(technicians, weekStartDate, weekEndDate, timezone, serviceAccountNames)),
       computeWeeklyDashboardAvoidance(technicians, weekStartDate, weekEndDate, timezone, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for weekly dashboard:', err);
         return {};
@@ -285,6 +293,7 @@ router.get(
         weekEnd: formatDateInTimezone(weekEndDate, timezone),
         technicians: techsWithTickets,
         statistics: dashboardData.statistics,
+        serviceAccountNames,
         timestamp: new Date().toISOString(),
       },
     });
@@ -312,8 +321,11 @@ router.get(
       });
     }
 
-    // Fetch technician with all tickets
-    const technician = await technicianRepository.getById(techId, { excludeNoise });
+    // Fetch technician and service account names in parallel
+    const [technician, serviceAccountNames] = await Promise.all([
+      technicianRepository.getById(techId, { excludeNoise }),
+      settingsRepository.getServiceAccountNames(),
+    ]);
 
     if (!technician) {
       return res.status(404).json({
@@ -329,7 +341,6 @@ router.get(
     // Get date range for filtering (if viewing historical date)
     let todayStart, todayEnd;
     if (dateParam) {
-      // Use provided date - interpret the date string as being in the target timezone
       const [year, month, day] = dateParam.split('-').map(Number);
       const selectedDate = new Date(year, month - 1, day, 12, 0, 0);
       const result = getTodayRange(timezone, selectedDate);
@@ -347,6 +358,7 @@ router.get(
       todayStart,
       todayEnd,
       isViewingToday,
+      serviceAccountNames,
     );
 
     // Compute avoidance analysis for this technician
@@ -401,8 +413,11 @@ router.get(
 
     logger.debug(`Fetching weekly stats for technician ${techId}, weekStart: ${weekStartParam || 'current week'}`);
 
-    // Fetch technician with all tickets
-    const technician = await technicianRepository.getById(techId, { excludeNoise });
+    // Fetch technician and service account names in parallel
+    const [technician, serviceAccountNames] = await Promise.all([
+      technicianRepository.getById(techId, { excludeNoise }),
+      settingsRepository.getServiceAccountNames(),
+    ]);
 
     if (!technician) {
       return res.status(404).json({
@@ -421,7 +436,6 @@ router.get(
       const [year, month, day] = weekStartParam.split('-').map(Number);
       weekStartDate = new Date(year, month - 1, day, 12, 0, 0);
     } else {
-      // Calculate current week's Monday
       const now = new Date();
       const currentDay = (now.getDay() + 6) % 7;
       weekStartDate = new Date(now);
@@ -441,6 +455,7 @@ router.get(
       weekStartDate,
       weekEndDate,
       timezone,
+      serviceAccountNames,
     );
 
     // Get tickets assigned during the week for display (timezone-aware boundaries)
@@ -544,8 +559,11 @@ router.get(
     }
     const monthEndDate = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0, 12, 0, 0);
 
-    // Fetch technician with all tickets
-    const technician = await technicianRepository.getById(techId, { excludeNoise });
+    // Fetch technician and service account names in parallel
+    const [technician, serviceAccountNames] = await Promise.all([
+      technicianRepository.getById(techId, { excludeNoise }),
+      settingsRepository.getServiceAccountNames(),
+    ]);
     if (!technician) {
       return res.status(404).json({ success: false, message: 'Technician not found' });
     }
@@ -560,6 +578,7 @@ router.get(
       monthStartDate,
       monthEndDate,
       timezone,
+      serviceAccountNames,
     );
 
     // Get tickets assigned during the month for display
@@ -774,8 +793,11 @@ router.get(
     const monthStartRange = getTodayRange(timezone, monthStartDate);
     const monthEndRange = getTodayRange(timezone, monthEndDate);
 
-    // Fetch active technicians with only relevant tickets
-    const technicians = await technicianRepository.getAllActiveScoped(monthStartRange.start, monthEndRange.end, { excludeNoise, workspaceId: req.workspaceId });
+    // Fetch active technicians and service account names in parallel
+    const [technicians, serviceAccountNames] = await Promise.all([
+      technicianRepository.getAllActiveScoped(monthStartRange.start, monthEndRange.end, { excludeNoise, workspaceId: req.workspaceId }),
+      settingsRepository.getServiceAccountNames(),
+    ]);
 
     // Use statsCalculator for consistent calculations
     const monthlyData = calculateMonthlyDashboard(
@@ -783,6 +805,7 @@ router.get(
       monthStartDate,
       monthEndDate,
       timezone,
+      serviceAccountNames,
     );
 
     // Fetch leave info for the month
@@ -835,6 +858,7 @@ router.get(
       data: {
         ...monthlyData,
         technicians: techniciansWithMonthTickets,
+        serviceAccountNames,
         timestamp: new Date().toISOString(),
       },
     });

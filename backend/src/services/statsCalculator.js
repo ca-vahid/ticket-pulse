@@ -17,7 +17,7 @@ import { getLoadLevel } from '../config/constants.js';
  * @param {boolean} isViewingToday - Whether we're viewing current day
  * @returns {Object} Calculated statistics for the technician
  */
-export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, isViewingToday = true) {
+export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, isViewingToday = true, serviceAccountNames = []) {
   const tech = technician;
 
   // Calculate open tickets based on viewing mode
@@ -69,13 +69,24 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     ticket.isSelfPicked || ticket.assignedBy === tech.name,
   ).length;
 
-  // Assigned tickets today (not self-picked and not assigned by themselves)
+  // Helper to check if a ticket was assigned by the app (service account)
+  const isAppAssignment = (ticket) =>
+    serviceAccountNames.length > 0 &&
+    ticket.assignedBy &&
+    serviceAccountNames.some(name => name.toLowerCase() === ticket.assignedBy.toLowerCase());
+
+  // App-assigned tickets today (assigned by Ticket Pulse service account)
+  const appAssignedToday = ticketsToday.filter(ticket =>
+    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
+  ).length;
+
+  // Assigned tickets today (by human coordinators, not self-picked and not app-assigned)
   const assignedTicketsToday = ticketsToday.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== tech.name,
+    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
   );
   const assignedToday = assignedTicketsToday.length;
 
-  // Get list of coordinators who assigned tickets (with counts)
+  // Get list of coordinators who assigned tickets (with counts), excluding service accounts
   const assignerCounts = {};
   assignedTicketsToday.forEach(ticket => {
     if (ticket.assignedBy && ticket.assignedBy !== tech.name) {
@@ -123,6 +134,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     pendingCount,
     totalTicketsToday: ticketsToday.length,
     selfPickedToday,
+    appAssignedToday,
     assignedToday,
     assigners,
     closedToday,
@@ -142,7 +154,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
  * @param {string} timezone - Timezone for date calculations
  * @returns {Object} Weekly statistics for the technician
  */
-export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, timezone) {
+export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, timezone, serviceAccountNames = []) {
   const tech = technician;
 
   // Current open tickets (snapshot, not time-bound)
@@ -172,13 +184,24 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     ticket.isSelfPicked || ticket.assignedBy === tech.name,
   ).length;
 
-  // Assigned tickets created this week
+  // Helper to check if a ticket was assigned by the app (service account)
+  const isAppAssignment = (ticket) =>
+    serviceAccountNames.length > 0 &&
+    ticket.assignedBy &&
+    serviceAccountNames.some(name => name.toLowerCase() === ticket.assignedBy.toLowerCase());
+
+  // App-assigned tickets this week
+  const weeklyAppAssigned = weeklyTickets.filter(ticket =>
+    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
+  ).length;
+
+  // Assigned tickets created this week (coordinator-only, excluding app)
   const assignedTicketsThisWeek = weeklyTickets.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== tech.name,
+    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
   );
   const weeklyAssigned = assignedTicketsThisWeek.length;
 
-  // Get list of coordinators who assigned tickets this week (with counts)
+  // Get list of coordinators who assigned tickets this week (with counts), excluding service accounts
   const assignerCounts = {};
   assignedTicketsThisWeek.forEach(ticket => {
     if (ticket.assignedBy && ticket.assignedBy !== tech.name) {
@@ -229,12 +252,14 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
       ticket.isSelfPicked || ticket.assignedBy === tech.name,
     ).length;
 
-    const dayAssigned = dayTickets.filter(ticket =>
-      !ticket.isSelfPicked && ticket.assignedBy !== tech.name,
+    const dayAppAssigned = dayTickets.filter(ticket =>
+      !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
     ).length;
 
-    // Count tickets assigned on this day that are now closed
-    // Note: Filter by assignment date + status (not close date) because closedAt may be null
+    const dayAssigned = dayTickets.filter(ticket =>
+      !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
+    ).length;
+
     const dayClosed = dayTickets.filter(ticket =>
       ['Resolved', 'Closed'].includes(ticket.status),
     ).length;
@@ -251,6 +276,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
       date: formatDateInTimezone(date, timezone),
       total: dayTickets.length,
       self: daySelf,
+      appAssigned: dayAppAssigned,
       assigned: dayAssigned,
       closed: dayClosed,
       csatCount: dayCSAT,
@@ -279,6 +305,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     // Weekly totals
     weeklyTotalCreated,
     weeklySelfPicked,
+    weeklyAppAssigned,
     weeklyAssigned,
     weeklyClosed,
     assigners, // Array of { name, count } for coordinators who assigned tickets
@@ -314,7 +341,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
  * @param {string} timezone - Timezone for date calculations
  * @returns {Object} Monthly statistics for the technician
  */
-export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd, timezone) {
+export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd, timezone, serviceAccountNames = []) {
   const tech = technician;
 
   // Current open tickets (snapshot, not time-bound)
@@ -343,8 +370,18 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
     ticket.isSelfPicked || ticket.assignedBy === tech.name,
   ).length;
 
+  // Helper to check if a ticket was assigned by the app (service account)
+  const isAppAssignment = (ticket) =>
+    serviceAccountNames.length > 0 &&
+    ticket.assignedBy &&
+    serviceAccountNames.some(name => name.toLowerCase() === ticket.assignedBy.toLowerCase());
+
+  const monthlyAppAssigned = monthlyTickets.filter(ticket =>
+    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
+  ).length;
+
   const assignedTicketsThisMonth = monthlyTickets.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== tech.name,
+    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
   );
   const monthlyAssigned = assignedTicketsThisMonth.length;
 
@@ -396,8 +433,12 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
       ticket.isSelfPicked || ticket.assignedBy === tech.name,
     ).length;
 
+    const dayAppAssigned = dayTickets.filter(ticket =>
+      !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
+    ).length;
+
     const dayAssigned = dayTickets.filter(ticket =>
-      !ticket.isSelfPicked && ticket.assignedBy !== tech.name,
+      !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
     ).length;
 
     const dayClosed = dayTickets.filter(ticket =>
@@ -408,6 +449,7 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
       date: formatDateInTimezone(date, timezone),
       total: dayTickets.length,
       self: daySelf,
+      appAssigned: dayAppAssigned,
       assigned: dayAssigned,
       closed: dayClosed,
     });
@@ -435,6 +477,7 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
     // Monthly totals
     monthlyTotalCreated,
     monthlySelfPicked,
+    monthlyAppAssigned,
     monthlyAssigned,
     monthlyClosed,
     assigners,
@@ -467,9 +510,9 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
  * @param {boolean} isViewingToday - Whether viewing current day
  * @returns {Object} Dashboard data with technician stats and totals
  */
-export function calculateDailyDashboard(technicians, dateStart, dateEnd, isViewingToday = true) {
+export function calculateDailyDashboard(technicians, dateStart, dateEnd, isViewingToday = true, serviceAccountNames = []) {
   const techsWithLoad = technicians.map(tech => {
-    const stats = calculateTechnicianDailyStats(tech, dateStart, dateEnd, isViewingToday);
+    const stats = calculateTechnicianDailyStats(tech, dateStart, dateEnd, isViewingToday, serviceAccountNames);
 
     return {
       id: tech.id,
@@ -498,6 +541,7 @@ export function calculateDailyDashboard(technicians, dateStart, dateEnd, isViewi
     pendingCount: techsWithLoad.reduce((sum, t) => sum + (t.pendingCount || 0), 0),
     closedTicketsToday: techsWithLoad.reduce((sum, t) => sum + t.closedToday, 0),
     selfPickedToday: techsWithLoad.reduce((sum, t) => sum + t.selfPickedToday, 0),
+    appAssignedToday: techsWithLoad.reduce((sum, t) => sum + t.appAssignedToday, 0),
     lightLoad: techsWithLoad.filter(t => t.loadLevel === 'light').length,
     mediumLoad: techsWithLoad.filter(t => t.loadLevel === 'medium').length,
     heavyLoad: techsWithLoad.filter(t => t.loadLevel === 'heavy').length,
@@ -517,9 +561,9 @@ export function calculateDailyDashboard(technicians, dateStart, dateEnd, isViewi
  * @param {string} timezone - Timezone for calculations
  * @returns {Object} Weekly dashboard data with aggregated stats
  */
-export function calculateWeeklyDashboard(technicians, weekStart, weekEnd, timezone) {
+export function calculateWeeklyDashboard(technicians, weekStart, weekEnd, timezone, serviceAccountNames = []) {
   const techsWithWeeklyStats = technicians.map(tech => {
-    const stats = calculateTechnicianWeeklyStats(tech, weekStart, weekEnd, timezone);
+    const stats = calculateTechnicianWeeklyStats(tech, weekStart, weekEnd, timezone, serviceAccountNames);
 
     return {
       id: tech.id,
@@ -548,6 +592,7 @@ export function calculateWeeklyDashboard(technicians, weekStart, weekEnd, timezo
     weeklyPending: techsWithWeeklyStats.reduce((sum, t) => sum + t.pendingCount, 0),
     weeklyClosed: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyClosed, 0),
     weeklySelfPicked: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklySelfPicked, 0),
+    weeklyAppAssigned: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyAppAssigned, 0),
     weeklyAssigned: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyAssigned, 0),
     weeklyNetChange: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyNetChange, 0),
     avgTicketsPerTech: parseFloat((techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyTotalCreated, 0) / techsWithWeeklyStats.length).toFixed(1)),
@@ -571,9 +616,9 @@ export function calculateWeeklyDashboard(technicians, weekStart, weekEnd, timezo
  * @param {boolean} isViewingToday - Whether we're viewing current day
  * @returns {Object} Detailed statistics with categorized ticket lists
  */
-export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isViewingToday = true) {
+export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isViewingToday = true, serviceAccountNames = []) {
   // Get basic daily stats
-  const stats = calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, isViewingToday);
+  const stats = calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, isViewingToday, serviceAccountNames);
 
   // All currently open tickets (regardless of viewing mode)
   const openTickets = technician.tickets.filter(ticket =>
@@ -593,14 +638,25 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
     ['Resolved', 'Closed'].includes(ticket.status),
   );
 
+  // Helper to check if a ticket was assigned by the app (service account)
+  const isAppAssignment = (ticket) =>
+    serviceAccountNames.length > 0 &&
+    ticket.assignedBy &&
+    serviceAccountNames.some(name => name.toLowerCase() === ticket.assignedBy.toLowerCase());
+
   // Self-picked tickets assigned on the selected date (open + closed)
   const selfPickedTicketsToday = ticketsOnDate.filter(ticket =>
     ticket.isSelfPicked || ticket.assignedBy === technician.name,
   );
 
+  // App-assigned tickets on the selected date
+  const appAssignedTicketsToday = ticketsOnDate.filter(ticket =>
+    !ticket.isSelfPicked && ticket.assignedBy !== technician.name && isAppAssignment(ticket),
+  );
+
   // Assigned tickets (by coordinator) on the selected date (open + closed)
   const assignedTicketsToday = ticketsOnDate.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== technician.name,
+    !ticket.isSelfPicked && ticket.assignedBy !== technician.name && !isAppAssignment(ticket),
   );
 
   // Currently open tickets separated by type
@@ -628,6 +684,7 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
     totalTicketsOnDate: ticketsOnDate.length,
     closedTicketsOnDateCount: closedTicketsOnDate.length,
     selfPickedOnDate: stats.selfPickedToday,
+    appAssignedOnDate: stats.appAssignedToday,
     assignedOnDate: stats.assignedToday,
     loadLevel: stats.loadLevel,
 
@@ -650,7 +707,7 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
  * @param {string} timezone - Timezone identifier (e.g. America/Los_Angeles)
  * @returns {Object} Monthly dashboard data with daily breakdown & aggregates
  */
-export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndDate, timezone) {
+export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndDate, timezone, serviceAccountNames = []) {
   const daysInMonth = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0).getDate();
 
   const monthStartString = formatDateInTimezone(monthStartDate, timezone);
@@ -660,6 +717,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
 
   let monthTotal = 0;
   let monthSelfPicked = 0;
+  let monthAppAssigned = 0;
   let monthAssigned = 0;
   let monthClosed = 0;
   let monthCSAT = 0;
@@ -673,6 +731,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
 
     let dayTotal = 0;
     let daySelf = 0;
+    let dayAppAssigned = 0;
     let dayAssigned = 0;
     let dayClosed = 0;
     let dayCSAT = 0;
@@ -680,7 +739,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
     const techniciansForDay = [];
 
     technicians.forEach((tech) => {
-      const stats = calculateTechnicianDailyStats(tech, dayStart, dayEnd, false);
+      const stats = calculateTechnicianDailyStats(tech, dayStart, dayEnd, false, serviceAccountNames);
 
       if (stats.totalTicketsToday > 0) {
         techniciansForDay.push({
@@ -688,6 +747,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
           technicianName: tech.name,
           total: stats.totalTicketsToday,
           selfPicked: stats.selfPickedToday,
+          appAssigned: stats.appAssignedToday,
           assigned: stats.assignedToday,
           closed: stats.closedToday,
           csatCount: stats.csatCount || 0,
@@ -696,6 +756,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
 
       dayTotal += stats.totalTicketsToday;
       daySelf += stats.selfPickedToday;
+      dayAppAssigned += stats.appAssignedToday;
       dayAssigned += stats.assignedToday;
       dayClosed += stats.closedToday;
       dayCSAT += stats.csatCount || 0;
@@ -703,6 +764,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
 
     monthTotal += dayTotal;
     monthSelfPicked += daySelf;
+    monthAppAssigned += dayAppAssigned;
     monthAssigned += dayAssigned;
     monthClosed += dayClosed;
     monthCSAT += dayCSAT;
@@ -713,6 +775,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
       dayOfWeek: dayStart.getDay(),
       total: dayTotal,
       selfPicked: daySelf,
+      appAssigned: dayAppAssigned,
       assigned: dayAssigned,
       closed: dayClosed,
       csatCount: dayCSAT,
@@ -723,6 +786,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
   const statistics = {
     monthTotal,
     monthSelfPicked,
+    monthAppAssigned,
     monthAssigned,
     monthClosed,
     monthCSAT,

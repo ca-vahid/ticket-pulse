@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, ChevronDown, ChevronUp } from 'lucide-react';
+import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, ChevronDown, ChevronUp, Bot } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle } from '../utils/leaveInfo';
@@ -117,6 +117,9 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
   const selfPicked = viewMode === 'weekly'
     ? (technician.weeklySelfPicked || 0)
     : (technician.selfPickedToday || 0);
+  const appAssigned = viewMode === 'weekly'
+    ? (technician.weeklyAppAssigned || 0)
+    : (technician.appAssignedToday || 0);
   const assigned = viewMode === 'weekly'
     ? (technician.weeklyAssigned || 0)
     : (technician.assignedToday || 0);
@@ -375,7 +378,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           <div className="text-[8px] text-indigo-400 uppercase font-semibold mt-0.5">{viewMode === 'weekly' ? 'total' : 'today'}</div>
         </div>
 
-        {/* Metrics - Self, Assigned, Done */}
+        {/* Metrics - Self, App, Assigned, Done */}
         <div className="flex items-center gap-3 flex-shrink-0">
           {/* Self */}
           <div className="flex flex-col items-center justify-center px-3 py-1.5 bg-purple-100 rounded border border-purple-200 w-[50px] h-[60px]">
@@ -384,7 +387,16 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
             <div className="text-[7px] text-purple-700 uppercase font-bold">Self</div>
           </div>
 
-          {/* Assigned */}
+          {/* App Assigned */}
+          {appAssigned > 0 && (
+            <div className="flex flex-col items-center justify-center px-3 py-1.5 bg-sky-50 rounded border border-sky-200 w-[50px] h-[60px]">
+              <Bot className="w-4 h-4 text-sky-600 mb-1" />
+              <div className="text-base font-bold text-sky-800">{appAssigned}</div>
+              <div className="text-[7px] text-sky-600 uppercase font-bold">App</div>
+            </div>
+          )}
+
+          {/* Assigned (by coordinator) */}
           <div className="flex flex-col items-center justify-center w-[45px] h-[60px]">
             <Send className="w-4 h-4 text-orange-600 mb-1" />
             <div className="text-base font-bold text-orange-800">{assigned}</div>

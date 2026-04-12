@@ -52,6 +52,7 @@ const DEFAULT_SETTINGS = {
   avoidance_flag_threshold: '0.35',
   avoidance_watch_threshold: '0.15',
   avoidance_easy_categories: '[]',
+  service_account_names: '',
 };
 
 /**
@@ -258,6 +259,21 @@ class SettingsRepository {
    */
   async getFreshServiceConfigForWorkspace(workspaceId) {
     return getFreshServiceConfigForWorkspace(workspaceId, this);
+  }
+
+  /**
+   * Get the list of service account names (used to identify app-made assignments)
+   * @returns {Promise<string[]>} Array of service account names (lowercased for comparison)
+   */
+  async getServiceAccountNames() {
+    try {
+      const raw = await this.get('service_account_names');
+      if (!raw || !raw.trim()) return [];
+      return raw.split(',').map(n => n.trim()).filter(Boolean);
+    } catch (error) {
+      logger.error('Error fetching service account names:', error);
+      return [];
+    }
   }
 
   async getSyncConfig() {

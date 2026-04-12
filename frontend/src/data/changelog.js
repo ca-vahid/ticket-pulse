@@ -1,6 +1,22 @@
-export const APP_VERSION = '1.9.3-preview';
+export const APP_VERSION = '1.9.4-preview';
 
 export const changelog = [
+  {
+    version: '1.9.4-preview',
+    date: 'April 12, 2026',
+    entries: [
+      { type: 'new', text: 'App-assigned ticket tracking -- dashboard now distinguishes tickets assigned by Ticket Pulse (via FreshService API) from self-picked and coordinator-assigned tickets; new "App" stat with Bot icon appears on TechCard, TechCardCompact, and dashboard header when app assignments exist' },
+      { type: 'new', text: 'Service Account Names setting -- configurable comma-separated list of FreshService agent names used by the app (Settings > FreshService Configuration); assignments by these agents are counted as "App Assigned" across daily, weekly, and monthly views' },
+      { type: 'new', text: 'Stacked bar visualization updated -- Self-Picked vs Assigned bar in technician detail now includes a sky-blue "App" segment between Self (blue) and Assigned (gray) when app assignments are present' },
+      { type: 'improved', text: 'Dashboard stat cards -- new "App" card with Bot icon in the header stat bar (sky-blue theme), shown conditionally when there are app-made assignments; legend updated to distinguish "App = App Assigned" from "Asgn = Coordinator Assigned"' },
+      { type: 'improved', text: 'Stats calculator refactored -- all stat functions (daily, weekly, monthly, technician detail, dashboard aggregate) accept a serviceAccountNames parameter and produce separate appAssigned counts; case-insensitive matching for service account names' },
+      { type: 'improved', text: 'Frontend filter recalculation -- search and category filters correctly recalculate app-assigned counts using the serviceAccountNames from the API response; daily breakdown grids include appAssigned per day' },
+      { type: 'improved', text: 'Dashboard header clickable day overview tiles for technician navigation' },
+      { type: 'improved', text: 'Assignment queue UX -- Status and AI Suggestion split into separate columns; row opacity no longer dims the quick-approve popover' },
+      { type: 'improved', text: 'Calibration UX polish -- prompt-only mode for quick runs, cancel button for stuck runs, smart auto-scroll, SSE heartbeat to prevent Azure timeouts, KB progress streaming, and draft prompt delete support' },
+      { type: 'fixed', text: 'Deleted/spam ticket reconciliation -- tickets that vanish from FreshService list API due to soft-delete or spam flagging are now detected and marked correctly during sync' },
+    ],
+  },
   {
     version: '1.9.3-preview',
     date: 'April 9, 2026',

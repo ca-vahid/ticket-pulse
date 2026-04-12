@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users } from 'lucide-react';
+import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, Bot } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle } from '../utils/leaveInfo';
@@ -101,6 +101,9 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
   const selfPicked = viewMode === 'weekly'
     ? (technician.weeklySelfPicked || 0)
     : (technician.selfPickedToday || 0);
+  const appAssigned = viewMode === 'weekly'
+    ? (technician.weeklyAppAssigned || 0)
+    : (technician.appAssignedToday || 0);
   const assigned = viewMode === 'weekly'
     ? (technician.weeklyAssigned || 0)
     : (technician.assignedToday || 0);
@@ -372,8 +375,8 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
           </div>
         </div>
 
-        {/* Metrics Grid - Icons + Numbers (3-4 columns based on CSAT presence) */}
-        <div className={`grid ${hasCSAT ? 'grid-cols-4' : 'grid-cols-3'} gap-2 mb-2`}>
+        {/* Metrics Grid - Icons + Numbers */}
+        <div className={`grid ${(appAssigned > 0 && hasCSAT) ? 'grid-cols-5' : (appAssigned > 0 || hasCSAT) ? 'grid-cols-4' : 'grid-cols-3'} gap-2 mb-2`}>
 
           {/* Self */}
           <div className="flex flex-col items-center p-2 bg-purple-100 rounded-lg shadow-sm border border-purple-200">
@@ -382,7 +385,16 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
             <div className="text-[9px] text-purple-700 uppercase font-bold">Self</div>
           </div>
 
-          {/* Assigned */}
+          {/* App Assigned - Only show when there are app assignments */}
+          {appAssigned > 0 && (
+            <div className="flex flex-col items-center p-2 bg-sky-50 rounded-lg shadow-sm border border-sky-200">
+              <Bot className="w-5 h-5 text-sky-600 mb-1" />
+              <div className="text-lg font-bold text-sky-800">{appAssigned}</div>
+              <div className="text-[9px] text-sky-600 uppercase font-bold">App</div>
+            </div>
+          )}
+
+          {/* Assigned (by coordinator) */}
           <div className="flex flex-col items-center p-2">
             <Send className="w-5 h-5 text-orange-600 mb-1" />
             <div className="text-lg font-bold text-orange-800">{assigned}</div>

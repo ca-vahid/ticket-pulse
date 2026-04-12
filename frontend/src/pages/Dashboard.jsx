@@ -47,6 +47,7 @@ import {
   VolumeX,
   Volume2,
   Sparkles,
+  Bot,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -778,6 +779,13 @@ export default function Dashboard() {
       ? (monthlyData?.technicians || dashboardData?.technicians || [])
       : (dashboardData?.technicians || []);
 
+  // Service account names for identifying app-made assignments (from API response)
+  const serviceAccountNames = (
+    viewMode === 'weekly' ? weeklyData?.serviceAccountNames
+      : viewMode === 'monthly' ? monthlyData?.serviceAccountNames
+        : dashboardData?.serviceAccountNames
+  ) || [];
+
   // Filter technicians based on hidden state
   const visibleTechnicians = technicians.filter(tech => !hiddenTechIds.includes(tech.id));
   const hiddenTechnicians = technicians.filter(tech => hiddenTechIds.includes(tech.id));
@@ -819,10 +827,20 @@ export default function Dashboard() {
     const openOnlyCount = filteredTickets.filter(t => t.status === 'Open').length;
     const pendingCount = filteredTickets.filter(t => t.status === 'Pending').length;
     const selfPicked = filteredTickets.filter(t => t.isSelfPicked || t.assignedBy === tech.name);
-    const assigned = filteredTickets.filter(t => !t.isSelfPicked && t.assignedBy !== tech.name);
+
+    // Helper to check if assigned by the app (service account)
+    const isAppAssignment = (t) =>
+      serviceAccountNames.length > 0 &&
+      t.assignedBy &&
+      serviceAccountNames.some(name => name.toLowerCase() === t.assignedBy.toLowerCase());
+
+    const appAssignedTickets = filteredTickets.filter(t =>
+      !t.isSelfPicked && t.assignedBy !== tech.name && isAppAssignment(t));
+    const assigned = filteredTickets.filter(t =>
+      !t.isSelfPicked && t.assignedBy !== tech.name && !isAppAssignment(t));
     const closed = filteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status));
 
-    // Calculate assigners (who assigned tickets to this tech)
+    // Calculate assigners (who assigned tickets to this tech), excluding service accounts
     const assignerCounts = {};
     assigned.forEach(ticket => {
       if (ticket.assignedBy && ticket.assignedBy !== tech.name) {
@@ -850,7 +868,8 @@ export default function Dashboard() {
 
         // Calculate counts for this day
         const daySelf = dayTickets.filter(t => t.isSelfPicked || t.assignedBy === tech.name).length;
-        const dayAssigned = dayTickets.filter(t => !t.isSelfPicked && t.assignedBy !== tech.name).length;
+        const dayAppAssigned = dayTickets.filter(t => !t.isSelfPicked && t.assignedBy !== tech.name && isAppAssignment(t)).length;
+        const dayAssigned = dayTickets.filter(t => !t.isSelfPicked && t.assignedBy !== tech.name && !isAppAssignment(t)).length;
         const dayClosed = filteredTickets.filter(ticket => {
           const closeDate = ticket.closedAt || ticket.resolvedAt;
           if (!closeDate) return false;
@@ -862,6 +881,7 @@ export default function Dashboard() {
           date: day.date,
           total: dayTickets.length,
           self: daySelf,
+          appAssigned: dayAppAssigned,
           assigned: dayAssigned,
           closed: dayClosed,
         };
@@ -875,12 +895,14 @@ export default function Dashboard() {
       pendingCount,
       totalTicketsToday: filteredTickets.length,
       selfPickedToday: selfPicked.length,
+      appAssignedToday: appAssignedTickets.length,
       assignedToday: assigned.length,
       closedToday: closed.length,
 
       // Weekly stats (if in weekly mode)
       weeklyTotalCreated: filteredTickets.length,
       weeklySelfPicked: selfPicked.length,
+      weeklyAppAssigned: appAssignedTickets.length,
       weeklyAssigned: assigned.length,
       weeklyClosed: closed.length,
       assigners, // List of who assigned tickets (for weekly view)
@@ -945,6 +967,12 @@ export default function Dashboard() {
     // Collect all filtered tickets
     const allFilteredTickets = filteredTechnicians.flatMap(tech => getTechTickets(tech));
 
+    // Helper to check if assigned by the app (service account)
+    const isAppAsgn = (t) =>
+      serviceAccountNames.length > 0 &&
+      t.assignedBy &&
+      serviceAccountNames.some(name => name.toLowerCase() === t.assignedBy.toLowerCase());
+
     // Calculate filtered stats based on view mode
     const filteredStats = {
       totalTechnicians: filteredTechnicians.length,
@@ -955,18 +983,21 @@ export default function Dashboard() {
       pendingCount: allFilteredTickets.filter(t => t.status === 'Pending').length,
       closedTicketsToday: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
       selfPickedToday: allFilteredTickets.filter(t => t.isSelfPicked).length,
+      appAssignedToday: allFilteredTickets.filter(t => !t.isSelfPicked && isAppAsgn(t)).length,
 
       // Weekly view stats
       weeklyTotalCreated: allFilteredTickets.length,
       weeklyClosed: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
       weeklySelfPicked: allFilteredTickets.filter(t => t.isSelfPicked).length,
-      weeklyAssigned: allFilteredTickets.filter(t => !t.isSelfPicked).length,
+      weeklyAppAssigned: allFilteredTickets.filter(t => !t.isSelfPicked && isAppAsgn(t)).length,
+      weeklyAssigned: allFilteredTickets.filter(t => !t.isSelfPicked && !isAppAsgn(t)).length,
 
       // Monthly view stats
       monthTotalCreated: allFilteredTickets.length,
       monthClosed: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
       monthSelfPicked: allFilteredTickets.filter(t => t.isSelfPicked).length,
-      monthAssigned: allFilteredTickets.filter(t => !t.isSelfPicked).length,
+      monthAppAssigned: allFilteredTickets.filter(t => !t.isSelfPicked && isAppAsgn(t)).length,
+      monthAssigned: allFilteredTickets.filter(t => !t.isSelfPicked && !isAppAsgn(t)).length,
 
       // Load level counts (only meaningful in daily view with current open tickets)
       lightLoad: filteredTechnicians.filter(t => t.loadLevel === 'light').length,
@@ -1105,6 +1136,11 @@ export default function Dashboard() {
     : viewMode === 'weekly'
       ? (displayStats.weeklySelfPicked || 0)
       : (displayStats.selfPickedToday || 0);
+  const appAssignedTotal = viewMode === 'monthly'
+    ? (displayStats.monthAppAssigned || 0)
+    : viewMode === 'weekly'
+      ? (displayStats.weeklyAppAssigned || 0)
+      : (displayStats.appAssignedToday || 0);
   const selfPickPercentage = totalTicketsToday > 0
     ? Math.round((selfPickedToday / totalTicketsToday) * 100)
     : 0;
@@ -1752,6 +1788,19 @@ export default function Dashboard() {
                     <div className="text-[9px] text-blue-100 uppercase font-medium">Self</div>
                   </div>
                 </div>
+
+                {/* App Assigned - Only show when there are app assignments */}
+                {appAssignedTotal > 0 && (
+                  <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
+                    <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-sky-400 bg-opacity-30 flex-none">
+                      <Bot className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-base font-bold leading-tight">{appAssignedTotal}</div>
+                      <div className="text-[9px] text-blue-100 uppercase font-medium">App</div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Divider */}
@@ -1933,7 +1982,8 @@ export default function Dashboard() {
               {isToday && <span className="ml-2">Open = All Open Tickets</span>}
               <span className="ml-2 text-blue-600">Today = Total Today</span>
               <span className="ml-2 text-purple-600">Self = Self-Picked</span>
-              <span className="ml-2 text-orange-600">Asgn = Assigned</span>
+              <span className="ml-2 text-sky-600">App = App Assigned</span>
+              <span className="ml-2 text-orange-600">Asgn = Coordinator Assigned</span>
               <span className="ml-2 text-green-600">Done = Closed</span>
               <span className="ml-2 text-yellow-600">⭐ = CSAT</span>
             </div>

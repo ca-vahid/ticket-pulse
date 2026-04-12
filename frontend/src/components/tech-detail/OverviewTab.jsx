@@ -32,9 +32,10 @@ function CategoryPills({ tickets }) {
   );
 }
 
-function StackedBar({ self, assigned, total }) {
+function StackedBar({ self, appAssigned = 0, assigned, total }) {
   if (!total) return null;
   const selfPct = (self / total) * 100;
+  const appPct = (appAssigned / total) * 100;
   const assignedPct = (assigned / total) * 100;
   return (
     <div>
@@ -42,15 +43,24 @@ function StackedBar({ self, assigned, total }) {
         {self > 0 && (
           <div className="bg-blue-500" style={{ width: `${selfPct}%` }} />
         )}
+        {appAssigned > 0 && (
+          <div className="bg-sky-400" style={{ width: `${appPct}%` }} />
+        )}
         {assigned > 0 && (
           <div className="bg-slate-400" style={{ width: `${assignedPct}%` }} />
         )}
       </div>
-      <div className="flex justify-between mt-1">
+      <div className="flex justify-between mt-1 flex-wrap gap-1">
         <span className="flex items-center gap-1 text-[10px] text-slate-500">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
           Self-Picked ({self})
         </span>
+        {appAssigned > 0 && (
+          <span className="flex items-center gap-1 text-[10px] text-sky-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block" />
+            App ({appAssigned})
+          </span>
+        )}
         <span className="flex items-center gap-1 text-[10px] text-slate-400">
           Assigned ({assigned})
           <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
@@ -89,6 +99,7 @@ function WeeklyOverview({ technician }) {
   const netChange = technician.weeklyNetChange || 0;
   const total     = technician.weeklyTotalCreated || 0;
   const selfPicked = technician.weeklySelfPicked || 0;
+  const appAssigned = technician.weeklyAppAssigned || 0;
   const assigned  = technician.weeklyAssigned || 0;
   const closed    = technician.weeklyClosed || 0;
   const selfRate  = total > 0 ? Math.round((selfPicked / total) * 100) : 0;
@@ -105,6 +116,7 @@ function WeeklyOverview({ technician }) {
         <StatRow stats={[
           { label: 'Total', value: total, color: 'text-blue-600' },
           { label: 'Self-Picked', value: selfPicked, color: 'text-slate-700' },
+          ...(appAssigned > 0 ? [{ label: 'App', value: appAssigned, color: 'text-sky-600' }] : []),
           { label: 'Assigned', value: assigned },
           { label: 'Closed', value: closed, color: 'text-emerald-600' },
           {
@@ -125,7 +137,7 @@ function WeeklyOverview({ technician }) {
       {total > 0 && (
         <div>
           <SectionLabel>Self-Picked vs Assigned</SectionLabel>
-          <StackedBar self={selfPicked} assigned={assigned} total={total} />
+          <StackedBar self={selfPicked} appAssigned={appAssigned} assigned={assigned} total={total} />
         </div>
       )}
 
@@ -251,6 +263,7 @@ function DailyOverview({ technician, selectedDate, openCount, pendingCount }) {
   const dayTickets = technician.ticketsOnDate || [];
   const total      = technician.totalTicketsOnDate || 0;
   const selfPicked = technician.selfPickedOnDate || 0;
+  const appAssigned = technician.appAssignedOnDate || 0;
   const assigned   = technician.assignedOnDate || 0;
   const closed     = technician.closedTicketsOnDateCount || 0;
   const selfRate   = total > 0 ? Math.round((selfPicked / total) * 100) : 0;
@@ -280,6 +293,7 @@ function DailyOverview({ technician, selectedDate, openCount, pendingCount }) {
         <StatRow stats={[
           { label: 'Total', value: total, color: 'text-blue-600' },
           { label: 'Self-Picked', value: selfPicked, color: 'text-slate-700' },
+          ...(appAssigned > 0 ? [{ label: 'App', value: appAssigned, color: 'text-sky-600' }] : []),
           { label: 'Assigned', value: assigned },
           { label: 'Closed', value: closed, color: 'text-emerald-600' },
           {
@@ -294,7 +308,7 @@ function DailyOverview({ technician, selectedDate, openCount, pendingCount }) {
       {total > 0 && (
         <div>
           <SectionLabel>Self-Picked vs Assigned</SectionLabel>
-          <StackedBar self={selfPicked} assigned={assigned} total={total} />
+          <StackedBar self={selfPicked} appAssigned={appAssigned} assigned={assigned} total={total} />
         </div>
       )}
 
@@ -333,6 +347,7 @@ function MonthlyOverview({ technician, selectedMonth }) {
   const netChange    = technician.monthlyNetChange || 0;
   const total        = technician.monthlyTotalCreated || 0;
   const selfPicked   = technician.monthlySelfPicked || 0;
+  const appAssigned  = technician.monthlyAppAssigned || 0;
   const assigned     = technician.monthlyAssigned || 0;
   const closed       = technician.monthlyClosed || 0;
   const selfRate     = total > 0 ? Math.round((selfPicked / total) * 100) : 0;
@@ -373,6 +388,7 @@ function MonthlyOverview({ technician, selectedMonth }) {
         <StatRow stats={[
           { label: 'Total', value: total, color: 'text-blue-600' },
           { label: 'Self-Picked', value: selfPicked, color: 'text-slate-700' },
+          ...(appAssigned > 0 ? [{ label: 'App', value: appAssigned, color: 'text-sky-600' }] : []),
           { label: 'Assigned', value: assigned },
           { label: 'Closed', value: closed, color: 'text-emerald-600' },
           {
@@ -393,7 +409,7 @@ function MonthlyOverview({ technician, selectedMonth }) {
       {total > 0 && (
         <div>
           <SectionLabel>Self-Picked vs Assigned</SectionLabel>
-          <StackedBar self={selfPicked} assigned={assigned} total={total} />
+          <StackedBar self={selfPicked} appAssigned={appAssigned} assigned={assigned} total={total} />
         </div>
       )}
 

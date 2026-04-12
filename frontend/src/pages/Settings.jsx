@@ -71,6 +71,7 @@ export default function Settings() {
   const [formData, setFormData] = useState({
     freshservice_domain: '',
     freshservice_api_key: '',
+    service_account_names: '',
     sync_interval_minutes: 5,
     default_timezone: 'America/Los_Angeles',
     dashboard_refresh_seconds: 30,
@@ -124,6 +125,7 @@ export default function Settings() {
       setFormData({
         freshservice_domain: settings.freshservice_domain || '',
         freshservice_api_key: settings.freshservice_api_key === '***MASKED***' ? '' : settings.freshservice_api_key || '',
+        service_account_names: settings.service_account_names || '',
         sync_interval_minutes: settings.sync_interval_minutes || 5,
         default_timezone: settings.default_timezone || 'America/Los_Angeles',
         dashboard_refresh_seconds: settings.dashboard_refresh_seconds || 30,
@@ -442,6 +444,23 @@ export default function Settings() {
                       />
                       <p className="text-xs text-gray-500 mt-1">
                   Leave blank to keep existing API key
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Service Account Name(s)
+                      </label>
+                      <input
+                        type="text"
+                        name="service_account_names"
+                        value={formData.service_account_names}
+                        onChange={handleChange}
+                        placeholder="e.g. Ticket Pulse, Vahid Haeri"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                  Comma-separated names of FreshService agents used by the app. Assignments by these agents will be shown as &ldquo;App Assigned&rdquo; on the dashboard. Tip: create a dedicated agent (e.g. &ldquo;Ticket Pulse&rdquo;) and use its API key above.
                       </p>
                     </div>
 
