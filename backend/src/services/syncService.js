@@ -111,11 +111,12 @@ class SyncService {
     const transformedTickets = transformTickets(fsTickets, transformOptions);
     logger.debug(`Transformed ${transformedTickets.length} tickets`);
 
-    const technicians = await technicianRepository.getAllActive(workspaceId);
+    // Include ALL technicians (active + inactive) so assignments to hidden/disabled agents are tracked
+    const technicians = await technicianRepository.getAll(workspaceId, { lite: true });
     const fsIdToInternalId = new Map(
       technicians.map(tech => [Number(tech.freshserviceId), tech.id]),
     );
-    logger.debug(`Built technician ID map for ${technicians.length} technicians`);
+    logger.debug(`Built technician ID map for ${technicians.length} technicians (including inactive)`);
 
     const ticketsWithTechIds = mapTechnicianIds(transformedTickets, fsIdToInternalId);
 
