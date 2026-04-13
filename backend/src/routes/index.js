@@ -19,13 +19,9 @@ import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Health check endpoint (no auth required)
+// Redirect to the root /health endpoint (full monitoring response lives there)
 router.get('/health', (req, res) => {
-  res.json({
-    success: true,
-    message: 'API is healthy',
-    timestamp: new Date().toISOString(),
-  });
+  res.redirect(307, '/health');
 });
 
 // Auth & workspace selection (handle their own auth internally)

@@ -2,6 +2,8 @@ import express from 'express';
 import session from 'express-session';
 import cors from 'cors';
 import helmet from 'helmet';
+import os from 'os';
+import { createRequire } from 'module';
 import connectPgSimple from 'connect-pg-simple';
 import pg from 'pg';
 import config from './config/index.js';
@@ -9,11 +11,15 @@ import logger from './utils/logger.js';
 import { setupBigIntSerialization } from './utils/bigIntSerializer.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import routes from './routes/index.js';
+import prisma from './services/prisma.js';
 import scheduledSyncService from './services/scheduledSyncService.js';
 import settingsRepository from './services/settingsRepository.js';
 import availabilityService from './services/availabilityService.js';
 import llmConfigService from './services/llmConfigService.js';
 import noiseRuleService from './services/noiseRuleService.js';
+
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json');
 
 // Setup BigInt serialization for JSON responses
 setupBigIntSerialization();
@@ -81,16 +87,68 @@ app.use((req, res, next) => {
   next();
 });
 
-// Track when the app process started
-const APP_STARTED_AT = new Date().toISOString();
+const APP_START_TIME = Date.now();
 
-// Health check (no auth required)
-app.get('/health', (req, res) => {
+// Monitoring-compatible health endpoint (AI Monitor integration)
+// Always returns HTTP 200; overall status is determined by the JSON body.
+app.get('/health', async (req, res) => {
+  if (config.monitor.key && req.headers['x-monitor-key'] !== config.monitor.key) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const checks = {};
+  let overallStatus = 'healthy';
+
+  const degradeOverall = (checkStatus) => {
+    if (checkStatus === 'unhealthy') overallStatus = 'unhealthy';
+    else if (checkStatus === 'degraded' && overallStatus !== 'unhealthy') overallStatus = 'degraded';
+  };
+
+  // --- Database check ---
+  try {
+    const dbStart = Date.now();
+    await prisma.$queryRawUnsafe('SELECT 1');
+    const responseTime = Date.now() - dbStart;
+    const dbStatus = responseTime > 2000 ? 'unhealthy' : responseTime > 200 ? 'degraded' : 'healthy';
+    checks.database = { status: dbStatus, responseTime, message: 'Connected to PostgreSQL' };
+    degradeOverall(dbStatus);
+  } catch (err) {
+    checks.database = { status: 'unhealthy', message: err.message };
+    overallStatus = 'unhealthy';
+  }
+
+  // --- Memory check ---
+  const totalMem = Math.round(os.totalmem() / 1048576);
+  const freeMem = Math.round(os.freemem() / 1048576);
+  const memPct = ((totalMem - freeMem) / totalMem) * 100;
+  const memStatus = memPct > 95 ? 'unhealthy' : memPct > 80 ? 'degraded' : 'healthy';
+  checks.memory = {
+    status: memStatus,
+    totalMB: totalMem,
+    usedMB: totalMem - freeMem,
+    freePercent: Math.round(100 - memPct),
+  };
+  degradeOverall(memStatus);
+
+  // --- Process memory (heap) ---
+  const heapUsed = Math.round(process.memoryUsage().heapUsed / 1048576);
+  const heapTotal = Math.round(process.memoryUsage().heapTotal / 1048576);
+  checks.processMemory = {
+    status: 'healthy',
+    heapUsedMB: heapUsed,
+    heapTotalMB: heapTotal,
+  };
+
   res.json({
-    success: true,
-    message: 'Server is healthy',
+    status: overallStatus,
     timestamp: new Date().toISOString(),
-    appStartedAt: APP_STARTED_AT,
+    app: {
+      name: 'ticket-pulse',
+      version: pkg.version,
+      environment: config.env,
+    },
+    uptime: Math.floor((Date.now() - APP_START_TIME) / 1000),
+    checks,
   });
 });
 

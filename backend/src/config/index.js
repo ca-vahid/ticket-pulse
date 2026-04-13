@@ -24,6 +24,7 @@ const envSchema = z.object({
   AZURE_GRAPH_CLIENT_ID: z.string().optional(),
   AZURE_GRAPH_CLIENT_SECRET: z.string().optional(),
   WEBHOOK_SECRET: z.string().optional(),
+  MONITOR_KEY: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.string().optional(),
   SMTP_USER: z.string().optional(),
@@ -120,6 +121,11 @@ export default {
   // Webhook
   webhook: {
     secret: config.WEBHOOK_SECRET || 'dev-webhook-secret-change-in-production',
+  },
+
+  // Health monitoring
+  monitor: {
+    key: config.MONITOR_KEY,
   },
 
   // SMTP
