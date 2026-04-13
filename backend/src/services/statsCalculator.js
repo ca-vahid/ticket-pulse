@@ -649,11 +649,6 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
     ticket.isSelfPicked || ticket.assignedBy === technician.name,
   );
 
-  // App-assigned tickets on the selected date
-  const appAssignedTicketsToday = ticketsOnDate.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== technician.name && isAppAssignment(ticket),
-  );
-
   // Assigned tickets (by coordinator) on the selected date (open + closed)
   const assignedTicketsToday = ticketsOnDate.filter(ticket =>
     !ticket.isSelfPicked && ticket.assignedBy !== technician.name && !isAppAssignment(ticket),
