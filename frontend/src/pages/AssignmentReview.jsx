@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assignmentAPI, workspaceAPI } from '../services/api';
+import { assignmentAPI, workspaceAPI, syncAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
 import PipelineRunDetail from '../components/assignment/PipelineRunDetail';
@@ -349,6 +349,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       }
     }
   }, [timeRange]);
+
+  const handleSmartRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await syncAPI.trigger();
+    } catch {
+      // Sync failed (e.g. network, auth) — still refresh from DB below
+    }
+    await fetchQueue();
+    setRefreshing(false);
+  }, [fetchQueue]);
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
 
@@ -1064,7 +1075,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Live
               </span>
-              <button type="button" onClick={fetchQueue} disabled={refreshing} className="touch-manipulation p-1 text-blue-600 hover:text-blue-800 disabled:opacity-50" title="Refresh now">
+              <button type="button" onClick={handleSmartRefresh} disabled={refreshing} className="touch-manipulation p-1 text-blue-600 hover:text-blue-800 disabled:opacity-50" title="Sync with FreshService & refresh">
                 <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               </button>
             </div>
@@ -1100,7 +1111,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         {/* Refreshing indicator */}
         {refreshing && (
           <div className="bg-blue-50 border-b border-blue-100 px-3 py-1 flex items-center gap-2 text-[11px] text-blue-600">
-            <Loader2 className="w-3 h-3 animate-spin" /> Refreshing...
+            <Loader2 className="w-3 h-3 animate-spin" /> Syncing with FreshService...
           </div>
         )}
 
@@ -1129,7 +1140,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                       ? 'No rejected runs in this period'
                       : 'No runs found'}
             </p>
-            <button onClick={fetchQueue} className="mt-2 text-xs text-blue-600 hover:underline inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
+            <button onClick={handleSmartRefresh} className="mt-2 text-xs text-blue-600 hover:underline inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
           </div>
         ) : (
           <>
