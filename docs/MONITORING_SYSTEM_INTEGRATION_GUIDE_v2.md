@@ -614,6 +614,143 @@ Or as JSON if you prefer:
 
 ---
 
+## Database Monitoring
+
+AI Monitor can also monitor your databases directly — no application code needed. We connect to your SQL Server or PostgreSQL databases every 30 seconds and check connectivity, response time, active connections, and database size.
+
+### What We Monitor On Your Database
+
+| Metric | What It Means |
+|---|---|
+| **Connection** | Can we connect at all? How fast? |
+| **Query time** | How long does a simple diagnostic query take? |
+| **Active connections** | How many concurrent sessions are active? |
+| **Database size** | How large is the database on disk? |
+| **Version** | What engine version is running? |
+
+### How To Register a Database
+
+**Option A**: In the AI Monitor dashboard, click **"+ Add Site"**, select **"DATABASE"** as the node type, choose **SQL Server** or **PostgreSQL**, paste your connection string, and save.
+
+**Option B**: Send us the details:
+
+| Field | Example |
+|---|---|
+| **Name** | `Production Orders DB` |
+| **Engine** | `SQL Server` or `PostgreSQL` |
+| **Connection string** | See formats below |
+| **Group** | `Databases` |
+
+### Connection String Formats
+
+**SQL Server** (Azure SQL, on-prem, etc.):
+
+```
+Server=myserver.database.windows.net;Database=mydb;User Id=myuser;Password=mypassword;Encrypt=true
+```
+
+Or URI format:
+```
+mssql://myuser:mypassword@myserver.database.windows.net:1433/mydb?encrypt=true
+```
+
+**PostgreSQL** (Azure Database for PostgreSQL, on-prem, etc.):
+
+```
+postgresql://myuser:mypassword@myserver.postgres.database.azure.com:5432/mydb?sslmode=require
+```
+
+Or key-value format:
+```
+host=myserver.postgres.database.azure.com dbname=mydb user=myuser password=mypassword sslmode=require
+```
+
+### Security
+
+- Connection strings are stored encrypted on the monitor server and never displayed in the dashboard or API responses
+- The monitor uses a minimal connection pool (2 connections) so it doesn't consume your connection limits
+- We run read-only diagnostic queries — we never modify your data
+- For Azure SQL, we recommend creating a dedicated monitoring user with minimal permissions:
+
+**SQL Server**:
+```sql
+CREATE LOGIN monitor_user WITH PASSWORD = 'your-strong-password';
+CREATE USER monitor_user FOR LOGIN monitor_user;
+GRANT VIEW DATABASE STATE TO monitor_user;
+GRANT VIEW SERVER STATE TO monitor_user;
+```
+
+**PostgreSQL**:
+```sql
+CREATE ROLE monitor_user WITH LOGIN PASSWORD 'your-strong-password';
+GRANT pg_monitor TO monitor_user;
+```
+
+### Adding Database Checks to Your App's Health Endpoint
+
+If your application connects to a database, you should also include a database check in your `/health` endpoint. This way, we get both direct database monitoring AND your app's view of the database.
+
+Here's how to add a database check for each stack:
+
+**Node.js (with `pg` for PostgreSQL)**:
+```javascript
+checks: {
+  database: async () => {
+    const start = Date.now();
+    await pool.query('SELECT 1');
+    return {
+      status: 'healthy',
+      responseTime: Date.now() - start,
+      message: 'PostgreSQL connected',
+    };
+  },
+}
+```
+
+**Node.js (with `mssql` for SQL Server)**:
+```javascript
+checks: {
+  database: async () => {
+    const start = Date.now();
+    await pool.request().query('SELECT 1');
+    return {
+      status: 'healthy',
+      responseTime: Date.now() - start,
+      message: 'SQL Server connected',
+    };
+  },
+}
+```
+
+**Python (SQLAlchemy)**:
+```python
+def check_database():
+    try:
+        start = time.time()
+        db.session.execute(text("SELECT 1"))
+        return {
+            "status": "healthy",
+            "responseTime": round((time.time() - start) * 1000),
+            "message": "Database connected"
+        }
+    except Exception as e:
+        return {"status": "unhealthy", "message": str(e)}
+```
+
+**C# (Entity Framework)**:
+```csharp
+var sw = Stopwatch.StartNew();
+await dbContext.Database.ExecuteSqlRawAsync("SELECT 1");
+sw.Stop();
+checks["database"] = new {
+    status = sw.ElapsedMilliseconds > 2000 ? "degraded" : "healthy",
+    responseTime = sw.ElapsedMilliseconds,
+    message = "SQL Server connected"
+};
+```
+
+---
+
 ## Common Questions
 
 **Do I have to use `/health` as the path?**
@@ -640,9 +777,20 @@ If your `/health` path returns a 500 error or malformed JSON, we'll mark it as u
 **I use a different framework not listed here. What do I do?**
 The concept is the same for any language/framework: handle `GET /health`, return JSON with `status`, `timestamp`, and `app.name`. The code examples above should give you enough to translate to any stack. If you're stuck, reach out.
 
+**Can you monitor our databases directly?**
+Yes. We support direct monitoring of SQL Server and PostgreSQL. Send us a connection string and we'll monitor connectivity, response time, active connections, and database size — no code changes needed on your end. See the [Database Monitoring](#database-monitoring) section above.
+
+**What permissions does the database monitor need?**
+Minimal read-only access. For SQL Server: `VIEW DATABASE STATE` and `VIEW SERVER STATE`. For PostgreSQL: the `pg_monitor` role. We recommend creating a dedicated `monitor_user` account.
+
+**Will database monitoring affect my database performance?**
+No. We run one lightweight diagnostic query every 30 seconds using a pool of 2 connections. The query reads system views only — no table scans, no data access.
+
 ---
 
 ## Summary
+
+### Web Applications
 
 | What | Details |
 |---|---|
@@ -654,3 +802,14 @@ The concept is the same for any language/framework: handle `GET /health`, return
 | **Auth** | Optional — `X-Monitor-Key` header |
 | **We check** | Every 30 seconds |
 | **We alert on** | State changes (down, degraded, recovered) |
+
+### Databases
+
+| What | Details |
+|---|---|
+| **Supported engines** | SQL Server, PostgreSQL |
+| **What you provide** | Connection string |
+| **What we check** | Connectivity, response time, active connections, DB size |
+| **Permissions needed** | `VIEW DATABASE STATE` (SQL Server) or `pg_monitor` (PostgreSQL) |
+| **We check** | Every 30 seconds |
+| **We alert on** | Connection failure, slow response, recovery |

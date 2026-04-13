@@ -879,8 +879,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   return (
     <div className="space-y-4">
+      {/* Action toast -- fixed position so it doesn't shift content */}
       {actionMsg && (
-        <div className={`text-sm rounded-lg px-3 py-2 border ${actionMsg.startsWith('Failed:') ? 'text-red-700 bg-red-50 border-red-200' : 'text-green-700 bg-green-50 border-green-200'}`}>{actionMsg}</div>
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className={`text-sm rounded-lg px-4 py-2.5 border shadow-lg backdrop-blur-sm ${actionMsg.startsWith('Failed:') ? 'text-red-700 bg-red-50/95 border-red-200' : 'text-green-700 bg-green-50/95 border-green-200'}`}>{actionMsg}</div>
+        </div>
       )}
 
       {/* Queued for business hours */}
@@ -1101,11 +1104,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         )}
 
-        {/* New arrivals banner */}
+        {/* New arrivals toast -- fixed position so it doesn't shift ticket list */}
         {newIds.size > 0 && subView === 'pending' && (
-          <div className="bg-emerald-50 border-b border-emerald-200 px-3 py-1.5 flex items-center gap-2 text-[11px] text-emerald-700 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-            {newIds.size} new ticket{newIds.size > 1 ? 's' : ''} arrived
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="bg-emerald-50/95 border border-emerald-300 rounded-full px-4 py-2 flex items-center gap-2 text-[11px] text-emerald-700 font-semibold shadow-lg backdrop-blur-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+              {newIds.size} new ticket{newIds.size > 1 ? 's' : ''} arrived
+            </div>
           </div>
         )}
 
