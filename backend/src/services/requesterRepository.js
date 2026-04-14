@@ -46,7 +46,7 @@ class RequesterRepository {
    * @param {Object} requesterData - Requester data from FreshService
    * @returns {Promise<Object>} Created/updated requester
    */
-  async upsert(requesterData) {
+  async upsert(requesterData, { embeddedName } = {}) {
     try {
       const {
         id: freshserviceId,
@@ -62,8 +62,12 @@ class RequesterRepository {
         active,
       } = requesterData;
 
-      // Combine first and last name
-      const name = [first_name, last_name].filter(Boolean).join(' ') || 'Unknown';
+      // Build name from first_name + last_name, but fall back to the embedded
+      // display name from the ticket list API when it produces a fuller result.
+      // FreshService sometimes has incomplete first_name/last_name for
+      // auto-created requesters while the ticket-embedded name is correct.
+      const apiName = [first_name, last_name].filter(Boolean).join(' ');
+      const name = (embeddedName && embeddedName.length > apiName.length ? embeddedName : apiName) || 'Unknown';
 
       return await prisma.requester.upsert({
         where: { freshserviceId: BigInt(freshserviceId) },
@@ -103,14 +107,15 @@ class RequesterRepository {
    * @param {Array<Object>} requestersData - Array of requester data from FreshService
    * @returns {Promise<Array>} Array of created/updated requesters
    */
-  async bulkUpsert(requestersData) {
+  async bulkUpsert(requestersData, { embeddedNames } = {}) {
     try {
       logger.info(`Upserting ${requestersData.length} requesters`);
       const results = [];
 
       for (const requesterData of requestersData) {
         try {
-          const requester = await this.upsert(requesterData);
+          const embeddedName = embeddedNames?.get(BigInt(requesterData.id).toString());
+          const requester = await this.upsert(requesterData, { embeddedName });
           results.push(requester);
         } catch (error) {
           logger.error(`Failed to upsert requester ${requesterData.id}:`, error);
@@ -123,6 +128,37 @@ class RequesterRepository {
       logger.error('Error bulk upserting requesters:', error);
       throw error;
     }
+  }
+
+  /**
+   * Fix requesters whose stored name is shorter than the embedded display name
+   * from ticket payloads. This corrects incomplete first_name/last_name data.
+   * @param {Map<string, string>} embeddedNames - Map of freshserviceId.toString() → display name
+   * @returns {Promise<number>} Number of requesters updated
+   */
+  async fixIncompleteNames(embeddedNames) {
+    let fixed = 0;
+    try {
+      const fsIds = [...embeddedNames.keys()].map(id => BigInt(id));
+      const existing = await prisma.requester.findMany({
+        where: { freshserviceId: { in: fsIds } },
+        select: { id: true, freshserviceId: true, name: true },
+      });
+
+      for (const req of existing) {
+        const betterName = embeddedNames.get(req.freshserviceId.toString());
+        if (betterName && betterName.length > req.name.length) {
+          await prisma.requester.update({
+            where: { id: req.id },
+            data: { name: betterName },
+          });
+          fixed++;
+        }
+      }
+    } catch (error) {
+      logger.error('Error fixing incomplete requester names:', error);
+    }
+    return fixed;
   }
 
   /**

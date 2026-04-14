@@ -39,6 +39,7 @@ class SyncService {
     this.lastSyncTime = null;
     this.currentStep = null;
     this.progressByWorkspace = new Map();
+    this._embeddedRequesterNames = new Map();
     this.progress = {
       currentStep: null,
       techniciansSynced: 0,
@@ -456,6 +457,18 @@ class SyncService {
       const fsTickets = await client.fetchTickets(filters);
       logger.info(`Fetched ${fsTickets.length} tickets from FreshService`);
 
+      // Collect embedded requester display names from ticket payloads.
+      // The ticket list API returns a pre-formatted requester.name that is often
+      // more complete than the first_name/last_name from the requester API.
+      for (const fsTicket of fsTickets) {
+        if (fsTicket.requester_id && fsTicket.requester?.name) {
+          this._embeddedRequesterNames.set(
+            BigInt(fsTicket.requester_id).toString(),
+            fsTicket.requester.name,
+          );
+        }
+      }
+
       // Step 3: Use _prepareTicketsForDatabase() for transform + mapping
       const ticketsWithTechIds = await this._prepareTicketsForDatabase(fsTickets, options.workspaceId);
 
@@ -600,8 +613,10 @@ class SyncService {
         const fsRequesters = await client.fetchAllRequesters(requesterIdsToFetch);
 
         if (fsRequesters.length > 0) {
-          // Upsert requesters into database
-          const syncedRequesters = await requesterRepository.bulkUpsert(fsRequesters);
+          const syncedRequesters = await requesterRepository.bulkUpsert(
+            fsRequesters,
+            { embeddedNames: this._embeddedRequesterNames },
+          );
           syncedCount = syncedRequesters.length;
           logger.info(`Synced ${syncedCount} requesters`);
         } else {
@@ -609,6 +624,15 @@ class SyncService {
         }
       } else {
         logger.info('No new requesters to fetch');
+      }
+
+      // Update existing requesters whose stored name is shorter than the
+      // embedded display name from ticket payloads (fixes incomplete names).
+      if (this._embeddedRequesterNames.size > 0) {
+        const namesFixed = await requesterRepository.fixIncompleteNames(this._embeddedRequesterNames);
+        if (namesFixed > 0) {
+          logger.info(`Fixed ${namesFixed} requester names from embedded ticket data`);
+        }
       }
 
       // ALWAYS link tickets to requesters (even if no new ones were fetched)
@@ -637,6 +661,7 @@ class SyncService {
     }
 
     this.runningWorkspaces.add(workspaceId);
+    this._embeddedRequesterNames = new Map();
     this.progress = {
       currentStep: 'Initializing sync',
       techniciansSynced: 0,
@@ -1160,6 +1185,16 @@ class SyncService {
 
       const totalTickets = rangeTickets.length;
       emit({ phase: 'fetch', step: `Found ${totalTickets} tickets in range`, pct: 20, total: totalTickets });
+
+      // Collect embedded requester display names from ticket payloads
+      for (const fsTicket of rangeTickets) {
+        if (fsTicket.requester_id && fsTicket.requester?.name) {
+          this._embeddedRequesterNames.set(
+            BigInt(fsTicket.requester_id).toString(),
+            fsTicket.requester.name,
+          );
+        }
+      }
 
       if (totalTickets === 0) {
         this.runningWorkspaces.delete(backfillKey);
