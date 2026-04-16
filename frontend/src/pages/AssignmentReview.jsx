@@ -1058,7 +1058,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-red-400' },
                 { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500' },
                 { id: 'all', label: 'All', count: null, dot: null },
-              ].filter((tab) => tab.id === 'pending' || tab.id === 'all' || tab.count > 0).map((tab) => (
+              ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => {
@@ -1208,37 +1208,30 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         )}
 
-        {/* Pipeline quality stats panel - shown on Pending view */}
-        {subView === 'pending' && (
-          <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5">
+        {/* Pipeline quality stats - shown on Assigned view (right where these metrics matter most) */}
+        {subView === 'assigned' && assignedTotal > 0 && (
+          <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-3 sm:px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1">
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Awaiting review</span>
-              <span className="text-[13px] font-bold text-slate-800 tabular-nums">{queue.totals?.unassigned ?? 0}</span>
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Via pipeline</span>
+              <span className="text-[12px] font-bold text-emerald-700 tabular-nums">{assignedRuns.total}</span>
             </div>
-            <div className="h-4 w-px bg-slate-200 hidden sm:block" aria-hidden />
-            <button
-              type="button"
-              onClick={() => { setSubView('assigned'); setAssignedFilter('manually_in_fs'); }}
-              className="flex items-center gap-1.5 group transition-colors"
-              title="View tickets assigned in FreshService without waiting for pipeline review"
-            >
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold group-hover:text-slate-600 transition-colors">Assigned outside pipeline</span>
-              <span className={`text-[13px] font-bold tabular-nums transition-colors ${(queue.totals?.outsideAssigned ?? 0) > 0 ? 'text-amber-700 group-hover:text-amber-800' : 'text-slate-500'}`}>
-                {queue.totals?.outsideAssigned ?? 0}
+            <div className="h-3 w-px bg-slate-200 hidden sm:block" aria-hidden />
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Manually in FreshService</span>
+              <span className={`text-[12px] font-bold tabular-nums ${outsideAssignedRuns.total > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
+                {outsideAssignedRuns.total}
               </span>
-            </button>
-            <div className="h-4 w-px bg-slate-200 hidden sm:block" aria-hidden />
-            <button
-              type="button"
-              onClick={() => { setSubView('assigned'); setAssignedFilter('via_pipeline'); }}
-              className="flex items-center gap-1.5 group transition-colors"
-              title="Pipeline runs where the final assignee differed from the AI's top recommendation"
+            </div>
+            <div className="h-3 w-px bg-slate-200 hidden sm:block" aria-hidden />
+            <div
+              className="flex items-center gap-1.5"
+              title="Pipeline runs where the final assignee differed from the AI's top recommendation (of the current Via Pipeline page)"
             >
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold group-hover:text-slate-600 transition-colors">Different agent chosen</span>
-              <span className={`text-[13px] font-bold tabular-nums transition-colors ${differentAgentCount > 0 ? 'text-blue-700 group-hover:text-blue-800' : 'text-slate-500'}`}>
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Different agent chosen</span>
+              <span className={`text-[12px] font-bold tabular-nums ${differentAgentCount > 0 ? 'text-blue-700' : 'text-slate-500'}`}>
                 {differentAgentCount}
               </span>
-            </button>
+            </div>
           </div>
         )}
 
