@@ -1052,7 +1052,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             {/* Queue (decision) scope */}
             <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-200/90 p-0.5 ring-1 ring-slate-300/40 shadow-sm">
               {[
-                { id: 'pending', label: 'Pending', count: queue.totals?.unassigned ?? 0, dot: 'bg-yellow-400' },
+                { id: 'pending', label: 'Awaiting Review', count: queue.totals?.unassigned ?? 0, dot: 'bg-yellow-400' },
                 { id: 'assigned', label: 'Assigned', count: assignedTotal, dot: 'bg-green-400' },
                 { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400' },
                 { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-red-400' },
@@ -1095,34 +1095,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     >
                       {f.label}
                       <span className={assignedFilter === f.id ? 'text-slate-700' : (f.tint || '')}> ({f.count})</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* Secondary ticket-status filter (Open/Pending/Closed-Resolved) - shown on all tabs except Deleted */}
-            {subView !== 'deleted' && (
-              <>
-                <div className="hidden h-5 w-px shrink-0 bg-gradient-to-b from-transparent via-slate-300 to-transparent sm:block" aria-hidden />
-                <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-100/90 p-0.5 ring-1 ring-slate-200/60">
-                  {[
-                    { id: 'all', label: 'All' },
-                    { id: 'in_progress', label: 'In Progress', tint: 'text-emerald-700' },
-                    { id: 'pending', label: 'Pending', tint: 'text-amber-700' },
-                    { id: 'closed_resolved', label: 'Closed/Resolved', tint: 'text-slate-600' },
-                  ].map((f) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setTicketStatusFilter(f.id)}
-                      className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-all duration-150 touch-manipulation ${
-                        ticketStatusFilter === f.id
-                          ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/70'
-                          : `text-slate-600 hover:bg-white/60 hover:text-slate-800 ${f.tint || ''}`
-                      }`}
-                    >
-                      {f.label}
                     </button>
                   ))}
                 </div>
@@ -1181,6 +1153,32 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             </div>
           </div>
         </div>
+
+        {/* Secondary ticket-status filter — own row below the primary tabs, distinct underline-style */}
+        {subView !== 'deleted' && (
+          <div className="border-b border-slate-100 bg-white px-3 sm:px-4 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Status</span>
+            {[
+              { id: 'all', label: 'All', activeColor: 'border-slate-700 text-slate-900' },
+              { id: 'in_progress', label: 'In Progress', activeColor: 'border-emerald-500 text-emerald-700' },
+              { id: 'pending', label: 'Pending', activeColor: 'border-amber-500 text-amber-700' },
+              { id: 'closed_resolved', label: 'Closed/Resolved', activeColor: 'border-slate-400 text-slate-600' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setTicketStatusFilter(f.id)}
+                className={`relative pb-1 text-[11px] font-medium transition-colors duration-150 touch-manipulation border-b-2 ${
+                  ticketStatusFilter === f.id
+                    ? f.activeColor
+                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Clear all confirmation */}
         {showClearConfirm && (
@@ -1262,7 +1260,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
             <p className="text-slate-500 text-sm font-medium">
               {subView === 'pending'
-                ? 'No pending assignments'
+                ? 'No tickets awaiting review'
                 : subView === 'assigned'
                   ? 'No assignments in this period'
                   : subView === 'dismissed'
