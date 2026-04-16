@@ -330,10 +330,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         }
       }
       const since = getSince(timeRange);
-      // The secondary ticket-status filter only applies to non-Deleted tabs.
-      // Pending/Assigned default to 'in_progress'; Dismissed/Rejected default to 'all'.
-      // We pass each tab's effective filter so totals reflect what's visible.
-      const pendingTicketStatus = subView === 'pending' ? ticketStatusFilter : 'in_progress';
+      // Awaiting Review: always shows ALL non-deleted unassigned items (no secondary filter).
+      // Assigned/Dismissed/Rejected: apply the active secondary status filter when viewing that tab.
+      const pendingTicketStatus = 'all';
       const assignedTicketStatus = subView === 'assigned' ? ticketStatusFilter : 'in_progress';
       const dismissedTicketStatus = subView === 'dismissed' ? ticketStatusFilter : 'all';
       const rejectedTicketStatus = subView === 'rejected' ? ticketStatusFilter : 'all';
@@ -432,9 +431,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     setNewIds(new Set());
   }, [queuePage]);
 
-  // Reset secondary status filter to that tab's default whenever the tab changes
+  // Reset secondary status filter to that tab's default whenever the tab changes.
+  // Awaiting Review (pending) doesn't use the filter at all; Assigned defaults to 'in_progress'.
   useEffect(() => {
-    if (subView === 'pending' || subView === 'assigned') {
+    if (subView === 'assigned') {
       setTicketStatusFilter('in_progress');
     } else {
       setTicketStatusFilter('all');
@@ -1154,8 +1154,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         </div>
 
-        {/* Secondary ticket-status filter — own row below the primary tabs, distinct underline-style */}
-        {subView !== 'deleted' && (
+        {/* Secondary ticket-status filter — only relevant on tabs where ticket lifecycle matters.
+            Hidden on Awaiting Review (always actionable) and Deleted (always deleted). */}
+        {subView !== 'deleted' && subView !== 'pending' && (
           <div className="border-b border-slate-100 bg-white px-3 sm:px-4 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
             <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Status</span>
             {[
