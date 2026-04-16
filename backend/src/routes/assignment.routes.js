@@ -210,7 +210,10 @@ router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
   const assignmentStatus = ['unassigned', 'outside_assigned', 'all'].includes(req.query.assignmentStatus)
     ? req.query.assignmentStatus
     : 'all';
-  const result = await assignmentRepository.getPendingQueue(req.workspaceId, { limit, offset, assignmentStatus });
+  const ticketStatus = ['all', 'in_progress', 'pending', 'closed_resolved', 'deleted'].includes(req.query.ticketStatus)
+    ? req.query.ticketStatus
+    : 'all';
+  const result = await assignmentRepository.getPendingQueue(req.workspaceId, { limit, offset, assignmentStatus, ticketStatus });
   res.json({ success: true, ...result });
 }));
 
@@ -219,7 +222,10 @@ router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
   const offset = parseInt(req.query.offset) || 0;
   const { status, decision, since, sinceField, decisions } = req.query;
   const decisionsArr = decisions ? decisions.split(',') : undefined;
-  const result = await assignmentRepository.getPipelineRuns(req.workspaceId, { limit, offset, status, decision, since, sinceField, decisions: decisionsArr });
+  const ticketStatus = ['all', 'in_progress', 'pending', 'closed_resolved', 'deleted'].includes(req.query.ticketStatus)
+    ? req.query.ticketStatus
+    : undefined;
+  const result = await assignmentRepository.getPipelineRuns(req.workspaceId, { limit, offset, status, decision, since, sinceField, decisions: decisionsArr, ticketStatus });
   res.json({ success: true, ...result });
 }));
 

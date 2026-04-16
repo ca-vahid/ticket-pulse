@@ -4,6 +4,36 @@ import { DatabaseError, NotFoundError } from '../utils/errors.js';
 
 const STALE_RUNNING_MINUTES = 30;
 
+// Ticket status group → list of values stored in tickets.status. The values come from the
+// FreshService transformer (string labels) and may also appear as numeric codes in legacy rows.
+const TICKET_STATUS_GROUPS = {
+  in_progress: ['Open', 'open', '2'],
+  pending: ['Pending', 'pending', '3'],
+  closed_resolved: ['Closed', 'closed', '5', 'Resolved', 'resolved', '4'],
+  deleted: ['Deleted', 'deleted', 'Spam', 'spam'],
+};
+
+const NON_DELETED_STATUSES = [
+  ...TICKET_STATUS_GROUPS.in_progress,
+  ...TICKET_STATUS_GROUPS.pending,
+  ...TICKET_STATUS_GROUPS.closed_resolved,
+];
+
+/**
+ * Build a Prisma `ticket` filter clause from a ticketStatus enum value.
+ * Returns an object suitable for spreading into a where clause, or {} for 'all' (excludes deleted).
+ */
+function buildTicketStatusFilter(ticketStatus) {
+  if (!ticketStatus || ticketStatus === 'all') {
+    // 'all' = any non-deleted ticket
+    return { ticket: { is: { status: { in: NON_DELETED_STATUSES } } } };
+  }
+  if (TICKET_STATUS_GROUPS[ticketStatus]) {
+    return { ticket: { is: { status: { in: TICKET_STATUS_GROUPS[ticketStatus] } } } };
+  }
+  return {};
+}
+
 class AssignmentRepository {
   // ─── Assignment Config ────────────────────────────────────────────────
 
@@ -121,24 +151,31 @@ class AssignmentRepository {
     }
   }
 
-  async getPendingQueue(workspaceId, { limit = 50, offset = 0, assignmentStatus = 'all' } = {}) {
+  async getPendingQueue(workspaceId, { limit = 50, offset = 0, assignmentStatus = 'all', ticketStatus = 'all' } = {}) {
     try {
       await this.sweepStaleRunningRuns(workspaceId);
 
-      const baseWhere = { workspaceId, decision: 'pending_review', status: 'completed' };
+      // Base query: pipeline runs awaiting review (excluding deleted tickets, which live on the Deleted tab).
+      const baseTicketFilter = buildTicketStatusFilter('all'); // 'all' = excludes deleted
+      const baseWhere = { workspaceId, decision: 'pending_review', status: 'completed', ...baseTicketFilter };
 
-      // Build filtered where-clause based on assignment state of the underlying ticket.
-      // - unassigned: ticket has no assignee (truly awaiting review/action)
-      // - outside_assigned: pipeline still pending, but ticket already assigned in FreshService (bypassed pipeline)
-      // - all: everything (default)
-      let itemsWhere = baseWhere;
+      // Apply ticket-status filter for the items we return (used by secondary status pills).
+      const ticketStatusFilter = buildTicketStatusFilter(ticketStatus);
+      const ticketStatusWhere = ticketStatus === 'all' ? baseTicketFilter : ticketStatusFilter;
+
+      // Apply assignment-state filter (unassigned vs outside_assigned vs all)
+      let assignmentClause = {};
       if (assignmentStatus === 'unassigned') {
-        itemsWhere = { ...baseWhere, ticket: { is: { assignedTechId: null } } };
+        assignmentClause = { ticket: { is: { ...ticketStatusWhere.ticket.is, assignedTechId: null } } };
       } else if (assignmentStatus === 'outside_assigned') {
-        itemsWhere = { ...baseWhere, ticket: { is: { assignedTechId: { not: null } } } };
+        assignmentClause = { ticket: { is: { ...ticketStatusWhere.ticket.is, assignedTechId: { not: null } } } };
+      } else {
+        assignmentClause = ticketStatusWhere;
       }
 
-      const [items, total, totalUnassigned, totalOutsideAssigned] = await Promise.all([
+      const itemsWhere = { workspaceId, decision: 'pending_review', status: 'completed', ...assignmentClause };
+
+      const [items, totalAll, totalUnassigned, totalOutsideAssigned, filteredTotal] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({
           where: itemsWhere,
           include: {
@@ -165,23 +202,19 @@ class AssignmentRepository {
         }),
         prisma.assignmentPipelineRun.count({ where: baseWhere }),
         prisma.assignmentPipelineRun.count({
-          where: { ...baseWhere, ticket: { is: { assignedTechId: null } } },
+          where: { ...baseWhere, ticket: { is: { ...baseTicketFilter.ticket.is, assignedTechId: null } } },
         }),
         prisma.assignmentPipelineRun.count({
-          where: { ...baseWhere, ticket: { is: { assignedTechId: { not: null } } } },
+          where: { ...baseWhere, ticket: { is: { ...baseTicketFilter.ticket.is, assignedTechId: { not: null } } } },
         }),
+        prisma.assignmentPipelineRun.count({ where: itemsWhere }),
       ]);
-
-      // filteredTotal is the count matching the filter (used for pagination)
-      let filteredTotal = total;
-      if (assignmentStatus === 'unassigned') filteredTotal = totalUnassigned;
-      else if (assignmentStatus === 'outside_assigned') filteredTotal = totalOutsideAssigned;
 
       return {
         items,
         total: filteredTotal,
         totals: {
-          all: total,
+          all: totalAll,
           unassigned: totalUnassigned,
           outsideAssigned: totalOutsideAssigned,
         },
@@ -192,7 +225,7 @@ class AssignmentRepository {
     }
   }
 
-  async getPipelineRuns(workspaceId, { limit = 50, offset = 0, status, decision, since, sinceField, decisions } = {}) {
+  async getPipelineRuns(workspaceId, { limit = 50, offset = 0, status, decision, since, sinceField, decisions, ticketStatus } = {}) {
     try {
       await this.sweepStaleRunningRuns(workspaceId);
       const where = { workspaceId };
@@ -203,6 +236,9 @@ class AssignmentRepository {
         const field = sinceField === 'decidedAt' ? 'decidedAt' : 'createdAt';
         where[field] = { gte: new Date(since) };
       }
+      // Apply ticket-status filter (defaults to excluding deleted tickets when not specified)
+      const ticketFilter = buildTicketStatusFilter(ticketStatus);
+      if (ticketFilter.ticket) where.ticket = ticketFilter.ticket;
 
       const [items, total] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({
