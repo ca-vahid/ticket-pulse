@@ -151,13 +151,19 @@ class AssignmentRepository {
     }
   }
 
-  async getPendingQueue(workspaceId, { limit = 50, offset = 0, assignmentStatus = 'all', ticketStatus = 'all' } = {}) {
+  async getPendingQueue(workspaceId, { limit = 50, offset = 0, assignmentStatus = 'all', ticketStatus = 'all', since, sinceField } = {}) {
     try {
       await this.sweepStaleRunningRuns(workspaceId);
 
       // Base query: pipeline runs awaiting review (excluding deleted tickets, which live on the Deleted tab).
       const baseTicketFilter = buildTicketStatusFilter('all'); // 'all' = excludes deleted
       const baseWhere = { workspaceId, decision: 'pending_review', status: 'completed', ...baseTicketFilter };
+
+      // Apply time-range filter (used by the 24h / 7d / 30d / All toggle)
+      if (since) {
+        const field = sinceField === 'decidedAt' ? 'decidedAt' : 'createdAt';
+        baseWhere[field] = { gte: new Date(since) };
+      }
 
       // Apply ticket-status filter for the items we return (used by secondary status pills).
       const ticketStatusFilter = buildTicketStatusFilter(ticketStatus);

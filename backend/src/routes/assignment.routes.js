@@ -213,7 +213,8 @@ router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
   const ticketStatus = ['all', 'in_progress', 'pending', 'closed_resolved', 'deleted'].includes(req.query.ticketStatus)
     ? req.query.ticketStatus
     : 'all';
-  const result = await assignmentRepository.getPendingQueue(req.workspaceId, { limit, offset, assignmentStatus, ticketStatus });
+  const { since, sinceField } = req.query;
+  const result = await assignmentRepository.getPendingQueue(req.workspaceId, { limit, offset, assignmentStatus, ticketStatus, since, sinceField });
   res.json({ success: true, ...result });
 }));
 
