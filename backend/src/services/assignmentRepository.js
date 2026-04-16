@@ -13,6 +13,12 @@ const TICKET_STATUS_GROUPS = {
   deleted: ['Deleted', 'deleted', 'Spam', 'spam'],
 };
 
+// 'active' = anything actionable (open or paused, but not closed/resolved/deleted)
+TICKET_STATUS_GROUPS.active = [
+  ...TICKET_STATUS_GROUPS.in_progress,
+  ...TICKET_STATUS_GROUPS.pending,
+];
+
 const NON_DELETED_STATUSES = [
   ...TICKET_STATUS_GROUPS.in_progress,
   ...TICKET_STATUS_GROUPS.pending,
@@ -181,6 +187,12 @@ class AssignmentRepository {
 
       const itemsWhere = { workspaceId, decision: 'pending_review', status: 'completed', ...assignmentClause };
 
+      // For the Awaiting Review tab count, restrict to ACTIVE tickets (open or pending) - excludes
+      // closed/resolved tickets that are technically still in our pending_review queue but no
+      // longer actionable. The user only wants "things truly waiting on me to decide".
+      const activeTicketFilter = buildTicketStatusFilter('active');
+      const baseActiveWhere = { ...baseWhere, ticket: { is: { ...activeTicketFilter.ticket.is } } };
+
       const [items, totalAll, totalUnassigned, totalOutsideAssigned, filteredTotal] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({
           where: itemsWhere,
@@ -208,7 +220,7 @@ class AssignmentRepository {
         }),
         prisma.assignmentPipelineRun.count({ where: baseWhere }),
         prisma.assignmentPipelineRun.count({
-          where: { ...baseWhere, ticket: { is: { ...baseTicketFilter.ticket.is, assignedTechId: null } } },
+          where: { ...baseActiveWhere, ticket: { is: { ...activeTicketFilter.ticket.is, assignedTechId: null } } },
         }),
         prisma.assignmentPipelineRun.count({
           where: { ...baseWhere, ticket: { is: { ...baseTicketFilter.ticket.is, assignedTechId: { not: null } } } },

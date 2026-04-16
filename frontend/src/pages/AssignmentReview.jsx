@@ -330,9 +330,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         }
       }
       const since = getSince(timeRange);
-      // Awaiting Review: always shows ALL non-deleted unassigned items (no secondary filter).
-      // Assigned/Dismissed/Rejected: apply the active secondary status filter when viewing that tab.
-      const pendingTicketStatus = 'all';
+      // Awaiting Review: only ACTIVE tickets (open or pending status) - excludes closed/resolved/deleted.
+      // These are the only tickets that genuinely need a review decision.
+      const pendingTicketStatus = 'active';
       const assignedTicketStatus = subView === 'assigned' ? ticketStatusFilter : 'in_progress';
       const dismissedTicketStatus = subView === 'dismissed' ? ticketStatusFilter : 'all';
       const rejectedTicketStatus = subView === 'rejected' ? ticketStatusFilter : 'all';
@@ -1051,28 +1051,38 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       <div className="border border-slate-200 rounded-lg">
         <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2 rounded-t-lg">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-            {/* Queue (decision) scope */}
-            <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-200/90 p-0.5 ring-1 ring-slate-300/40 shadow-sm">
+            {/* Primary tabs — modern segmented control with subtle elevation on active */}
+            <div className="inline-flex items-center gap-0.5 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/60">
               {[
-                { id: 'pending', label: 'Awaiting Review', count: queue.totals?.unassigned ?? 0, dot: 'bg-yellow-400' },
-                { id: 'assigned', label: 'Assigned', count: assignedTotal, dot: 'bg-green-400' },
-                { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400' },
-                { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-red-400' },
-                { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500' },
-                { id: 'all', label: 'All', count: null, dot: null },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => {
-                    setSubView(tab.id);
-                    setAssignedFilter('all');
-                  }}
-                  className={`rounded-md px-2 py-1 text-[11px] font-medium transition-all duration-150 touch-manipulation flex items-center gap-1 sm:px-2.5 ${subView === tab.id ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80' : 'text-slate-600 hover:text-slate-800 hover:bg-white/40'}`}
-                >
-                  {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot}`} />}
-                  {tab.label}{tab.count != null ? ` (${tab.count})` : ''}
-                </button>
-              ))}
+                { id: 'pending', label: 'Awaiting Review', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
+                { id: 'assigned', label: 'Assigned', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
+                { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400', activeRing: 'ring-slate-200' },
+                { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-rose-400', activeRing: 'ring-rose-200' },
+                { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500', activeRing: 'ring-red-200' },
+                { id: 'all', label: 'All', count: null, dot: null, activeRing: 'ring-slate-200' },
+              ].map((tab) => {
+                const isActive = subView === tab.id;
+                const isZero = tab.count === 0;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => { setSubView(tab.id); setAssignedFilter('all'); }}
+                    className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
+                      isActive
+                        ? `bg-white text-slate-900 shadow-sm ring-1 ${tab.activeRing}`
+                        : `${isZero ? 'text-slate-400' : 'text-slate-600'} hover:text-slate-900 hover:bg-white/70`
+                    }`}
+                  >
+                    {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot} ${isZero && !isActive ? 'opacity-40' : ''}`} />}
+                    <span>{tab.label}</span>
+                    {tab.count != null && (
+                      <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-slate-500' : isZero ? 'text-slate-300' : 'text-slate-400'}`}>
+                        {tab.count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Drilldown filter for Assigned view: All | Via Pipeline | Manually in FreshService */}
@@ -1100,6 +1110,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     </button>
                   ))}
                 </div>
+                {differentAgentCount > 0 && assignedFilter !== 'manually_in_fs' && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-blue-200"
+                    title="Pipeline runs where the final assignee differed from the AI's top recommendation"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                    {differentAgentCount} different agent chosen
+                  </span>
+                )}
               </>
             )}
 
@@ -1205,33 +1224,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 {clearing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                 {clearing ? 'Deleting...' : 'Yes, delete all'}
               </button>
-            </div>
-          </div>
-        )}
-
-        {/* Pipeline quality stats - shown on Assigned view (right where these metrics matter most) */}
-        {subView === 'assigned' && assignedTotal > 0 && (
-          <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-3 sm:px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Via pipeline</span>
-              <span className="text-[12px] font-bold text-emerald-700 tabular-nums">{assignedRuns.total}</span>
-            </div>
-            <div className="h-3 w-px bg-slate-200 hidden sm:block" aria-hidden />
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Manually in FreshService</span>
-              <span className={`text-[12px] font-bold tabular-nums ${outsideAssignedRuns.total > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
-                {outsideAssignedRuns.total}
-              </span>
-            </div>
-            <div className="h-3 w-px bg-slate-200 hidden sm:block" aria-hidden />
-            <div
-              className="flex items-center gap-1.5"
-              title="Pipeline runs where the final assignee differed from the AI's top recommendation (of the current Via Pipeline page)"
-            >
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Different agent chosen</span>
-              <span className={`text-[12px] font-bold tabular-nums ${differentAgentCount > 0 ? 'text-blue-700' : 'text-slate-500'}`}>
-                {differentAgentCount}
-              </span>
             </div>
           </div>
         )}
