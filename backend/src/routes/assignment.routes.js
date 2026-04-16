@@ -207,7 +207,10 @@ router.post('/runs/:id/run-now', requireAdmin, asyncHandler(async (req, res) => 
 router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
-  const result = await assignmentRepository.getPendingQueue(req.workspaceId, { limit, offset });
+  const assignmentStatus = ['unassigned', 'outside_assigned', 'all'].includes(req.query.assignmentStatus)
+    ? req.query.assignmentStatus
+    : 'all';
+  const result = await assignmentRepository.getPendingQueue(req.workspaceId, { limit, offset, assignmentStatus });
   res.json({ success: true, ...result });
 }));
 

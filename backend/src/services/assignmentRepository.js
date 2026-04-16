@@ -121,12 +121,26 @@ class AssignmentRepository {
     }
   }
 
-  async getPendingQueue(workspaceId, { limit = 50, offset = 0 } = {}) {
+  async getPendingQueue(workspaceId, { limit = 50, offset = 0, assignmentStatus = 'all' } = {}) {
     try {
       await this.sweepStaleRunningRuns(workspaceId);
-      const [items, total] = await Promise.all([
+
+      const baseWhere = { workspaceId, decision: 'pending_review', status: 'completed' };
+
+      // Build filtered where-clause based on assignment state of the underlying ticket.
+      // - unassigned: ticket has no assignee (truly awaiting review/action)
+      // - outside_assigned: pipeline still pending, but ticket already assigned in FreshService (bypassed pipeline)
+      // - all: everything (default)
+      let itemsWhere = baseWhere;
+      if (assignmentStatus === 'unassigned') {
+        itemsWhere = { ...baseWhere, ticket: { is: { assignedTechId: null } } };
+      } else if (assignmentStatus === 'outside_assigned') {
+        itemsWhere = { ...baseWhere, ticket: { is: { assignedTechId: { not: null } } } };
+      }
+
+      const [items, total, totalUnassigned, totalOutsideAssigned] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({
-          where: { workspaceId, decision: 'pending_review', status: 'completed' },
+          where: itemsWhere,
           include: {
             ticket: {
               select: {
@@ -149,11 +163,29 @@ class AssignmentRepository {
           take: limit,
           skip: offset,
         }),
+        prisma.assignmentPipelineRun.count({ where: baseWhere }),
         prisma.assignmentPipelineRun.count({
-          where: { workspaceId, decision: 'pending_review', status: 'completed' },
+          where: { ...baseWhere, ticket: { is: { assignedTechId: null } } },
+        }),
+        prisma.assignmentPipelineRun.count({
+          where: { ...baseWhere, ticket: { is: { assignedTechId: { not: null } } } },
         }),
       ]);
-      return { items, total };
+
+      // filteredTotal is the count matching the filter (used for pagination)
+      let filteredTotal = total;
+      if (assignmentStatus === 'unassigned') filteredTotal = totalUnassigned;
+      else if (assignmentStatus === 'outside_assigned') filteredTotal = totalOutsideAssigned;
+
+      return {
+        items,
+        total: filteredTotal,
+        totals: {
+          all: total,
+          unassigned: totalUnassigned,
+          outsideAssigned: totalOutsideAssigned,
+        },
+      };
     } catch (error) {
       logger.error('Error fetching pending queue:', error);
       throw new DatabaseError('Failed to fetch pending queue', error);

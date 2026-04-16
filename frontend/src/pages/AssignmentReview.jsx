@@ -254,7 +254,9 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
 
 function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const navigate = useNavigate();
-  const [queue, setQueue] = useState({ items: [], total: 0 });
+  const [queue, setQueue] = useState({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 } });
+  const [outsideAssignedRuns, setOutsideAssignedRuns] = useState({ items: [], total: 0 });
+  const [assignedFilter, setAssignedFilter] = useState('all'); // 'all' | 'by_app' | 'outside_app'
   const [assignedRuns, setAssignedRuns] = useState({ items: [], total: 0 });
   const [queuedRuns, setQueuedRuns] = useState([]);
   const [selectedRun, setSelectedRun] = useState(null);
@@ -279,6 +281,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [removingIds, setRemovingIds] = useState(new Set());
   const [newIds, setNewIds] = useState(new Set());
   const seenIdsRef = useRef(null);
+  const newIdsInitializedRef = useRef(false);
+  const [queuePage, setQueuePage] = useState(0);
+  const queuePageSize = 50;
 
   const animateOut = useCallback((runId) => {
     setRemovingIds(prev => new Set([...prev, runId]));
@@ -286,6 +291,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       setQueue(prev => ({
         items: prev.items.filter(r => r.id !== runId),
         total: Math.max(0, prev.total - 1),
+        totals: {
+          all: Math.max(0, (prev.totals?.all ?? prev.total) - 1),
+          unassigned: Math.max(0, (prev.totals?.unassigned ?? 0) - 1),
+          outsideAssigned: prev.totals?.outsideAssigned ?? 0,
+        },
       }));
       setRemovingIds(prev => { const s = new Set(prev); s.delete(runId); return s; });
     }, 240);
@@ -319,15 +329,26 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         }
       }
       const since = getSince(timeRange);
-      const [queueRes, assignedRes, dismissedRes, rejectedRes, queuedRes, statusRes] = await Promise.all([
-        assignmentAPI.getQueue(),
+      // Pending queue: only fetch truly-unassigned (paginated). Totals come back for all buckets.
+      const [queueRes, outsideRes, assignedRes, dismissedRes, rejectedRes, queuedRes, statusRes] = await Promise.all([
+        assignmentAPI.getQueue({
+          limit: queuePageSize,
+          offset: queuePage * queuePageSize,
+          assignmentStatus: 'unassigned',
+        }),
+        assignmentAPI.getQueue({ limit: 100, offset: 0, assignmentStatus: 'outside_assigned' }),
         assignmentAPI.getRuns({ decisions: 'approved,modified,auto_assigned', since, sinceField: 'decidedAt', limit: 50 }),
         assignmentAPI.getRuns({ decisions: 'noise_dismissed', since, sinceField: 'decidedAt', limit: 50 }),
         assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: 50 }),
         assignmentAPI.getQueuedRuns(),
         assignmentAPI.getQueueStatus().catch(() => null),
       ]);
-      setQueue({ items: queueRes?.items || [], total: queueRes?.total || 0 });
+      setQueue({
+        items: queueRes?.items || [],
+        total: queueRes?.total || 0,
+        totals: queueRes?.totals || { all: 0, unassigned: 0, outsideAssigned: 0 },
+      });
+      setOutsideAssignedRuns({ items: outsideRes?.items || [], total: outsideRes?.total || 0 });
       setAssignedRuns({ items: assignedRes?.items || [], total: assignedRes?.total || 0 });
       setDismissedRuns({ items: dismissedRes?.items || [], total: dismissedRes?.total || 0 });
       setRejectedRuns({ items: rejectedRes?.items || [], total: rejectedRes?.total || 0 });
@@ -336,7 +357,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       hasLoadedOnce.current = true;
     } catch {
       if (!silent) {
-        setQueue({ items: [], total: 0 });
+        setQueue({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 } });
+        setOutsideAssignedRuns({ items: [], total: 0 });
         setAssignedRuns({ items: [], total: 0 });
         setDismissedRuns({ items: [], total: 0 });
         setRejectedRuns({ items: [], total: 0 });
@@ -348,7 +370,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         setRefreshing(false);
       }
     }
-  }, [timeRange]);
+  }, [timeRange, queuePage]);
 
   const handleSmartRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -363,17 +385,23 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
 
-  // Detect new items arriving via silent polls
+  // Detect genuinely new items arriving via silent polls (not on initial load).
+  // We only start diffing AFTER the first non-empty load has been recorded, so
+  // switching tabs or a fresh page load never triggers a "new tickets" toast.
   useEffect(() => {
+    if (queue.items.length === 0) return;
     const currentIds = new Set(queue.items.map(r => r.id));
-    if (seenIdsRef.current === null) {
-      // First load — just record what's here, don't highlight anything
+
+    if (!newIdsInitializedRef.current) {
       seenIdsRef.current = currentIds;
+      newIdsInitializedRef.current = true;
       return;
     }
+
     const added = queue.items.filter(r => !seenIdsRef.current.has(r.id)).map(r => r.id);
     seenIdsRef.current = currentIds;
     if (added.length === 0) return;
+
     setNewIds(prev => new Set([...prev, ...added]));
     const timer = setTimeout(() => {
       setNewIds(prev => {
@@ -384,6 +412,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     }, 6000);
     return () => clearTimeout(timer);
   }, [queue.items]);
+
+  // Reset the "new items" tracker when pagination changes so page-flips don't flash items as new
+  useEffect(() => {
+    newIdsInitializedRef.current = false;
+    seenIdsRef.current = null;
+    setNewIds(new Set());
+  }, [queuePage]);
 
   // Auto-poll every 30 seconds (matches backend sync interval)
   useEffect(() => {
@@ -615,9 +650,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const filteredItems = [...queue.items]
     .filter((r) => filterPriority === 'all' || String(r.ticket?.priority) === filterPriority)
     .filter((r) => {
+      // Note: queue.items from the backend is already unassigned-only.
+      // The secondary filter only narrows by ticket status (open/closed/deleted).
       if (filterTicketStatus === 'all') return true;
-      if (filterTicketStatus === 'open') return isTicketOpen(r) && isTicketUnassigned(r);
-      if (filterTicketStatus === 'assigned') return isTicketOpen(r) && !isTicketUnassigned(r);
+      if (filterTicketStatus === 'open') return isTicketOpen(r);
       if (filterTicketStatus === 'closed') return !isTicketOpen(r) && !isTicketDeleted(r);
       if (filterTicketStatus === 'deleted') return isTicketDeleted(r);
       return true;
@@ -647,13 +683,33 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     return status;
   };
 
+  // Pending stats reflect the backend totals (not just current page)
   const pendingStats = {
-    total: queue.items.length,
+    total: queue.totals?.unassigned ?? queue.items.length,
     open: queue.items.filter((r) => isTicketOpen(r) && isTicketUnassigned(r)).length,
-    assigned: queue.items.filter((r) => isTicketOpen(r) && !isTicketUnassigned(r)).length,
     closed: queue.items.filter((r) => !isTicketOpen(r) && !isTicketDeleted(r)).length,
     deleted: queue.items.filter((r) => isTicketDeleted(r)).length,
   };
+
+  // Heuristic: was a "different agent" (not the AI's top suggestion) chosen?
+  const wasDifferentAgentChosen = (run) => {
+    const topTechId = run.recommendation?.recommendations?.[0]?.techId;
+    const finalTechId = run.assignedTech?.id || run.ticket?.assignedTech?.id || run.ticket?.assignedTechId;
+    if (!topTechId || !finalTechId) return false;
+    return Number(topTechId) !== Number(finalTechId);
+  };
+
+  // Combined "Assigned" view: pipeline-assigned runs + outside-pipeline-assigned runs (tickets that
+  // got an assignee in FreshService before the pipeline review was decided).
+  const assignedTotal = (assignedRuns?.total || 0) + (outsideAssignedRuns?.total || 0);
+  const combinedAssignedItems = (() => {
+    const byApp = (assignedRuns?.items || []).map(r => ({ ...r, _source: 'by_app' }));
+    const outside = (outsideAssignedRuns?.items || []).map(r => ({ ...r, _source: 'outside_app' }));
+    if (assignedFilter === 'by_app') return byApp;
+    if (assignedFilter === 'outside_app') return outside;
+    return [...byApp, ...outside].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  })();
+  const differentAgentCount = (assignedRuns?.items || []).filter(wasDifferentAgentChosen).length;
 
   const TechAvatar = ({ techId, name, size = 'sm', ring = '' }) => {
     const tech = techPhotos[techId];
@@ -751,10 +807,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   const activeItems = (() => {
     if (subView === 'pending') return filteredItems;
-    if (subView === 'assigned') return assignedRuns.items;
+    if (subView === 'assigned') return combinedAssignedItems;
     if (subView === 'dismissed') return dismissedRuns.items;
     if (subView === 'rejected') return rejectedRuns.items;
-    return [...queue.items, ...assignedRuns.items, ...dismissedRuns.items, ...rejectedRuns.items]
+    return [...queue.items, ...combinedAssignedItems, ...dismissedRuns.items, ...rejectedRuns.items]
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   })();
   const showActions = subView === 'pending';
@@ -983,20 +1039,56 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             {/* Queue (decision) scope */}
             <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-200/90 p-0.5 ring-1 ring-slate-300/40 shadow-sm">
               {[
-                { id: 'pending', label: 'Pending', count: queue.total, dot: 'bg-yellow-400' },
-                { id: 'assigned', label: 'Assigned', count: assignedRuns.total, dot: 'bg-green-400' },
+                { id: 'pending', label: 'Pending', count: queue.totals?.unassigned ?? 0, dot: 'bg-yellow-400' },
+                { id: 'assigned', label: 'Assigned', count: assignedTotal, dot: 'bg-green-400' },
                 { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400' },
                 { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-red-400' },
                 { id: 'all', label: 'All', count: null, dot: null },
               ].filter((tab) => tab.id === 'pending' || tab.id === 'all' || tab.count > 0).map((tab) => (
-                <button key={tab.id} onClick={() => { setSubView(tab.id); setFilterTicketStatus('all'); }} className={`rounded-md px-2 py-1 text-[11px] font-medium transition-all touch-manipulation flex items-center gap-1 sm:px-2.5 ${subView === tab.id ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80' : 'text-slate-600 hover:text-slate-800'}`}>
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setSubView(tab.id);
+                    setFilterTicketStatus('all');
+                    setAssignedFilter('all');
+                  }}
+                  className={`rounded-md px-2 py-1 text-[11px] font-medium transition-all duration-150 touch-manipulation flex items-center gap-1 sm:px-2.5 ${subView === tab.id ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80' : 'text-slate-600 hover:text-slate-800 hover:bg-white/40'}`}
+                >
                   {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot}`} />}
                   {tab.label}{tab.count != null ? ` (${tab.count})` : ''}
                 </button>
               ))}
             </div>
 
-            {subView === 'pending' && pendingStats.total > 0 && (
+            {/* Drilldown filter for Assigned view: All | By app | Outside app */}
+            {subView === 'assigned' && assignedTotal > 0 && (
+              <>
+                <div className="hidden h-5 w-px shrink-0 bg-gradient-to-b from-transparent via-slate-300 to-transparent sm:block" aria-hidden />
+                <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-100/90 p-0.5 ring-1 ring-slate-200/60">
+                  {[
+                    { id: 'all', label: 'All', count: assignedTotal },
+                    { id: 'by_app', label: 'By app', count: assignedRuns.total, tint: 'text-emerald-700' },
+                    { id: 'outside_app', label: 'Outside app', count: outsideAssignedRuns.total, tint: 'text-amber-700' },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setAssignedFilter(f.id)}
+                      className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-all duration-150 touch-manipulation ${
+                        assignedFilter === f.id
+                          ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/70'
+                          : 'text-slate-600 hover:bg-white/60 hover:text-slate-800'
+                      }`}
+                    >
+                      {f.label}
+                      <span className={assignedFilter === f.id ? 'text-slate-700' : (f.tint || '')}> ({f.count})</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {subView === 'pending' && (pendingStats.closed > 0 || pendingStats.deleted > 0) && (
               <>
                 <div className="hidden h-5 w-px shrink-0 bg-gradient-to-b from-transparent via-slate-300 to-transparent sm:block" aria-hidden />
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -1004,8 +1096,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-100/90 p-0.5 ring-1 ring-slate-200/60">
                     {[
                       { id: 'all', label: 'All', count: pendingStats.total, tint: '' },
-                      { id: 'open', label: 'Unassigned', count: pendingStats.open, tint: 'text-emerald-700' },
-                      { id: 'assigned', label: 'Assigned', count: pendingStats.assigned, tint: 'text-amber-800' },
+                      { id: 'open', label: 'Open', count: pendingStats.open, tint: 'text-emerald-700' },
                       { id: 'closed', label: 'Closed', count: pendingStats.closed, tint: 'text-slate-600' },
                       { id: 'deleted', label: 'Deleted', count: pendingStats.deleted, tint: 'text-red-600' },
                     ].filter((f) => f.id === 'all' || f.count > 0).map((f) => (
@@ -1013,7 +1104,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                         key={f.id}
                         type="button"
                         onClick={() => setFilterTicketStatus(f.id)}
-                        className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-all touch-manipulation ${
+                        className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-all duration-150 touch-manipulation ${
                           filterTicketStatus === f.id
                             ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/70'
                             : 'text-slate-600 hover:bg-white/60 hover:text-slate-800'
@@ -1058,7 +1149,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 <option value="1">Low</option>
               </select>
 
-              {subView === 'pending' && queue.total > 0 && isAdmin && (
+              {subView === 'pending' && (queue.totals?.all ?? queue.total) > 0 && isAdmin && (
                 <button type="button" onClick={() => setShowClearConfirm(true)} className="flex touch-manipulation items-center gap-1 rounded border border-red-200 px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 hover:text-red-700">
                   <Trash2 className="h-3 w-3" /> Delete all
                 </button>
@@ -1087,7 +1178,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center gap-3 flex-wrap">
             <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
             <p className="text-sm text-red-800 flex-1 min-w-0">
-              Delete all <strong>{queue.total}</strong> pending reviews? This permanently removes these pipeline runs from Ticket Pulse and does not change the FreshService tickets.
+              Delete all <strong>{queue.totals?.all ?? queue.total}</strong> pending reviews? This permanently removes these pipeline runs from Ticket Pulse and does not change the FreshService tickets.
             </p>
             <div className="flex items-center gap-2">
               <button
@@ -1108,10 +1199,47 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         )}
 
-        {/* Refreshing indicator */}
+        {/* Pipeline quality stats panel - shown on Pending view */}
+        {subView === 'pending' && (
+          <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Awaiting review</span>
+              <span className="text-[13px] font-bold text-slate-800 tabular-nums">{queue.totals?.unassigned ?? 0}</span>
+            </div>
+            <div className="h-4 w-px bg-slate-200 hidden sm:block" aria-hidden />
+            <button
+              type="button"
+              onClick={() => { setSubView('assigned'); setAssignedFilter('outside_app'); }}
+              className="flex items-center gap-1.5 group transition-colors"
+              title="View tickets assigned in FreshService without waiting for pipeline review"
+            >
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold group-hover:text-slate-600 transition-colors">Assigned outside pipeline</span>
+              <span className={`text-[13px] font-bold tabular-nums transition-colors ${(queue.totals?.outsideAssigned ?? 0) > 0 ? 'text-amber-700 group-hover:text-amber-800' : 'text-slate-500'}`}>
+                {queue.totals?.outsideAssigned ?? 0}
+              </span>
+            </button>
+            <div className="h-4 w-px bg-slate-200 hidden sm:block" aria-hidden />
+            <button
+              type="button"
+              onClick={() => { setSubView('assigned'); setAssignedFilter('by_app'); }}
+              className="flex items-center gap-1.5 group transition-colors"
+              title="Pipeline runs where the final assignee differed from the AI's top recommendation"
+            >
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold group-hover:text-slate-600 transition-colors">Different agent chosen</span>
+              <span className={`text-[13px] font-bold tabular-nums transition-colors ${differentAgentCount > 0 ? 'text-blue-700 group-hover:text-blue-800' : 'text-slate-500'}`}>
+                {differentAgentCount}
+              </span>
+            </button>
+          </div>
+        )}
+
+        {/* Refreshing indicator - floating, doesn't reflow content */}
         {refreshing && (
-          <div className="bg-blue-50 border-b border-blue-100 px-3 py-1 flex items-center gap-2 text-[11px] text-blue-600">
-            <Loader2 className="w-3 h-3 animate-spin" /> Syncing with FreshService...
+          <div className="pointer-events-none fixed top-4 right-4 z-[150] animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="pointer-events-auto bg-blue-50/95 border border-blue-200 rounded-full px-3 py-1.5 flex items-center gap-2 text-[11px] text-blue-700 font-medium shadow-lg backdrop-blur-sm">
+              <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />
+              Syncing with FreshService…
+            </div>
           </div>
         )}
 
@@ -1125,7 +1253,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         )}
 
-        {/* List content */}
+        {/* List content - key triggers a subtle fade-in on tab/filter/page change */}
+        <div key={`${subView}-${assignedFilter}-${queuePage}-${filterTicketStatus}`} className="animate-in fade-in duration-150">
         {activeItems.length === 0 ? (
           <div className="text-center py-10">
             <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
@@ -1281,6 +1410,41 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               </tbody>
             </table>
           </>
+        )}
+        </div>
+
+        {/* Pagination controls for pending queue */}
+        {subView === 'pending' && queue.total > queuePageSize && (
+          <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/50 px-4 py-2.5 animate-in fade-in duration-150">
+            <span className="text-[11px] text-slate-500">
+              Showing {queuePage * queuePageSize + 1}–{Math.min((queuePage + 1) * queuePageSize, queue.total)} of {queue.total}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setQueuePage(p => Math.max(0, p - 1))}
+                disabled={queuePage === 0}
+                className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Previous
+              </button>
+              {Array.from({ length: Math.ceil(queue.total / queuePageSize) }, (_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setQueuePage(i)}
+                  className={`w-7 h-7 text-[11px] font-medium rounded border transition-colors ${i === queuePage ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                >
+                  {i + 1}
+                </button>
+              ))}
+              <button
+                onClick={() => setQueuePage(p => Math.min(Math.ceil(queue.total / queuePageSize) - 1, p + 1))}
+                disabled={queuePage >= Math.ceil(queue.total / queuePageSize) - 1}
+                className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
