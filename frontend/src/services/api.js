@@ -152,9 +152,20 @@ export const dashboardAPI = {
     return await api.get(`/dashboard/technician/${id}`, { params: applyNoiseParam(params) });
   },
 
-  /** Fetch the list of tickets this tech has bounced (rejected back to the queue). */
-  getTechnicianBounced: async (id, window = '7d') => {
-    return await api.get(`/dashboard/technician/${id}/bounced`, { params: { window } });
+  /**
+   * Fetch the list of tickets this tech has bounced (rejected back to the queue).
+   * Accepts either a preset window ('7d' | '30d' | 'all') OR a custom date
+   * range via { start, end } (YYYY-MM-DD strings). Custom range takes precedence.
+   */
+  getTechnicianBounced: async (id, { window = '7d', start, end } = {}) => {
+    const params = {};
+    if (start && end) {
+      params.start = start;
+      params.end = end;
+    } else {
+      params.window = window;
+    }
+    return await api.get(`/dashboard/technician/${id}/bounced`, { params });
   },
 
   /** Fetch a ticket's full ownership timeline (episodes + FS events). */

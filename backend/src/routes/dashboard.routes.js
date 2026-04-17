@@ -1022,12 +1022,18 @@ router.get(
  * GET /api/dashboard/technician/:id/bounced
  * Return tickets this technician picked up and then rejected back to the queue.
  * Query params:
+ *   - start=YYYY-MM-DD & end=YYYY-MM-DD: custom date range (inclusive).
+ *     When both provided, overrides window. Used for deep-linking from
+ *     the dashboard Rej badge (e.g. "only show rejections on Apr 17").
  *   - window: '7d' | '30d' | 'all' (default '7d')
+ *   - timezone: IANA TZ for interpreting start/end (default America/Los_Angeles)
  */
 router.get(
   '/technician/:id/bounced',
   asyncHandler(async (req, res) => {
     const techId = parseInt(req.params.id, 10);
+    const { start, end } = req.query;
+    const timezone = req.query.timezone || 'America/Los_Angeles';
     const window = req.query.window === '30d' || req.query.window === 'all' ? req.query.window : '7d';
 
     const where = {
@@ -1035,7 +1041,17 @@ router.get(
       workspaceId: req.workspaceId,
       endMethod: 'rejected',
     };
-    if (window !== 'all') {
+
+    // Custom date range takes precedence over window presets
+    if (start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      const [sy, sm, sd] = start.split('-').map(Number);
+      const [ey, em, ed] = end.split('-').map(Number);
+      const startDate = new Date(sy, sm - 1, sd, 12, 0, 0);
+      const endDate = new Date(ey, em - 1, ed, 12, 0, 0);
+      const { start: rangeStart } = getTodayRange(timezone, startDate);
+      const { end: rangeEnd } = getTodayRange(timezone, endDate);
+      where.endedAt = { gte: rangeStart, lte: rangeEnd };
+    } else if (window !== 'all') {
       const daysAgo = window === '30d' ? 30 : 7;
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - daysAgo);
@@ -1071,7 +1087,15 @@ router.get(
       ticket: r.ticket ? { ...r.ticket, freshserviceTicketId: r.ticket.freshserviceTicketId?.toString() } : null,
     }));
 
-    res.json({ success: true, data: { window, rejections: rows } });
+    res.json({
+      success: true,
+      data: {
+        window,
+        rangeStart: start || null,
+        rangeEnd: end || null,
+        rejections: rows,
+      },
+    });
   }),
 );
 

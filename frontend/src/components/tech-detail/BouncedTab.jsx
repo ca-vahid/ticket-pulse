@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { RotateCcw, ExternalLink, Clock, AlertTriangle, Loader2, User } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { FRESHSERVICE_DOMAIN } from './constants';
 
-const WINDOWS = [
+const PRESET_PILLS = [
   { id: '7d',  label: 'Last 7 days' },
   { id: '30d', label: 'Last 30 days' },
   { id: 'all', label: 'Lifetime' },
@@ -35,27 +36,86 @@ function durationBetween(start, end) {
   return `${Math.round(hrs / 24)}d`;
 }
 
+function formatShortDate(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatMonthLabel(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+/**
+ * Build a contextual pill from URL params — a deep-link from the dashboard
+ * Rej badge supplies range + start + end.
+ */
+function getContextualPill(search) {
+  const params = new URLSearchParams(search);
+  const range = params.get('range');
+  const start = params.get('start');
+  const end = params.get('end');
+  if (!range || !start || !end) return null;
+
+  if (range === 'day') {
+    return { id: 'custom-day', label: formatShortDate(start), start, end };
+  }
+  if (range === 'week') {
+    return { id: 'custom-week', label: `${formatShortDate(start)} – ${formatShortDate(end)}`, start, end };
+  }
+  if (range === 'month') {
+    return { id: 'custom-month', label: formatMonthLabel(start), start, end };
+  }
+  return null;
+}
+
 export default function BouncedTab({ technician }) {
-  const [window, setWindow] = useState('7d');
+  const location = useLocation();
+  const contextualPill = useMemo(() => getContextualPill(location.search), [location.search]);
+
+  // Default-select the contextual pill when the page was deep-linked
+  const [selectedId, setSelectedId] = useState(contextualPill?.id || '7d');
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (contextualPill && selectedId === '7d') {
+      setSelectedId(contextualPill.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextualPill?.id]);
+
+  useEffect(() => {
     if (!technician?.id) return;
     setLoading(true);
     setError(null);
-    dashboardAPI.getTechnicianBounced(technician.id, window)
+
+    const opts = {};
+    if (contextualPill && selectedId === contextualPill.id) {
+      opts.start = contextualPill.start;
+      opts.end = contextualPill.end;
+    } else {
+      opts.window = selectedId;
+    }
+
+    dashboardAPI.getTechnicianBounced(technician.id, opts)
       .then((res) => setRows(res?.data?.rejections || []))
       .catch((err) => setError(err.message || 'Failed to load bounced tickets'))
       .finally(() => setLoading(false));
-  }, [technician?.id, window]);
+  }, [technician?.id, selectedId, contextualPill]);
 
-  const counts = {
+  // Counts for the always-shown pills (7d/30d/all) come from the tech object
+  const staticCounts = {
     '7d': technician?.rejected7d || 0,
     '30d': technician?.rejected30d || 0,
     'all': technician?.rejectedLifetime || 0,
   };
+
+  // The contextual pill's count = rows.length when it's the selected pill (we
+  // just fetched exactly those rows). Otherwise show a neutral dash.
+  const contextualCount = selectedId === contextualPill?.id ? rows.length : null;
 
   return (
     <div className="space-y-4">
@@ -69,20 +129,37 @@ export default function BouncedTab({ technician }) {
             Tickets {technician?.name || 'this technician'} picked up and then put back in the queue.
           </p>
         </div>
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-          {WINDOWS.map((w) => (
+        <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
+          {contextualPill && (
             <button
-              key={w.id}
               type="button"
-              onClick={() => setWindow(w.id)}
+              onClick={() => setSelectedId(contextualPill.id)}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                window === w.id
+                selectedId === contextualPill.id
+                  ? 'bg-white text-slate-900 shadow-sm ring-1 ring-indigo-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Range carried over from the dashboard view"
+            >
+              {contextualPill.label}
+              {contextualCount != null && (
+                <span className="ml-1.5 text-[10px] text-slate-400">({contextualCount})</span>
+              )}
+            </button>
+          )}
+          {PRESET_PILLS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setSelectedId(p.id)}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                selectedId === p.id
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              {w.label}
-              <span className="ml-1.5 text-[10px] text-slate-400">({counts[w.id]})</span>
+              {p.label}
+              <span className="ml-1.5 text-[10px] text-slate-400">({staticCounts[p.id]})</span>
             </button>
           ))}
         </div>
@@ -107,7 +184,7 @@ export default function BouncedTab({ technician }) {
           <RotateCcw className="w-10 h-10 text-slate-300 mx-auto mb-2" />
           <p className="text-sm text-slate-500">No bounced tickets in this window.</p>
           <p className="text-xs text-slate-400 mt-0.5">
-            This tech hasn't picked up and rejected any tickets in the selected timeframe.
+            This tech hasn&apos;t picked up and rejected any tickets in the selected timeframe.
           </p>
         </div>
       )}

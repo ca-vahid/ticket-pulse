@@ -6,6 +6,37 @@ import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getL
 import { prefetchTechDetail } from '../hooks/usePrefetch';
 import ExpandableTicketList, { useGroupedTickets, getTicketsForView } from './ExpandableTicketList';
 
+/**
+ * Deep-link URL for the Bounced tab with a date range matching the current
+ * dashboard view. Mirrors the helper in TechCard.jsx.
+ */
+function buildBouncedUrl(techId, viewMode, selectedDate, selectedWeek, selectedMonth) {
+  const base = `/technician/${techId}?tab=bounced`;
+  const fmt = (d) => {
+    if (!d) return null;
+    const dt = typeof d === 'string' ? new Date(d) : d;
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  if (viewMode === 'weekly' && selectedWeek) {
+    const wk = typeof selectedWeek === 'string' ? new Date(selectedWeek) : selectedWeek;
+    const start = fmt(wk);
+    const endDt = new Date(wk);
+    endDt.setDate(endDt.getDate() + 6);
+    return `${base}&range=week&start=${start}&end=${fmt(endDt)}`;
+  }
+  if (viewMode === 'monthly' && selectedMonth) {
+    const m = typeof selectedMonth === 'string' ? new Date(selectedMonth) : selectedMonth;
+    const start = new Date(m.getFullYear(), m.getMonth(), 1);
+    const end = new Date(m.getFullYear(), m.getMonth() + 1, 0);
+    return `${base}&range=month&start=${fmt(start)}&end=${fmt(end)}`;
+  }
+  const date = fmt(selectedDate) || fmt(new Date());
+  return `${base}&range=day&start=${date}&end=${date}`;
+}
+
 // Extremely subtle row background color based on relative load level
 const getRowBackgroundColor = (openCount, maxOpenCount) => {
   if (openCount === 0) {
@@ -35,7 +66,7 @@ const getInitials = (name) => {
   return '??';
 };
 
-export default function TechCardCompact({ technician, onHide, rank, selectedDate, selectedWeek, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [], forceExpand = null }) {
+export default function TechCardCompact({ technician, onHide, rank, selectedDate, selectedWeek, selectedMonth, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [], forceExpand = null }) {
   const navigate = useNavigate();
   const [showAssignersPopup, setShowAssignersPopup] = useState(false);
   const [localExpanded, setLocalExpanded] = useState(false);
@@ -447,7 +478,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                navigate(`/technician/${technician.id}?tab=bounced`);
+                navigate(buildBouncedUrl(technician.id, viewMode, selectedDate, selectedWeek, selectedMonth));
               }}
               className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-red-50 rounded border border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer"
               title={

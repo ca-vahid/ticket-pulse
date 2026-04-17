@@ -2108,6 +2108,7 @@ export default function Dashboard() {
                           onHide={handleHideTechnician}
                           selectedDate={selectedDate}
                           selectedWeek={selectedWeek}
+                          selectedMonth={selectedMonth}
                           maxOpenCount={maxOpenCount}
                           maxDailyCount={maxDailyCount}
                           viewMode={viewMode}
@@ -2133,6 +2134,7 @@ export default function Dashboard() {
                           onHide={handleHideTechnician}
                           selectedDate={selectedDate}
                           selectedWeek={selectedWeek}
+                          selectedMonth={selectedMonth}
                           maxOpenCount={maxOpenCount}
                           maxDailyCount={maxDailyCount}
                           viewMode={viewMode}
