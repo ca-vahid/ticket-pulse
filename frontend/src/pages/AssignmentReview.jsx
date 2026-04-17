@@ -285,6 +285,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const newIdsInitializedRef = useRef(false);
   const [queuePage, setQueuePage] = useState(0);
   const queuePageSize = 50;
+  const queuedSectionRef = useRef(null);
+
+  const scrollToQueuedSection = useCallback(() => {
+    queuedSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   const animateOut = useCallback((runId) => {
     setRemovingIds(prev => new Set([...prev, runId]));
@@ -968,83 +973,26 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         </div>
       )}
 
-      {/* Queued for business hours */}
+      {/* Compact warning banner — clickable, scrolls down to the queued section */}
       {queuedRuns.length > 0 && (
-        <div className="border border-amber-200 rounded-lg overflow-hidden">
-          <div className="bg-amber-50 px-3 sm:px-4 py-2.5 border-b border-amber-100">
-            <div className="flex items-center gap-2 flex-wrap">
-              <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
-              <span className="text-sm font-bold text-amber-800">Queued for Business Hours</span>
-              <span className="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{queuedRuns.length}</span>
-              <div className="flex-1" />
-              {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow ? (
-                <div className="bg-amber-100 border border-amber-200 rounded-full px-3 py-1 flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
-                  <span className="text-xs font-semibold text-amber-700">Starts {queueStatus.nextWindow.label}</span>
-                </div>
-              ) : queueStatus?.isBusinessHours ? (
-                <div className="bg-green-50 border border-green-200 rounded-full px-3 py-1 flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
-                  <span className="text-xs font-semibold text-green-700">Active — processing on next sync</span>
-                </div>
-              ) : null}
-            </div>
-          </div>
-          <div className="md:hidden divide-y divide-amber-50 bg-white">
-            {queuedRuns.map((run) => (
-              <div key={run.id} className="px-3 py-3 space-y-2">
-                <div>
-                  <span className="text-xs text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
-                  <p className="font-semibold text-slate-800 text-sm leading-snug">{run.ticket?.subject || 'No subject'}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{run.queuedReason || 'Outside business hours'}</p>
-                </div>
-                {isAdmin && (
-                  <div className="flex items-center gap-2">
-                    <button onClick={(e) => handleRunNow(e, run.id)} className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center justify-center gap-1.5 shadow-sm touch-manipulation min-h-[44px]">
-                      <Play className="w-3.5 h-3.5" /> Run Now
-                    </button>
-                    {confirmDeleteId === run.id ? (
-                      <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-semibold touch-manipulation min-h-[44px]">Delete?</button>
-                    ) : (
-                      <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-2.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg touch-manipulation min-h-[44px]" title="Delete">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          <table className="hidden md:table w-full text-sm">
-            <thead><tr className="text-xs text-amber-600 border-b border-amber-100 bg-amber-50/50">
-              <th className="text-left px-4 py-1.5 font-medium">Ticket</th>
-              <th className="text-left px-4 py-1.5 font-medium">Reason</th>
-              <th className="text-left px-4 py-1.5 font-medium">Queued At</th>
-              {isAdmin && <th className="px-4 py-1.5 text-right font-medium">Actions</th>}
-            </tr></thead>
-            <tbody>
-              {queuedRuns.map((run) => (
-                <tr key={run.id} className="border-t border-amber-50 hover:bg-amber-50 transition-colors">
-                  <td className="px-4 py-3"><span className="text-xs text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span><span className="ml-2 font-semibold text-slate-800">{run.ticket?.subject || 'No subject'}</span></td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{run.queuedReason || 'Outside business hours'} · via {run.triggerSource}</td>
-                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{formatDateTimeInTimezone(run.queuedAt, workspaceTimezone)}</td>
-                  {isAdmin && (
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={(e) => handleRunNow(e, run.id)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 flex items-center gap-1.5 shadow-sm"><Play className="w-3.5 h-3.5" /> Run Now</button>
-                        {confirmDeleteId === run.id ? (
-                          <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
-                        ) : (
-                          <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-lg" title="Delete"><Trash2 className="w-4 h-4" /></button>
-                        )}
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <button
+          type="button"
+          onClick={scrollToQueuedSection}
+          className="group flex items-center gap-2 w-full text-left px-3 py-2 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-50 hover:border-amber-300 transition-colors"
+          title="Jump to queued tickets"
+        >
+          <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+          <span className="text-[12px] font-semibold text-amber-800">
+            {queuedRuns.length} ticket{queuedRuns.length !== 1 ? 's' : ''} queued for next business hours
+          </span>
+          {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow && (
+            <span className="text-[11px] text-amber-600">· starts {queueStatus.nextWindow.label}</span>
+          )}
+          {queueStatus?.isBusinessHours && (
+            <span className="text-[11px] text-emerald-600 font-medium">· active — processing on next sync</span>
+          )}
+          <span className="ml-auto text-[11px] font-medium text-amber-700 opacity-0 group-hover:opacity-100 transition-opacity">View ↓</span>
+        </button>
       )}
 
       {/* Sub-view tabs + filters + toolbar (single compact row; ticket status only on Pending) */}
@@ -1444,6 +1392,86 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         )}
       </div>
+
+      {/* Queued for business hours — moved below tickets so it's secondary content */}
+      {queuedRuns.length > 0 && (
+        <div ref={queuedSectionRef} className="border border-amber-200 rounded-lg overflow-hidden scroll-mt-4">
+          <div className="bg-amber-50/80 px-3 sm:px-4 py-1.5 border-b border-amber-100 flex items-center gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+            <span className="text-[12px] font-semibold text-amber-800">Queued for Business Hours</span>
+            <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums">{queuedRuns.length}</span>
+            <div className="flex-1" />
+            {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow ? (
+              <span className="inline-flex items-center gap-1 text-[10px] text-amber-700">
+                <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
+                Starts {queueStatus.nextWindow.label}
+              </span>
+            ) : queueStatus?.isBusinessHours ? (
+              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700">
+                <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                Active — processing on next sync
+              </span>
+            ) : null}
+          </div>
+          <div className="md:hidden divide-y divide-amber-50 bg-white">
+            {queuedRuns.map((run) => (
+              <div key={run.id} className="px-3 py-2 space-y-1.5">
+                <div>
+                  <span className="text-[10px] text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                  <p className="font-medium text-slate-800 text-[13px] leading-snug">{run.ticket?.subject || 'No subject'}</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">{run.queuedReason || 'Outside business hours'}</p>
+                </div>
+                {isAdmin && (
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={(e) => handleRunNow(e, run.id)} className="flex-1 px-2.5 py-1.5 bg-blue-600 text-white rounded text-[11px] font-semibold hover:bg-blue-700 flex items-center justify-center gap-1 shadow-sm touch-manipulation">
+                      <Play className="w-3 h-3" /> Run Now
+                    </button>
+                    {confirmDeleteId === run.id ? (
+                      <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1.5 bg-red-500 text-white rounded text-[11px] font-semibold touch-manipulation">Delete?</button>
+                    ) : (
+                      <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded touch-manipulation" title="Delete">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <table className="hidden md:table w-full text-xs">
+            <thead><tr className="text-[10px] text-amber-600 border-b border-amber-100 bg-amber-50/40">
+              <th className="text-left px-3 py-1 font-medium">Ticket</th>
+              <th className="text-left px-3 py-1 font-medium">Reason</th>
+              <th className="text-left px-3 py-1 font-medium">Queued At</th>
+              {isAdmin && <th className="px-3 py-1 text-right font-medium w-32">Actions</th>}
+            </tr></thead>
+            <tbody>
+              {queuedRuns.map((run) => (
+                <tr key={run.id} className="border-t border-amber-50 hover:bg-amber-50/60 transition-colors">
+                  <td className="px-3 py-1.5">
+                    <span className="text-[10px] text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                    <span className="ml-2 font-medium text-slate-800">{run.ticket?.subject || 'No subject'}</span>
+                  </td>
+                  <td className="px-3 py-1.5 text-[11px] text-slate-500">{run.queuedReason || 'Outside business hours'} · via {run.triggerSource}</td>
+                  <td className="px-3 py-1.5 text-[11px] text-slate-400 whitespace-nowrap">{formatDateTimeInTimezone(run.queuedAt, workspaceTimezone)}</td>
+                  {isAdmin && (
+                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={(e) => handleRunNow(e, run.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-semibold hover:bg-blue-700 flex items-center gap-1 shadow-sm transition-colors"><Play className="w-3 h-3" /> Run Now</button>
+                        {confirmDeleteId === run.id ? (
+                          <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
+                        ) : (
+                          <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                        )}
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <ManualTriggerPanel isAdmin={isAdmin} />
       <MobileQuickApproveSheet
