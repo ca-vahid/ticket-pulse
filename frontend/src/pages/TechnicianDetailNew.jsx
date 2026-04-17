@@ -605,6 +605,10 @@ export default function TechnicianDetailNew() {
               <CSATTab
                 tickets={csatTickets}
                 isLoading={csatLoading}
+                viewMode={viewMode}
+                selectedDate={selectedDate}
+                selectedWeek={selectedWeek}
+                selectedMonth={selectedMonth}
               />
             )}
 

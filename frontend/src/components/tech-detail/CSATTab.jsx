@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Star, User, ExternalLink, X } from 'lucide-react';
 import { FRESHSERVICE_DOMAIN } from './constants';
 
@@ -30,6 +30,67 @@ function formatDate(dateString) {
   return new Date(dateString).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
   });
+}
+
+function formatShortDate(d) {
+  const date = typeof d === 'string' ? new Date(d + 'T12:00:00') : d;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatMonthLabel(d) {
+  const date = typeof d === 'string' ? new Date(d + 'T12:00:00') : d;
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function toIsoDate(d) {
+  if (!d) return null;
+  const dt = typeof d === 'string' ? new Date(d) : d;
+  if (Number.isNaN(dt.getTime())) return null;
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Derive the contextual date range from the parent page's view mode + selection.
+ */
+function getContextualRange({ viewMode, selectedDate, selectedWeek, selectedMonth }) {
+  if (viewMode === 'daily') {
+    const iso = toIsoDate(selectedDate) || toIsoDate(new Date());
+    return {
+      id: `day-${iso}`,
+      label: formatShortDate(iso),
+      startMs: new Date(iso + 'T00:00:00').getTime(),
+      endMs: new Date(iso + 'T23:59:59.999').getTime(),
+    };
+  }
+  if (viewMode === 'weekly' && selectedWeek) {
+    const wk = typeof selectedWeek === 'string' ? new Date(selectedWeek) : selectedWeek;
+    const startDt = new Date(wk);
+    startDt.setHours(0, 0, 0, 0);
+    const endDt = new Date(wk);
+    endDt.setDate(endDt.getDate() + 6);
+    endDt.setHours(23, 59, 59, 999);
+    return {
+      id: `week-${toIsoDate(startDt)}`,
+      label: `${formatShortDate(startDt)} – ${formatShortDate(endDt)}`,
+      startMs: startDt.getTime(),
+      endMs: endDt.getTime(),
+    };
+  }
+  if (viewMode === 'monthly' && selectedMonth) {
+    const m = typeof selectedMonth === 'string' ? new Date(selectedMonth) : selectedMonth;
+    const startDt = new Date(m.getFullYear(), m.getMonth(), 1, 0, 0, 0);
+    const endDt = new Date(m.getFullYear(), m.getMonth() + 1, 0, 23, 59, 59, 999);
+    return {
+      id: `month-${toIsoDate(startDt)}`,
+      label: formatMonthLabel(startDt),
+      startMs: startDt.getTime(),
+      endMs: endDt.getTime(),
+    };
+  }
+  return null;
 }
 
 // ── Stars ─────────────────────────────────────────────────────────────────────
@@ -221,8 +282,96 @@ function FeedbackModal({ ticket, onClose }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function CSATTab({ tickets, isLoading }) {
+export default function CSATTab({
+  tickets,
+  isLoading,
+  viewMode = 'daily',
+  selectedDate,
+  selectedWeek,
+  selectedMonth,
+}) {
   const [expandedTicket, setExpandedTicket] = useState(null);
+
+  const contextualRange = useMemo(
+    () => getContextualRange({ viewMode, selectedDate, selectedWeek, selectedMonth }),
+    [viewMode, selectedDate, selectedWeek, selectedMonth],
+  );
+
+  // Counts for each pill — computed locally by filtering the all-time list
+  const { contextualCount, count7d, count30d, countAll, contextualList } = useMemo(() => {
+    const all = tickets || [];
+    const now = Date.now();
+    const d7 = now - 7 * 86400000;
+    const d30 = now - 30 * 86400000;
+    let ctx = 0;
+    let w7 = 0;
+    let w30 = 0;
+    const ctxList = [];
+    for (const t of all) {
+      if (!t.csatSubmittedAt) continue;
+      const ms = new Date(t.csatSubmittedAt).getTime();
+      if (Number.isNaN(ms)) continue;
+      if (ms >= d7) w7++;
+      if (ms >= d30) w30++;
+      if (contextualRange && ms >= contextualRange.startMs && ms <= contextualRange.endMs) {
+        ctx++;
+        ctxList.push(t);
+      }
+    }
+    return {
+      contextualCount: ctx,
+      count7d: w7,
+      count30d: w30,
+      countAll: all.length,
+      contextualList: ctxList,
+    };
+  }, [tickets, contextualRange]);
+
+  // Default to the contextual pill; user can switch
+  const [selectedId, setSelectedId] = useState(contextualRange?.id || 'all');
+  const [userPicked, setUserPicked] = useState(false);
+
+  // Auto-follow contextual range unless user has explicitly picked a preset
+  const ctxId = contextualRange?.id;
+  useEffect(() => {
+    if (!userPicked && ctxId) setSelectedId(ctxId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxId]);
+
+  const handleSelectContextual = () => {
+    if (contextualRange) {
+      setSelectedId(contextualRange.id);
+      setUserPicked(false);
+    }
+  };
+  const handleSelectPreset = (id) => {
+    setSelectedId(id);
+    setUserPicked(true);
+  };
+
+  const filteredTickets = useMemo(() => {
+    const all = tickets || [];
+    if (selectedId === 'all') return all;
+    if (selectedId === '7d') {
+      const cutoff = Date.now() - 7 * 86400000;
+      return all.filter((t) => t.csatSubmittedAt && new Date(t.csatSubmittedAt).getTime() >= cutoff);
+    }
+    if (selectedId === '30d') {
+      const cutoff = Date.now() - 30 * 86400000;
+      return all.filter((t) => t.csatSubmittedAt && new Date(t.csatSubmittedAt).getTime() >= cutoff);
+    }
+    if (selectedId === contextualRange?.id) return contextualList;
+    return all;
+  }, [tickets, selectedId, contextualRange, contextualList]);
+
+  // Sort newest first for all filters
+  const sortedTickets = useMemo(() => {
+    return [...filteredTickets].sort((a, b) => {
+      const aT = a.csatSubmittedAt ? new Date(a.csatSubmittedAt).getTime() : 0;
+      const bT = b.csatSubmittedAt ? new Date(b.csatSubmittedAt).getTime() : 0;
+      return bT - aT;
+    });
+  }, [filteredTickets]);
 
   if (isLoading) {
     return (
@@ -244,11 +393,90 @@ export default function CSATTab({ tickets, isLoading }) {
 
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-        {tickets.map((ticket) => (
-          <CSATCard key={ticket.id} ticket={ticket} onExpand={setExpandedTicket} />
-        ))}
+      {/* Period filter pills (mirror the Bounced tab pattern) */}
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+            <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
+            CSAT responses
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {selectedId === contextualRange?.id
+              ? `Customer feedback received ${contextualRange?.label ? `on ${contextualRange.label}` : 'in the selected period'}.`
+              : selectedId === '7d'
+                ? 'Customer feedback received in the last 7 days.'
+                : selectedId === '30d'
+                  ? 'Customer feedback received in the last 30 days.'
+                  : 'All customer feedback received for this agent.'}
+          </p>
+        </div>
+        <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
+          {contextualRange && (
+            <button
+              type="button"
+              onClick={handleSelectContextual}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                selectedId === contextualRange.id
+                  ? 'bg-white text-slate-900 shadow-sm ring-1 ring-indigo-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Matches the date filter at the top of the page"
+            >
+              {contextualRange.label}
+              <span className="ml-1.5 text-[10px] text-slate-400">({contextualCount})</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => handleSelectPreset('7d')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              selectedId === '7d' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Last 7 days
+            <span className="ml-1.5 text-[10px] text-slate-400">({count7d})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSelectPreset('30d')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              selectedId === '30d' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Last 30 days
+            <span className="ml-1.5 text-[10px] text-slate-400">({count30d})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSelectPreset('all')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              selectedId === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            All time
+            <span className="ml-1.5 text-[10px] text-slate-400">({countAll})</span>
+          </button>
+        </div>
       </div>
+
+      {sortedTickets.length === 0 ? (
+        <div className="text-center py-12 bg-slate-50 rounded-lg border border-slate-100">
+          <Star className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+          <p className="text-slate-500 text-sm">
+            No CSAT responses in this range.
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Try a wider window — this agent has <strong>{countAll}</strong> response{countAll === 1 ? '' : 's'} all-time.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {sortedTickets.map((ticket) => (
+            <CSATCard key={ticket.id} ticket={ticket} onExpand={setExpandedTicket} />
+          ))}
+        </div>
+      )}
+
       {expandedTicket && (
         <FeedbackModal ticket={expandedTicket} onClose={() => setExpandedTicket(null)} />
       )}
