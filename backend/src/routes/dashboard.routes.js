@@ -89,17 +89,37 @@ router.get(
       }),
     ]);
 
-    // Fetch per-tech rejection counts (7 day window)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    let rejectionMap = {};
+    // Fetch per-tech rejection counts across multiple windows (7d, 30d, lifetime)
+    const now = new Date();
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 7);
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(now.getDate() - 30);
+
+    let rej7d = {};
+    let rej30d = {};
+    let rejLifetime = {};
     try {
-      const rejections = await prisma.ticketAssignmentEpisode.groupBy({
-        by: ['technicianId'],
-        where: { workspaceId: req.workspaceId, endMethod: 'rejected', endedAt: { gte: sevenDaysAgo } },
-        _count: true,
-      });
-      rejectionMap = Object.fromEntries(rejections.map((r) => [r.technicianId, r._count]));
+      const [r7, r30, rAll] = await Promise.all([
+        prisma.ticketAssignmentEpisode.groupBy({
+          by: ['technicianId'],
+          where: { workspaceId: req.workspaceId, endMethod: 'rejected', endedAt: { gte: sevenDaysAgo } },
+          _count: true,
+        }),
+        prisma.ticketAssignmentEpisode.groupBy({
+          by: ['technicianId'],
+          where: { workspaceId: req.workspaceId, endMethod: 'rejected', endedAt: { gte: thirtyDaysAgo } },
+          _count: true,
+        }),
+        prisma.ticketAssignmentEpisode.groupBy({
+          by: ['technicianId'],
+          where: { workspaceId: req.workspaceId, endMethod: 'rejected' },
+          _count: true,
+        }),
+      ]);
+      rej7d = Object.fromEntries(r7.map((r) => [r.technicianId, r._count]));
+      rej30d = Object.fromEntries(r30.map((r) => [r.technicianId, r._count]));
+      rejLifetime = Object.fromEntries(rAll.map((r) => [r.technicianId, r._count]));
     } catch { /* table may not exist yet */ }
 
     // Transform tickets for frontend (flatten requester object)
@@ -109,7 +129,9 @@ router.get(
       tickets: (tech.ticketsToday || []).map(transformTicket),
       avoidance: avoidanceMap[tech.id] || null,
       leaveInfo: leaveInfoMap[tech.id] || {},
-      rejected7d: rejectionMap[tech.id] || 0,
+      rejected7d: rej7d[tech.id] || 0,
+      rejected30d: rej30d[tech.id] || 0,
+      rejectedLifetime: rejLifetime[tech.id] || 0,
     }));
 
     // Remove intermediate arrays from response (we use tickets instead)
@@ -926,6 +948,127 @@ router.get(
         averageScore: csatTickets.length > 0
           ? (csatTickets.reduce((sum, t) => sum + (t.csatScore || 0), 0) / csatTickets.length).toFixed(2)
           : null,
+      },
+    });
+  }),
+);
+
+/**
+ * GET /api/dashboard/technician/:id/bounced
+ * Return tickets this technician picked up and then rejected back to the queue.
+ * Query params:
+ *   - window: '7d' | '30d' | 'all' (default '7d')
+ */
+router.get(
+  '/technician/:id/bounced',
+  asyncHandler(async (req, res) => {
+    const techId = parseInt(req.params.id, 10);
+    const window = req.query.window === '30d' || req.query.window === 'all' ? req.query.window : '7d';
+
+    const where = {
+      technicianId: techId,
+      workspaceId: req.workspaceId,
+      endMethod: 'rejected',
+    };
+    if (window !== 'all') {
+      const daysAgo = window === '30d' ? 30 : 7;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - daysAgo);
+      where.endedAt = { gte: cutoff };
+    }
+
+    const rejections = await prisma.ticketAssignmentEpisode.findMany({
+      where,
+      orderBy: { endedAt: 'desc' },
+      include: {
+        ticket: {
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            subject: true,
+            status: true,
+            priority: true,
+            ticketCategory: true,
+            assignedTechId: true,
+            assignedTech: { select: { id: true, name: true } },
+            requester: { select: { name: true, email: true } },
+          },
+        },
+      },
+    });
+
+    const rows = rejections.map((r) => ({
+      episodeId: r.id,
+      startedAt: r.startedAt,
+      endedAt: r.endedAt,
+      startMethod: r.startMethod,
+      endActorName: r.endActorName,
+      ticket: r.ticket ? { ...r.ticket, freshserviceTicketId: r.ticket.freshserviceTicketId?.toString() } : null,
+    }));
+
+    res.json({ success: true, data: { window, rejections: rows } });
+  }),
+);
+
+/**
+ * GET /api/dashboard/ticket/:id/history
+ * Return the full ownership timeline for a ticket (all episodes + FS-sourced events).
+ * Used by the run-detail handoff strip and the ticket detail drawer.
+ */
+router.get(
+  '/ticket/:id/history',
+  asyncHandler(async (req, res) => {
+    // Accept either our internal id or a FreshService ticket id
+    const idParam = req.params.id;
+    const ticket = await prisma.ticket.findFirst({
+      where: {
+        workspaceId: req.workspaceId,
+        OR: [
+          { id: /^\d+$/.test(idParam) ? parseInt(idParam, 10) : -1 },
+          { freshserviceTicketId: /^\d+$/.test(idParam) ? BigInt(idParam) : BigInt(0) },
+        ],
+      },
+      select: { id: true, freshserviceTicketId: true, subject: true, assignedTechId: true },
+    });
+    if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
+
+    const [episodes, activities] = await Promise.all([
+      prisma.ticketAssignmentEpisode.findMany({
+        where: { ticketId: ticket.id },
+        orderBy: { startedAt: 'asc' },
+        include: { technician: { select: { id: true, name: true } } },
+      }),
+      prisma.ticketActivity.findMany({
+        where: {
+          ticketId: ticket.id,
+          activityType: { in: ['self_picked', 'coordinator_assigned', 'rejected', 'reassigned', 'group_changed'] },
+        },
+        orderBy: { performedAt: 'asc' },
+      }),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        ticket: { ...ticket, freshserviceTicketId: ticket.freshserviceTicketId?.toString() },
+        episodes: episodes.map((e) => ({
+          id: e.id,
+          techId: e.technicianId,
+          techName: e.technician?.name || null,
+          startedAt: e.startedAt,
+          endedAt: e.endedAt,
+          startMethod: e.startMethod,
+          startAssignedByName: e.startAssignedByName,
+          endMethod: e.endMethod,
+          endActorName: e.endActorName,
+        })),
+        events: activities.map((a) => ({
+          id: a.id,
+          type: a.activityType,
+          at: a.performedAt,
+          by: a.performedBy,
+          details: a.details,
+        })),
       },
     });
   }),

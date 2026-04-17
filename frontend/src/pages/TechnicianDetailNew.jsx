@@ -11,6 +11,7 @@ import OverviewTab from '../components/tech-detail/OverviewTab';
 import TicketBoardTab from '../components/tech-detail/TicketBoardTab';
 import CoverageTab from '../components/tech-detail/CoverageTab';
 import CSATTab from '../components/tech-detail/CSATTab';
+import BouncedTab from '../components/tech-detail/BouncedTab';
 import { formatDateLocal } from '../components/tech-detail/utils';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -20,6 +21,7 @@ const PRIMARY_TABS = [
   { id: 'tickets',  label: 'Tickets' },
   { id: 'coverage', label: 'Coverage' },
   { id: 'csat',     label: 'CSAT' },
+  { id: 'bounced',  label: 'Bounced' },
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -37,8 +39,14 @@ export default function TechnicianDetailNew() {
   const fetchSeqRef = useRef(0);
   const [error, setError] = useState(null);
 
-  // Primary tab: overview | tickets | coverage | csat
-  const [activeTab, setActiveTab] = useState('overview');
+  // Primary tab: overview | tickets | coverage | csat | bounced
+  // Honour ?tab=<id> query param on initial load.
+  const [activeTab, setActiveTab] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = params.get('tab');
+    if (tab && PRIMARY_TABS.some((t) => t.id === tab)) return tab;
+    return 'overview';
+  });
   // Ticket board sub-view: all | self | assigned | closed
   const [ticketView, setTicketView] = useState('all');
 
@@ -515,6 +523,10 @@ export default function TechnicianDetailNew() {
                 tickets={csatTickets}
                 isLoading={csatLoading}
               />
+            )}
+
+            {activeTab === 'bounced' && (
+              <BouncedTab technician={technician} />
             )}
           </div>
         </div>

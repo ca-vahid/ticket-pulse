@@ -1,6 +1,28 @@
-export const APP_VERSION = '1.9.4-preview';
+export const APP_VERSION = '1.9.5-preview';
 
 export const changelog = [
+  {
+    version: '1.9.5-preview',
+    date: 'April 17, 2026',
+    entries: [
+      { type: 'new', text: 'Assignment bounce tracking -- new ticket_assignment_episodes table captures every ownership period per ticket (who held it, how it started, how it ended); "self-picked" semantics now reflect the current owner, so if a tech picks then drops a ticket the next holder gets correct attribution' },
+      { type: 'new', text: 'Rejected (Rej) metric on technician cards -- red badge with RotateCcw icon appears when a tech has rejected tickets in the last 7 days; tooltip shows 7d / 30d / lifetime counts; click the badge to drill into the list' },
+      { type: 'new', text: 'Bounced tickets tab on technician detail -- new tab shows every ticket this tech picked up and put back in the queue, filterable by 7 days / 30 days / lifetime, with the current holder and hold duration for each' },
+      { type: 'new', text: 'Handoff history strip on run-detail page -- horizontal timeline above the recommendation cards shows every pickup/rejection/reassignment chain for the ticket, so coordinators see at a glance who held it and why it came back' },
+      { type: 'new', text: 'Live freshness check for pending runs -- the review page now re-queries FreshService when you open it and surfaces warnings: "assignee changed", "recommended tech already rejected this ticket", "tech is not a member of the ticket group"; admins get a "Refresh & re-rank" button to supersede stale runs with a fresh pipeline' },
+      { type: 'new', text: 'Preflight validation on FreshService write-back -- before approving a recommendation, the backend checks live FS state and blocks with clear reasons (superseded_assignee, incompatible_group, already_rejected_by_this_agent); force flag available to override when needed' },
+      { type: 'new', text: 'Historical episode backfill endpoint -- new POST /api/sync/backfill-episodes for admins to populate the episodes table with up to 180 days of FreshService activity history; existing admin Backfill panel now also writes episodes automatically' },
+      { type: 'improved', text: 'Shared FreshService rate limiter -- single token-bucket queue on FreshServiceClient caps at 110 req/min, adapts to x-ratelimit-remaining header, and honors Retry-After on 429s; replaced per-callsite throttling that was causing overlapping retries and bursts across workspaces (dev testing: rate-limit hits dropped 99.8%, from 1,843 to 3)' },
+      { type: 'improved', text: 'Full FreshService error body captured -- failed syncs now persist the complete FS validation error (errors[] array) in syncPayload.freshserviceError instead of discarding it, making it obvious why a sync failed' },
+      { type: 'improved', text: 'LLM rejection awareness -- find_matching_agents tool now annotates each candidate with previouslyRejectedThisTicket and rejectedAt, giving the recommendation prompt a soft signal to avoid re-suggesting an agent who already bounced the ticket' },
+      { type: 'improved', text: 'New ticket_activities event types -- sync now writes real FreshService events (self_picked, coordinator_assigned, rejected, reassigned, group_changed) with the actor name, replacing the previous "System" placeholder; foundation for future per-ticket activity timeline views' },
+      { type: 'improved', text: 'Diagnostics endpoint -- GET /api/sync/rate-limit-stats returns current FreshService budget, queue depth, current min-delay, and slowdown status for real-time observation of the limiter' },
+      { type: 'fixed', text: 'Vacation Tracker in-place modification bug -- when a user edited an existing VT leave in place (same leave ID, different dates -- e.g. moved WFH from Thursday to Friday), the old date rows were orphaned and the user appeared on leave for both days; deleteStaleLeaves now keys on (vtLeaveId, leaveDate) tuples so modifications properly clear stale days' },
+      { type: 'fixed', text: 'Assignment approval race condition -- run #340 style failures (approving a recommendation after the ticket was self-picked then rejected outside the pipeline) now caught at preflight with a specific error code instead of silently failing with "Validation failed" from FreshService' },
+      { type: 'fixed', text: 'Sync missed intermediate assignment changes -- previous sync filter only fetched FS activities when the ticket was currently assigned, so a brief pick-and-drop window between polls would never be recorded; filter broadened to also refetch when FS updated_at > our local timestamp or the ticket has an active pipeline run' },
+      { type: 'database', text: 'New migration: ticket_assignment_episodes table (PK id, FK ticket_id/technician_id/workspace_id, started_at, ended_at, start_method, end_method, unique (ticket_id, started_at)); new columns on tickets (rejection_count, group_id); new index on ticket_activities(activityType); run `prisma migrate deploy` before deploying this release' },
+    ],
+  },
   {
     version: '1.9.4-preview',
     date: 'April 12, 2026',

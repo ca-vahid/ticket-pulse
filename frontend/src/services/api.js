@@ -152,6 +152,16 @@ export const dashboardAPI = {
     return await api.get(`/dashboard/technician/${id}`, { params: applyNoiseParam(params) });
   },
 
+  /** Fetch the list of tickets this tech has bounced (rejected back to the queue). */
+  getTechnicianBounced: async (id, window = '7d') => {
+    return await api.get(`/dashboard/technician/${id}/bounced`, { params: { window } });
+  },
+
+  /** Fetch a ticket's full ownership timeline (episodes + FS events). */
+  getTicketHistory: async (idOrFsId) => {
+    return await api.get(`/dashboard/ticket/${idOrFsId}/history`);
+  },
+
   getWeeklyStats: async (timezone = 'America/Los_Angeles', date = null) => {
     const params = { timezone };
     if (date) {

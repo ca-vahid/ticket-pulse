@@ -120,15 +120,44 @@ class VacationTrackerRepository {
     return results;
   }
 
-  async deleteStaleLeaves(workspaceId, startDate, endDate, activeVtLeaveIds) {
-    if (!activeVtLeaveIds.length) return { count: 0 };
-    return prisma.technicianLeave.deleteMany({
+  /**
+   * Delete leave-day rows in the date window that no longer correspond to a
+   * currently-approved VT leave-day.
+   *
+   * `validKeys` is a Set of `${vtLeaveId}|${ISO date}` strings representing
+   * the rows that SHOULD exist after the sync. Anything else in the window
+   * is removed.
+   *
+   * This catches BOTH cases:
+   *   1. Entire leave cancelled (vtLeaveId no longer in VT APPROVED set)
+   *   2. Leave modified in-place (same vtLeaveId but different date range,
+   *      e.g. user moves WFH Thu → Fri — old Thu row must be removed)
+   */
+  async deleteStaleLeaves(workspaceId, startDate, endDate, validKeys) {
+    if (!(validKeys instanceof Set)) {
+      throw new Error('deleteStaleLeaves: validKeys must be a Set of "vtLeaveId|ISODate" strings');
+    }
+
+    // Fetch current rows in window and diff against the valid set.
+    const existing = await prisma.technicianLeave.findMany({
       where: {
         workspaceId,
         leaveDate: { gte: startDate, lte: endDate },
-        vtLeaveId: { notIn: activeVtLeaveIds },
       },
+      select: { id: true, vtLeaveId: true, leaveDate: true },
     });
+
+    const toDelete = existing.filter((row) => {
+      const key = `${row.vtLeaveId}|${row.leaveDate.toISOString().slice(0, 10)}`;
+      return !validKeys.has(key);
+    });
+
+    if (toDelete.length === 0) return { count: 0 };
+
+    const res = await prisma.technicianLeave.deleteMany({
+      where: { id: { in: toDelete.map((r) => r.id) } },
+    });
+    return res;
   }
 
   async getLeavesByDateRange(workspaceId, startDate, endDate) {

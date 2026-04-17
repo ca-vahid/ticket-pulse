@@ -2,11 +2,20 @@
 
 All notable changes and improvements to Ticket Pulse.
 
-## [1.9.6-preview] - 2026-04-17
+## [1.9.5-preview] - 2026-04-17
 
-### Shared FreshService Rate Limiter
+### Assignment Bounce Tracking, Preflight Validation, and Rate Limiter Rewrite
 
-This release replaces the per-callsite throttling with a single shared token-bucket rate limiter on the `FreshServiceClient` instance. In dev testing against the same catch-up workload, rate-limit hits dropped **99.8%** (from 1,843 to 3) while throughput improved.
+This release closes six gaps exposed by run #340 (ticket #219101) — where a technician self-picked, worked, then rejected a ticket back into the queue, leading to a stale approval and a failed FreshService write-back — and ships a complete rewrite of FreshService rate limiting plus a critical Vacation Tracker sync fix.
+
+**Headline numbers** (dev testing, same catch-up workload):
+
+| Metric | Before | After |
+|---|---|---|
+| FreshService 429 rate-limit hits | 1,843 | 3 |
+| Overlapping retries | Constant | None |
+| Response headers used for pacing | Never | Every response |
+| `Retry-After` honored | No (fixed backoff) | Yes |
 
 ---
 
@@ -89,14 +98,6 @@ The backfill endpoint also had its manual `setTimeout(1100ms)` removed for the s
 | Rate-limit headers read | Never | Every response |
 | Retry-After honored | No (fixed backoff) | Yes |
 | Cross-workspace coordination | None | Shared limiter |
-
----
-
-## [1.9.5-preview] - 2026-04-17
-
-### Assignment Bounce Tracking & Preflight Validation
-
-This release closes six gaps exposed by run #340 (ticket #219101) where a technician self-picked, worked, then rejected a ticket back into the queue — an event our sync completely missed, leading to a stale approval and a failed FreshService write-back.
 
 ---
 
@@ -263,11 +264,149 @@ A red "Rej" badge appears on technician cards when the tech has rejected tickets
 
 ### New Endpoint: `POST /api/sync/backfill-episodes`
 
-Fetches activities from FreshService and populates `ticket_assignment_episodes` for historical tickets. Supports `daysToSync` (default 180), `limit`, and `concurrency` params.
+Fetches activities from FreshService and populates `ticket_assignment_episodes` for historical tickets. Supports `daysToSync` (default 180), `limit`, and `concurrency` params. The existing admin Backfill panel (Settings → Backfill) also now populates episodes automatically on every run.
 
 **Files Changed**:
-- `backend/src/services/syncService.js` — `backfillEpisodes()` method
+- `backend/src/services/syncService.js` — `backfillEpisodes()` method, `_updateTicketsWithAnalysis()` now reconciles episodes
 - `backend/src/routes/sync.routes.js` — `/backfill-episodes` endpoint
+
+---
+
+## 📊 Rejected Windows (7d / 30d / Lifetime) + Drill-Down
+
+**Status**: ✅ Complete
+**Impact**: Coordinators can see who is bouncing tickets and inspect the specific tickets
+
+### Tooltip on Technician Cards
+
+Hovering the red **Rej** badge on a technician card now shows all three windows:
+```
+Rejected tickets — tech picked up then put back in queue
+Last 7d: 2
+Last 30d: 5
+Lifetime: 18
+
+Click to see the list
+```
+
+### Clickable Drill-Down — New Bounced Tab
+
+Clicking the **Rej** badge jumps to a new **Bounced** tab on the technician detail page, showing every ticket the tech picked up and rejected, with:
+- 7d / 30d / Lifetime filter pills
+- Per-row: ticket subject, priority, category, requester, start method (self-picked vs assigned), hold duration, current holder (or "back in queue"), and a direct link to FreshService
+
+**Files Changed**:
+- `backend/src/routes/dashboard.routes.js` — `rejected30d` and `rejectedLifetime` in dashboard response, new `GET /api/dashboard/technician/:id/bounced`
+- `frontend/src/services/api.js` — `getTechnicianBounced()` method
+- `frontend/src/components/TechCard.jsx` — clickable badge, multi-window tooltip
+- `frontend/src/components/TechCardCompact.jsx` — same
+- `frontend/src/components/tech-detail/BouncedTab.jsx` (new) — drill-down list
+- `frontend/src/pages/TechnicianDetailNew.jsx` — new "Bounced" tab, `?tab=bounced` query param honored
+
+---
+
+## 🧭 Handoff History Strip on Run Detail
+
+**Status**: ✅ Complete
+**Impact**: Coordinators see the full ownership chain at a glance while reviewing
+
+### Inline Timeline Above Recommendations
+
+`/assignments/run/:id` now renders a compact horizontal strip listing every ownership episode for the ticket:
+
+```
+Handoff history (3 episodes)
+[Andrew Fong · self]  →rejected  [Adrian Lo · assigned]  →reassigned  [Mehdi Abbaspour · assigned · current]
+```
+
+Each pill is color-coded (green=current, red=rejected, neutral=reassigned-out) and has a tooltip with exact timestamps and end-actor names.
+
+### New Endpoint: `GET /api/dashboard/ticket/:id/history`
+
+Accepts either our internal ticket ID or a FreshService ticket ID and returns the full episode list plus FS-sourced events. Reusable for future per-ticket timeline drawers.
+
+**Files Changed**:
+- `backend/src/routes/dashboard.routes.js` — `/ticket/:id/history` endpoint
+- `frontend/src/services/api.js` — `getTicketHistory()` method
+- `frontend/src/components/assignment/HandoffHistoryStrip.jsx` (new)
+- `frontend/src/components/assignment/PipelineRunDetail.jsx` — renders the strip above the deleted/freshness banners
+
+---
+
+## 🚦 Shared FreshService Rate Limiter (Rewrite)
+
+**Status**: ✅ Complete
+**Impact**: Dev testing: rate-limit hits dropped from **1,843 to 3** (99.8% reduction)
+
+### Root Cause of the Previous 429 Storm
+
+The old throttling had three compounding bugs:
+
+1. **Fake serialization in `_analyzeTicketActivities`** — used `Promise.all` with staggered `setTimeout` offsets that only *appeared* sequential. When any request exceeded its 1.1s schedule (or retried), scheduled calls overlapped with the retries.
+2. **No cross-workspace coordination** — 4 workspaces on `*/5 * * * *` cron all fired simultaneously, each running its own "1 req/sec" stream; combined: 4+ req/sec bursts.
+3. **Ignored rate-limit response headers** — `x-ratelimit-remaining`, `x-ratelimit-total`, and `Retry-After` were never read; fixed 5/10/20s backoff used instead.
+
+Bonus discovery: FreshService's *actual* Enterprise per-minute budget is **140/min** (confirmed from `x-ratelimit-total` header), not the "5000/hour" we'd been assuming.
+
+### The Fix: Global Token-Bucket Limiter
+
+New `FreshServiceRateLimiter` class (`backend/src/integrations/rateLimiter.js`):
+
+- Per-process singleton — all `FreshServiceClient` instances share one queue
+- Caps at 110 req/min (under the 140 Enterprise limit)
+- 550ms minimum delay between requests (dodges burst detection)
+- Reads `x-ratelimit-remaining` on every response and slows down to 1,500ms spacing when < 15% budget remaining
+- Honors `Retry-After` on 429 via a global queue pause
+- All HTTP calls in `FreshServiceClient` route through `_get/_put/_post` wrappers
+
+### Caller Simplification
+
+`_analyzeTicketActivities` replaced the fake-parallel pattern with a simple `for-of` loop:
+
+```javascript
+// Before: Promise.all + setTimeout (overlaps on retries)
+await Promise.all(tickets.map((t, i) => processTicket(t, i)));
+
+// After: true sequential (limiter paces centrally)
+for (const ticket of tickets) {
+  await client.fetchTicketActivities(ticket.id);
+}
+```
+
+### Diagnostics Endpoint
+
+**New**: `GET /api/sync/rate-limit-stats` — returns current FS headers plus limiter queue depth, requests-last-minute, min-delay, and whether a slowdown is active.
+
+**Files Changed**:
+- `backend/src/integrations/rateLimiter.js` (new) — `FreshServiceRateLimiter` class
+- `backend/src/integrations/freshservice.js` — all HTTP calls route through `_get/_put/_post`
+- `backend/src/services/syncService.js` — simplified `_analyzeTicketActivities`, removed manual backfill delays
+- `backend/src/routes/sync.routes.js` — new `/rate-limit-stats` endpoint
+
+---
+
+## 🏖️ Vacation Tracker In-Place Modification Fix
+
+**Status**: ✅ Complete
+**Impact**: Users who edit existing WFH/vacation requests no longer appear on leave for orphaned dates
+
+### The Bug
+
+When a user modified an existing VT leave (same `vtLeaveId` but shrunk or moved the date range — e.g. moved a WFH from Thursday to Friday), the old date rows were orphaned in our DB:
+
+- Thursday WFH stored: `(vtLeaveId=123, leaveDate=2026-04-16)`
+- User moves to Friday: VT returns `id=123` with dates=Fri only
+- Sync upserts `(123, Fri)`, activeVtLeaveIds=`[123]`
+- Old `deleteStaleLeaves` deleted rows where `vtLeaveId NOT IN [123]` → `123` is in the list → nothing deleted
+- Result: user showed WFH on **both** Thursday and Friday
+
+### The Fix
+
+`deleteStaleLeaves` now keys on `(vtLeaveId, leaveDate)` tuples instead of just `vtLeaveId`. Any row in the sync window that isn't in the freshly-upserted set of `${vtLeaveId}|${ISODate}` keys is removed, correctly handling both full cancellations (different leave ID) and in-place modifications (same leave ID, different dates).
+
+**Files Changed**:
+- `backend/src/services/vacationTrackerRepository.js` — `deleteStaleLeaves()` signature and logic
+- `backend/src/services/vacationTrackerService.js` — `syncLeaves()` builds `validKeys` Set
 
 ---
 

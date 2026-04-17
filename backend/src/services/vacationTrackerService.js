@@ -147,7 +147,9 @@ class VacationTrackerService {
 
       syncState.progress = { step: 'processing leaves', pct: 40 };
       const leaveRows = [];
-      const activeVtLeaveIds = [];
+      // Track every (vtLeaveId, leaveDate) tuple that should exist post-sync.
+      // Any row in the window that isn't in this set is stale and gets removed.
+      const validKeys = new Set();
 
       for (const leave of leaves) {
         const mapping = userMap.get(leave.userId);
@@ -156,7 +158,6 @@ class VacationTrackerService {
         const ltInfo = leaveTypeMap.get(leave.leaveTypeId);
         if (!ltInfo || ltInfo.category === 'IGNORED') continue;
 
-        activeVtLeaveIds.push(leave.id);
         const dates = expandDateRange(leave.startDate, leave.endDate);
 
         for (const date of dates) {
@@ -169,6 +170,7 @@ class VacationTrackerService {
             category: ltInfo.category,
             status: leave.status || 'APPROVED',
           });
+          validKeys.add(`${leave.id}|${date.toISOString().slice(0, 10)}`);
         }
       }
 
@@ -178,7 +180,7 @@ class VacationTrackerService {
       syncState.progress = { step: 'cleaning stale data', pct: 90 };
       const startDt = new Date(startDate + 'T00:00:00Z');
       const endDt = new Date(endDate + 'T00:00:00Z');
-      const deleted = await vtRepo.deleteStaleLeaves(workspaceId, startDt, endDt, activeVtLeaveIds);
+      const deleted = await vtRepo.deleteStaleLeaves(workspaceId, startDt, endDt, validKeys);
 
       await vtRepo.updateLastSyncAt(workspaceId);
 

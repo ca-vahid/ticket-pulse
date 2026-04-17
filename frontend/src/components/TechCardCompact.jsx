@@ -410,13 +410,25 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
             <div className="text-[7px] text-green-600 uppercase font-medium">Done</div>
           </div>
 
-          {/* Rejected (7d) - Only show when there are rejections */}
+          {/* Rejected (7d) - Only show when there are rejections; click to drill down */}
           {(technician.rejected7d || 0) > 0 && (
-            <div className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-red-50 rounded border border-red-200" title="Tickets this tech picked and put back in queue (last 7 days)">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/technician/${technician.id}?tab=bounced`);
+              }}
+              className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-red-50 rounded border border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer"
+              title={
+                `Rejected tickets — picked up then put back in queue\n` +
+                `7d: ${technician.rejected7d || 0}  ·  30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}\n\n` +
+                `Click to drill down`
+              }
+            >
               <RotateCcw className="w-4 h-4 text-red-500 mb-1" />
               <div className="text-base font-bold text-red-700">{technician.rejected7d}</div>
               <div className="text-[7px] text-red-500 uppercase font-bold">Rej</div>
-            </div>
+            </button>
           )}
 
           {/* CSAT - Only show if there are CSAT responses */}

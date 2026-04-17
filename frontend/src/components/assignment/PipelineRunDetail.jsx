@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
+import HandoffHistoryStrip from './HandoffHistoryStrip';
 
 const ticketDescriptionMdComponents = {
   ...transcriptMdComponents,
@@ -634,6 +635,15 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           </div>
         )}
       </div>
+
+      {/* Handoff history strip — shows every pickup/rejection/reassignment for this ticket */}
+      {ticket?.id && (
+        <HandoffHistoryStrip
+          ticketId={ticket.id}
+          freshserviceTicketId={ticket.freshserviceTicketId}
+          workspaceTimezone={workspaceTimezone}
+        />
+      )}
 
       {/* Deleted ticket banner */}
       {String(ticket?.status || '').toLowerCase() === 'deleted' && isPending && (
