@@ -69,78 +69,87 @@ function ManualTriggerPanel({ isAdmin = false }) {
   const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
   return (
-    <div className="border rounded-lg bg-gray-50 mt-4">
+    <div className="border rounded-lg bg-gray-50 mt-4 overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between p-3 sm:p-4 touch-manipulation text-left"
+        className="w-full flex items-center justify-between p-3 sm:p-4 touch-manipulation text-left hover:bg-gray-100/60 transition-colors"
+        aria-expanded={expanded}
       >
         <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
           <Zap className="w-4 h-4" /> Manual Trigger
         </h4>
-        {expanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+        <ChevronDown
+          className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${expanded ? 'rotate-0' : '-rotate-90'}`}
+        />
       </button>
 
-      {expanded && (
-        <div className="px-3 pb-3 sm:px-4 sm:pb-4">
-          <div className="flex items-center justify-end gap-2 mb-3">
-            <label className="flex items-center gap-1 text-xs text-gray-500 touch-manipulation">
-              <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="rounded w-4 h-4" />
-              Assigned
-            </label>
-            <button onClick={fetchTickets} className="text-xs text-blue-600 hover:underline p-1 touch-manipulation">Refresh</button>
-          </div>
-
-          <div className="relative mb-3">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search tickets..."
-              className="w-full pl-9 pr-3 py-2.5 sm:py-2 border rounded-lg text-sm bg-white"
-            />
-          </div>
-
-          {loading ? (
-            <div className="flex justify-center p-4"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
-          ) : filtered.length === 0 ? (
-            <p className="text-gray-400 text-sm text-center py-4">No tickets found.</p>
-          ) : (
-            <div className="space-y-1.5 max-h-72 overflow-y-auto">
-              {filtered.map((ticket) => {
-                const hasPipeline = ticket.pipelineRuns?.length > 0;
-                return (
-                  <div key={ticket.id} className="flex items-center justify-between bg-white border rounded-lg px-3 py-2.5 sm:py-2 gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate">
-                        <span className="text-gray-400 font-mono text-xs">#{ticket.freshserviceTicketId}</span>{' '}
-                        {ticket.subject || 'No subject'}
-                      </p>
-                      <p className="text-xs text-gray-400 truncate">
-                        {ticket.requester?.name || 'Unknown'}
-                        {ticket.assignedTech ? ` · ${ticket.assignedTech.name}` : ''}
-                        {' · '}{PRIORITY_LABELS[ticket.priority] || `P${ticket.priority}`}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleTrigger(ticket.id)}
-                      className={`px-3 py-2 sm:py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation min-h-[36px] flex-shrink-0 ${
-                        hasPipeline
-                          ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          : 'bg-blue-600 text-white hover:bg-blue-700'
-                      }`}
-                    >
-                      {hasPipeline ? <RotateCcw className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                      {hasPipeline ? 'Re-run' : 'Run'}
-                    </button>
-                  </div>
-                );
-              })}
+      {/* Smooth collapse using grid-template-rows trick */}
+      <div
+        className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+        style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
+      >
+        <div className="overflow-hidden">
+          <div className="px-3 pb-3 sm:px-4 sm:pb-4">
+            <div className="flex items-center justify-end gap-2 mb-3">
+              <label className="flex items-center gap-1 text-xs text-gray-500 touch-manipulation">
+                <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="rounded w-4 h-4" />
+                Assigned
+              </label>
+              <button onClick={fetchTickets} className="text-xs text-blue-600 hover:underline p-1 touch-manipulation">Refresh</button>
             </div>
-          )}
+
+            <div className="relative mb-3">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search tickets..."
+                className="w-full pl-9 pr-3 py-2.5 sm:py-2 border rounded-lg text-sm bg-white"
+              />
+            </div>
+
+            {loading ? (
+              <div className="flex justify-center p-4"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+            ) : filtered.length === 0 ? (
+              <p className="text-gray-400 text-sm text-center py-4">No tickets found.</p>
+            ) : (
+              <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                {filtered.map((ticket) => {
+                  const hasPipeline = ticket.pipelineRuns?.length > 0;
+                  return (
+                    <div key={ticket.id} className="flex items-center justify-between bg-white border rounded-lg px-3 py-2.5 sm:py-2 gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate">
+                          <span className="text-gray-400 font-mono text-xs">#{ticket.freshserviceTicketId}</span>{' '}
+                          {ticket.subject || 'No subject'}
+                        </p>
+                        <p className="text-xs text-gray-400 truncate">
+                          {ticket.requester?.name || 'Unknown'}
+                          {ticket.assignedTech ? ` · ${ticket.assignedTech.name}` : ''}
+                          {' · '}{PRIORITY_LABELS[ticket.priority] || `P${ticket.priority}`}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleTrigger(ticket.id)}
+                        className={`px-3 py-2 sm:py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation min-h-[36px] flex-shrink-0 ${
+                          hasPipeline
+                            ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
+                      >
+                        {hasPipeline ? <RotateCcw className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                        {hasPipeline ? 'Re-run' : 'Run'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -285,9 +294,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [queuePage, setQueuePage] = useState(0);
   const queuePageSize = 50;
   const queuedSectionRef = useRef(null);
+  const [queuedExpanded, setQueuedExpanded] = useState(false);
 
   const scrollToQueuedSection = useCallback(() => {
-    queuedSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setQueuedExpanded(true);
+    // Wait one tick so the expand animation starts before scrolling
+    setTimeout(() => {
+      queuedSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
   }, []);
 
   const animateOut = useCallback((runId) => {
@@ -1002,7 +1016,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             <div className="inline-flex items-center gap-0.5 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/60">
               {[
                 { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
-                { id: 'assigned', label: 'Assigned', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
+                { id: 'assigned', label: 'Decided', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
                 { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400', activeRing: 'ring-slate-200' },
                 { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-rose-400', activeRing: 'ring-rose-200' },
                 { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500', activeRing: 'ring-red-200' },
@@ -1197,7 +1211,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               {subView === 'pending'
                 ? 'No tickets awaiting decision'
                 : subView === 'assigned'
-                  ? 'No assignments in this period'
+                  ? 'No decisions in this period'
                   : subView === 'dismissed'
                     ? 'No dismissed runs in this period'
                     : subView === 'rejected'
@@ -1385,10 +1399,18 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         )}
       </div>
 
-      {/* Queued for business hours — moved below tickets so it's secondary content */}
+      {/* Queued for business hours — collapsible (collapsed by default) */}
       {queuedRuns.length > 0 && (
         <div ref={queuedSectionRef} className="border border-amber-200 rounded-lg overflow-hidden scroll-mt-4">
-          <div className="bg-amber-50/80 px-3 sm:px-4 py-1.5 border-b border-amber-100 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setQueuedExpanded((v) => !v)}
+            className="w-full bg-amber-50/80 hover:bg-amber-50 px-3 sm:px-4 py-1.5 border-b border-amber-100 flex items-center gap-2 transition-colors text-left"
+            aria-expanded={queuedExpanded}
+          >
+            <ChevronDown
+              className={`w-3.5 h-3.5 text-amber-600 flex-shrink-0 transition-transform duration-300 ${queuedExpanded ? 'rotate-0' : '-rotate-90'}`}
+            />
             <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
             <span className="text-[12px] font-semibold text-amber-800">Queued for Business Hours</span>
             <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums">{queuedRuns.length}</span>
@@ -1404,7 +1426,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 Active — processing on next sync
               </span>
             ) : null}
-          </div>
+          </button>
+          {/* Smooth collapse using grid-template-rows trick (transitions max content height fluidly) */}
+          <div
+            className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+            style={{ gridTemplateRows: queuedExpanded ? '1fr' : '0fr' }}
+          >
+            <div className="overflow-hidden">
           <div className="md:hidden divide-y divide-amber-50 bg-white">
             {queuedRuns.map((run) => (
               <div key={run.id} className="px-3 py-2 space-y-1.5">
@@ -1462,6 +1490,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               ))}
             </tbody>
           </table>
+            </div>
+          </div>
         </div>
       )}
 
