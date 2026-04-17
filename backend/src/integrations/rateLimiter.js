@@ -3,24 +3,31 @@ import logger from '../utils/logger.js';
 /**
  * Token-bucket rate limiter for FreshService API calls.
  *
- * Shared across all callsites via a single instance on FreshServiceClient.
+ * Shared per-process singleton via FreshServiceClient.
  *
- * Rules:
- *  - Cap per-minute requests (default 110, well under FS's 140/min)
- *  - Enforce min delay between requests to dodge burst detection
- *  - Adapt based on `x-ratelimit-remaining` header (slow down near the edge)
- *  - Honor `Retry-After` header on 429
+ * Design:
+ *  - Caps requests per 60-second sliding window
+ *  - Enforces a min-delay between LAUNCH times (not completions) so we can
+ *    have multiple requests in flight at once (concurrency)
+ *  - Honors Retry-After on 429 via a global pause
+ *  - Does NOT adapt based on x-ratelimit-remaining because that header is
+ *    per-endpoint on Freshworks and caused a death spiral with /activities
  */
 export class FreshServiceRateLimiter {
-  constructor({ maxRequestsPerMinute = 110, minDelayMs = 550, slowDelayMs = 1500 } = {}) {
+  constructor({
+    maxRequestsPerMinute = 120,
+    minDelayMs = 550,
+    maxConcurrent = 3,
+  } = {}) {
     this.maxRequestsPerMinute = maxRequestsPerMinute;
-    this.baseMinDelayMs = minDelayMs;
     this.minDelayMs = minDelayMs;
-    this.slowDelayMs = slowDelayMs;
-    this.recentRequests = []; // timestamps (ms)
-    this.queue = [];
+    this.maxConcurrent = maxConcurrent;
+    this.recentLaunches = []; // timestamps when requests were launched
+    this.inFlight = 0;        // currently in-flight requests
+    this.queue = [];          // [{ fn, resolve, reject }]
     this.processing = false;
-    this.slowdownUntil = 0; // ms timestamp
+    this.slowdownUntil = 0;   // ms timestamp for 429 Retry-After pause
+    this.lastLaunchAt = 0;
   }
 
   _sleep(ms) {
@@ -30,105 +37,123 @@ export class FreshServiceRateLimiter {
   async enqueue(fn) {
     return new Promise((resolve, reject) => {
       this.queue.push({ fn, resolve, reject });
-      this._drain().catch((e) => logger.error('Rate limiter drain error:', e));
+      this._pump().catch((e) => logger.error('RateLimiter pump error:', e));
     });
   }
 
-  async _drain() {
+  /**
+   * Continuously try to launch queued requests. Multiple launches can be
+   * in-flight at once (up to maxConcurrent), but launches are spaced by
+   * minDelayMs to stay under the per-minute cap and avoid burst detection.
+   */
+  async _pump() {
     if (this.processing) return;
     this.processing = true;
     try {
       while (this.queue.length > 0) {
-        await this._throttle();
-        const { fn, resolve, reject } = this.queue.shift();
-        this.recentRequests.push(Date.now());
-        try {
-          const result = await fn();
-          resolve(result);
-        } catch (err) {
-          reject(err);
-        }
+        // Block here until we're allowed to launch the next request
+        await this._waitForLaunchWindow();
+
+        // Still have an item? (someone could have drained us)
+        const item = this.queue.shift();
+        if (!item) break;
+
+        const now = Date.now();
+        this.recentLaunches.push(now);
+        this.lastLaunchAt = now;
+        this.inFlight++;
+
+        // Fire-and-manage: don't await here so the next iteration can launch
+        // another request concurrently.
+        item.fn()
+          .then((result) => item.resolve(result))
+          .catch((err) => item.reject(err))
+          .finally(() => {
+            this.inFlight--;
+            // Poke the pump in case it was parked waiting on concurrency cap
+            if (this.queue.length > 0 && !this.processing) {
+              this._pump().catch((e) => logger.error('RateLimiter pump error:', e));
+            }
+          });
       }
     } finally {
       this.processing = false;
     }
   }
 
-  async _throttle() {
-    const now = Date.now();
+  /**
+   * Sleep until we're permitted to launch the next request:
+   *  - Not inside a 429 Retry-After window
+   *  - Under maxConcurrent in-flight
+   *  - Under maxRequestsPerMinute in the sliding window
+   *  - At least minDelayMs since last launch
+   */
+  async _waitForLaunchWindow() {
+    // Loop until all gates pass (each gate may sleep once)
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const now = Date.now();
 
-    // Purge requests older than 60s
-    this.recentRequests = this.recentRequests.filter((t) => now - t < 60000);
+      // Purge launches older than 60s
+      this.recentLaunches = this.recentLaunches.filter((t) => now - t < 60000);
 
-    // Honor explicit slowdown window (from 429 Retry-After)
-    if (this.slowdownUntil > now) {
-      await this._sleep(this.slowdownUntil - now);
-      return this._throttle();
-    }
+      // Gate 1: 429 pause
+      if (this.slowdownUntil > now) {
+        await this._sleep(this.slowdownUntil - now);
+        continue;
+      }
 
-    // If at per-minute cap, wait until oldest falls outside the window
-    if (this.recentRequests.length >= this.maxRequestsPerMinute) {
-      const oldest = this.recentRequests[0];
-      const waitMs = 60000 - (now - oldest) + 100;
-      logger.warn(`RateLimiter: per-minute cap reached (${this.recentRequests.length}), sleeping ${waitMs}ms`);
-      await this._sleep(waitMs);
-      return this._throttle();
-    }
+      // Gate 2: concurrency cap
+      if (this.inFlight >= this.maxConcurrent) {
+        // Short wait then re-check — an in-flight request should finish shortly
+        await this._sleep(50);
+        continue;
+      }
 
-    // Min-delay between requests
-    if (this.recentRequests.length > 0) {
-      const last = this.recentRequests[this.recentRequests.length - 1];
-      const since = now - last;
+      // Gate 3: per-minute cap
+      if (this.recentLaunches.length >= this.maxRequestsPerMinute) {
+        const oldest = this.recentLaunches[0];
+        const waitMs = 60000 - (now - oldest) + 50;
+        logger.debug(`RateLimiter: per-minute cap reached (${this.recentLaunches.length}/${this.maxRequestsPerMinute}), sleeping ${waitMs}ms`);
+        await this._sleep(waitMs);
+        continue;
+      }
+
+      // Gate 4: min-delay since last launch
+      const since = now - this.lastLaunchAt;
       if (since < this.minDelayMs) {
         await this._sleep(this.minDelayMs - since);
+        continue;
       }
+
+      // All gates pass
+      return;
     }
   }
 
-  /**
-   * Call after a successful response to adapt pacing.
-   * Reads `x-ratelimit-remaining` / `x-ratelimit-total` and slows down if near edge.
-   */
-  onResponse(headers) {
-    if (!headers) return;
-    const remaining = parseInt(headers['x-ratelimit-remaining'], 10);
-    const total = parseInt(headers['x-ratelimit-total'], 10);
-    if (!Number.isNaN(remaining) && !Number.isNaN(total) && total > 0) {
-      const ratio = remaining / total;
-      if (ratio < 0.15) {
-        // Very close to cap — slow way down
-        this.minDelayMs = this.slowDelayMs;
-      } else if (ratio < 0.3) {
-        // Getting close — moderate slowdown
-        this.minDelayMs = Math.max(this.baseMinDelayMs + 400, 900);
-      } else {
-        // Healthy — baseline
-        this.minDelayMs = this.baseMinDelayMs;
-      }
-    }
-  }
+  /** Observational hook — kept for diagnostics but no longer adjusts pacing. */
+  onResponse(_headers) { /* intentionally empty: per-endpoint sub-limits made this misleading */ }
 
-  /**
-   * Call on a 429 response to respect Retry-After.
-   * Applies a global slowdown so the whole queue waits.
-   */
+  /** Pause the queue when we actually hit a 429. */
   on429(headers) {
     const retryAfterSec = parseInt(headers?.['retry-after'], 10);
     const waitSec = !Number.isNaN(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec : 10;
     this.slowdownUntil = Math.max(this.slowdownUntil, Date.now() + waitSec * 1000);
-    // Also bump the min delay so subsequent calls are spaced out
-    this.minDelayMs = this.slowDelayMs;
-    logger.warn(`RateLimiter: 429 received, pausing queue for ${waitSec}s (Retry-After: ${retryAfterSec || 'default'})`);
+    logger.warn(`RateLimiter: 429 — pausing queue for ${waitSec}s (Retry-After: ${retryAfterSec || 'default'}), ${this.queue.length} queued, ${this.inFlight} in-flight`);
   }
 
   getStats() {
     const now = Date.now();
-    const live = this.recentRequests.filter((t) => now - t < 60000);
+    const live = this.recentLaunches.filter((t) => now - t < 60000);
     return {
       requestsLastMinute: live.length,
+      inFlight: this.inFlight,
       queueDepth: this.queue.length,
+      maxRequestsPerMinute: this.maxRequestsPerMinute,
+      maxConcurrent: this.maxConcurrent,
       minDelayMs: this.minDelayMs,
       slowdownActive: this.slowdownUntil > now,
+      slowdownMsLeft: Math.max(0, this.slowdownUntil - now),
     };
   }
 }

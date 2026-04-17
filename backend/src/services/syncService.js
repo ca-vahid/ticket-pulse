@@ -255,12 +255,13 @@ class SyncService {
    * @private
    */
   /**
-   * Analyze ticket activities. Rate limiting is handled centrally by the
-   * FreshServiceClient's shared rate limiter — we just issue requests
-   * sequentially and let the limiter queue/throttle them.
+   * Analyze ticket activities. Rate limiting + concurrency are handled
+   * centrally by the FreshServiceClient's shared rate limiter.
    *
-   * Previously this used a Promise.all + setTimeout pattern that caused
-   * overlapping requests during retries. Now: a true sequential loop.
+   * Caller fires ALL activity fetches as parallel promises; the limiter
+   * queues them and launches up to maxConcurrent at a time, spaced by
+   * minDelayMs. This lets us saturate the rate budget instead of idling
+   * between round-trips.
    */
   async _analyzeTicketActivities(client, tickets, options = {}) {
     const { ticketFilter = null, onProgress = null } = options;
@@ -275,13 +276,13 @@ class SyncService {
     }
 
     const totalCount = ticketsToAnalyze.length;
-    logger.info(`Analyzing ${totalCount} tickets (rate-limited by shared queue)`);
+    logger.info(`Analyzing ${totalCount} tickets (concurrent via shared rate limiter)`);
 
     const analysisMap = new Map();
     let processedCount = 0;
     let errorCount = 0;
 
-    for (const ticket of ticketsToAnalyze) {
+    const processOne = async (ticket) => {
       const ticketId = ticket.id || ticket.freshserviceTicketId;
       try {
         const activities = await client.fetchTicketActivities(Number(ticketId));
@@ -289,25 +290,26 @@ class SyncService {
           const analysis = analyzeTicketActivities(activities);
           analysisMap.set(ticketId.toString(), analysis);
           processedCount++;
-
-          if (onProgress && processedCount % 5 === 0) {
-            onProgress(processedCount, totalCount);
-          }
-          if (processedCount % 50 === 0) {
-            logger.info(`Activity analysis: ${processedCount}/${totalCount} (${Math.round(processedCount / totalCount * 100)}%) — ${errorCount} errors`);
-          }
-          logger.debug(`Ticket ${ticketId}: isSelfPicked=${analysis.isSelfPicked}, assignedBy=${analysis.assignedBy}`);
+        } else {
+          processedCount++;
         }
       } catch (error) {
         errorCount++;
         if (!String(error).includes('500')) {
           logger.warn(`Failed to analyze ticket ${ticketId}: ${error.message || error}`);
         }
-        if (onProgress && (processedCount + errorCount) % 5 === 0) {
-          onProgress(processedCount + errorCount, totalCount);
-        }
       }
-    }
+
+      const done = processedCount + errorCount;
+      if (onProgress && done % 5 === 0) onProgress(done, totalCount);
+      if (done % 50 === 0) {
+        logger.info(`Activity analysis: ${done}/${totalCount} (${Math.round(done / totalCount * 100)}%) — ${errorCount} errors`);
+      }
+    };
+
+    // Fire all requests in parallel; the shared limiter serializes them
+    // up to maxConcurrent at a time while respecting the per-minute cap.
+    await Promise.all(ticketsToAnalyze.map(processOne));
 
     if (onProgress) onProgress(totalCount, totalCount);
     logger.info(`Activity analysis complete: ${processedCount} analyzed, ${errorCount} errors`);
