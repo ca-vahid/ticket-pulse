@@ -45,6 +45,7 @@ model Workspace {
   competencyPrompts      CompetencyPromptVersion[]
   competencyRuns         CompetencyAnalysisRun[]
   calibrationRuns        CalibrationRun[]
+  assignmentEpisodes     TicketAssignmentEpisode[]
 
   @@map("workspaces")
 }
@@ -88,6 +89,7 @@ model Technician {
   competencies         TechnicianCompetency[]
   pipelineAssignments  AssignmentPipelineRun[] @relation("pipelineAssignedTo")
   competencyRuns       CompetencyAnalysisRun[]
+  assignmentEpisodes   TicketAssignmentEpisode[]
 
   @@unique([freshserviceId, workspaceId])
   @@map("technicians")
@@ -185,8 +187,13 @@ model Ticket {
   isNoise              Boolean   @default(false) @map("is_noise")
   noiseRuleMatched     String?   @db.VarChar(100) @map("noise_rule_matched")
 
+  // Bounce / rejection tracking
+  rejectionCount       Int       @default(0) @map("rejection_count")
+  groupId              BigInt?   @map("group_id")
+
   ticketAssignments    TicketAssignment[]
   pipelineRuns         AssignmentPipelineRun[]
+  assignmentEpisodes   TicketAssignmentEpisode[]
 
   @@map("tickets")
   @@index([workspaceId])
@@ -224,14 +231,41 @@ model NoiseRule {
 model TicketActivity {
   id            Int       @id @default(autoincrement())
   ticketId      Int       @map("ticket_id")
-  activityType  String    @db.VarChar(50) // assigned, status_changed, resolved, picked
+  activityType  String    @db.VarChar(50) // assigned, status_changed, resolved, picked, self_picked, coordinator_assigned, rejected, reassigned, group_changed
   performedBy   String    @db.VarChar(255) @map("performed_by")
   performedAt   DateTime  @map("performed_at")
-  details       Json?     // Store additional context as JSON
+  details       Json?     // { fromTechId, toTechId, actorName, actorFsId, fromGroupId, toGroupId }
 
   @@map("ticket_activities")
   @@index([ticketId])
   @@index([performedAt])
+  @@index([activityType])
+}
+
+model TicketAssignmentEpisode {
+  id                  Int       @id @default(autoincrement())
+  ticketId            Int       @map("ticket_id")
+  ticket              Ticket    @relation(fields: [ticketId], references: [id])
+  technicianId        Int       @map("technician_id")
+  technician          Technician @relation(fields: [technicianId], references: [id])
+  workspaceId         Int       @map("workspace_id")
+  workspace           Workspace  @relation(fields: [workspaceId], references: [id])
+  startedAt           DateTime  @map("started_at")
+  endedAt             DateTime? @map("ended_at")
+  startMethod         String    @db.VarChar(30) @map("start_method") // self_picked | coordinator_assigned | workflow_assigned | unknown
+  startAssignedByName String?   @db.VarChar(255) @map("start_assigned_by_name")
+  endMethod           String?   @db.VarChar(20) @map("end_method") // rejected | reassigned | closed | still_active
+  endActorName        String?   @db.VarChar(255) @map("end_actor_name")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@map("ticket_assignment_episodes")
+  @@unique([ticketId, startedAt])
+  @@index([ticketId])
+  @@index([technicianId])
+  @@index([workspaceId])
+  @@index([endMethod])
+  @@index([startedAt])
 }
 
 model AppSettings {

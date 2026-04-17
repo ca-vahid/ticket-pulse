@@ -16,6 +16,7 @@ import noiseRuleService from './noiseRuleService.js';
 import assignmentRepository from './assignmentRepository.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
 import { shouldTriggerAssignmentForLatestRun } from './assignmentFlowGuards.js';
+import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
@@ -82,6 +83,103 @@ class SyncService {
     }
     const config = await settingsRepository.getFreshServiceConfig();
     return { ...config, defaultTimezone: 'America/Los_Angeles', syncIntervalMinutes: 5 };
+  }
+
+  // ========================================
+  // EPISODE RECONCILIATION
+  // ========================================
+
+  /**
+   * Reconcile assignment episodes from FS activity analysis into DB.
+   * Inserts new episodes and closes stale open ones.
+   */
+  async _reconcileEpisodes(ticketId, workspaceId, analysis, techNameMap) {
+    try {
+      const existingEpisodes = await prisma.ticketAssignmentEpisode.findMany({
+        where: { ticketId },
+        orderBy: { startedAt: 'asc' },
+      });
+      const existingSet = new Set(existingEpisodes.map((e) => e.startedAt.getTime()));
+
+      for (const ep of analysis.episodes) {
+        const techId = techNameMap.get(ep.agentName);
+        if (!techId) {
+          logger.debug(`Episode skip: tech "${ep.agentName}" not found in map for ticket ${ticketId}`);
+          continue;
+        }
+
+        const startMs = new Date(ep.startedAt).getTime();
+        if (existingSet.has(startMs)) {
+          // Update existing episode end state if it changed
+          const existing = existingEpisodes.find((e) => e.startedAt.getTime() === startMs);
+          if (existing && existing.endMethod !== ep.endMethod) {
+            await prisma.ticketAssignmentEpisode.update({
+              where: { id: existing.id },
+              data: {
+                endedAt: ep.endedAt ? new Date(ep.endedAt) : null,
+                endMethod: ep.endMethod || null,
+                endActorName: ep.endActorName || null,
+              },
+            });
+          }
+          continue;
+        }
+
+        await prisma.ticketAssignmentEpisode.create({
+          data: {
+            ticketId,
+            technicianId: techId,
+            workspaceId,
+            startedAt: new Date(ep.startedAt),
+            endedAt: ep.endedAt ? new Date(ep.endedAt) : null,
+            startMethod: ep.startMethod || 'unknown',
+            startAssignedByName: ep.startAssignedByName || null,
+            endMethod: ep.endMethod || null,
+            endActorName: ep.endActorName || null,
+          },
+        });
+      }
+    } catch (error) {
+      logger.error(`Failed to reconcile episodes for ticket ${ticketId}:`, error);
+    }
+  }
+
+  /**
+   * Write FS-sourced events as TicketActivity rows, deduplicating by timestamp + type.
+   */
+  async _writeEventActivities(ticketId, events) {
+    try {
+      const existing = await prisma.ticketActivity.findMany({
+        where: { ticketId },
+        select: { activityType: true, performedAt: true },
+      });
+      const existingSet = new Set(
+        existing.map((e) => `${e.activityType}:${e.performedAt.getTime()}`),
+      );
+
+      for (const evt of events) {
+        const key = `${evt.type}:${new Date(evt.timestamp).getTime()}`;
+        if (existingSet.has(key)) continue;
+
+        const details = {};
+        if (evt.actorFsId) details.actorFsId = evt.actorFsId;
+        if (evt.agentName) details.agentName = evt.agentName;
+        if (evt.groupName !== undefined) details.groupName = evt.groupName;
+        if (evt.source) details.source = evt.source;
+
+        await prisma.ticketActivity.create({
+          data: {
+            ticketId,
+            activityType: evt.type,
+            performedBy: evt.actorName || 'Unknown',
+            performedAt: new Date(evt.timestamp),
+            details: Object.keys(details).length > 0 ? details : undefined,
+          },
+        });
+      }
+    } catch (error) {
+      logger.error(`Failed to write event activities for ticket ${ticketId}:`, error);
+    }
   }
 
   // ========================================
@@ -480,14 +578,40 @@ class SyncService {
       );
       logger.info(`Found ${existingTicketsMap.size} existing tickets out of ${ticketIds.length}`);
 
-      // Step 5: Use _analyzeTicketActivities() with selective filter
-      // Only analyze NEW tickets or tickets missing assignment data
+      // Step 5: Use _analyzeTicketActivities() with broadened filter
+      // Fetch activities when: new ticket, assignment data incomplete,
+      // FS updated_at newer than our record, or ticket has an active pipeline run.
+      const ticketsWithActiveRuns = new Set();
+      try {
+        const activeRuns = await prisma.assignmentPipelineRun.findMany({
+          where: { status: { in: ['running', 'completed'] }, decision: 'pending_review' },
+          select: { ticket: { select: { freshserviceTicketId: true } } },
+        });
+        for (const r of activeRuns) {
+          if (r.ticket?.freshserviceTicketId) ticketsWithActiveRuns.add(r.ticket.freshserviceTicketId.toString());
+        }
+      } catch { /* non-fatal */ }
+
       const ticketFilter = (fsTicket) => {
         const existingTicket = existingTicketsMap.get(fsTicket.id.toString());
+        if (!existingTicket) return true;
+
         const hasAssignedTech = fsTicket.responder_id !== null && fsTicket.responder_id !== undefined;
-        const needsAnalysis = !existingTicket ||
-          (hasAssignedTech && (!existingTicket.assignedBy || !existingTicket.firstAssignedAt));
-        return needsAnalysis && hasAssignedTech;
+
+        // Missing episodes or assignment data
+        if (hasAssignedTech && (!existingTicket.assignedBy || !existingTicket.firstAssignedAt)) return true;
+
+        // FS updated since our last record
+        if (fsTicket.updated_at) {
+          const fsUpdated = new Date(fsTicket.updated_at).getTime();
+          const ourUpdated = existingTicket.updatedAt ? new Date(existingTicket.updatedAt).getTime() : 0;
+          if (fsUpdated > ourUpdated) return true;
+        }
+
+        // Has an active pipeline run
+        if (ticketsWithActiveRuns.has(fsTicket.id.toString())) return true;
+
+        return false;
       };
 
       const activityAnalysisMap = await this._analyzeTicketActivities(client, fsTickets, {
@@ -498,38 +622,44 @@ class SyncService {
 
       logger.info(`Analyzed ${activityAnalysisMap.size} tickets for activity data`);
 
-      // Step 6: Upsert tickets with merge logic and activity logging
+      // Build tech name→id map for episode reconciliation
+      const allTechs = await technicianRepository.getAll(options.workspaceId, { lite: true });
+      const techNameMap = new Map();
+      for (const t of allTechs) {
+        techNameMap.set(t.name, t.id);
+        if (t.email) techNameMap.set(t.email, t.id);
+      }
+
+      // Step 6: Upsert tickets with merge logic, activity logging, and episode reconciliation
       let syncedCount = 0;
       for (const ticket of ticketsWithTechIds) {
         try {
           const existingTicket = existingTicketsMap.get(ticket.freshserviceTicketId.toString());
           const ticketWorkspaceId = ticket.workspaceId ?? options.workspaceId ?? 1;
 
-          // Always re-evaluate noise classification on sync so rule changes
-          // and workspace-specific rules are reflected in current data.
           const { isNoise, ruleId } = await noiseRuleService.evaluate(
             ticket.subject,
             ticket.createdAt ? new Date(ticket.createdAt) : null,
             ticketWorkspaceId,
           );
 
-          // Get analysis from map or use existing/default values
           let isSelfPicked = false;
           let assignedBy = null;
           let firstAssignedAt = null;
+          let rejectionCount = existingTicket?.rejectionCount || 0;
 
           const analysis = activityAnalysisMap.get(ticket.freshserviceTicketId.toString());
           if (analysis) {
-            isSelfPicked = analysis.isSelfPicked;
+            isSelfPicked = analysis.currentIsSelfPicked;
             assignedBy = analysis.assignedBy;
             firstAssignedAt = analysis.firstAssignedAt;
+            rejectionCount = analysis.rejectionCount || 0;
           } else if (existingTicket) {
             isSelfPicked = existingTicket.isSelfPicked;
             assignedBy = existingTicket.assignedBy;
             firstAssignedAt = existingTicket.firstAssignedAt;
           }
 
-          // Upsert ticket
           const upsertedTicket = await ticketRepository.upsert({
             ...ticket,
             workspaceId: ticketWorkspaceId,
@@ -538,6 +668,7 @@ class SyncService {
             isSelfPicked,
             assignedBy,
             firstAssignedAt,
+            rejectionCount,
           });
 
           // Create activity log if assignment changed
@@ -568,6 +699,16 @@ class SyncService {
                 note: `Status changed from ${existingTicket.status} to ${upsertedTicket.status}`,
               },
             });
+          }
+
+          // --- Reconcile assignment episodes from FS activity analysis ---
+          if (analysis && analysis.episodes && analysis.episodes.length > 0) {
+            await this._reconcileEpisodes(upsertedTicket.id, ticketWorkspaceId, analysis, techNameMap);
+          }
+
+          // --- Write FS-sourced event activities (richer than snapshot diffs) ---
+          if (analysis && analysis.events && analysis.events.length > 0) {
+            await this._writeEventActivities(upsertedTicket.id, analysis.events);
           }
 
           syncedCount++;
@@ -1566,6 +1707,143 @@ class SyncService {
         spam: spamCount,
         verified: verifiedCount,
       });
+    }
+  }
+  /**
+   * Backfill assignment episodes for historical tickets.
+   * Fetches activities from FreshService and populates ticket_assignment_episodes.
+   * @param {Object} options
+   * @param {number} options.daysToSync - How many days of history to backfill (default 180)
+   * @param {number} options.limit - Max tickets per batch (default 100)
+   * @param {boolean} options.processAll - Process all batches until complete
+   * @param {number} options.concurrency - Parallel FS API calls (default 3)
+   * @param {number} options.workspaceId
+   * @param {Function} options.onProgress - SSE progress callback
+   */
+  async backfillEpisodes(options = {}) {
+    const daysToSync = options.daysToSync || 180;
+    const limit = options.limit || 100;
+    const processAll = options.processAll !== false;
+    const concurrency = options.concurrency || 3;
+    const wsId = options.workspaceId || 1;
+    const onProgress = options.onProgress || null;
+
+    try {
+      logger.info(`Starting episode backfill (days=${daysToSync}, limit=${limit}, concurrency=${concurrency})`);
+      const client = await this._initializeClient();
+
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysToSync);
+
+      // Build tech name→id map
+      const allTechs = await technicianRepository.getAll(wsId, { lite: true });
+      const techNameMap = new Map();
+      for (const t of allTechs) {
+        techNameMap.set(t.name, t.id);
+        if (t.email) techNameMap.set(t.email, t.id);
+      }
+
+      let totalProcessed = 0;
+      let totalEpisodesCreated = 0;
+      let totalErrors = 0;
+      let batchNumber = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        batchNumber++;
+
+        // Fetch tickets that need episode backfill:
+        // 1. Have been updated since cutoff
+        // 2. Have at least one assignment in their history (assignedTechId not null OR firstAssignedAt exists)
+        // 3. Don't yet have episodes (or have fewer episodes than expected)
+        const tickets = await prisma.ticket.findMany({
+          where: {
+            workspaceId: wsId,
+            createdAt: { gte: cutoffDate },
+            OR: [
+              { assignedTechId: { not: null } },
+              { firstAssignedAt: { not: null } },
+            ],
+          },
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            _count: { select: { assignmentEpisodes: true } },
+          },
+          take: limit,
+          skip: (batchNumber - 1) * limit,
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (tickets.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        logger.info(`Episode backfill batch ${batchNumber}: ${tickets.length} tickets`);
+        if (onProgress) onProgress({ batch: batchNumber, ticketCount: tickets.length, totalProcessed });
+
+        for (const ticket of tickets) {
+          try {
+            const fsTicketId = Number(ticket.freshserviceTicketId);
+            const activities = await client.fetchTicketActivities(fsTicketId);
+            if (!activities || activities.length === 0) {
+              totalProcessed++;
+              continue;
+            }
+
+            const analysis = analyzeTicketActivities(activities);
+
+            if (analysis.episodes && analysis.episodes.length > 0) {
+              await this._reconcileEpisodes(ticket.id, wsId, analysis, techNameMap);
+              totalEpisodesCreated += analysis.episodes.length;
+            }
+
+            if (analysis.events && analysis.events.length > 0) {
+              await this._writeEventActivities(ticket.id, analysis.events);
+            }
+
+            // Update ticket-level fields
+            await prisma.ticket.update({
+              where: { id: ticket.id },
+              data: {
+                isSelfPicked: analysis.currentIsSelfPicked,
+                rejectionCount: analysis.rejectionCount || 0,
+                assignedBy: analysis.assignedBy || null,
+                firstAssignedAt: analysis.firstAssignedAt || undefined,
+              },
+            });
+
+            totalProcessed++;
+
+            // Rate limiting between FS API calls
+            if (totalProcessed % concurrency === 0) {
+              await new Promise((r) => setTimeout(r, 1100));
+            }
+          } catch (error) {
+            totalErrors++;
+            logger.error(`Episode backfill failed for ticket ${ticket.freshserviceTicketId}:`, error);
+          }
+        }
+
+        if (!processAll || tickets.length < limit) {
+          hasMore = false;
+        }
+      }
+
+      const summary = {
+        ticketsProcessed: totalProcessed,
+        episodesCreated: totalEpisodesCreated,
+        errors: totalErrors,
+        batches: batchNumber,
+        daysToSync,
+      };
+
+      logger.info('Episode backfill complete', summary);
+      return summary;
+    } catch (error) {
+      logger.error('Episode backfill failed:', error);
+      throw error;
     }
   }
 }

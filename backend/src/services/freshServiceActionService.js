@@ -85,13 +85,20 @@ class FreshServiceActionService {
 
   /**
    * Execute FreshService write-back for a pipeline run.
-   * Single path: builds the action, then either previews (dry-run) or executes (real).
+   * Includes preflight validation against live FS state unless force=true.
+   * @param {number} runId
+   * @param {number} workspaceId
+   * @param {boolean} dryRun
+   * @param {Object} options
+   * @param {boolean} options.force - Skip preflight checks
    */
-  async execute(runId, workspaceId, dryRun = false) {
+  async execute(runId, workspaceId, dryRun = false, options = {}) {
+    const force = options.force || false;
+
     const run = await prisma.assignmentPipelineRun.findUnique({
       where: { id: runId },
       include: {
-        ticket: { select: { freshserviceTicketId: true, subject: true, ticketCategory: true } },
+        ticket: { select: { id: true, freshserviceTicketId: true, subject: true, ticketCategory: true } },
       },
     });
 
@@ -139,6 +146,27 @@ class FreshServiceActionService {
       }
 
       const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+
+      // --- Preflight checks (skip if force=true) ---
+      if (!force) {
+        const assignAction = actions.find((a) => a.type === 'assign');
+        if (assignAction) {
+          const preflightResult = await this._preflightCheck(client, run, assignAction);
+          if (preflightResult) {
+            await prisma.assignmentPipelineRun.update({
+              where: { id: runId },
+              data: {
+                syncStatus: 'failed',
+                syncError: preflightResult.reason,
+                syncPayload: { ...payloadData, preflightAbort: preflightResult },
+              },
+            });
+            logger.warn('FreshService sync aborted by preflight', { runId, ...preflightResult });
+            return { success: false, error: preflightResult.reason, preflightAbort: preflightResult, preview };
+          }
+        }
+      }
+
       let ticketGone = false;
 
       for (const action of actions) {
@@ -173,12 +201,78 @@ class FreshServiceActionService {
       return { success: true, preview, actions, ticketGone, syncNote };
 
     } catch (err) {
+      const freshserviceError = err.freshserviceDetail
+        ? { status: err.freshserviceStatus, body: err.freshserviceDetail }
+        : null;
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },
-        data: { syncStatus: 'failed', syncError: err.message, syncPayload: payloadData },
+        data: {
+          syncStatus: 'failed',
+          syncError: err.message,
+          syncPayload: { ...payloadData, freshserviceError },
+        },
       });
-      logger.error('FreshService sync failed', { runId, error: err.message });
-      return { success: false, error: err.message, preview };
+      logger.error('FreshService sync failed', { runId, error: err.message, freshserviceError });
+      return { success: false, error: err.message, preview, freshserviceError };
+    }
+  }
+  /**
+   * Pre-validate that the assignment will succeed before making the API call.
+   * Returns null if OK, or { code, reason, details } if should abort.
+   */
+  async _preflightCheck(client, run, assignAction) {
+    try {
+      const fsTicket = await client.getTicket(assignAction.ticketId);
+      if (!fsTicket) return null;
+
+      // Check 1: ticket already assigned to someone else
+      if (fsTicket.responder_id && Number(fsTicket.responder_id) !== Number(assignAction.agentId)) {
+        const currentAgent = await prisma.technician.findFirst({
+          where: { freshserviceId: BigInt(fsTicket.responder_id) },
+          select: { name: true },
+        });
+        return {
+          code: 'superseded_assignee',
+          reason: `Ticket is already assigned to ${currentAgent?.name || `agent #${fsTicket.responder_id}`}`,
+          details: { currentResponderId: fsTicket.responder_id, currentAgentName: currentAgent?.name },
+        };
+      }
+
+      // Check 2: ticket is in a group — check if target agent belongs to it
+      if (fsTicket.group_id) {
+        const group = await client.getGroup(fsTicket.group_id);
+        if (group && group.agent_ids && !group.agent_ids.includes(Number(assignAction.agentId))) {
+          return {
+            code: 'incompatible_group',
+            reason: `Target agent is not a member of group "${group.name || fsTicket.group_id}"`,
+            details: { groupId: fsTicket.group_id, groupName: group.name },
+          };
+        }
+      }
+
+      // Check 3: agent previously rejected this ticket
+      if (run.ticket?.id) {
+        const rejection = await prisma.ticketAssignmentEpisode.findFirst({
+          where: {
+            ticketId: run.ticket.id,
+            endMethod: 'rejected',
+            technician: { freshserviceId: BigInt(assignAction.agentId) },
+          },
+          select: { endedAt: true, technician: { select: { name: true } } },
+        });
+        if (rejection) {
+          return {
+            code: 'already_rejected_by_this_agent',
+            reason: `${rejection.technician.name} previously rejected this ticket at ${rejection.endedAt?.toISOString()}`,
+            details: { rejectedAt: rejection.endedAt, agentName: rejection.technician.name },
+          };
+        }
+      }
+
+      return null;
+    } catch (error) {
+      logger.warn('Preflight check failed (proceeding with sync)', { runId: run.id, error: error.message });
+      return null;
     }
   }
 }

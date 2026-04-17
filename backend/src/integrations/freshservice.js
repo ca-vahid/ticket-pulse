@@ -454,8 +454,33 @@ class FreshServiceClient {
       });
       return response.data.ticket;
     } catch (error) {
-      logger.error(`Error assigning ticket ${ticketId} to agent ${agentId}:`, error);
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error(`Error assigning ticket ${ticketId} to agent ${agentId}:`, { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
+    }
+  }
+
+  async getTicket(ticketId) {
+    try {
+      const response = await this.client.get(`/tickets/${ticketId}?include=stats`);
+      return response.data.ticket;
+    } catch (error) {
+      logger.error(`Error fetching ticket ${ticketId}:`, error);
       throw error;
+    }
+  }
+
+  async getGroup(groupId) {
+    try {
+      const response = await this.client.get(`/groups/${groupId}`);
+      return response.data.group;
+    } catch (error) {
+      logger.error(`Error fetching group ${groupId}:`, error);
+      return null;
     }
   }
 

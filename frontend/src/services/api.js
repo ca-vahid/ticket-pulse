@@ -484,8 +484,10 @@ export const assignmentAPI = {
   deleteRun: (id) => api.delete(`/assignment/runs/${id}`),
   dismissRun: (id) => api.post(`/assignment/runs/${id}/dismiss`),
   bulkDeleteRuns: (data) => api.post('/assignment/runs/bulk-delete', data),
-  syncRun: (id) => api.post(`/assignment/runs/${id}/sync`),
+  syncRun: (id, force) => api.post(`/assignment/runs/${id}/sync${force ? '?force=true' : ''}`),
   syncPreview: (id) => api.post(`/assignment/runs/${id}/sync-preview`),
+  getRunFreshness: (id) => api.get(`/assignment/runs/${id}/freshness`),
+  rerunPipeline: (id) => api.post(`/assignment/runs/${id}/rerun`),
   triggerPipeline: (ticketId) => api.post(`/assignment/trigger/${ticketId}`),
   getRecentTickets: (params) => api.get('/assignment/recent-tickets', { params }),
 

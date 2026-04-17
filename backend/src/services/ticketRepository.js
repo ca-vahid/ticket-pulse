@@ -229,6 +229,8 @@ class TicketRepository {
         firstAssignedAt: data.firstAssignedAt,
         isNoise: data.isNoise ?? undefined,
         noiseRuleMatched: data.noiseRuleMatched ?? undefined,
+        groupId: data.groupId !== undefined ? data.groupId : undefined,
+        rejectionCount: data.rejectionCount !== undefined ? data.rejectionCount : undefined,
         updatedAt: new Date(),
       };
 
@@ -266,6 +268,8 @@ class TicketRepository {
         firstAssignedAt: data.firstAssignedAt,
         isNoise: data.isNoise || false,
         noiseRuleMatched: data.noiseRuleMatched || null,
+        groupId: data.groupId || null,
+        rejectionCount: data.rejectionCount || 0,
         workspaceId: data.workspaceId || 1,
       };
 

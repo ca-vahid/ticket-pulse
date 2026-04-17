@@ -2,6 +2,185 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.5-preview] - 2026-04-17
+
+### Assignment Bounce Tracking & Preflight Validation
+
+This release closes six gaps exposed by run #340 (ticket #219101) where a technician self-picked, worked, then rejected a ticket back into the queue — an event our sync completely missed, leading to a stale approval and a failed FreshService write-back.
+
+---
+
+## 🗃️ New Data Model: Assignment Episodes
+
+**Status**: ✅ Complete
+**Impact**: Full assignment ownership history per ticket, bounce/rejection tracking
+
+### New Table: `ticket_assignment_episodes`
+
+Tracks every ownership period for a ticket — who held it, how it started (self-picked vs coordinator-assigned), and how it ended (rejected, reassigned, closed, or still active).
+
+**Schema**:
+- `id`, `ticket_id`, `technician_id`, `workspace_id`
+- `started_at`, `ended_at` (nullable = current holder)
+- `start_method`: `self_picked | coordinator_assigned | workflow_assigned | unknown`
+- `end_method`: `rejected | reassigned | closed | still_active`
+- `start_assigned_by_name`, `end_actor_name`
+
+### New Ticket Columns
+
+- `rejection_count` (Int, default 0) — how many times a ticket was bounced back to queue
+- `group_id` (BigInt, nullable) — current FreshService group for future escalation logic
+
+### Extended Activity Types
+
+`ticket_activities.activityType` now includes: `self_picked`, `coordinator_assigned`, `rejected`, `reassigned`, `group_changed`.
+
+**Files Changed**:
+- `backend/prisma/schema.prisma` — new model + columns + relations
+- `backend/prisma/migrations/20260418000000_add_assignment_episodes_and_bounce_tracking/migration.sql`
+
+---
+
+## 🔍 Rewritten Activity Analyzer
+
+**Status**: ✅ Complete
+**Impact**: Complete FreshService assignment history captured instead of only the first assignment
+
+### Changes to `analyzeTicketActivities()`
+
+The analyzer now emits:
+- `events[]` — every agent assign/unassign/group change as a typed event
+- `episodes[]` — one per ownership period with start/end methods and actor names
+- `currentIsSelfPicked` — reflects the **current** owner's acquisition method (not the first owner)
+- `rejectionCount` — how many times the ticket was bounced
+
+**Semantic change**: `isSelfPicked` now means "the current holder picked it themselves." If a tech self-picks then rejects, that tech's self-pick no longer inflates the current assignee's stats.
+
+**Files Changed**:
+- `backend/src/integrations/freshserviceTransformer.js` — full rewrite of `analyzeTicketActivities()`
+- `backend/src/services/ticketRepository.js` — added `groupId`, `rejectionCount` to upsert payloads
+
+---
+
+## 🔄 Sync Service: Episode Reconciliation
+
+**Status**: ✅ Complete
+**Impact**: Captures assignment changes that happen between sync polls
+
+### Broadened Activity Fetch Filter
+
+Previously only fetched activities when `responder_id` was set. Now also fetches when:
+- FS `updated_at` is newer than our local record
+- Ticket has an active pipeline run
+- Ticket is new
+
+### Episode & Activity Writing
+
+After each ticket upsert, the sync now:
+- Reconciles episodes from the FS activity analysis (insert new, update end states)
+- Writes per-event `TicketActivity` rows with real actor names (replaces generic `performedBy: 'System'`)
+
+**Files Changed**:
+- `backend/src/services/syncService.js` — new `_reconcileEpisodes()`, `_writeEventActivities()`, broadened `ticketFilter`
+
+---
+
+## 🛡️ Preflight Validation on FreshService Write-Back
+
+**Status**: ✅ Complete
+**Impact**: Prevents failed approvals like run #340
+
+### Pre-checks Before Assignment
+
+Before sending `PUT /tickets/:id` to FreshService, the system now validates:
+1. **`superseded_assignee`** — ticket is already assigned to someone else
+2. **`incompatible_group`** — target agent is not a member of the ticket's current group
+3. **`already_rejected_by_this_agent`** — target agent previously bounced this ticket
+
+All checks are skippable via `force: true` on `/runs/:id/decide` and `/runs/:id/sync`.
+
+### Full FS Error Capture
+
+`assignTicket()` now wraps FreshService error responses with `freshserviceDetail` and `freshserviceStatus`. Failed syncs persist the full FS error body in `syncPayload.freshserviceError` — no more losing "Validation failed" details.
+
+**Files Changed**:
+- `backend/src/integrations/freshservice.js` — error wrapping, new `getTicket()`, `getGroup()` helpers
+- `backend/src/services/freshServiceActionService.js` — `_preflightCheck()`, `execute()` accepts `force`, full error capture
+- `backend/src/routes/assignment.routes.js` — `force` param on decide/sync endpoints
+
+---
+
+## 🔎 Live Freshness Check on Run Detail Page
+
+**Status**: ✅ Complete
+**Impact**: Coordinators see real-time ticket state before approving
+
+### New Endpoints
+
+- `GET /api/assignments/runs/:id/freshness` — fetches live FS state, diffs against recommendation, returns rejection history
+- `POST /api/assignments/runs/:id/rerun` — supersedes the old run and triggers a fresh pipeline
+
+### UI Changes
+
+The run detail page now:
+- Auto-checks freshness when viewing a pending run
+- Shows specific warnings: "assignee changed", "rejected by recommended tech", "group incompatible"
+- Displays full rejection history timeline
+- Renders preflight abort details and full FS error bodies on sync status cards
+- Offers "Refresh & re-rank" button for admins when diffs are detected
+
+**Files Changed**:
+- `backend/src/routes/assignment.routes.js` — freshness + rerun endpoints
+- `frontend/src/components/assignment/PipelineRunDetail.jsx` — freshness banner, sync error details
+- `frontend/src/services/api.js` — `getRunFreshness()`, `rerunPipeline()` methods
+
+---
+
+## 🤖 LLM Rejection Awareness
+
+**Status**: ✅ Complete
+**Impact**: Pipeline avoids recommending agents who already rejected the same ticket
+
+### `find_matching_agents` Enhancement
+
+Each candidate agent is now annotated with `previouslyRejectedThisTicket` and `rejectedAt` when they have a closed episode with `endMethod='rejected'` for the current ticket. Serves as a soft signal for the LLM.
+
+**Files Changed**:
+- `backend/src/services/assignmentTools.js` — rejection lookup in `findMatchingAgents()`
+
+---
+
+## 📊 Dashboard: Rejected (7d) Metric
+
+**Status**: ✅ Complete
+**Impact**: Coordinators can see which technicians are bouncing tickets
+
+### New Metric on Technician Cards
+
+A red "Rej" badge appears on technician cards when the tech has rejected tickets in the last 7 days. Sourced from `ticket_assignment_episodes WHERE endMethod = 'rejected'`.
+
+**Files Changed**:
+- `backend/src/routes/dashboard.routes.js` — `rejected7d` field in dashboard response
+- `frontend/src/components/TechCard.jsx` — rejection badge
+- `frontend/src/components/TechCardCompact.jsx` — rejection badge (compact view)
+
+---
+
+## 🔧 Historical Backfill
+
+**Status**: ✅ Complete
+**Impact**: Admin can populate episodes for historical tickets
+
+### New Endpoint: `POST /api/sync/backfill-episodes`
+
+Fetches activities from FreshService and populates `ticket_assignment_episodes` for historical tickets. Supports `daysToSync` (default 180), `limit`, and `concurrency` params.
+
+**Files Changed**:
+- `backend/src/services/syncService.js` — `backfillEpisodes()` method
+- `backend/src/routes/sync.routes.js` — `/backfill-episodes` endpoint
+
+---
+
 ## [Unreleased] - 2025-10-30
 
 ### Week Sync Enhancements and Bug Fixes

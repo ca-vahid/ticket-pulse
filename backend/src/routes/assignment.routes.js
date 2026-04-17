@@ -13,6 +13,9 @@ import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import availabilityService from '../services/availabilityService.js';
+import settingsRepository from '../services/settingsRepository.js';
+import { createFreshServiceClient } from '../integrations/freshservice.js';
+import { analyzeTicketActivities } from '../integrations/freshserviceTransformer.js';
 import { convertToTimezone } from '../utils/timezone.js';
 import { requireReviewer, requireAdmin } from '../middleware/auth.js';
 import appConfig from '../config/index.js';
@@ -240,7 +243,7 @@ router.get('/runs/:id', requireReviewer, asyncHandler(async (req, res) => {
 
 router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
-  const { decision, assignedTechId, overrideReason, decisionNote } = req.body;
+  const { decision, assignedTechId, overrideReason, decisionNote, force } = req.body;
 
   if (!['approved', 'modified', 'rejected'].includes(decision)) {
     return res.status(400).json({ success: false, message: 'decision must be: approved, modified, or rejected' });
@@ -304,7 +307,7 @@ router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) =
   // FreshService write-back (fire-and-forget)
   if (decision === 'approved' || decision === 'modified') {
     const config = await assignmentRepository.getConfig(req.workspaceId);
-    freshServiceActionService.execute(runId, req.workspaceId, config?.dryRunMode ?? true).catch((err) =>
+    freshServiceActionService.execute(runId, req.workspaceId, config?.dryRunMode ?? true, { force: !!force }).catch((err) =>
       logger.warn('FreshService sync failed after decide', { runId, error: err.message }),
     );
   }
@@ -384,7 +387,7 @@ router.post('/runs/:id/sync', requireAdmin, asyncHandler(async (req, res) => {
   if (run.syncStatus === 'synced' && !force) {
     return res.status(409).json({ success: false, message: 'Run already synced. Use force=true to resync intentionally.' });
   }
-  const result = await freshServiceActionService.execute(runId, req.workspaceId, false);
+  const result = await freshServiceActionService.execute(runId, req.workspaceId, false, { force });
   res.json({ success: true, data: result });
 }));
 
@@ -399,6 +402,132 @@ router.post('/runs/:id/sync-preview', requireAdmin, asyncHandler(async (req, res
   }
   const result = await freshServiceActionService.execute(runId, req.workspaceId, true);
   res.json({ success: true, data: result });
+}));
+
+// ─── Freshness Check & Rerun ──────────────────────────────────────────────
+
+router.get('/runs/:id/freshness', requireReviewer, asyncHandler(async (req, res) => {
+  const runId = parseInt(req.params.id);
+  const run = await assignmentRepository.getPipelineRun(runId);
+  if (run.workspaceId !== req.workspaceId) {
+    return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+  }
+
+  const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(req.workspaceId);
+  if (!fsConfig?.domain || !fsConfig?.apiKey) {
+    return res.status(400).json({ success: false, message: 'FreshService not configured' });
+  }
+
+  const fsTicketId = Number(run.ticket?.freshserviceTicketId);
+  if (!fsTicketId) {
+    return res.json({ success: true, data: { diffs: [], fresh: true } });
+  }
+
+  const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+  const [fsTicket, fsActivities] = await Promise.all([
+    client.getTicket(fsTicketId),
+    client.fetchTicketActivities(fsTicketId),
+  ]);
+
+  const diffs = [];
+  let currentAssigneeName = null;
+  let currentGroupName = null;
+
+  // Check if assignee has changed
+  if (fsTicket?.responder_id) {
+    const currentTech = await prisma.technician.findFirst({
+      where: { freshserviceId: BigInt(fsTicket.responder_id) },
+      select: { id: true, name: true },
+    });
+    currentAssigneeName = currentTech?.name || `FS Agent #${fsTicket.responder_id}`;
+
+    const recommendedTechId = run.recommendation?.recommendations?.[0]?.techId;
+    if (currentTech && recommendedTechId && currentTech.id !== recommendedTechId) {
+      diffs.push('assignee_changed');
+    } else if (!currentTech) {
+      diffs.push('assignee_changed');
+    }
+  } else if (run.ticket?.assignedTechId) {
+    diffs.push('assignee_changed');
+  }
+
+  // Check group
+  if (fsTicket?.group_id) {
+    const group = await client.getGroup(fsTicket.group_id);
+    currentGroupName = group?.name || `Group #${fsTicket.group_id}`;
+
+    const topRecTechId = run.recommendation?.recommendations?.[0]?.techId;
+    if (topRecTechId) {
+      const recTech = await prisma.technician.findUnique({
+        where: { id: topRecTechId },
+        select: { freshserviceId: true },
+      });
+      if (recTech && group?.agent_ids && !group.agent_ids.includes(Number(recTech.freshserviceId))) {
+        diffs.push('group_incompatible');
+      }
+    }
+  }
+
+  // Check rejection history from episodes
+  const rejectionHistory = await prisma.ticketAssignmentEpisode.findMany({
+    where: { ticketId: run.ticket?.id, endMethod: 'rejected' },
+    select: {
+      technicianId: true,
+      endedAt: true,
+      technician: { select: { name: true } },
+    },
+    orderBy: { endedAt: 'desc' },
+  });
+
+  // Check if recommended tech already rejected this ticket
+  const topRecTechId = run.recommendation?.recommendations?.[0]?.techId;
+  if (topRecTechId && rejectionHistory.some((r) => r.technicianId === topRecTechId)) {
+    diffs.push('rejected_by_recommended_tech');
+  }
+
+  // Analyze FS activities for bounce info
+  const analysis = fsActivities?.length ? analyzeTicketActivities(fsActivities) : null;
+
+  res.json({
+    success: true,
+    data: {
+      fresh: diffs.length === 0,
+      diffs,
+      currentAssigneeName,
+      currentResponderId: fsTicket?.responder_id || null,
+      currentGroupId: fsTicket?.group_id || null,
+      currentGroupName,
+      currentStatus: fsTicket?.status || null,
+      recommendedTechId: topRecTechId || null,
+      recommendedTechName: run.recommendation?.recommendations?.[0]?.techName || null,
+      rejectionHistory: rejectionHistory.map((r) => ({
+        techId: r.technicianId,
+        techName: r.technician.name,
+        rejectedAt: r.endedAt,
+      })),
+      bounceCount: analysis?.rejectionCount || 0,
+    },
+  });
+}));
+
+router.post('/runs/:id/rerun', requireAdmin, asyncHandler(async (req, res) => {
+  const runId = parseInt(req.params.id);
+  const run = await assignmentRepository.getPipelineRun(runId);
+  if (run.workspaceId !== req.workspaceId) {
+    return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+  }
+
+  // Mark old run as superseded
+  await prisma.assignmentPipelineRun.update({
+    where: { id: runId },
+    data: { status: 'superseded', decision: null },
+  });
+
+  // Trigger new pipeline run
+  res.status(202).json({ success: true, message: 'Pipeline re-run triggered, old run superseded' });
+  assignmentPipelineService.runPipeline(run.ticketId, req.workspaceId, 'manual').catch((error) => {
+    logger.error('Pipeline rerun failed', { runId, ticketId: run.ticketId, error: error.message });
+  });
 }));
 
 router.get('/ticket/:ticketId/latest-run', requireReviewer, asyncHandler(async (req, res) => {

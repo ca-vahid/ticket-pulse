@@ -358,4 +358,34 @@ router.get(
   }),
 );
 
+/**
+ * POST /api/sync/backfill-episodes
+ * Backfill assignment episodes from FreshService activity history.
+ * Query params:
+ *   - daysToSync=180: How many days of history (default: 180)
+ *   - limit=100: Max tickets per batch (default: 100)
+ *   - concurrency=3: Parallel FS API calls (default: 3)
+ */
+router.post(
+  '/backfill-episodes',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const daysToSync = parseInt(req.query.daysToSync, 10) || 180;
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const concurrency = parseInt(req.query.concurrency, 10) || 3;
+
+    logger.info(`Episode backfill triggered (days=${daysToSync}, limit=${limit}, concurrency=${concurrency})`);
+
+    const result = await syncService.backfillEpisodes({
+      daysToSync,
+      limit,
+      concurrency,
+      processAll: true,
+      workspaceId: req.workspaceId,
+    });
+
+    res.json({ success: true, data: result });
+  }),
+);
+
 export default router;

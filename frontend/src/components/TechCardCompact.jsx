@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, ChevronDown, ChevronUp, Bot } from 'lucide-react';
+import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, ChevronDown, ChevronUp, Bot, RotateCcw } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle } from '../utils/leaveInfo';
@@ -409,6 +409,15 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
             <div className="text-base font-bold text-green-800">{closed}</div>
             <div className="text-[7px] text-green-600 uppercase font-medium">Done</div>
           </div>
+
+          {/* Rejected (7d) - Only show when there are rejections */}
+          {(technician.rejected7d || 0) > 0 && (
+            <div className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-red-50 rounded border border-red-200" title="Tickets this tech picked and put back in queue (last 7 days)">
+              <RotateCcw className="w-4 h-4 text-red-500 mb-1" />
+              <div className="text-base font-bold text-red-700">{technician.rejected7d}</div>
+              <div className="text-[7px] text-red-500 uppercase font-bold">Rej</div>
+            </div>
+          )}
 
           {/* CSAT - Only show if there are CSAT responses */}
           {hasCSAT && (

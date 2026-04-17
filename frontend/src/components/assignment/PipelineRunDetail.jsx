@@ -449,6 +449,21 @@ function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezon
         )}
       </div>
       {localSyncError && <p className="text-xs text-red-600 mt-1.5">{localSyncError}</p>}
+      {run.syncPayload?.freshserviceError?.body?.errors && (
+        <div className="text-xs text-red-500 mt-1 space-y-0.5">
+          {run.syncPayload.freshserviceError.body.errors.map((e, i) => (
+            <p key={i}>{e.field}: {e.message} ({e.code})</p>
+          ))}
+        </div>
+      )}
+      {run.syncPayload?.preflightAbort && (
+        <div className="text-xs text-amber-700 mt-1.5 bg-amber-50 rounded p-2">
+          <strong>Preflight blocked:</strong> {run.syncPayload.preflightAbort.reason}
+          {run.syncPayload.preflightAbort.code === 'incompatible_group' && run.syncPayload.preflightAbort.details?.groupName && (
+            <span> (group: {run.syncPayload.preflightAbort.details.groupName})</span>
+          )}
+        </div>
+      )}
       {run.syncPayload?.preview && <p className="text-xs text-slate-500 mt-1.5">Actions: {run.syncPayload.preview}</p>}
       {result && (
         <div className={`mt-2 text-xs p-2 rounded ${result.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
@@ -505,10 +520,24 @@ function TranscriptSection({ transcript }) {
 
 export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const [fsDomain, setFsDomain] = useState(null);
+  const [freshness, setFreshness] = useState(null);
+  const [freshnessLoading, setFreshnessLoading] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
 
   useEffect(() => {
     assignmentAPI.getFreshServiceDomain().then(res => setFsDomain(res?.domain)).catch(() => {});
   }, []);
+
+  const isPending = run?.decision === 'pending_review' && run?.status === 'completed';
+
+  useEffect(() => {
+    if (!run?.id || !isPending) return;
+    setFreshnessLoading(true);
+    assignmentAPI.getRunFreshness(run.id)
+      .then((res) => setFreshness(res?.data || null))
+      .catch(() => setFreshness(null))
+      .finally(() => setFreshnessLoading(false));
+  }, [run?.id, isPending]);
 
   if (!run) return null;
 
@@ -516,17 +545,30 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const decisionBadge = run.status === 'completed'
     ? (DECISION_BADGES[run.decision] || DECISION_BADGES.pending_review)
     : (RUN_STATUS_BADGES[run.status] || RUN_STATUS_BADGES.running);
-  const isPending = run.decision === 'pending_review' && run.status === 'completed';
 
   const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
   const PRIORITY_PILL = { 1: 'bg-slate-100 text-slate-600', 2: 'bg-yellow-100 text-yellow-800', 3: 'bg-orange-100 text-orange-800', 4: 'bg-red-100 text-red-800' };
 
   const ticketUrl = fsDomain && ticket?.freshserviceTicketId ? `https://${fsDomain}/a/tickets/${ticket.freshserviceTicketId}` : null;
 
-  const isTicketStale = ticket && (
+  const hasFreshnessDiffs = freshness && !freshness.fresh && freshness.diffs?.length > 0;
+
+  // Fallback staleness check using local DB data (shown while freshness loads or if check fails)
+  const isTicketStale = !freshness && ticket && (
     (ticket.status && !['Open', 'open', '2', 'Pending', 'pending', '3'].includes(String(ticket.status))) ||
     (ticket.assignedTechId && ticket.assignedTech && isPending)
   );
+
+  const handleRerun = async () => {
+    if (rerunning) return;
+    setRerunning(true);
+    try {
+      await assignmentAPI.rerunPipeline(run.id);
+      window.location.reload();
+    } catch {
+      setRerunning(false);
+    }
+  };
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -604,7 +646,72 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         </div>
       )}
 
-      {/* Staleness banner */}
+      {/* Live freshness banner (replaces old isTicketStale) */}
+      {freshnessLoading && isPending && String(ticket?.status || '').toLowerCase() !== 'deleted' && (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Checking live FreshService state...
+        </div>
+      )}
+
+      {hasFreshnessDiffs && isPending && String(ticket?.status || '').toLowerCase() !== 'deleted' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-1.5">
+              <p className="text-sm font-semibold text-amber-800">Ticket state has changed since this run</p>
+
+              {freshness.diffs.includes('assignee_changed') && freshness.currentAssigneeName && (
+                <p className="text-sm text-amber-700">
+                  Ticket is now assigned to <strong>{freshness.currentAssigneeName}</strong>{' '}
+                  (was {ticket?.assignedTech?.name ? ticket.assignedTech.name : 'unassigned'} at run time).
+                </p>
+              )}
+
+              {freshness.diffs.includes('rejected_by_recommended_tech') && (
+                <p className="text-sm text-amber-700">
+                  <strong>{freshness.recommendedTechName}</strong> already held and rejected this ticket
+                  {freshness.rejectionHistory?.find(r => r.techId === freshness.recommendedTechId)?.rejectedAt
+                    ? ` at ${formatDateTimeInTimezone(freshness.rejectionHistory.find(r => r.techId === freshness.recommendedTechId).rejectedAt, workspaceTimezone)}`
+                    : ''
+                  }
+                   — re-assigning may be undone.
+                </p>
+              )}
+
+              {freshness.diffs.includes('group_incompatible') && (
+                <p className="text-sm text-amber-700">
+                  Ticket is in group <strong>{freshness.currentGroupName}</strong>;{' '}
+                  <strong>{freshness.recommendedTechName}</strong> is not a member of that group.
+                </p>
+              )}
+
+              {freshness.rejectionHistory?.length > 0 && (
+                <div className="text-xs text-amber-600 mt-1">
+                  Rejection history: {freshness.rejectionHistory.map((r, i) => (
+                    <span key={i}>{i > 0 ? ', ' : ''}{r.techName} ({formatDateTimeInTimezone(r.rejectedAt, workspaceTimezone)})</span>
+                  ))}
+                </div>
+              )}
+
+              {isAdmin && (
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={handleRerun}
+                    disabled={rerunning}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"
+                  >
+                    {rerunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    Refresh & re-rank
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fallback local staleness banner (while freshness loads or if check unavailable) */}
       {isTicketStale && isPending && String(ticket?.status || '').toLowerCase() !== 'deleted' && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2.5">
           <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />

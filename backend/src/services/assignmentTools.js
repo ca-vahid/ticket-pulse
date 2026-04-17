@@ -196,7 +196,7 @@ export async function executeTool(toolName, toolInput, context) {
   case 'get_ticket_categories':
     return await getTicketCategories(workspaceId);
   case 'find_matching_agents':
-    return await findMatchingAgents(workspaceId, toolInput);
+    return await findMatchingAgents(workspaceId, toolInput, ticketId);
   case 'get_technicians':
     return await getTechnicians(workspaceId);
   case 'get_workload_stats':
@@ -431,7 +431,7 @@ async function getTicketCategories(workspaceId) {
   };
 }
 
-async function findMatchingAgents(workspaceId, criteria) {
+async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
   const { category, requires_physical_presence, preferred_location, min_proficiency } = criteria;
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
@@ -559,6 +559,22 @@ async function findMatchingAgents(workspaceId, criteria) {
 
     return a.openTickets - b.openTickets;
   });
+
+  // Annotate with rejection history for this specific ticket
+  if (ticketId) {
+    try {
+      const rejections = await prisma.ticketAssignmentEpisode.findMany({
+        where: { ticketId, endMethod: 'rejected' },
+        select: { technicianId: true, endedAt: true },
+      });
+      const rejMap = new Map(rejections.map((r) => [r.technicianId, r.endedAt]));
+      for (const r of results) {
+        const rejectedAt = rejMap.get(r.techId);
+        r.previouslyRejectedThisTicket = !!rejectedAt;
+        if (rejectedAt) r.rejectedAt = rejectedAt.toISOString();
+      }
+    } catch { /* non-fatal */ }
+  }
 
   return {
     criteria: { category, requires_physical_presence, preferred_location, min_proficiency },

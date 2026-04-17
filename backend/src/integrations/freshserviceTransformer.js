@@ -65,6 +65,7 @@ export function transformTicket(fsTicket, { categoryCustomField = 'security' } =
       ticketCategory: fsTicket.custom_fields?.[categoryCustomField] || null,
       department: fsTicket.department?.name || null,
       isEscalated: fsTicket.is_escalated || false,
+      groupId: fsTicket.group_id ? BigInt(fsTicket.group_id) : null,
       // Time tracking - Logged work hours (would need separate /time_entries API call)
       timeSpentMinutes: null,
       billableMinutes: null,
@@ -119,37 +120,47 @@ export function transformAgent(fsAgent, workspaceId = null) {
 }
 
 /**
- * Analyze ticket activities to determine assignment details
- * @param {Array} activities - FreshService ticket activities/conversations
- * @returns {Object} Assignment analysis
+ * Analyze ticket activities to determine full assignment history.
+ *
+ * Emits:
+ *  - events[]    – every agent assign / unassign / group change as a typed event
+ *  - episodes[]  – one entry per ownership period (assign → unassign/reassign/close)
+ *  - legacy fields (isSelfPicked, assignedBy, firstAssignedAt, assignmentHistory)
+ *    kept for backward-compat but isSelfPicked now reflects the CURRENT owner.
+ *
+ * @param {Array} activities - FreshService ticket activities
+ * @returns {Object} Full assignment analysis
  */
 export function analyzeTicketActivities(activities) {
+  const empty = {
+    isSelfPicked: false,
+    assignedBy: null,
+    firstAssignedAt: null,
+    assignmentHistory: [],
+    firstPublicAgentReplyAt: null,
+    events: [],
+    episodes: [],
+    currentEpisode: null,
+    currentIsSelfPicked: false,
+    rejectionCount: 0,
+    groupChanges: [],
+  };
+
   if (!activities || !Array.isArray(activities) || activities.length === 0) {
-    return {
-      isSelfPicked: false,
-      assignmentHistory: [],
-      firstPublicAgentReplyAt: null,
-    };
+    return empty;
   }
 
-  const assignmentHistory = [];
-  let isSelfPicked = false;
-  let firstAssignmentChecked = false; // Track if we've checked the first assignment
-  let firstPublicAgentReplyAt = null;
-
-  // Sort activities by created_at to find the FIRST assignment
   const sortedActivities = [...activities].sort(
     (a, b) => new Date(a.created_at) - new Date(b.created_at),
   );
 
+  const events = [];
+  const assignmentHistory = [];
+  const groupChanges = [];
+  let firstPublicAgentReplyAt = null;
+
   for (const activity of sortedActivities) {
-    // Detect first public agent reply (outgoing + non-private).
-    // FreshService activities often include fields like:
-    // - created_at: timestamp
-    // - incoming: boolean (true if customer/incoming)
-    // - private: boolean (true if private note)
-    // - body_text / body / note: message content for replies/notes
-    // This is best-effort: if incoming/private flags are absent, we won't guess.
+    // Detect first public agent reply
     if (!firstPublicAgentReplyAt) {
       const isIncoming = activity.incoming === true;
       const isPrivate = activity.private === true;
@@ -157,61 +168,165 @@ export function analyzeTicketActivities(activities) {
         (typeof activity.body_text === 'string' && activity.body_text.trim().length > 0) ||
         (typeof activity.body === 'string' && activity.body.trim().length > 0) ||
         (typeof activity.note === 'string' && activity.note.trim().length > 0);
-
       if (!isIncoming && !isPrivate && hasMessageBody && activity.created_at) {
         firstPublicAgentReplyAt = new Date(activity.created_at);
       }
     }
 
-    // Check for assignment activity in the content field
-    // FreshService activities use content like " set Agent as [Agent Name]"
-    if (activity.content && activity.content.includes('set Agent as')) {
-      // Extract the agent name from content (format: " set Agent as [Agent Name]")
-      const match = activity.content.match(/set Agent as (.+)/);
-      if (match) {
-        const assignedAgentName = match[1].trim();
-        const actorName = activity.actor?.name;
+    if (!activity.content) continue;
+    const content = activity.content;
+    const actorName = activity.actor?.name || null;
+    const actorFsId = activity.actor?.id || null;
+    const timestamp = new Date(activity.created_at);
 
-        // Log for debugging
-        logger.debug(`Assignment activity found: Actor="${actorName}", Assigned="${assignedAgentName}"`);
+    // Agent assignments: "set Agent as <name>" or "set Agent as none"
+    // FreshService often combines: "set Agent as X and set Group as Y"
+    const agentMatch = content.match(/set Agent as (.+?)(?:\s+and\s+set\s+|$)/);
+    if (agentMatch) {
+      let assignedTo = agentMatch[1].trim();
+      // Clean trailing "and set Group..." that may leak past the regex
+      assignedTo = assignedTo.replace(/\s+and\s+set\s+.*/i, '').trim();
 
-        assignmentHistory.push({
-          timestamp: new Date(activity.created_at),
-          assignedBy: actorName,
-          assignedTo: assignedAgentName,
+      if (assignedTo.toLowerCase() === 'none') {
+        events.push({
+          type: 'rejected',
+          timestamp,
+          actorName,
+          actorFsId,
+          agentName: null,
+        });
+        logger.debug(`Rejection detected: Actor="${actorName}" unassigned ticket at ${timestamp.toISOString()}`);
+      } else {
+        const isSelf = actorName && actorName === assignedTo;
+        events.push({
+          type: isSelf ? 'self_picked' : 'coordinator_assigned',
+          timestamp,
+          actorName,
+          actorFsId,
+          agentName: assignedTo,
         });
 
-        // ONLY check the FIRST assignment for self-picking
-        // Self-picked = the actor (who performed the action) is the same as the assigned agent
-        if (!firstAssignmentChecked && actorName && assignedAgentName) {
-          firstAssignmentChecked = true; // Mark that we've checked the first assignment
-          if (actorName === assignedAgentName) {
-            isSelfPicked = true;
-            logger.debug(`Ticket is SELF-PICKED: ${actorName} assigned to themselves`);
-          } else {
-            logger.debug(`Ticket is COORDINATOR-ASSIGNED: ${actorName} assigned to ${assignedAgentName}`);
+        assignmentHistory.push({
+          timestamp,
+          assignedBy: actorName,
+          assignedTo,
+        });
+
+        logger.debug(`Assignment: Actor="${actorName}", Assigned="${assignedTo}" (${isSelf ? 'self' : 'coord'}) at ${timestamp.toISOString()}`);
+      }
+    }
+
+    // Workflow-driven "set Agent as none" inside sub_contents (FS escalation workflows)
+    if (activity.sub_contents && Array.isArray(activity.sub_contents)) {
+      for (const sc of activity.sub_contents) {
+        if (typeof sc === 'string' && /^set Agent as none$/i.test(sc.trim())) {
+          // Only emit if we didn't already emit a rejection from the main content
+          if (!agentMatch || agentMatch[1].trim().toLowerCase() !== 'none') {
+            events.push({
+              type: 'rejected',
+              timestamp,
+              actorName: actorName || 'Ticket Workflow',
+              actorFsId,
+              agentName: null,
+              source: 'workflow_sub_content',
+            });
           }
         }
       }
     }
+
+    // Group changes: "set Group as <name>"
+    const groupMatch = content.match(/set Group as (.+?)(?:\s+and\s+set\s+|$)/);
+    if (groupMatch) {
+      let groupName = groupMatch[1].trim();
+      groupName = groupName.replace(/\s+and\s+set\s+.*/i, '').trim();
+      const isNone = groupName.toLowerCase() === 'none';
+      events.push({
+        type: 'group_changed',
+        timestamp,
+        actorName,
+        actorFsId,
+        groupName: isNone ? null : groupName,
+      });
+      groupChanges.push({
+        timestamp,
+        actorName,
+        groupName: isNone ? null : groupName,
+      });
+    }
   }
 
-  // Get the first assignment (coordinator who assigned the ticket)
+  // --- Build episodes from events ---
+  const episodes = [];
+  let currentHolder = null; // { agentName, startedAt, startMethod, startAssignedByName }
+
+  for (const evt of events) {
+    if (evt.type === 'self_picked' || evt.type === 'coordinator_assigned') {
+      // Close previous episode if open
+      if (currentHolder) {
+        episodes.push({
+          ...currentHolder,
+          endedAt: evt.timestamp,
+          endMethod: 'reassigned',
+          endActorName: evt.actorName,
+        });
+      }
+      currentHolder = {
+        agentName: evt.agentName,
+        startedAt: evt.timestamp,
+        startMethod: evt.type,
+        startAssignedByName: evt.type === 'coordinator_assigned' ? evt.actorName : null,
+      };
+    } else if (evt.type === 'rejected') {
+      if (currentHolder) {
+        episodes.push({
+          ...currentHolder,
+          endedAt: evt.timestamp,
+          endMethod: 'rejected',
+          endActorName: evt.actorName,
+        });
+        currentHolder = null;
+      }
+    }
+  }
+
+  // If there is still an open holder, mark as still_active
+  if (currentHolder) {
+    episodes.push({
+      ...currentHolder,
+      endedAt: null,
+      endMethod: 'still_active',
+      endActorName: null,
+    });
+  }
+
+  const currentEpisode = episodes.length > 0 ? episodes[episodes.length - 1] : null;
+  const rejectionCount = episodes.filter((e) => e.endMethod === 'rejected').length;
+
+  // --- Derive legacy fields for backward-compat ---
+  // isSelfPicked now reflects the CURRENT owner's acquisition method
+  const currentIsSelfPicked = currentEpisode?.endMethod === 'still_active' && currentEpisode?.startMethod === 'self_picked';
+
   const firstAssignment = assignmentHistory.length > 0 ? assignmentHistory[0] : null;
-
-  // IMPORTANT: If ticket is self-picked, assignedBy MUST be null
-  // This ensures self-picked tickets never show an assigner name
-  const assignedBy = isSelfPicked ? null : (firstAssignment ? firstAssignment.assignedBy : null);
-
-  // Extract first assigned timestamp for pickup time calculation
   const firstAssignedAt = firstAssignment ? firstAssignment.timestamp : null;
 
+  // assignedBy: for the current episode (not the first one) if coordinator-assigned
+  const assignedBy = currentIsSelfPicked
+    ? null
+    : (currentEpisode?.startAssignedByName || firstAssignment?.assignedBy || null);
+
   return {
-    isSelfPicked,
-    assignedBy, // The coordinator who assigned this ticket (null if self-picked)
-    firstAssignedAt, // Timestamp when ticket was first assigned
+    isSelfPicked: currentIsSelfPicked,
+    assignedBy,
+    firstAssignedAt,
     assignmentHistory,
     firstPublicAgentReplyAt,
+    events,
+    episodes,
+    currentEpisode,
+    currentIsSelfPicked,
+    rejectionCount,
+    groupChanges,
   };
 }
 

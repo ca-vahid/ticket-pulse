@@ -89,6 +89,19 @@ router.get(
       }),
     ]);
 
+    // Fetch per-tech rejection counts (7 day window)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    let rejectionMap = {};
+    try {
+      const rejections = await prisma.ticketAssignmentEpisode.groupBy({
+        by: ['technicianId'],
+        where: { workspaceId: req.workspaceId, endMethod: 'rejected', endedAt: { gte: sevenDaysAgo } },
+        _count: true,
+      });
+      rejectionMap = Object.fromEntries(rejections.map((r) => [r.technicianId, r._count]));
+    } catch { /* table may not exist yet */ }
+
     // Transform tickets for frontend (flatten requester object)
     // Use ticketsToday for date-filtered view (tickets assigned on selected date)
     const techsWithTransformedTickets = dashboardData.technicians.map(tech => ({
@@ -96,6 +109,7 @@ router.get(
       tickets: (tech.ticketsToday || []).map(transformTicket),
       avoidance: avoidanceMap[tech.id] || null,
       leaveInfo: leaveInfoMap[tech.id] || {},
+      rejected7d: rejectionMap[tech.id] || 0,
     }));
 
     // Remove intermediate arrays from response (we use tickets instead)
