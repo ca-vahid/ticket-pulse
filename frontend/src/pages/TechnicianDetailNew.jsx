@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { dashboardAPI } from '../services/api';
@@ -71,8 +71,25 @@ export default function TechnicianDetailNew() {
     return stored ? JSON.parse(stored) : [];
   });
 
-  // Date / week / month state
+  // Parse URL query params on mount — used as a deep-link bootstrap (e.g. when
+  // the user clicks the Rej badge on the dashboard, which supplies
+  // ?range=day|week|month&start=YYYY-MM-DD&end=YYYY-MM-DD).
+  const urlParamsOnMount = useMemo(() => {
+    const p = new URLSearchParams(location.search);
+    const range = p.get('range');
+    const start = p.get('start');
+    if (!range || !start) return null;
+    const startDate = new Date(start + 'T12:00:00');
+    if (Number.isNaN(startDate.getTime())) return null;
+    return { range, startDate };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Date / week / month state. Priority: URL deep-link > location.state > defaults.
   const [selectedDate, setSelectedDate] = useState(() => {
+    if (urlParamsOnMount?.range === 'day') {
+      return formatDateLocal(urlParamsOnMount.startDate);
+    }
     const passedDate = location.state?.selectedDate;
     if (!passedDate) return null;
     const isCurrentDay = new Date(passedDate).toDateString() === new Date().toDateString();
@@ -80,13 +97,24 @@ export default function TechnicianDetailNew() {
     return formatDateLocal(new Date(passedDate));
   });
 
-  const [viewMode, setViewMode] = useState(location.state?.viewMode || 'daily');
-  const originViewModeRef = useRef(location.state?.viewMode || 'daily');
+  const initialViewMode = urlParamsOnMount?.range === 'week'
+    ? 'weekly'
+    : urlParamsOnMount?.range === 'month'
+      ? 'monthly'
+      : urlParamsOnMount?.range === 'day'
+        ? 'daily'
+        : (location.state?.viewMode || 'daily');
+
+  const [viewMode, setViewMode] = useState(initialViewMode);
+  const originViewModeRef = useRef(initialViewMode);
 
   const [selectedWeek, setSelectedWeek] = useState(() => {
+    if (urlParamsOnMount?.range === 'week') {
+      return urlParamsOnMount.startDate;
+    }
     const nav = location.state?.selectedWeek;
     if (nav) return nav;
-    if (location.state?.viewMode === 'weekly') {
+    if (initialViewMode === 'weekly') {
       const now = new Date();
       const day = (now.getDay() + 6) % 7;
       const monday = new Date(now);
@@ -99,6 +127,10 @@ export default function TechnicianDetailNew() {
 
   // selectedMonth: Date representing the 1st of the selected month
   const [selectedMonth, setSelectedMonth] = useState(() => {
+    if (urlParamsOnMount?.range === 'month') {
+      const d = urlParamsOnMount.startDate;
+      return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
+    }
     const nav = location.state?.selectedMonth;
     if (nav) return new Date(nav);
     const now = new Date();
@@ -526,7 +558,13 @@ export default function TechnicianDetailNew() {
             )}
 
             {activeTab === 'bounced' && (
-              <BouncedTab technician={technician} />
+              <BouncedTab
+                technician={technician}
+                viewMode={viewMode}
+                selectedDate={selectedDate}
+                selectedWeek={selectedWeek}
+                selectedMonth={selectedMonth}
+              />
             )}
           </div>
         </div>

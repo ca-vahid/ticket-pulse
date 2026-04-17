@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
 import { RotateCcw, ExternalLink, Clock, AlertTriangle, Loader2, User } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { FRESHSERVICE_DOMAIN } from './constants';
@@ -46,46 +45,81 @@ function formatMonthLabel(iso) {
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
-/**
- * Build a contextual pill from URL params — a deep-link from the dashboard
- * Rej badge supplies range + start + end.
- */
-function getContextualPill(search) {
-  const params = new URLSearchParams(search);
-  const range = params.get('range');
-  const start = params.get('start');
-  const end = params.get('end');
-  if (!range || !start || !end) return null;
+function toIsoDate(d) {
+  if (!d) return null;
+  const dt = typeof d === 'string' ? new Date(d) : d;
+  if (Number.isNaN(dt.getTime())) return null;
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
-  if (range === 'day') {
-    return { id: 'custom-day', label: formatShortDate(start), start, end };
+/**
+ * Derive the contextual pill from the parent page's live view mode + selected
+ * date/week/month. This keeps the pill in sync when the user changes the
+ * top-of-page date filter AFTER arriving via a deep link.
+ */
+function getContextualPill({ viewMode, selectedDate, selectedWeek, selectedMonth }) {
+  if (viewMode === 'daily') {
+    const isoDate = toIsoDate(selectedDate) || toIsoDate(new Date());
+    return {
+      id: `day-${isoDate}`,
+      label: formatShortDate(isoDate),
+      start: isoDate,
+      end: isoDate,
+    };
   }
-  if (range === 'week') {
-    return { id: 'custom-week', label: `${formatShortDate(start)} – ${formatShortDate(end)}`, start, end };
+  if (viewMode === 'weekly' && selectedWeek) {
+    const wk = typeof selectedWeek === 'string' ? new Date(selectedWeek) : selectedWeek;
+    const start = toIsoDate(wk);
+    const endDate = new Date(wk);
+    endDate.setDate(endDate.getDate() + 6);
+    const end = toIsoDate(endDate);
+    return {
+      id: `week-${start}`,
+      label: `${formatShortDate(start)} – ${formatShortDate(end)}`,
+      start,
+      end,
+    };
   }
-  if (range === 'month') {
-    return { id: 'custom-month', label: formatMonthLabel(start), start, end };
+  if (viewMode === 'monthly' && selectedMonth) {
+    const m = typeof selectedMonth === 'string' ? new Date(selectedMonth) : selectedMonth;
+    const startDate = new Date(m.getFullYear(), m.getMonth(), 1);
+    const endDate = new Date(m.getFullYear(), m.getMonth() + 1, 0);
+    const start = toIsoDate(startDate);
+    return {
+      id: `month-${start}`,
+      label: formatMonthLabel(start),
+      start,
+      end: toIsoDate(endDate),
+    };
   }
   return null;
 }
 
-export default function BouncedTab({ technician }) {
-  const location = useLocation();
-  const contextualPill = useMemo(() => getContextualPill(location.search), [location.search]);
+export default function BouncedTab({ technician, viewMode = 'daily', selectedDate, selectedWeek, selectedMonth }) {
+  const contextualPill = useMemo(
+    () => getContextualPill({ viewMode, selectedDate, selectedWeek, selectedMonth }),
+    [viewMode, selectedDate, selectedWeek, selectedMonth],
+  );
 
-  // Default-select the contextual pill when the page was deep-linked
+  // Default to the contextual pill; user can still pick a preset
   const [selectedId, setSelectedId] = useState(contextualPill?.id || '7d');
 
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
+  // When the contextual pill changes (date picker moved, view mode toggled),
+  // auto-follow it unless the user has explicitly picked a preset pill.
+  const [userPickedPreset, setUserPickedPreset] = useState(false);
   useEffect(() => {
-    if (contextualPill && selectedId === '7d') {
+    if (!userPickedPreset && contextualPill) {
       setSelectedId(contextualPill.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextualPill?.id]);
+
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!technician?.id) return;
@@ -104,7 +138,7 @@ export default function BouncedTab({ technician }) {
       .then((res) => setRows(res?.data?.rejections || []))
       .catch((err) => setError(err.message || 'Failed to load bounced tickets'))
       .finally(() => setLoading(false));
-  }, [technician?.id, selectedId, contextualPill]);
+  }, [technician?.id, selectedId, contextualPill?.id, contextualPill?.start, contextualPill?.end]);
 
   // Counts for the always-shown pills (7d/30d/all) come from the tech object
   const staticCounts = {
@@ -116,6 +150,15 @@ export default function BouncedTab({ technician }) {
   // The contextual pill's count = rows.length when it's the selected pill (we
   // just fetched exactly those rows). Otherwise show a neutral dash.
   const contextualCount = selectedId === contextualPill?.id ? rows.length : null;
+
+  const handleSelectPreset = (id) => {
+    setSelectedId(id);
+    setUserPickedPreset(true);
+  };
+  const handleSelectContextual = () => {
+    setSelectedId(contextualPill.id);
+    setUserPickedPreset(false);
+  };
 
   return (
     <div className="space-y-4">
@@ -133,13 +176,13 @@ export default function BouncedTab({ technician }) {
           {contextualPill && (
             <button
               type="button"
-              onClick={() => setSelectedId(contextualPill.id)}
+              onClick={handleSelectContextual}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                 selectedId === contextualPill.id
                   ? 'bg-white text-slate-900 shadow-sm ring-1 ring-indigo-200'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="Range carried over from the dashboard view"
+              title="Matches the date filter at the top of the page"
             >
               {contextualPill.label}
               {contextualCount != null && (
@@ -151,7 +194,7 @@ export default function BouncedTab({ technician }) {
             <button
               key={p.id}
               type="button"
-              onClick={() => setSelectedId(p.id)}
+              onClick={() => handleSelectPreset(p.id)}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                 selectedId === p.id
                   ? 'bg-white text-slate-900 shadow-sm'
