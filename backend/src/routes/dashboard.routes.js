@@ -444,8 +444,11 @@ router.get(
       logger.error(`Avoidance analysis failed for technician ${techId}:`, err);
     }
 
-    // Per-tech rejection counts (rolling windows) for the BouncedTab filter pills
-    const { rej7d, rej30d, rejLifetime } = await getRejectionCounts(req.workspaceId);
+    // Per-tech rejection counts — rolling windows for BouncedTab pills AND
+    // a period-scoped count for the day the user is viewing (used by the
+    // Bounced tab badge).
+    const { rej7d, rej30d, rejLifetime, rejPeriod } =
+      await getRejectionCounts(req.workspaceId, todayStart, todayEnd);
 
     // Transform tickets for frontend (flatten requester object)
     res.json({
@@ -460,6 +463,7 @@ router.get(
         selfPickedOpenTickets: technicianData.selfPickedOpenTickets.map(transformTicket),
         assignedOpenTickets: technicianData.assignedOpenTickets.map(transformTicket),
         avoidance,
+        rejectedThisPeriod: rejPeriod[techId] || 0,
         rejected7d: rej7d[techId] || 0,
         rejected30d: rej30d[techId] || 0,
         rejectedLifetime: rejLifetime[techId] || 0,
@@ -579,8 +583,11 @@ router.get(
       logger.error(`Weekly avoidance analysis failed for technician ${techId}:`, err);
     }
 
-    // Per-tech rejection counts (rolling windows for the BouncedTab pills)
-    const { rej7d: w_r7, rej30d: w_r30, rejLifetime: w_rL } = await getRejectionCounts(req.workspaceId);
+    // Per-tech rejection counts: rolling windows + period-scoped for selected week
+    const weekStartUTC = new Date(weekStartDate.toISOString().slice(0, 10) + 'T00:00:00Z');
+    const weekEndUTC = new Date(weekEndDate.toISOString().slice(0, 10) + 'T23:59:59Z');
+    const { rej7d: w_r7, rej30d: w_r30, rejLifetime: w_rL, rejPeriod: w_rP } =
+      await getRejectionCounts(req.workspaceId, weekStartUTC, weekEndUTC);
 
     res.json({
       success: true,
@@ -604,6 +611,7 @@ router.get(
         assignedTickets: assignedTickets.map(transformTicket),
         closedTickets: closedTickets.map(transformTicket),
         avoidance,
+        rejectedThisPeriod: w_rP[techId] || 0,
         rejected7d: w_r7[techId] || 0,
         rejected30d: w_r30[techId] || 0,
         rejectedLifetime: w_rL[techId] || 0,
@@ -703,8 +711,11 @@ router.get(
 
     const monthStr = monthStartDate.toLocaleDateString('en-CA').slice(0, 7); // "YYYY-MM"
 
-    // Per-tech rejection counts (rolling windows for the BouncedTab pills)
-    const { rej7d: m_r7, rej30d: m_r30, rejLifetime: m_rL } = await getRejectionCounts(req.workspaceId);
+    // Per-tech rejection counts: rolling windows + period-scoped for selected month
+    const monthStartUTC = new Date(monthStartDate.toISOString().slice(0, 10) + 'T00:00:00Z');
+    const monthEndUTC = new Date(monthEndDate.toISOString().slice(0, 10) + 'T23:59:59Z');
+    const { rej7d: m_r7, rej30d: m_r30, rejLifetime: m_rL, rejPeriod: m_rP } =
+      await getRejectionCounts(req.workspaceId, monthStartUTC, monthEndUTC);
 
     res.json({
       success: true,
@@ -729,6 +740,7 @@ router.get(
         assignedTickets: assignedTickets.map(transformTicket),
         closedTickets: closedTickets.map(transformTicket),
         avoidance,
+        rejectedThisPeriod: m_rP[techId] || 0,
         rejected7d: m_r7[techId] || 0,
         rejected30d: m_r30[techId] || 0,
         rejectedLifetime: m_rL[techId] || 0,

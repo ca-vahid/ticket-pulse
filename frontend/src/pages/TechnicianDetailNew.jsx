@@ -443,13 +443,61 @@ export default function TechnicianDetailNew() {
       <main className="max-w-7xl mx-auto px-6 py-4 space-y-4">
         {/* Primary tab bar */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          {/* Tab navigation */}
+          {/* Tab navigation — badges are period-aware where it makes sense:
+              - Tickets: count of tickets actioned in selected period (self + assigned)
+              - CSAT: count of CSAT responses whose csatSubmittedAt falls in the period
+              - Bounced: count of rejections in selected period
+              A secondary "N total" hint is shown when the all-time count differs. */}
           <div className="flex border-b border-slate-200 bg-slate-50/60">
             {PRIMARY_TABS.map((tab) => {
               const isActive = activeTab === tab.id;
-              const badge = tab.id === 'tickets' ? openCount + pendingCount
-                : tab.id === 'csat' ? csatCount
-                  : null;
+
+              let badge = null;
+              let badgeHint = null;
+              if (tab.id === 'tickets') {
+                badge = selfPickedCount + assignedCount;
+                const openNow = openCount + pendingCount;
+                if (openNow !== badge) badgeHint = `${openNow} open now`;
+              } else if (tab.id === 'csat') {
+                // Period-scoped CSAT = count of csatTickets whose csatSubmittedAt
+                // falls in the selected period. Backend provides weekly/monthly
+                // counts; for daily we filter csatTickets locally.
+                if (viewMode === 'weekly') {
+                  badge = technician?.weeklyCSATCount || 0;
+                } else if (viewMode === 'monthly') {
+                  badge = technician?.monthlyCSATCount || 0;
+                } else {
+                  const iso = selectedDate
+                    ? (typeof selectedDate === 'string' ? selectedDate : formatDateLocal(selectedDate))
+                    : formatDateLocal(new Date());
+                  badge = (csatTickets || []).filter((t) => {
+                    if (!t.csatSubmittedAt) return false;
+                    const d = new Date(t.csatSubmittedAt);
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    return `${y}-${m}-${day}` === iso;
+                  }).length;
+                }
+                if (csatCount !== badge && csatCount > 0) badgeHint = `${csatCount} all-time`;
+              } else if (tab.id === 'bounced') {
+                // Period-specific rejection count: rejections whose endedAt
+                // falls in the selected day/week/month.
+                badge = technician?.rejectedThisPeriod || 0;
+                const lifetime = technician?.rejectedLifetime || 0;
+                if (lifetime !== badge && lifetime > 0) badgeHint = `${lifetime} lifetime`;
+              }
+
+              // Show the badge whenever it's a period-aware metric, even when
+              // the period count is 0 — so the user sees the number update as
+              // they move through dates. Bounced is hidden when 0 to avoid
+              // cluttering every tab for techs with no rejection history.
+              const hasLifetimeData =
+                (tab.id === 'tickets' && (openCount + pendingCount + selfPickedCount + assignedCount) > 0) ||
+                (tab.id === 'csat' && (csatCount > 0)) ||
+                (tab.id === 'bounced' && (technician?.rejectedLifetime || 0) > 0);
+              const showBadge = badge != null && (badge > 0 || hasLifetimeData);
+
               return (
                 <button
                   key={tab.id}
@@ -459,13 +507,16 @@ export default function TechnicianDetailNew() {
                       ? 'text-slate-900 font-semibold border-blue-600 bg-white'
                       : 'text-slate-400 font-medium border-transparent hover:text-slate-600 hover:bg-white/60'
                   }`}
+                  title={badgeHint || undefined}
                 >
                   {tab.label}
-                  {badge != null && badge > 0 && (
+                  {showBadge && (
                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full transition-all ${
                       isActive
                         ? 'bg-blue-600 text-white'
-                        : 'bg-slate-200 text-slate-500'
+                        : badge === 0
+                          ? 'bg-slate-100 text-slate-400'
+                          : 'bg-slate-200 text-slate-500'
                     }`}>
                       {badge}
                     </span>
