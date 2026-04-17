@@ -54,8 +54,15 @@ export function transformTicket(fsTicket, { categoryCustomField = 'security' } =
       requesterId: fsTicket.requester_id ? BigInt(fsTicket.requester_id) : null,
       createdAt: fsTicket.created_at ? new Date(fsTicket.created_at) : new Date(),
       assignedAt: fsTicket.assigned_at ? new Date(fsTicket.assigned_at) : null,
-      resolvedAt: fsTicket.resolved_at ? new Date(fsTicket.resolved_at) : null,
-      closedAt: fsTicket.closed_at ? new Date(fsTicket.closed_at) : null,
+      // FreshService v2 API puts these in `stats`, not at top-level. The
+      // top-level fields are usually null, which previously broke the
+      // CSAT sync's candidate query.
+      resolvedAt: (fsTicket.stats?.resolved_at || fsTicket.resolved_at)
+        ? new Date(fsTicket.stats?.resolved_at || fsTicket.resolved_at)
+        : null,
+      closedAt: (fsTicket.stats?.closed_at || fsTicket.closed_at)
+        ? new Date(fsTicket.stats?.closed_at || fsTicket.closed_at)
+        : null,
       dueBy: fsTicket.due_by ? new Date(fsTicket.due_by) : null,
       frDueBy: fsTicket.fr_due_by ? new Date(fsTicket.fr_due_by) : null,
       updatedAt: fsTicket.updated_at ? new Date(fsTicket.updated_at) : new Date(),

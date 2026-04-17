@@ -367,15 +367,30 @@ class TicketRepository {
    * @param {number|null} workspaceId - When set, restrict to this workspace
    * @returns {Promise<Array>} Array of tickets
    */
-  async getRecentClosedWithoutCSAT(cutoffDate, workspaceId = null) {
+  /**
+   * Get recent closed/resolved tickets without CSAT responses.
+   *
+   * Uses updatedAt as a robust fallback: historically closedAt/resolvedAt
+   * were often null in our DB (FS v2 stores them in `stats`, not top-level),
+   * which caused this query to match zero rows for months. updatedAt is
+   * reliably populated for every sync, so combining it with the status
+   * filter still yields "recently-touched tickets that are currently
+   * closed/resolved" — the correct CSAT candidate set.
+   *
+   * @param {Date} cutoffDate - Only include tickets closed/resolved/updated after this date
+   * @param {number|null} workspaceId
+   * @param {number} [limit] - Optional cap (default 500)
+   */
+  async getRecentClosedWithoutCSAT(cutoffDate, workspaceId = null, limit = 500) {
     try {
       const where = {
         status: { in: ['Resolved', 'Closed'] },
         OR: [
           { closedAt: { gte: cutoffDate } },
           { resolvedAt: { gte: cutoffDate } },
+          { updatedAt: { gte: cutoffDate } },
         ],
-        csatResponseId: null, // No CSAT response yet
+        csatResponseId: null,
       };
       if (workspaceId !== null) where.workspaceId = workspaceId;
 
@@ -388,10 +403,12 @@ class TicketRepository {
           status: true,
           closedAt: true,
           resolvedAt: true,
+          updatedAt: true,
         },
-        orderBy: {
-          closedAt: 'desc',
-        },
+        // Prioritize most recently closed (falls back to updatedAt via the
+        // service's caller since Prisma can't order by COALESCE directly)
+        orderBy: { updatedAt: 'desc' },
+        take: limit,
       });
     } catch (error) {
       logger.error('Error fetching recent closed tickets without CSAT:', error);

@@ -1497,11 +1497,47 @@ class SyncService {
       if (await isCancelRequested()) throw new Error('CANCELLED');
 
       // Phase 7: Update tickets with analysis (includes episode reconciliation)
-      emit({ phase: 'finalize', step: 'Updating tickets with analysis data', pct: 93 });
+      emit({ phase: 'finalize', step: 'Updating tickets with analysis data', pct: 90 });
       await this._updateTicketsWithAnalysis(analysisMap, { workspaceId });
 
-      // Phase 8: Sync requesters
-      emit({ phase: 'requesters', step: 'Syncing requester details', pct: 95 });
+      if (await isCancelRequested()) throw new Error('CANCELLED');
+
+      // Phase 8: Sync CSAT responses for tickets in this date range
+      // This catches up on CSAT surveys that are submitted days/weeks after
+      // the ticket is closed — the regular 5-min sync only checks ~200 of the
+      // most-recently-closed, so a manual backfill over a wider window fills
+      // any gaps.
+      let csatSynced = 0;
+      let csatChecked = 0;
+      try {
+        const csatDaysBack = Math.max(1, Math.ceil((fetchEnd - fetchStart) / 86400000) + 7);
+        emit({ phase: 'csat', step: `Checking CSAT responses for tickets in range (${csatDaysBack}d window)`, pct: 92 });
+        const csatResult = await this.syncRecentCSAT(csatDaysBack, workspaceId, {
+          limit: 2000, // Allow full coverage for admin backfills
+          shouldCancel: isCancelRequested,
+          onProgress: (cur, total, found) => {
+            const pct = 92 + Math.floor((cur / total) * 4); // 92 → 96
+            emit({
+              phase: 'csat',
+              step: `CSAT sync: ${cur}/${total} checked, ${found} responses found`,
+              pct,
+              processed: cur,
+              total,
+            });
+          },
+        });
+        csatSynced = csatResult.csatFound || 0;
+        csatChecked = csatResult.total || 0;
+        emit({ phase: 'csat', step: `CSAT sync complete — ${csatSynced} found in ${csatChecked} checked`, pct: 96 });
+      } catch (e) {
+        logger.warn(`Backfill CSAT phase failed (non-fatal): ${e.message}`);
+        emit({ phase: 'csat', step: `CSAT sync failed: ${e.message}`, pct: 96 });
+      }
+
+      if (await isCancelRequested()) throw new Error('CANCELLED');
+
+      // Phase 9: Sync requesters
+      emit({ phase: 'requesters', step: 'Syncing requester details', pct: 97 });
       await this.syncRequesters();
 
       const elapsedMs = Date.now() - startTime;
@@ -1512,6 +1548,8 @@ class SyncService {
         ticketsFetched: totalTickets,
         ticketsSynced: syncedCount,
         activitiesAnalyzed: analysisMap.size,
+        csatSynced,
+        csatChecked,
         skipped: skippedCount,
         dateRange: `${startDate} → ${endDate}`,
         elapsed,
@@ -1584,8 +1622,18 @@ class SyncService {
    * @param {number} daysBack - Number of days to look back (default 30)
    * @returns {Promise<Object>} Summary of CSAT sync results
    */
-  async syncRecentCSAT(daysBack = 30, workspaceId = null) {
+  /**
+   * Sync CSAT for recently closed tickets.
+   * @param {number} daysBack
+   * @param {number|null} workspaceId
+   * @param {Object} [options]
+   * @param {number} [options.limit=200] - Max tickets to check per call
+   * @param {Function} [options.onProgress] - Extra progress callback
+   * @param {Function} [options.shouldCancel] - Abort hook
+   */
+  async syncRecentCSAT(daysBack = 30, workspaceId = null, options = {}) {
     try {
+      const { limit = 200, onProgress = null, shouldCancel = null } = options;
       const client = await this._initializeClient();
       return await csatService.syncRecentCSAT(
         client,
@@ -1593,8 +1641,10 @@ class SyncService {
         daysBack,
         (current, total, found) => {
           this.progress.currentStep = `Syncing CSAT responses (${current}/${total}, found ${found})`;
+          onProgress?.(current, total, found);
         },
         workspaceId,
+        { limit, shouldCancel },
       );
     } catch (error) {
       logger.error('Error syncing recent CSAT:', error);

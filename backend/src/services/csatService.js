@@ -107,42 +107,54 @@ class CSATService {
    * @param {Function} onProgress - Optional callback for progress updates (current, total, csatFound)
    * @returns {Promise<Object>} Summary of sync results
    */
-  async syncMultipleTicketsCSAT(freshserviceClient, ticketRepository, ticketIds, onProgress = null) {
+  /**
+   * Sync CSAT responses for multiple tickets. Uses Promise.all so the shared
+   * FreshService rate limiter can pipeline them; each individual call goes
+   * through the limiter's launch queue (concurrency + min-delay enforced
+   * centrally).
+   *
+   * @param {Function} shouldCancel - Optional callback returning truthy to abort mid-run
+   */
+  async syncMultipleTicketsCSAT(freshserviceClient, ticketRepository, ticketIds, onProgress = null, shouldCancel = null) {
     const results = {
       total: ticketIds.length,
       csatFound: 0,
       updated: 0,
       errors: 0,
+      cancelled: false,
     };
 
     logger.info(`Starting CSAT sync for ${ticketIds.length} tickets`);
 
-    for (let i = 0; i < ticketIds.length; i++) {
-      const ticketId = ticketIds[i];
-
+    let processed = 0;
+    const processOne = async (ticketId) => {
+      if (shouldCancel?.()) return;
       try {
         const found = await this.syncTicketCSAT(freshserviceClient, ticketRepository, ticketId);
-
         if (found) {
           results.csatFound++;
           results.updated++;
         }
-
-        if (onProgress) {
-          onProgress(i + 1, results.total, results.csatFound);
-        }
-
-        // Rate limiting: Add small delay between requests
-        if (i < ticketIds.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
-        }
       } catch (error) {
         results.errors++;
-        logger.error(`Failed to sync CSAT for ticket ${ticketId}:`, error.message);
+        logger.warn(`CSAT sync error for ticket ${ticketId}: ${error.message}`);
       }
-    }
+      processed++;
+      if (onProgress && processed % 10 === 0) {
+        onProgress(processed, results.total, results.csatFound);
+      }
+      if (processed % 100 === 0) {
+        logger.info(`CSAT sync progress: ${processed}/${results.total} (${results.csatFound} found, ${results.errors} errors)`);
+      }
+    };
 
-    logger.info(`CSAT sync complete: ${results.csatFound} CSAT responses found out of ${results.total} tickets`);
+    // Fire all in parallel — the shared rate limiter paces them
+    await Promise.all(ticketIds.map(processOne));
+
+    if (onProgress) onProgress(results.total, results.total, results.csatFound);
+    if (shouldCancel?.()) results.cancelled = true;
+
+    logger.info(`CSAT sync complete: ${results.csatFound} CSAT responses found, ${results.errors} errors, ${results.total} checked`);
     return results;
   }
 
@@ -155,30 +167,26 @@ class CSATService {
    * @param {number|null} workspaceId - When set, only tickets in this workspace are considered
    * @returns {Promise<Object>} Summary of sync results
    */
-  async syncRecentCSAT(freshserviceClient, ticketRepository, daysBack = 30, onProgress = null, workspaceId = null) {
+  async syncRecentCSAT(freshserviceClient, ticketRepository, daysBack = 30, onProgress = null, workspaceId = null, options = {}) {
+    const { limit = 200, shouldCancel = null } = options;
     try {
-      logger.info(`Syncing CSAT for tickets from last ${daysBack} days`);
-
-      // Get closed/resolved tickets from last N days that don't have CSAT yet
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysBack);
 
-      const tickets = await ticketRepository.getRecentClosedWithoutCSAT(cutoffDate, workspaceId);
-      logger.info(`Found ${tickets.length} closed tickets without CSAT from last ${daysBack} days`);
+      const tickets = await ticketRepository.getRecentClosedWithoutCSAT(cutoffDate, workspaceId, limit);
+      logger.info(`CSAT candidates: ${tickets.length} closed tickets without CSAT in last ${daysBack} days (limit ${limit})`);
 
       if (tickets.length === 0) {
         return { total: 0, csatFound: 0, updated: 0, errors: 0 };
       }
 
-      // Extract FreshService ticket IDs
       const ticketIds = tickets.map(t => Number(t.freshserviceTicketId));
-
-      // Sync CSAT for these tickets
       return await this.syncMultipleTicketsCSAT(
         freshserviceClient,
         ticketRepository,
         ticketIds,
         onProgress,
+        shouldCancel,
       );
     } catch (error) {
       logger.error('Error syncing recent CSAT:', error);
