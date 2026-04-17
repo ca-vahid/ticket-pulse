@@ -18,6 +18,45 @@ const router = express.Router();
 router.use(requireAuth);
 
 /**
+ * Compute per-tech rejection counts (7d, 30d, lifetime) for a workspace.
+ * Returns an object: { rej7d: { techId: count }, rej30d: ..., rejLifetime: ... }
+ */
+async function getRejectionCounts(workspaceId) {
+  const now = new Date();
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(now.getDate() - 7);
+  const thirtyDaysAgo = new Date(now);
+  thirtyDaysAgo.setDate(now.getDate() - 30);
+
+  try {
+    const [r7, r30, rAll] = await Promise.all([
+      prisma.ticketAssignmentEpisode.groupBy({
+        by: ['technicianId'],
+        where: { workspaceId, endMethod: 'rejected', endedAt: { gte: sevenDaysAgo } },
+        _count: true,
+      }),
+      prisma.ticketAssignmentEpisode.groupBy({
+        by: ['technicianId'],
+        where: { workspaceId, endMethod: 'rejected', endedAt: { gte: thirtyDaysAgo } },
+        _count: true,
+      }),
+      prisma.ticketAssignmentEpisode.groupBy({
+        by: ['technicianId'],
+        where: { workspaceId, endMethod: 'rejected' },
+        _count: true,
+      }),
+    ]);
+    return {
+      rej7d: Object.fromEntries(r7.map((r) => [r.technicianId, r._count])),
+      rej30d: Object.fromEntries(r30.map((r) => [r.technicianId, r._count])),
+      rejLifetime: Object.fromEntries(rAll.map((r) => [r.technicianId, r._count])),
+    };
+  } catch {
+    return { rej7d: {}, rej30d: {}, rejLifetime: {} };
+  }
+}
+
+/**
  * Transform ticket to flatten requester object for frontend
  * Frontend expects requesterName and requesterEmail as flat fields
  * @param {Object} ticket - Ticket with nested requester object
@@ -90,37 +129,7 @@ router.get(
     ]);
 
     // Fetch per-tech rejection counts across multiple windows (7d, 30d, lifetime)
-    const now = new Date();
-    const sevenDaysAgo = new Date(now);
-    sevenDaysAgo.setDate(now.getDate() - 7);
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(now.getDate() - 30);
-
-    let rej7d = {};
-    let rej30d = {};
-    let rejLifetime = {};
-    try {
-      const [r7, r30, rAll] = await Promise.all([
-        prisma.ticketAssignmentEpisode.groupBy({
-          by: ['technicianId'],
-          where: { workspaceId: req.workspaceId, endMethod: 'rejected', endedAt: { gte: sevenDaysAgo } },
-          _count: true,
-        }),
-        prisma.ticketAssignmentEpisode.groupBy({
-          by: ['technicianId'],
-          where: { workspaceId: req.workspaceId, endMethod: 'rejected', endedAt: { gte: thirtyDaysAgo } },
-          _count: true,
-        }),
-        prisma.ticketAssignmentEpisode.groupBy({
-          by: ['technicianId'],
-          where: { workspaceId: req.workspaceId, endMethod: 'rejected' },
-          _count: true,
-        }),
-      ]);
-      rej7d = Object.fromEntries(r7.map((r) => [r.technicianId, r._count]));
-      rej30d = Object.fromEntries(r30.map((r) => [r.technicianId, r._count]));
-      rejLifetime = Object.fromEntries(rAll.map((r) => [r.technicianId, r._count]));
-    } catch { /* table may not exist yet */ }
+    const { rej7d, rej30d, rejLifetime } = await getRejectionCounts(req.workspaceId);
 
     // Transform tickets for frontend (flatten requester object)
     // Use ticketsToday for date-filtered view (tickets assigned on selected date)
@@ -314,12 +323,18 @@ router.get(
       }),
     ]);
 
+    // Fetch per-tech rejection counts (same windows as daily — rejection is a rolling metric)
+    const { rej7d: w_rej7d, rej30d: w_rej30d, rejLifetime: w_rejLifetime } = await getRejectionCounts(req.workspaceId);
+
     // Transform technicians to include weeklyTickets array for frontend filtering
     const techsWithTickets = dashboardData.technicians.map(tech => ({
       ...tech,
       weeklyTickets: (tech.weeklyTickets || []).map(transformTicket),
       avoidance: avoidanceMap[tech.id] || null,
       leaveInfo: leaveInfoMap[tech.id] || {},
+      rejected7d: w_rej7d[tech.id] || 0,
+      rejected30d: w_rej30d[tech.id] || 0,
+      rejectedLifetime: w_rejLifetime[tech.id] || 0,
     }));
 
     res.json({
@@ -854,6 +869,9 @@ router.get(
       logger.debug('VT leave info not available for monthly:', err.message);
     }
 
+    // Fetch per-tech rejection counts (rolling windows; same data as daily/weekly)
+    const { rej7d: m_rej7d, rej30d: m_rej30d, rejLifetime: m_rejLifetime } = await getRejectionCounts(req.workspaceId);
+
     // Also return technicians with their tickets filtered by month for frontend filtering
     const techniciansWithMonthTickets = technicians.map(tech => {
       const monthTickets = tech.tickets.filter(ticket => {
@@ -886,6 +904,9 @@ router.get(
         monthlyCSATCount: csatCount,
         monthlyCSATAverage: csatAverage,
         leaveInfo: leaveInfoMap[tech.id] || {},
+        rejected7d: m_rej7d[tech.id] || 0,
+        rejected30d: m_rej30d[tech.id] || 0,
+        rejectedLifetime: m_rejLifetime[tech.id] || 0,
       };
     });
 

@@ -94,33 +94,47 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
 
   const isTopPerformer = rank && rank <= 3;
 
-  // Use appropriate fields based on view mode
+  // Use appropriate fields based on view mode (daily | weekly | monthly)
   const totalTickets = viewMode === 'weekly'
     ? (technician.weeklyTotalCreated || 0)
-    : (technician.totalTicketsToday || 0);
+    : viewMode === 'monthly'
+      ? (technician.monthlyTotalCreated || 0)
+      : (technician.totalTicketsToday || 0);
   const selfPicked = viewMode === 'weekly'
     ? (technician.weeklySelfPicked || 0)
-    : (technician.selfPickedToday || 0);
+    : viewMode === 'monthly'
+      ? (technician.monthlySelfPicked || 0)
+      : (technician.selfPickedToday || 0);
   const appAssigned = viewMode === 'weekly'
     ? (technician.weeklyAppAssigned || 0)
-    : (technician.appAssignedToday || 0);
+    : viewMode === 'monthly'
+      ? (technician.monthlyAppAssigned || 0)
+      : (technician.appAssignedToday || 0);
   const assigned = viewMode === 'weekly'
     ? (technician.weeklyAssigned || 0)
-    : (technician.assignedToday || 0);
+    : viewMode === 'monthly'
+      ? (technician.monthlyAssigned || 0)
+      : (technician.assignedToday || 0);
   const closed = viewMode === 'weekly'
     ? (technician.weeklyClosed || 0)
-    : (technician.closedToday || 0);
+    : viewMode === 'monthly'
+      ? (technician.monthlyClosed || 0)
+      : (technician.closedToday || 0);
 
   // CSAT data
   const csatCount = viewMode === 'weekly'
     ? (technician.weeklyCSATCount || 0)
-    : (technician.csatCount || 0);
+    : viewMode === 'monthly'
+      ? (technician.monthlyCSATCount || 0)
+      : (technician.csatCount || 0);
   const csatAverage = viewMode === 'weekly'
     ? technician.weeklyCSATAverage
-    : technician.csatAverage;
+    : viewMode === 'monthly'
+      ? technician.monthlyCSATAverage
+      : technician.csatAverage;
 
   const hasCSAT = csatCount > 0;
-  
+
   // CSAT color based on average
   const getCSATColor = (avg) => {
     if (!avg) return 'text-gray-400';
@@ -131,6 +145,13 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
   };
 
   const highSelfPickRate = selfPicked >= 3;
+
+  // Rejection display: monthly view shows 30d count; daily/weekly show 7d count
+  // Tooltip always reveals all three windows
+  const rejectedDisplay = viewMode === 'monthly'
+    ? (technician.rejected30d || 0)
+    : (technician.rejected7d || 0);
+  const rejectedLabel = viewMode === 'monthly' ? '30d' : '7d';
 
   // Get ticket counts - prioritize "Open" status (most important)
   // FreshService statuses: Open (active work), Pending (waiting/less urgent), Resolved, Closed
@@ -369,47 +390,54 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
             <div className="text-center">
               <div className="text-3xl font-bold text-indigo-600 leading-none">{totalTickets}</div>
               <div className="text-[9px] text-indigo-400 uppercase font-semibold mt-1">
-                {viewMode === 'weekly' ? 'total' : 'today'}
+                {viewMode === 'weekly' || viewMode === 'monthly' ? 'total' : 'today'}
               </div>
             </div>
           </div>
         </div>
 
         {/* Metrics Grid - Icons + Numbers */}
-        <div className={`grid ${(appAssigned > 0 && hasCSAT) ? 'grid-cols-5' : (appAssigned > 0 || hasCSAT) ? 'grid-cols-4' : 'grid-cols-3'} gap-2 mb-2`}>
+        {/* Fixed 6-column layout so all techs align vertically. Optional metrics
+            (App, Rej, CSAT) render as muted placeholders when count is 0. */}
+        <div className="grid grid-cols-6 gap-2 mb-2">
 
-          {/* Self */}
+          {/* Self - always primary */}
           <div className="flex flex-col items-center p-2 bg-purple-100 rounded-lg shadow-sm border border-purple-200">
             <Hand className="w-5 h-5 text-purple-700 mb-1" />
             <div className="text-lg font-bold text-purple-900">{selfPicked}</div>
             <div className="text-[9px] text-purple-700 uppercase font-bold">Self</div>
           </div>
 
-          {/* App Assigned - Only show when there are app assignments */}
-          {appAssigned > 0 && (
-            <div className="flex flex-col items-center p-2 bg-sky-50 rounded-lg shadow-sm border border-sky-200">
-              <Bot className="w-5 h-5 text-sky-600 mb-1" />
-              <div className="text-lg font-bold text-sky-800">{appAssigned}</div>
-              <div className="text-[9px] text-sky-600 uppercase font-bold">App</div>
-            </div>
-          )}
+          {/* App Assigned - muted when 0 to keep alignment */}
+          <div
+            className={`flex flex-col items-center p-2 rounded-lg shadow-sm border ${
+              appAssigned > 0
+                ? 'bg-sky-50 border-sky-200'
+                : 'bg-slate-50/50 border-slate-100 opacity-50'
+            }`}
+            title={appAssigned > 0 ? `App-assigned tickets (by Ticket Pulse service account)` : 'No app-assigned tickets'}
+          >
+            <Bot className={`w-5 h-5 mb-1 ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`} />
+            <div className={`text-lg font-bold ${appAssigned > 0 ? 'text-sky-800' : 'text-slate-300'}`}>{appAssigned}</div>
+            <div className={`text-[9px] uppercase font-bold ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`}>App</div>
+          </div>
 
-          {/* Assigned (by coordinator) */}
+          {/* Assigned (by coordinator) - always shown */}
           <div className="flex flex-col items-center p-2">
             <Send className="w-5 h-5 text-orange-600 mb-1" />
             <div className="text-lg font-bold text-orange-800">{assigned}</div>
             <div className="text-[9px] text-orange-600 uppercase font-medium">Asgn</div>
           </div>
 
-          {/* Done */}
+          {/* Done - always shown */}
           <div className="flex flex-col items-center p-2">
             <CheckSquare className="w-5 h-5 text-green-600 mb-1" />
             <div className="text-lg font-bold text-green-800">{closed}</div>
             <div className="text-[9px] text-green-600 uppercase font-medium">Done</div>
           </div>
 
-          {/* Rejected (7d) - Only show when there are rejections; click to drill down */}
-          {(technician.rejected7d || 0) > 0 && (
+          {/* Rejected - muted when 0; clickable to drill into bounced list */}
+          {rejectedDisplay > 0 ? (
             <button
               type="button"
               onClick={(e) => {
@@ -419,24 +447,41 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               className="flex flex-col items-center p-2 bg-red-50 rounded-lg shadow-sm border border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer"
               title={
                 `Rejected tickets — tech picked up then put back in queue\n` +
-                `Last 7d: ${technician.rejected7d || 0}\n` +
-                `Last 30d: ${technician.rejected30d || 0}\n` +
-                `Lifetime: ${technician.rejectedLifetime || 0}\n\n` +
+                `7d: ${technician.rejected7d || 0}  ·  30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}\n` +
+                `(showing ${rejectedLabel} count)\n\n` +
                 `Click to see the list`
               }
             >
               <RotateCcw className="w-5 h-5 text-red-500 mb-1" />
-              <div className="text-lg font-bold text-red-700">{technician.rejected7d}</div>
+              <div className="text-lg font-bold text-red-700">{rejectedDisplay}</div>
               <div className="text-[9px] text-red-500 uppercase font-bold">Rej</div>
             </button>
+          ) : (
+            <div
+              className="flex flex-col items-center p-2 bg-slate-50/50 rounded-lg shadow-sm border border-slate-100 opacity-50"
+              title={`No bounced tickets in the last ${rejectedLabel}`}
+            >
+              <RotateCcw className="w-5 h-5 text-slate-300 mb-1" />
+              <div className="text-lg font-bold text-slate-300">0</div>
+              <div className="text-[9px] text-slate-300 uppercase font-bold">Rej</div>
+            </div>
           )}
 
-          {/* CSAT - Only show if there are CSAT responses */}
-          {hasCSAT && (
+          {/* CSAT - muted when 0 */}
+          {hasCSAT ? (
             <div className="flex flex-col items-center p-2 bg-yellow-50 rounded-lg shadow-sm border border-yellow-200" title={`Average: ${csatAverage?.toFixed(1)}/4`}>
               <Star className={`w-5 h-5 ${getCSATColor(csatAverage)} mb-1`} />
               <div className={`text-lg font-bold ${getCSATColor(csatAverage)}`}>{csatCount}</div>
               <div className="text-[9px] text-yellow-700 uppercase font-bold">CSAT</div>
+            </div>
+          ) : (
+            <div
+              className="flex flex-col items-center p-2 bg-slate-50/50 rounded-lg shadow-sm border border-slate-100 opacity-50"
+              title="No CSAT responses in this period"
+            >
+              <Star className="w-5 h-5 text-slate-300 mb-1" />
+              <div className="text-lg font-bold text-slate-300">0</div>
+              <div className="text-[9px] text-slate-300 uppercase font-bold">CSAT</div>
             </div>
           )}
         </div>
