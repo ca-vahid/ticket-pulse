@@ -185,7 +185,9 @@ class AssignmentRepository {
         assignmentClause = ticketStatusWhere;
       }
 
-      const itemsWhere = { workspaceId, decision: 'pending_review', status: 'completed', ...assignmentClause };
+      // Build itemsWhere by extending baseWhere so it inherits the time-range filter (since).
+      // The assignmentClause's `ticket` field overrides baseWhere's `ticket` field via spread.
+      const itemsWhere = { ...baseWhere, ...assignmentClause };
 
       // For the Awaiting Review tab count, restrict to ACTIVE tickets (open or pending) - excludes
       // closed/resolved tickets that are technically still in our pending_review queue but no
