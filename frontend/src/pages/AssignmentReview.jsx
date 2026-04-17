@@ -1001,7 +1001,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             {/* Primary tabs — modern segmented control with subtle elevation on active */}
             <div className="inline-flex items-center gap-0.5 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/60">
               {[
-                { id: 'pending', label: 'Awaiting Review', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
+                { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
                 { id: 'assigned', label: 'Assigned', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
                 { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400', activeRing: 'ring-slate-200' },
                 { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-rose-400', activeRing: 'ring-rose-200' },
@@ -1031,43 +1031,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 );
               })}
             </div>
-
-            {/* Drilldown filter for Assigned view: All | Via Pipeline | Manually in FreshService */}
-            {subView === 'assigned' && assignedTotal > 0 && (
-              <>
-                <div className="hidden h-5 w-px shrink-0 bg-gradient-to-b from-transparent via-slate-300 to-transparent sm:block" aria-hidden />
-                <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-100/90 p-0.5 ring-1 ring-slate-200/60">
-                  {[
-                    { id: 'all', label: 'All', count: assignedTotal },
-                    { id: 'via_pipeline', label: 'Via Pipeline', count: assignedRuns.total, tint: 'text-emerald-700' },
-                    { id: 'manually_in_fs', label: 'Manually in FreshService', count: outsideAssignedRuns.total, tint: 'text-amber-700' },
-                  ].map((f) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setAssignedFilter(f.id)}
-                      className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-all duration-150 touch-manipulation ${
-                        assignedFilter === f.id
-                          ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/70'
-                          : 'text-slate-600 hover:bg-white/60 hover:text-slate-800'
-                      }`}
-                    >
-                      {f.label}
-                      <span className={assignedFilter === f.id ? 'text-slate-700' : (f.tint || '')}> ({f.count})</span>
-                    </button>
-                  ))}
-                </div>
-                {differentAgentCount > 0 && assignedFilter !== 'manually_in_fs' && (
-                  <span
-                    className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-blue-200"
-                    title="Pipeline runs where the final assignee differed from the AI's top recommendation"
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                    {differentAgentCount} different agent chosen
-                  </span>
-                )}
-              </>
-            )}
 
             {filterPriority !== 'all' && (
               <button
@@ -1114,30 +1077,68 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         </div>
 
-        {/* Secondary ticket-status filter — only relevant on tabs where ticket lifecycle matters.
-            Hidden on Awaiting Review (always actionable) and Deleted (always deleted). */}
+        {/* Unified secondary filter row — Source drilldown (Assigned only) + Status filter,
+            stacked beneath the primary tabs for a clearer visual hierarchy. */}
         {subView !== 'deleted' && subView !== 'pending' && (
-          <div className="border-b border-slate-100 bg-white px-3 sm:px-4 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Status</span>
-            {[
-              { id: 'all', label: 'All', activeColor: 'border-slate-700 text-slate-900' },
-              { id: 'in_progress', label: 'In Progress', activeColor: 'border-emerald-500 text-emerald-700' },
-              { id: 'pending', label: 'Pending', activeColor: 'border-amber-500 text-amber-700' },
-              { id: 'closed_resolved', label: 'Closed/Resolved', activeColor: 'border-slate-400 text-slate-600' },
-            ].map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setTicketStatusFilter(f.id)}
-                className={`relative pb-1 text-[11px] font-medium transition-colors duration-150 touch-manipulation border-b-2 ${
-                  ticketStatusFilter === f.id
-                    ? f.activeColor
-                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
+          <div className="border-b border-slate-100 bg-white px-3 sm:px-4 py-2 space-y-1.5">
+            {/* Source drilldown — Assigned tab only */}
+            {subView === 'assigned' && assignedTotal > 0 && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold w-14 shrink-0">Source</span>
+                {[
+                  { id: 'all', label: 'All', count: assignedTotal, activeColor: 'border-slate-700 text-slate-900' },
+                  { id: 'via_pipeline', label: 'Via Pipeline', count: assignedRuns.total, activeColor: 'border-emerald-500 text-emerald-700' },
+                  { id: 'manually_in_fs', label: 'Manually in FreshService', count: outsideAssignedRuns.total, activeColor: 'border-amber-500 text-amber-700' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setAssignedFilter(f.id)}
+                    className={`relative pb-1 text-[11px] font-medium transition-colors duration-150 touch-manipulation border-b-2 ${
+                      assignedFilter === f.id
+                        ? f.activeColor
+                        : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'
+                    }`}
+                  >
+                    {f.label}
+                    <span className={`ml-1 tabular-nums ${assignedFilter === f.id ? 'opacity-60' : 'opacity-50'}`}>({f.count})</span>
+                  </button>
+                ))}
+                {differentAgentCount > 0 && assignedFilter !== 'manually_in_fs' && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-blue-200"
+                    title="Pipeline runs where the final assignee differed from the AI's top recommendation"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                    {differentAgentCount} different agent chosen
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Ticket-status filter — applies to all tabs except Awaiting Decision/Deleted */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold w-14 shrink-0">Status</span>
+              {[
+                { id: 'all', label: 'All', activeColor: 'border-slate-700 text-slate-900' },
+                { id: 'in_progress', label: 'In Progress', activeColor: 'border-emerald-500 text-emerald-700' },
+                { id: 'pending', label: 'Pending', activeColor: 'border-amber-500 text-amber-700' },
+                { id: 'closed_resolved', label: 'Closed/Resolved', activeColor: 'border-slate-400 text-slate-600' },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setTicketStatusFilter(f.id)}
+                  className={`relative pb-1 text-[11px] font-medium transition-colors duration-150 touch-manipulation border-b-2 ${
+                    ticketStatusFilter === f.id
+                      ? f.activeColor
+                      : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1194,7 +1195,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
             <p className="text-slate-500 text-sm font-medium">
               {subView === 'pending'
-                ? 'No tickets awaiting review'
+                ? 'No tickets awaiting decision'
                 : subView === 'assigned'
                   ? 'No assignments in this period'
                   : subView === 'dismissed'
