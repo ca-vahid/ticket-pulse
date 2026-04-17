@@ -162,11 +162,15 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
 
   const highSelfPickRate = selfPicked >= 3;
 
-  // Rejection display: monthly view shows 30d count; daily/weekly show 7d count.
-  const rejectedDisplay = viewMode === 'monthly'
-    ? (technician.rejected30d || 0)
-    : (technician.rejected7d || 0);
-  const rejectedLabel = viewMode === 'monthly' ? '30d' : '7d';
+  // Rejection display: count of rejections in the SELECTED period.
+  const rejectedDisplay = (technician.rejectedThisPeriod !== undefined && technician.rejectedThisPeriod !== null)
+    ? technician.rejectedThisPeriod
+    : viewMode === 'monthly'
+      ? (technician.rejected30d || 0)
+      : (technician.rejected7d || 0);
+  const periodLabel = viewMode === 'weekly' ? 'this week'
+    : viewMode === 'monthly' ? 'this month'
+    : 'this day';
 
   // Get ticket counts
   const openOnlyCount = technician.openOnlyCount || 0;
@@ -437,7 +441,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
             <div className="text-[7px] text-green-600 uppercase font-medium">Done</div>
           </div>
 
-          {/* Rejected - clickable when > 0, muted placeholder when 0 */}
+          {/* Rejected - count for SELECTED period; clickable when > 0, muted placeholder when 0 */}
           {rejectedDisplay > 0 ? (
             <button
               type="button"
@@ -448,8 +452,8 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-red-50 rounded border border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer"
               title={
                 `Rejected tickets — picked up then put back in queue\n` +
-                `7d: ${technician.rejected7d || 0}  ·  30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}\n` +
-                `(showing ${rejectedLabel} count)\n\n` +
+                `Selected ${periodLabel}: ${rejectedDisplay}\n` +
+                `Last 7d: ${technician.rejected7d || 0}  ·  Last 30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}\n\n` +
                 `Click to drill down`
               }
             >
@@ -460,7 +464,10 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           ) : (
             <div
               className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-slate-50/50 rounded border border-slate-100 opacity-50"
-              title={`No bounced tickets in the last ${rejectedLabel}`}
+              title={
+                `No bounced tickets ${periodLabel}\n` +
+                `Last 7d: ${technician.rejected7d || 0}  ·  Last 30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}`
+              }
             >
               <RotateCcw className="w-4 h-4 text-slate-300 mb-1" />
               <div className="text-base font-bold text-slate-300">0</div>

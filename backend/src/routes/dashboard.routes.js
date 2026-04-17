@@ -18,10 +18,14 @@ const router = express.Router();
 router.use(requireAuth);
 
 /**
- * Compute per-tech rejection counts (7d, 30d, lifetime) for a workspace.
- * Returns an object: { rej7d: { techId: count }, rej30d: ..., rejLifetime: ... }
+ * Compute per-tech rejection counts for a workspace.
+ *
+ * Returns rolling windows (7d, 30d, lifetime) AND optionally a period-scoped
+ * count for [periodStart, periodEnd] when both are provided. The period count
+ * is what the dashboard's headline "Rej" badge uses when a specific date /
+ * week / month is being viewed; the rolling windows feed the badge tooltip.
  */
-async function getRejectionCounts(workspaceId) {
+async function getRejectionCounts(workspaceId, periodStart = null, periodEnd = null) {
   const now = new Date();
   const sevenDaysAgo = new Date(now);
   sevenDaysAgo.setDate(now.getDate() - 7);
@@ -29,7 +33,7 @@ async function getRejectionCounts(workspaceId) {
   thirtyDaysAgo.setDate(now.getDate() - 30);
 
   try {
-    const [r7, r30, rAll] = await Promise.all([
+    const queries = [
       prisma.ticketAssignmentEpisode.groupBy({
         by: ['technicianId'],
         where: { workspaceId, endMethod: 'rejected', endedAt: { gte: sevenDaysAgo } },
@@ -45,14 +49,28 @@ async function getRejectionCounts(workspaceId) {
         where: { workspaceId, endMethod: 'rejected' },
         _count: true,
       }),
-    ]);
+    ];
+    if (periodStart && periodEnd) {
+      queries.push(prisma.ticketAssignmentEpisode.groupBy({
+        by: ['technicianId'],
+        where: {
+          workspaceId,
+          endMethod: 'rejected',
+          endedAt: { gte: periodStart, lte: periodEnd },
+        },
+        _count: true,
+      }));
+    }
+    const results = await Promise.all(queries);
+    const [r7, r30, rAll, rPeriod] = results;
     return {
       rej7d: Object.fromEntries(r7.map((r) => [r.technicianId, r._count])),
       rej30d: Object.fromEntries(r30.map((r) => [r.technicianId, r._count])),
       rejLifetime: Object.fromEntries(rAll.map((r) => [r.technicianId, r._count])),
+      rejPeriod: rPeriod ? Object.fromEntries(rPeriod.map((r) => [r.technicianId, r._count])) : {},
     };
   } catch {
-    return { rej7d: {}, rej30d: {}, rejLifetime: {} };
+    return { rej7d: {}, rej30d: {}, rejLifetime: {}, rejPeriod: {} };
   }
 }
 
@@ -128,8 +146,9 @@ router.get(
       }),
     ]);
 
-    // Fetch per-tech rejection counts across multiple windows (7d, 30d, lifetime)
-    const { rej7d, rej30d, rejLifetime } = await getRejectionCounts(req.workspaceId);
+    // Fetch per-tech rejection counts: rolling windows (tooltip) + selected-day count (headline)
+    const { rej7d, rej30d, rejLifetime, rejPeriod } =
+      await getRejectionCounts(req.workspaceId, todayStart, todayEnd);
 
     // Transform tickets for frontend (flatten requester object)
     // Use ticketsToday for date-filtered view (tickets assigned on selected date)
@@ -138,6 +157,9 @@ router.get(
       tickets: (tech.ticketsToday || []).map(transformTicket),
       avoidance: avoidanceMap[tech.id] || null,
       leaveInfo: leaveInfoMap[tech.id] || {},
+      // Period-scoped count for the headline number on the card
+      rejectedThisPeriod: rejPeriod[tech.id] || 0,
+      // Rolling windows for the tooltip + drill-down filter pills
       rejected7d: rej7d[tech.id] || 0,
       rejected30d: rej30d[tech.id] || 0,
       rejectedLifetime: rejLifetime[tech.id] || 0,
@@ -323,8 +345,9 @@ router.get(
       }),
     ]);
 
-    // Fetch per-tech rejection counts (same windows as daily — rejection is a rolling metric)
-    const { rej7d: w_rej7d, rej30d: w_rej30d, rejLifetime: w_rejLifetime } = await getRejectionCounts(req.workspaceId);
+    // Fetch per-tech rejection counts: rolling windows + selected-week count
+    const { rej7d: w_rej7d, rej30d: w_rej30d, rejLifetime: w_rejLifetime, rejPeriod: w_rejPeriod } =
+      await getRejectionCounts(req.workspaceId, weekStartRange.start, weekEndRange.end);
 
     // Transform technicians to include weeklyTickets array for frontend filtering
     const techsWithTickets = dashboardData.technicians.map(tech => ({
@@ -332,6 +355,7 @@ router.get(
       weeklyTickets: (tech.weeklyTickets || []).map(transformTicket),
       avoidance: avoidanceMap[tech.id] || null,
       leaveInfo: leaveInfoMap[tech.id] || {},
+      rejectedThisPeriod: w_rejPeriod[tech.id] || 0,
       rejected7d: w_rej7d[tech.id] || 0,
       rejected30d: w_rej30d[tech.id] || 0,
       rejectedLifetime: w_rejLifetime[tech.id] || 0,
@@ -420,6 +444,9 @@ router.get(
       logger.error(`Avoidance analysis failed for technician ${techId}:`, err);
     }
 
+    // Per-tech rejection counts (rolling windows) for the BouncedTab filter pills
+    const { rej7d, rej30d, rejLifetime } = await getRejectionCounts(req.workspaceId);
+
     // Transform tickets for frontend (flatten requester object)
     res.json({
       success: true,
@@ -433,6 +460,9 @@ router.get(
         selfPickedOpenTickets: technicianData.selfPickedOpenTickets.map(transformTicket),
         assignedOpenTickets: technicianData.assignedOpenTickets.map(transformTicket),
         avoidance,
+        rejected7d: rej7d[techId] || 0,
+        rejected30d: rej30d[techId] || 0,
+        rejectedLifetime: rejLifetime[techId] || 0,
       },
     });
   }),
@@ -549,6 +579,9 @@ router.get(
       logger.error(`Weekly avoidance analysis failed for technician ${techId}:`, err);
     }
 
+    // Per-tech rejection counts (rolling windows for the BouncedTab pills)
+    const { rej7d: w_r7, rej30d: w_r30, rejLifetime: w_rL } = await getRejectionCounts(req.workspaceId);
+
     res.json({
       success: true,
       data: {
@@ -571,6 +604,9 @@ router.get(
         assignedTickets: assignedTickets.map(transformTicket),
         closedTickets: closedTickets.map(transformTicket),
         avoidance,
+        rejected7d: w_r7[techId] || 0,
+        rejected30d: w_r30[techId] || 0,
+        rejectedLifetime: w_rL[techId] || 0,
       },
     });
   }),
@@ -667,6 +703,9 @@ router.get(
 
     const monthStr = monthStartDate.toLocaleDateString('en-CA').slice(0, 7); // "YYYY-MM"
 
+    // Per-tech rejection counts (rolling windows for the BouncedTab pills)
+    const { rej7d: m_r7, rej30d: m_r30, rejLifetime: m_rL } = await getRejectionCounts(req.workspaceId);
+
     res.json({
       success: true,
       data: {
@@ -690,6 +729,9 @@ router.get(
         assignedTickets: assignedTickets.map(transformTicket),
         closedTickets: closedTickets.map(transformTicket),
         avoidance,
+        rejected7d: m_r7[techId] || 0,
+        rejected30d: m_r30[techId] || 0,
+        rejectedLifetime: m_rL[techId] || 0,
       },
     });
   }),
@@ -869,8 +911,9 @@ router.get(
       logger.debug('VT leave info not available for monthly:', err.message);
     }
 
-    // Fetch per-tech rejection counts (rolling windows; same data as daily/weekly)
-    const { rej7d: m_rej7d, rej30d: m_rej30d, rejLifetime: m_rejLifetime } = await getRejectionCounts(req.workspaceId);
+    // Fetch per-tech rejection counts: rolling windows + selected-month count
+    const { rej7d: m_rej7d, rej30d: m_rej30d, rejLifetime: m_rejLifetime, rejPeriod: m_rejPeriod } =
+      await getRejectionCounts(req.workspaceId, monthStartRange.start, monthEndRange.end);
 
     // Also return technicians with their tickets filtered by month for frontend filtering
     const techniciansWithMonthTickets = technicians.map(tech => {
@@ -904,6 +947,7 @@ router.get(
         monthlyCSATCount: csatCount,
         monthlyCSATAverage: csatAverage,
         leaveInfo: leaveInfoMap[tech.id] || {},
+        rejectedThisPeriod: m_rejPeriod[tech.id] || 0,
         rejected7d: m_rej7d[tech.id] || 0,
         rejected30d: m_rej30d[tech.id] || 0,
         rejectedLifetime: m_rejLifetime[tech.id] || 0,
