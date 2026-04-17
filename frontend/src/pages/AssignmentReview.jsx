@@ -252,7 +252,7 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
   );
 }
 
-function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
+function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles', timeRange = '7d' }) {
   const navigate = useNavigate();
   const [queue, setQueue] = useState({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 } });
   const [outsideAssignedRuns, setOutsideAssignedRuns] = useState({ items: [], total: 0 });
@@ -273,7 +273,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [filterPriority, setFilterPriority] = useState('all');
   const [queueStatus, setQueueStatus] = useState(null);
   const [subView, setSubView] = useState('pending');
-  const [timeRange, setTimeRange] = useState('7d');
   const [dismissedRuns, setDismissedRuns] = useState({ items: [], total: 0 });
   const [rejectedRuns, setRejectedRuns] = useState({ items: [], total: 0 });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -1083,14 +1082,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             <div className="hidden min-w-[0.5rem] flex-1 lg:block" />
 
             <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:gap-2 lg:ml-auto">
-              <div className="inline-flex items-center gap-0.5 rounded-lg bg-slate-200/90 p-0.5 ring-1 ring-slate-300/30">
-                {['24h', '7d', '30d', 'all'].map((range) => (
-                  <button key={range} type="button" onClick={() => setTimeRange(range)} className={`rounded-md px-1.5 py-1 text-[11px] font-medium transition-all touch-manipulation ${timeRange === range ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/70' : 'text-slate-600 hover:text-slate-800'}`}>
-                    {range === 'all' ? 'All' : range}
-                  </button>
-                ))}
-              </div>
-
               <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="touch-manipulation rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] shadow-sm">
                 <option value="all">Priority</option>
                 <option value="4">Urgent</option>
@@ -1936,6 +1927,7 @@ export default function AssignmentReview() {
   const { currentWorkspace, availableWorkspaces } = useWorkspace();
   const { user } = useAuth();
   const [workspaceTimezone, setWorkspaceTimezone] = useState('America/Los_Angeles');
+  const [timeRange, setTimeRange] = useState('7d');
 
   const isGlobalAdmin = user?.role === 'admin';
   const wsRole = (() => {
@@ -2098,6 +2090,29 @@ export default function AssignmentReview() {
               </button>
             );
           })}
+
+          {/* Time-range filter — visible on Review Queue tab, integrated into the purple header */}
+          {activeTab === 'queue' && (
+            <>
+              <div className="flex-1" />
+              <div className="inline-flex items-center gap-0.5 rounded-md bg-white/15 ring-1 ring-white/20 p-0.5">
+                {['24h', '7d', '30d', 'all'].map((range) => (
+                  <button
+                    key={range}
+                    type="button"
+                    onClick={() => setTimeRange(range)}
+                    className={`rounded px-2 py-1 text-[11px] font-semibold transition-all touch-manipulation ${
+                      timeRange === range
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-white/80 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {range === 'all' ? 'All' : range}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -2105,7 +2120,7 @@ export default function AssignmentReview() {
       <div className="flex-1 px-2 pb-2 sm:px-4 sm:pb-4 overflow-auto">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-full">
           <div className="px-3 py-3 sm:px-6 sm:py-5">
-            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'calibration' && <CalibrationManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
