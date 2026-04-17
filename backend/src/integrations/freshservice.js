@@ -1,6 +1,23 @@
 import axios from 'axios';
 import logger from '../utils/logger.js';
 import { ExternalAPIError } from '../utils/errors.js';
+import { FreshServiceRateLimiter } from './rateLimiter.js';
+
+// Shared per-process singleton rate limiter so ALL callsites and workspaces
+// share a single budget against FreshService. Enterprise per-minute cap is
+// typically 140/min on /agents — we cap at 110 to leave headroom and avoid
+// burst-detection 429s.
+let SHARED_RATE_LIMITER = null;
+function getSharedRateLimiter() {
+  if (!SHARED_RATE_LIMITER) {
+    SHARED_RATE_LIMITER = new FreshServiceRateLimiter({
+      maxRequestsPerMinute: 110,
+      minDelayMs: 550,
+      slowDelayMs: 1500,
+    });
+  }
+  return SHARED_RATE_LIMITER;
+}
 
 /**
  * FreshService API Client
@@ -18,6 +35,9 @@ class FreshServiceClient {
     const fullDomain = domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`;
     this.baseURL = `https://${fullDomain}/api/v2`;
 
+    // Shared rate limiter across the process
+    this.limiter = getSharedRateLimiter();
+
     // Create axios instance with authentication
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -31,19 +51,23 @@ class FreshServiceClient {
       timeout: 30000, // 30 second timeout
     });
 
-    // Add response interceptor for error handling
-    // NOTE: Don't wrap 429 errors so retry logic can handle them
+    // Response interceptor — feed rate-limit headers back to limiter and let 429 bubble
     this.client.interceptors.response.use(
-      response => response,
-      error => {
+      (response) => {
+        this.limiter.onResponse(response.headers);
+        return response;
+      },
+      (error) => {
         const status = error.response?.status;
 
-        // Let 429/404/405 pass through unwrapped so callers can handle them directly
-        if (status === 429 || status === 404 || status === 405) {
+        if (status === 429) {
+          this.limiter.on429(error.response?.headers);
+          throw error;
+        }
+        if (status === 404 || status === 405) {
           throw error;
         }
 
-        // Log and wrap all other errors
         logger.error('FreshService API error:', {
           url: error.config?.url,
           status,
@@ -60,11 +84,20 @@ class FreshServiceClient {
   }
 
   /**
-   * Fetch all pages of a paginated API endpoint
-   * @param {string} endpoint - API endpoint
-   * @param {Object} params - Query parameters
-   * @param {Function} onProgress - Optional callback for progress updates (page, itemCount)
-   * @returns {Promise<Array>} Combined results from all pages
+   * Route an axios method call through the shared rate limiter.
+   * All HTTP calls should use this.
+   */
+  _throttledRequest(method, url, ...rest) {
+    return this.limiter.enqueue(() => this.client[method](url, ...rest));
+  }
+
+  _get(url, config) { return this._throttledRequest('get', url, config); }
+  _put(url, data, config) { return this._throttledRequest('put', url, data, config); }
+  _post(url, data, config) { return this._throttledRequest('post', url, data, config); }
+
+  /**
+   * Fetch all pages of a paginated API endpoint.
+   * Rate limiting is handled centrally by `this.limiter` via `_get()`.
    */
   async fetchAllPages(endpoint, params = {}, onProgress = null) {
     const allResults = [];
@@ -74,11 +107,7 @@ class FreshServiceClient {
     while (hasMore) {
       try {
         const response = await this._fetchWithRetry(endpoint, {
-          params: {
-            ...params,
-            page,
-            per_page: 100, // Maximum allowed by FreshService
-          },
+          params: { ...params, page, per_page: 100 },
         });
 
         const data = response.data;
@@ -88,27 +117,15 @@ class FreshServiceClient {
           allResults.push(...results);
           page++;
 
-          // Log progress every 10 pages to show sync progress
           if (page % 10 === 0) {
             logger.info(`Fetching ${endpoint}: ${allResults.length} items so far (page ${page})...`);
-
-            // Call progress callback if provided
-            if (onProgress) {
-              onProgress(page, allResults.length);
-            }
+            if (onProgress) onProgress(page, allResults.length);
           }
 
-          // Check if there are more pages
-          // FreshService returns fewer results when we're on the last page
-          if (results.length < 100) {
-            hasMore = false;
-          }
+          if (results.length < 100) hasMore = false;
         } else {
           hasMore = false;
         }
-
-        // Rate limiting: 1 second delay between requests (5000 req/hour limit)
-        await this._sleep(1000);
       } catch (error) {
         logger.error(`Error fetching page ${page} of ${endpoint}:`, error);
         throw error;
@@ -120,40 +137,27 @@ class FreshServiceClient {
   }
 
   /**
-   * Fetch with retry logic for rate limiting (429 errors)
-   * @param {string} endpoint - API endpoint
-   * @param {Object} config - Axios request config
-   * @param {number} maxRetries - Maximum number of retries
-   * @returns {Promise<Object>} API response
+   * Retry wrapper for 429 responses. The rate limiter already paces requests,
+   * but if a 429 still slips through (e.g. endpoint-specific sub-limits),
+   * honor the Retry-After header via limiter.on429() then retry.
    */
   async _fetchWithRetry(endpoint, config = {}, maxRetries = 3) {
     let lastError;
-
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        return await this.client.get(endpoint, config);
+        return await this._get(endpoint, config);
       } catch (error) {
         lastError = error;
         const status = error.response?.status;
-
-        // Only retry on 429 (rate limit) errors
         if (status === 429 && attempt < maxRetries) {
-          // Exponential backoff: 5s, 10s, 20s
-          const delayMs = 5000 * Math.pow(2, attempt - 1);
-          logger.warn(
-            `Rate limit hit (429) on ${endpoint} page ${config.params?.page || 1}. ` +
-            `Retrying in ${delayMs / 1000}s (attempt ${attempt}/${maxRetries})...`,
-          );
-          await this._sleep(delayMs);
+          // limiter.on429 was already called in the interceptor; the queue is
+          // now paused for Retry-After. Just re-enqueue.
+          logger.warn(`Retrying ${endpoint} (attempt ${attempt + 1}/${maxRetries}) after 429`);
           continue;
         }
-
-        // Don't retry other errors or if max retries reached
         throw error;
       }
     }
-
-    // If we get here, all retries failed
     throw lastError;
   }
 
@@ -221,7 +225,7 @@ class FreshServiceClient {
    */
   async fetchTicket(ticketId) {
     try {
-      const response = await this.client.get(`/tickets/${ticketId}`);
+      const response = await this._get(`/tickets/${ticketId}`);
       return response.data.ticket;
     } catch (error) {
       logger.error(`Error fetching ticket ${ticketId}:`, error);
@@ -230,30 +234,21 @@ class FreshServiceClient {
   }
 
   /**
-   * Fetch a single ticket, returning null if deleted (404) instead of throwing.
-   * Retries on 429 (rate limit) with exponential backoff.
-   * @param {number} ticketId - FreshService ticket ID
-   * @returns {Promise<Object|null>} Ticket object or null if deleted/not found
+   * Fetch a single ticket, returning null if deleted (404). 429s are handled
+   * by the shared limiter; we retry once.
    */
   async fetchTicketSafe(ticketId) {
-    const maxRetries = 3;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const response = await this.client.get(`/tickets/${ticketId}`);
+        const response = await this._get(`/tickets/${ticketId}`);
         return response.data.ticket;
       } catch (error) {
-        if (error.response?.status === 404) {
-          return null;
-        }
-        if (error.response?.status === 429 && attempt < maxRetries) {
-          const delayMs = 5000 * Math.pow(2, attempt - 1);
-          logger.warn(`Rate limit hit on /tickets/${ticketId}, retrying in ${delayMs / 1000}s (${attempt}/${maxRetries})`);
-          await this._sleep(delayMs);
-          continue;
-        }
+        if (error.response?.status === 404) return null;
+        if (error.response?.status === 429 && attempt < 3) continue;
         throw error;
       }
     }
+    return null;
   }
 
   /**
@@ -263,27 +258,17 @@ class FreshServiceClient {
    */
   async fetchCSATResponse(ticketId) {
     try {
-      // Use retry logic to handle rate limiting (429 errors)
       const response = await this._fetchWithRetry(`/tickets/${ticketId}/csat_response`, {}, 3);
       return response.data.csat_response || null;
     } catch (error) {
-      // 404 means no CSAT response exists for this ticket - this is normal
-      if (error.response?.status === 404) {
-        return null;
-      }
+      if (error.response?.status === 404) return null;
       logger.error(`Error fetching CSAT for ticket ${ticketId}:`, error);
       throw error;
     }
   }
 
-  /**
-   * Fetch ticket activities (conversations, notes, etc.)
-   * @param {number} ticketId - Ticket ID
-   * @returns {Promise<Array>} Array of activities
-   */
   async fetchTicketActivities(ticketId) {
     try {
-      // Use retry logic to handle rate limiting (429 errors)
       const response = await this._fetchWithRetry(`/tickets/${ticketId}/activities`, {}, 3);
       return response.data.activities || [];
     } catch (error) {
@@ -338,7 +323,7 @@ class FreshServiceClient {
    */
   async fetchAgent(agentId) {
     try {
-      const response = await this.client.get(`/agents/${agentId}`);
+      const response = await this._get(`/agents/${agentId}`);
       return response.data.agent;
     } catch (error) {
       logger.error(`Error fetching agent ${agentId}:`, error);
@@ -346,14 +331,9 @@ class FreshServiceClient {
     }
   }
 
-  /**
-   * Fetch requester by ID
-   * @param {number} requesterId - Requester ID
-   * @returns {Promise<Object>} Requester object
-   */
   async fetchRequester(requesterId) {
     try {
-      const response = await this.client.get(`/requesters/${requesterId}`);
+      const response = await this._get(`/requesters/${requesterId}`);
       return response.data.requester;
     } catch (error) {
       logger.error(`Error fetching requester ${requesterId}:`, error);
@@ -362,9 +342,7 @@ class FreshServiceClient {
   }
 
   /**
-   * Fetch multiple requesters by IDs with rate limiting
-   * @param {Array<number>} requesterIds - Array of requester IDs
-   * @returns {Promise<Array>} Array of requester objects
+   * Fetch multiple requesters. Rate limiting is handled centrally.
    */
   async fetchAllRequesters(requesterIds) {
     try {
@@ -374,12 +352,8 @@ class FreshServiceClient {
 
       for (const id of requesterIds) {
         try {
-          // Rate limiting: 1.1 second delay between requests (well under 5000/hour limit)
-          await this._sleep(1100);
           const requester = await this.fetchRequester(id);
           requesters.push(requester);
-
-          // Log progress every 50 requesters
           if (requesters.length % 50 === 0) {
             logger.info(`Fetched ${requesters.length}/${requesterIds.length} requesters`);
           }
@@ -401,14 +375,10 @@ class FreshServiceClient {
     }
   }
 
-  /**
-   * Test API connection
-   * @returns {Promise<boolean>} True if connection successful
-   */
   async testConnection() {
     try {
       logger.info('Testing FreshService API connection');
-      await this.client.get('/agents', { params: { per_page: 1 } });
+      await this._get('/agents', { params: { per_page: 1 } });
       logger.info('FreshService API connection successful');
       return true;
     } catch (error) {
@@ -417,18 +387,14 @@ class FreshServiceClient {
     }
   }
 
-  /**
-   * Get API rate limit information
-   * @returns {Promise<Object>} Rate limit info
-   */
   async getRateLimitInfo() {
     try {
-      const response = await this.client.get('/agents', { params: { per_page: 1 } });
-
+      const response = await this._get('/agents', { params: { per_page: 1 } });
       return {
         limit: response.headers['x-ratelimit-total'],
         remaining: response.headers['x-ratelimit-remaining'],
         usedToday: response.headers['x-ratelimit-used-currentrequest'],
+        limiterStats: this.limiter.getStats(),
       };
     } catch (error) {
       logger.error('Error fetching rate limit info:', error);
@@ -449,7 +415,7 @@ class FreshServiceClient {
    */
   async assignTicket(ticketId, agentId) {
     try {
-      const response = await this.client.put(`/tickets/${ticketId}`, {
+      const response = await this._put(`/tickets/${ticketId}`, {
         ticket: { responder_id: agentId },
       });
       return response.data.ticket;
@@ -466,7 +432,7 @@ class FreshServiceClient {
 
   async getTicket(ticketId) {
     try {
-      const response = await this.client.get(`/tickets/${ticketId}?include=stats`);
+      const response = await this._get(`/tickets/${ticketId}?include=stats`);
       return response.data.ticket;
     } catch (error) {
       logger.error(`Error fetching ticket ${ticketId}:`, error);
@@ -476,7 +442,7 @@ class FreshServiceClient {
 
   async getGroup(groupId) {
     try {
-      const response = await this.client.get(`/groups/${groupId}`);
+      const response = await this._get(`/groups/${groupId}`);
       return response.data.group;
     } catch (error) {
       logger.error(`Error fetching group ${groupId}:`, error);
@@ -486,17 +452,14 @@ class FreshServiceClient {
 
   async closeTicket(ticketId, status = 4) {
     try {
-      const response = await this.client.put(`/tickets/${ticketId}`, {
-        ticket: { status },
-      });
+      const response = await this._put(`/tickets/${ticketId}`, { ticket: { status } });
       return response.data.ticket;
     } catch (error) {
-      // If 400/422, FreshService may require fields like category/department for closure
       const httpStatus = error.response?.status || error.statusCode;
       if (httpStatus === 400 || httpStatus === 422) {
         logger.warn(`Ticket ${ticketId} close requires additional fields, retrying with defaults`);
         try {
-          const response = await this.client.put(`/tickets/${ticketId}`, {
+          const response = await this._put(`/tickets/${ticketId}`, {
             ticket: { status, category: 'Other' },
           });
           return response.data.ticket;
@@ -516,7 +479,7 @@ class FreshServiceClient {
 
   async addPrivateNote(ticketId, body) {
     try {
-      const response = await this.client.post(`/tickets/${ticketId}/notes`, {
+      const response = await this._post(`/tickets/${ticketId}/notes`, {
         body,
         private: true,
       });
@@ -530,6 +493,13 @@ class FreshServiceClient {
       logger.error(`Error adding note to ticket ${ticketId}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Get current rate limiter stats (for diagnostics).
+   */
+  getLimiterStats() {
+    return this.limiter.getStats();
   }
 
   _sleep(ms) {

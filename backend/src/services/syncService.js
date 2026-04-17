@@ -74,6 +74,20 @@ class SyncService {
   }
 
   /**
+   * Get current rate limiter stats + FS headers from a single probe call.
+   * Used by the /rate-limit-stats diagnostics endpoint.
+   */
+  async getRateLimitInfo() {
+    try {
+      const client = await this._initializeClient();
+      return await client.getRateLimitInfo();
+    } catch (error) {
+      logger.error('Failed to fetch rate limit info:', error);
+      return null;
+    }
+  }
+
+  /**
    * Get the FreshService workspace ID for a given internal workspace ID.
    * Falls back to global settings if workspaceId is not provided.
    */
@@ -240,97 +254,62 @@ class SyncService {
    * @returns {Promise<Map>} Map of ticketId → { isSelfPicked, assignedBy, firstAssignedAt }
    * @private
    */
+  /**
+   * Analyze ticket activities. Rate limiting is handled centrally by the
+   * FreshServiceClient's shared rate limiter — we just issue requests
+   * sequentially and let the limiter queue/throttle them.
+   *
+   * Previously this used a Promise.all + setTimeout pattern that caused
+   * overlapping requests during retries. Now: a true sequential loop.
+   */
   async _analyzeTicketActivities(client, tickets, options = {}) {
-    const {
-      concurrency = 1,
-      batchDelay = 1100,
-      ticketFilter = null,
-      onProgress = null,
-    } = options;
+    const { ticketFilter = null, onProgress = null } = options;
 
     if (!Array.isArray(tickets) || tickets.length === 0) {
       return new Map();
     }
 
-    // Filter tickets if needed
     let ticketsToAnalyze = tickets;
     if (ticketFilter) {
       ticketsToAnalyze = tickets.filter(ticketFilter);
     }
 
-    logger.info(`Analyzing ${ticketsToAnalyze.length} tickets (concurrency: ${concurrency}, delay: ${batchDelay}ms)`);
+    const totalCount = ticketsToAnalyze.length;
+    logger.info(`Analyzing ${totalCount} tickets (rate-limited by shared queue)`);
 
     const analysisMap = new Map();
     let processedCount = 0;
     let errorCount = 0;
-    const totalCount = ticketsToAnalyze.length;
 
-    // Process function for a single ticket
-    const processTicket = async (ticket, index) => {
-      // Calculate delay based on batch (for rate limiting)
-      const delayMs = Math.floor(index / concurrency) * batchDelay;
-      if (delayMs > 0) {
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-      }
-
+    for (const ticket of ticketsToAnalyze) {
+      const ticketId = ticket.id || ticket.freshserviceTicketId;
       try {
-        // Extract ticket ID (handle both raw FS tickets and transformed tickets)
-        const ticketId = ticket.id || ticket.freshserviceTicketId;
-
-        // Fetch activities from FreshService
         const activities = await client.fetchTicketActivities(Number(ticketId));
-
         if (activities && activities.length > 0) {
-          // Analyze activities to determine assignment details
           const analysis = analyzeTicketActivities(activities);
           analysisMap.set(ticketId.toString(), analysis);
           processedCount++;
 
-          // Report progress if callback provided
           if (onProgress && processedCount % 5 === 0) {
             onProgress(processedCount, totalCount);
           }
-
           if (processedCount % 50 === 0) {
-            logger.info(`Activity analysis progress: ${processedCount}/${totalCount} (${Math.round(processedCount / totalCount * 100)}%) - ${errorCount} errors`);
+            logger.info(`Activity analysis: ${processedCount}/${totalCount} (${Math.round(processedCount / totalCount * 100)}%) — ${errorCount} errors`);
           }
-
           logger.debug(`Ticket ${ticketId}: isSelfPicked=${analysis.isSelfPicked}, assignedBy=${analysis.assignedBy}`);
         }
-
-        return { success: true, ticketId };
       } catch (error) {
         errorCount++;
-        const ticketId = ticket.id || ticket.freshserviceTicketId;
-
-        // Report progress even on error
-        if (onProgress && (processedCount + errorCount) % 5 === 0) {
-          onProgress(processedCount + errorCount, totalCount);
-        }
-
-        if ((processedCount + errorCount) % 50 === 0) {
-          logger.info(`Activity analysis progress: ${processedCount + errorCount}/${totalCount} (${Math.round((processedCount + errorCount) / totalCount * 100)}%) - ${errorCount} errors`);
-        }
-
-        // Only log non-500 errors (500s are expected for some tickets)
         if (!String(error).includes('500')) {
           logger.warn(`Failed to analyze ticket ${ticketId}: ${error.message || error}`);
         }
-
-        return { success: false, ticketId, error };
+        if (onProgress && (processedCount + errorCount) % 5 === 0) {
+          onProgress(processedCount + errorCount, totalCount);
+        }
       }
-    };
-
-    // Process all tickets (Promise.all handles both sequential and parallel)
-    await Promise.all(
-      ticketsToAnalyze.map((ticket, index) => processTicket(ticket, index)),
-    );
-
-    // Final progress report
-    if (onProgress) {
-      onProgress(totalCount, totalCount);
     }
 
+    if (onProgress) onProgress(totalCount, totalCount);
     logger.info(`Activity analysis complete: ${processedCount} analyzed, ${errorCount} errors`);
     return analysisMap;
   }
@@ -615,8 +594,6 @@ class SyncService {
       };
 
       const activityAnalysisMap = await this._analyzeTicketActivities(client, fsTickets, {
-        concurrency: 1,
-        batchDelay: 1100,
         ticketFilter,
       });
 
@@ -1815,11 +1792,7 @@ class SyncService {
             });
 
             totalProcessed++;
-
-            // Rate limiting between FS API calls
-            if (totalProcessed % concurrency === 0) {
-              await new Promise((r) => setTimeout(r, 1100));
-            }
+            // Rate limiting is handled centrally by FreshServiceClient.limiter
           } catch (error) {
             totalErrors++;
             logger.error(`Episode backfill failed for ticket ${ticket.freshserviceTicketId}:`, error);

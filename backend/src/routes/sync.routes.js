@@ -388,4 +388,23 @@ router.post(
   }),
 );
 
+/**
+ * GET /api/sync/rate-limit-stats
+ * Return current FreshService rate limiter queue stats (diagnostics).
+ */
+router.get(
+  '/rate-limit-stats',
+  asyncHandler(async (req, res) => {
+    const fsModule = await import('../integrations/freshservice.js');
+    const stats = await syncService.getRateLimitInfo();
+    res.json({
+      success: true,
+      data: {
+        freshservice: stats || null,
+        module: fsModule.createFreshServiceClient ? 'loaded' : 'missing',
+      },
+    });
+  }),
+);
+
 export default router;

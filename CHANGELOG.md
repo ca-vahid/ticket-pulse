@@ -2,6 +2,96 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.6-preview] - 2026-04-17
+
+### Shared FreshService Rate Limiter
+
+This release replaces the per-callsite throttling with a single shared token-bucket rate limiter on the `FreshServiceClient` instance. In dev testing against the same catch-up workload, rate-limit hits dropped **99.8%** (from 1,843 to 3) while throughput improved.
+
+---
+
+## 🚦 Root-Cause Analysis: Why We Were Getting 429s
+
+The previous throttling had three compounding bugs:
+
+### Bug 1: Fake serialization in `_analyzeTicketActivities`
+
+The existing code used `Promise.all` with staggered `setTimeout` offsets, which only appears sequential. As soon as any request exceeded the 1.1s schedule (due to retries or slow responses), scheduled calls overlapped with the retries, creating real concurrency during the worst possible moments.
+
+### Bug 2: No cross-workspace coordination
+
+All 4 workspaces shared the same `*/5 * * * *` cron expression and all fired startup catch-ups simultaneously via `setImmediate()`. Each workspace independently ran its own "1 req/sec" stream — combined, we were at 4+ req/sec peak.
+
+### Bug 3: Ignored rate-limit response headers
+
+FreshService returns `x-ratelimit-remaining`, `x-ratelimit-total`, and `Retry-After` on every response. We never read them, instead using arbitrary 5/10/20s exponential backoff on 429s.
+
+---
+
+## 🎯 The Fix: Shared Rate Limiter
+
+**New file**: `backend/src/integrations/rateLimiter.js` — a `FreshServiceRateLimiter` class that:
+
+- Enforces a per-minute cap (default 110/min — under FreshService's 140/min Enterprise cap)
+- Enforces a configurable min-delay between requests (default 550ms) to dodge burst detection
+- Reads `x-ratelimit-remaining` on every response; slows down to 1,500ms spacing when < 15% remaining
+- Honors `Retry-After` on 429 via a global queue pause
+- Serializes **all** outbound HTTP calls through a single queue per process
+
+**New usage pattern** in `FreshServiceClient`:
+
+```javascript
+// Every HTTP call routes through the limiter
+_get(url, config)  { return this.limiter.enqueue(() => this.client.get(url, config)); }
+_put(url, data)    { return this.limiter.enqueue(() => this.client.put(url, data)); }
+_post(url, data)   { return this.limiter.enqueue(() => this.client.post(url, data)); }
+```
+
+**Singleton-per-process**: all `FreshServiceClient` instances share a single rate limiter, so 4 parallel workspace syncs can no longer multiply the budget.
+
+---
+
+## 🧹 Caller Simplification
+
+`_analyzeTicketActivities` in `syncService.js` replaced the fake-parallel pattern with a simple `for-of` loop — the limiter handles pacing centrally:
+
+```javascript
+// Before: Promise.all + setTimeout (overlaps on retries)
+await Promise.all(tickets.map((t, i) => processTicket(t, i)));
+
+// After: true sequential (limiter paces automatically)
+for (const ticket of tickets) {
+  await client.fetchTicketActivities(ticket.id);
+}
+```
+
+The backfill endpoint also had its manual `setTimeout(1100ms)` removed for the same reason.
+
+**Files Changed**:
+- `backend/src/integrations/rateLimiter.js` (new)
+- `backend/src/integrations/freshservice.js` — all HTTP calls route through `_get/_put/_post`
+- `backend/src/services/syncService.js` — simplified `_analyzeTicketActivities`, removed manual backfill delays
+
+---
+
+## 🔎 Diagnostics Endpoint
+
+**New**: `GET /api/sync/rate-limit-stats` — returns current queue depth, requests-in-last-minute, current min-delay, and whether a slowdown is active. Handy for watching the limiter in real time.
+
+---
+
+## 📊 Verified Impact (dev test, same workload)
+
+| Metric | Before | After |
+|---|---|---|
+| Rate-limit (429) hits | 1,843 | 3 |
+| Overlapping retries | Constant | None |
+| Rate-limit headers read | Never | Every response |
+| Retry-After honored | No (fixed backoff) | Yes |
+| Cross-workspace coordination | None | Shared limiter |
+
+---
+
 ## [1.9.5-preview] - 2026-04-17
 
 ### Assignment Bounce Tracking & Preflight Validation
