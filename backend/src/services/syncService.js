@@ -843,10 +843,22 @@ class SyncService {
       try {
         this.progress.currentStep = 'Syncing CSAT responses';
         this.progress.currentStepNumber = 4;
-        const csatDaysBack = parseInt(await settingsRepository.get('csat_sync_days'), 10) || 90;
-        const csatResults = await this.syncRecentCSAT(csatDaysBack, workspaceId);
-        csatSynced = csatResults.csatFound;
-        this.progress.csatSynced = csatSynced;
+
+        // Skip scheduled CSAT sync entirely if an admin backfill is running
+        // for any workspace — the backfill will handle CSAT more thoroughly
+        // and we don't want to compete for the shared FS rate limiter budget.
+        const backfillActive = [...this.runningWorkspaces].some((k) => String(k).startsWith('backfill:'));
+        if (backfillActive) {
+          logger.info('Skipping scheduled CSAT sync: admin backfill is active');
+        } else {
+          const csatDaysBack = parseInt(await settingsRepository.get('csat_sync_days'), 10) || 90;
+          // Tight cap per scheduled cycle: 4 workspaces × 30 = 120 CSAT calls
+          // per 5-min window = ~24 calls/min = 22% of the 110/min limiter budget.
+          // Leaves room for the actual sync work + any admin operations.
+          const csatResults = await this.syncRecentCSAT(csatDaysBack, workspaceId, { limit: 30 });
+          csatSynced = csatResults.csatFound;
+          this.progress.csatSynced = csatSynced;
+        }
       } catch (error) {
         logger.error('CSAT sync failed (non-fatal):', error);
         // Continue even if CSAT sync fails

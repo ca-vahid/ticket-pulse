@@ -117,9 +117,11 @@ class FreshServiceClient {
           allResults.push(...results);
           page++;
 
+          // Emit progress on every page so the UI reflects real motion.
+          // Log output stays every 10 pages to avoid spam.
+          if (onProgress) onProgress(page, allResults.length);
           if (page % 10 === 0) {
             logger.info(`Fetching ${endpoint}: ${allResults.length} items so far (page ${page})...`);
-            if (onProgress) onProgress(page, allResults.length);
           }
 
           if (results.length < 100) hasMore = false;
