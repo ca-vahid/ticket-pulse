@@ -315,39 +315,65 @@ class SyncService {
   }
 
   /**
-   * Update tickets with activity analysis results
+   * Update tickets with activity analysis results.
+   * When a workspaceId is supplied, also reconciles episodes and writes
+   * per-event TicketActivity rows — keeping the historical-backfill path
+   * feature-parity with performFullSync.
    *
-   * @param {Map} analysisMap - Map of ticketId → { isSelfPicked, assignedBy, firstAssignedAt, firstPublicAgentReplyAt }
+   * @param {Map} analysisMap - Map of ticketId → analysis object
+   * @param {Object} options
+   * @param {number} options.workspaceId - Required for episode reconciliation
    * @returns {Promise<number>} Count of updated tickets
    * @private
    */
-  async _updateTicketsWithAnalysis(analysisMap) {
+  async _updateTicketsWithAnalysis(analysisMap, { workspaceId = null } = {}) {
     if (!analysisMap || analysisMap.size === 0) {
       return 0;
     }
 
-    const prismaModule = await import('./prisma.js');
-    const db = prismaModule.default;
+    // Build tech-name→id map once per batch when we need episode reconciliation
+    let techNameMap = null;
+    if (workspaceId) {
+      const allTechs = await technicianRepository.getAll(workspaceId, { lite: true });
+      techNameMap = new Map();
+      for (const t of allTechs) {
+        techNameMap.set(t.name, t.id);
+        if (t.email) techNameMap.set(t.email, t.id);
+      }
+    }
+
     let updatedCount = 0;
 
     for (const [ticketId, analysis] of analysisMap.entries()) {
       try {
-        await db.ticket.update({
+        const updated = await prisma.ticket.update({
           where: { freshserviceTicketId: BigInt(ticketId) },
           data: {
             firstAssignedAt: analysis.firstAssignedAt,
-            isSelfPicked: analysis.isSelfPicked,
+            // Prefer currentIsSelfPicked (new semantic) over legacy isSelfPicked
+            isSelfPicked: analysis.currentIsSelfPicked ?? analysis.isSelfPicked ?? false,
             assignedBy: analysis.assignedBy,
             firstPublicAgentReplyAt: analysis.firstPublicAgentReplyAt || undefined,
+            rejectionCount: analysis.rejectionCount || 0,
           },
+          select: { id: true, workspaceId: true },
         });
         updatedCount++;
+
+        // Reconcile episodes + write event activities (if we have tech map)
+        if (techNameMap && analysis.episodes?.length) {
+          const wsId = updated.workspaceId || workspaceId;
+          await this._reconcileEpisodes(updated.id, wsId, analysis, techNameMap);
+        }
+        if (analysis.events?.length) {
+          await this._writeEventActivities(updated.id, analysis.events);
+        }
       } catch (error) {
         logger.warn(`Failed to update ticket ${ticketId} with analysis: ${error.message || error}`);
       }
     }
 
-    logger.info(`Updated ${updatedCount} tickets with activity analysis`);
+    logger.info(`Updated ${updatedCount} tickets with activity analysis (episodes: ${techNameMap ? 'reconciled' : 'skipped'})`);
     return updatedCount;
   }
 
@@ -1202,7 +1228,7 @@ class SyncService {
       this.progress.currentStep = 'Finalizing sync and updating database';
       this.progress.currentStepNumber = 5;
       this.progress.percentage = 90;
-      await this._updateTicketsWithAnalysis(analysisMap);
+      await this._updateTicketsWithAnalysis(analysisMap, { workspaceId });
 
       // Count pickup times backfilled (tickets that had firstAssignedAt set)
       let pickupTimesBackfilled = 0;
@@ -1389,9 +1415,9 @@ class SyncService {
         },
       });
 
-      // Phase 7: Update tickets with analysis
+      // Phase 7: Update tickets with analysis (includes episode reconciliation)
       emit({ phase: 'finalize', step: 'Updating tickets with analysis data', pct: 93 });
-      await this._updateTicketsWithAnalysis(analysisMap);
+      await this._updateTicketsWithAnalysis(analysisMap, { workspaceId });
 
       // Phase 8: Sync requesters
       emit({ phase: 'requesters', step: 'Syncing requester details', pct: 95 });
