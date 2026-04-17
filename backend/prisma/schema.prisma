@@ -46,6 +46,7 @@ model Workspace {
   competencyRuns         CompetencyAnalysisRun[]
   calibrationRuns        CalibrationRun[]
   assignmentEpisodes     TicketAssignmentEpisode[]
+  backfillRuns           BackfillRun[]
 
   @@map("workspaces")
 }
@@ -266,6 +267,45 @@ model TicketAssignmentEpisode {
   @@index([workspaceId])
   @@index([endMethod])
   @@index([startedAt])
+}
+
+model BackfillRun {
+  id                  Int       @id @default(autoincrement())
+  workspaceId         Int       @map("workspace_id")
+  workspace           Workspace @relation(fields: [workspaceId], references: [id])
+  status              String    @db.VarChar(20) // running | completed | failed | cancelled | interrupted
+  startDate           String    @db.VarChar(10) @map("start_date")
+  endDate             String    @db.VarChar(10) @map("end_date")
+  skipExisting        Boolean   @default(true) @map("skip_existing")
+  activityConcurrency Int       @default(3) @map("activity_concurrency")
+  triggeredByEmail    String?   @db.VarChar(255) @map("triggered_by_email")
+
+  // Live progress snapshot (updated periodically while running)
+  progressPct         Int       @default(0) @map("progress_pct")
+  progressStep        String?   @db.VarChar(255) @map("progress_step")
+  progressPhase       String?   @db.VarChar(50) @map("progress_phase")
+  ticketsTotal        Int?      @map("tickets_total")
+  ticketsProcessed    Int?      @map("tickets_processed")
+
+  // Final results
+  ticketsFetched      Int?      @map("tickets_fetched")
+  ticketsSynced       Int?      @map("tickets_synced")
+  activitiesAnalyzed  Int?      @map("activities_analyzed")
+  skippedCount        Int?      @map("skipped_count")
+  elapsedMs           Int?      @map("elapsed_ms")
+  errorMessage        String?   @db.Text @map("error_message")
+
+  // Cancellation flag — backfill loop checks this and aborts
+  cancelRequested     Boolean   @default(false) @map("cancel_requested")
+  cancelledByEmail    String?   @db.VarChar(255) @map("cancelled_by_email")
+
+  startedAt           DateTime  @default(now()) @map("started_at")
+  completedAt         DateTime? @map("completed_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@map("backfill_runs")
+  @@index([workspaceId, startedAt])
+  @@index([status])
 }
 
 model AppSettings {

@@ -326,6 +326,21 @@ export const syncAPI = {
   getBackfillStatus: async () => {
     return await api.get('/sync/backfill/status');
   },
+
+  /** Get the currently-running BackfillRun row for the workspace (or null). */
+  getCurrentBackfill: async () => {
+    return await api.get('/sync/backfill/current');
+  },
+
+  /** Get past backfill runs (most recent first). */
+  getBackfillHistory: async (limit = 20) => {
+    return await api.get('/sync/backfill/history', { params: { limit } });
+  },
+
+  /** Request cancellation of a running backfill. */
+  cancelBackfill: async (id) => {
+    return await api.post(`/sync/backfill/${id}/cancel`);
+  },
 };
 
 /**

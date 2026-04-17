@@ -206,6 +206,26 @@ async function initialize() {
       logger.warn('FreshService not configured. Please configure in settings.');
     }
 
+    // Reconcile any backfill runs left in 'running' state from a prior crash/restart.
+    // The backfill loop only lives in-process, so a 'running' row at boot is orphaned.
+    try {
+      const prismaModule = await import('./services/prisma.js');
+      const orphans = await prismaModule.default.backfillRun.updateMany({
+        where: { status: 'running' },
+        data: {
+          status: 'interrupted',
+          progressStep: 'Server restarted before backfill completed',
+          progressPhase: 'interrupted',
+          completedAt: new Date(),
+        },
+      });
+      if (orphans.count > 0) {
+        logger.warn(`Marked ${orphans.count} orphaned backfill run(s) as 'interrupted' on startup`);
+      }
+    } catch (e) {
+      logger.warn('Backfill run reconciliation failed (non-fatal):', e.message);
+    }
+
     logger.info('Server initialization complete');
   } catch (error) {
     logger.error('Server initialization failed:', error);

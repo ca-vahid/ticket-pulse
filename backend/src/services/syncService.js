@@ -1290,15 +1290,84 @@ class SyncService {
       skipExisting = true,
       activityConcurrency = 3,
       onProgress = null,
+      triggeredByEmail = null,
     } = options;
 
     const backfillKey = `backfill:${workspaceId}`;
     if (this.runningWorkspaces.has(backfillKey)) {
-      return { status: 'skipped', reason: 'Backfill already running for this workspace' };
+      // Find the existing run row so the caller can attach to it
+      const existing = await prisma.backfillRun.findFirst({
+        where: { workspaceId, status: 'running' },
+        orderBy: { startedAt: 'desc' },
+      });
+      return { status: 'skipped', reason: 'Backfill already running for this workspace', backfillRunId: existing?.id };
     }
 
     this.runningWorkspaces.add(backfillKey);
-    const emit = (data) => { if (onProgress) onProgress(data); };
+
+    // Create a DB row tracking this run — so the UI can rejoin after navigation
+    // and we have a permanent history of all backfills.
+    const runRow = await prisma.backfillRun.create({
+      data: {
+        workspaceId,
+        status: 'running',
+        startDate,
+        endDate,
+        skipExisting,
+        activityConcurrency,
+        triggeredByEmail,
+      },
+    });
+    const runId = runRow.id;
+
+    // Throttled DB progress writer — coalesce updates to at most 1/sec
+    let lastDbWrite = 0;
+    let lastEmittedProgress = null;
+    const persistProgress = async (data, force = false) => {
+      lastEmittedProgress = data;
+      const now = Date.now();
+      if (!force && now - lastDbWrite < 1000) return;
+      lastDbWrite = now;
+      try {
+        await prisma.backfillRun.update({
+          where: { id: runId },
+          data: {
+            progressPct: Math.max(0, Math.min(100, data.pct ?? 0)),
+            progressStep: data.step?.slice(0, 255) || null,
+            progressPhase: data.phase || null,
+            ticketsTotal: data.total ?? undefined,
+            ticketsProcessed: data.processed ?? undefined,
+          },
+        });
+      } catch (e) {
+        logger.warn(`Backfill run ${runId} progress persist failed: ${e.message}`);
+      }
+    };
+
+    // Cancellation check — read from DB, throttled to avoid spamming queries
+    let lastCancelCheck = 0;
+    let cachedCancelRequested = false;
+    const isCancelRequested = async () => {
+      const now = Date.now();
+      if (now - lastCancelCheck < 1000) return cachedCancelRequested;
+      lastCancelCheck = now;
+      try {
+        const r = await prisma.backfillRun.findUnique({
+          where: { id: runId },
+          select: { cancelRequested: true },
+        });
+        cachedCancelRequested = !!r?.cancelRequested;
+        return cachedCancelRequested;
+      } catch {
+        return false;
+      }
+    };
+
+    const emit = (data) => {
+      // Persist + forward to caller's SSE stream
+      persistProgress(data).catch(() => {});
+      if (onProgress) onProgress(data);
+    };
     const startTime = Date.now();
 
     try {
@@ -1379,6 +1448,8 @@ class SyncService {
       const totalToSync = ticketsToSync.length;
 
       for (let i = 0; i < totalToSync; i += batchSize) {
+        if (await isCancelRequested()) throw new Error('CANCELLED');
+
         const batch = ticketsToSync.slice(i, i + batchSize);
         const batchNum = Math.floor(i / batchSize) + 1;
         const totalBatches = Math.ceil(totalToSync / batchSize);
@@ -1399,13 +1470,15 @@ class SyncService {
 
       emit({ phase: 'upsert', step: `Saved ${syncedCount} tickets`, pct: 56, processed: syncedCount, total: totalToSync });
 
+      if (await isCancelRequested()) throw new Error('CANCELLED');
+
       // Phase 6: Analyze activities for assignment tracking
       emit({ phase: 'activities', step: 'Analyzing ticket activities', pct: 58, processed: 0, total: totalTickets });
 
       const analysisMap = await this._analyzeTicketActivities(client, rangeTickets, {
         concurrency: activityConcurrency,
         batchDelay: 2000,
-        onProgress: (processed, total) => {
+        onProgress: async (processed, total) => {
           const actPct = 58 + Math.floor((processed / total) * 34);
           emit({
             phase: 'activities',
@@ -1414,8 +1487,14 @@ class SyncService {
             processed,
             total,
           });
+          // Periodic cancel check during the long activity-analysis phase
+          if (processed % 50 === 0 && await isCancelRequested()) {
+            throw new Error('CANCELLED');
+          }
         },
       });
+
+      if (await isCancelRequested()) throw new Error('CANCELLED');
 
       // Phase 7: Update tickets with analysis (includes episode reconciliation)
       emit({ phase: 'finalize', step: 'Updating tickets with analysis data', pct: 93 });
@@ -1425,9 +1504,11 @@ class SyncService {
       emit({ phase: 'requesters', step: 'Syncing requester details', pct: 95 });
       await this.syncRequesters();
 
-      const elapsed = `${((Date.now() - startTime) / 1000).toFixed(0)}s`;
+      const elapsedMs = Date.now() - startTime;
+      const elapsed = `${(elapsedMs / 1000).toFixed(0)}s`;
       const summary = {
         status: 'completed',
+        backfillRunId: runId,
         ticketsFetched: totalTickets,
         ticketsSynced: syncedCount,
         activitiesAnalyzed: analysisMap.size,
@@ -1436,6 +1517,23 @@ class SyncService {
         elapsed,
       };
 
+      // Persist final state to DB row
+      await prisma.backfillRun.update({
+        where: { id: runId },
+        data: {
+          status: 'completed',
+          progressPct: 100,
+          progressStep: 'Backfill complete',
+          progressPhase: 'done',
+          ticketsFetched: totalTickets,
+          ticketsSynced: syncedCount,
+          activitiesAnalyzed: analysisMap.size,
+          skippedCount: skippedCount,
+          elapsedMs,
+          completedAt: new Date(),
+        },
+      }).catch((e) => logger.warn(`Failed to persist completed state for run ${runId}: ${e.message}`));
+
       emit({ phase: 'done', step: 'Backfill complete', pct: 100, detail: summary.elapsed, ...summary });
 
       this.runningWorkspaces.delete(backfillKey);
@@ -1443,7 +1541,6 @@ class SyncService {
       logger.info('Historical backfill completed', summary);
 
       // Trigger the assignment pipeline for any unassigned tickets in the backfilled range
-      // so historical/recovery imports get pipeline runs (otherwise they'd silently skip).
       this._pollForUnassignedTickets(workspaceId, {
         cutoffOverride: fetchStart,
         maxPerCycleOverride: 50,
@@ -1454,7 +1551,29 @@ class SyncService {
       return summary;
     } catch (error) {
       this.runningWorkspaces.delete(backfillKey);
-      emit({ phase: 'error', step: `Backfill failed: ${error.message}`, pct: -1 });
+      const elapsedMs = Date.now() - startTime;
+      const isCancellation = error.message === 'CANCELLED';
+
+      // Persist final state to DB row
+      await prisma.backfillRun.update({
+        where: { id: runId },
+        data: {
+          status: isCancellation ? 'cancelled' : 'failed',
+          progressPhase: isCancellation ? 'cancelled' : 'error',
+          progressStep: isCancellation ? 'Cancelled by user' : `Failed: ${error.message?.slice(0, 240)}`,
+          errorMessage: isCancellation ? null : error.message,
+          elapsedMs,
+          completedAt: new Date(),
+        },
+      }).catch((e) => logger.warn(`Failed to persist failure state for run ${runId}: ${e.message}`));
+
+      if (isCancellation) {
+        emit({ phase: 'cancelled', step: 'Backfill cancelled by user', pct: lastEmittedProgress?.pct ?? -1, backfillRunId: runId });
+        logger.info(`Backfill run ${runId} cancelled by user`);
+        return { status: 'cancelled', backfillRunId: runId };
+      }
+
+      emit({ phase: 'error', step: `Backfill failed: ${error.message}`, pct: -1, backfillRunId: runId });
       logger.error('Historical backfill failed:', error);
       throw error;
     }

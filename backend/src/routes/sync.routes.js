@@ -324,6 +324,7 @@ router.post(
         workspaceId: req.workspaceId,
         skipExisting,
         activityConcurrency,
+        triggeredByEmail: req.session?.user?.email || null,
         onProgress: (progress) => {
           send('backfill-progress', progress);
         },
@@ -355,6 +356,88 @@ router.get(
       success: true,
       data: { isRunning },
     });
+  }),
+);
+
+/**
+ * GET /api/sync/backfill/current
+ * Return the current running BackfillRun for this workspace, if any.
+ * Used when the user reopens the Backfill panel to rejoin an in-progress run.
+ */
+router.get(
+  '/backfill/current',
+  asyncHandler(async (req, res) => {
+    const prismaModule = await import('../services/prisma.js');
+    const prisma = prismaModule.default;
+    const current = await prisma.backfillRun.findFirst({
+      where: { workspaceId: req.workspaceId, status: 'running' },
+      orderBy: { startedAt: 'desc' },
+    });
+    res.json({ success: true, data: current });
+  }),
+);
+
+/**
+ * GET /api/sync/backfill/history
+ * Return past backfill runs for this workspace (most recent first).
+ * Query params:
+ *   - limit=20: Max rows to return
+ */
+router.get(
+  '/backfill/history',
+  asyncHandler(async (req, res) => {
+    const prismaModule = await import('../services/prisma.js');
+    const prisma = prismaModule.default;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const rows = await prisma.backfillRun.findMany({
+      where: { workspaceId: req.workspaceId },
+      orderBy: { startedAt: 'desc' },
+      take: limit,
+    });
+    res.json({ success: true, data: rows });
+  }),
+);
+
+/**
+ * POST /api/sync/backfill/:id/cancel
+ * Request cancellation of a running backfill. The backfill loop checks this
+ * flag periodically and aborts cleanly.
+ */
+router.post(
+  '/backfill/:id/cancel',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid backfill run id' });
+    }
+    const prismaModule = await import('../services/prisma.js');
+    const prisma = prismaModule.default;
+
+    const run = await prisma.backfillRun.findUnique({ where: { id } });
+    if (!run) {
+      return res.status(404).json({ success: false, message: 'Backfill run not found' });
+    }
+    if (run.workspaceId !== req.workspaceId) {
+      return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+    }
+    if (run.status !== 'running') {
+      return res.status(409).json({
+        success: false,
+        message: `Run is not running (status: ${run.status})`,
+      });
+    }
+
+    await prisma.backfillRun.update({
+      where: { id },
+      data: {
+        cancelRequested: true,
+        cancelledByEmail: req.session?.user?.email || null,
+      },
+    });
+
+    logger.info(`Backfill run ${id} cancellation requested by ${req.session?.user?.email || 'admin'}`);
+    res.json({ success: true, message: 'Cancellation requested. The backfill will stop within ~10 seconds.' });
   }),
 );
 
