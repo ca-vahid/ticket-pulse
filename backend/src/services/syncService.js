@@ -678,6 +678,11 @@ class SyncService {
     try {
       logger.info(`Starting full sync for workspace ${workspaceId}`);
 
+      // Capture the previous successful sync time so we can detect outage gaps.
+      // We need this before our own sync log gets completed (otherwise it'd return our own current run).
+      const prevSync = await syncLogRepository.getLatestSuccessful(workspaceId);
+      const prevSyncCompletedAt = prevSync?.completedAt || null;
+
       // Sync technicians first (needed for ticket assignment mapping)
       const techniciansSynced = await this.syncTechnicians(workspaceId);
 
@@ -739,8 +744,10 @@ class SyncService {
         logger.error('Failed to broadcast SSE update:', error);
       }
 
-      // Assignment pipeline polling: check for unassigned tickets (fire-and-forget)
-      this._pollForUnassignedTickets(workspaceId).catch((err) => {
+      // Assignment pipeline polling: check for unassigned tickets (fire-and-forget).
+      // Pass previous sync time so we can detect outage gaps and widen the lookback window
+      // automatically — otherwise tickets that arrived during downtime never get pipeline runs.
+      this._pollForUnassignedTickets(workspaceId, { prevSyncCompletedAt }).catch((err) => {
         logger.warn('Assignment polling failed (non-fatal)', { workspaceId, error: err.message });
       });
 
@@ -1288,6 +1295,16 @@ class SyncService {
       this.runningWorkspaces.delete(backfillKey);
       clearReadCache();
       logger.info('Historical backfill completed', summary);
+
+      // Trigger the assignment pipeline for any unassigned tickets in the backfilled range
+      // so historical/recovery imports get pipeline runs (otherwise they'd silently skip).
+      this._pollForUnassignedTickets(workspaceId, {
+        cutoffOverride: fetchStart,
+        maxPerCycleOverride: 50,
+      }).catch((err) => {
+        logger.warn('Post-backfill pipeline polling failed (non-fatal)', { workspaceId, error: err.message });
+      });
+
       return summary;
     } catch (error) {
       this.runningWorkspaces.delete(backfillKey);
@@ -1323,16 +1340,59 @@ class SyncService {
   /**
    * Post-sync polling: find unassigned tickets that haven't been processed
    * by the assignment pipeline and trigger it for them.
-   * Rate-limited to avoid overwhelming the LLM.
+   *
+   * Outage recovery: if the gap since the last successful sync exceeds the
+   * normal cycle (i.e. the API was down or sync was paused), automatically
+   * widen the lookback window to cover the gap and increase the per-cycle
+   * limit so we catch up quickly. Without this, tickets that arrive during
+   * downtime never get pipeline runs because they're already older than 24h
+   * by the time sync resumes.
+   *
+   * @param {number} workspaceId
+   * @param {Object} [opts]
+   * @param {Date|null} [opts.prevSyncCompletedAt] - When the previous successful sync finished
+   * @param {Date|null} [opts.cutoffOverride] - Force a specific lookback cutoff (used by weekly sync)
+   * @param {number|null} [opts.maxPerCycleOverride] - Force a specific per-cycle limit
    */
-  async _pollForUnassignedTickets(workspaceId) {
+  async _pollForUnassignedTickets(workspaceId, opts = {}) {
     const config = await assignmentRepository.getConfig(workspaceId);
     if (!config?.isEnabled || !config?.pollForUnassigned) return;
 
-    const maxPerCycle = config.pollMaxPerCycle || 5;
+    const NORMAL_LOOKBACK_HOURS = 24;
+    const OUTAGE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min between syncs counts as an outage
+    const MAX_RECOVERY_LOOKBACK_DAYS = 7;       // never look further back than this
+    const RECOVERY_MAX_PER_CYCLE = 50;          // boost catch-up rate during recovery
 
-    // Only look at tickets created in the last 24 hours that are unassigned
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    let cutoff;
+    let maxPerCycle = opts.maxPerCycleOverride ?? (config.pollMaxPerCycle || 5);
+    let mode = 'normal';
+
+    if (opts.cutoffOverride instanceof Date) {
+      cutoff = opts.cutoffOverride;
+      mode = 'forced';
+    } else if (opts.prevSyncCompletedAt) {
+      const gapMs = Date.now() - new Date(opts.prevSyncCompletedAt).getTime();
+      if (gapMs > OUTAGE_THRESHOLD_MS) {
+        // Recovery mode: cover the gap (plus a small buffer) but cap the lookback.
+        const lookbackMs = Math.min(
+          gapMs + 60 * 60 * 1000,
+          MAX_RECOVERY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+        );
+        cutoff = new Date(Date.now() - lookbackMs);
+        maxPerCycle = Math.max(maxPerCycle, RECOVERY_MAX_PER_CYCLE);
+        mode = 'recovery';
+        logger.warn('Sync gap detected — entering pipeline recovery mode', {
+          workspaceId,
+          gapMinutes: Math.round(gapMs / 60000),
+          lookbackHours: Math.round(lookbackMs / 3600000),
+          maxPerCycle,
+        });
+      }
+    }
+
+    if (!cutoff) {
+      cutoff = new Date(Date.now() - NORMAL_LOOKBACK_HOURS * 60 * 60 * 1000);
+    }
 
     const { default: prisma } = await import('./prisma.js');
     const candidateTickets = await prisma.ticket.findMany({
@@ -1366,6 +1426,8 @@ class SyncService {
     logger.info('Assignment polling found unassigned tickets', {
       workspaceId,
       count: unassignedTickets.length,
+      mode,
+      cutoff: cutoff.toISOString(),
     });
 
     for (const ticket of unassignedTickets) {
