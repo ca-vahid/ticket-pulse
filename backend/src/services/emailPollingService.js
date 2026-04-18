@@ -102,7 +102,32 @@ class EmailPollingService {
 
   async _poll(wsId, mailbox) {
     const config = await assignmentRepository.getConfig(wsId);
-    const since = config?.lastEmailCheckAt || new Date(Date.now() - 5 * 60 * 1000);
+    // Clamp the lookback window to a safe maximum (default 1 hour). Without
+    // this, when the app is restarted after extended downtime,
+    // lastEmailCheckAt could be days old and the poller would try to drain
+    // a huge mailbox backlog in one tick — flooding the queue with
+    // outdated work (alerts, marketing, security notifications, etc.) most
+    // of which is no longer actionable. The regular sync service already
+    // catches up on tickets that arrived during downtime; we don't need
+    // the email poller to act on a stale firehose.
+    const MAX_LOOKBACK_MS = 60 * 60 * 1000; // 1 hour
+    const fallbackSince = new Date(Date.now() - 5 * 60 * 1000);
+    const lastCheck = config?.lastEmailCheckAt;
+    let since = lastCheck || fallbackSince;
+
+    if (lastCheck) {
+      const ageMs = Date.now() - lastCheck.getTime();
+      if (ageMs > MAX_LOOKBACK_MS) {
+        const clampedSince = new Date(Date.now() - MAX_LOOKBACK_MS);
+        logger.warn('Email polling: lastEmailCheckAt is stale, clamping window', {
+          workspaceId: wsId,
+          lastCheck: lastCheck.toISOString(),
+          ageHours: (ageMs / 3_600_000).toFixed(1),
+          clampedTo: clampedSince.toISOString(),
+        });
+        since = clampedSince;
+      }
+    }
 
     let emails;
     try {

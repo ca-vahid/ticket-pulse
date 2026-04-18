@@ -510,6 +510,7 @@ export const assignmentAPI = {
   updateConfig: (data) => api.put('/assignment/config', data),
 
   getQueuedRuns: () => api.get('/assignment/queued'),
+  pruneQueuedRuns: () => api.post('/assignment/queued/prune'),
   getQueueStatus: () => api.get('/assignment/queue-status'),
   runNow: (id) => api.post(`/assignment/runs/${id}/run-now`),
   getQueue: (params) => api.get('/assignment/queue', { params }),

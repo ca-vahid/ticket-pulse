@@ -55,6 +55,22 @@ class AssignmentPipelineService {
 
     // ── Business hours gate (automatic triggers only) ───────────────────
     if (!isManual) {
+      // Queue-time validation: never queue a ticket that is already closed,
+      // deleted, or assigned. Without this guard the email poller floods the
+      // queue with noise — security alerts, marketing emails, and FS tickets
+      // that were auto-deleted as spam all get pulled in by subject regex
+      // matching. (The same validation runs at drain time, but by then the
+      // queue UI is already polluted with stale items.)
+      const queueGuard = await this._validateForQueue(ticketId);
+      if (!queueGuard.valid) {
+        logger.info('Pipeline queue rejected: ticket not eligible', {
+          ticketId, workspaceId, triggerSource, reason: queueGuard.reason,
+        });
+        emit({ type: 'error', message: `Ticket not eligible for queue: ${queueGuard.reason}` });
+        emit({ type: 'complete' });
+        return { skipped: true, reason: 'not_eligible_for_queue', detail: queueGuard.reason };
+      }
+
       const workspace = await prisma.workspace.findUnique({
         where: { id: workspaceId },
         select: { defaultTimezone: true },
@@ -122,6 +138,27 @@ class AssignmentPipelineService {
     }
 
     return this._executeRun(run.id, ticketId, workspaceId, triggerSource, pipelineStart, emit, signal);
+  }
+
+  /**
+   * Validate a ticket is eligible to enter the queue. Mirrors
+   * validateQueuedRun but takes a ticketId directly (no run needed).
+   * Used at queue-time so closed/deleted/assigned tickets never get
+   * queued in the first place.
+   */
+  async _validateForQueue(ticketId) {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { status: true, assignedTechId: true },
+    });
+    if (!ticket) return { valid: false, reason: 'Ticket not found in database' };
+    if (CLOSED_STATUSES.includes(ticket.status)) {
+      return { valid: false, reason: `Ticket already ${ticket.status}` };
+    }
+    if (ticket.assignedTechId) {
+      return { valid: false, reason: 'Ticket already assigned to a technician' };
+    }
+    return { valid: true };
   }
 
   /**

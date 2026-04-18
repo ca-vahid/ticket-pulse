@@ -99,8 +99,45 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
 // ─── Pipeline Runs ──────────────────────────────────────────────────────
 
 router.get('/queued', requireReviewer, asyncHandler(async (req, res) => {
-  const runs = await assignmentRepository.listQueuedRuns(req.workspaceId, 50);
-  res.json({ success: true, data: runs, total: runs.length });
+  // limit defaults to 500 (was 50, which silently truncated large queues
+  // and hid that the queue had problems). Also return totalCount so the UI
+  // can warn when the queue exceeds the display cap.
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 500, 1), 2000);
+  const [runs, totalCount] = await Promise.all([
+    assignmentRepository.listQueuedRuns(req.workspaceId, limit),
+    assignmentRepository.countQueuedRuns(req.workspaceId),
+  ]);
+  res.json({
+    success: true,
+    data: runs,
+    total: runs.length,
+    totalCount,
+    truncated: runs.length < totalCount,
+  });
+}));
+
+// ─── Queue Pruning ──────────────────────────────────────────────────────
+// Mark all queued runs as skipped_stale if the underlying ticket is no
+// longer eligible for assignment (closed, deleted, or assigned). Used to
+// clean up after the email poller (or backfill, app restart, etc.) flooded
+// the queue with non-actionable items.
+router.post('/queued/prune', requireReviewer, asyncHandler(async (req, res) => {
+  const queued = await assignmentRepository.listQueuedRuns(req.workspaceId, 2000);
+  let pruned = 0;
+  let kept = 0;
+  const reasons = {};
+  for (const run of queued) {
+    const validation = await assignmentPipelineService.validateQueuedRun(run);
+    if (!validation.valid) {
+      await assignmentRepository.markRunSkippedStale(run.id, validation.reason);
+      reasons[validation.reason] = (reasons[validation.reason] || 0) + 1;
+      pruned++;
+    } else {
+      kept++;
+    }
+  }
+  logger.info('Queue pruned', { workspaceId: req.workspaceId, pruned, kept, reasons });
+  res.json({ success: true, data: { pruned, kept, reasons } });
 }));
 
 router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {
