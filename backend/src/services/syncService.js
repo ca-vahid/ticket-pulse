@@ -1514,34 +1514,55 @@ class SyncService {
 
       if (await isCancelRequested()) throw new Error('CANCELLED');
 
-      // Phase 8: Sync CSAT responses for tickets in this date range
-      // This catches up on CSAT surveys that are submitted days/weeks after
-      // the ticket is closed — the regular 5-min sync only checks ~200 of the
-      // most-recently-closed, so a manual backfill over a wider window fills
-      // any gaps.
+      // Phase 8: Sync CSAT responses for every closed/resolved ticket in the
+      // backfill's date range. We iterate through `rangeTickets` directly so
+      // every ticket the user asked about gets checked — rather than using
+      // the priority-ordered candidate query, which (correctly for the
+      // scheduled sweep) may return a different subset.
+      //
+      // FS status codes: 4=Resolved, 5=Closed. Only those two states can have
+      // CSAT responses. Anything else is skipped.
       let csatSynced = 0;
       let csatChecked = 0;
       try {
-        const csatDaysBack = Math.max(1, Math.ceil((fetchEnd - fetchStart) / 86400000) + 7);
-        emit({ phase: 'csat', step: `Checking CSAT responses for tickets in range (${csatDaysBack}d window)`, pct: 92 });
-        const csatResult = await this.syncRecentCSAT(csatDaysBack, workspaceId, {
-          limit: 2000, // Allow full coverage for admin backfills
-          minRecheckHours: 0, // Admin backfill bypasses the 24h re-check throttle
-          shouldCancel: isCancelRequested,
-          onProgress: (cur, total, found) => {
-            const pct = 92 + Math.floor((cur / total) * 4); // 92 → 96
-            emit({
-              phase: 'csat',
-              step: `CSAT sync: ${cur}/${total} checked, ${found} responses found`,
-              pct,
-              processed: cur,
-              total,
-            });
-          },
+        const closedTicketIds = rangeTickets
+          .filter((t) => t.status === 4 || t.status === 5)
+          .map((t) => Number(t.id));
+
+        emit({
+          phase: 'csat',
+          step: `Checking CSAT for ${closedTicketIds.length} closed/resolved tickets in range`,
+          pct: 92,
+          total: closedTicketIds.length,
+          processed: 0,
         });
-        csatSynced = csatResult.csatFound || 0;
-        csatChecked = csatResult.total || 0;
-        emit({ phase: 'csat', step: `CSAT sync complete — ${csatSynced} found in ${csatChecked} checked`, pct: 96 });
+
+        if (closedTicketIds.length > 0) {
+          const csatResult = await csatService.syncMultipleTicketsCSAT(
+            client,
+            ticketRepository,
+            closedTicketIds,
+            (cur, total, found) => {
+              const pct = 92 + Math.floor((cur / total) * 4); // 92 → 96
+              emit({
+                phase: 'csat',
+                step: `CSAT sync: ${cur}/${total} checked, ${found} responses found`,
+                pct,
+                processed: cur,
+                total,
+              });
+            },
+            isCancelRequested,
+          );
+          csatSynced = csatResult.csatFound || 0;
+          csatChecked = csatResult.total || 0;
+        }
+
+        emit({
+          phase: 'csat',
+          step: `CSAT sync complete — ${csatSynced} found in ${csatChecked} checked`,
+          pct: 96,
+        });
       } catch (e) {
         logger.warn(`Backfill CSAT phase failed (non-fatal): ${e.message}`);
         emit({ phase: 'csat', step: `CSAT sync failed: ${e.message}`, pct: 96 });

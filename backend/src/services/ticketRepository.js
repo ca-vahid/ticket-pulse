@@ -419,9 +419,18 @@ class TicketRepository {
           updatedAt: true,
           csatCheckedAt: true,
         },
-        // Nulls first so never-checked tickets get priority, then walk
-        // through by oldest-checked so we rotate through the backlog.
-        orderBy: [{ csatCheckedAt: { sort: 'asc', nulls: 'first' } }],
+        // Priority:
+        //  1. Never-checked tickets first (csatCheckedAt NULL)
+        //  2. Within that bucket, NEWEST tickets first — CSAT surveys land
+        //     within days/weeks of closure, so recent tickets are far more
+        //     likely to have one waiting. (Previously we fell back to
+        //     freshservice_ticket_id ASC which sorted oldest-first → recent
+        //     tickets like #217324 at rank 12,000+ never got checked.)
+        //  3. For already-checked, oldest-checked-first rotates the backlog.
+        orderBy: [
+          { csatCheckedAt: { sort: 'asc', nulls: 'first' } },
+          { createdAt: 'desc' },
+        ],
         take: limit,
       });
     } catch (error) {
