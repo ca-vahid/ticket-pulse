@@ -68,7 +68,12 @@ class CSATService {
       const csatResponse = await freshserviceClient.fetchCSATResponse(ticketId);
 
       if (!csatResponse) {
-        // No CSAT response for this ticket (normal for most tickets)
+        // No CSAT response for this ticket (normal for most tickets).
+        // Still stamp csat_checked_at so the sweep moves on to other tickets
+        // and doesn't re-hit this one every 5 minutes.
+        await ticketRepository.updateByFreshserviceId(ticketId, {
+          csatCheckedAt: new Date(),
+        }).catch(() => { /* ticket might not be in our DB yet — non-fatal */ });
         return false;
       }
 
@@ -80,8 +85,11 @@ class CSATService {
         return false;
       }
 
-      // Update ticket with CSAT data
-      await ticketRepository.updateByFreshserviceId(ticketId, csatData);
+      // Update ticket with CSAT data (and mark checked)
+      await ticketRepository.updateByFreshserviceId(ticketId, {
+        ...csatData,
+        csatCheckedAt: new Date(),
+      });
 
       logger.info(`Updated CSAT for ticket ${ticketId}: Score ${csatData.csatScore}/${csatData.csatTotalScore}`);
       return true;
@@ -168,13 +176,13 @@ class CSATService {
    * @returns {Promise<Object>} Summary of sync results
    */
   async syncRecentCSAT(freshserviceClient, ticketRepository, daysBack = 30, onProgress = null, workspaceId = null, options = {}) {
-    const { limit = 200, shouldCancel = null } = options;
+    const { limit = 200, shouldCancel = null, minRecheckHours = 24 } = options;
     try {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysBack);
 
-      const tickets = await ticketRepository.getRecentClosedWithoutCSAT(cutoffDate, workspaceId, limit);
-      logger.info(`CSAT candidates: ${tickets.length} closed tickets without CSAT in last ${daysBack} days (limit ${limit})`);
+      const tickets = await ticketRepository.getRecentClosedWithoutCSAT(cutoffDate, workspaceId, limit, minRecheckHours);
+      logger.info(`CSAT candidates: ${tickets.length} closed tickets without CSAT in last ${daysBack} days (limit ${limit}, minRecheck ${minRecheckHours}h)`);
 
       if (tickets.length === 0) {
         return { total: 0, csatFound: 0, updated: 0, errors: 0 };

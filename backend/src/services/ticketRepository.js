@@ -370,19 +370,23 @@ class TicketRepository {
   /**
    * Get recent closed/resolved tickets without CSAT responses.
    *
-   * Uses updatedAt as a robust fallback: historically closedAt/resolvedAt
-   * were often null in our DB (FS v2 stores them in `stats`, not top-level),
-   * which caused this query to match zero rows for months. updatedAt is
-   * reliably populated for every sync, so combining it with the status
-   * filter still yields "recently-touched tickets that are currently
-   * closed/resolved" — the correct CSAT candidate set.
+   * Picks tickets in a smart order so we walk through the backlog instead of
+   * re-checking the same 30 freshly-synced tickets every cycle:
+   *  - Never-checked tickets first (csat_checked_at NULL)
+   *  - Then oldest-checked-first
+   *  - Skips tickets checked within the last `minRecheckHours` hours
    *
-   * @param {Date} cutoffDate - Only include tickets closed/resolved/updated after this date
+   * closedAt/resolvedAt are used when populated; updatedAt is the robust
+   * fallback since those two fields are NULL for most historical tickets.
+   *
+   * @param {Date} cutoffDate - Only consider tickets with activity since this date
    * @param {number|null} workspaceId
    * @param {number} [limit] - Optional cap (default 500)
+   * @param {number} [minRecheckHours=24] - Don't re-check a ticket within this window
    */
-  async getRecentClosedWithoutCSAT(cutoffDate, workspaceId = null, limit = 500) {
+  async getRecentClosedWithoutCSAT(cutoffDate, workspaceId = null, limit = 500, minRecheckHours = 24) {
     try {
+      const recheckCutoff = new Date(Date.now() - minRecheckHours * 3600 * 1000);
       const where = {
         status: { in: ['Resolved', 'Closed'] },
         OR: [
@@ -391,6 +395,15 @@ class TicketRepository {
           { updatedAt: { gte: cutoffDate } },
         ],
         csatResponseId: null,
+        // Either never checked, OR last checked more than minRecheckHours ago
+        AND: [
+          {
+            OR: [
+              { csatCheckedAt: null },
+              { csatCheckedAt: { lt: recheckCutoff } },
+            ],
+          },
+        ],
       };
       if (workspaceId !== null) where.workspaceId = workspaceId;
 
@@ -404,10 +417,11 @@ class TicketRepository {
           closedAt: true,
           resolvedAt: true,
           updatedAt: true,
+          csatCheckedAt: true,
         },
-        // Prioritize most recently closed (falls back to updatedAt via the
-        // service's caller since Prisma can't order by COALESCE directly)
-        orderBy: { updatedAt: 'desc' },
+        // Nulls first so never-checked tickets get priority, then walk
+        // through by oldest-checked so we rotate through the backlog.
+        orderBy: [{ csatCheckedAt: { sort: 'asc', nulls: 'first' } }],
         take: limit,
       });
     } catch (error) {

@@ -192,6 +192,11 @@ model Ticket {
   rejectionCount       Int       @default(0) @map("rejection_count")
   groupId              BigInt?   @map("group_id")
 
+  // CSAT sync bookkeeping — when we last asked FS for this ticket's CSAT
+  // response. Lets the scheduled CSAT sweep walk through the backlog
+  // instead of re-checking the same 30 freshly-synced tickets every cycle.
+  csatCheckedAt        DateTime? @map("csat_checked_at")
+
   ticketAssignments    TicketAssignment[]
   pipelineRuns         AssignmentPipelineRun[]
   assignmentEpisodes   TicketAssignmentEpisode[]

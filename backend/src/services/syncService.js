@@ -1526,6 +1526,7 @@ class SyncService {
         emit({ phase: 'csat', step: `Checking CSAT responses for tickets in range (${csatDaysBack}d window)`, pct: 92 });
         const csatResult = await this.syncRecentCSAT(csatDaysBack, workspaceId, {
           limit: 2000, // Allow full coverage for admin backfills
+          minRecheckHours: 0, // Admin backfill bypasses the 24h re-check throttle
           shouldCancel: isCancelRequested,
           onProgress: (cur, total, found) => {
             const pct = 92 + Math.floor((cur / total) * 4); // 92 → 96
@@ -1645,7 +1646,7 @@ class SyncService {
    */
   async syncRecentCSAT(daysBack = 30, workspaceId = null, options = {}) {
     try {
-      const { limit = 200, onProgress = null, shouldCancel = null } = options;
+      const { limit = 200, onProgress = null, shouldCancel = null, minRecheckHours = 24 } = options;
       const client = await this._initializeClient();
       return await csatService.syncRecentCSAT(
         client,
@@ -1656,7 +1657,7 @@ class SyncService {
           onProgress?.(current, total, found);
         },
         workspaceId,
-        { limit, shouldCancel },
+        { limit, shouldCancel, minRecheckHours },
       );
     } catch (error) {
       logger.error('Error syncing recent CSAT:', error);
