@@ -1702,32 +1702,43 @@ export default function Dashboard() {
             <div className="hidden md:block w-px bg-white bg-opacity-20 flex-none self-stretch" />
 
             {/* RIGHT ZONE: Stats Cards + Self-Pick + View Toggle */}
-            <div className="hidden md:flex items-center gap-2 flex-1 min-w-0 justify-end">
+            {/* flex-wrap + gap-y allows the row to break cleanly onto a 2nd line on
+                narrower viewports instead of overflowing into the LEFT zone. */}
+            <div className="hidden md:flex flex-wrap items-center gap-x-2 gap-y-2 flex-1 min-w-0 justify-end">
 
-              {/* Stats Cards */}
-              <div className="flex items-center gap-1.5">
+              {/* Stats Cards — also wrap among themselves so individual cards
+                  don't get pushed into the day grid when 6 cards are visible
+                  (Total / Open / Pending / Closed / Self / App in weekly mode). */}
+              <div className="flex flex-wrap items-center gap-1.5 justify-end">
                 {/* Total */}
                 <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
                   <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-400 bg-opacity-30 flex-none">
                     <Inbox className="w-3.5 h-3.5 text-white" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-base font-bold leading-tight">
                       {viewMode === 'monthly' ? (displayStats.monthTotalCreated || 0) : viewMode === 'weekly' ? (displayStats.weeklyTotalCreated || 0) : (displayStats.totalTicketsToday || 0)}
                     </div>
                     <div className="text-[9px] text-blue-100 uppercase font-medium leading-tight">
-                      <div>Total</div>
-                      <div className="text-[8px] opacity-80">
-                        {viewMode === 'monthly'
-                          ? selectedMonth.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-                          : viewMode === 'weekly'
-                            ? `${(() => {
-                              const weekEnd = new Date(selectedWeek);
-                              weekEnd.setDate(selectedWeek.getDate() + 6);
-                              return `${selectedWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} \u2013 ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-                            })()}`
-                            : selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-                        }
+                      <div className="flex items-baseline gap-1">
+                        <span>Total</span>
+                        <span className="text-[8px] opacity-70 normal-case truncate max-w-[110px]">
+                          {viewMode === 'monthly'
+                            ? selectedMonth.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+                            : viewMode === 'weekly'
+                              ? (() => {
+                                const weekEnd = new Date(selectedWeek);
+                                weekEnd.setDate(selectedWeek.getDate() + 6);
+                                const startMonth = selectedWeek.toLocaleDateString('en-US', { month: 'short' });
+                                const endMonth = weekEnd.toLocaleDateString('en-US', { month: 'short' });
+                                // Same month? "Apr 13–19". Cross-month? "Apr 28 – May 4"
+                                return startMonth === endMonth
+                                  ? `${startMonth} ${selectedWeek.getDate()}\u2013${weekEnd.getDate()}`
+                                  : `${startMonth} ${selectedWeek.getDate()} \u2013 ${endMonth} ${weekEnd.getDate()}`;
+                              })()
+                              : selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                          }
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1803,8 +1814,9 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* Divider */}
-              <div className="w-px h-10 bg-white bg-opacity-20 flex-none" />
+              {/* Divider — hidden on narrow widths where the row has wrapped,
+                  since a dangling vertical bar between wrapped rows looks broken. */}
+              <div className="hidden xl:block w-px h-10 bg-white bg-opacity-20 flex-none" />
 
               {/* Self-Pick Progress */}
               <div className="flex-none w-40">
@@ -1837,8 +1849,8 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Divider */}
-              <div className="w-px h-10 bg-white bg-opacity-20 flex-none" />
+              {/* Divider — see note above */}
+              <div className="hidden xl:block w-px h-10 bg-white bg-opacity-20 flex-none" />
 
               {/* View Toggle - far right */}
               <div className="flex-none inline-flex items-center gap-1 bg-white bg-opacity-20 rounded-lg p-1">
