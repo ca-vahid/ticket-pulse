@@ -159,6 +159,118 @@ class SyncService {
   }
 
   /**
+   * Resolve an FS responder ID to our internal technician ID. If the agent
+   * isn't in our DB at all (e.g. contractor, agent from a different
+   * workspace, or never-synced), fetch them from FS and insert as an
+   * inactive tech so future assignments resolve cleanly without manual
+   * intervention. Returns { techId, tech } or null if resolution failed.
+   */
+  async _resolveResponderTech(fsResponderId, workspaceId, client = null) {
+    if (!fsResponderId) return null;
+    const fsIdBig = BigInt(fsResponderId);
+
+    // First: look in our DB. We deliberately accept inactive techs here —
+    // a deactivated agent is still the responder for tickets assigned to
+    // them, and we want the assignment tracked. Prefer the matching
+    // workspace if present, otherwise fall back to any workspace match.
+    let tech = await prisma.technician.findFirst({
+      where: { freshserviceId: fsIdBig, workspaceId },
+      select: { id: true, name: true, workspaceId: true, isActive: true },
+    });
+    if (!tech) {
+      tech = await prisma.technician.findFirst({
+        where: { freshserviceId: fsIdBig },
+        select: { id: true, name: true, workspaceId: true, isActive: true },
+      });
+    }
+    if (tech) return { techId: tech.id, tech };
+
+    // Not in DB: fetch from FS and upsert as inactive. This closes the gap
+    // where a ticket is assigned to an agent that our system doesn't
+    // track (e.g. external contractor, agent in a different group).
+    try {
+      const fsClient = client || await this._initializeClient();
+      const fsAgent = await fsClient.fetchAgent(Number(fsResponderId));
+      if (!fsAgent) return null;
+      const firstName = fsAgent.first_name || '';
+      const lastName = fsAgent.last_name || '';
+      const name = `${firstName} ${lastName}`.trim() || fsAgent.email || `FS Agent ${fsResponderId}`;
+      const created = await prisma.technician.create({
+        data: {
+          freshserviceId: fsIdBig,
+          name,
+          email: fsAgent.email || null,
+          isActive: false, // Inactive by default — don't affect load counts / recs
+          workspaceId,
+        },
+        select: { id: true, name: true, workspaceId: true, isActive: true },
+      });
+      logger.info('Auto-upserted untracked FS agent for assignment resolution', {
+        fsAgentId: fsResponderId, name, workspaceId, techId: created.id,
+      });
+      return { techId: created.id, tech: created };
+    } catch (error) {
+      // Composite unique constraint collision can happen if a parallel sync
+      // inserted them first — re-fetch.
+      if (error.code === 'P2002') {
+        const retry = await prisma.technician.findFirst({
+          where: { freshserviceId: fsIdBig },
+          select: { id: true, name: true, workspaceId: true, isActive: true },
+        });
+        if (retry) return { techId: retry.id, tech: retry };
+      }
+      logger.warn('Failed to resolve unknown FS responder', {
+        fsAgentId: fsResponderId, workspaceId, error: error.message,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Auto-resolve pending_review pipeline runs when the underlying ticket
+   * has been assigned outside of our pipeline (e.g. coordinator picked
+   * someone manually in FreshService, a workflow auto-assigned, a
+   * contractor got the ticket, etc.). Marks the run as auto_assigned to
+   * the new tech, which takes it out of the "Awaiting Decision" queue
+   * and places it under "Decided" with the proper name.
+   */
+  async _autoResolvePendingRuns(ticketId, assignedTechId, assignedTechName) {
+    if (!assignedTechId) return;
+    const pendingRuns = await prisma.assignmentPipelineRun.findMany({
+      where: {
+        ticketId,
+        status: 'completed',
+        decision: 'pending_review',
+      },
+      select: { id: true },
+    });
+    if (pendingRuns.length === 0) return;
+
+    const reason = `Assigned externally to ${assignedTechName || 'another agent'} outside the pipeline — auto-resolved`;
+    for (const run of pendingRuns) {
+      try {
+        await prisma.assignmentPipelineRun.update({
+          where: { id: run.id },
+          data: {
+            decision: 'auto_assigned',
+            assignedTechId,
+            decidedByEmail: 'system@ticket-pulse',
+            decidedAt: new Date(),
+            decisionNote: reason,
+          },
+        });
+        logger.info('Auto-resolved pending pipeline run — ticket assigned externally', {
+          runId: run.id, ticketId, assignedTechId, assignedTechName,
+        });
+      } catch (err) {
+        logger.warn('Failed to auto-resolve pending run', {
+          runId: run.id, error: err.message,
+        });
+      }
+    }
+  }
+
+  /**
    * Bounce-detection: a ticket transitioned from assigned to unassigned and is
    * still active (Open / Pending). Create a fresh pipeline run with rebound
    * context so the coordinator sees it surface again with full history.
@@ -731,6 +843,23 @@ class SyncService {
           const existingTicket = existingTicketsMap.get(ticket.freshserviceTicketId.toString());
           const ticketWorkspaceId = ticket.workspaceId ?? options.workspaceId ?? 1;
 
+          // Resolve unknown-to-us responders. FS may assign tickets to agents
+          // we don't track (external contractors, agents deactivated from
+          // our map, agents that joined without a full tech sync, etc.). In
+          // those cases mapTechnicianIds leaves assignedTechId null, which
+          // leaves a stale pending_review run sitting in the queue forever.
+          // Resolve on-demand and persist the agent as inactive.
+          if (ticket.assignedFreshserviceId && !ticket.assignedTechId) {
+            const resolved = await this._resolveResponderTech(
+              ticket.assignedFreshserviceId,
+              ticketWorkspaceId,
+              client,
+            );
+            if (resolved) {
+              ticket.assignedTechId = resolved.techId;
+            }
+          }
+
           const { isNoise, ruleId } = await noiseRuleService.evaluate(
             ticket.subject,
             ticket.createdAt ? new Date(ticket.createdAt) : null,
@@ -778,6 +907,19 @@ class SyncService {
                 note: 'Ticket reassigned',
               },
             });
+
+            // External-assignment auto-resolve: if this ticket just gained
+            // an assignee (was unassigned, now assigned) and has a pending
+            // pipeline run, mark the run as auto_assigned. Otherwise the
+            // run hangs in "Awaiting Decision" forever because the queue
+            // only clears on manual decisions.
+            if (!existingTicket.assignedTechId && upsertedTicket.assignedTechId) {
+              await this._autoResolvePendingRuns(
+                upsertedTicket.id,
+                upsertedTicket.assignedTechId,
+                upsertedTicket.assignedTech?.name,
+              );
+            }
           }
 
           // Create activity log if status changed
@@ -2005,11 +2147,49 @@ class SyncService {
             reason: isGone ? 'hard_delete_404' : isSoftDeleted ? 'soft_delete_flag' : 'spam_flag',
           });
         } else {
-          // Ticket still active — touch updatedAt to rotate it to the back of the queue
+          // Ticket still active — also sync responder drift. The 5-min
+          // incremental sync filters by FS updated_since, so a ticket
+          // assigned externally days ago (that hasn't received any other
+          // update) never gets re-processed. Reconciliation is the only
+          // path that touches these stale tickets, so it has to do more
+          // than bump updatedAt — it has to repair assignedTechId drift
+          // and auto-resolve any stuck pending pipeline runs.
+          const fsResponderId = fsTicket.responder_id || null;
+          let newAssignedTechId = null;
+          let newAssignedTech = null;
+          if (fsResponderId) {
+            const resolved = await this._resolveResponderTech(fsResponderId, workspaceId, client);
+            if (resolved) {
+              newAssignedTechId = resolved.techId;
+              newAssignedTech = resolved.tech;
+            }
+          }
+
+          const currentAssignment = await prisma.ticket.findUnique({
+            where: { id: ticket.id },
+            select: { assignedTechId: true },
+          });
+
           await prisma.ticket.update({
             where: { id: ticket.id },
-            data: { updatedAt: new Date() },
+            data: {
+              updatedAt: new Date(),
+              assignedTechId: newAssignedTechId,
+            },
           });
+
+          // If the ticket just gained an assignee (was null, now non-null)
+          // auto-resolve the pending pipeline run. This is the exact fix
+          // for the Fraser Baldwin / David Zapata class of bugs where a
+          // ticket got assigned externally and our queue never cleared.
+          if (!currentAssignment?.assignedTechId && newAssignedTechId) {
+            await this._autoResolvePendingRuns(
+              ticket.id,
+              newAssignedTechId,
+              newAssignedTech?.name,
+            );
+          }
+
           verifiedCount++;
         }
       } catch (err) {
