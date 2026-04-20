@@ -790,7 +790,28 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const manual = (outsideAssignedRuns?.items || []).map(r => ({ ...r, _source: 'manually_in_fs' }));
     if (assignedFilter === 'via_pipeline') return viaPipeline;
     if (assignedFilter === 'manually_in_fs') return manual;
-    return [...viaPipeline, ...manual].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // 'all' view: a ticket can show up in BOTH lists (e.g. originally
+    // decided via_pipeline, then bounced and now has a pending_review
+    // rebound run that catches the manually_in_fs filter). Dedupe by
+    // ticket — keep the most recent run, attach _siblingCount for a
+    // subtle indicator. Sub-tabs intentionally don't dedupe so a user
+    // investigating can still see the full history.
+    const merged = [...viaPipeline, ...manual]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const seenByTicket = new Map();
+    for (const run of merged) {
+      const tid = run.ticket?.id;
+      if (!tid) { continue; }
+      if (!seenByTicket.has(tid)) {
+        seenByTicket.set(tid, { run, count: 1 });
+      } else {
+        seenByTicket.get(tid).count += 1;
+      }
+    }
+    return [...seenByTicket.values()].map(({ run, count }) => ({
+      ...run,
+      _siblingCount: count - 1, // 0 if unique, otherwise count of older runs we hid
+    }));
   })();
   const differentAgentCount = (assignedRuns?.items || []).filter(wasDifferentAgentChosen).length;
 
@@ -1394,6 +1415,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                           </span>
                           <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
                           {run.ticket?.ticketCategory && <span className="text-[10px] text-slate-300 ml-1.5">{run.ticket.ticketCategory}</span>}
+                          {run._siblingCount > 0 && (
+                            <span className="ml-1.5 text-[9px] text-slate-400" title={`${run._siblingCount} earlier run${run._siblingCount > 1 ? 's' : ''} for this ticket — switch to a sub-filter to see all`}>
+                              +{run._siblingCount} earlier
+                            </span>
+                          )}
                         </td>
                         <td className={`px-3 py-1.5 ${rowDim}`}>
                           <span className="text-slate-700">{run.ticket?.requester?.name || '—'}</span>
