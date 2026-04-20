@@ -264,26 +264,56 @@ class SyncService {
         return;
       }
 
-      // Find the previous assignee's name for the rebound context
-      const prevTech = await prisma.technician.findUnique({
-        where: { id: existingTicket.assignedTechId },
-        select: { id: true, name: true },
-      });
-
-      // Find the most recent rejection event from analysis (who unassigned)
+      // Identify the previous assignee. Prefer the analyzer's source-of-truth
+      // (latest closed episode) over the DB snapshot, because the snapshot
+      // can miss short-lived assignments that happened between sync ticks.
+      let prevTechId = null;
+      let prevTechName = null;
       let unassignedAt = null;
       let unassignedByName = null;
-      if (analysis?.events?.length) {
+
+      const lastEpisode = analysis?.currentEpisode;
+      if (lastEpisode && lastEpisode.endMethod === 'rejected') {
+        prevTechName = lastEpisode.agentName || null;
+        unassignedAt = lastEpisode.endedAt;
+        unassignedByName = lastEpisode.endActorName || null;
+      }
+
+      // Find the most recent rejection event for fallback timestamp/actor
+      if ((!unassignedAt || !unassignedByName) && analysis?.events?.length) {
         const lastReject = [...analysis.events].reverse().find((e) => e.type === 'rejected');
         if (lastReject) {
-          unassignedAt = lastReject.timestamp;
-          unassignedByName = lastReject.actorName;
+          unassignedAt = unassignedAt || lastReject.timestamp;
+          unassignedByName = unassignedByName || lastReject.actorName;
+        }
+      }
+
+      // If snapshot diff caught it (existingTicket.assignedTechId), use that
+      // as the canonical previous tech ID since we have it. Otherwise look
+      // up by name from the episode.
+      if (existingTicket?.assignedTechId) {
+        const prevTech = await prisma.technician.findUnique({
+          where: { id: existingTicket.assignedTechId },
+          select: { id: true, name: true },
+        });
+        if (prevTech) {
+          prevTechId = prevTech.id;
+          prevTechName = prevTechName || prevTech.name;
+        }
+      } else if (prevTechName) {
+        const prevTech = await prisma.technician.findFirst({
+          where: { name: prevTechName, workspaceId },
+          select: { id: true, name: true },
+        });
+        if (prevTech) {
+          prevTechId = prevTech.id;
+          prevTechName = prevTech.name;
         }
       }
 
       const reboundFrom = {
-        previousTechId: prevTech?.id || existingTicket.assignedTechId,
-        previousTechName: prevTech?.name || 'Unknown',
+        previousTechId: prevTechId,
+        previousTechName: prevTechName || 'Unknown',
         unassignedAt: unassignedAt ? new Date(unassignedAt).toISOString() : null,
         unassignedByName: unassignedByName || null,
         reboundCount: reboundCount + 1,
@@ -890,16 +920,37 @@ class SyncService {
             await this._writeEventActivities(upsertedTicket.id, analysis.events);
           }
 
-          // --- Bounce detection: ticket was assigned but is now unassigned ---
-          // When an agent (or coordinator) returns a ticket to the unassigned
-          // queue, FS just clears responder_id. Without this hook the ticket
-          // would silently float in FS forever — never re-entering our review
-          // queue. Trigger a fresh pipeline run with rebound context so the
-          // coordinator sees it surface again with "Returned from X" badge.
-          if (
+          // --- Bounce detection: ticket was assigned then unassigned ---
+          // We trigger a fresh pipeline run if either signal fires:
+          //
+          //  (a) DB snapshot diff: existing.assignedTechId → null. This
+          //      catches the simple case where the sync saw the assigned
+          //      state at least once and now sees it cleared.
+          //
+          //  (b) Activity analyzer: the latest episode ended with
+          //      end_method='rejected'. This catches the case where
+          //      FS assignment + rejection both happened between two of
+          //      our sync ticks (the snapshot never saw the assignment),
+          //      so (a) would silently miss it. The analyzer reads FS
+          //      events directly, so it's the source of truth.
+          //
+          // The rebound handler itself dedupes against open runs and a
+          // max-rebounds-per-ticket loop guard, so firing both signals
+          // is safe.
+          const snapshotBounce = !!(
             existingTicket
             && existingTicket.assignedTechId
             && upsertedTicket.assignedTechId === null
+          );
+          const analyzerBounce = !!(
+            analysis
+            && analysis.currentEpisode
+            && analysis.currentEpisode.endMethod === 'rejected'
+            && upsertedTicket.assignedTechId === null
+          );
+
+          if (
+            (snapshotBounce || analyzerBounce)
             && ['Open', 'Pending'].includes(upsertedTicket.status)
             && !upsertedTicket.isNoise
           ) {
