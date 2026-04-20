@@ -263,7 +263,7 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
 
 function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles', timeRange = '7d' }) {
   const navigate = useNavigate();
-  const [queue, setQueue] = useState({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 } });
+  const [queue, setQueue] = useState({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 }, inProgress: [] });
   const [outsideAssignedRuns, setOutsideAssignedRuns] = useState({ items: [], total: 0 });
   const [deletedRuns, setDeletedRuns] = useState({ items: [], total: 0 });
   const [assignedFilter, setAssignedFilter] = useState('all'); // 'all' | 'via_pipeline' | 'manually_in_fs'
@@ -378,6 +378,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         items: queueRes?.items || [],
         total: queueRes?.total || 0,
         totals: queueRes?.totals || { all: 0, unassigned: 0, outsideAssigned: 0 },
+        inProgress: queueRes?.inProgress || [],
       });
       setOutsideAssignedRuns({ items: outsideRes?.items || [], total: outsideRes?.total || 0 });
       setAssignedRuns({ items: assignedRes?.items || [], total: assignedRes?.total || 0 });
@@ -393,7 +394,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       hasLoadedOnce.current = true;
     } catch {
       if (!silent) {
-        setQueue({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 } });
+        setQueue({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 }, inProgress: [] });
         setOutsideAssignedRuns({ items: [], total: 0 });
         setAssignedRuns({ items: [], total: 0 });
         setDismissedRuns({ items: [], total: 0 });
@@ -419,6 +420,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     }
     await fetchQueue();
     setRefreshing(false);
+
+    // The sync's pipeline-polling step is fire-and-forget — by the time
+    // we got our response and refreshed the queue, those runs may not
+    // have been created yet (or may still be in 'running' status). Poll
+    // a few extra times over the next 8s to catch them as they appear.
+    // Once any inProgress runs land, the dedicated fast-poll effect
+    // (4s interval) takes over until they all finish.
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try { await fetchQueue({ silent: true }); } catch { /* ignore */ }
+    }
   }, [fetchQueue]);
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
@@ -479,6 +491,18 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const id = setInterval(() => fetchQueue({ silent: true }), 30_000);
     return () => clearInterval(id);
   }, [fetchQueue]);
+
+  // Fast-poll every 4 seconds while pipeline runs are actively analyzing.
+  // The user's manual sync triggers fire-and-forget LLM runs that take
+  // 5–30s each — without this, they'd only appear on the next 30s tick.
+  // Deps include only `inProgressCount` (not the full array) so we don't
+  // re-create the interval every poll.
+  const inProgressCount = queue.inProgress?.length || 0;
+  useEffect(() => {
+    if (inProgressCount === 0) return;
+    const id = setInterval(() => fetchQueue({ silent: true }), 4_000);
+    return () => clearInterval(id);
+  }, [inProgressCount, fetchQueue]);
 
   useEffect(() => {
     if (deepRunId) {
@@ -1247,6 +1271,36 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         )}
 
+        {/* In-progress pipeline runs — tickets being analyzed by the LLM right now.
+            These appear right after a sync (or scheduled poll) and stay for a few
+            seconds-to-minutes until the LLM finishes ranking candidates. Without
+            this section the user wouldn't know the system is working — the queue
+            looks empty even though analysis is underway. */}
+        {subView === 'pending' && queue.inProgress && queue.inProgress.length > 0 && (
+          <div className="border border-blue-200 bg-blue-50/40 rounded-lg overflow-hidden">
+            <div className="px-3 py-1.5 border-b border-blue-100 bg-blue-50/60 flex items-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin flex-shrink-0" />
+              <span className="text-[12px] font-semibold text-blue-800">
+                Analyzing {queue.inProgress.length} ticket{queue.inProgress.length !== 1 ? 's' : ''}…
+              </span>
+              <span className="text-[10px] text-blue-600">
+                AI is ranking candidates — usually 5–30s per ticket
+              </span>
+            </div>
+            <div className="divide-y divide-blue-50">
+              {queue.inProgress.map((run) => (
+                <div key={`ip-${run.id}`} className="px-3 py-1.5 flex items-center gap-2 text-xs">
+                  <Loader2 className="w-3 h-3 text-blue-500 animate-spin flex-shrink-0 opacity-60" />
+                  <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                  <span className="text-slate-700 font-medium truncate flex-1">{run.ticket?.subject || 'No subject'}</span>
+                  <span className="text-[10px] text-slate-400 hidden sm:inline">{run.ticket?.requester?.name || ''}</span>
+                  <span className="text-[10px] text-blue-600 italic">analyzing…</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* List content - key triggers a subtle fade-in on tab/filter/page change */}
         <div key={`${subView}-${assignedFilter}-${queuePage}-${ticketStatusFilter}`} className="animate-in fade-in duration-150">
           {activeItems.length === 0 ? (
@@ -1254,7 +1308,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
               <p className="text-slate-500 text-sm font-medium">
                 {subView === 'pending'
-                  ? 'No tickets awaiting decision'
+                  ? (queue.inProgress?.length > 0
+                    ? 'No tickets awaiting decision yet — AI is still analyzing'
+                    : 'No tickets awaiting decision')
                   : subView === 'assigned'
                     ? 'No decisions in this period'
                     : subView === 'dismissed'

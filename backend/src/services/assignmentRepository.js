@@ -195,7 +195,17 @@ class AssignmentRepository {
       const activeTicketFilter = buildTicketStatusFilter('active');
       const baseActiveWhere = { ...baseWhere, ticket: { is: { ...activeTicketFilter.ticket.is } } };
 
-      const [items, totalAll, totalUnassigned, totalOutsideAssigned, filteredTotal] = await Promise.all([
+      // In-progress runs (status='running'): pipeline is actively analyzing
+      // these tickets right now. Returned as a separate `inProgress` array
+      // so the UI can show "Analyzing..." indicators without inflating the
+      // Awaiting Decision count or messing with the existing filters.
+      const inProgressWhere = {
+        workspaceId,
+        status: 'running',
+        ...activeTicketFilter,
+      };
+
+      const [items, totalAll, totalUnassigned, totalOutsideAssigned, filteredTotal, inProgress] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({
           where: itemsWhere,
           include: {
@@ -229,6 +239,25 @@ class AssignmentRepository {
           where: { ...baseWhere, ticket: { is: { ...baseTicketFilter.ticket.is, assignedTechId: { not: null } } } },
         }),
         prisma.assignmentPipelineRun.count({ where: itemsWhere }),
+        prisma.assignmentPipelineRun.findMany({
+          where: inProgressWhere,
+          select: {
+            id: true,
+            triggerSource: true,
+            createdAt: true,
+            ticket: {
+              select: {
+                id: true,
+                freshserviceTicketId: true,
+                subject: true,
+                priority: true,
+                requester: { select: { name: true, email: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        }),
       ]);
 
       await this._enrichRunsWithReboundContext(items);
@@ -241,6 +270,7 @@ class AssignmentRepository {
           unassigned: totalUnassigned,
           outsideAssigned: totalOutsideAssigned,
         },
+        inProgress,
       };
     } catch (error) {
       logger.error('Error fetching pending queue:', error);
