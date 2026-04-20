@@ -227,50 +227,6 @@ class SyncService {
   }
 
   /**
-   * Auto-resolve pending_review pipeline runs when the underlying ticket
-   * has been assigned outside of our pipeline (e.g. coordinator picked
-   * someone manually in FreshService, a workflow auto-assigned, a
-   * contractor got the ticket, etc.). Marks the run as auto_assigned to
-   * the new tech, which takes it out of the "Awaiting Decision" queue
-   * and places it under "Decided" with the proper name.
-   */
-  async _autoResolvePendingRuns(ticketId, assignedTechId, assignedTechName) {
-    if (!assignedTechId) return;
-    const pendingRuns = await prisma.assignmentPipelineRun.findMany({
-      where: {
-        ticketId,
-        status: 'completed',
-        decision: 'pending_review',
-      },
-      select: { id: true },
-    });
-    if (pendingRuns.length === 0) return;
-
-    const reason = `Assigned externally to ${assignedTechName || 'another agent'} outside the pipeline — auto-resolved`;
-    for (const run of pendingRuns) {
-      try {
-        await prisma.assignmentPipelineRun.update({
-          where: { id: run.id },
-          data: {
-            decision: 'auto_assigned',
-            assignedTechId,
-            decidedByEmail: 'system@ticket-pulse',
-            decidedAt: new Date(),
-            decisionNote: reason,
-          },
-        });
-        logger.info('Auto-resolved pending pipeline run — ticket assigned externally', {
-          runId: run.id, ticketId, assignedTechId, assignedTechName,
-        });
-      } catch (err) {
-        logger.warn('Failed to auto-resolve pending run', {
-          runId: run.id, error: err.message,
-        });
-      }
-    }
-  }
-
-  /**
    * Bounce-detection: a ticket transitioned from assigned to unassigned and is
    * still active (Open / Pending). Create a fresh pipeline run with rebound
    * context so the coordinator sees it surface again with full history.
@@ -907,19 +863,6 @@ class SyncService {
                 note: 'Ticket reassigned',
               },
             });
-
-            // External-assignment auto-resolve: if this ticket just gained
-            // an assignee (was unassigned, now assigned) and has a pending
-            // pipeline run, mark the run as auto_assigned. Otherwise the
-            // run hangs in "Awaiting Decision" forever because the queue
-            // only clears on manual decisions.
-            if (!existingTicket.assignedTechId && upsertedTicket.assignedTechId) {
-              await this._autoResolvePendingRuns(
-                upsertedTicket.id,
-                upsertedTicket.assignedTechId,
-                upsertedTicket.assignedTech?.name,
-              );
-            }
           }
 
           // Create activity log if status changed
@@ -2156,19 +2099,12 @@ class SyncService {
           // and auto-resolve any stuck pending pipeline runs.
           const fsResponderId = fsTicket.responder_id || null;
           let newAssignedTechId = null;
-          let newAssignedTech = null;
           if (fsResponderId) {
             const resolved = await this._resolveResponderTech(fsResponderId, workspaceId, client);
             if (resolved) {
               newAssignedTechId = resolved.techId;
-              newAssignedTech = resolved.tech;
             }
           }
-
-          const currentAssignment = await prisma.ticket.findUnique({
-            where: { id: ticket.id },
-            select: { assignedTechId: true },
-          });
 
           await prisma.ticket.update({
             where: { id: ticket.id },
@@ -2178,17 +2114,12 @@ class SyncService {
             },
           });
 
-          // If the ticket just gained an assignee (was null, now non-null)
-          // auto-resolve the pending pipeline run. This is the exact fix
-          // for the Fraser Baldwin / David Zapata class of bugs where a
-          // ticket got assigned externally and our queue never cleared.
-          if (!currentAssignment?.assignedTechId && newAssignedTechId) {
-            await this._autoResolvePendingRuns(
-              ticket.id,
-              newAssignedTechId,
-              newAssignedTech?.name,
-            );
-          }
+          // Note: any pending_review pipeline run remains pending — the
+          // existing "Decided > Manually in FreshService" sub-tab is built
+          // exactly for this case (ticket has both a pending run AND an
+          // external assignee). It surfaces the AI's recommendation
+          // alongside who actually got the ticket, so the coordinator can
+          // see the divergence.
 
           verifiedCount++;
         }
