@@ -210,6 +210,7 @@ class AssignmentRepository {
                 ticketCategory: true,
                 assignedTechId: true,
                 createdAt: true,
+                rejectionCount: true,
                 requester: { select: { name: true, email: true } },
                 assignedTech: { select: { id: true, name: true } },
               },
@@ -229,6 +230,8 @@ class AssignmentRepository {
         }),
         prisma.assignmentPipelineRun.count({ where: itemsWhere }),
       ]);
+
+      await this._enrichRunsWithReboundContext(items);
 
       return {
         items,
@@ -275,6 +278,7 @@ class AssignmentRepository {
                 ticketCategory: true,
                 assignedTechId: true,
                 createdAt: true,
+                rejectionCount: true,
                 requester: { select: { name: true, email: true, department: true } },
                 assignedTech: { select: { id: true, name: true } },
               },
@@ -287,11 +291,68 @@ class AssignmentRepository {
         }),
         prisma.assignmentPipelineRun.count({ where }),
       ]);
+      await this._enrichRunsWithReboundContext(items);
       return { items, total };
     } catch (error) {
       logger.error('Error fetching pipeline runs:', error);
       throw new DatabaseError('Failed to fetch pipeline runs', error);
     }
+  }
+
+  /**
+   * Enrich a list of pipeline runs with `ticket.lastReboundContext` —
+   * the most recent rejected episode for the ticket. This lets the UI
+   * show a "Returned from X" badge on ANY run for a ticket that has
+   * been bounced before, not just on the rebound run itself. Necessary
+   * because rebound runs can be skipped_stale (e.g. someone external
+   * grabbed the ticket before the drain ran), and in that case nothing
+   * with `reboundFrom` set ever reaches the visible queue/decided
+   * lists.
+   */
+  async _enrichRunsWithReboundContext(items) {
+    if (!Array.isArray(items) || items.length === 0) return items;
+    const ticketIds = [...new Set(items.map((i) => i.ticket?.id).filter(Boolean))];
+    if (ticketIds.length === 0) return items;
+
+    const episodes = await prisma.ticketAssignmentEpisode.findMany({
+      where: { ticketId: { in: ticketIds }, endMethod: 'rejected' },
+      orderBy: { endedAt: 'desc' },
+      select: {
+        ticketId: true,
+        endedAt: true,
+        endActorName: true,
+        technician: { select: { id: true, name: true } },
+      },
+    });
+
+    // Pick the most recent rejection per ticket
+    const latestByTicket = new Map();
+    for (const ep of episodes) {
+      if (!latestByTicket.has(ep.ticketId)) {
+        latestByTicket.set(ep.ticketId, ep);
+      }
+    }
+
+    // Count rejections per ticket
+    const countByTicket = new Map();
+    for (const ep of episodes) {
+      countByTicket.set(ep.ticketId, (countByTicket.get(ep.ticketId) || 0) + 1);
+    }
+
+    for (const item of items) {
+      const tid = item.ticket?.id;
+      if (!tid) continue;
+      const ep = latestByTicket.get(tid);
+      if (!ep) continue;
+      item.ticket.lastReboundContext = {
+        previousTechId: ep.technician?.id || null,
+        previousTechName: ep.technician?.name || 'Unknown',
+        unassignedAt: ep.endedAt ? ep.endedAt.toISOString() : null,
+        unassignedByName: ep.endActorName || null,
+        reboundCount: countByTicket.get(tid) || 1,
+      };
+    }
+    return items;
   }
 
   // ─── Open-run dedupe (covers queued + running) ─────────────────────────

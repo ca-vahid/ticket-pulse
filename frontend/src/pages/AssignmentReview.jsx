@@ -900,16 +900,19 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${priPill}`}>{priLabel || '—'}</span>
           <span className="text-slate-400 font-mono text-[11px]">#{run.ticket?.freshserviceTicketId}</span>
           {run.ticket?.ticketCategory && <span className="text-[10px] text-slate-400 bg-slate-100 rounded px-1 py-0.5">{run.ticket.ticketCategory}</span>}
-          {run.reboundFrom?.previousTechName && (
-            <span
-              className="inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none"
-              title={`Returned from ${run.reboundFrom.previousTechName}${run.reboundFrom.unassignedAt ? ' at ' + new Date(run.reboundFrom.unassignedAt).toLocaleString() : ''}${run.reboundFrom.unassignedByName ? ' by ' + run.reboundFrom.unassignedByName : ''}${run.reboundFrom.reboundCount > 1 ? ' (rebound #' + run.reboundFrom.reboundCount + ')' : ''}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <RotateCcw className="w-2.5 h-2.5" />
-              Returned from {run.reboundFrom.previousTechName?.split(' ')[0]}
-            </span>
-          )}
+          {(run.reboundFrom || run.ticket?.lastReboundContext)?.previousTechName && (() => {
+            const ctx = run.reboundFrom || run.ticket.lastReboundContext;
+            return (
+              <span
+                className="inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none"
+                title={`Returned from ${ctx.previousTechName}${ctx.unassignedAt ? ' at ' + new Date(ctx.unassignedAt).toLocaleString() : ''}${ctx.unassignedByName ? ' by ' + ctx.unassignedByName : ''}${ctx.reboundCount > 1 ? ' (rebound #' + ctx.reboundCount + ')' : ''}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <RotateCcw className="w-2.5 h-2.5" />
+                Returned from {ctx.previousTechName?.split(' ')[0]}
+              </span>
+            );
+          })()}
           <span className="ml-auto" />
           {subView !== 'pending' && run.decision && (
             <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
@@ -1319,16 +1322,19 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                           <span className="font-medium text-slate-800 leading-snug flex items-center gap-1.5 flex-wrap">
                             {run.ticket?.subject || 'No subject'}
                             {flag === 'deleted' && <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />}
-                            {run.reboundFrom?.previousTechName && (
-                              <span
-                                className="inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none"
-                                title={`Returned from ${run.reboundFrom.previousTechName}${run.reboundFrom.unassignedAt ? ' at ' + new Date(run.reboundFrom.unassignedAt).toLocaleString() : ''}${run.reboundFrom.unassignedByName ? ' by ' + run.reboundFrom.unassignedByName : ''}${run.reboundFrom.reboundCount > 1 ? ' (rebound #' + run.reboundFrom.reboundCount + ')' : ''}`}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <RotateCcw className="w-2.5 h-2.5" />
-                                Returned from {run.reboundFrom.previousTechName?.split(' ')[0]}
-                              </span>
-                            )}
+                            {(run.reboundFrom || run.ticket?.lastReboundContext)?.previousTechName && (() => {
+                              const ctx = run.reboundFrom || run.ticket.lastReboundContext;
+                              return (
+                                <span
+                                  className="inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none"
+                                  title={`Returned from ${ctx.previousTechName}${ctx.unassignedAt ? ' at ' + new Date(ctx.unassignedAt).toLocaleString() : ''}${ctx.unassignedByName ? ' by ' + ctx.unassignedByName : ''}${ctx.reboundCount > 1 ? ' (rebound #' + ctx.reboundCount + ')' : ''}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <RotateCcw className="w-2.5 h-2.5" />
+                                  Returned from {ctx.previousTechName?.split(' ')[0]}
+                                </span>
+                              );
+                            })()}
                           </span>
                           <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
                           {run.ticket?.ticketCategory && <span className="text-[10px] text-slate-300 ml-1.5">{run.ticket.ticketCategory}</span>}
