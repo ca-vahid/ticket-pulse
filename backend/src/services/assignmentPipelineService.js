@@ -20,10 +20,14 @@ class AssignmentPipelineService {
    * Automatic triggers are queued outside business hours.
    * Manual triggers always execute immediately.
    */
-  async runPipeline(ticketId, workspaceId, triggerSource = 'manual', onEvent = null, signal = null) {
+  async runPipeline(ticketId, workspaceId, triggerSource = 'manual', onEvent = null, signal = null, options = {}) {
     const pipelineStart = Date.now();
     const emit = (event) => { try { onEvent?.(event); } catch { /* SSE write errors are non-fatal */ } };
     const isManual = triggerSource === 'manual';
+    // reboundFrom: { previousTechId, previousTechName, unassignedAt, unassignedByName, reboundCount }
+    // Set when this run is being created because the ticket bounced back from
+    // a prior assignee. Persisted on the run so the UI / LLM can show context.
+    const reboundFrom = options.reboundFrom || null;
 
     if (signal?.aborted) {
       return { skipped: true, reason: 'cancelled_before_start' };
@@ -79,11 +83,18 @@ class AssignmentPipelineService {
       const bh = await availabilityService.isBusinessHours(new Date(), tz, workspaceId);
 
       if (!bh.isBusinessHours) {
-        const queuedReason = bh.reason || 'Outside business hours';
+        let queuedReason = bh.reason || 'Outside business hours';
+        // For rebound runs, prefix the reason with rebound context so the
+        // queue UI immediately shows why this is back here.
+        if (reboundFrom?.previousTechName) {
+          const when = reboundFrom.unassignedAt ? ` at ${new Date(reboundFrom.unassignedAt).toISOString()}` : '';
+          const who = reboundFrom.unassignedByName ? ` by ${reboundFrom.unassignedByName}` : '';
+          queuedReason = `Returned from ${reboundFrom.previousTechName}${when}${who} — ${queuedReason}`;
+        }
         let run;
         try {
           run = await assignmentRepository.createQueuedRun({
-            ticketId, workspaceId, triggerSource, queuedReason,
+            ticketId, workspaceId, triggerSource, queuedReason, reboundFrom,
           });
         } catch (error) {
           const existingRun = await assignmentRepository.getOpenPipelineRun(ticketId);
@@ -120,6 +131,7 @@ class AssignmentPipelineService {
         triggerSource,
         llmModel: assignmentConfig.llmModel,
         promptVersionId: promptVersion.id,
+        reboundFrom,
       });
     } catch (error) {
       const existingRun = await assignmentRepository.getOpenPipelineRun(ticketId);

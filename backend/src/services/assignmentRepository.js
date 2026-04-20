@@ -317,7 +317,7 @@ class AssignmentRepository {
 
   // ─── Queue-specific methods ────────────────────────────────────────────
 
-  async createQueuedRun({ ticketId, workspaceId, triggerSource, queuedReason }) {
+  async createQueuedRun({ ticketId, workspaceId, triggerSource, queuedReason, reboundFrom = null }) {
     try {
       return await prisma.assignmentPipelineRun.create({
         data: {
@@ -327,6 +327,7 @@ class AssignmentRepository {
           triggerSource,
           queuedAt: new Date(),
           queuedReason,
+          reboundFrom: reboundFrom || undefined,
         },
       });
     } catch (error) {

@@ -159,6 +159,95 @@ class SyncService {
   }
 
   /**
+   * Bounce-detection: a ticket transitioned from assigned to unassigned and is
+   * still active (Open / Pending). Create a fresh pipeline run with rebound
+   * context so the coordinator sees it surface again with full history.
+   *
+   * Guards:
+   *  - Skip if there's already an open (queued/running) run for this ticket
+   *  - Skip if assignment pipeline isn't enabled for the workspace
+   *  - Skip after MAX_AUTO_REBOUNDS_PER_TICKET to avoid infinite loops
+   */
+  async _handleTicketRebound(upsertedTicket, existingTicket, analysis, workspaceId) {
+    const MAX_AUTO_REBOUNDS_PER_TICKET = 3;
+    try {
+      // Skip if assignment pipeline isn't enabled
+      const { default: assignmentRepository } = await import('./assignmentRepository.js');
+      const cfg = await assignmentRepository.getConfig(workspaceId);
+      if (!cfg?.isEnabled) return;
+
+      // Skip if there's already an open (queued/running) pipeline run
+      const openRun = await assignmentRepository.getOpenPipelineRun(upsertedTicket.id);
+      if (openRun) {
+        logger.debug('Bounce detection: open run already exists, skipping', {
+          ticketId: upsertedTicket.id, existingRunId: openRun.id, status: openRun.status,
+        });
+        return;
+      }
+
+      // Loop guard: count prior auto-rebound runs for this ticket
+      const reboundCount = await prisma.assignmentPipelineRun.count({
+        where: { ticketId: upsertedTicket.id, triggerSource: 'rebound' },
+      });
+      if (reboundCount >= MAX_AUTO_REBOUNDS_PER_TICKET) {
+        logger.warn('Bounce detection: max auto-rebounds reached, skipping', {
+          ticketId: upsertedTicket.id, reboundCount,
+        });
+        return;
+      }
+
+      // Find the previous assignee's name for the rebound context
+      const prevTech = await prisma.technician.findUnique({
+        where: { id: existingTicket.assignedTechId },
+        select: { id: true, name: true },
+      });
+
+      // Find the most recent rejection event from analysis (who unassigned)
+      let unassignedAt = null;
+      let unassignedByName = null;
+      if (analysis?.events?.length) {
+        const lastReject = [...analysis.events].reverse().find((e) => e.type === 'rejected');
+        if (lastReject) {
+          unassignedAt = lastReject.timestamp;
+          unassignedByName = lastReject.actorName;
+        }
+      }
+
+      const reboundFrom = {
+        previousTechId: prevTech?.id || existingTicket.assignedTechId,
+        previousTechName: prevTech?.name || 'Unknown',
+        unassignedAt: unassignedAt ? new Date(unassignedAt).toISOString() : null,
+        unassignedByName: unassignedByName || null,
+        reboundCount: reboundCount + 1,
+      };
+
+      logger.info('Bounce detection: queueing rebound pipeline run', {
+        ticketId: upsertedTicket.id,
+        freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString(),
+        ...reboundFrom,
+      });
+
+      // Trigger a fresh pipeline run. runPipeline will queue (outside business
+      // hours) or run immediately. We deliberately don't await onEvent updates.
+      const { default: assignmentPipelineService } = await import('./assignmentPipelineService.js');
+      assignmentPipelineService.runPipeline(
+        upsertedTicket.id,
+        workspaceId,
+        'rebound',
+        null,
+        null,
+        { reboundFrom },
+      ).catch((err) => {
+        logger.warn('Rebound pipeline trigger failed', {
+          ticketId: upsertedTicket.id, error: err.message,
+        });
+      });
+    } catch (error) {
+      logger.error(`Bounce detection failed for ticket ${upsertedTicket.id}:`, error);
+    }
+  }
+
+  /**
    * Write FS-sourced events as TicketActivity rows, deduplicating by timestamp + type.
    */
   async _writeEventActivities(ticketId, events) {
@@ -714,6 +803,31 @@ class SyncService {
           // --- Write FS-sourced event activities (richer than snapshot diffs) ---
           if (analysis && analysis.events && analysis.events.length > 0) {
             await this._writeEventActivities(upsertedTicket.id, analysis.events);
+          }
+
+          // --- Bounce detection: ticket was assigned but is now unassigned ---
+          // When an agent (or coordinator) returns a ticket to the unassigned
+          // queue, FS just clears responder_id. Without this hook the ticket
+          // would silently float in FS forever — never re-entering our review
+          // queue. Trigger a fresh pipeline run with rebound context so the
+          // coordinator sees it surface again with "Returned from X" badge.
+          if (
+            existingTicket
+            && existingTicket.assignedTechId
+            && upsertedTicket.assignedTechId === null
+            && ['Open', 'Pending'].includes(upsertedTicket.status)
+            && !upsertedTicket.isNoise
+          ) {
+            this._handleTicketRebound(
+              upsertedTicket,
+              existingTicket,
+              analysis,
+              ticketWorkspaceId,
+            ).catch((err) => {
+              logger.warn('Bounce-detection follow-up failed (non-fatal)', {
+                ticketId: upsertedTicket.id, error: err.message,
+              });
+            });
           }
 
           syncedCount++;

@@ -1488,6 +1488,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   <div key={run.id} className="px-3 py-2 space-y-1.5">
                     <div>
                       <span className="text-[10px] text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                      {run.reboundFrom?.previousTechName && (
+                        <span
+                          className="ml-1.5 inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded"
+                          title={`Returned from ${run.reboundFrom.previousTechName}${run.reboundFrom.unassignedAt ? ' at ' + new Date(run.reboundFrom.unassignedAt).toLocaleString() : ''}${run.reboundFrom.unassignedByName ? ' by ' + run.reboundFrom.unassignedByName : ''}`}
+                        >
+                          ↩ Returned from {run.reboundFrom.previousTechName}
+                        </span>
+                      )}
                       <p className="font-medium text-slate-800 text-[13px] leading-snug">{run.ticket?.subject || 'No subject'}</p>
                       <p className="text-[10px] text-slate-500 mt-0.5">{run.queuedReason || 'Outside business hours'}</p>
                     </div>
@@ -1520,6 +1528,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     <tr key={run.id} className="border-t border-amber-50 hover:bg-amber-50/60 transition-colors">
                       <td className="px-3 py-1.5">
                         <span className="text-[10px] text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                        {run.reboundFrom?.previousTechName && (
+                          <span
+                            className="ml-2 inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded align-middle"
+                            title={`Returned from ${run.reboundFrom.previousTechName}${run.reboundFrom.unassignedAt ? ' at ' + new Date(run.reboundFrom.unassignedAt).toLocaleString() : ''}${run.reboundFrom.unassignedByName ? ' by ' + run.reboundFrom.unassignedByName : ''}`}
+                          >
+                            ↩ Returned from {run.reboundFrom.previousTechName}
+                          </span>
+                        )}
                         <span className="ml-2 font-medium text-slate-800">{run.ticket?.subject || 'No subject'}</span>
                       </td>
                       <td className="px-3 py-1.5 text-[11px] text-slate-500">{run.queuedReason || 'Outside business hours'} · via {run.triggerSource}</td>
