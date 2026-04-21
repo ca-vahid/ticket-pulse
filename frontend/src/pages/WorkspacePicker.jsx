@@ -3,10 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Layers, LogOut, ArrowRight } from 'lucide-react';
+import { useDemoMode, useDemoLabel, scrubFreeText as scrubDemoText } from '../utils/demoMode';
 
 export default function WorkspacePicker() {
   const { availableWorkspaces, selectWorkspace } = useWorkspace();
   const { user, logout } = useAuth();
+  const demoMode = useDemoMode();
+  const welcomeName = useDemoLabel('name', user?.name || 'User');
   const _navigate = useNavigate();
   const [selecting, setSelecting] = useState(null);
   const [error, setError] = useState(null);
@@ -40,7 +43,7 @@ export default function WorkspacePicker() {
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Select Workspace</h1>
           <p className="text-gray-500 mt-1">
-            Welcome, {user?.name || 'User'}. Choose a workspace to continue.
+            Welcome, {welcomeName}. Choose a workspace to continue.
           </p>
         </div>
 
@@ -68,9 +71,9 @@ export default function WorkspacePicker() {
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">{ws.name}</h3>
+                  <h3 className="text-lg font-semibold text-gray-900">{demoMode ? scrubDemoText(ws.name) : ws.name}</h3>
                   <p className="text-sm text-gray-500 mt-0.5">
-                    {ws.slug} workspace
+                    {demoMode ? scrubDemoText(ws.slug) : ws.slug} workspace
                     {ws.role === 'admin' && (
                       <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
                         Admin

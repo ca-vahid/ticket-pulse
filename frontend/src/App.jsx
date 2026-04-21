@@ -12,6 +12,7 @@ import Settings from './pages/Settings';
 import Visuals from './pages/Visuals';
 import TimelineExplorer from './pages/TimelineExplorer';
 import AssignmentReview from './pages/AssignmentReview';
+import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
 
 /**
@@ -236,6 +237,7 @@ function App() {
                 {/* 404 Catch-all */}
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
+              <DemoModeBanner />
             </SettingsProvider>
           </DashboardProvider>
         </WorkspaceProvider>

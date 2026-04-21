@@ -1,6 +1,20 @@
-export const APP_VERSION = '1.9.5-preview';
+export const APP_VERSION = '1.9.6-preview';
 
 export const changelog = [
+  {
+    version: '1.9.6-preview',
+    date: 'April 21, 2026',
+    entries: [
+      { type: 'new', text: 'Demo Mode for screen recordings -- one-click toggle in the Dashboard header anonymizes every sensitive string on screen (technician names, requester names, emails, office locations, ticket subjects, computer names, internal domains) so you can record training videos without manual editing; persists in localStorage so it survives page refreshes' },
+      { type: 'new', text: 'Stock face avatar pool -- 50 photo-realistic corporate headshots generated with Gemini 3 Pro Image (Nano Banana Pro) bundled under /demo-avatars/; technician profile photos are deterministically replaced from the pool when Demo Mode is on, with a Reshuffle option in the toggle dropdown to mid-session re-randomize the roster' },
+      { type: 'new', text: 'Per-session deterministic identity mapping -- the same real person always maps to the same fake person within a recording (no flicker between pages or live updates), but a brand new browser tab/recording starts with a fresh roster; uses a sessionStorage seed + Mulberry32 PRNG so identities are reproducible without any persistent storage of the mapping itself' },
+      { type: 'new', text: 'DEMO MODE banner -- amber pill fixed to the bottom-right of every page when Demo Mode is on, so you never accidentally record real data thinking the toggle was active' },
+      { type: 'improved', text: 'Single-chokepoint anonymization -- axios response interceptor and SSE event handler both route data through a recursive scrubber when Demo Mode is on, so all pages (Dashboard, Technician Detail, Timeline Explorer, Assignment Review, Visuals, Settings) pick up the scrub automatically with zero per-page changes' },
+      { type: 'improved', text: 'Smart subject scrubbing -- ticket subjects are processed through an ordered regex pipeline (emails -> computer names -> internal domains -> known locations -> known people -> trigger-based generic name catcher) that preserves tech jargon like "Significant Anomaly" or "Application or Service Principal" while still catching unfamiliar names from "New Hire: <X>" / "involving <X>" / "for <X>" patterns' },
+      { type: 'improved', text: 'Map view location remap -- when Demo Mode is on, agent.location values are swapped to other valid Canadian cities (Halifax, Winnipeg, Hamilton...) that already exist in the Visuals page office lookup, so map pins move to plausible-but-different cities automatically without any map code changes' },
+      { type: 'improved', text: 'Timezone city scrubbing -- IANA timezones like America/Toronto are remapped to other valid IANA names (America/Halifax, America/Phoenix...) so the city portion of the timezone string no longer leaks the technician\u2019s real office while date math continues to work normally' },
+    ],
+  },
   {
     version: '1.9.5-preview',
     date: 'April 17, 2026',

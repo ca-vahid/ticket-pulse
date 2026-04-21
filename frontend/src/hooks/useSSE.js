@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { sseAPI } from '../services/api';
+import { isDemoMode, maybeScrub } from '../utils/demoMode';
+
+// Scrubs SSE event payloads through the demo-mode anonymizer when active so
+// live push updates stay consistent with the rest of the (axios-scrubbed) UI.
+function parseAndScrub(rawData) {
+  const parsed = JSON.parse(rawData);
+  return maybeScrub(parsed, isDemoMode());
+}
 
 /**
  * Custom hook for Server-Sent Events
@@ -81,13 +89,13 @@ export function useSSE(options = {}) {
           retryAttemptRef.current = 0;
           setConnectionStatus('connected');
           if (onConnected) {
-            onConnected(JSON.parse(event.data));
+            onConnected(parseAndScrub(event.data));
           }
         });
 
         eventSource.addEventListener('sync-completed', (event) => {
           // Sync completed event received
-          const data = JSON.parse(event.data);
+          const data = parseAndScrub(event.data);
           setLastEvent({ type: 'sync-completed', data, timestamp: Date.now() });
           if (onSyncCompleted) {
             onSyncCompleted(data);
@@ -96,7 +104,7 @@ export function useSSE(options = {}) {
 
         eventSource.onmessage = (event) => {
           // SSE message received
-          const data = JSON.parse(event.data);
+          const data = parseAndScrub(event.data);
           setLastEvent({ type: 'message', data, timestamp: Date.now() });
           if (onMessage) {
             onMessage(data);

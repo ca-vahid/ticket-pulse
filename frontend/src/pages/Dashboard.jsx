@@ -4,6 +4,12 @@ import { useDashboard } from '../contexts/DashboardContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
+import {
+  useDemoMode,
+  useDemoLabel,
+  scrubFreeText as scrubDemoText,
+} from '../utils/demoMode';
+import DemoModeToggle from '../components/DemoModeToggle';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
 import SearchBox from '../components/SearchBox';
@@ -85,6 +91,11 @@ export default function Dashboard() {
     return ws?.role || 'viewer';
   })();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
+
+  // Demo Mode: when ON, anonymizes all sensitive data for screen recordings.
+  const demoMode = useDemoMode();
+  const welcomeLabel = useDemoLabel('name', user?.name || user?.username);
+
   const [refreshing, setRefreshing] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null); // null, 'syncing', 'success', 'error'
   const [syncMessage, setSyncMessage] = useState('');
@@ -1221,7 +1232,7 @@ export default function Dashboard() {
                 </button>
               </div>
               <div className="flex items-center gap-2 text-xs text-gray-600">
-                <span>Welcome, {user?.name || user?.username}</span>
+                <span>Welcome, {welcomeLabel}</span>
                 {currentWorkspace && availableWorkspaces.length > 1 && (
                   <select
                     value={currentWorkspace.id}
@@ -1235,13 +1246,13 @@ export default function Dashboard() {
                     title="Switch workspace"
                   >
                     {availableWorkspaces.map(ws => (
-                      <option key={ws.id} value={ws.id}>{ws.name}{ws.role ? ` [${ws.role}]` : ''}</option>
+                      <option key={ws.id} value={ws.id}>{demoMode ? scrubDemoText(ws.name) : ws.name}{ws.role ? ` [${ws.role}]` : ''}</option>
                     ))}
                   </select>
                 )}
                 {currentWorkspace && availableWorkspaces.length <= 1 && (
                   <span className="bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-medium">
-                    {currentWorkspace.name}
+                    {demoMode ? scrubDemoText(currentWorkspace.name) : currentWorkspace.name}
                   </span>
                 )}
               </div>
@@ -1964,6 +1975,7 @@ export default function Dashboard() {
                 {excludeNoise ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                 <span>{excludeNoise ? 'Noise Hidden' : 'Hide Noise'}</span>
               </button>
+              <DemoModeToggle onChange={() => { forceRefreshNoCache().catch(() => {}); }} />
               {hiddenTechnicians.length > 0 && (
                 <button
                   onClick={() => setShowHidden(!showHidden)}

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { formatDateLocal } from '../utils/dateHelpers';
+import { isDemoMode, maybeScrub } from '../utils/demoMode';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
 
@@ -86,13 +87,18 @@ const errorInterceptor = (error) => {
   }
 };
 
+// Demo mode: pass every response body through the scrubber when demo mode is
+// on, so all components downstream see anonymized data without any per-call
+// changes. No-op when demo mode is off.
+const scrubResponseInterceptor = (response) => maybeScrub(response.data, isDemoMode());
+
 api.interceptors.response.use(
-  response => response.data,
+  scrubResponseInterceptor,
   errorInterceptor,
 );
 
 apiLongTimeout.interceptors.response.use(
-  response => response.data,
+  scrubResponseInterceptor,
   errorInterceptor,
 );
 

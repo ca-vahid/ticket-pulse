@@ -1,0 +1,13 @@
+{
+  "name": "ticket-pulse-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "One-off maintenance scripts (e.g. generating demo-mode avatars). Not part of the runtime app.",
+  "scripts": {
+    "generate-demo-avatars": "node generate-demo-avatars.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "^1.50.1"
+  }
+}

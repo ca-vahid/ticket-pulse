@@ -2,6 +2,97 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.6-preview] - 2026-04-21
+
+### Demo Mode for Training Recordings
+
+This release adds a global **Demo Mode** that anonymizes every sensitive string on screen (technician names, requester names, emails, office locations, ticket subjects, computer names, internal domains) and swaps real Azure-AD profile photos for a curated pool of 50 AI-generated corporate headshots — designed so coordinators can record training videos without any manual post-editing.
+
+**Headline points:**
+
+- One-click toggle in the Dashboard header (next to **Hide Noise**) flips the entire app into anonymized mode and persists in `localStorage`.
+- **Single-chokepoint design**: the axios response interceptor + SSE event handler both route data through a recursive scrubber, so every page is anonymized without per-page changes.
+- **Per-session deterministic mapping**: same real person always becomes the same fake person within a recording, but each new tab/session starts with a fresh roster of fake identities.
+- 50 photo-realistic stock headshots generated with **Gemini 3 Pro Image (Nano Banana Pro)** committed under `frontend/public/demo-avatars/`.
+- Smart ticket-subject scrubbing preserves tech jargon like "Significant Anomaly" or "Application or Service Principal" while still catching unfamiliar names in "New Hire: \<X\>", "involving \<X\>", "for \<X\>" patterns.
+
+---
+
+## 🎯 How it Works
+
+### The chokepoint
+
+Every server-driven byte goes through one place — the axios response interceptor in `frontend/src/services/api.js`:
+
+```js
+const scrubResponseInterceptor = (response) =>
+  maybeScrub(response.data, isDemoMode());
+```
+
+When Demo Mode is off, this is a no-op. When it's on, the response is walked recursively and every recognized field is rewritten before any React component sees it. This is also wired into `useSSE` so live push updates stay consistent with the rest of the UI.
+
+### Per-session deterministic identities
+
+- A 32-bit seed is generated once per browser session and stashed in `sessionStorage` (`tp_demoSeed`).
+- The seed feeds a **Mulberry32** PRNG which shuffles the dictionary of fake names + locations.
+- A `Map<realName, fakeName>` cache (cleared on **Reshuffle**) ensures "Andrew Fong" is always the same fake person across the Dashboard, Technician Detail, Timeline Explorer, Assignment Review, and live SSE updates within one recording.
+- New tab → fresh seed → entirely different roster, so consecutive recordings show different "people".
+
+### The free-text scrubber pipeline (for ticket subjects)
+
+Applied in order:
+
+1. **Email regex** → `mapEmail()` (preserves `name@domain` shape, swaps both sides to `acme.example`)
+2. **Computer name regex** (`BGC-EDM-HV01` → `ACME-WS-042`) — deterministic per real machine
+3. **Internal token regex** (`BGC`, `bgcengineering.ca`, `bgcsaas`) → `Acme` / `acme.example`
+4. **Known location regex** (Toronto, Vancouver, Calgary, …) → fake Canadian city
+5. **Known-people regex** (built dynamically from every name we've ever mapped via structured fields)
+6. **Triggered generic name catcher** — only scrubs Title-Case sequences that follow a clear name-introducing trigger (`for`, `by`, `from`, `with`, `involving`, `Hire`, after `:`), so "Significant Anomaly" or "Application or Service Principal" survive untouched while "New Hire: Mahmoud Al-Riffai" gets caught.
+
+### Map view
+
+Locations like `Toronto` get remapped to other valid IANA cities (`Halifax`, `Winnipeg`, `Hamilton`…) that already exist in the Visuals page's `OFFICE_LOCATIONS` lookup, so map pins move to plausible-but-different cities automatically with zero changes to map code. IANA timezones (`America/Toronto`) are likewise remapped (`America/Halifax`) so the city portion of a timezone string no longer leaks the office.
+
+### Stock face avatars
+
+`scripts/generate-demo-avatars.mjs` calls Gemini 3 Pro Image once per prompt against 50 hand-curated diverse subject descriptions. The resulting `avatar-001.png` … `avatar-050.png` plus `manifest.json` are committed to `frontend/public/demo-avatars/`. At runtime the scrubber rewrites `photoUrl` / `_techPhotoUrl` to a pool slot deterministically chosen from `(realName ⊕ sessionSeed)`, so a fake person keeps the same face throughout the recording.
+
+---
+
+## 🧩 New Files
+
+- `frontend/src/utils/demoMode/` — `state.js`, `rng.js`, `dictionaries.js`, `mappings.js`, `scrubber.js`, `index.js` (public API + `useDemoMode`, `useDemoLabel` hooks)
+- `frontend/src/components/DemoModeToggle.jsx` — header button + dropdown (Reshuffle, Replace photos toggle)
+- `frontend/src/components/DemoModeBanner.jsx` — fixed bottom-right amber pill on every page
+- `frontend/public/demo-avatars/` — 50 PNG headshots + manifest (~29 MB)
+- `scripts/generate-demo-avatars.mjs` — Gemini 3 Pro Image batch generator with `--resume` and `--concurrency` flags
+- `scripts/test-demo-scrub.mjs` — Node smoke test that runs the scrubber against payloads modelled on the production screenshots and asserts no banned tokens leak through
+- `scripts/package.json` + `scripts/README.md`
+
+## 🔧 Modified Files
+
+- `frontend/src/services/api.js` — both `api` and `apiLongTimeout` interceptors now route bodies through `maybeScrub`
+- `frontend/src/hooks/useSSE.js` — SSE event payloads scrubbed before dispatch
+- `frontend/src/pages/Dashboard.jsx` — `<DemoModeToggle>` mounted next to **Hide Noise**, "Welcome, X" and workspace name wrapped in `useDemoLabel`
+- `frontend/src/pages/WorkspacePicker.jsx` — welcome name + workspace cards wrapped in `useDemoLabel`
+- `frontend/src/App.jsx` — `<DemoModeBanner>` mounted globally inside `SettingsProvider`
+
+## ⚙️ How to Use
+
+1. Open the Dashboard, click the new amber **Demo Mode** button (next to Hide Noise).
+2. Page reloads with all real names, emails, locations, computer names, ticket subjects swapped to fake equivalents, and real Azure-AD profile photos replaced with stock headshots.
+3. The amber **DEMO MODE — identities anonymized** pill appears in the bottom-right of every page.
+4. Use the chevron next to the toggle for **Reshuffle identities** (fresh roster mid-session) and **Replace photos** on/off.
+5. Open a new tab → demo mode stays on (localStorage), but you get a brand-new roster of fake people (sessionStorage seed) — perfect for varied training videos.
+
+## 🚧 Out of Scope (intentional)
+
+- The browser URL bar, history, autocomplete suggestions — cannot be programmatically changed. Mitigation: record a window crop that excludes the address bar, or use a hosts-file alias.
+- Anything outside the app (other browser tabs, bookmarks bar visible in the screenshot frame).
+- Backend logs / DB — Demo Mode is purely a frontend transformation; the backend keeps real data.
+
+---
+
 ## [1.9.5-preview] - 2026-04-17
 
 ### Assignment Bounce Tracking, Preflight Validation, and Rate Limiter Rewrite
