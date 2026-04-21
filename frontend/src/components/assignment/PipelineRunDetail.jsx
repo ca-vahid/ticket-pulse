@@ -543,9 +543,18 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   if (!run) return null;
 
   const ticket = run.ticket;
-  const decisionBadge = run.status === 'completed'
-    ? (DECISION_BADGES[run.decision] || DECISION_BADGES.pending_review)
-    : (RUN_STATUS_BADGES[run.status] || RUN_STATUS_BADGES.running);
+  // If the run is pending_review but the ticket has been assigned externally
+  // in FS, show a clearer "FS Manual" badge instead of the misleading
+  // "Pending Review" — no human action is needed in the app.
+  const externallyAssigned = run.status === 'completed'
+    && run.decision === 'pending_review'
+    && ticket?.assignedTechId
+    && !['Closed', 'Resolved', 'Deleted', 'Spam'].includes(ticket?.status);
+  const decisionBadge = externallyAssigned
+    ? { label: 'FS Manual', style: 'bg-amber-100 text-amber-800' }
+    : run.status === 'completed'
+      ? (DECISION_BADGES[run.decision] || DECISION_BADGES.pending_review)
+      : (RUN_STATUS_BADGES[run.status] || RUN_STATUS_BADGES.running);
 
   const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
   const PRIORITY_PILL = { 1: 'bg-slate-100 text-slate-600', 2: 'bg-yellow-100 text-yellow-800', 3: 'bg-orange-100 text-orange-800', 4: 'bg-red-100 text-red-800' };

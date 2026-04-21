@@ -762,6 +762,30 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', rejected: 'Rejected', pending_review: 'Pending' };
   const DECISION_PILL = { approved: 'bg-green-100 text-green-800', modified: 'bg-blue-100 text-blue-800', auto_assigned: 'bg-purple-100 text-purple-800', noise_dismissed: 'bg-slate-100 text-slate-500', rejected: 'bg-red-100 text-red-800' };
+
+  // Contextual decision label. A run's `decision` may be 'pending_review'
+  // even though no human action is needed in our app — the ticket has
+  // already been assigned externally in FreshService. In that case, render
+  // a clearer 'FS Manual' label with an amber pill instead of the
+  // confusing yellow 'Pending'. Tooltip explains why.
+  const getDisplayDecision = (run) => {
+    const externallyAssigned =
+      run.decision === 'pending_review'
+      && run.ticket?.assignedTechId
+      && !['Closed', 'Resolved', 'Deleted', 'Spam'].includes(run.ticket?.status);
+    if (externallyAssigned) {
+      return {
+        label: 'FS Manual',
+        pillClass: 'bg-amber-100 text-amber-800',
+        tooltip: `Assigned in FreshService outside the pipeline${run.ticket?.assignedTech?.name ? ' — ' + run.ticket.assignedTech.name : ''}. AI suggestion left unresolved.`,
+      };
+    }
+    return {
+      label: DECISION_LABELS[run.decision] || run.decision,
+      pillClass: DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500',
+      tooltip: null,
+    };
+  };
   const _FLAG_PILL = { open: { label: 'Unassigned', style: 'bg-green-100 text-green-700' }, assigned: { label: 'Assigned', style: 'bg-amber-100 text-amber-700' }, closed: { label: 'Closed', style: 'bg-slate-100 text-slate-500' }, deleted: { label: 'Deleted', style: 'bg-red-100 text-red-600' } };
   const STATUS_PILL_STYLE = { Open: 'bg-green-100 text-green-700', Pending: 'bg-yellow-100 text-yellow-700', Closed: 'bg-slate-100 text-slate-500', Resolved: 'bg-slate-100 text-slate-500', Deleted: 'bg-red-100 text-red-600', Spam: 'bg-red-100 text-red-600', 'Waiting on Customer': 'bg-blue-100 text-blue-600', 'Waiting on Third Party': 'bg-blue-100 text-blue-600' };
   const getStatusPillStyle = (status) => STATUS_PILL_STYLE[status] || 'bg-slate-100 text-slate-500';
@@ -959,11 +983,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             );
           })()}
           <span className="ml-auto" />
-          {subView !== 'pending' && run.decision && (
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
-              {DECISION_LABELS[run.decision] || run.decision}
-            </span>
-          )}
+          {subView !== 'pending' && run.decision && (() => {
+            const dd = getDisplayDecision(run);
+            return (
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${dd.pillClass}`} title={dd.tooltip || undefined}>
+                {dd.label}
+              </span>
+            );
+          })()}
           <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
         </div>
 
@@ -1467,13 +1494,16 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                             )
                           ) : <span className="text-slate-300">—</span>}
                         </td>
-                        {subView !== 'pending' && (
-                          <td className={`px-3 py-1.5 ${rowDim}`}>
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500'}`}>
-                              {DECISION_LABELS[run.decision] || run.decision}
-                            </span>
-                          </td>
-                        )}
+                        {subView !== 'pending' && (() => {
+                          const dd = getDisplayDecision(run);
+                          return (
+                            <td className={`px-3 py-1.5 ${rowDim}`}>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${dd.pillClass}`} title={dd.tooltip || undefined}>
+                                {dd.label}
+                              </span>
+                            </td>
+                          );
+                        })()}
                         <td className={`px-3 py-1.5 text-slate-400 whitespace-nowrap ${rowDim}`}>{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</td>
                         {showActions && (
                           <td className="px-3 py-1.5 relative">
