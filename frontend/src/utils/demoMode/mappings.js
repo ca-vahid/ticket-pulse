@@ -258,7 +258,12 @@ export function getDemoAvatar(realKey) {
   if (cached != null) return `/demo-avatars/${files[cached]}`;
 
   const seed = getDemoSeed();
-  const startIdx = (hashString(key) ^ seed) % files.length;
+  // CRITICAL: `>>> 0` forces unsigned 32-bit. Without it, the XOR returns a
+  // signed int that can be negative, which makes `% files.length` produce a
+  // negative remainder in JS — and then `files[-X]` is undefined, yielding
+  // the URL "/demo-avatars/undefined" that 404s and shows a broken image
+  // with the alt-text leaking the (real or fake) name.
+  const startIdx = ((hashString(key) ^ seed) >>> 0) % files.length;
   let idx = startIdx;
   // Avoid duplicate avatars for different people while we still have unused
   // slots in the pool.

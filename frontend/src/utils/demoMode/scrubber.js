@@ -35,6 +35,13 @@ const NAME_KEYS = new Set([
   'assignedBy', 'performedByName', 'performerName', 'createdByName',
   'updatedByName', 'managerName', 'reviewerName', 'reporterName',
   'firstName', 'lastName',
+  // Assignment pipeline + episodes use techName (recommendations[], episodes[])
+  'techName', 'technicianName',
+  // Timeline rows + ticket lists carry the holder name
+  'assignedTechName', '_techName', 'currentHolderName', 'holderName',
+  'pickerName', 'lastHolderName', 'previousHolderName',
+  // Bounce / handoff history
+  'fromTechName', 'toTechName', 'rejectedByName',
 ]);
 
 // Keys whose VALUE is an email address.

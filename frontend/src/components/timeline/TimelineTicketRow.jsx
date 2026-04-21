@@ -79,7 +79,13 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
 
           {/* Agent avatar (before subject) */}
           {picked && pickerPhoto ? (
-            <img src={pickerPhoto} alt={pickerName} title={pickerName} className="w-5 h-5 rounded-full object-cover flex-shrink-0 border border-slate-200" />
+            <img
+              src={pickerPhoto}
+              alt={pickerName}
+              title={pickerName}
+              className="w-5 h-5 rounded-full object-cover flex-shrink-0 border border-slate-200"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
           ) : picked ? (
             <div title={pickerName} className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[8px] font-bold text-white ${accent?.bg || 'bg-emerald-500'}`}>
               {pickerInitials}

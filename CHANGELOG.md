@@ -2,6 +2,51 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.7-preview] - 2026-04-21
+
+### Demo Mode bug fixes — broken avatars and name leaks
+
+Three follow-up fixes to the Demo Mode feature shipped in 1.9.6-preview, surfaced by a real recording session.
+
+### 🐛 Fixed: avatars rendering as the broken-image alt text
+
+`getDemoAvatar()` computed the avatar slot with:
+
+```js
+const startIdx = (hashString(key) ^ seed) % files.length;
+```
+
+JavaScript's bitwise `^` returns a **signed** 32-bit integer, and JS `%` preserves the sign of the dividend. For roughly half of all (key, seed) combinations the result was negative, making `files[startIdx]` `undefined` and producing the URL `/demo-avatars/undefined`. The browser 404'd and fell back to rendering the `alt` text — which was the (real or fake) technician's name overlaid on a broken-image icon.
+
+**Fix**: force unsigned 32-bit before the modulo:
+
+```js
+const startIdx = ((hashString(key) ^ seed) >>> 0) % files.length;
+```
+
+A 1,000-random-key probe was added to `scripts/test-demo-scrub.mjs` to guarantee every URL ends with a real `avatar-NNN.png`, so this can never regress silently.
+
+### 🐛 Fixed: real names leaking in Assignment Review and Timeline Explorer
+
+Two field names were missing from the scrubber's `NAME_KEYS` set:
+
+- `recommendation.recommendations[].techName` — drove the entire **AI Suggestion** column on the Decided/Pending review queue
+- `ticket.assignedTechName` — drove the holder label in Timeline Explorer rows for un-picked tickets
+
+Added: `techName`, `technicianName`, `assignedTechName`, `_techName`, `currentHolderName`, `holderName`, `pickerName`, `fromTechName`, `toTechName`, `rejectedByName`, `lastHolderName`, `previousHolderName` — covering the assignment recommendations array, episodes/handoff history, and timeline rows.
+
+### 🛡️ Improved: defensive image fallback
+
+`TechCard.jsx`, `TechCardCompact.jsx`, and `TimelineTicketRow.jsx` now attach an `onError` handler to every `<img>`:
+
+```jsx
+onError={(e) => { e.currentTarget.style.display = 'none'; }}
+```
+
+Any future avatar URL that 404s or is blocked by CORS will now silently disappear and let the existing initials-circle fallback render, instead of the browser drawing its broken-image placeholder with the technician's name as alt text.
+
+---
+
 ## [1.9.6-preview] - 2026-04-21
 
 ### Demo Mode for Training Recordings

@@ -226,6 +226,10 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               src={technician.photoUrl}
               alt={technician.name}
               className="w-20 h-20 rounded-full object-cover shadow-lg border-2 border-gray-300 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer"
+              onError={(e) => {
+                // Hide broken images so alt text doesn't leak the real name.
+                e.currentTarget.style.display = 'none';
+              }}
             />
           ) : (
             <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-20 h-20 shadow-lg border-2 border-blue-400 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer">

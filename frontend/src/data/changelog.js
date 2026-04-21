@@ -1,6 +1,15 @@
-export const APP_VERSION = '1.9.6-preview';
+export const APP_VERSION = '1.9.7-preview';
 
 export const changelog = [
+  {
+    version: '1.9.7-preview',
+    date: 'April 21, 2026',
+    entries: [
+      { type: 'fixed', text: 'Demo Mode broken avatars -- getDemoAvatar() was using `(hashString(key) ^ seed) % files.length` where the XOR returns a SIGNED 32-bit int, so JS\u2019s sign-preserving modulo could produce a negative index and the URL became /demo-avatars/undefined; the broken <img> then rendered the alt text which leaked the (real or fake) name. Fixed by forcing unsigned with `>>> 0` before the modulo; added a 1000-key probe in the smoke test so this never regresses' },
+      { type: 'fixed', text: 'Demo Mode name leaks in Assignment Review and Timeline Explorer -- the AI Suggestion column was rendering `recommendation.recommendations[].techName` and the timeline rows were rendering `ticket.assignedTechName`, neither of which were in the scrubber\u2019s NAME_KEYS set, so real technician names were displayed even with Demo Mode on; added techName, technicianName, assignedTechName, _techName, currentHolderName, holderName, pickerName, fromTechName, toTechName, rejectedByName, lastHolderName, previousHolderName' },
+      { type: 'improved', text: 'Defensive image fallback in Demo Mode -- TechCard, TechCardCompact, and TimelineTicketRow now hide the <img> on load error instead of letting the browser show its broken-image placeholder + alt text; ensures any future bad avatar URL fails to initials gracefully without leaking the technician name' },
+    ],
+  },
   {
     version: '1.9.6-preview',
     date: 'April 21, 2026',
