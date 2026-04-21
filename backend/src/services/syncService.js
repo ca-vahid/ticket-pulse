@@ -244,10 +244,14 @@ class SyncService {
       const cfg = await assignmentRepository.getConfig(workspaceId);
       if (!cfg?.isEnabled) return;
 
-      // Skip if there's already an open (queued/running) pipeline run
+      // Skip if there's already an in-flight (queued/running) pipeline run.
+      // We deliberately do NOT skip on existing pending_review runs — those
+      // get superseded below, because the rebound is a NEW state that
+      // invalidates the prior recommendation (the prior pick was likely the
+      // agent who just rejected the ticket).
       const openRun = await assignmentRepository.getOpenPipelineRun(upsertedTicket.id);
       if (openRun) {
-        logger.debug('Bounce detection: open run already exists, skipping', {
+        logger.debug('Bounce detection: in-flight run already exists, skipping', {
           ticketId: upsertedTicket.id, existingRunId: openRun.id, status: openRun.status,
         });
         return;
@@ -262,6 +266,28 @@ class SyncService {
           ticketId: upsertedTicket.id, reboundCount,
         });
         return;
+      }
+
+      // Supersede any existing pending_review runs. Their recommendation is
+      // now stale (likely names the agent who just rejected) and the user
+      // should only see the rebound run going forward — otherwise the ticket
+      // shows up multiple times in the Awaiting Decision queue.
+      const superseded = await prisma.assignmentPipelineRun.updateMany({
+        where: {
+          ticketId: upsertedTicket.id,
+          status: 'completed',
+          decision: 'pending_review',
+        },
+        data: {
+          status: 'superseded',
+          errorMessage: 'Superseded by a newer rebound run after ticket was returned to the queue',
+          updatedAt: new Date(),
+        },
+      });
+      if (superseded.count > 0) {
+        logger.info('Bounce detection: superseded prior pending_review runs', {
+          ticketId: upsertedTicket.id, count: superseded.count,
+        });
       }
 
       // Identify the previous assignee. Prefer the analyzer's source-of-truth
