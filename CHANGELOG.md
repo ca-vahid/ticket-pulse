@@ -2,6 +2,94 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.73-preview] - 2026-04-21
+
+### Auto-fallback for rejected auto-assignments
+
+When auto-assign is on and an agent rejects a ticket (removes themselves in FreshService), the existing rebound flow shipped in v1.9.5-preview already detected the bounce and triggered a fresh pipeline run — but several pieces of plumbing were missing or broken end-to-end. This release wires them all the way through.
+
+#### What was already there (verified, unchanged)
+
+- `_handleTicketRebound` in `syncService.js` detects rejection from the FreshService activity stream and triggers a fresh pipeline run with `triggerSource='rebound'`, passing a `reboundFrom` snapshot.
+- `runPipeline` accepts and persists `reboundFrom` on the run record, queues outside business hours, and respects `autoAssign=true` at the bottom of `_executeRun`.
+- `find_matching_agents` annotates each candidate with `previouslyRejectedThisTicket: true` and `rejectedAt` from the `ticket_assignment_episodes` table.
+- `freshServiceActionService._preflightCheck` blocks the FS write-back with `code='already_rejected_by_this_agent'` if the LLM still picks the rejecter.
+- `MAX_AUTO_REBOUNDS_PER_TICKET = 3` loop guard exists.
+
+#### New: Rebound Context block in the LLM's first user message
+
+`_executeRun` now loads `reboundFrom` from the run record (already persisted) and prepends a `## Rebound Context` block to the first user message:
+
+> This ticket was previously assigned and returned to the queue. This is the 2nd attempt to find an assignee. Most recently it was returned by Andrew at 2026-04-21 14:32 PDT.
+>
+> When calling find_matching_agents, expect to see `previouslyRejectedThisTicket: true` on at least one candidate. Avoid recommending any agent flagged as a prior rejecter unless they are genuinely the only qualified option (and explain why in overallReasoning if so).
+>
+> When writing the agentBriefingHtml, include a brief, neutral acknowledgement that this ticket was re-routed (e.g. "This ticket was returned to the queue and now needs your attention"). Do NOT name the previous assignee or explain why they returned it.
+
+Previously this metadata sat on the run record but never reached the LLM, so it had to discover the rebound implicitly by noticing rejection flags on candidates — too easy to miss when the prompt didn't mention rebounds at all.
+
+#### New: DEFAULT_SYSTEM_PROMPT learns about rebounds
+
+- **Step 4 (Find Matching Agents)** gains a paragraph telling the LLM to exclude prior rejecters unless they're genuinely the only qualified option, and to never make a rejecter the rank-1 pick if any alternative exists.
+- **Step 8 (agentBriefingHtml)** gains a "Do include" bullet that — when this is a rebound run — instructs the briefing to start with a brief neutral acknowledgement like *"This ticket was returned to the queue and now needs your attention."* No naming the previous assignee, no use of the words "rebound", "bounced", or "rejected".
+
+A new `needsPromptUpgrade` detector + `replaceAgentBriefingStep` path auto-upgrades older published prompts on next run (preserves any custom Steps 1-7 the workspace edited).
+
+#### Improved: Loop-guard exhaustion no longer goes silent
+
+When `MAX_AUTO_REBOUNDS_PER_TICKET = 3` is hit, `_handleTicketRebound` previously just `logger.warn`'d and returned, leaving the ticket invisible — no entry in any queue, no notification. Now it materializes a `decision='pending_review'` run with:
+
+- `triggerSource='rebound_exhausted'`
+- `errorMessage='Auto-fallback exhausted after N rebounds — needs manual review'`
+- The latest `reboundFrom` snapshot
+- A synthesized empty `recommendation` so the Awaiting Decision UI renders it as "no candidates left to try" rather than crashing on null fields
+
+So the ticket appears in Awaiting Decision with a clear red strip (see UI section below) instead of going into limbo.
+
+#### Fixed: No more stuck `auto_assigned + syncStatus=failed` runs
+
+Two failure paths previously left runs in a confusing dead state where the dashboard showed the ticket as assigned but FreshService was unchanged.
+
+**Path 1 — LLM ignores the rebound prompt and re-suggests the prior rejecter.** `_executeRun` now checks `ticketAssignmentEpisode` for any prior `endMethod='rejected'` row matching `topRec.techId` *before* setting `decision='auto_assigned'`. If found, decision is forced to `pending_review` with a clear `errorMessage`:
+
+```
+LLM re-suggested <tech>, who already rejected this ticket — downgraded to pending_review for manual handling.
+```
+
+**Path 2 — FreshService preflight blocks the assign at sync time.** When `_preflightCheck` returns `already_rejected_by_this_agent`, `superseded_assignee`, or `incompatible_group`, `freshServiceActionService.execute` now downgrades the run from `auto_assigned` to `pending_review` (clearing `assignedTechId`) so it surfaces in Awaiting Decision instead of looking falsely successful in the dashboard. Manually-approved runs keep their original decision so the audit trail of admin intent stays intact.
+
+#### Improved: Rebound context is finally visible in `PipelineRunDetail`
+
+`reboundFrom` was persisted on the run record but never displayed. Two new strip variants now render near the top of the run detail page:
+
+- **Amber strip** for ongoing rebounds: *"Rebound #N — returned from `<tech>` at `<time>`"* with a one-line explanation that the pipeline was re-run with explicit instructions to avoid the rejecter.
+- **Red strip** for `rebound_exhausted` runs: *"Auto-fallback exhausted after N rebounds — needs manual review"* with the latest unassignment context.
+
+Reuses the `RotateCcw` icon from the existing rejection metric on `TechCard`.
+
+#### Files touched
+
+- `backend/src/services/assignmentPipelineService.js` — load `reboundFrom`, inject Rebound Context, downgrade re-suggested rejecter
+- `backend/src/services/promptRepository.js` — Step 4 + Step 8 rebound guidance, legacy auto-upgrade detector
+- `backend/src/services/syncService.js` — materialize `rebound_exhausted` pending_review run on loop-guard exit
+- `backend/src/services/freshServiceActionService.js` — downgrade auto-assigned runs on preflight failure
+- `frontend/src/components/assignment/PipelineRunDetail.jsx` — amber/red rebound context strip
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.73-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+#### What stays the same (deliberately)
+
+- No waterfall through pre-ranked candidates — the LLM re-runs each rebound from scratch, just with explicit Rebound Context now (the chosen strategy from planning).
+- No new config knob — `autoAssign` already gates the whole flow; rebound chains automatically use the same setting.
+- `MAX_AUTO_REBOUNDS_PER_TICKET = 3` constant stays as-is (no UI exposure for now).
+- Existing rebound dedup / superseding logic stays as-is (already shipped in v1.9.71-preview).
+
+#### Database
+
+No migrations. `reboundFrom` was already a `Json` column on `assignment_pipeline_runs`. The new `triggerSource='rebound_exhausted'` value fits in the existing `VarChar(20)` column and isn't constrained by an enum.
+
+---
+
 ## [1.9.72-preview] - 2026-04-21
 
 ### 🐛 Fixed: Run Now on a queued ticket disappeared into a 5-second toast

@@ -166,16 +166,29 @@ class FreshServiceActionService {
         if (assignAction) {
           const preflightResult = await this._preflightCheck(client, run, assignAction);
           if (preflightResult) {
+            // For auto-assigned runs (no human in the loop yet), downgrade the
+            // decision to pending_review so the run surfaces in Awaiting
+            // Decision instead of being stuck as `auto_assigned + syncStatus=failed`
+            // — which would falsely appear assigned in the dashboard while
+            // FreshService is unchanged. Manually-approved runs keep their
+            // existing decision so the audit trail shows admin intent.
+            const shouldDowngrade = run.decision === 'auto_assigned';
+            const updatePayload = {
+              syncStatus: 'failed',
+              syncError: preflightResult.reason,
+              syncPayload: { ...payloadData, preflightAbort: preflightResult },
+            };
+            if (shouldDowngrade) {
+              updatePayload.decision = 'pending_review';
+              updatePayload.assignedTechId = null;
+              updatePayload.errorMessage = `Auto-assign blocked at FreshService preflight: ${preflightResult.reason}. Downgraded to pending_review for manual handling.`;
+            }
             await prisma.assignmentPipelineRun.update({
               where: { id: runId },
-              data: {
-                syncStatus: 'failed',
-                syncError: preflightResult.reason,
-                syncPayload: { ...payloadData, preflightAbort: preflightResult },
-              },
+              data: updatePayload,
             });
-            logger.warn('FreshService sync aborted by preflight', { runId, ...preflightResult });
-            return { success: false, error: preflightResult.reason, preflightAbort: preflightResult, preview };
+            logger.warn('FreshService sync aborted by preflight', { runId, downgraded: shouldDowngrade, ...preflightResult });
+            return { success: false, error: preflightResult.reason, preflightAbort: preflightResult, preview, downgraded: shouldDowngrade };
           }
         }
       }
