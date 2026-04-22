@@ -1,24 +1,33 @@
 import prisma from './prisma.js';
-import { getTodayRange } from '../utils/timezone.js';
 import { tallyGroupedRuns, adjustForHandledInFs } from './assignmentStatsAggregation.js';
 
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Aggregate today's pipeline activity for a workspace, used by the Review
- * Queue's auto-assign empty-state panel. Returns counts of each decision
- * outcome plus a one-row preview of the most recent auto-assignment, so the
- * empty page has something interesting to show when auto-assign is doing
- * its job and the queue is genuinely empty.
+ * Aggregate the last 24 hours of pipeline activity for a workspace, used by
+ * the Review Queue's auto-assign empty-state panel.
  *
- * "Today" is bounded by the workspace timezone so the stats line up with
- * what the coordinator considers the current shift.
+ * IMPORTANT — window choice:
+ * Originally this used a workspace-tz "today" window (midnight to midnight in
+ * the workspace's local timezone). That made the counts disagree with the
+ * destination tabs whenever a row created late yesterday Pacific was visible
+ * in the rolling-24h destination but excluded by today's calendar bounds.
+ * The user reported "card says 0 but the tab shows 3" exactly because of
+ * this. The fix is to use the same rolling-24h window the destination tabs
+ * use — that way clicking a card always lands on a tab whose count matches.
+ *
+ * The empty state header label was renamed from "TODAY" to "LAST 24H" to
+ * reflect this honestly.
  *
  * Pure-ish: takes Prisma + tz, returns a plain object. Nothing in here
  * mutates state.
  *
  * @param {number} workspaceId
- * @param {string} timezone     IANA zone for the workspace
+ * @param {string} timezone     IANA zone for the workspace (kept on the
+ *                              response so the UI can format times correctly,
+ *                              but no longer used to anchor the window).
  * @returns {Promise<{
- *   range: { start: string, end: string, timezone: string },
+ *   range: { start: string, end: string, timezone: string, label: string },
  *   totalRuns: number,
  *   autoAssigned: number,
  *   approved: number,
@@ -30,15 +39,16 @@ import { tallyGroupedRuns, adjustForHandledInFs } from './assignmentStatsAggrega
  *   rebounds: number,
  *   noiseFiltered: number,
  *   pipelineBypass: number,
- *   latestAutoAssignment: null | { runId: number, ticketSubject: string, ticketId: number, freshserviceTicketId: string|null, techName: string|null, techPhotoUrl: string|null, decidedAt: string },
+ *   recentAutoAssignments: Array<{ runId: number, ticketSubject: string, ticketId: number, freshserviceTicketId: string|null, techName: string|null, techPhotoUrl: string|null, decidedAt: string }>,
  * }>}
  */
 export async function getTodayStats(workspaceId, timezone) {
-  const { start, end } = getTodayRange(timezone);
+  const end = new Date();
+  const start = new Date(end.getTime() - TWENTY_FOUR_HOURS_MS);
 
-  // One grouped query for outcome counts. createdAt bounds today's runs in
-  // the workspace's local day window; updatedAt would let stale "running"
-  // runs from yesterday count today, which is wrong.
+  // One grouped query for outcome counts. createdAt bounds the window;
+  // updatedAt would let stale "running" runs from days ago count today,
+  // which is wrong.
   const grouped = await prisma.assignmentPipelineRun.groupBy({
     by: ['status', 'decision'],
     where: {
@@ -52,12 +62,8 @@ export async function getTodayStats(workspaceId, timezone) {
 
   // "Handled in FS" — pipeline runs that completed as pending_review BUT
   // whose ticket later got an assignedTechId (the agent grabbed it in FS
-  // before the admin could review). This count matches what the
-  // "Manually in FreshService" sub-tab shows, so clicking the card
-  // navigates to a list with the same number of rows. Pipeline-bypass
-  // tickets (those that never had a run at all) are surfaced separately
-  // as `pipelineBypass` below — listing them in the same tab would be
-  // confusing because they have no AI Suggestion / Decision columns.
+  // before the admin could review). Identical filters + window as the
+  // "Manually in FreshService" sub-tab so the count matches exactly.
   const handledInFs = await prisma.assignmentPipelineRun.count({
     where: {
       workspaceId,
@@ -69,11 +75,10 @@ export async function getTodayStats(workspaceId, timezone) {
   });
   adjustForHandledInFs(tally, handledInFs);
 
-  // Pipeline-bypass — tickets that arrived today and got assigned in FS
-  // entirely outside our system (no pipeline run created at all, usually
-  // because the agent grabbed it in the ~30s window before our next poll).
-  // Surfaced as a small pill in the empty-state's process row so the admin
-  // can see how many tickets are slipping past auto-assign.
+  // Pipeline-bypass — tickets that arrived in the last 24h and got assigned
+  // in FS entirely outside our system (no pipeline run created at all,
+  // usually because the agent grabbed it in the ~30s window before our next
+  // poll). Surfaced as a separate pill so it doesn't conflate with handledInFs.
   const [assignedTodayCount, pipelineSeenTicketIds] = await Promise.all([
     prisma.ticket.count({
       where: {
@@ -104,14 +109,12 @@ export async function getTodayStats(workspaceId, timezone) {
     },
   });
 
-  // Rebound activity: tickets that bounced back today and triggered a fresh
-  // pipeline run (or hit the rebound_exhausted manual-review state). We
-  // count any run whose triggerSource is rebound* OR whose reboundFrom
-  // metadata is set — covers both fresh rebound runs and edge cases where
-  // metadata was attached but the trigger source label drifted. Useful for
-  // the empty-state panel because the "in progress" tile is a snapshot
-  // that misses brief rebound runs (LLM finishes in 30-60s); a daily count
-  // persists across refreshes so the admin sees rebounds happened.
+  // Rebound activity in the window. Counts any run whose triggerSource is
+  // rebound* OR whose reboundFrom metadata is set — covers both fresh
+  // rebound runs and edge cases where metadata was attached but the trigger
+  // source label drifted. Useful because the "in progress" tile is a
+  // snapshot that misses brief rebound runs (LLM finishes in 30-60s); a
+  // 24h count persists across refreshes so the admin sees rebounds happened.
   const rebounds = await prisma.assignmentPipelineRun.count({
     where: {
       workspaceId,
@@ -123,9 +126,10 @@ export async function getTodayStats(workspaceId, timezone) {
     },
   });
 
-  // Latest auto-assignment for the "AI just did this" preview. Best signal
-  // that the system is alive and working when the queue page is empty.
-  const latest = await prisma.assignmentPipelineRun.findFirst({
+  // Last 10 auto-assignments — feeds the recent activity feed at the bottom
+  // of the empty state. Was previously a single "most recent" row; expanded
+  // so the admin can see the AI's recent batch at a glance.
+  const recentRuns = await prisma.assignmentPipelineRun.findMany({
     where: {
       workspaceId,
       createdAt: { gte: start, lte: end },
@@ -133,6 +137,7 @@ export async function getTodayStats(workspaceId, timezone) {
       assignedTechId: { not: null },
     },
     orderBy: { updatedAt: 'desc' },
+    take: 10,
     select: {
       id: true,
       updatedAt: true,
@@ -146,6 +151,7 @@ export async function getTodayStats(workspaceId, timezone) {
       start: start.toISOString(),
       end: end.toISOString(),
       timezone,
+      label: 'Last 24h',
     },
     totalRuns: tally.totalRuns,
     autoAssigned: tally.autoAssigned,
@@ -158,18 +164,16 @@ export async function getTodayStats(workspaceId, timezone) {
     rebounds,
     noiseFiltered,
     pipelineBypass,
-    latestAutoAssignment: latest
-      ? {
-        runId: latest.id,
-        ticketId: latest.ticket?.id,
-        ticketSubject: latest.ticket?.subject || '(no subject)',
-        freshserviceTicketId: latest.ticket?.freshserviceTicketId
-          ? String(latest.ticket.freshserviceTicketId)
-          : null,
-        techName: latest.assignedTech?.name || null,
-        techPhotoUrl: latest.assignedTech?.photoUrl || null,
-        decidedAt: latest.updatedAt.toISOString(),
-      }
-      : null,
+    recentAutoAssignments: recentRuns.map((r) => ({
+      runId: r.id,
+      ticketId: r.ticket?.id,
+      ticketSubject: r.ticket?.subject || '(no subject)',
+      freshserviceTicketId: r.ticket?.freshserviceTicketId
+        ? String(r.ticket.freshserviceTicketId)
+        : null,
+      techName: r.assignedTech?.name || null,
+      techPhotoUrl: r.assignedTech?.photoUrl || null,
+      decidedAt: r.updatedAt.toISOString(),
+    })),
   };
 }
