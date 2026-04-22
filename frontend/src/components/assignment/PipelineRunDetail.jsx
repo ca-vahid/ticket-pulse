@@ -219,10 +219,59 @@ function ReasoningCard({ reasoning, recommendations }) {
           <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
         </div>
         <h4 className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Overall Reasoning</h4>
+        <span className="ml-auto text-[10px] font-medium text-indigo-500/80 uppercase tracking-wider">Internal</span>
       </div>
       <p className="text-sm text-slate-700 leading-relaxed">
         <HighlightText text={reasoning} techNames={techNames} />
       </p>
+    </div>
+  );
+}
+
+function AgentBriefingCard({ recommendation, decision }) {
+  if (!recommendation) return null;
+
+  const isNoise = decision === 'noise_dismissed' || (Array.isArray(recommendation.recommendations) && recommendation.recommendations.length === 0);
+  const briefing = isNoise ? recommendation.closureNoticeHtml : recommendation.agentBriefingHtml;
+  const fieldName = isNoise ? 'closureNoticeHtml' : 'agentBriefingHtml';
+
+  if (!briefing) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+            <MessageSquare className="w-3.5 h-3.5 text-amber-700" />
+          </div>
+          <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wide">What the agent will see</h4>
+          <span className="ml-auto text-[10px] font-medium text-amber-700/80 uppercase tracking-wider">Public note</span>
+        </div>
+        <p className="text-xs text-amber-800/90">
+          The LLM did not produce a <code className="font-mono bg-amber-100 px-1 rounded">{fieldName}</code> for this run.
+          On sync, the FreshService note will fall back to {isNoise ? 'a generic closure message' : 'the internal reasoning above'} — which may leak routing logic.
+          Consider re-running the pipeline to get a clean public briefing.
+        </p>
+      </div>
+    );
+  }
+
+  const safeHtml = sanitizeTicketHtml(briefing);
+
+  return (
+    <div className="bg-gradient-to-br from-emerald-50 via-teal-50 to-slate-50 border border-emerald-100 rounded-xl p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+          <MessageSquare className="w-3.5 h-3.5 text-emerald-700" />
+        </div>
+        <h4 className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">
+          {isNoise ? 'Closure notice (what the agent will see)' : 'What the agent will see'}
+        </h4>
+        <span className="ml-auto text-[10px] font-medium text-emerald-700/80 uppercase tracking-wider">Public note</span>
+      </div>
+      <div
+        className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-a:text-emerald-700"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: safeHtml }}
+      />
     </div>
   );
 }
@@ -644,6 +693,11 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           </div>
         )}
       </div>
+
+      {/* Public note preview — exactly what gets posted to FreshService for the assignee. */}
+      {run.recommendation && (run.decision === 'auto_assigned' || run.decision === 'pending_review' || run.decision === 'approved' || run.decision === 'modified' || run.decision === 'noise_dismissed') && (
+        <AgentBriefingCard recommendation={run.recommendation} decision={run.decision} />
+      )}
 
       {/* Handoff history strip — shows every pickup/rejection/reassignment for this ticket */}
       {ticket?.id && (

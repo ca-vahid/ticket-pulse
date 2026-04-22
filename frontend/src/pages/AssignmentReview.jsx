@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { assignmentAPI, workspaceAPI, syncAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -160,6 +160,29 @@ function ManualTriggerPanel({ isAdmin = false }) {
 // remount the component (and lose input focus) each time state changes.
 
 function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTechSelect, approving, onCancel, onSubmit, techPhotos }) {
+  const [showOtherPicker, setShowOtherPicker] = useState(false);
+  const [otherSearch, setOtherSearch] = useState('');
+
+  const recTechIds = useMemo(() => new Set(recs.map((r) => r.techId)), [recs]);
+  const allTechs = useMemo(() => Object.values(techPhotos || {}), [techPhotos]);
+  const otherTechs = useMemo(
+    () => allTechs.filter((t) => !recTechIds.has(t.id)).sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+    [allTechs, recTechIds],
+  );
+  const filteredOthers = useMemo(() => {
+    const q = otherSearch.trim().toLowerCase();
+    if (!q) return otherTechs;
+    return otherTechs.filter(
+      (t) => t.name?.toLowerCase().includes(q) || t.location?.toLowerCase().includes(q) || t.email?.toLowerCase().includes(q),
+    );
+  }, [otherTechs, otherSearch]);
+
+  const isOverride = !!selectedTechId && !recTechIds.has(selectedTechId);
+  const overrideTech = isOverride ? techPhotos?.[selectedTechId] : null;
+  const overrideInitials = overrideTech?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
+
+  const submitDisabled = approving || !selectedTechId || (isOverride && !note.trim());
+
   return (
     <>
       <div className="px-3 pt-3 pb-1.5 sm:px-3">
@@ -188,15 +211,91 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
               </button>
             );
           })}
+
+          {isOverride && overrideTech && (
+            <div className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 sm:py-1.5 bg-blue-50 ring-1 ring-blue-300">
+              {overrideTech.photoUrl ? (
+                <img src={overrideTech.photoUrl} alt="" className="w-8 h-8 sm:w-6 sm:h-6 rounded-full object-cover flex-shrink-0 ring-2 ring-blue-400" />
+              ) : (
+                <span className="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-blue-100 text-blue-700 ring-2 ring-blue-400 text-[10px] sm:text-[9px] font-bold flex items-center justify-center flex-shrink-0">{overrideInitials}</span>
+              )}
+              <span className="text-sm sm:text-xs font-medium truncate flex-1 text-blue-900">{overrideTech.name}</span>
+              <span className="text-[9px] sm:text-[8px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700 px-1.5 sm:px-1 rounded flex-shrink-0">Override</span>
+            </div>
+          )}
         </div>
+
+        {!showOtherPicker ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setShowOtherPicker(true); }}
+            className="mt-2 w-full text-left text-[11px] sm:text-[10px] font-medium text-blue-600 hover:text-blue-700 px-2 py-1.5 sm:py-1 rounded hover:bg-blue-50 transition-colors"
+          >
+            + Assign to someone else
+          </button>
+        ) : (
+          <div className="mt-2 border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm">
+            <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-200">
+              <div className="relative">
+                <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={otherSearch}
+                  onChange={(e) => setOtherSearch(e.target.value)}
+                  placeholder="Search by name or location..."
+                  className="w-full pl-6 pr-2 py-1 text-xs border border-slate-200 rounded bg-white focus:ring-1 focus:ring-blue-200 focus:border-blue-300"
+                  onClick={(e) => e.stopPropagation()}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="max-h-36 overflow-y-auto">
+              {filteredOthers.map((t) => {
+                const isActive = selectedTechId === t.id;
+                const initials = t.name?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTechSelect(t.id);
+                      setShowOtherPicker(false);
+                      setOtherSearch('');
+                    }}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs border-b border-slate-100 last:border-0 transition-colors ${isActive ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                  >
+                    {t.photoUrl ? (
+                      <img src={t.photoUrl} alt="" className="w-5 h-5 rounded-full object-cover flex-shrink-0" />
+                    ) : (
+                      <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 text-[9px] font-bold flex items-center justify-center flex-shrink-0">{initials}</span>
+                    )}
+                    <span className="font-medium text-slate-800 truncate flex-1">{t.name}</span>
+                    {t.location && <span className="text-[10px] text-slate-400 truncate flex-shrink-0">{t.location}</span>}
+                  </button>
+                );
+              })}
+              {filteredOthers.length === 0 && (
+                <div className="px-3 py-3 text-center text-[11px] text-slate-400">No technicians found</div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setShowOtherPicker(false); setOtherSearch(''); }}
+              className="w-full text-[10px] font-medium text-slate-500 hover:text-slate-700 py-1 border-t border-slate-100"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
       <div className="px-3 pb-2">
         <input
           type="text"
           value={note}
           onChange={(e) => onNoteChange(e.target.value)}
-          placeholder="Note (optional)"
-          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs focus:ring-2 focus:ring-blue-200 focus:border-blue-300 bg-slate-50"
+          placeholder={isOverride ? 'Why this technician? (required)' : 'Note (optional)'}
+          className={`w-full border rounded-lg px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs focus:ring-2 focus:border-blue-300 bg-slate-50 ${isOverride && !note.trim() ? 'border-amber-300 focus:ring-amber-200' : 'border-slate-200 focus:ring-blue-200'}`}
           onClick={(e) => e.stopPropagation()}
         />
       </div>
@@ -211,11 +310,11 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
         <button
           type="button"
           onClick={(e) => onSubmit(e, run)}
-          disabled={approving || !selectedTechId}
-          className="px-4 py-2 sm:px-3 sm:py-1.5 bg-green-600 text-white rounded-lg sm:rounded-md text-sm sm:text-[11px] font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-1.5 sm:gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+          disabled={submitDisabled}
+          className={`px-4 py-2 sm:px-3 sm:py-1.5 text-white rounded-lg sm:rounded-md text-sm sm:text-[11px] font-semibold disabled:opacity-50 transition-colors flex items-center gap-1.5 sm:gap-1 touch-manipulation min-h-[44px] sm:min-h-0 ${isOverride ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'}`}
         >
           {approving ? <Loader2 className="w-4 h-4 sm:w-3 sm:h-3 animate-spin" /> : <Check className="w-4 h-4 sm:w-3 sm:h-3" />}
-          Approve
+          {isOverride ? 'Assign' : 'Approve'}
         </button>
       </div>
     </>
@@ -229,7 +328,7 @@ function QuickApprovePopover({ run, align = 'right', quickApproveId, popoverRef,
     <div
       ref={popoverRef}
       onClick={(e) => e.stopPropagation()}
-      className={`hidden md:block absolute z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
+      className={`hidden md:block absolute z-50 mt-1 w-72 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
       style={{ top: '100%' }}
     >
       <QuickApproveInner run={run} recs={recs} {...innerProps} />

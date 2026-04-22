@@ -64,6 +64,38 @@ Call **submit_recommendation** with your final ranked list. You MUST always call
 
 If the ticket is noise/FYI, call submit_recommendation with an empty recommendations array and explain why.
 
+## Step 8: Write the Agent-Facing Briefing (CRITICAL)
+The \`submit_recommendation\` tool takes TWO separate write-ups, and you must populate both correctly:
+
+**\`overallReasoning\` — INTERNAL audit log.** Full transparency. Mention scores, ranks, candidates you considered and dropped, workload and fairness reasoning, on-shift status, rebound history. This is for the admin and never reaches the assignee.
+
+**\`agentBriefingHtml\` — PUBLIC note posted to the ticket.** This is what the assigned technician will read. Treat it like a handoff note from a teammate.
+
+For the briefing, **never** mention any of the following — they reveal our routing logic and let agents game it:
+- Numerical scores, ranks, percentages, or confidence values
+- Names of OTHER technicians who were considered or ruled out
+- Workload counts or "X has fewer open tickets" reasoning
+- Competency proficiency levels, IT levels, seniority labels
+- Other agents being OFF, WFH, or on leave
+- The words "algorithm", "system", "LLM", "AI", "model", "pipeline", "score", "ranked", "fairness", "rebound", "queue"
+- Internal IDs, run IDs, or pipeline metadata
+
+Do include:
+- A 1-2 sentence recap of what the requester needs
+- A short, plain-language reason this is being routed to them ("you've handled similar VPN tickets recently", "this needs on-site support in Vancouver")
+- One suggested first step or thing to verify with the requester, when it's obvious
+- Any directly relevant KB links or related ticket IDs surfaced during research
+
+Format with simple HTML: \`<b>\`, \`<i>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<a href>\`, \`<h3>\` only. Aim for 60-180 words.
+
+**Good example** (assignment):
+\`<p>The requester needs help connecting to the corporate VPN from a new MacBook — they're getting a certificate trust error.</p><p>You've recently resolved several similar Mac VPN cert issues, so you're a good fit here.</p><p>Suggested first check: confirm the device has the latest InternalCA profile installed via Jamf Self Service before troubleshooting the client itself.</p>\`
+
+**Bad example** (DO NOT WRITE):
+\`<p>You ranked #1 with a score of 0.92. Other candidates (Alex, Jordan) had higher workloads (8 and 11 open tickets vs your 3). Your VPN proficiency is Expert (level 5).</p>\`
+
+For noise dismissals (empty recommendations), populate \`closureNoticeHtml\` instead with a brief, neutral explanation that the ticket needs no helpdesk follow-up. Keep it under 300 characters and never mention "noise", "spam", or any classifier language.
+
 ## Decision Rules (in priority order)
 1. **Availability** — Never assign to someone who is OFF for the full day. For half-day leaves, treat the agent as available for the other half — read \`availabilityNote\` to decide whether the ticket fits that window. Deprioritize agents whose shift has ended or hasn't started yet.
 2. **On-shift preference** — Prefer agents currently on shift with time remaining. An agent with 6 hours left is better than one ending in 30 minutes for non-urgent work.
@@ -89,6 +121,10 @@ function needsPromptUpgrade(systemPrompt = '') {
   if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('search_decision_notes')) {
     return true;
   }
+  // Add Step 8 (agent-facing briefing) if the prompt predates the public-note split.
+  if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('agentBriefingHtml')) {
+    return true;
+  }
   return false;
 }
 
@@ -101,6 +137,47 @@ Call **search_decision_notes** with keywords from the ticket (e.g., category nam
 - Are there routing preferences or patterns the admin has established?
 
 Admin decision notes carry high weight — if an admin has explicitly stated a routing preference, follow it unless circumstances have changed.`;
+
+const AGENT_BRIEFING_STEP = `
+
+## Step 8: Write the Agent-Facing Briefing (CRITICAL)
+The \`submit_recommendation\` tool takes TWO separate write-ups, and you must populate both correctly:
+
+**\`overallReasoning\` — INTERNAL audit log.** Full transparency. Mention scores, ranks, candidates you considered and dropped, workload and fairness reasoning, on-shift status, rebound history. This is for the admin and never reaches the assignee.
+
+**\`agentBriefingHtml\` — PUBLIC note posted to the ticket.** This is what the assigned technician will read. Treat it like a handoff note from a teammate.
+
+For the briefing, **never** mention any of the following — they reveal our routing logic and let agents game it:
+- Numerical scores, ranks, percentages, or confidence values
+- Names of OTHER technicians who were considered or ruled out
+- Workload counts or "X has fewer open tickets" reasoning
+- Competency proficiency levels, IT levels, seniority labels
+- Other agents being OFF, WFH, or on leave
+- The words "algorithm", "system", "LLM", "AI", "model", "pipeline", "score", "ranked", "fairness", "rebound", "queue"
+- Internal IDs, run IDs, or pipeline metadata
+
+Do include:
+- A 1-2 sentence recap of what the requester needs
+- A short, plain-language reason this is being routed to them ("you've handled similar VPN tickets recently", "this needs on-site support in Vancouver")
+- One suggested first step or thing to verify with the requester, when it's obvious
+- Any directly relevant KB links or related ticket IDs surfaced during research
+
+Format with simple HTML: \`<b>\`, \`<i>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<a href>\`, \`<h3>\` only. Aim for 60-180 words.
+
+**Good example** (assignment):
+\`<p>The requester needs help connecting to the corporate VPN from a new MacBook — they're getting a certificate trust error.</p><p>You've recently resolved several similar Mac VPN cert issues, so you're a good fit here.</p><p>Suggested first check: confirm the device has the latest InternalCA profile installed via Jamf Self Service before troubleshooting the client itself.</p>\`
+
+**Bad example** (DO NOT WRITE):
+\`<p>You ranked #1 with a score of 0.92. Other candidates (Alex, Jordan) had higher workloads (8 and 11 open tickets vs your 3). Your VPN proficiency is Expert (level 5).</p>\`
+
+For noise dismissals (empty recommendations), populate \`closureNoticeHtml\` instead with a brief, neutral explanation that the ticket needs no helpdesk follow-up. Keep it under 300 characters and never mention "noise", "spam", or any classifier language.`;
+
+function injectAgentBriefingStep(prompt) {
+  if (prompt.includes('agentBriefingHtml')) return prompt;
+  // Append after the prompt body — Step 8 is always last in the canonical version,
+  // so a tail-append keeps any custom Steps 1-7 intact.
+  return prompt.trimEnd() + '\n' + AGENT_BRIEFING_STEP;
+}
 
 function upgradeLegacyPrompt(systemPrompt = '') {
   if (!needsPromptUpgrade(systemPrompt)) {
@@ -121,7 +198,14 @@ function upgradeLegacyPrompt(systemPrompt = '') {
         upgraded += DECISION_NOTES_STEP;
       }
     }
-    return upgraded;
+    return injectAgentBriefingStep(upgraded);
+  }
+
+  // If only missing the agent briefing step, inject it without disturbing the rest.
+  if (!systemPrompt.includes('agentBriefingHtml')
+      && systemPrompt.includes('search_decision_notes')
+      && systemPrompt.includes('get_technician_ad_profile')) {
+    return injectAgentBriefingStep(systemPrompt);
   }
 
   if (systemPrompt.includes('You are an IT helpdesk ticket assignment assistant.')) {
