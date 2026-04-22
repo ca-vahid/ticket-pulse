@@ -612,6 +612,18 @@ class AssignmentPipelineService {
       // pending_review stays null (the run really is still pending).
       const pipelineDidDecide = isPipelineFinalDecision(decision);
 
+      // Stamp syncStatus='pending' atomically with the decision so a process
+      // crash between "decision finalized" and "FS sync kicked off" doesn't
+      // leave the run permanently stuck. The fire-and-forget execute() call
+      // below will overwrite to 'synced' / 'failed' / 'skipped' / 'dry_run'
+      // when it actually runs. The new sweepOrphanedSyncRuns() recovers any
+      // run that's still 'pending' a few minutes later (process died mid-flight).
+      // Only set this for outcomes we actually try to sync — pending_review and
+      // failed don't trigger a sync attempt.
+      const willTriggerSync =
+        decision === 'auto_assigned'
+        || (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise);
+
       await assignmentRepository.updatePipelineRun(runId, {
         status: finalStatus,
         decision,
@@ -622,6 +634,7 @@ class AssignmentPipelineService {
         errorMessage,
         ...(decision === 'auto_assigned' && topRec?.techId ? { assignedTechId: topRec.techId } : {}),
         ...(pipelineDidDecide ? { decidedAt: new Date() } : {}),
+        ...(willTriggerSync ? { syncStatus: 'pending' } : {}),
       });
 
       if (recommendation) {

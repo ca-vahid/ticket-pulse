@@ -1,6 +1,16 @@
-export const APP_VERSION = '1.9.81-preview';
+export const APP_VERSION = '1.9.82-preview';
 
 export const changelog = [
+  {
+    version: '1.9.82-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'fixed', text: 'Auto-assigned tickets could get permanently stuck if the backend restarted at the wrong moment -- the pipeline updated the run record with decision=auto_assigned + decidedAt, then dispatched freshServiceActionService.execute() as a fire-and-forget promise. If the Node.js process restarted during the ~100ms window before that promise made its first DB write (e.g. backend deploy mid-pipeline), the FS sync never completed: our DB showed "auto-assigned to X" but the ticket sat unassigned in FreshService forever, with no error trail. Confirmed on prod: run #572 (Lucy MacKenzie / "Computer Mouse" -> Gaby Tonnova) was created at 16:51:07 right after a v1.9.81 deploy and got stuck this way' },
+      { type: 'new', text: 'New _recoverOrphanedSyncs() runs every sync cycle -- finds completed runs with decision=auto_assigned/noise_dismissed where decidedAt is set but syncStatus is still null or "pending" and decidedAt is older than 5 min (conservative threshold to avoid racing slow but in-flight syncs). For each orphan, re-invokes freshServiceActionService.execute() to push the assignment to FS and update syncStatus correctly. Self-healing -- no manual intervention needed for this class of failure going forward' },
+      { type: 'improved', text: 'Stamp syncStatus=\'pending\' atomically with the decisionAt update -- gives the recovery sweep a clear "this run intends to sync" signal even before the fire-and-forget execute() call has its first chance to update the record. Successful syncs overwrite to \'synced\'/\'failed\'/\'skipped\'/\'dry_run\' as today; only crashed syncs leave it as \'pending\' for the sweep to pick up. Only set when a sync is actually expected (auto_assigned, or noise_dismissed when autoCloseNoise is on)' },
+      { type: 'fixed', text: 'New findOrphanedSyncRuns() helper on assignmentRepository -- powers the recovery sweep. Conservative WHERE clause: status=\'completed\' AND decision IN (auto_assigned, noise_dismissed) AND syncStatus IN (null, \'pending\') AND decidedAt < (now - threshold). Returns just the IDs + decision + workspace context so the sweep can call execute() per orphan' },
+    ],
+  },
   {
     version: '1.9.81-preview',
     date: 'April 22, 2026',

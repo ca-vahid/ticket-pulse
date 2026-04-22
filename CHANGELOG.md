@@ -2,6 +2,79 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.82-preview] - 2026-04-22
+
+### Bug fix: auto-assigned runs could get permanently stuck on backend restart
+
+User reported a fresh symptom right after the v1.9.81 deploy: ticket #219719 ("Computer Mouse" by Lucy MacKenzie) showed in our app as auto-assigned to Gaby Tonnova, but FreshService still showed it unassigned. Two more tickets were similarly stranded.
+
+#### Root cause
+
+Inside `_executeRun`, after the LLM finalizes a decision the code does:
+
+1. `await assignmentRepository.updatePipelineRun(runId, { decision: 'auto_assigned', decidedAt: new Date(), ... })`
+2. `freshServiceActionService.execute(runId, ...).catch(err => logger.warn(...))` — **fire-and-forget**
+
+If the Node.js process restarts in the ~100ms window between step 1 (DB committed) and step 2's first internal DB write, the detached promise never makes any progress. From outside, the run looks "decided" (`decisionAt` set, `decision='auto_assigned'`) but `syncStatus` is `NULL` and the FS API was never called. Our DB believes the assignment happened; FS doesn't know.
+
+Verified against prod:
+
+```
+run #572 ticket #219719 "Computer Mouse"
+  decision=auto_assigned  decidedAt=2026-04-22T16:51:41Z  assignedTechId=20 (Gaby)
+  syncStatus=NULL         syncError=NULL                  syncedAt=NULL
+```
+
+PR #13 backend deploy started at 16:49:20Z and finished ~16:51:01Z (Azure App Service warm-up after that). Run #572 was created at 16:51:07Z and decided at 16:51:41Z — right at the restart boundary. Classic mid-flight loss.
+
+#### Fix — three layers
+
+**1. Stamp `syncStatus='pending'` atomically with the decision** (assignmentPipelineService).
+The decision update now also sets `syncStatus='pending'` when the outcome is one we'll try to sync (`auto_assigned`, or `noise_dismissed` when `autoCloseNoise` is on). Successful syncs overwrite to `'synced'`/`'failed'`/`'skipped'`/`'dry_run'` as today; only crashed syncs leave it as `'pending'` for the sweep to pick up.
+
+**2. New `findOrphanedSyncRuns()` helper** (assignmentRepository).
+Conservative WHERE clause:
+
+```
+status='completed'
+AND decision IN ('auto_assigned', 'noise_dismissed')
+AND syncStatus IN (NULL, 'pending')
+AND decidedAt < now() - INTERVAL '5 minutes'
+```
+
+The 5-minute threshold avoids racing in-flight syncs that are just slow.
+
+**3. New `_recoverOrphanedSyncs()` hooks into the existing scheduled sync** (syncService).
+Runs as a fire-and-forget after the polling step in every sync cycle. For each orphan, calls `freshServiceActionService.execute(runId, workspaceId, dryRunMode)` to push the assignment to FS and update `syncStatus`. Self-healing — no manual intervention needed for this class of failure going forward.
+
+#### One-shot fix applied to prod
+
+Lucy's run #572 was manually recovered by directly calling `freshServiceActionService.execute(572, 1, false)` against prod. Result:
+
+```
+FreshService: ticket assigned    { ticketId: 219719, agentId: 1000008456 (Gaby), runId: 572 }
+FreshService: note added         { ticketId: 219719, runId: 572 }
+FreshService sync completed      { runId: 572, ticketGone: false }
+```
+
+Ticket is now assigned in FreshService.
+
+#### Bonus: Neville's noise-flagged ticket
+
+Also un-flagged ticket #219711 ("Threat Intelligence" by Neville Vyland) on prod (`is_noise=true → false`) so the next poll cycle can analyze it. The over-matching noise rule #11 has been disabled by the user.
+
+#### Files touched
+
+- `backend/src/services/assignmentPipelineService.js` — set `syncStatus='pending'` when decision is finalized
+- `backend/src/services/assignmentRepository.js` — new `findOrphanedSyncRuns()` helper
+- `backend/src/services/syncService.js` — new `_recoverOrphanedSyncs()` + import + hook into sync cycle
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.82-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No DB schema change. 65 existing tests still pass.
+
+---
+
 ## [1.9.81-preview] - 2026-04-22
 
 ### Bug fix: "Picked up in FreshService" undercounted; new noise-filtered visibility
