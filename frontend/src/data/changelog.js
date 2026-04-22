@@ -1,6 +1,17 @@
-export const APP_VERSION = '1.9.79-preview';
+export const APP_VERSION = '1.9.80-preview';
 
 export const changelog = [
+  {
+    version: '1.9.80-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'fixed', text: 'Auto-Assign empty-state stats are now honest -- the panel showed "1 auto-assigned out of 7 total tickets" but the visible tiles only added up to 3, because the approved/modified bucket (admin clicked approve in the app, which is a real outcome path) wasn\u2019t shown anywhere. Restructured the panel: the hero card now reports total tickets processed today as the headline, and a 4-tile outcome row breaks down the THREE distinct ways a ticket gets assigned -- "Auto-assigned by AI", "Approved by you", "Picked up in FreshService" (was "Handled in FS" sub-label) -- plus "Dismissed as noise" for the closure path. The math finally adds up' },
+      { type: 'new', text: 'Rebounds-today metric -- the "In Progress" tile is a snapshot that easily misses brief rebound runs (LLM finishes in 30-60s), so a coordinator who happened to refresh between rebound start and finish would see 0 even when a rejection had just triggered re-routing. Added today.rebounds count (runs with triggerSource=rebound* OR reboundFrom set) to the queue-status response, surfaced as a small amber pill in the new "process state" row. Persists across refreshes so admins see what happened, not just what\u2019s happening this exact second' },
+      { type: 'improved', text: 'Replaced the static 4-tile secondary row with a context-aware "process state" row that only renders pills for non-zero metrics (currently analyzing / rebounds today / needs your attention / queued for after-hours). When nothing\u2019s happening the panel stays focused on the outcome breakdown instead of drowning in greyed-out zeros' },
+      { type: 'improved', text: 'Better terminology throughout the empty-state panel -- "Auto-assigned by AI" / "Approved by you" / "Picked up in FreshService" make the three distinct paths obvious at a glance. DRY-RUN badge moved into the "Auto-Assign is ON" pill in the header where it belongs, instead of buried in the hero sub-line. Excluded-group count moved into the explanatory text so the layout stays tight' },
+      { type: 'improved', text: '1 new test (66 total) verifying the outcome buckets + handled-in-FS adjustment together account for every completed run \u2014 catches future drift where a new decision value gets added but isn\u2019t bucketed correctly' },
+    ],
+  },
   {
     version: '1.9.79-preview',
     date: 'April 22, 2026',

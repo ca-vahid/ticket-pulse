@@ -2,6 +2,81 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.80-preview] - 2026-04-22
+
+### Auto-Assign empty-state stats: honest math + rebounds visibility + clearer terminology
+
+User pushed back on the v1.9.78 panel: it claimed "1 auto-assigned out of 7 total tickets" but the visible tiles only added up to 3, because the **approved/modified** bucket (admin clicked approve in the app — a real outcome path) wasn't shown anywhere. Also flagged that the "In Progress" tile showed `0` during a rejection event when the LLM was actively re-routing the ticket.
+
+#### Three real assignment paths, finally all visible
+
+A ticket can end up assigned via **three** distinct paths that the panel needs to surface separately:
+
+1. **Auto-assigned by AI** — `decision='auto_assigned'` (no human in the loop)
+2. **Approved by you** — `decision IN ('approved', 'modified')` (pipeline ran, admin clicked approve, possibly with override)
+3. **Picked up in FreshService** — `decision='pending_review' AND assignedTechId IS NOT NULL` (agent grabbed it directly, bypassing our app)
+
+Plus the closure path:
+
+4. **Dismissed as noise** — `decision='noise_dismissed'`
+
+The previous panel only showed paths 1, 3, and 4. Path 2 was invisible. After verifying against prod (4 auto-assigned + 4 approved + 0 handled-in-FS + 1 noise = **9 total**), restructured the layout:
+
+- **Hero card** now reports today's **total tickets processed** as the headline
+- **4-tile outcome row** breaks down the four paths with clear, distinct names
+- **Process-state pill row** (new) handles the live/transient metrics that aren't outcomes
+
+#### "Rebounds today" metric — fills the In-Progress gap
+
+The "In Progress" tile is a snapshot of `status='running'` runs in the moment the panel renders. Rebound runs (triggered when an agent rejects) typically complete in 30-60 seconds — so a coordinator who happened to refresh between rebound start and finish would see `0`, even when a rejection had just triggered re-routing.
+
+Added `today.rebounds` to the queue-status response — counts runs with `triggerSource IN ('rebound', 'rebound_exhausted')` OR `reboundFrom` not null, scoped to today's window. Persists across refreshes so admins see *what happened today*, not just *what's happening this exact second*.
+
+Surfaced as a small amber pill in the new context-aware "process state" row (next to currently-analyzing, needs-your-attention, queued-for-after-hours). The row only renders pills for non-zero metrics, so when nothing's happening it stays clean.
+
+#### Better terminology
+
+| Before | After | Why |
+|---|---|---|
+| "Auto-Assigned" (hero only) | **"Auto-assigned by AI"** (named tile) | Distinct from path 2; "AI" makes the autonomous-agent nature obvious |
+| (missing) | **"Approved by you"** | The third bucket the user called out — admin's manual approvals in the app |
+| "Handled in FS" | **"Picked up in FreshService"** | "Handled" was vague — this is specifically the agent-grabbed-it path |
+| "Noise dismissed" | **"Dismissed as noise"** | Reads as a passive outcome, matches the other tile labels grammatically |
+| "Needed review" sub: "excluded groups + rebound" | **"need(s) your attention"** sub: tooltip lists reasons | "Needed review" was confusing because every pending_review run "needs review"; this metric is specifically the *unusual* downgrades |
+| "In progress" sub: "LLM analyzing now" | **"currently analyzing"** | Sub-label folded into label for compactness |
+
+DRY-RUN badge moved from the hero sub-line into the "Auto-Assign is ON" pill in the header — that's where it semantically belongs (it's about the assign behavior, not about a particular stat).
+
+#### Files touched
+
+- `backend/src/services/assignmentDailyStats.js` — add `rebounds` count + JSDoc update
+- `backend/tests/statsAggregation.test.js` — 1 new accounting test (66 total now)
+- `frontend/src/pages/AssignmentReview.jsx` — restructure `AutoAssignActiveEmptyState`, add `SmallStatPill` component for the process-state row, swap labels
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.80-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No DB schema change. No new migration.
+
+#### Verified on prod
+
+Ran `getTodayStats()` against prod after the change — produces honest accounting:
+
+```
+totalRuns: 9
+autoAssigned: 4         (was visible)
+approved: 4             (was INVISIBLE — now in its own tile)
+handledInFs: 0
+noiseDismissed: 1
+rebounds: 1             (matches the user's "rejection happened" observation)
+manualReviewRequired: 0
+inProgress: 0
+queuedForLater: 0
+```
+
+4 + 4 + 0 + 1 = 9. Everything accounted for.
+
+---
+
 ## [1.9.79-preview] - 2026-04-22
 
 ### Bug fix: auto-decided runs silently vanished from the Decided / Dismissed tabs

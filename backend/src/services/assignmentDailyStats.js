@@ -27,6 +27,7 @@ import { tallyGroupedRuns, adjustForHandledInFs } from './assignmentStatsAggrega
  *   manualReviewRequired: number,
  *   inProgress: number,
  *   queuedForLater: number,
+ *   rebounds: number,
  *   latestAutoAssignment: null | { runId: number, ticketSubject: string, ticketId: number, freshserviceTicketId: string|null, techName: string|null, decidedAt: string },
  * }>}
  */
@@ -62,6 +63,25 @@ export async function getTodayStats(workspaceId, timezone) {
   });
   adjustForHandledInFs(tally, handledInFs);
 
+  // Rebound activity: tickets that bounced back today and triggered a fresh
+  // pipeline run (or hit the rebound_exhausted manual-review state). We
+  // count any run whose triggerSource is rebound* OR whose reboundFrom
+  // metadata is set — covers both fresh rebound runs and edge cases where
+  // metadata was attached but the trigger source label drifted. Useful for
+  // the empty-state panel because the "in progress" tile is a snapshot
+  // that misses brief rebound runs (LLM finishes in 30-60s); a daily count
+  // persists across refreshes so the admin sees rebounds happened.
+  const rebounds = await prisma.assignmentPipelineRun.count({
+    where: {
+      workspaceId,
+      createdAt: { gte: start, lte: end },
+      OR: [
+        { triggerSource: { in: ['rebound', 'rebound_exhausted'] } },
+        { reboundFrom: { not: null } },
+      ],
+    },
+  });
+
   // Latest auto-assignment for the "AI just did this" preview. Best signal
   // that the system is alive and working when the queue page is empty.
   const latest = await prisma.assignmentPipelineRun.findFirst({
@@ -94,6 +114,7 @@ export async function getTodayStats(workspaceId, timezone) {
     manualReviewRequired: tally.manualReviewRequired,
     inProgress: tally.inProgress,
     queuedForLater: tally.queuedForLater,
+    rebounds,
     latestAutoAssignment: latest
       ? {
         runId: latest.id,
