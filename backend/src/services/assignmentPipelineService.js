@@ -14,7 +14,7 @@ import logger from '../utils/logger.js';
 // rebound-context user-message logic and the auto-assign decision rules
 // without pulling in Prisma/Anthropic.
 import { buildUserMessage } from './assignmentUserMessage.js';
-import { isGroupExcluded } from './assignmentDecisionRules.js';
+import { isGroupExcluded, isPipelineFinalDecision } from './assignmentDecisionRules.js';
 
 const MAX_TURNS = 20;
 const CLOSED_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
@@ -604,6 +604,14 @@ class AssignmentPipelineService {
         errorMessage = `Group ${excludedGroupName} is excluded from auto-assignment — manual approval required.`;
       }
 
+      // Set decidedAt when the pipeline itself finalizes a decision. Without
+      // this, auto_assigned + noise_dismissed runs had decidedAt=NULL and
+      // were silently filtered out of the Decided/Dismissed tabs (which
+      // query by sinceField='decidedAt'). Admin-triggered decisions (via
+      // /decide + /dismiss) continue to set decidedAt themselves, and
+      // pending_review stays null (the run really is still pending).
+      const pipelineDidDecide = isPipelineFinalDecision(decision);
+
       await assignmentRepository.updatePipelineRun(runId, {
         status: finalStatus,
         decision,
@@ -613,6 +621,7 @@ class AssignmentPipelineService {
         fullTranscript,
         errorMessage,
         ...(decision === 'auto_assigned' && topRec?.techId ? { assignedTechId: topRec.techId } : {}),
+        ...(pipelineDidDecide ? { decidedAt: new Date() } : {}),
       });
 
       if (recommendation) {
