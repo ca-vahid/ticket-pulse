@@ -23,3 +23,20 @@ export function isGroupExcluded(ticketGroupId, excludedGroupIds) {
   if (!Number.isFinite(id)) return false;
   return excludedGroupIds.some((g) => Number(g) === id);
 }
+
+/**
+ * Returns true when the pipeline itself finalized the decision (no admin in
+ * the loop). Used by _executeRun to decide whether to stamp `decidedAt` on
+ * the run — which is what makes the run visible in the Decided/Dismissed
+ * tabs (they filter by sinceField='decidedAt').
+ *
+ * pending_review explicitly returns false: the run really is still pending
+ * an admin decision and should keep decidedAt=null until /decide or
+ * /dismiss is called.
+ *
+ * @param {string|null|undefined} decision
+ * @returns {boolean}
+ */
+export function isPipelineFinalDecision(decision) {
+  return decision === 'auto_assigned' || decision === 'noise_dismissed';
+}

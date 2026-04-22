@@ -1,6 +1,16 @@
-export const APP_VERSION = '1.9.78-preview';
+export const APP_VERSION = '1.9.79-preview';
 
 export const changelog = [
+  {
+    version: '1.9.79-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'fixed', text: 'Auto-assigned and noise-dismissed runs silently vanished from the Decided / Dismissed tabs -- both tabs filter by sinceField=\'decidedAt\', but _executeRun never set decidedAt on pipeline-finalized decisions (only admin actions via /decide + /dismiss did). So runs with decidedAt=NULL never satisfied the 24h/7d/30d/All time-range filter, making them invisible to anyone trusting those tabs to be a complete picture. History tab still showed them because it queries createdAt, masking the issue. Root cause verified on prod: 1 of 2 auto_assigned runs and 26 of 28 noise_dismissed runs had decidedAt=NULL. Fix: _executeRun now stamps decidedAt=now() when decision is auto_assigned or noise_dismissed. Admin-triggered decisions unchanged (they already set decidedAt). pending_review stays NULL until an admin actually decides' },
+      { type: 'fixed', text: 'freshServiceActionService.execute now clears decidedAt when downgrading an auto_assigned run to pending_review on preflight failure -- previously decidedAt stayed stamped from the original auto-assign, which would falsely surface the downgraded run in the Decided tab even though nobody had actually approved it' },
+      { type: 'database', text: 'Migration 20260422200000_backfill_decided_at_auto_decisions backfills decidedAt=updatedAt for all historical auto_assigned + noise_dismissed runs that currently have decidedAt=NULL. Deliberately excludes pending_review (which should stay NULL). Already applied to prod before this release; run `prisma migrate deploy` on any other environments before deploying' },
+      { type: 'improved', text: 'Extracted isPipelineFinalDecision() pure helper to assignmentDecisionRules.js with 5 unit tests covering auto_assigned, noise_dismissed, pending_review, admin-only outcomes (approved/modified/rejected), and defensive null/undefined/unknown handling. Suite total: 64 tests (was 59). Module coverage stays at 100%' },
+    ],
+  },
   {
     version: '1.9.78-preview',
     date: 'April 22, 2026',

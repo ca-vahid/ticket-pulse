@@ -1,4 +1,4 @@
-import { isGroupExcluded } from '../src/services/assignmentDecisionRules.js';
+import { isGroupExcluded, isPipelineFinalDecision } from '../src/services/assignmentDecisionRules.js';
 
 describe('isGroupExcluded — empty / null cases', () => {
   test('returns false when ticketGroupId is null', () => {
@@ -64,5 +64,46 @@ describe('isGroupExcluded — invalid input handling', () => {
   test('handles a single-element exclusion list', () => {
     expect(isGroupExcluded(42, [42])).toBe(true);
     expect(isGroupExcluded(43, [42])).toBe(false);
+  });
+});
+
+describe('isPipelineFinalDecision', () => {
+  test('auto_assigned is a pipeline-final decision', () => {
+    // The pipeline auto-assigned the ticket — it made the final call itself,
+    // so decidedAt should be stamped. Otherwise the run disappears from the
+    // Decided tab because it filters by sinceField=decidedAt.
+    expect(isPipelineFinalDecision('auto_assigned')).toBe(true);
+  });
+
+  test('noise_dismissed is a pipeline-final decision', () => {
+    // Same reasoning for the Dismissed tab.
+    expect(isPipelineFinalDecision('noise_dismissed')).toBe(true);
+  });
+
+  test('pending_review is NOT a pipeline-final decision', () => {
+    // The decision is still pending — admin will set decidedAt when they
+    // approve/modify/reject. If we stamped decidedAt here, the run would
+    // falsely appear in the Decided tab before anyone decided anything.
+    expect(isPipelineFinalDecision('pending_review')).toBe(false);
+  });
+
+  test('admin-only outcomes are NOT pipeline-final', () => {
+    // approved / modified / rejected ALWAYS come from admin actions, which
+    // set decidedAt themselves in the /decide endpoint. The pipeline
+    // never produces these directly, so this helper returns false — and
+    // if somehow the pipeline did produce one, we'd want decidedAt set
+    // by the /decide endpoint anyway (not here).
+    expect(isPipelineFinalDecision('approved')).toBe(false);
+    expect(isPipelineFinalDecision('modified')).toBe(false);
+    expect(isPipelineFinalDecision('rejected')).toBe(false);
+  });
+
+  test('null / undefined / unknown values are NOT pipeline-final', () => {
+    // Defensive: if the pipeline fails before setting a decision, we don't
+    // want to stamp decidedAt on a non-decision.
+    expect(isPipelineFinalDecision(null)).toBe(false);
+    expect(isPipelineFinalDecision(undefined)).toBe(false);
+    expect(isPipelineFinalDecision('')).toBe(false);
+    expect(isPipelineFinalDecision('some_future_decision')).toBe(false);
   });
 });

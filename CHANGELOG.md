@@ -2,6 +2,65 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.79-preview] - 2026-04-22
+
+### Bug fix: auto-decided runs silently vanished from the Decided / Dismissed tabs
+
+User noticed that ticket #219688 ("access to GWVRM1", auto-assigned to Mehdi) was showing correctly in the History tab but was missing from Decided. A noise-dismissed ticket (#219671) had the same symptom in the Dismissed tab.
+
+#### Root cause
+
+Both Decided and Dismissed tabs filter by `sinceField='decidedAt'` (with the 24h/7d/30d time-range toggle). But `_executeRun` never set `decidedAt` on pipeline-finalized decisions — only admin actions (`/decide`, `/dismiss`) did. So any run with `decision IN ('auto_assigned', 'noise_dismissed')` had `decidedAt = NULL`, never satisfied the `decidedAt >= N days ago` filter, and got silently hidden.
+
+The History tab wasn't affected because it queries `createdAt`, which masked the issue.
+
+Audit against prod confirmed the scale:
+
+```
+Runs with decidedAt=NULL by decision:
+  auto_assigned:    1 / 2
+  noise_dismissed:  26 / 28
+  pending_review:   212 / 212  (correct — they really are pending)
+```
+
+#### Fix
+
+Two code paths + one data backfill:
+
+1. **`_executeRun` now stamps `decidedAt` when the pipeline finalizes a decision.** Extracted the predicate to `isPipelineFinalDecision(decision)` in `assignmentDecisionRules.js` — returns true for `auto_assigned` and `noise_dismissed`, false for everything else (pending_review stays NULL, admin-only outcomes are set by the /decide endpoint).
+
+2. **`freshServiceActionService.execute` now clears `decidedAt`** when it downgrades an `auto_assigned` run to `pending_review` on preflight failure. Without this, the downgraded run would falsely appear in the Decided tab even though nobody actually approved it.
+
+3. **Migration `20260422200000_backfill_decided_at_auto_decisions`** backfills existing rows. Sets `decidedAt = updatedAt` (when the pipeline completed the decision) for every completed `auto_assigned`/`noise_dismissed` run with NULL `decidedAt`. Deliberately excludes `pending_review` and admin-only outcomes.
+
+Already applied to prod before this release. Verified on prod post-backfill:
+
+```
+Runs with decidedAt=NULL: pending_review: 212   (correct)
+Run #561 (access to GWVRM1):    decidedAt=2026-04-22T15:16:52.747Z
+Run #559 (CAL Internet Up):     decidedAt=2026-04-22T12:07:24.412Z
+```
+
+Both flagged runs now have `decidedAt` set and will show up in the Decided / Dismissed tabs on next page load.
+
+#### Tests
+
+5 new unit tests for `isPipelineFinalDecision` — covers all decision states plus defensive null/undefined/unknown handling. Suite total: **64 passing** (was 59).
+
+#### Files touched
+
+- `backend/src/services/assignmentPipelineService.js` — set `decidedAt` on pipeline-final decisions
+- `backend/src/services/freshServiceActionService.js` — clear `decidedAt` on preflight downgrade
+- `backend/src/services/assignmentDecisionRules.js` — new `isPipelineFinalDecision` helper
+- `backend/tests/groupExclusion.test.js` — 5 new tests
+- `backend/prisma/migrations/20260422200000_backfill_decided_at_auto_decisions/migration.sql` — additive backfill
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.79-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No schema change, no new columns.
+
+---
+
 ## [1.9.78-preview] - 2026-04-22
 
 ### Rich empty-state panel on the Review Queue when Auto-Assign is on

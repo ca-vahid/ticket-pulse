@@ -181,6 +181,11 @@ class FreshServiceActionService {
             if (shouldDowngrade) {
               updatePayload.decision = 'pending_review';
               updatePayload.assignedTechId = null;
+              // Clear decidedAt — the pipeline set it when the decision was
+              // auto_assigned (see _executeRun), but we're reverting that
+              // decision now. A pending_review run should always have
+              // decidedAt=null until an admin makes the real call.
+              updatePayload.decidedAt = null;
               updatePayload.errorMessage = `Auto-assign blocked at FreshService preflight: ${preflightResult.reason}. Downgraded to pending_review for manual handling.`;
             }
             await prisma.assignmentPipelineRun.update({
