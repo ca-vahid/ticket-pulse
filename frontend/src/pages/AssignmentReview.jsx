@@ -342,24 +342,45 @@ function QuickApprovePopover({ run, align = 'right', quickApproveId, popoverRef,
  * subtle icon. Color theming via `tone` so the auto-assigned tile pops while
  * secondary metrics stay quiet.
  */
-function StatTile({ icon: Icon, label, value, sublabel, tone = 'slate' }) {
+/**
+ * Stat tile for the auto-assign empty-state outcome row.
+ *
+ * Design notes (per UX redesign in v1.9.83):
+ *  - White card with subtle shadow + rounded corners (depth, not flat).
+ *  - Color is reserved for the icon chip and accent — body stays neutral so
+ *    the cards feel like a unified set rather than a rainbow of pastels.
+ *  - Number is the dominant element; label sits above as a small caps label.
+ *  - When `onClick` is provided the entire card becomes a button-like
+ *    affordance — hover lifts the card slightly so the click target is obvious.
+ */
+function StatTile({ icon: Icon, label, value, sublabel, tone = 'slate', onClick }) {
   const TONE_CLASSES = {
-    blue:   { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-700',    icon: 'text-blue-500',    value: 'text-blue-900' },
-    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', icon: 'text-emerald-500', value: 'text-emerald-900' },
-    amber:  { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-700',   icon: 'text-amber-500',   value: 'text-amber-900' },
-    slate:  { bg: 'bg-slate-50',   border: 'border-slate-200',   text: 'text-slate-600',   icon: 'text-slate-400',   value: 'text-slate-800' },
-    rose:   { bg: 'bg-rose-50',    border: 'border-rose-200',    text: 'text-rose-700',    icon: 'text-rose-500',    value: 'text-rose-900' },
+    blue:    { iconBg: 'bg-blue-50',    iconColor: 'text-blue-600',    accent: 'border-l-blue-500' },
+    emerald: { iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600', accent: 'border-l-emerald-500' },
+    amber:   { iconBg: 'bg-amber-50',   iconColor: 'text-amber-600',   accent: 'border-l-amber-500' },
+    slate:   { iconBg: 'bg-slate-100',  iconColor: 'text-slate-500',   accent: 'border-l-slate-400' },
+    rose:    { iconBg: 'bg-rose-50',    iconColor: 'text-rose-600',    accent: 'border-l-rose-500' },
   };
   const t = TONE_CLASSES[tone] || TONE_CLASSES.slate;
+  const Comp = onClick ? 'button' : 'div';
+  const interactive = onClick
+    ? 'text-left cursor-pointer transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300'
+    : '';
   return (
-    <div className={`${t.bg} border ${t.border} rounded-xl p-4 flex flex-col gap-1.5`}>
-      <div className="flex items-center gap-1.5">
-        <Icon className={`w-4 h-4 ${t.icon}`} />
-        <span className={`text-[11px] font-semibold uppercase tracking-wide ${t.text}`}>{label}</span>
+    <Comp
+      onClick={onClick}
+      className={`group bg-white border border-slate-200/80 border-l-4 ${t.accent} rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col gap-2 ${interactive}`}
+    >
+      <div className="flex items-center gap-2">
+        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg ${t.iconBg}`}>
+          <Icon className={`w-3.5 h-3.5 ${t.iconColor}`} />
+        </span>
+        <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
+        {onClick && <ChevronRight className="ml-auto w-3.5 h-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />}
       </div>
-      <div className={`text-3xl sm:text-4xl font-bold tabular-nums leading-none ${t.value}`}>{value ?? 0}</div>
-      {sublabel && <div className="text-[11px] text-slate-500 mt-0.5">{sublabel}</div>}
-    </div>
+      <div className="text-3xl sm:text-4xl font-bold tabular-nums leading-none text-slate-900">{value ?? 0}</div>
+      {sublabel && <div className="text-[11px] text-slate-500 leading-snug">{sublabel}</div>}
+    </Comp>
   );
 }
 
@@ -370,7 +391,7 @@ function StatTile({ icon: Icon, label, value, sublabel, tone = 'slate' }) {
  * broken. Also acknowledges that excluded groups (if configured) will still
  * surface tickets here for manual approval.
  */
-function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTotal, onRefresh }) {
+function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTotal, onRefresh, onNavigate }) {
   const today = queueStatus?.today || {};
   const stats = {
     autoAssigned: today.autoAssigned || 0,        // decision='auto_assigned' — no human in the loop
@@ -392,34 +413,57 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
   // the window.
   const liveInProgress = inProgressCount > 0 ? inProgressCount : stats.inProgress;
 
+  // Each outcome tile drills into the appropriate sub-tab + filter combo so
+  // the cards double as quick links. Pipeline-decided outcomes (auto-assigned,
+  // approved) land on Decided > Via Pipeline; FS-driven assignments land on
+  // Decided > Manually in FreshService; noise dismissals land on Dismissed.
+  const goToDecidedViaPipeline = () => onNavigate?.({ subView: 'assigned', assignedFilter: 'via_pipeline' });
+  const goToDecidedFsManual    = () => onNavigate?.({ subView: 'assigned', assignedFilter: 'manually_in_fs' });
+  const goToDismissed          = () => onNavigate?.({ subView: 'dismissed' });
+
   return (
-    <div className="py-6 sm:py-8 px-3 sm:px-6">
-      {/* Header — auto-assign is on, page intentionally empty */}
-      <div className="text-center max-w-2xl mx-auto mb-5 sm:mb-6">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold mb-3">
-          <Bot className="w-3.5 h-3.5" />
+    <div className="py-6 sm:py-10 px-3 sm:px-6">
+      {/* Header — auto-assign is on, page intentionally empty.
+          Serif headline + generous spacing per UX redesign. */}
+      <div className="text-center max-w-2xl mx-auto mb-6 sm:mb-8">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold mb-4">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
           <span>Auto-Assign is ON</span>
           {dryRun && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 text-[10px] font-semibold">DRY-RUN</span>}
         </div>
-        <h3 className="text-xl sm:text-2xl font-bold text-slate-800">No tickets are waiting for you right now.</h3>
-        <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+        <h3 className="font-serif text-2xl sm:text-3xl font-semibold text-slate-900 tracking-tight leading-tight">
+          No tickets are waiting for you right now.
+        </h3>
+        <p className="text-sm text-slate-500 mt-3 leading-relaxed">
           The pipeline is processing tickets in the background. Items only land here when they genuinely need a human decision — like tickets in {' '}
           <span className="font-semibold text-slate-700">excluded groups</span>
           {excludedGroupCount > 0 ? ` (${excludedGroupCount} configured)` : ''}, rebound exhaustion, or LLM uncertainty.
         </p>
       </div>
 
-      {/* Hero — total processed today, with a short breakdown ribbon */}
-      <div className="max-w-4xl mx-auto mb-3 sm:mb-4">
-        <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-violet-50 border border-blue-200 rounded-2xl p-4 sm:p-5 flex items-center gap-4 sm:gap-5">
-          <div className="flex-shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white/70 border border-blue-200 flex items-center justify-center">
-            <Sparkles className="w-6 h-6 sm:w-7 sm:h-7 text-blue-600" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Today</div>
-            <div className="text-3xl sm:text-4xl font-bold text-slate-900 tabular-nums leading-tight">
-              {stats.totalRuns}
-              <span className="text-sm sm:text-base font-medium text-slate-500 ml-2">tickets processed by the pipeline</span>
+      {/* Hero — dark-blue glassmorphism card. Today's total processed by the
+          pipeline as the focal point. Subtle radial gradient + bottom-right
+          sparkle adds depth without being distracting. */}
+      <div className="max-w-4xl mx-auto mb-4 sm:mb-5">
+        <div className="relative overflow-hidden rounded-2xl shadow-lg shadow-slate-900/10
+                        bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900
+                        border border-white/10 p-5 sm:p-6">
+          {/* Decorative gradient orb top-right */}
+          <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-blue-500/20 blur-3xl pointer-events-none" aria-hidden />
+          <div className="absolute -bottom-20 -left-10 w-56 h-56 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" aria-hidden />
+
+          <div className="relative flex items-center gap-4 sm:gap-5">
+            <div className="flex-shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-2xl
+                            bg-white/10 border border-white/20 backdrop-blur-sm
+                            flex items-center justify-center shadow-inner shadow-white/5">
+              <Sparkles className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-200/80">Today</div>
+              <div className="mt-1 flex items-baseline gap-3 flex-wrap">
+                <span className="text-4xl sm:text-5xl font-bold tabular-nums leading-none text-white">{stats.totalRuns}</span>
+                <span className="text-sm sm:text-base font-medium text-blue-100/80">tickets processed by the pipeline</span>
+              </div>
             </div>
           </div>
         </div>
@@ -428,14 +472,16 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
       {/* Outcome tiles — 4 distinct paths a ticket can end up in.
           The math: autoAssigned + approved + handledInFs + noiseDismissed
           should equal totalRuns minus (manualReviewRequired + inProgress +
-          queuedForLater + any failed runs). */}
-      <div className="max-w-4xl mx-auto grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mb-3">
+          queuedForLater + any failed runs). All tiles are clickable and
+          navigate to the corresponding sub-tab + filter for drill-down. */}
+      <div className="max-w-4xl mx-auto grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-5">
         <StatTile
           icon={Bot}
           label="Auto-assigned by AI"
           value={stats.autoAssigned}
           sublabel="pipeline routed without review"
           tone="emerald"
+          onClick={goToDecidedViaPipeline}
         />
         <StatTile
           icon={Check}
@@ -443,6 +489,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           value={stats.approved}
           sublabel="admin clicked approve in app"
           tone="blue"
+          onClick={goToDecidedViaPipeline}
         />
         <StatTile
           icon={Users}
@@ -450,6 +497,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           value={stats.handledInFs}
           sublabel="assigned outside the pipeline"
           tone="amber"
+          onClick={goToDecidedFsManual}
         />
         <StatTile
           icon={XCircle}
@@ -457,13 +505,15 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           value={stats.noiseDismissed}
           sublabel="auto-classified non-actionable"
           tone="slate"
+          onClick={goToDismissed}
         />
       </div>
 
-      {/* Process state — only render rows that are actually non-zero so the
-          panel doesn't drown in greyed-out tiles when nothing's happening. */}
+      {/* Process state — only render pills that are actually non-zero so the
+          panel doesn't drown in greyed-out tiles when nothing's happening.
+          More compact pill styling per UX redesign. */}
       {(liveInProgress > 0 || stats.rebounds > 0 || stats.noiseFiltered > 0 || stats.manualReviewRequired > 0 || queuedRunsTotal > 0) && (
-        <div className="max-w-4xl mx-auto flex flex-wrap items-stretch gap-2 mb-3">
+        <div className="max-w-4xl mx-auto flex flex-wrap items-center gap-2 mb-4 sm:mb-5">
           {liveInProgress > 0 && (
             <SmallStatPill icon={Brain} tone="blue" value={liveInProgress} label="currently analyzing" />
           )}
@@ -475,7 +525,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
               icon={XCircle}
               tone="slate"
               value={stats.noiseFiltered}
-              label={`noise-filtered (skipped before analysis)`}
+              label="noise-filtered (skipped before analysis)"
               title="Tickets matched a noise rule and were silently excluded from polling. If a ticket you expected to see auto-assigned is missing, check the Noise Rules page — a rule may be over-matching."
             />
           )}
@@ -488,40 +538,45 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
         </div>
       )}
 
-      {/* Latest auto-assignment strip */}
-      <div className="max-w-4xl mx-auto">
-        {latest && (
-          <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-3.5 flex items-center gap-3">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
-              <Check className="w-4 h-4 text-emerald-600" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Most recent auto-assignment</div>
-              <div className="text-sm text-slate-800 truncate font-medium" title={latest.ticketSubject}>
-                {latest.freshserviceTicketId && <span className="text-slate-400 mr-1.5 font-normal">#{latest.freshserviceTicketId}</span>}
-                {latest.ticketSubject}
+      {/* Latest auto-assignment strip — clickable card pointing at the run
+          detail page. Updated layout per UX redesign: cleaner spacing, button
+          on the right. Whole card is clickable. */}
+      {latest && (
+        <div className="max-w-4xl mx-auto">
+          <a
+            href={`/assignments/history/${latest.runId}`}
+            className="group block bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-all duration-150 p-3.5 sm:p-4"
+          >
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-emerald-100 ring-4 ring-emerald-50 flex items-center justify-center">
+                <Check className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
               </div>
-              <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                <span>to <span className="font-semibold text-slate-700">{latest.techName || 'Unknown'}</span></span>
-                <span className="text-slate-300">·</span>
-                <Clock className="w-3 h-3 text-slate-400" />
-                <RelativeTime iso={latest.decidedAt} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Most recent auto-assignment</div>
+                <div className="text-sm sm:text-base text-slate-900 truncate font-medium mt-0.5" title={latest.ticketSubject}>
+                  {latest.freshserviceTicketId && <span className="text-slate-400 mr-1.5 font-normal">#{latest.freshserviceTicketId}</span>}
+                  {latest.ticketSubject}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                  <span>to <span className="font-semibold text-slate-700">{latest.techName || 'Unknown'}</span></span>
+                  <span className="text-slate-300">·</span>
+                  <Clock className="w-3 h-3 text-slate-400" />
+                  <RelativeTime iso={latest.decidedAt} />
+                </div>
               </div>
+              <span className="hidden sm:inline-flex flex-shrink-0 items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-700 bg-blue-50 group-hover:bg-blue-100 transition-colors">
+                View ticket <ExternalLink className="w-3 h-3" />
+              </span>
+              <ChevronRight className="sm:hidden flex-shrink-0 w-4 h-4 text-slate-400" />
             </div>
-            <a
-              href={`/assignments/history/${latest.runId}`}
-              className="flex-shrink-0 text-xs text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
-            >
-              View <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-        )}
-      </div>
+          </a>
+        </div>
+      )}
 
       {/* Refresh */}
-      <div className="text-center mt-4">
-        <button onClick={onRefresh} className="text-xs text-slate-500 hover:text-slate-700 inline-flex items-center gap-1">
-          <RefreshCw className="w-3.5 h-3.5" /> Refresh stats
+      <div className="text-center mt-5">
+        <button onClick={onRefresh} className="text-xs text-slate-400 hover:text-slate-600 inline-flex items-center gap-1.5 transition-colors">
+          <RefreshCw className="w-3 h-3" /> Refresh stats
         </button>
       </div>
     </div>
@@ -532,21 +587,30 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
  * Compact inline pill for the "process state" row — smaller than a StatTile
  * (used when the metric is more "happening right now" than "outcome of the day").
  * Only rendered when value > 0 to keep the panel uncluttered.
+ *
+ * UX redesign v1.9.83: rounded-full pill with a small colored icon chip on
+ * the left and a bold tabular-num value, then a quieter label. Reads like
+ * "[icon] 2 rebounds today" at a glance.
  */
 function SmallStatPill({ icon: Icon, label, value, tone = 'slate', title }) {
   const TONE_CLASSES = {
-    blue:    'bg-blue-50 border-blue-200 text-blue-800',
-    emerald: 'bg-emerald-50 border-emerald-200 text-emerald-800',
-    amber:   'bg-amber-50 border-amber-200 text-amber-800',
-    rose:    'bg-rose-50 border-rose-200 text-rose-800',
-    slate:   'bg-slate-50 border-slate-200 text-slate-700',
+    blue:    { iconBg: 'bg-blue-100',    iconText: 'text-blue-700',    text: 'text-blue-900',    border: 'border-blue-200/70' },
+    emerald: { iconBg: 'bg-emerald-100', iconText: 'text-emerald-700', text: 'text-emerald-900', border: 'border-emerald-200/70' },
+    amber:   { iconBg: 'bg-amber-100',   iconText: 'text-amber-700',   text: 'text-amber-900',   border: 'border-amber-200/70' },
+    rose:    { iconBg: 'bg-rose-100',    iconText: 'text-rose-700',    text: 'text-rose-900',    border: 'border-rose-200/70' },
+    slate:   { iconBg: 'bg-slate-200',   iconText: 'text-slate-600',   text: 'text-slate-700',   border: 'border-slate-200' },
   };
   const tc = TONE_CLASSES[tone] || TONE_CLASSES.slate;
   return (
-    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs ${tc}`} title={title || undefined}>
-      <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+    <div
+      className={`inline-flex items-center gap-2 pl-1 pr-3 py-1 rounded-full bg-white border ${tc.border} shadow-sm text-xs ${tc.text}`}
+      title={title || undefined}
+    >
+      <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full ${tc.iconBg}`}>
+        <Icon className={`w-3 h-3 ${tc.iconText}`} />
+      </span>
       <span className="font-semibold tabular-nums">{value}</span>
-      <span>{label}</span>
+      <span className="text-slate-600">{label}</span>
     </div>
   );
 }
@@ -1727,6 +1791,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 inProgressCount={queue.inProgress?.length || 0}
                 queuedRunsTotal={queuedRunsMeta?.totalCount || 0}
                 onRefresh={handleSmartRefresh}
+                onNavigate={(target) => {
+                  // Drive the parent's tab + sub-filter state from the
+                  // empty-state stat tiles so they double as quick links.
+                  if (target.subView) setSubView(target.subView);
+                  if (target.assignedFilter) setAssignedFilter(target.assignedFilter);
+                }}
               />
             ) : (
               <div className="text-center py-10">

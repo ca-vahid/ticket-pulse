@@ -2,6 +2,59 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.83-preview] - 2026-04-22
+
+### UX redesign: Auto-Assign empty-state panel + clickable outcome cards
+
+The empty-state panel was functional but had a generic flat look. Reworked per a UX brief covering typography hierarchy, glassmorphism, refined color usage, and improved layout breathing room. The outcome tiles now also double as quick links into the appropriate sub-tab.
+
+#### Typography & hierarchy
+
+- **Serif headline** ("No tickets are waiting for you right now.") via Tailwind `font-serif` — adds character without dragging in a custom font load
+- **Larger, bolder numbers** in the hero (4-5xl) and tiles (3-4xl) — readable at a glance
+- More negative space between sections (`mb-6/8` instead of `mb-3/4`) to let the layout breathe
+
+#### Modern glassmorphism hero card
+
+The "Today" card moved from a pale-blue gradient to a dark glassmorphism panel:
+
+- Background: `bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900` with subtle blue + violet gradient orbs (blurred via `blur-3xl`) for depth
+- Border: `border border-white/10` for the frosted-glass edge
+- Icon chip: `bg-white/10` with `backdrop-blur-sm` and inner shadow
+- Text: white headline, `text-blue-100/80` body
+- Shadow: `shadow-lg shadow-slate-900/10` for layered desktop feel
+
+#### Outcome tiles — clickable, white, subtle accents
+
+- Background: white with `border border-slate-200/80` and `shadow-sm` (subtle layering instead of pale colored fills)
+- Accent: colored 4-px left border + small icon chip with tone-matched background — the only color in the card, kept deliberate rather than washed-out
+- All four tiles are now buttons: hover lifts (`hover:-translate-y-0.5`) + drops a chevron in the top-right + adds shadow elevation, with focus ring for accessibility
+- Click destinations:
+  - **Auto-assigned by AI** + **Approved by you** → Decided > Via Pipeline (both kinds of pipeline-driven assignments visible there)
+  - **Picked up in FreshService** → Decided > Manually in FreshService
+  - **Dismissed as noise** → Dismissed tab
+
+#### Refined pill row
+
+`SmallStatPill` redesigned: white background pill with a small colored icon chip on the left, then bold tabular value, then quieter label. Reads cleanly as "[icon] 2 rebounds today" or "[icon] 3 noise-filtered (skipped before analysis)".
+
+#### Cleaner "Most recent auto-assignment" card
+
+- Whole card is now the click target (was just the small View link)
+- Bigger emerald check icon with ring outline for visual anchor
+- Right-side "View ticket" pill button on desktop, simple chevron on mobile
+- Hover elevation matches the outcome tiles
+
+#### Files touched
+
+- `frontend/src/pages/AssignmentReview.jsx` — `AutoAssignActiveEmptyState`, `StatTile`, `SmallStatPill` rewrites + `onNavigate` callback wiring
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.83-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No backend changes, no DB changes.
+
+---
+
 ## [1.9.82-preview] - 2026-04-22
 
 ### Bug fix: auto-assigned runs could get permanently stuck on backend restart
