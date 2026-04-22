@@ -171,7 +171,47 @@ export const TOOL_SCHEMAS = [
             required: ['rank', 'techId', 'techName', 'score', 'reasoning'],
           },
         },
-        overallReasoning: { type: 'string', description: 'Overall analysis summary explaining the recommendation logic' },
+        overallReasoning: {
+          type: 'string',
+          description: 'INTERNAL ONLY — never shown to the assignee. Full analysis explaining the routing logic: scores, ranking, why each candidate was preferred or rejected, workload/fairness considerations, on-shift status, rebound history, etc. This is for admin review and audit only.',
+        },
+        agentBriefingHtml: {
+          type: 'string',
+          description: `Public-facing HTML message that will be posted as a private note on the FreshService ticket and read by the assigned technician. REQUIRED when recommendations is non-empty.
+
+Tone: concise, professional, written directly TO the assignee (use "you").
+
+INCLUDE:
+- A 1-2 sentence recap of what the requester needs.
+- A short, plain-language reason this is being routed to them (e.g. "you've handled similar VPN tickets recently", "this needs on-site work in Vancouver"). Keep it human — no scoring language.
+- Suggested first step or what to verify with the requester, if obvious.
+- Any directly relevant links/references found during research (KB articles, related tickets by ID).
+
+NEVER INCLUDE (these reveal our routing algorithm and let agents game it):
+- Numerical scores, ranks, percentages, or confidence values.
+- Names of OTHER candidates that were considered or ruled out.
+- Workload counts, "open ticket" numbers, or fairness/round-robin reasoning.
+- Competency proficiency levels, IT levels, seniority labels.
+- Words like "algorithm", "system", "LLM", "AI", "model", "pipeline", "score", "ranked", "fairness", "rebound".
+- Internal IDs, run IDs, or pipeline metadata.
+- Information about agents being OFF / WFH / on leave.
+
+Allowed HTML tags only: <b> <i> <br> <p> <ul> <li> <a href> <h3>. No <script>, <style>, <img>, inline styles, or other tags.
+
+Length: aim for 60-180 words. Hard cap ~1200 characters.`,
+        },
+        closureNoticeHtml: {
+          type: 'string',
+          description: `Public-facing HTML message posted as a private note when the ticket is being auto-closed as noise/non-actionable. REQUIRED when recommendations is empty (noise dismissal).
+
+Tone: brief, neutral, professional. 1-2 sentences max.
+
+Should explain in plain language why the ticket is being closed without an assignment (e.g. "This appears to be an automated notification with no action required" or "This is informational and does not require helpdesk follow-up"). Do NOT mention "noise", "spam classifier", scoring, or any algorithm internals.
+
+Allowed HTML tags only: <b> <i> <br> <p>. No links or lists needed.
+
+Length: under 300 characters.`,
+        },
         ticketClassification: { type: 'string', description: 'The matched category from get_ticket_categories (e.g., "Networking", "Hardware", "Account Access")' },
         requiresPhysicalPresence: { type: 'boolean', description: 'Whether the ticket requires physical presence' },
         estimatedComplexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Estimated complexity of the ticket' },

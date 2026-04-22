@@ -38,15 +38,24 @@ class FreshServiceActionService {
       const fsAgentId = Number(tech.freshserviceId);
       actions.push({ type: 'assign', ticketId: fsTicketId, agentId: fsAgentId });
 
-      const reasoning = run.recommendation?.overallReasoning || '';
-      const confidence = run.recommendation?.confidence || 'N/A';
       const decisionLabel = decision === 'auto_assigned' ? 'auto-assigned' : decision === 'modified' ? 'assigned (admin override)' : 'approved';
+
+      // Prefer the LLM's sanitized public briefing. Fall back to overallReasoning
+      // for legacy runs (created before agentBriefingHtml was introduced) so
+      // re-syncs of historical runs don't break, but log it so we can spot
+      // unexpected fallbacks.
+      const briefing = run.recommendation?.agentBriefingHtml;
+      const legacyReasoning = run.recommendation?.overallReasoning;
+      const usingFallback = !briefing && !!legacyReasoning;
+      if (usingFallback) {
+        logger.warn('FreshService note: agentBriefingHtml missing, falling back to overallReasoning (may leak internal logic)', { runId: run.id });
+      }
+      const messageHtml = briefing || legacyReasoning || '';
 
       let noteBody = `<b>[Ticket Pulse]</b> Assignment ${decisionLabel}.<br>`;
       noteBody += `<b>Assigned to:</b> ${tech.name}<br>`;
-      noteBody += `<b>Confidence:</b> ${confidence}<br>`;
+      if (messageHtml) noteBody += `${messageHtml}<br>`;
       if (run.overrideReason) noteBody += `<b>Override reason:</b> ${run.overrideReason}<br>`;
-      noteBody += `<b>Reasoning:</b> ${reasoning}<br>`;
       noteBody += `<b>Run ID:</b> ${run.id}`;
 
       actions.push({ type: 'note', ticketId: fsTicketId, body: noteBody, private: true });
@@ -59,12 +68,16 @@ class FreshServiceActionService {
         return { actions: [], preview: 'Skipped: run had valid recommendations — admin dismissed the pipeline run, not the ticket', error: null };
       }
 
-      const classification = run.recommendation?.ticketClassification || 'noise';
-      const reasoning = run.recommendation?.overallReasoning || 'Classified as non-actionable';
+      // Prefer the LLM's sanitized closure notice. Fall back to a generic line
+      // (NOT the internal reasoning) for legacy runs without the new field.
+      const closureNotice = run.recommendation?.closureNoticeHtml;
+      if (!closureNotice) {
+        logger.warn('FreshService note: closureNoticeHtml missing on noise_dismissed run, using generic message', { runId: run.id });
+      }
+      const messageHtml = closureNotice || 'This ticket has been reviewed and does not require helpdesk follow-up.';
 
-      let noteBody = '<b>[Ticket Pulse]</b> Ticket classified as non-actionable noise.<br>';
-      noteBody += `<b>Classification:</b> ${classification}<br>`;
-      noteBody += `<b>Reasoning:</b> ${reasoning}<br>`;
+      let noteBody = '<b>[Ticket Pulse]</b> Ticket closed without assignment.<br>';
+      noteBody += `${messageHtml}<br>`;
       noteBody += `<b>Run ID:</b> ${run.id}`;
 
       actions.push({ type: 'note', ticketId: fsTicketId, body: noteBody, private: true });
