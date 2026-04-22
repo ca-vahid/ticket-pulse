@@ -10,6 +10,9 @@ import { formatDateInTimezone } from '../utils/timezone.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+// Pure helper extracted to its own module so unit tests can exercise the
+// rebound-context user-message logic without pulling in Prisma/Anthropic.
+import { buildUserMessage } from './assignmentUserMessage.js';
 
 const MAX_TURNS = 20;
 const CLOSED_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
@@ -329,24 +332,13 @@ class AssignmentPipelineService {
         .catch((error) => logger.debug('Pipeline heartbeat failed', { runId, error: error.message }));
     };
 
-    let userMessage = `Current date/time: ${dayOfWeek}, ${localDate} at ${localTime} (${wsTz})\n\nAnalyze ticket ID ${ticketId} (use get_ticket_details to read it) and recommend the best technician for assignment. When you have completed your analysis, you MUST call the submit_recommendation tool with your final recommendation.`;
-
-    if (reboundFrom && (reboundFrom.previousTechName || reboundFrom.reboundCount)) {
-      const reboundCount = reboundFrom.reboundCount || 1;
-      const prevName = reboundFrom.previousTechName || 'a previous assignee';
-      const whenStr = reboundFrom.unassignedAt
-        ? formatInTimeZone(new Date(reboundFrom.unassignedAt), wsTz, 'yyyy-MM-dd HH:mm zzz')
-        : 'recently';
-      const ordinal = reboundCount === 1 ? '1st' : reboundCount === 2 ? '2nd' : reboundCount === 3 ? '3rd' : `${reboundCount}th`;
-      // Surface the rebound state explicitly so the LLM (a) actively avoids the
-      // prior rejecter via the previouslyRejectedThisTicket flag from
-      // find_matching_agents, and (b) knows to acknowledge the re-routing in
-      // agentBriefingHtml without naming the previous assignee.
-      userMessage += `\n\n## Rebound Context\nThis ticket was previously assigned and returned to the queue. This is the ${ordinal} attempt to find an assignee. Most recently it was returned by ${prevName} at ${whenStr}.\n\nWhen calling find_matching_agents, expect to see \`previouslyRejectedThisTicket: true\` on at least one candidate. Avoid recommending any agent flagged as a prior rejecter unless they are genuinely the only qualified option (and explain why in overallReasoning if so).\n\nWhen writing the agentBriefingHtml, include a brief, neutral acknowledgement that this ticket was re-routed (e.g. "This ticket was returned to the queue and now needs your attention"). Do NOT name the previous assignee or explain why they returned it.`;
-    }
-
+    // Pure helper at module scope; see buildUserMessage above. Surfaces the
+    // rebound state explicitly so the LLM (a) actively avoids the prior
+    // rejecter via the previouslyRejectedThisTicket flag from
+    // find_matching_agents, and (b) knows to acknowledge the re-routing in
+    // agentBriefingHtml without naming the previous assignee.
     const messages = [
-      { role: 'user', content: userMessage },
+      { role: 'user', content: buildUserMessage({ ticketId, dayOfWeek, localDate, localTime, wsTz, reboundFrom }) },
     ];
 
     const toolAllowlist = promptVersion.toolConfig?.allowedTools || null;
