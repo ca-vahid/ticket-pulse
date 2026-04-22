@@ -2,6 +2,35 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.77-preview] - 2026-04-22
+
+### UX polish: renamed "FS Manual" decision pill to "Handled in FS"
+
+The amber decision pill for pipeline runs where a ticket was assigned in FreshService outside our pipeline used to read **"FS Manual"** — a label that felt like a database field name rather than a user-facing status, and that also implied the admin still had something to do (the word "Manual" suggests action-pending). In practice these tickets need zero in-app action; the work is already in motion with whoever picked them up in FreshService.
+
+Renamed to **"Handled in FS"** to make clear that:
+
+- The ticket is already being worked — no decision is needed in Ticket Pulse
+- It happened outside our pipeline (in FreshService directly) — so the AI suggestion beside it is informational only
+
+The tooltip is unchanged: *"Assigned in FreshService outside the pipeline — `<tech name>`. AI suggestion left unresolved."*
+
+Applied to both sites that render the pill:
+
+- Row-level pill in the Decided list under "Manually in FreshService"
+- Header pill on `PipelineRunDetail` when opening any such run
+
+No underlying data changed — the run's `decision` is still `pending_review`, the backend filter is still `outside_assigned`. Purely a render-layer string swap.
+
+#### Files touched
+
+- `frontend/src/pages/AssignmentReview.jsx` — `getDisplayDecision` return label + comment
+- `frontend/src/components/assignment/PipelineRunDetail.jsx` — `decisionBadge` label + comment
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.77-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+---
+
 ## [1.9.76-preview] - 2026-04-22
 
 ### Bug fix: "FS Manual" label disappeared on closed externally-assigned tickets

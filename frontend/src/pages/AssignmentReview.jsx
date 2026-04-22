@@ -884,7 +884,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   // Contextual decision label. A run's `decision` may be 'pending_review'
   // even though no human action is needed in our app — the ticket has
   // already been assigned externally in FreshService. In that case, render
-  // a clearer 'FS Manual' label with an amber pill instead of the
+  // a clearer 'Handled in FS' label with an amber pill instead of the
   // confusing yellow 'Pending'. Tooltip explains why.
   const getDisplayDecision = (run) => {
     // A pending_review run with an assignedTechId means someone took the
@@ -898,7 +898,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const externallyAssigned = run.decision === 'pending_review' && run.ticket?.assignedTechId;
     if (externallyAssigned) {
       return {
-        label: 'FS Manual',
+        label: 'Handled in FS',
         pillClass: 'bg-amber-100 text-amber-800',
         tooltip: `Assigned in FreshService outside the pipeline${run.ticket?.assignedTech?.name ? ' — ' + run.ticket.assignedTech.name : ''}. AI suggestion left unresolved.`,
       };
