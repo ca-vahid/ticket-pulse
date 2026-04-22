@@ -1,6 +1,14 @@
-export const APP_VERSION = '1.9.74-preview';
+export const APP_VERSION = '1.9.75-preview';
 
 export const changelog = [
+  {
+    version: '1.9.75-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'fixed', text: 'Excluded Groups picker showed "0 agents" for every group -- the backend was reading `g.agent_ids` from the FreshService /groups response, but FS actually returns group members under `members` (with separate `observers` and `leaders` arrays). The agent_ids field the code expected is a Freshdesk-ism that the Freshservice API has never populated on /groups responses. Picker now reads `members` with an `agent_ids` fallback for defensiveness, so counts render correctly (e.g. "Everyone IT" now shows 15 agents instead of 0)' },
+      { type: 'fixed', text: 'Pre-existing FreshService preflight "incompatible_group" check was silently always-true -- same root cause: `if (group.agent_ids && !group.agent_ids.includes(agentId))` short-circuited to false on every call because agent_ids was always undefined, meaning the check never actually caught agents being assigned to groups they didn\u2019t belong to. Fixed to read `members` (with agent_ids fallback) so the preflight finally does its job. Low impact in practice because the LLM rarely recommended cross-group assignments, but closes a silent-failure hole for future cases' },
+    ],
+  },
   {
     version: '1.9.74-preview',
     date: 'April 22, 2026',
