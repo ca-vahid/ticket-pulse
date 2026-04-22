@@ -414,12 +414,31 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
   const liveInProgress = inProgressCount > 0 ? inProgressCount : stats.inProgress;
 
   // Each outcome tile drills into the appropriate sub-tab + filter combo so
-  // the cards double as quick links. Pipeline-decided outcomes (auto-assigned,
-  // approved) land on Decided > Via Pipeline; FS-driven assignments land on
-  // Decided > Manually in FreshService; noise dismissals land on Dismissed.
-  const goToDecidedViaPipeline = () => onNavigate?.({ subView: 'assigned', assignedFilter: 'via_pipeline' });
-  const goToDecidedFsManual    = () => onNavigate?.({ subView: 'assigned', assignedFilter: 'manually_in_fs' });
-  const goToDismissed          = () => onNavigate?.({ subView: 'dismissed' });
+  // the cards double as quick links AND the destination shows exactly the
+  // count the card promised. Time range nudges to 24h (close to "today" in
+  // workspace tz). decidedDecisionFilter narrows Via Pipeline to the
+  // specific decision so AI vs admin counts match precisely.
+  const goToAutoAssigned = () => onNavigate?.({
+    subView: 'assigned',
+    assignedFilter: 'via_pipeline',
+    decidedDecisionFilter: 'auto_assigned',
+    timeRange: '24h',
+  });
+  const goToApprovedByYou = () => onNavigate?.({
+    subView: 'assigned',
+    assignedFilter: 'via_pipeline',
+    decidedDecisionFilter: 'approved',
+    timeRange: '24h',
+  });
+  const goToHandledInFs = () => onNavigate?.({
+    subView: 'assigned',
+    assignedFilter: 'manually_in_fs',
+    timeRange: '24h',
+  });
+  const goToDismissed = () => onNavigate?.({
+    subView: 'dismissed',
+    timeRange: '24h',
+  });
 
   return (
     <div className="py-6 sm:py-10 px-3 sm:px-6">
@@ -481,7 +500,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           value={stats.autoAssigned}
           sublabel="pipeline routed without review"
           tone="emerald"
-          onClick={goToDecidedViaPipeline}
+          onClick={goToAutoAssigned}
         />
         <StatTile
           icon={Check}
@@ -489,7 +508,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           value={stats.approved}
           sublabel="admin clicked approve in app"
           tone="blue"
-          onClick={goToDecidedViaPipeline}
+          onClick={goToApprovedByYou}
         />
         <StatTile
           icon={Users}
@@ -497,7 +516,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           value={stats.handledInFs}
           sublabel="assigned outside the pipeline"
           tone="amber"
-          onClick={goToDecidedFsManual}
+          onClick={goToHandledInFs}
         />
         <StatTile
           icon={XCircle}
@@ -540,7 +559,8 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
 
       {/* Latest auto-assignment strip — clickable card pointing at the run
           detail page. Updated layout per UX redesign: cleaner spacing, button
-          on the right. Whole card is clickable. */}
+          on the right. Whole card is clickable. Shows the assignee's profile
+          photo when available, falls back to initials. */}
       {latest && (
         <div className="max-w-4xl mx-auto">
           <a
@@ -548,9 +568,13 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
             className="group block bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-all duration-150 p-3.5 sm:p-4"
           >
             <div className="flex items-center gap-3 sm:gap-4">
-              <div className="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-emerald-100 ring-4 ring-emerald-50 flex items-center justify-center">
-                <Check className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
-              </div>
+              <TechAvatar
+                photoUrl={latest.techPhotoUrl}
+                name={latest.techName}
+                size="lg"
+                badge={<Check className="w-3.5 h-3.5 text-white" />}
+                badgeClass="bg-emerald-500 ring-2 ring-white"
+              />
               <div className="flex-1 min-w-0">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Most recent auto-assignment</div>
                 <div className="text-sm sm:text-base text-slate-900 truncate font-medium mt-0.5" title={latest.ticketSubject}>
@@ -641,6 +665,56 @@ function RelativeTime({ iso }) {
   return <span>{days} day{days === 1 ? '' : 's'} ago</span>;
 }
 
+/**
+ * Profile avatar for a technician with optional badge overlay. Falls back to
+ * a colored initials circle when photoUrl is missing or the image fails to
+ * load (broken-image alt would leak the real name in Demo Mode).
+ *
+ * @param {object} props
+ * @param {string|null} props.photoUrl
+ * @param {string|null} props.name
+ * @param {'sm'|'md'|'lg'} [props.size='md']
+ * @param {React.ReactNode} [props.badge]      Optional small overlay (e.g. status icon)
+ * @param {string} [props.badgeClass]
+ */
+function TechAvatar({ photoUrl, name, size = 'md', badge = null, badgeClass = 'bg-emerald-500' }) {
+  const [broken, setBroken] = useState(false);
+  const SIZES = {
+    sm: { wrap: 'w-7 h-7', text: 'text-[10px]', badge: 'w-3.5 h-3.5 -bottom-0.5 -right-0.5' },
+    md: { wrap: 'w-9 h-9', text: 'text-xs', badge: 'w-4 h-4 -bottom-0.5 -right-0.5' },
+    lg: { wrap: 'w-11 h-11 sm:w-12 sm:h-12', text: 'text-sm', badge: 'w-5 h-5 -bottom-0.5 -right-0.5' },
+  };
+  const s = SIZES[size] || SIZES.md;
+  const initials = (name || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('') || '?';
+  const showImg = photoUrl && !broken;
+  return (
+    <div className={`relative flex-shrink-0 ${s.wrap}`}>
+      {showImg ? (
+        <img
+          src={photoUrl}
+          alt={name || ''}
+          className={`${s.wrap} rounded-full object-cover border border-slate-200 shadow-sm`}
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        <div className={`${s.wrap} rounded-full bg-gradient-to-br from-blue-500 to-blue-600 border border-blue-400 shadow-sm flex items-center justify-center`}>
+          <span className={`${s.text} font-bold text-white`}>{initials}</span>
+        </div>
+      )}
+      {badge && (
+        <span className={`absolute ${s.badge} rounded-full ${badgeClass} flex items-center justify-center`}>
+          {badge}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClose, sheetRef, ...innerProps }) {
   if (!quickApproveId) return null;
   const run = activeItems.find((r) => r.id === quickApproveId);
@@ -665,12 +739,17 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
   );
 }
 
-function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles', timeRange = '7d' }) {
+function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles', timeRange = '7d', onTimeRangeChange }) {
   const navigate = useNavigate();
   const [queue, setQueue] = useState({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 }, inProgress: [] });
   const [outsideAssignedRuns, setOutsideAssignedRuns] = useState({ items: [], total: 0 });
   const [deletedRuns, setDeletedRuns] = useState({ items: [], total: 0 });
   const [assignedFilter, setAssignedFilter] = useState('all'); // 'all' | 'via_pipeline' | 'manually_in_fs'
+  // Sub-filter inside Decided > Via Pipeline: 'all' (auto+approved+modified),
+  // 'auto_assigned' (just AI), or 'approved' (just admin-approved/modified).
+  // Set by drilling into the empty-state outcome cards so the destination
+  // shows EXACTLY the count the card promised. Cleared by the chip's X.
+  const [decidedDecisionFilter, setDecidedDecisionFilter] = useState('all');
   const [ticketStatusFilter, setTicketStatusFilter] = useState('in_progress'); // 'all' | 'in_progress' | 'pending' | 'closed_resolved'
   const [assignedRuns, setAssignedRuns] = useState({ items: [], total: 0 });
   const [queuedRuns, setQueuedRuns] = useState([]);
@@ -776,7 +855,21 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           sinceField: 'createdAt',
         }),
         assignmentAPI.getQueue({ limit: 100, offset: 0, assignmentStatus: 'outside_assigned', ticketStatus: assignedTicketStatus, since, sinceField: 'createdAt' }),
-        assignmentAPI.getRuns({ decisions: 'approved,modified,auto_assigned', since, sinceField: 'decidedAt', limit: 50, ticketStatus: assignedTicketStatus }),
+        // The decision list narrows when the empty-state cards drill in:
+        //   'auto_assigned'  → only AI-decided runs
+        //   'approved'       → only admin-approved (approved + modified)
+        //   'all'            → everything that lives under "Via Pipeline"
+        assignmentAPI.getRuns({
+          decisions: decidedDecisionFilter === 'auto_assigned'
+            ? 'auto_assigned'
+            : decidedDecisionFilter === 'approved'
+              ? 'approved,modified'
+              : 'approved,modified,auto_assigned',
+          since,
+          sinceField: 'decidedAt',
+          limit: 50,
+          ticketStatus: assignedTicketStatus,
+        }),
         assignmentAPI.getRuns({ decisions: 'noise_dismissed', since, sinceField: 'decidedAt', limit: 50, ticketStatus: dismissedTicketStatus }),
         assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: 50, ticketStatus: rejectedTicketStatus }),
         assignmentAPI.getRuns({ since, sinceField: 'createdAt', limit: 100, ticketStatus: 'deleted' }),
@@ -818,7 +911,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         setRefreshing(false);
       }
     }
-  }, [timeRange, queuePage, ticketStatusFilter, subView]);
+  }, [timeRange, queuePage, ticketStatusFilter, subView, decidedDecisionFilter]);
 
   const handleSmartRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1571,7 +1664,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => { setSubView(tab.id); setAssignedFilter('all'); }}
+                    onClick={() => { setSubView(tab.id); setAssignedFilter('all'); setDecidedDecisionFilter('all'); }}
                     className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
                       isActive
                         ? `bg-white text-slate-900 shadow-sm ring-1 ${tab.activeRing}`
@@ -1671,6 +1764,35 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     {differentAgentCount} different agent chosen
                   </span>
                 )}
+              </div>
+            )}
+
+            {/* Decision sub-filter — only meaningful when looking at Via
+                Pipeline (those runs split into two distinct outcomes:
+                auto-assigned by AI vs admin-approved). Set automatically
+                when drilling in from the empty-state outcome cards so the
+                count matches the card; user can toggle freely too. */}
+            {subView === 'assigned' && assignedFilter === 'via_pipeline' && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold w-14 shrink-0">Decision</span>
+                {[
+                  { id: 'all', label: 'All', activeColor: 'border-slate-700 text-slate-900' },
+                  { id: 'auto_assigned', label: 'Auto-assigned by AI', activeColor: 'border-emerald-500 text-emerald-700' },
+                  { id: 'approved', label: 'Approved by you', activeColor: 'border-blue-500 text-blue-700' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setDecidedDecisionFilter(f.id)}
+                    className={`relative pb-1 text-[11px] font-medium transition-colors duration-150 touch-manipulation border-b-2 ${
+                      decidedDecisionFilter === f.id
+                        ? f.activeColor
+                        : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
               </div>
             )}
 
@@ -1794,8 +1916,18 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 onNavigate={(target) => {
                   // Drive the parent's tab + sub-filter state from the
                   // empty-state stat tiles so they double as quick links.
+                  // Also nudge the time range to '24h' so the destination
+                  // shows ~today's window, matching what the cards just
+                  // promised. (Empty-state stats are workspace-tz "today"
+                  // bounds; 24h rolling overlaps ~95%.)
                   if (target.subView) setSubView(target.subView);
-                  if (target.assignedFilter) setAssignedFilter(target.assignedFilter);
+                  // Reset assignedFilter when not provided so a stale value
+                  // from a previous visit doesn't leak through.
+                  setAssignedFilter(target.assignedFilter || 'all');
+                  setDecidedDecisionFilter(target.decidedDecisionFilter || 'all');
+                  if (target.timeRange && onTimeRangeChange) {
+                    onTimeRangeChange(target.timeRange);
+                  }
                 }}
               />
             ) : (
@@ -3042,7 +3174,7 @@ export default function AssignmentReview() {
       <div className="flex-1 px-2 pb-2 sm:px-4 sm:pb-4 overflow-auto">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-full">
           <div className="px-3 py-3 sm:px-6 sm:py-5">
-            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} />}
+            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'calibration' && <CalibrationManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}

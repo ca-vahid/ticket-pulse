@@ -2,6 +2,63 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.84-preview] - 2026-04-22
+
+### Empty-state polish: assignee avatar + precise click-through filters
+
+User feedback after v1.9.83: the avatar from the designer mockup was missing on the "Most recent auto-assignment" card, and the outcome tile click destinations didn't filter precisely (clicking "21 auto-assigned" landed on Decided > Via Pipeline which showed all 25 = 21 auto + 4 approved).
+
+#### Avatar restored
+
+Backend `getTodayStats` now selects `assignedTech.photoUrl` and returns `techPhotoUrl` in the `latestAutoAssignment` payload. Frontend renders it via a new reusable `TechAvatar` component:
+
+- Three sizes (`sm` / `md` / `lg`)
+- Optional badge overlay (used here for the green check) — anchored bottom-right with ring outline
+- Demo Mode-safe fallback: if the image fails to load, it silently swaps to a colored initials circle so broken-image alt text can't leak the real name
+- Falls back to initials when `photoUrl` is null
+
+#### Precise drill-down filters
+
+Each outcome tile now navigates with the exact decision filter the count was based on:
+
+| Card | Lands on | Filter applied |
+|---|---|---|
+| Auto-assigned by AI (21) | Decided > Via Pipeline | `decisions=auto_assigned` |
+| Approved by you (4) | Decided > Via Pipeline | `decisions=approved,modified` |
+| Picked up in FreshService (5) | Decided > Manually in FreshService | (filter inherent to sub-tab) |
+| Dismissed as noise (2) | Dismissed tab | (filter inherent to tab) |
+
+All four also nudge the time range to **24h**. Empty-state stats are bounded by workspace-tz "today" while time range presets are rolling windows; 24h overlaps "today" by ~95% in normal cases — close enough that the displayed count matches what the card promised.
+
+#### New "Decision" sub-filter row on Decided > Via Pipeline
+
+Because Via Pipeline aggregates two distinct outcomes (AI vs admin), added a third sub-filter row below the existing Source row:
+
+```
+Source:    All  Via Pipeline  Manually in FreshService
+Decision:  All  Auto-assigned by AI  Approved by you
+```
+
+Set automatically when drilling in from the empty-state cards, but visible at all times so the user can toggle freely. Resets to "All" when switching primary tabs (Awaiting / Decided / Dismissed / Rejected / Deleted).
+
+#### Implementation details
+
+- `QueueTab` gained an `onTimeRangeChange` callback prop. The parent (`AssignmentReview`) was already managing `timeRange` state but it was a one-way prop; this lets child components push changes back up.
+- New `decidedDecisionFilter` state in `QueueTab` (`'all' | 'auto_assigned' | 'approved'`). Folded into the `assignedRes` `getRuns` call's `decisions` param.
+- `fetchQueue` callback dependency list extended to include `decidedDecisionFilter` so changes refetch.
+- Top-level tab clicks reset both `assignedFilter` and `decidedDecisionFilter` so a stale filter from a previous visit doesn't carry over.
+
+#### Files touched
+
+- `backend/src/services/assignmentDailyStats.js` — select `photoUrl`, return `techPhotoUrl`
+- `frontend/src/pages/AssignmentReview.jsx` — `TechAvatar` component, `decidedDecisionFilter` state, Decision sub-filter row, drill-down callbacks, `onTimeRangeChange` plumbing
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.84-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No DB schema change.
+
+---
+
 ## [1.9.83-preview] - 2026-04-22
 
 ### UX redesign: Auto-Assign empty-state panel + clickable outcome cards

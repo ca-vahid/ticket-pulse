@@ -1,6 +1,17 @@
-export const APP_VERSION = '1.9.83-preview';
+export const APP_VERSION = '1.9.84-preview';
 
 export const changelog = [
+  {
+    version: '1.9.84-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'new', text: 'Profile photo on the "Most recent auto-assignment" card -- backend now returns techPhotoUrl alongside techName in the latestAutoAssignment payload, and the empty-state card renders the assignee\u2019s actual photo (with a small green check badge overlay). Falls back to a colored initials circle when photo is missing or fails to load. Matches the designer mockup' },
+      { type: 'new', text: 'New TechAvatar component -- reusable avatar with optional badge overlay, three sizes (sm/md/lg), and Demo Mode-safe fallback (hides broken image so alt-text doesn\u2019t leak the real name). Used in the empty-state card today, can be reused elsewhere in the app later' },
+      { type: 'fixed', text: 'Empty-state outcome cards now drill into PRECISE filters so the destination shows exactly the count the card promised. Auto-assigned by AI (21) lands on Decided > Via Pipeline > AI-only (21). Approved by you (4) lands on Decided > Via Pipeline > Approved-only (4). Picked up in FreshService (5) lands on Decided > Manually in FreshService (5). All four cards also nudge the time range to 24h so the rolling window matches today\u2019s bounds within ~95%' },
+      { type: 'new', text: 'Decision sub-filter on Decided > Via Pipeline -- new "Decision" row appears below the Source row when viewing Via Pipeline, with All / Auto-assigned by AI / Approved by you pills. Set automatically when drilling in from the empty-state, but the user can toggle freely to switch between AI-only and admin-only views. Resets to All when switching primary tabs' },
+      { type: 'improved', text: 'QueueTab gained an onTimeRangeChange callback prop so child components (the empty-state navigation in particular) can switch the parent-owned time range when drilling in. Previously the time range was a one-way prop with no upstream control' },
+    ],
+  },
   {
     version: '1.9.83-preview',
     date: 'April 22, 2026',
