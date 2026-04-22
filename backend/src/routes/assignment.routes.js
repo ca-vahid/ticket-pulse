@@ -124,13 +124,25 @@ router.get('/groups', requireAdmin, asyncHandler(async (req, res) => {
     : {};
   try {
     const groups = await client.listGroups(filters);
-    // Trim to just what the picker needs — names can be long, descriptions
-    // sometimes contain HTML, agent_ids can be hundreds long. Strip noise.
-    const trimmed = groups.map((g) => ({
-      id: Number(g.id),
-      name: g.name || `Group #${g.id}`,
-      agentCount: Array.isArray(g.agent_ids) ? g.agent_ids.length : 0,
-    })).sort((a, b) => a.name.localeCompare(b.name));
+    // Trim to just what the picker needs. The FreshService API response uses
+    // `members` for the list of agent IDs on a group (not `agent_ids` as
+    // Freshdesk does and as the in-code comments previously assumed). We read
+    // both for safety — if FS ever flips back or a future API version returns
+    // the older shape, the picker still shows accurate counts.
+    const trimmed = groups.map((g) => {
+      const memberIds = Array.isArray(g.members)
+        ? g.members
+        : Array.isArray(g.agent_ids) ? g.agent_ids : [];
+      const observerIds = Array.isArray(g.observers) ? g.observers : [];
+      const leaderIds = Array.isArray(g.leaders) ? g.leaders : [];
+      return {
+        id: Number(g.id),
+        name: g.name || `Group #${g.id}`,
+        agentCount: memberIds.length,
+        observerCount: observerIds.length,
+        leaderCount: leaderIds.length,
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
     res.json({ success: true, data: trimmed });
   } catch (err) {
     logger.error('Failed to list FreshService groups', { workspaceId: req.workspaceId, error: err.message });

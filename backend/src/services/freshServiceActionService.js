@@ -267,7 +267,15 @@ class FreshServiceActionService {
       // Check 2: ticket is in a group — check if target agent belongs to it
       if (fsTicket.group_id) {
         const group = await client.getGroup(fsTicket.group_id);
-        if (group && group.agent_ids && !group.agent_ids.includes(Number(assignAction.agentId))) {
+        // FreshService returns group members under `members` (not `agent_ids`
+        // as Freshdesk does — this check was silently always-true before
+        // v1.9.75 because agent_ids is never populated on /groups responses).
+        // Fall back to agent_ids for defensiveness in case a future API
+        // version or a different FS tier returns the older shape.
+        const memberIds = Array.isArray(group?.members)
+          ? group.members
+          : Array.isArray(group?.agent_ids) ? group.agent_ids : null;
+        if (group && memberIds && !memberIds.includes(Number(assignAction.agentId))) {
           return {
             code: 'incompatible_group',
             reason: `Target agent is not a member of group "${group.name || fsTicket.group_id}"`,

@@ -457,9 +457,15 @@ class FreshServiceClient {
    * List all FreshService groups in a workspace. Returns the full set
    * (paginated 100/page). Used by the assignment config UI to populate the
    * "exclude from auto-assign" picker.
+   *
+   * Response shape note: FreshService returns group members under `members`
+   * (an array of agent IDs), plus separate `observers` and `leaders` arrays.
+   * This differs from Freshdesk's `agent_ids` naming; callers should read
+   * `members` for the list of regular agents in the group.
+   *
    * @param {object}  [filters]
    * @param {number}  [filters.workspace_id]
-   * @returns {Promise<Array<{id:number,name:string,description?:string,agent_ids?:number[]}>>}
+   * @returns {Promise<Array<{id:number,name:string,description?:string,members?:number[],observers?:number[],leaders?:number[]}>>}
    */
   async listGroups(filters = {}) {
     try {

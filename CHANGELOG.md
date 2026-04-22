@@ -2,6 +2,53 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.75-preview] - 2026-04-22
+
+### Bug fix: FreshService group member count was always zero
+
+The Excluded Groups picker shipped in v1.9.74 rendered "0 agents" next to every group — including "Everyone IT" which has 15 members. Investigation showed the backend was reading `g.agent_ids` from the FreshService `/groups` response, but the real response shape for Freshservice is:
+
+```json
+{
+  "id": 1000205455,
+  "name": "Everyone IT",
+  "members":  [/* 15 agent IDs */],
+  "observers": [/* 1 ID */],
+  "leaders":  []
+}
+```
+
+The `agent_ids` naming is a Freshdesk-ism. Freshservice uses `members` + `observers` + `leaders` and has no `agent_ids` field on groups at all.
+
+#### What was broken
+
+- **Picker counts**: `GET /assignment/groups` returned `agentCount: 0` for every group.
+- **Preflight check (pre-existing, silent since 1.9.5)**: `freshServiceActionService._preflightCheck`'s "incompatible_group" check used the same `agent_ids` read pattern: `if (group && group.agent_ids && !group.agent_ids.includes(agentId))`. Because `agent_ids` was always undefined, the `&&` short-circuited to `false` — meaning the check never fired and any "agent X doesn't belong to group Y" scenarios slipped through to the actual FreshService API call. Low impact in practice because the LLM rarely recommends cross-group assignments and FS itself rejects bad assignments, but it closes a silent-failure hole.
+
+#### Fix
+
+Both sites now read `members` with an `agent_ids` fallback for defensiveness, in case a future FS API version or a different tier ever returns the older shape:
+
+```js
+const memberIds = Array.isArray(g.members)
+  ? g.members
+  : Array.isArray(g.agent_ids) ? g.agent_ids : null;
+```
+
+Also extended the route response with `observerCount` and `leaderCount` (not surfaced in the UI today but available for future use). `listGroups()` JSDoc updated to document the real response shape.
+
+#### Files touched
+
+- `backend/src/routes/assignment.routes.js` — picker count reads `members`
+- `backend/src/services/freshServiceActionService.js` — preflight incompatible_group check reads `members`
+- `backend/src/integrations/freshservice.js` — `listGroups()` JSDoc
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.75-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No database changes, no migration, no prompt changes.
+
+---
+
 ## [1.9.74-preview] - 2026-04-22
 
 ### Per-group exclusion from auto-assignment
