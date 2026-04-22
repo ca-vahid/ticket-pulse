@@ -1,6 +1,15 @@
-export const APP_VERSION = '1.9.82-preview';
+export const APP_VERSION = '1.9.83-preview';
 
 export const changelog = [
+  {
+    version: '1.9.83-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'improved', text: 'Auto-Assign empty-state panel UI redesign -- modernized typography (serif headline for sophistication, big bold numbers for readability), glassmorphism dark-blue hero card for "Today" with gradient orbs and inner glow, white outcome cards with subtle drop shadows + colored left-border accents (replaced the pale green/yellow card backgrounds), refined small pills with icon chips, and cleaner activity item at the bottom. More negative space throughout. Visually distinct from the rest of the app while staying consistent with the existing tab/header styling' },
+      { type: 'new', text: 'Outcome cards are now clickable -- Auto-assigned by AI / Approved by you both jump to Decided > Via Pipeline; Picked up in FreshService jumps to Decided > Manually in FreshService; Dismissed as noise jumps to Dismissed tab. The "Most recent auto-assignment" card already linked to the run detail page; now the entire card is the click target instead of just the small View link. Hover lifts the cards slightly so the interaction is obvious' },
+      { type: 'improved', text: 'StatTile component refactored to support an optional onClick prop. When provided the tile renders as a button with focus styles, hover lift, and a subtle chevron that fades in on hover. When omitted (e.g. used as a static metric somewhere else in the app later) the tile stays a plain div. Backwards compatible' },
+    ],
+  },
   {
     version: '1.9.82-preview',
     date: 'April 22, 2026',
