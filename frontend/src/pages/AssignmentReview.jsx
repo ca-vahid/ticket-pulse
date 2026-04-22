@@ -14,7 +14,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check, TrendingUp,
-  ShieldCheck, Users,
+  ShieldCheck, Users, Bot, Sparkles, ExternalLink, Clock,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -335,6 +335,197 @@ function QuickApprovePopover({ run, align = 'right', quickApproveId, popoverRef,
       <QuickApproveInner run={run} recs={recs} {...innerProps} />
     </div>
   );
+}
+
+/**
+ * Stat tile for the auto-assign empty-state panel. Big number, small label,
+ * subtle icon. Color theming via `tone` so the auto-assigned tile pops while
+ * secondary metrics stay quiet.
+ */
+function StatTile({ icon: Icon, label, value, sublabel, tone = 'slate' }) {
+  const TONE_CLASSES = {
+    blue:   { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-700',    icon: 'text-blue-500',    value: 'text-blue-900' },
+    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', icon: 'text-emerald-500', value: 'text-emerald-900' },
+    amber:  { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-700',   icon: 'text-amber-500',   value: 'text-amber-900' },
+    slate:  { bg: 'bg-slate-50',   border: 'border-slate-200',   text: 'text-slate-600',   icon: 'text-slate-400',   value: 'text-slate-800' },
+    rose:   { bg: 'bg-rose-50',    border: 'border-rose-200',    text: 'text-rose-700',    icon: 'text-rose-500',    value: 'text-rose-900' },
+  };
+  const t = TONE_CLASSES[tone] || TONE_CLASSES.slate;
+  return (
+    <div className={`${t.bg} border ${t.border} rounded-xl p-4 flex flex-col gap-1.5`}>
+      <div className="flex items-center gap-1.5">
+        <Icon className={`w-4 h-4 ${t.icon}`} />
+        <span className={`text-[11px] font-semibold uppercase tracking-wide ${t.text}`}>{label}</span>
+      </div>
+      <div className={`text-3xl sm:text-4xl font-bold tabular-nums leading-none ${t.value}`}>{value ?? 0}</div>
+      {sublabel && <div className="text-[11px] text-slate-500 mt-0.5">{sublabel}</div>}
+    </div>
+  );
+}
+
+/**
+ * Replaces the sad "No tickets awaiting decision" placeholder when auto-assign
+ * is on and the queue is genuinely empty. The pipeline is doing its job in the
+ * background — show today's stats so the page is informative instead of feeling
+ * broken. Also acknowledges that excluded groups (if configured) will still
+ * surface tickets here for manual approval.
+ */
+function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTotal, onRefresh }) {
+  const today = queueStatus?.today || {};
+  const stats = {
+    autoAssigned: today.autoAssigned || 0,
+    handledInFs: today.handledInFs || 0,
+    noiseDismissed: today.noiseDismissed || 0,
+    manualReviewRequired: today.manualReviewRequired || 0,
+    inProgress: today.inProgress || 0,
+    totalRuns: today.totalRuns || 0,
+  };
+  const excludedGroupCount = queueStatus?.excludedGroupCount || 0;
+  const latest = today.latestAutoAssignment || null;
+  const dryRun = queueStatus?.dryRunMode;
+
+  return (
+    <div className="py-8 sm:py-10 px-3 sm:px-6">
+      {/* Header — auto-assign is on, page intentionally empty */}
+      <div className="text-center max-w-2xl mx-auto mb-6 sm:mb-8">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold mb-3">
+          <Bot className="w-3.5 h-3.5" />
+          <span>Auto-Assign is ON</span>
+        </div>
+        <h3 className="text-xl sm:text-2xl font-bold text-slate-800">No tickets are waiting for you right now.</h3>
+        <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+          The pipeline is analyzing tickets as they arrive and assigning them automatically.
+          Tickets only land here when they need a human decision — for example, items in {' '}
+          <span className="font-semibold text-slate-700">excluded groups</span>
+          {excludedGroupCount > 0 ? ` (${excludedGroupCount} configured)` : ''}, rebound exhaustion, or LLM uncertainty.
+        </p>
+      </div>
+
+      {/* Hero stat — today's auto-assignments */}
+      <div className="max-w-3xl mx-auto mb-4">
+        <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-violet-50 border border-blue-200 rounded-2xl p-5 sm:p-6 flex items-center gap-4 sm:gap-6">
+          <div className="flex-shrink-0 w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white/70 border border-blue-200 flex items-center justify-center">
+            <Sparkles className="w-7 h-7 sm:w-8 sm:h-8 text-blue-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Today</div>
+            <div className="text-3xl sm:text-4xl font-bold text-slate-900 tabular-nums leading-tight">
+              {stats.autoAssigned}
+              <span className="text-sm sm:text-base font-medium text-slate-500 ml-2">auto-assigned</span>
+            </div>
+            <div className="text-xs text-slate-500 mt-1">
+              out of <span className="font-semibold text-slate-700">{stats.totalRuns}</span> total ticket{stats.totalRuns === 1 ? '' : 's'} processed by the pipeline
+              {dryRun && <span className="ml-2 px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 text-[10px] font-semibold">DRY-RUN</span>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Secondary stats grid */}
+      <div className="max-w-3xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 mb-5">
+        <StatTile
+          icon={Users}
+          label="Handled in FS"
+          value={stats.handledInFs}
+          sublabel="agents picked up directly"
+          tone="amber"
+        />
+        <StatTile
+          icon={XCircle}
+          label="Noise dismissed"
+          value={stats.noiseDismissed}
+          sublabel="auto-classified as non-actionable"
+          tone="slate"
+        />
+        <StatTile
+          icon={ShieldCheck}
+          label="Needed review"
+          value={stats.manualReviewRequired}
+          sublabel="excluded groups + rebound"
+          tone="rose"
+        />
+        <StatTile
+          icon={Brain}
+          label="In progress"
+          value={inProgressCount || stats.inProgress}
+          sublabel="LLM analyzing now"
+          tone="blue"
+        />
+      </div>
+
+      {/* Latest auto-assignment + queued count strip */}
+      <div className="max-w-3xl mx-auto space-y-2">
+        {latest && (
+          <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-3.5 flex items-center gap-3">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+              <Check className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Most recent auto-assignment</div>
+              <div className="text-sm text-slate-800 truncate font-medium" title={latest.ticketSubject}>
+                {latest.freshserviceTicketId && <span className="text-slate-400 mr-1.5 font-normal">#{latest.freshserviceTicketId}</span>}
+                {latest.ticketSubject}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span>to <span className="font-semibold text-slate-700">{latest.techName || 'Unknown'}</span></span>
+                <span className="text-slate-300">·</span>
+                <Clock className="w-3 h-3 text-slate-400" />
+                <RelativeTime iso={latest.decidedAt} />
+              </div>
+            </div>
+            <a
+              href={`/assignments/history/${latest.runId}`}
+              className="flex-shrink-0 text-xs text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
+            >
+              View <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        )}
+
+        {queuedRunsTotal > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2.5 text-xs text-amber-800">
+            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <span>
+              <span className="font-semibold">{queuedRunsTotal}</span> ticket{queuedRunsTotal === 1 ? ' is' : 's are'} queued for next business hours and will run automatically when business hours start.
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Refresh */}
+      <div className="text-center mt-5">
+        <button onClick={onRefresh} className="text-xs text-slate-500 hover:text-slate-700 inline-flex items-center gap-1">
+          <RefreshCw className="w-3.5 h-3.5" /> Refresh stats
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Tiny "X minutes ago / X hours ago" helper that updates every 30s. Used in the
+ * empty-state's "most recent auto-assignment" strip so the relative time stays
+ * accurate without forcing a full page refresh.
+ */
+function RelativeTime({ iso }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => force((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return <span>just now</span>;
+  if (ms < 3_600_000) {
+    const min = Math.floor(ms / 60_000);
+    return <span>{min} min ago</span>;
+  }
+  if (ms < 86_400_000) {
+    const hr = Math.floor(ms / 3_600_000);
+    return <span>{hr} hr ago</span>;
+  }
+  const days = Math.floor(ms / 86_400_000);
+  return <span>{days} day{days === 1 ? '' : 's'} ago</span>;
 }
 
 function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClose, sheetRef, ...innerProps }) {
@@ -1475,25 +1666,40 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         {/* List content - key triggers a subtle fade-in on tab/filter/page change */}
         <div key={`${subView}-${assignedFilter}-${queuePage}-${ticketStatusFilter}`} className="animate-in fade-in duration-150">
           {activeItems.length === 0 ? (
-            <div className="text-center py-10">
-              <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-              <p className="text-slate-500 text-sm font-medium">
-                {subView === 'pending'
-                  ? (queue.inProgress?.length > 0
-                    ? 'No tickets awaiting decision yet — AI is still analyzing'
-                    : 'No tickets awaiting decision')
-                  : subView === 'assigned'
-                    ? 'No decisions in this period'
-                    : subView === 'dismissed'
-                      ? 'No dismissed runs in this period'
-                      : subView === 'rejected'
-                        ? 'No rejected runs in this period'
-                        : subView === 'deleted'
-                          ? 'No deleted tickets in this period'
-                          : 'No runs found'}
-              </p>
-              <button onClick={handleSmartRefresh} className="mt-2 text-xs text-blue-600 hover:underline inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
-            </div>
+            // When auto-assign is on and the pending queue is empty, the
+            // pipeline is doing its job behind the scenes — show today's
+            // stats so the page is informative instead of feeling broken.
+            // Falls back to the original sparse placeholder for every other
+            // case (decided/dismissed/rejected/deleted tabs, or auto-assign
+            // off).
+            subView === 'pending' && queueStatus?.autoAssign ? (
+              <AutoAssignActiveEmptyState
+                queueStatus={queueStatus}
+                inProgressCount={queue.inProgress?.length || 0}
+                queuedRunsTotal={queuedRunsMeta?.totalCount || 0}
+                onRefresh={handleSmartRefresh}
+              />
+            ) : (
+              <div className="text-center py-10">
+                <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-500 text-sm font-medium">
+                  {subView === 'pending'
+                    ? (queue.inProgress?.length > 0
+                      ? 'No tickets awaiting decision yet — AI is still analyzing'
+                      : 'No tickets awaiting decision')
+                    : subView === 'assigned'
+                      ? 'No decisions in this period'
+                      : subView === 'dismissed'
+                        ? 'No dismissed runs in this period'
+                        : subView === 'rejected'
+                          ? 'No rejected runs in this period'
+                          : subView === 'deleted'
+                            ? 'No deleted tickets in this period'
+                            : 'No runs found'}
+                </p>
+                <button onClick={handleSmartRefresh} className="mt-2 text-xs text-blue-600 hover:underline inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
+              </div>
+            )
           ) : (
             <>
               {/* Mobile cards */}

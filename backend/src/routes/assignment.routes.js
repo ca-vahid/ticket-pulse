@@ -259,6 +259,14 @@ router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {
     }
   }
 
+  // Pull the workspace's assignment config + today's pipeline stats so the
+  // Review Queue can render a richer empty-state when auto-assign is on
+  // (instead of a sad "no tickets" placeholder). Both are cheap — single
+  // row read for config, one groupBy + one count for stats.
+  const cfg = await assignmentRepository.getConfig(req.workspaceId);
+  const { getTodayStats } = await import('../services/assignmentDailyStats.js');
+  const today = await getTodayStats(req.workspaceId, tz);
+
   res.json({
     success: true,
     data: {
@@ -267,6 +275,12 @@ router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {
       timezone: tz,
       queuedCount,
       nextWindow,
+      autoAssign: !!cfg?.autoAssign,
+      autoCloseNoise: !!cfg?.autoCloseNoise,
+      pipelineEnabled: !!cfg?.isEnabled,
+      dryRunMode: !!cfg?.dryRunMode,
+      excludedGroupCount: Array.isArray(cfg?.excludedGroupIds) ? cfg.excludedGroupIds.length : 0,
+      today,
     },
   });
 }));
