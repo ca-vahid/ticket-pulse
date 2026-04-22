@@ -173,21 +173,26 @@ export const TOOL_SCHEMAS = [
         },
         overallReasoning: {
           type: 'string',
-          description: 'INTERNAL ONLY — never shown to the assignee. Full analysis explaining the routing logic: scores, ranking, why each candidate was preferred or rejected, workload/fairness considerations, on-shift status, rebound history, etc. This is for admin review and audit only.',
+          description: `INTERNAL ONLY — never shown to the assignee. Full analysis explaining the routing logic: scores, ranking, why each candidate was preferred or rejected, workload/fairness considerations, on-shift status, rebound history, etc. This is for admin review and audit only.
+
+FORMAT: Plain text or simple Markdown. Use short paragraphs separated by a blank line, and bullet lists ("- ") where you're enumerating candidates or factors. Do NOT produce one giant wall of text — break it up so an admin can scan it quickly. No HTML.`,
         },
         agentBriefingHtml: {
           type: 'string',
           description: `Public-facing HTML message that will be posted as a private note on the FreshService ticket and read by the assigned technician. REQUIRED when recommendations is non-empty.
 
+PURPOSE: Explain *what the ticket is about* and *why it was routed to this person*. That's it. This is a justification note, NOT a how-to guide.
+
 Tone: concise, professional, written directly TO the assignee (use "you").
 
 INCLUDE:
 - A 1-2 sentence recap of what the requester needs.
-- A short, plain-language reason this is being routed to them (e.g. "you've handled similar VPN tickets recently", "this needs on-site work in Vancouver"). Keep it human — no scoring language.
-- Suggested first step or what to verify with the requester, if obvious.
+- Reasons this is being routed to them (e.g. "you've handled similar VPN tickets recently", "this needs on-site work in Vancouver"). Keep it human — no scoring language.
 - Any directly relevant links/references found during research (KB articles, related tickets by ID).
 
-NEVER INCLUDE (these reveal our routing algorithm and let agents game it):
+NEVER INCLUDE:
+- Suggested first steps, troubleshooting instructions, or "you should do X". The assignee is a qualified technician — do not tell them how to do their job.
+- Questions the assignee should ask the requester. They will figure that out.
 - Numerical scores, ranks, percentages, or confidence values.
 - Names of OTHER candidates that were considered or ruled out.
 - Workload counts, "open ticket" numbers, or fairness/round-robin reasoning.
@@ -198,7 +203,7 @@ NEVER INCLUDE (these reveal our routing algorithm and let agents game it):
 
 Allowed HTML tags only: <b> <i> <br> <p> <ul> <li> <a href> <h3>. No <script>, <style>, <img>, inline styles, or other tags.
 
-Length: aim for 60-180 words. Hard cap ~1200 characters.`,
+Length: aim for 40-120 words. Hard cap ~800 characters.`,
         },
         closureNoticeHtml: {
           type: 'string',

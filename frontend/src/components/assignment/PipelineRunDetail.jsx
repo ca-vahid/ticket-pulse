@@ -169,49 +169,8 @@ function stripHtml(html) {
   return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
 }
 
-function HighlightText({ text, techNames = [] }) {
-  if (!text) return null;
-
-  const allMatches = [];
-  const ticketRegex = /#\d{4,}/g;
-  let m;
-  while ((m = ticketRegex.exec(text)) !== null) {
-    allMatches.push({ start: m.index, end: m.index + m[0].length, text: m[0], type: 'ticket' });
-  }
-  for (const name of techNames.filter(Boolean)) {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
-    while ((m = regex.exec(text)) !== null) {
-      if (!allMatches.some(e => e.start <= m.index && e.end >= m.index + m[0].length)) {
-        allMatches.push({ start: m.index, end: m.index + m[0].length, text: m[0], type: 'tech' });
-      }
-    }
-  }
-  allMatches.sort((a, b) => a.start - b.start);
-
-  const parts = [];
-  let lastIndex = 0;
-  for (const match of allMatches) {
-    if (match.start > lastIndex) parts.push({ text: text.slice(lastIndex, match.start), type: 'plain' });
-    parts.push(match);
-    lastIndex = match.end;
-  }
-  if (lastIndex < text.length) parts.push({ text: text.slice(lastIndex), type: 'plain' });
-
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.type === 'ticket') return <mark key={i} className="bg-amber-100 text-amber-800 px-0.5 rounded font-mono text-[11px] not-italic">{part.text}</mark>;
-        if (part.type === 'tech') return <strong key={i} className="text-indigo-700 font-semibold">{part.text}</strong>;
-        return <span key={i}>{part.text}</span>;
-      })}
-    </>
-  );
-}
-
-function ReasoningCard({ reasoning, recommendations }) {
+function ReasoningCard({ reasoning, recommendations: _recommendations }) {
   if (!reasoning) return null;
-  const techNames = recommendations?.map(r => r.techName).filter(Boolean) || [];
   return (
     <div className="bg-gradient-to-br from-indigo-50 via-blue-50 to-slate-50 border border-indigo-100 rounded-xl p-4 h-full flex flex-col">
       <div className="flex items-center gap-2 mb-3">
@@ -221,9 +180,9 @@ function ReasoningCard({ reasoning, recommendations }) {
         <h4 className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Overall Reasoning</h4>
         <span className="ml-auto text-[10px] font-medium text-indigo-500/80 uppercase tracking-wider">Internal</span>
       </div>
-      <p className="text-sm text-slate-700 leading-relaxed">
-        <HighlightText text={reasoning} techNames={techNames} />
-      </p>
+      <div className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-headings:text-slate-800 prose-strong:text-slate-900 prose-ul:my-2 prose-li:my-0.5">
+        <Markdown remarkPlugins={[remarkGfm]} components={ticketDescriptionMdComponents}>{reasoning}</Markdown>
+      </div>
     </div>
   );
 }
@@ -269,7 +228,6 @@ function AgentBriefingCard({ recommendation, decision }) {
       </div>
       <div
         className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-a:text-emerald-700"
-        // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: safeHtml }}
       />
     </div>
@@ -823,6 +781,8 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           onDecide={isPending ? onDecide : null}
           deciding={deciding}
           hideReasoning={!!run.recommendation?.overallReasoning}
+          hideAgentBriefing
+          decision={run.decision}
         />
       )}
 
