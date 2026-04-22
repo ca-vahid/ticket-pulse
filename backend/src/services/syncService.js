@@ -262,9 +262,66 @@ class SyncService {
         where: { ticketId: upsertedTicket.id, triggerSource: 'rebound' },
       });
       if (reboundCount >= MAX_AUTO_REBOUNDS_PER_TICKET) {
-        logger.warn('Bounce detection: max auto-rebounds reached, skipping', {
+        // Previously this just logged and returned, leaving the ticket in
+        // limbo with no UI surface. Now we materialize a pending_review run
+        // tagged 'rebound_exhausted' so it appears in Awaiting Decision with
+        // a clear "needs manual handling" message and full rebound context.
+        logger.warn('Bounce detection: max auto-rebounds reached, materializing pending_review run', {
           ticketId: upsertedTicket.id, reboundCount,
         });
+
+        // Capture the previous-assignee snapshot from the analyzer's view
+        // (mirrors the same logic used below for normal rebounds, just
+        // inlined here because we exit before reaching that block).
+        let prevTechName = null;
+        let unassignedAt = null;
+        let unassignedByName = null;
+        const lastEpisode = analysis?.currentEpisode;
+        if (lastEpisode && lastEpisode.endMethod === 'rejected') {
+          prevTechName = lastEpisode.agentName || null;
+          unassignedAt = lastEpisode.endedAt;
+          unassignedByName = lastEpisode.endActorName || null;
+        }
+        if ((!unassignedAt || !unassignedByName) && analysis?.events?.length) {
+          const lastReject = [...analysis.events].reverse().find((e) => e.type === 'rejected');
+          if (lastReject) {
+            unassignedAt = unassignedAt || lastReject.timestamp;
+            unassignedByName = unassignedByName || lastReject.actorName;
+          }
+        }
+
+        try {
+          await prisma.assignmentPipelineRun.create({
+            data: {
+              ticketId: upsertedTicket.id,
+              workspaceId,
+              status: 'completed',
+              decision: 'pending_review',
+              triggerSource: 'rebound_exhausted',
+              errorMessage: `Auto-fallback exhausted after ${reboundCount} rebound${reboundCount === 1 ? '' : 's'} — needs manual review`,
+              reboundFrom: {
+                previousTechId: null,
+                previousTechName: prevTechName || 'Unknown',
+                unassignedAt: unassignedAt ? new Date(unassignedAt).toISOString() : null,
+                unassignedByName: unassignedByName || null,
+                reboundCount: reboundCount + 1,
+              },
+              // Synthesized empty recommendation so the Awaiting Decision UI
+              // renders this as a "no candidates left to try" run rather than
+              // crashing on null fields.
+              recommendation: {
+                recommendations: [],
+                overallReasoning: `Auto-fallback exhausted: this ticket has been rejected by ${reboundCount} successive auto-assigned technician${reboundCount === 1 ? '' : 's'}. No further automatic re-routing will happen — please assign manually or dismiss.`,
+                ticketClassification: 'needs_manual_review',
+                confidence: 'low',
+              },
+            },
+          });
+        } catch (err) {
+          logger.error('Bounce detection: failed to materialize rebound_exhausted run', {
+            ticketId: upsertedTicket.id, error: err.message,
+          });
+        }
         return;
       }
 

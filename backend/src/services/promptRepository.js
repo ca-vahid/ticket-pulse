@@ -38,6 +38,8 @@ Call **find_matching_agents** with:
 
 This returns a pre-filtered, ranked list combining competency, availability, location, and workload.
 
+**If this is a rebound run** (you'll see a "## Rebound Context" block in the user message), at least one candidate will have \`previouslyRejectedThisTicket: true\`. Exclude those candidates entirely unless they are genuinely the only qualified option — in which case explain in \`overallReasoning\` why you re-suggested them despite the prior rejection. Never make a prior rejecter the rank-1 pick if any other plausible candidate exists.
+
 ## Step 5: Research History
 Use **search_tickets** to find similar past tickets in the workspace — search by keywords from the ticket subject or by category. Look at:
 - Who resolved similar tickets before? That person likely has the best context.
@@ -86,6 +88,7 @@ Do include:
 - A 1-2 sentence recap of what the requester needs
 - A short, plain-language reason this is being routed to them ("you've handled similar VPN tickets recently", "this needs on-site support in Vancouver")
 - Any directly relevant KB links or related ticket IDs surfaced during research
+- **If this is a rebound run** (a "## Rebound Context" block was present in the user message), include a brief, neutral acknowledgement up front like "This ticket was returned to the queue and now needs your attention." — and only that. **Do NOT name the previous assignee, do NOT explain why they returned it, do NOT use the words "rebound", "bounced", or "rejected".**
 
 Format with simple HTML: \`<b>\`, \`<i>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<a href>\`, \`<h3>\` only. Aim for 40-120 words.
 
@@ -136,6 +139,12 @@ function needsPromptUpgrade(systemPrompt = '') {
       && /One suggested first step or thing to verify|Suggested first step or what to verify/.test(systemPrompt)) {
     return true;
   }
+  // Re-inject Step 8 if it predates the rebound-acknowledgement bullet so older
+  // prompts know how to handle reroutes after a rejection. The Rebound Context
+  // string only appears in the canonical Step 8 produced after this release.
+  if (systemPrompt.includes('agentBriefingHtml') && !systemPrompt.includes('Rebound Context')) {
+    return true;
+  }
   return false;
 }
 
@@ -173,6 +182,7 @@ Do include:
 - A 1-2 sentence recap of what the requester needs
 - A short, plain-language reason this is being routed to them ("you've handled similar VPN tickets recently", "this needs on-site support in Vancouver")
 - Any directly relevant KB links or related ticket IDs surfaced during research
+- **If this is a rebound run** (a "## Rebound Context" block was present in the user message), include a brief, neutral acknowledgement up front like "This ticket was returned to the queue and now needs your attention." — and only that. **Do NOT name the previous assignee, do NOT explain why they returned it, do NOT use the words "rebound", "bounced", or "rejected".**
 
 Format with simple HTML: \`<b>\`, \`<i>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<a href>\`, \`<h3>\` only. Aim for 40-120 words.
 
@@ -249,6 +259,13 @@ function upgradeLegacyPrompt(systemPrompt = '') {
   // customizations the admin made to Steps 1-7.
   if (systemPrompt.includes('agentBriefingHtml')
       && /one suggested first step|suggested first step or thing to verify|Suggested first check/i.test(systemPrompt)) {
+    return replaceAgentBriefingStep(systemPrompt);
+  }
+
+  // Has Step 8 but predates the rebound-acknowledgement bullet — replace just the
+  // Step 8 block so existing prompts learn how to handle rerouted tickets without
+  // disturbing any other customizations.
+  if (systemPrompt.includes('agentBriefingHtml') && !systemPrompt.includes('Rebound Context')) {
     return replaceAgentBriefingStep(systemPrompt);
   }
 

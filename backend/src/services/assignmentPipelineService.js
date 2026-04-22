@@ -276,6 +276,22 @@ class AssignmentPipelineService {
     const localTime = formatInTimeZone(now, wsTz, 'HH:mm');
     const dayOfWeek = formatInTimeZone(now, wsTz, 'EEEE');
 
+    // Pull rebound metadata that syncService persisted on the run record so we
+    // can surface it to the LLM in the first user message. Without this the LLM
+    // is blind to the fact that this run is a rerouting after a rejection,
+    // which leads to repeating the same pick or producing a generic agent
+    // briefing that doesn't acknowledge the bounce.
+    let reboundFrom = null;
+    try {
+      const runRecord = await prisma.assignmentPipelineRun.findUnique({
+        where: { id: runId },
+        select: { reboundFrom: true },
+      });
+      reboundFrom = runRecord?.reboundFrom || null;
+    } catch (err) {
+      logger.debug('Could not load reboundFrom for pipeline run', { runId, error: err.message });
+    }
+
     // Ensure run is in running state (may already be if created as running)
     await assignmentRepository.updatePipelineRun(runId, {
       status: 'running',
@@ -313,8 +329,24 @@ class AssignmentPipelineService {
         .catch((error) => logger.debug('Pipeline heartbeat failed', { runId, error: error.message }));
     };
 
+    let userMessage = `Current date/time: ${dayOfWeek}, ${localDate} at ${localTime} (${wsTz})\n\nAnalyze ticket ID ${ticketId} (use get_ticket_details to read it) and recommend the best technician for assignment. When you have completed your analysis, you MUST call the submit_recommendation tool with your final recommendation.`;
+
+    if (reboundFrom && (reboundFrom.previousTechName || reboundFrom.reboundCount)) {
+      const reboundCount = reboundFrom.reboundCount || 1;
+      const prevName = reboundFrom.previousTechName || 'a previous assignee';
+      const whenStr = reboundFrom.unassignedAt
+        ? formatInTimeZone(new Date(reboundFrom.unassignedAt), wsTz, 'yyyy-MM-dd HH:mm zzz')
+        : 'recently';
+      const ordinal = reboundCount === 1 ? '1st' : reboundCount === 2 ? '2nd' : reboundCount === 3 ? '3rd' : `${reboundCount}th`;
+      // Surface the rebound state explicitly so the LLM (a) actively avoids the
+      // prior rejecter via the previouslyRejectedThisTicket flag from
+      // find_matching_agents, and (b) knows to acknowledge the re-routing in
+      // agentBriefingHtml without naming the previous assignee.
+      userMessage += `\n\n## Rebound Context\nThis ticket was previously assigned and returned to the queue. This is the ${ordinal} attempt to find an assignee. Most recently it was returned by ${prevName} at ${whenStr}.\n\nWhen calling find_matching_agents, expect to see \`previouslyRejectedThisTicket: true\` on at least one candidate. Avoid recommending any agent flagged as a prior rejecter unless they are genuinely the only qualified option (and explain why in overallReasoning if so).\n\nWhen writing the agentBriefingHtml, include a brief, neutral acknowledgement that this ticket was re-routed (e.g. "This ticket was returned to the queue and now needs your attention"). Do NOT name the previous assignee or explain why they returned it.`;
+    }
+
     const messages = [
-      { role: 'user', content: `Current date/time: ${dayOfWeek}, ${localDate} at ${localTime} (${wsTz})\n\nAnalyze ticket ID ${ticketId} (use get_ticket_details to read it) and recommend the best technician for assignment. When you have completed your analysis, you MUST call the submit_recommendation tool with your final recommendation.` },
+      { role: 'user', content: userMessage },
     ];
 
     const toolAllowlist = promptVersion.toolConfig?.allowedTools || null;
@@ -495,11 +527,40 @@ class AssignmentPipelineService {
       const topRec = recommendation?.recommendations?.[0];
       const isNoise = recommendation && (!recommendation.recommendations || recommendation.recommendations.length === 0);
 
+      // Detect "LLM ignored the prompt and re-suggested a prior rejecter" so we
+      // don't auto-assign a ticket back to the agent who just bounced it. The
+      // preflight check would catch this at the FS layer too, but downgrading
+      // here avoids the FS round-trip and produces a cleaner state.
+      let llmIgnoredRebound = false;
+      if (recommendation && triggerSource === 'rebound' && topRec?.techId) {
+        try {
+          const rejectedByTopRec = await prisma.ticketAssignmentEpisode.findFirst({
+            where: {
+              ticketId,
+              technicianId: topRec.techId,
+              endMethod: 'rejected',
+            },
+            select: { id: true },
+          });
+          if (rejectedByTopRec) {
+            llmIgnoredRebound = true;
+            logger.warn('Pipeline rebound: LLM picked a prior rejecter as top recommendation, downgrading to pending_review', {
+              runId, ticketId, topRecTechId: topRec.techId,
+            });
+          }
+        } catch (err) {
+          logger.debug('Could not check for prior rejection of top recommendation', { runId, error: err.message });
+        }
+      }
+
       let decision;
       if (!recommendation) {
         decision = null;
       } else if (isNoise) {
         decision = 'noise_dismissed';
+      } else if (llmIgnoredRebound) {
+        // Force manual review when the LLM ignored the rebound constraint.
+        decision = 'pending_review';
       } else if (assignmentConfig?.autoAssign) {
         decision = 'auto_assigned';
       } else {
@@ -507,7 +568,10 @@ class AssignmentPipelineService {
       }
 
       const finalStatus = recommendation ? 'completed' : 'failed_schema_validation';
-      const errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
+      let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
+      if (llmIgnoredRebound) {
+        errorMessage = `LLM re-suggested ${topRec.techName || `tech #${topRec.techId}`}, who already rejected this ticket — downgraded to pending_review for manual handling.`;
+      }
 
       await assignmentRepository.updatePipelineRun(runId, {
         status: finalStatus,

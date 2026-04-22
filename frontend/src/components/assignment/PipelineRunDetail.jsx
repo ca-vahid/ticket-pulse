@@ -7,6 +7,7 @@ import {
   ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
   ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag, Sparkles,
+  RotateCcw, OctagonAlert,
 } from 'lucide-react';
 import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
@@ -636,6 +637,44 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           </span>
         </div>
       </div>
+
+      {/* Rebound / auto-fallback context strip — surfaces why this run exists.
+          Two flavors: ongoing rebound (amber) vs auto-fallback exhausted (red). */}
+      {run.triggerSource === 'rebound_exhausted' ? (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2.5">
+          <OctagonAlert className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-red-800">
+              Auto-fallback exhausted{run.reboundFrom?.reboundCount ? ` after ${run.reboundFrom.reboundCount - 1} rebound${run.reboundFrom.reboundCount - 1 === 1 ? '' : 's'}` : ''} — needs manual review
+            </p>
+            <p className="text-xs text-red-700 mt-1">
+              This ticket has been rejected by every technician auto-assigned so far. The system stopped re-routing it automatically. Please assign it manually or dismiss it.
+              {run.reboundFrom?.previousTechName && run.reboundFrom.previousTechName !== 'Unknown' && (
+                <> Most recently returned by <span className="font-semibold">{run.reboundFrom.previousTechName}</span>{run.reboundFrom.unassignedAt && <> at {formatDateTimeInTimezone(run.reboundFrom.unassignedAt, workspaceTimezone)}</>}.</>
+              )}
+            </p>
+          </div>
+        </div>
+      ) : run.reboundFrom && (run.reboundFrom.previousTechName || run.reboundFrom.reboundCount) ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2.5">
+          <RotateCcw className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">
+              Rebound{run.reboundFrom.reboundCount ? ` #${run.reboundFrom.reboundCount}` : ''}
+              {run.reboundFrom.previousTechName && run.reboundFrom.previousTechName !== 'Unknown' && (
+                <> — returned from <span className="font-semibold">{run.reboundFrom.previousTechName}</span></>
+              )}
+              {run.reboundFrom.unassignedAt && <> at {formatDateTimeInTimezone(run.reboundFrom.unassignedAt, workspaceTimezone)}</>}
+            </p>
+            <p className="text-xs text-amber-700 mt-1">
+              The previous assignee returned this ticket to the queue. The pipeline re-ran with explicit instructions to avoid re-suggesting them.
+              {run.reboundFrom.unassignedByName && run.reboundFrom.unassignedByName !== run.reboundFrom.previousTechName && (
+                <> Unassigned by <span className="font-semibold">{run.reboundFrom.unassignedByName}</span>.</>
+              )}
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {/* Ticket Details + AI Reasoning side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4 items-start">
