@@ -8,8 +8,13 @@ const CATEGORY_STYLES = {
     badgeBg: 'bg-amber-100',
     badgeBorder: 'border-amber-300',
     badgeText: 'text-amber-800',
-    // Solid fills used by half-day split cells where bg-*/70 looks washed out.
-    splitFill: 'bg-amber-200',
+    // Soft vertical gradients used by half-day cells. Fades from the leave
+    // colour at the relevant edge (top for AM, bottom for PM) through the
+    // midline into transparent, so the split has no hard line.
+    // NOTE: Tailwind needs literal classnames at build time — keep these
+    // strings unparameterised even though it's repetitive.
+    splitGradientAM: 'bg-gradient-to-b from-amber-300/80 via-amber-200/40 to-transparent',
+    splitGradientPM: 'bg-gradient-to-t from-amber-300/80 via-amber-200/40 to-transparent',
   },
   WFH: {
     label: 'WFH',
@@ -20,7 +25,8 @@ const CATEGORY_STYLES = {
     badgeBg: 'bg-teal-100',
     badgeBorder: 'border-teal-300',
     badgeText: 'text-teal-800',
-    splitFill: 'bg-teal-200',
+    splitGradientAM: 'bg-gradient-to-b from-teal-300/80 via-teal-200/40 to-transparent',
+    splitGradientPM: 'bg-gradient-to-t from-teal-300/80 via-teal-200/40 to-transparent',
   },
   OTHER: {
     label: 'OTH',
@@ -31,7 +37,8 @@ const CATEGORY_STYLES = {
     badgeBg: 'bg-purple-100',
     badgeBorder: 'border-purple-300',
     badgeText: 'text-purple-800',
-    splitFill: 'bg-purple-200',
+    splitGradientAM: 'bg-gradient-to-b from-purple-300/80 via-purple-200/40 to-transparent',
+    splitGradientPM: 'bg-gradient-to-t from-purple-300/80 via-purple-200/40 to-transparent',
   },
 };
 
@@ -111,21 +118,24 @@ export function getLeaveCount(leave) {
 }
 
 /**
- * Decompose a half-day leave into top/bottom fills for split-cell rendering.
- * Returns { topFill, bottomFill, isSplit } — non-null fill means "render the
- * leave colour on this half"; null means "render the normal day-cell colour".
+ * Returns the overlay-gradient class for a half-day leave.
  *
- * For full-day leaves both halves use the leave style; the renderer can opt
- * to ignore the split and use the existing single-colour path instead.
+ * Output shape:
+ *   { isSplit: true,  overlayClass: 'bg-gradient-to-b from-...' }  // half-day
+ *   { isSplit: false, overlayClass: null }                         // full-day or none
+ *
+ * The overlay is rendered as a SINGLE absolute inset-0 div on top of the
+ * normal day-cell colour. The gradient fades the leave colour from the
+ * relevant edge (top for AM, bottom for PM) into transparent toward the
+ * opposite edge, so there is no hard 50/50 line.
  */
 export function getLeaveSplit(leave) {
-  if (!leave) return { topFill: null, bottomFill: null, isSplit: false };
+  if (!leave || !isHalfDayLeave(leave)) {
+    return { isSplit: false, overlayClass: null };
+  }
   const style = getLeaveStyle(leave.category);
-  if (!isHalfDayLeave(leave)) {
-    return { topFill: style, bottomFill: style, isSplit: false };
-  }
-  if (leave.halfDayPart === 'AM') {
-    return { topFill: style, bottomFill: null, isSplit: true };
-  }
-  return { topFill: null, bottomFill: style, isSplit: true };
+  const overlayClass = leave.halfDayPart === 'AM'
+    ? style.splitGradientAM
+    : style.splitGradientPM;
+  return { isSplit: true, overlayClass };
 }

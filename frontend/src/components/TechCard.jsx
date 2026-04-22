@@ -410,12 +410,11 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                       </div>
                     </div>
                     <div className={`relative w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
-                      {/* Half-day overlay: top half = AM, bottom half = PM */}
-                      {dayLeaveSplit?.isSplit && dayLeaveSplit.topFill && (
-                        <div className={`absolute inset-x-0 top-0 h-1/2 ${dayLeaveSplit.topFill.splitFill} opacity-80 pointer-events-none`} />
-                      )}
-                      {dayLeaveSplit?.isSplit && dayLeaveSplit.bottomFill && (
-                        <div className={`absolute inset-x-0 bottom-0 h-1/2 ${dayLeaveSplit.bottomFill.splitFill} opacity-80 pointer-events-none`} />
+                      {/* Half-day overlay: gradient fades from the leave colour
+                          at the AM/PM edge into transparent at the midline,
+                          so there is no hard 50/50 split. */}
+                      {dayLeaveSplit?.isSplit && (
+                        <div className={`absolute inset-0 ${dayLeaveSplit.overlayClass} pointer-events-none`} />
                       )}
                       <span className="relative z-10">{day.total}</span>
                     </div>
