@@ -2,6 +2,108 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.71-preview] - 2026-04-21
+
+### Sanitized agent-facing assignment notes — stop leaking the routing algorithm
+
+Background: when the pipeline approved or auto-assigned a ticket, the FreshService private note posted on the ticket included `recommendation.overallReasoning` verbatim. That field is the LLM's *internal* deliberation — it explains why rank 1 won by referring to scores, competency proficiency, workload fairness, on-shift status, rebound history, and the names of competing candidates. Anything an agent could read and reverse-engineer to game routing.
+
+#### ✨ New: `agentBriefingHtml` — a public note written for the assignee
+
+The `submit_recommendation` tool schema gains two extra outputs:
+
+- **`agentBriefingHtml`** — required when there are recommendations. Written directly *to* the assignee in plain language, with allowed HTML tags only (`<b> <i> <br> <p> <ul> <li> <a href> <h3>`). Schema description hard-bans scores, ranks, percentages, confidence values, names of other candidates, workload counts, fairness reasoning, proficiency labels, IT levels, info about other agents being OFF/WFH/on leave, internal/run IDs, and any of the words "algorithm", "system", "LLM", "AI", "model", "pipeline", "score", "ranked", "fairness", "rebound", "queue".
+- **`closureNoticeHtml`** — required when the recommendations array is empty (noise dismissal). Brief, neutral, no "noise/spam/classifier" language.
+
+`overallReasoning` is preserved (and explicitly relabeled "INTERNAL ONLY") so the admin UI and audit log keep full transparency — it just never reaches FreshService.
+
+#### ✨ New: prompt Step 8 with positive and negative examples
+
+`DEFAULT_SYSTEM_PROMPT` gains a new Step 8 ("Write the Agent-Facing Briefing") with explicit do/don't lists and a worked example pair so the LLM never has to guess what's safe to write. A legacy detector + `injectAgentBriefingStep()` auto-upgrades published prompts on the next run by appending Step 8 only — any custom Steps 1–7 the workspace edited are preserved.
+
+**Bad example** (what the prompt explicitly tells the LLM not to write):
+
+> You ranked #1 with a score of 0.92. Other candidates (Alex, Jordan) had higher workloads (8 and 11 open tickets vs your 3). Your VPN proficiency is Expert (level 5).
+
+**Good example**:
+
+> The requester needs help connecting to the corporate VPN from a new MacBook — they're getting a certificate trust error. You've recently resolved several similar Mac VPN cert issues, so you're a good fit here. Suggested first check: confirm the device has the latest InternalCA profile installed via Jamf Self Service before troubleshooting the client itself.
+
+#### ✨ New: public-note preview card on the run detail page
+
+`PipelineRunDetail` (used in both the pending-review and history tabs of Assignment Review) now renders a green **"What the agent will see"** card directly under the Ticket Details / Overall Reasoning grid, showing the rendered HTML exactly as it will appear on the FS ticket. The existing "Overall Reasoning" card got a small **Internal** badge so the contrast (purple = internal, green = public) is unmistakable.
+
+If the field is missing (legacy run created before this release), the preview falls back to an amber warning card telling the admin a sync would use the legacy fallback so they can re-run before approving.
+
+#### 🛡️ FreshService note builder rewritten
+
+`freshServiceActionService.buildAction()` now uses the public briefing for both assignment and noise-closure paths. The new note format is: header → `Assigned to:` → briefing HTML → `Override reason:` (when present) → `Run ID:`. Confidence and the raw "Reasoning" line are gone. For legacy runs without `agentBriefingHtml`, the builder falls back to `overallReasoning` *and* logs a warning so we can spot any unexpected fallbacks in production.
+
+---
+
+### Half-day vacation leaves handled end-to-end
+
+Vacation Tracker marks partial-day leaves with `isFullDayLeave=false` and a `startHour`/`endHour` window, but we were collapsing them into a full-day row. That made the LLM assigner skip agents who were only out for the morning or afternoon, and the dashboard rendered them as fully unavailable.
+
+#### Backend
+
+- New columns on `technician_leaves`: `is_full_day`, `half_day_part`, `start_minute`, `end_minute` (additive, defaults preserve existing behaviour).
+- Sync bucketises partial leaves into AM/PM by window-midpoint vs noon, so `09:00–13:00` reads as **AM** and `12:30–16:30` reads as **PM**. Multi-day partial leaves (none in live data) are conservatively treated as full-day on every day.
+- `get_agent_availability` tool now emits **HALF-DAY-OFF** and **HALF-DAY-WFH** buckets with a derived `availabilityNote` that compares the workspace clock to the leave window (`"off this morning, available from 12:00 onward"`, etc).
+- Default system prompt updated so the LLM treats half-day agents as available for the other half of the day instead of excluding them outright.
+
+#### Frontend
+
+- Half-day leaves render as split day-cells in the weekly mini-calendar (top half = AM, bottom half = PM), with the ticket count overlaid on top.
+- The hard 50/50 split where one half was solid and the other was empty looked unfinished — replaced with a single full-height overlay using a vertical gradient that fades from the leave colour at the AM/PM edge through the midline into transparent.
+- Daily badge now reads `OFF AM` / `WFH PM`; tooltip appends the exact window.
+- `MonthlyCalendar` leave counts are weighted (1 for full, 0.5 for half) and rendered as `1/2`, `1 1/2`, `2`, etc. A small `1/2` chip flags days where any leave is partial, so `1.5` isn't read as a typo.
+
+---
+
+### "FS Manual" badge for externally-assigned runs
+
+When a ticket is assigned in FreshService outside the pipeline (the *Manually in FreshService* sub-tab case), the run still has `decision='pending_review'` technically — but no human action is needed in our app. The yellow **Pending** pill misleads the user into thinking they have a backlog to triage when really the assignment is done.
+
+A contextual decision label now detects this state and renders **FS Manual** (amber) instead:
+
+```
+externallyAssigned =
+  decision === 'pending_review'
+  && ticket.assignedTechId !== null
+  && ticket.status NOT IN (Closed, Resolved, Deleted, Spam)
+```
+
+Tooltip explains: *"Assigned in FreshService outside the pipeline — &lt;tech name&gt;. AI suggestion left unresolved."*
+
+Applied to the Assignment Review list rows (desktop table + mobile card, via a single `getDisplayDecision(run)` helper) and the `PipelineRunDetail` header badge. The underlying decision data stays as `pending_review` — purely a render-layer change — so coordinators can still record their own decision later (approve/override/reject) if they want to capture their assessment of the AI's recommendation vs the actual external pick.
+
+---
+
+### 🐛 Fixed: rebound created a second `pending_review` row
+
+Bug seen on prod ticket **#219505**: shown twice in *Awaiting Decision*. Two `pending_review` runs existed for the same ticket — the original poll and the rebound created after the first assignee rejected. Both passed the queue's filter (`status='completed' AND decision='pending_review'`) so both rendered.
+
+**Root cause**: `_handleTicketRebound`'s dedup check uses `getOpenPipelineRun`, which only matches `status IN (queued, running)`. A `pending_review` run isn't "open" by that definition, so the rebound proceeded and created a second pending row.
+
+**Fix**: in `_handleTicketRebound`, after the in-flight dedup check and before creating the new run, mark any existing `pending_review` runs for the ticket as `superseded` with reason *"Superseded by a newer rebound run after ticket was returned to the queue"*. The superseded run still exists in the History tab for audit.
+
+The fix didn't extend `getOpenPipelineRun`'s semantics because that helper is also used by `runPipeline` to skip duplicate work — broadening it would block legitimate manual triggers AND the rebound flow itself.
+
+One-shot prod cleanup: marked run #518 as superseded. Audited the rest of prod for other tickets with multiple pending_review runs — only #219505 was affected.
+
+---
+
+### 🗄️ Database migration required
+
+```bash
+prisma migrate deploy
+```
+
+New migration: `20260421000000_add_half_day_leaves` — adds `is_full_day`, `half_day_part`, `start_minute`, `end_minute` columns to `technician_leaves`. Additive only; defaults preserve existing behaviour for full-day leaves.
+
+---
+
 ## [1.9.7-preview] - 2026-04-21
 
 ### Demo Mode bug fixes — broken avatars and name leaks
