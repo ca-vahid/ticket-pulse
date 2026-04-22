@@ -15,6 +15,7 @@ import csatService from './csatService.js';
 import noiseRuleService from './noiseRuleService.js';
 import assignmentRepository from './assignmentRepository.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
+import freshServiceActionService from './freshServiceActionService.js';
 import { shouldTriggerAssignmentForLatestRun } from './assignmentFlowGuards.js';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
@@ -1242,6 +1243,16 @@ class SyncService {
         logger.warn('Assignment polling failed (non-fatal)', { workspaceId, error: err.message });
       });
 
+      // Recover orphaned syncs (decision saved but FS write never completed —
+      // typically caused by a process restart between the decidedAt update and
+      // the fire-and-forget freshServiceActionService.execute call). Without
+      // this, runs would show "auto-assigned to X" in our DB while the ticket
+      // sat unassigned in FS forever. Fire-and-forget; per-run errors are logged
+      // inside the recovery routine.
+      this._recoverOrphanedSyncs(workspaceId).catch((err) => {
+        logger.warn('Orphan sync recovery failed (non-fatal)', { workspaceId, error: err.message });
+      });
+
       // Reconcile ticket statuses: detect deleted/spam tickets not returned by list API (fire-and-forget)
       this._reconcileTicketStatuses(workspaceId).catch((err) => {
         logger.warn('Ticket status reconciliation failed (non-fatal)', { workspaceId, error: err.message });
@@ -2120,6 +2131,47 @@ class SyncService {
           ticketId: ticket.id,
           error: err.message,
         });
+      }
+    }
+  }
+
+  /**
+   * Recover orphaned syncs — runs whose decision was finalized
+   * (auto_assigned / noise_dismissed) but whose FreshService write never
+   * completed (syncStatus is null or 'pending'). This happens when the
+   * Node.js process restarts between the decisionAt-set DB update and the
+   * fire-and-forget freshServiceActionService.execute() call dispatched
+   * from _executeRun.
+   *
+   * Without recovery, our DB shows the run as "completed / auto_assigned"
+   * but the ticket stays unassigned in FS forever — confusing for admins
+   * and breaks auto-assign reliability.
+   *
+   * Runs as part of every sync cycle. Conservative threshold (5 min)
+   * avoids racing in-flight syncs that are just slow.
+   */
+  async _recoverOrphanedSyncs(workspaceId) {
+    const orphans = await assignmentRepository.findOrphanedSyncRuns({
+      workspaceId,
+      olderThanMinutes: 5,
+    });
+    if (orphans.length === 0) return;
+
+    logger.info('Orphan sync recovery: found stuck runs to retry', {
+      workspaceId,
+      count: orphans.length,
+      runIds: orphans.map((r) => r.id),
+    });
+
+    const cfg = await assignmentRepository.getConfig(workspaceId);
+    const dryRun = cfg?.dryRunMode ?? true;
+
+    for (const orphan of orphans) {
+      try {
+        await freshServiceActionService.execute(orphan.id, workspaceId, dryRun);
+        logger.info('Orphan sync recovery: re-executed FS sync', { runId: orphan.id, decision: orphan.decision });
+      } catch (err) {
+        logger.warn('Orphan sync recovery: retry failed', { runId: orphan.id, error: err.message });
       }
     }
   }

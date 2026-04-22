@@ -520,6 +520,48 @@ class AssignmentRepository {
     }
   }
 
+  /**
+   * Find pipeline runs whose decision was finalized (auto_assigned or
+   * noise_dismissed) but whose FreshService sync never completed. This
+   * catches the gap where the process restarted between "decision saved"
+   * and "syncStatus updated" — the fire-and-forget execute() call dies
+   * mid-flight and the run is left permanently stuck (decision saved in
+   * our DB, but FS was never told).
+   *
+   * Returns the orphan runs so the caller can re-trigger
+   * freshServiceActionService.execute() for each one. Threshold is
+   * conservative (5 min) so we don't fight an in-flight sync that's just
+   * slow.
+   *
+   * @param {object} [opts]
+   * @param {number|null} [opts.workspaceId]
+   * @param {number} [opts.olderThanMinutes=5]
+   * @returns {Promise<Array<{id:number, workspaceId:number, decision:string, decidedAt:Date, syncStatus:string|null}>>}
+   */
+  async findOrphanedSyncRuns({ workspaceId = null, olderThanMinutes = 5 } = {}) {
+    try {
+      const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+      const where = {
+        status: 'completed',
+        decision: { in: ['auto_assigned', 'noise_dismissed'] },
+        OR: [{ syncStatus: null }, { syncStatus: 'pending' }],
+        decidedAt: { lt: cutoff, not: null },
+        ...(workspaceId !== null && workspaceId !== undefined ? { workspaceId } : {}),
+      };
+      return await prisma.assignmentPipelineRun.findMany({
+        where,
+        select: {
+          id: true, workspaceId: true, decision: true,
+          decidedAt: true, syncStatus: true, assignedTechId: true,
+        },
+        orderBy: { decidedAt: 'asc' },
+      });
+    } catch (error) {
+      logger.error('Error finding orphaned sync runs:', error);
+      return [];
+    }
+  }
+
   async sweepStaleRunningRuns(workspaceId = null) {
     try {
       const staleBefore = new Date(Date.now() - STALE_RUNNING_MINUTES * 60 * 1000);
