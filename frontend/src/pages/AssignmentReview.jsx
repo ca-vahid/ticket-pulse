@@ -396,12 +396,19 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
   const stats = {
     autoAssigned: today.autoAssigned || 0,        // decision='auto_assigned' — no human in the loop
     approved: today.approved || 0,                // decision='approved' OR 'modified' — admin clicked approve
-    handledInFs: today.handledInFs || 0,          // tickets created today now assigned, but NOT via our pipeline
+    // Pending_review pipeline runs whose ticket later got assignedTechId set
+    // (agent grabbed in FS after our analysis). Matches what the "Manually
+    // in FreshService" sub-tab shows so click-through count is exact.
+    handledInFs: today.handledInFs || 0,
     noiseDismissed: today.noiseDismissed || 0,    // decision='noise_dismissed' (pipeline ran, classified as noise)
     manualReviewRequired: today.manualReviewRequired || 0,
     inProgress: today.inProgress || 0,
     rebounds: today.rebounds || 0,
     noiseFiltered: today.noiseFiltered || 0,      // tickets with isNoise=true — silently skipped by polling
+    // Tickets assigned today that NEVER went through our pipeline at all
+    // (typically because the agent grabbed them in FS within the 30s
+    // window before our next poll). Surfaced as a separate process pill.
+    pipelineBypass: today.pipelineBypass || 0,
     totalRuns: today.totalRuns || 0,
   };
   const excludedGroupCount = queueStatus?.excludedGroupCount || 0;
@@ -422,21 +429,25 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
     subView: 'assigned',
     assignedFilter: 'via_pipeline',
     decidedDecisionFilter: 'auto_assigned',
+    ticketStatus: 'all',
     timeRange: '24h',
   });
   const goToApprovedByYou = () => onNavigate?.({
     subView: 'assigned',
     assignedFilter: 'via_pipeline',
     decidedDecisionFilter: 'approved',
+    ticketStatus: 'all',
     timeRange: '24h',
   });
   const goToHandledInFs = () => onNavigate?.({
     subView: 'assigned',
     assignedFilter: 'manually_in_fs',
+    ticketStatus: 'all',
     timeRange: '24h',
   });
   const goToDismissed = () => onNavigate?.({
     subView: 'dismissed',
+    ticketStatus: 'all',
     timeRange: '24h',
   });
 
@@ -514,7 +525,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           icon={Users}
           label="Picked up in FreshService"
           value={stats.handledInFs}
-          sublabel="assigned outside the pipeline"
+          sublabel="agent grabbed after AI analysis"
           tone="amber"
           onClick={goToHandledInFs}
         />
@@ -531,13 +542,22 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
       {/* Process state — only render pills that are actually non-zero so the
           panel doesn't drown in greyed-out tiles when nothing's happening.
           More compact pill styling per UX redesign. */}
-      {(liveInProgress > 0 || stats.rebounds > 0 || stats.noiseFiltered > 0 || stats.manualReviewRequired > 0 || queuedRunsTotal > 0) && (
+      {(liveInProgress > 0 || stats.rebounds > 0 || stats.pipelineBypass > 0 || stats.noiseFiltered > 0 || stats.manualReviewRequired > 0 || queuedRunsTotal > 0) && (
         <div className="max-w-4xl mx-auto flex flex-wrap items-center gap-2 mb-4 sm:mb-5">
           {liveInProgress > 0 && (
             <SmallStatPill icon={Brain} tone="blue" value={liveInProgress} label="currently analyzing" />
           )}
           {stats.rebounds > 0 && (
             <SmallStatPill icon={RotateCcw} tone="amber" value={stats.rebounds} label={`rebound${stats.rebounds === 1 ? '' : 's'} today`} title="Tickets that bounced back after a rejection and triggered a fresh pipeline run" />
+          )}
+          {stats.pipelineBypass > 0 && (
+            <SmallStatPill
+              icon={Users}
+              tone="amber"
+              value={stats.pipelineBypass}
+              label="bypassed pipeline (no analysis)"
+              title="Tickets created today that ended up assigned in FreshService but never had a pipeline run — typically because the agent grabbed them within the 30s window before our next poll fired. Not visible in the Manually in FreshService tab because there's no run record."
+            />
           )}
           {stats.noiseFiltered > 0 && (
             <SmallStatPill
@@ -974,7 +994,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   // Reset secondary status filter to that tab's default whenever the tab changes.
   // Awaiting Review (pending) doesn't use the filter at all; Assigned defaults to 'in_progress'.
+  // EXCEPT: when navigating in from the empty-state outcome cards, the caller
+  // sets ticketStatusFilter='all' explicitly so closed tickets stay visible
+  // and the count matches the card. Skip the auto-reset for one render in
+  // that case.
+  const skipNextStatusReset = useRef(false);
   useEffect(() => {
+    if (skipNextStatusReset.current) {
+      skipNextStatusReset.current = false;
+      setQueuePage(0);
+      return;
+    }
     if (subView === 'assigned') {
       setTicketStatusFilter('in_progress');
     } else {
@@ -1921,10 +1951,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   // promised. (Empty-state stats are workspace-tz "today"
                   // bounds; 24h rolling overlaps ~95%.)
                   if (target.subView) setSubView(target.subView);
-                  // Reset assignedFilter when not provided so a stale value
-                  // from a previous visit doesn't leak through.
+                  // Reset filters when not provided so a stale value from a
+                  // previous visit doesn't leak through.
                   setAssignedFilter(target.assignedFilter || 'all');
                   setDecidedDecisionFilter(target.decidedDecisionFilter || 'all');
+                  // Default to 'all' ticket statuses on drill-down so closed/
+                  // resolved tickets aren't silently hidden by the
+                  // 'in_progress' default — the empty-state counts include
+                  // every ticket regardless of current status. Skip the
+                  // subView useEffect's auto-reset for this render.
+                  skipNextStatusReset.current = true;
+                  setTicketStatusFilter(target.ticketStatus || 'all');
                   if (target.timeRange && onTimeRangeChange) {
                     onTimeRangeChange(target.timeRange);
                   }

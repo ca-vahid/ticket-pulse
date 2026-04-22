@@ -1,6 +1,15 @@
-export const APP_VERSION = '1.9.84-preview';
+export const APP_VERSION = '1.9.85-preview';
 
 export const changelog = [
+  {
+    version: '1.9.85-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'fixed', text: 'Click-through count now exactly matches the destination tab. Previous version: clicking "Picked up in FreshService 7" landed on a tab showing 1 (status filter defaulted to In Progress) or 3 (after manually changing to All), neither matching 7. Two distinct bugs: (1) the navigation didn\u2019t override the assigned-tab\u2019s default status filter ("In Progress"), so closed/resolved tickets were silently hidden -- now sets ticketStatus=\'all\' on drill-down, with a one-shot ref guard to prevent the subView useEffect from auto-resetting it back. (2) the handledInFs metric was conflating two different things: pipeline runs that landed as pending_review then got an assignedTechId AND tickets that bypassed the pipeline entirely. The Manually-in-FreshService tab only shows the first kind, so the count never matched. Split into two metrics: handledInFs (matches the tab) + new pipelineBypass (surfaced as a separate amber pill in the process row)' },
+      { type: 'new', text: 'New "bypassed pipeline (no analysis)" pill -- counts today\u2019s tickets that ended up assigned in FreshService without ever having a pipeline run created (typically because the agent grabbed them within the 30s window before our next poll fired). Tooltip explains why these tickets aren\u2019t visible in the Manually-in-FreshService tab (no pipeline run = no row to show). Helps admins see how often the system is being beaten to the punch by fast-acting agents' },
+      { type: 'improved', text: 'Tile sublabels updated to be more precise -- "Picked up in FreshService" now reads "agent grabbed after AI analysis" (was "assigned outside the pipeline" which conflated two distinct paths)' },
+    ],
+  },
   {
     version: '1.9.84-preview',
     date: 'April 22, 2026',
