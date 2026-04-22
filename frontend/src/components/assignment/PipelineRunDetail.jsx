@@ -553,11 +553,14 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const ticket = run.ticket;
   // If the run is pending_review but the ticket has been assigned externally
   // in FS, show a clearer "FS Manual" badge instead of the misleading
-  // "Pending Review" — no human action is needed in the app.
+  // "Pending Review" — no human action is needed in the app. This stays
+  // accurate even for Closed/Resolved tickets: the ticket was handled
+  // manually, and the label should reflect that regardless of its current
+  // status. Mirrors getDisplayDecision in the list view so the badge is
+  // consistent across pages.
   const externallyAssigned = run.status === 'completed'
     && run.decision === 'pending_review'
-    && ticket?.assignedTechId
-    && !['Closed', 'Resolved', 'Deleted', 'Spam'].includes(ticket?.status);
+    && ticket?.assignedTechId;
   const decisionBadge = externallyAssigned
     ? { label: 'FS Manual', style: 'bg-amber-100 text-amber-800' }
     : run.status === 'completed'

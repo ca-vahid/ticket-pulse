@@ -1,6 +1,13 @@
-export const APP_VERSION = '1.9.75-preview';
+export const APP_VERSION = '1.9.76-preview';
 
 export const changelog = [
+  {
+    version: '1.9.76-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'fixed', text: 'Decided tab showed "Pending" instead of "FS Manual" for externally-assigned tickets once they closed -- the decision-label logic (getDisplayDecision in AssignmentReview + externallyAssigned check in PipelineRunDetail) had a status guard excluding Closed/Resolved/Deleted/Spam tickets, but the backend "outside_assigned" filter (that powers the "Manually in FreshService" sub-tab) had no such guard. So Closed tickets that had been manually assigned in FreshService appeared in the sub-tab but displayed the wrong label. Removed the status guard in both UI sites -- if a pending_review run has an assignedTechId, it\u2019s always "FS Manual" regardless of current ticket status. Keeps list view and detail view consistent' },
+    ],
+  },
   {
     version: '1.9.75-preview',
     date: 'April 22, 2026',
