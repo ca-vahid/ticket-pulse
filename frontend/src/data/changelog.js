@@ -1,6 +1,16 @@
-export const APP_VERSION = '1.9.71-preview';
+export const APP_VERSION = '1.9.72-preview';
 
 export const changelog = [
+  {
+    version: '1.9.72-preview',
+    date: 'April 21, 2026',
+    entries: [
+      { type: 'fixed', text: 'Run Now on a queued ticket no longer disappears into a 5-second toast -- clicking Run Now in the "Queued for Business Hours" section now opens a slide-over with the live LLM analysis streaming in real time (text, tool calls, recommendation cards), the same view you get from the Manual Trigger panel. Closing the overlay doesn\u2019t cancel the run -- it continues server-side -- and the queue refreshes automatically so the row moves to Awaiting Decision (or Decided / Dismissed) without a manual reload' },
+      { type: 'new', text: 'POST /assignment/runs/:id/run-now?stream=true -- new SSE streaming variant of the existing run-now endpoint that mirrors the /trigger?stream=true contract, so LivePipelineView could be reused unchanged. Falls back to the original fire-and-forget 202 response when stream=true is omitted (preserves the previous API contract for any other callers)' },
+      { type: 'improved', text: 'When a queued run is auto-rejected at validation (e.g. ticket got assigned externally between queueing and Run Now), the SSE stream now emits an "error" event with code=skipped_stale and the reason text, so the live overlay can show "Skipped: Ticket already assigned to a technician" instead of dying on a 409 the EventSource can\u2019t read' },
+      { type: 'improved', text: 'LivePipelineView gains three optional props (streamPath, skipExistingCheck, initialRunId) so it can be embedded in flows where the run has already been claimed server-side (run-now) without racing the "is there a recent run?" probe that exists for the manual-trigger flow' },
+    ],
+  },
   {
     version: '1.9.71-preview',
     date: 'April 21, 2026',

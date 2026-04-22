@@ -310,12 +310,26 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
   );
 }
 
-export default function LivePipelineView({ ticketId, onComplete, onBack }) {
+/**
+ * @param {object}   props
+ * @param {number}   props.ticketId             Ticket to analyze (drives the default trigger stream URL)
+ * @param {Function} [props.onComplete]         Called after the user makes a decision via the embedded RecommendationCards
+ * @param {Function} [props.onBack]             Renders a "Back to queue" link in the header when provided
+ * @param {string}   [props.streamPath]         Override the SSE endpoint. Use for run-now (an already-claimed
+ *                                              queued run) — pass `/assignment/runs/{runId}/run-now?stream=true`.
+ *                                              When omitted, defaults to `/assignment/trigger/{ticketId}?stream=true`.
+ * @param {boolean}  [props.skipExistingCheck]  Skip the "do we already have a recent run for this ticket?" probe
+ *                                              and start streaming immediately. Used for run-now where the run
+ *                                              has already been claimed server-side and we always want the live feed.
+ * @param {number}   [props.initialRunId]       Seed the runId state so the "Run #N" badge renders before the
+ *                                              first run_started event arrives. Used for run-now.
+ */
+export default function LivePipelineView({ ticketId, onComplete, onBack, streamPath, skipExistingCheck = false, initialRunId = null }) {
   const [status, setStatus] = useState('loading');
   const [events, setEvents] = useState([]);
   const [toolCalls, setToolCalls] = useState([]);
   const [recommendation, setRecommendation] = useState(null);
-  const [runId, setRunId] = useState(null);
+  const [runId, setRunId] = useState(initialRunId);
   const [deciding, setDeciding] = useState(false);
   const [error, setError] = useState(null);
   const [existingRun, setExistingRun] = useState(null);
@@ -333,6 +347,14 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
   useEffect(() => {
     if (!ticketId) return;
     let cancelled = false;
+
+    // Run-now path: the queued run was already claimed server-side. Skip the
+    // "is there a recent run?" probe (it would race the just-claimed run and
+    // possibly short-circuit into a stale completed view) and stream immediately.
+    if (skipExistingCheck) {
+      startStream();
+      return () => { cancelled = true; };
+    }
 
     async function checkExisting() {
       try {
@@ -379,7 +401,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
 
     let currentStatus = 'connecting';
     let currentRecommendation = null;
-    let currentRunId = null;
+    let currentRunId = initialRunId;
 
     function handleEvent(event) {
       processStreamEvent(event, {
@@ -400,7 +422,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack }) {
         currentStatus = 'running';
         setStatus('running');
 
-        await readSSEStream(`/assignment/trigger/${ticketId}?stream=true`, {
+        await readSSEStream(streamPath || `/assignment/trigger/${ticketId}?stream=true`, {
           signal: abortController.signal,
           onEvent: handleEvent,
         });

@@ -376,6 +376,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [refreshing, setRefreshing] = useState(false);
   const [deciding, setDeciding] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
+  // When the user clicks "Run Now" on a queued row we open a slide-over with
+  // LivePipelineView wired to the run-now SSE endpoint, so the streaming LLM
+  // analysis is visible immediately instead of vanishing into a 5-second toast.
+  // Holds { runId, ticketId, freshserviceTicketId, subject } while the overlay is open.
+  const [runNowLive, setRunNowLive] = useState(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [sortField, setSortField] = useState('createdAt');
@@ -749,6 +754,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     }
   };
 
+  // Defined before any early-return below so React hook order stays stable
+  // across renders (the conditional `if (selectedRun) return ...` and
+  // `if (loading) return ...` would otherwise skip this useCallback).
+  const closeRunNowLive = useCallback(async () => {
+    setRunNowLive(null);
+    // The promoted run is now either completed (pending_review / auto_assigned /
+    // noise_dismissed), failed, or skipped_stale — refresh the queue so the row
+    // moves to the right tab without the user having to manually reload.
+    try { await fetchQueue(); } catch { /* ignore */ }
+  }, [fetchQueue]);
+
   if (selectedRun) {
     return (
       <div>
@@ -773,17 +789,19 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     );
   }
 
-  const handleRunNow = async (e, runId) => {
+  const handleRunNow = (e, runId) => {
     e.stopPropagation();
-    try {
-      await assignmentAPI.runNow(runId);
-      setActionMsg('Run started — processing in background. Check History tab for results.');
-      await fetchQueue();
-      setTimeout(() => setActionMsg(null), 5000);
-    } catch (err) {
-      setActionMsg(`Failed: ${err.message}`);
-      setTimeout(() => setActionMsg(null), 3000);
-    }
+    // Find the queued run we're about to promote so the live overlay can show
+    // the ticket subject/ID immediately. The actual claim + execution happens
+    // server-side once LivePipelineView opens its SSE connection to
+    // /assignment/runs/{runId}/run-now?stream=true.
+    const run = queuedRuns.find((r) => r.id === runId);
+    setRunNowLive({
+      runId,
+      ticketId: run?.ticket?.id || run?.ticketId || null,
+      freshserviceTicketId: run?.ticket?.freshserviceTicketId ?? null,
+      subject: run?.ticket?.subject || `Run #${runId}`,
+    });
   };
 
   const handlePruneQueue = async () => {
@@ -1809,6 +1827,89 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         sheetRef={quickApproveMobileRef}
         {...qaInnerProps}
       />
+
+      {/* Run Now live overlay -- streams the promoted queued run via SSE so the
+          user sees Claude's analysis live instead of staring at a 5s toast. */}
+      {runNowLive && (
+        <RunNowLiveOverlay
+          info={runNowLive}
+          onClose={closeRunNowLive}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Modal/slide-over wrapping LivePipelineView for the "Run Now" flow on a queued run.
+ * The run-now SSE endpoint at /assignment/runs/{runId}/run-now?stream=true mirrors
+ * the manual /trigger?stream=true contract, so the existing live view can stream it
+ * unchanged once we pass streamPath + skipExistingCheck + initialRunId.
+ */
+function RunNowLiveOverlay({ info, onClose }) {
+  // Block background scroll while the overlay is open and let Esc close it.
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const fsLabel = info.freshserviceTicketId ? `#${info.freshserviceTicketId}` : `Run #${info.runId}`;
+
+  return (
+    <div className="fixed inset-0 z-[300] bg-black/40 backdrop-blur-sm flex items-stretch sm:items-center justify-center sm:p-4">
+      <div className="bg-white w-full sm:max-w-5xl sm:rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-screen sm:max-h-[90vh]">
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+              <Brain className="w-3.5 h-3.5" />
+              Running queued ticket now
+            </div>
+            <div className="mt-0.5 text-sm font-semibold text-slate-800 truncate" title={info.subject}>
+              <span className="text-slate-400 mr-1.5">{fsLabel}</span>
+              {info.subject}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-white/70 transition-colors"
+            title="Close (Esc) — analysis continues in the background"
+          >
+            <XCircle className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 sm:p-5">
+          {info.ticketId ? (
+            <LivePipelineView
+              ticketId={info.ticketId}
+              streamPath={assignmentAPI.runNowStreamPath(info.runId)}
+              skipExistingCheck
+              initialRunId={info.runId}
+              onComplete={onClose}
+            />
+          ) : (
+            <div className="p-6 text-center text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">
+              Cannot stream this run — internal ticket ID is missing. The run is still executing in the background; check the History tab in a few seconds.
+            </div>
+          )}
+        </div>
+
+        <div className="px-4 sm:px-5 py-2.5 border-t bg-slate-50 text-[11px] text-slate-500 flex items-center justify-between">
+          <span>Closing this window won&apos;t cancel the run — it continues server-side.</span>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

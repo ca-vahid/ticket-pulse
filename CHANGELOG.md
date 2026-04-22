@@ -2,6 +2,49 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.72-preview] - 2026-04-21
+
+### 🐛 Fixed: Run Now on a queued ticket disappeared into a 5-second toast
+
+**Symptom**: clicking *Run Now* on a row in the "Queued for Business Hours" section made the row vanish, showed a brief "Run started — check History tab" toast, and gave no live feedback. The run actually completed correctly server-side (e.g. one prod ticket completed as `pending_review` in 47 s) but the user had no way to see it happen.
+
+**Root cause**: the run-now endpoint was fire-and-forget. The route called `_executeRun(...)` with a no-op `emit` callback, returned `202` immediately, and the frontend just refreshed the queue. The row disappeared because the run's status flipped from `queued` → `running`, removing it from the queued list.
+
+**Fix**: two parts.
+
+#### Backend — SSE streaming variant
+
+`POST /assignment/runs/:id/run-now` now accepts `?stream=true`. When set, the response opens an SSE channel and pipes every event from `_executeRun` (text, tool_call, tool_result, recommendation, error, complete) to the client — mirroring the contract of the existing `/trigger?stream=true` endpoint, so `LivePipelineView` can stream it unchanged.
+
+The non-streaming behaviour is preserved (still returns `202` and runs in the background) so any other callers don't break.
+
+If the queued run fails preflight validation (e.g. the ticket got assigned externally between queueing and the click), the stream now emits a structured error event and a terminal `done` event instead of returning a `409` the EventSource can't read:
+
+```js
+res.write(`data: ${JSON.stringify({ type: 'error', message: `Skipped: ${validation.reason}`, code: 'skipped_stale' })}\n\n`);
+res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+res.end();
+```
+
+#### Frontend — slide-over overlay reusing LivePipelineView
+
+Clicking *Run Now* on a queued row no longer fires off a request and shows a toast. It opens a centered slide-over with `LivePipelineView` connected to the new SSE endpoint via three new optional props on the existing component:
+
+- **`streamPath`** — overrides the default `/assignment/trigger/{ticketId}?stream=true` URL.
+- **`skipExistingCheck`** — skips the "is there a recent run for this ticket?" probe that LivePipelineView normally runs at mount. The probe would race the just-claimed run-now and possibly short-circuit into a stale completed view.
+- **`initialRunId`** — seeds the `runId` state so the "Run #N" badge renders before the first `run_started` event arrives.
+
+The overlay header shows the FreshService ticket ID and subject so the user knows which ticket is running. Closing it (Esc, X, or the Close button) doesn't cancel the run — execution continues server-side. On close the queue is auto-refreshed so the now-completed run moves to Awaiting Decision (or Decided / Dismissed) without a manual reload.
+
+#### Files touched
+
+- `backend/src/routes/assignment.routes.js` — extend run-now route with `?stream=true` branch (~50 lines)
+- `frontend/src/components/assignment/LivePipelineView.jsx` — three optional props with JSDoc
+- `frontend/src/services/api.js` — add `runNowStreamPath(id)` URL builder
+- `frontend/src/pages/AssignmentReview.jsx` — `runNowLive` state, slide-over, `RunNowLiveOverlay` component
+
+---
+
 ## [1.9.71-preview] - 2026-04-21
 
 ### Sanitized agent-facing assignment notes — stop leaking the routing algorithm

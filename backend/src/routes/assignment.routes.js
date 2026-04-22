@@ -219,6 +219,8 @@ router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {
 
 router.post('/runs/:id/run-now', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
+  const stream = req.query.stream === 'true';
+
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
@@ -235,13 +237,73 @@ router.post('/runs/:id/run-now', requireAdmin, asyncHandler(async (req, res) => 
   const validation = await assignmentPipelineService.validateQueuedRun(run);
   if (!validation.valid) {
     await assignmentRepository.markRunSkippedStale(runId, validation.reason);
+    if (stream) {
+      // Open the SSE response just long enough to deliver the stale reason and
+      // a terminal event, so the live view can show "Skipped: <reason>" instead
+      // of dying on a 409 the EventSource can't read.
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.flushHeaders();
+      res.write(`data: ${JSON.stringify({ type: 'error', message: `Skipped: ${validation.reason}`, code: 'skipped_stale' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      return res.end();
+    }
     return res.status(409).json({ success: false, message: validation.reason });
   }
 
-  res.status(202).json({ success: true, message: 'Run promoted to immediate execution' });
-  assignmentPipelineService._executeRun(runId, run.ticketId, run.workspaceId, 'manual', Date.now(), () => {}, null).catch((error) => {
-    logger.error('Run-now execution failed', { runId, error: error.message });
+  if (!stream) {
+    res.status(202).json({ success: true, message: 'Run promoted to immediate execution' });
+    assignmentPipelineService._executeRun(runId, run.ticketId, run.workspaceId, 'manual', Date.now(), () => {}, null).catch((error) => {
+      logger.error('Run-now execution failed', { runId, error: error.message });
+    });
+    return;
+  }
+
+  // SSE streaming mode — mirrors the manual /trigger?stream=true contract so
+  // the existing LivePipelineView component can be reused unchanged.
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
   });
+  res.flushHeaders();
+
+  const abortController = new AbortController();
+  let clientDisconnected = false;
+
+  const onEvent = (event) => {
+    if (clientDisconnected) return;
+    try {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch {
+      clientDisconnected = true;
+    }
+  };
+
+  req.on('close', () => {
+    clientDisconnected = true;
+    abortController.abort();
+    logger.debug('SSE client disconnected during run-now', { runId });
+  });
+
+  try {
+    await assignmentPipelineService._executeRun(runId, run.ticketId, run.workspaceId, 'manual', Date.now(), onEvent, abortController.signal);
+  } catch (error) {
+    logger.error('Run-now stream execution failed', { runId, error: error.message });
+    if (!clientDisconnected) {
+      res.write(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`);
+    }
+  }
+
+  if (!clientDisconnected) {
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    res.end();
+  }
 }));
 
 router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
