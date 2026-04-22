@@ -4,12 +4,79 @@ import { readSSEStream } from '../../hooks/useStreamingFetch';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  Loader2, CheckCircle, XCircle, AlertTriangle, Brain,
+  Loader2, CheckCircle, XCircle, AlertTriangle, Brain, MessageSquare,
   Users, Search, MapPin, X, ChevronDown, ChevronRight, Star, Sparkles,
 } from 'lucide-react';
 import {
   CopyBadge, mdComponents, StreamContent, cleanTranscript, processStreamEvent,
 } from './StreamingComponents';
+
+/** Strip obvious script/event-handler vectors before rendering FreshService HTML. Not a full sanitizer. */
+function sanitizeBriefingHtml(html) {
+  if (!html) return '';
+  return html
+    .replace(/<\/(?:script|style)[^>]*>[\s\S]*?<\/(?:script|style)>/gi, '')
+    .replace(/<(?:script|style)\b[^>]*>[\s\S]*?<\/(?:script|style)>/gi, '')
+    .replace(/<\?[\s\S]*?\?>/g, '')
+    .replace(/on\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/on\w+\s*=\s*'[^']*'/gi, '')
+    .replace(/on\w+\s*=\s*[^\s>]+/gi, '')
+    .replace(/javascript:\s*/gi, '')
+    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, '');
+}
+
+/**
+ * Inline preview of the private note that will be (or has been) posted to FreshService.
+ * Mirrors AgentBriefingCard in PipelineRunDetail so the user can see the same content
+ * without having to navigate to the run detail page.
+ */
+function AgentBriefingPreview({ recommendation, decision }) {
+  if (!recommendation) return null;
+
+  const isNoise = decision === 'noise_dismissed'
+    || (Array.isArray(recommendation.recommendations) && recommendation.recommendations.length === 0);
+  const briefing = isNoise ? recommendation.closureNoticeHtml : recommendation.agentBriefingHtml;
+  const fieldName = isNoise ? 'closureNoticeHtml' : 'agentBriefingHtml';
+
+  if (!briefing) {
+    return (
+      <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+            <MessageSquare className="w-3.5 h-3.5 text-amber-700" />
+          </div>
+          <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wide">What the agent will see</h4>
+          <span className="ml-auto text-[10px] font-medium text-amber-700/80 uppercase tracking-wider">Public note</span>
+        </div>
+        <p className="text-xs text-amber-800/90">
+          The LLM did not produce a <code className="font-mono bg-amber-100 px-1 rounded">{fieldName}</code> for this run.
+          On sync, the FreshService note will fall back to {isNoise ? 'a generic closure message' : 'the internal reasoning above'} — which may leak routing logic.
+        </p>
+      </div>
+    );
+  }
+
+  const safeHtml = sanitizeBriefingHtml(briefing);
+
+  return (
+    <div className="mt-4 bg-gradient-to-br from-emerald-50 via-teal-50 to-slate-50 border border-emerald-100 rounded-xl p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+          <MessageSquare className="w-3.5 h-3.5 text-emerald-700" />
+        </div>
+        <h4 className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">
+          {isNoise ? 'Closure notice (what the agent will see)' : 'What the agent will see'}
+        </h4>
+        <span className="ml-auto text-[10px] font-medium text-emerald-700/80 uppercase tracking-wider">Public note</span>
+      </div>
+      <div
+        className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-a:text-emerald-700"
+        dangerouslySetInnerHTML={{ __html: safeHtml }}
+      />
+    </div>
+  );
+}
+
 
 function ScoreRing({ pct, selected = false, size = 52 }) {
   if (pct === null || pct === undefined) return null;
@@ -38,7 +105,7 @@ function ScoreRing({ pct, selected = false, size = 52 }) {
   );
 }
 
-export function RecommendationCards({ data, onDecide, deciding, hideReasoning = false }) {
+export function RecommendationCards({ data, onDecide, deciding, hideReasoning = false, hideAgentBriefing = false, decision = null }) {
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [decisionNote, setDecisionNote] = useState('');
   const [showTechPicker, setShowTechPicker] = useState(false);
@@ -56,15 +123,22 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
 
   if (!data?.recommendations?.length) {
     return (
-      <div className="mt-4 border-t pt-4">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
-          <h4 className="text-sm font-semibold text-yellow-800 mb-1">No Assignment Needed</h4>
-          <p className="text-sm text-yellow-700">{data?.overallReasoning || 'This ticket was classified as noise or non-actionable.'}</p>
-          {data?.ticketClassification && (
-            <p className="text-xs text-yellow-600 mt-2">Classification: {data.ticketClassification}</p>
+      <div className="mt-4 border-t pt-4 space-y-3">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <h4 className="text-sm font-semibold text-yellow-800 mb-1 text-center">No Assignment Needed</h4>
+          {data?.overallReasoning ? (
+            <div className="text-sm text-yellow-800 prose prose-sm max-w-none prose-p:my-1.5 prose-headings:text-yellow-900 prose-strong:text-yellow-900">
+              <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{data.overallReasoning}</Markdown>
+            </div>
+          ) : (
+            <p className="text-sm text-yellow-700 text-center">This ticket was classified as noise or non-actionable.</p>
           )}
-          <p className="text-xs text-gray-400 mt-2">No technician recommendations were produced for this run.</p>
+          {data?.ticketClassification && (
+            <p className="text-xs text-yellow-600 mt-2 text-center">Classification: {data.ticketClassification}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-2 text-center">No technician recommendations were produced for this run.</p>
         </div>
+        {!hideAgentBriefing && <AgentBriefingPreview recommendation={data} decision={decision || 'noise_dismissed'} />}
       </div>
     );
   }
@@ -301,11 +375,16 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
           </button>
           {showReasoning && (
             <div className="border border-t-0 border-slate-200 rounded-b-lg px-4 py-3 bg-white">
-              <p className="text-sm text-slate-700 leading-relaxed">{data.overallReasoning}</p>
+              <div className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-headings:text-slate-800 prose-strong:text-slate-900">
+                <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{data.overallReasoning}</Markdown>
+              </div>
             </div>
           )}
         </div>
       )}
+
+      {/* Public note preview — what gets posted to FreshService for the assignee. */}
+      {!hideAgentBriefing && <AgentBriefingPreview recommendation={data} decision={decision} />}
     </div>
   );
 }

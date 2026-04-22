@@ -67,11 +67,13 @@ If the ticket is noise/FYI, call submit_recommendation with an empty recommendat
 ## Step 8: Write the Agent-Facing Briefing (CRITICAL)
 The \`submit_recommendation\` tool takes TWO separate write-ups, and you must populate both correctly:
 
-**\`overallReasoning\` — INTERNAL audit log.** Full transparency. Mention scores, ranks, candidates you considered and dropped, workload and fairness reasoning, on-shift status, rebound history. This is for the admin and never reaches the assignee.
+**\`overallReasoning\` — INTERNAL audit log.** Full transparency. Mention scores, ranks, candidates you considered and dropped, workload and fairness reasoning, on-shift status, rebound history. This is for the admin and never reaches the assignee. **Format as short paragraphs with blank lines between them, and bullet lists where you enumerate candidates or factors.** Do not produce one giant wall of text.
 
-**\`agentBriefingHtml\` — PUBLIC note posted to the ticket.** This is what the assigned technician will read. Treat it like a handoff note from a teammate.
+**\`agentBriefingHtml\` — PUBLIC note posted to the ticket.** This is what the assigned technician will read. Its job is to explain *what the ticket is about* and *why it was routed to them* — nothing more. It is a justification note, not a how-to guide.
 
-For the briefing, **never** mention any of the following — they reveal our routing logic and let agents game it:
+For the briefing, **never** include:
+- Suggested first steps, troubleshooting instructions, or "you should do X" — the assignee is a qualified technician, do not tell them how to do their job
+- Questions the assignee should ask the requester
 - Numerical scores, ranks, percentages, or confidence values
 - Names of OTHER technicians who were considered or ruled out
 - Workload counts or "X has fewer open tickets" reasoning
@@ -83,16 +85,16 @@ For the briefing, **never** mention any of the following — they reveal our rou
 Do include:
 - A 1-2 sentence recap of what the requester needs
 - A short, plain-language reason this is being routed to them ("you've handled similar VPN tickets recently", "this needs on-site support in Vancouver")
-- One suggested first step or thing to verify with the requester, when it's obvious
 - Any directly relevant KB links or related ticket IDs surfaced during research
 
-Format with simple HTML: \`<b>\`, \`<i>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<a href>\`, \`<h3>\` only. Aim for 60-180 words.
+Format with simple HTML: \`<b>\`, \`<i>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<a href>\`, \`<h3>\` only. Aim for 40-120 words.
 
 **Good example** (assignment):
-\`<p>The requester needs help connecting to the corporate VPN from a new MacBook — they're getting a certificate trust error.</p><p>You've recently resolved several similar Mac VPN cert issues, so you're a good fit here.</p><p>Suggested first check: confirm the device has the latest InternalCA profile installed via Jamf Self Service before troubleshooting the client itself.</p>\`
+\`<p>The requester needs help connecting to the corporate VPN from a new MacBook — they're getting a certificate trust error.</p><p>You've recently resolved several similar Mac VPN cert issues, so this is being routed to you. Related ticket: #18432.</p>\`
 
-**Bad example** (DO NOT WRITE):
-\`<p>You ranked #1 with a score of 0.92. Other candidates (Alex, Jordan) had higher workloads (8 and 11 open tickets vs your 3). Your VPN proficiency is Expert (level 5).</p>\`
+**Bad examples** (DO NOT WRITE):
+- \`<p>You ranked #1 with a score of 0.92. Other candidates (Alex, Jordan) had higher workloads.</p>\` — leaks routing internals.
+- \`<p>Suggested first check: confirm the device has the latest InternalCA profile via Jamf Self Service before troubleshooting the client.</p>\` — telling the technician how to do their job.
 
 For noise dismissals (empty recommendations), populate \`closureNoticeHtml\` instead with a brief, neutral explanation that the ticket needs no helpdesk follow-up. Keep it under 300 characters and never mention "noise", "spam", or any classifier language.
 
@@ -125,6 +127,15 @@ function needsPromptUpgrade(systemPrompt = '') {
   if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('agentBriefingHtml')) {
     return true;
   }
+  // The "no how-to instructions" briefing rules replaced the older "include a suggested
+  // first step" guidance — re-inject Step 8 so older prompts stop telling the LLM to
+  // write troubleshooting steps into the agent-facing note. We match the exact phrasing
+  // of the OLD "Do include" bullet and tool-schema text, NOT the "Suggested first check"
+  // string that now appears as a counter-example in the BAD-example block.
+  if (systemPrompt.includes('agentBriefingHtml')
+      && /One suggested first step or thing to verify|Suggested first step or what to verify/.test(systemPrompt)) {
+    return true;
+  }
   return false;
 }
 
@@ -143,11 +154,13 @@ const AGENT_BRIEFING_STEP = `
 ## Step 8: Write the Agent-Facing Briefing (CRITICAL)
 The \`submit_recommendation\` tool takes TWO separate write-ups, and you must populate both correctly:
 
-**\`overallReasoning\` — INTERNAL audit log.** Full transparency. Mention scores, ranks, candidates you considered and dropped, workload and fairness reasoning, on-shift status, rebound history. This is for the admin and never reaches the assignee.
+**\`overallReasoning\` — INTERNAL audit log.** Full transparency. Mention scores, ranks, candidates you considered and dropped, workload and fairness reasoning, on-shift status, rebound history. This is for the admin and never reaches the assignee. **Format as short paragraphs with blank lines between them, and bullet lists where you enumerate candidates or factors.** Do not produce one giant wall of text.
 
-**\`agentBriefingHtml\` — PUBLIC note posted to the ticket.** This is what the assigned technician will read. Treat it like a handoff note from a teammate.
+**\`agentBriefingHtml\` — PUBLIC note posted to the ticket.** This is what the assigned technician will read. Its job is to explain *what the ticket is about* and *why it was routed to them* — nothing more. It is a justification note, not a how-to guide.
 
-For the briefing, **never** mention any of the following — they reveal our routing logic and let agents game it:
+For the briefing, **never** include:
+- Suggested first steps, troubleshooting instructions, or "you should do X" — the assignee is a qualified technician, do not tell them how to do their job
+- Questions the assignee should ask the requester
 - Numerical scores, ranks, percentages, or confidence values
 - Names of OTHER technicians who were considered or ruled out
 - Workload counts or "X has fewer open tickets" reasoning
@@ -159,16 +172,16 @@ For the briefing, **never** mention any of the following — they reveal our rou
 Do include:
 - A 1-2 sentence recap of what the requester needs
 - A short, plain-language reason this is being routed to them ("you've handled similar VPN tickets recently", "this needs on-site support in Vancouver")
-- One suggested first step or thing to verify with the requester, when it's obvious
 - Any directly relevant KB links or related ticket IDs surfaced during research
 
-Format with simple HTML: \`<b>\`, \`<i>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<a href>\`, \`<h3>\` only. Aim for 60-180 words.
+Format with simple HTML: \`<b>\`, \`<i>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<a href>\`, \`<h3>\` only. Aim for 40-120 words.
 
 **Good example** (assignment):
-\`<p>The requester needs help connecting to the corporate VPN from a new MacBook — they're getting a certificate trust error.</p><p>You've recently resolved several similar Mac VPN cert issues, so you're a good fit here.</p><p>Suggested first check: confirm the device has the latest InternalCA profile installed via Jamf Self Service before troubleshooting the client itself.</p>\`
+\`<p>The requester needs help connecting to the corporate VPN from a new MacBook — they're getting a certificate trust error.</p><p>You've recently resolved several similar Mac VPN cert issues, so this is being routed to you. Related ticket: #18432.</p>\`
 
-**Bad example** (DO NOT WRITE):
-\`<p>You ranked #1 with a score of 0.92. Other candidates (Alex, Jordan) had higher workloads (8 and 11 open tickets vs your 3). Your VPN proficiency is Expert (level 5).</p>\`
+**Bad examples** (DO NOT WRITE):
+- \`<p>You ranked #1 with a score of 0.92. Other candidates (Alex, Jordan) had higher workloads.</p>\` — leaks routing internals.
+- \`<p>Suggested first check: confirm the device has the latest InternalCA profile via Jamf Self Service before troubleshooting the client.</p>\` — telling the technician how to do their job.
 
 For noise dismissals (empty recommendations), populate \`closureNoticeHtml\` instead with a brief, neutral explanation that the ticket needs no helpdesk follow-up. Keep it under 300 characters and never mention "noise", "spam", or any classifier language.`;
 
@@ -177,6 +190,29 @@ function injectAgentBriefingStep(prompt) {
   // Append after the prompt body — Step 8 is always last in the canonical version,
   // so a tail-append keeps any custom Steps 1-7 intact.
   return prompt.trimEnd() + '\n' + AGENT_BRIEFING_STEP;
+}
+
+/**
+ * Replace an outdated Step 8 (Agent-Facing Briefing) block with the current canonical
+ * version. Used when the prompt already mentions agentBriefingHtml but contains the
+ * older "suggested first step" wording. Falls back to a tail-append if we can't find
+ * the section header (so we never silently drop the upgrade).
+ */
+function replaceAgentBriefingStep(prompt) {
+  // Find the start of the Agent-Facing Briefing section.
+  const startMatch = prompt.match(/## Step \d+:\s*Write the Agent-Facing Briefing/);
+  if (!startMatch) {
+    return prompt.trimEnd() + '\n' + AGENT_BRIEFING_STEP;
+  }
+  const startIdx = startMatch.index;
+  // Find the next "## " section header AFTER the briefing header (if any), otherwise
+  // chop to end-of-string. This preserves any custom steps the admin added below.
+  const after = prompt.slice(startIdx + startMatch[0].length);
+  const nextSection = after.match(/\n## /);
+  const endIdx = nextSection ? startIdx + startMatch[0].length + nextSection.index : prompt.length;
+  const before = prompt.slice(0, startIdx).trimEnd();
+  const tail = prompt.slice(endIdx);
+  return `${before}\n${AGENT_BRIEFING_STEP.trim()}\n${tail}`;
 }
 
 function upgradeLegacyPrompt(systemPrompt = '') {
@@ -206,6 +242,14 @@ function upgradeLegacyPrompt(systemPrompt = '') {
       && systemPrompt.includes('search_decision_notes')
       && systemPrompt.includes('get_technician_ad_profile')) {
     return injectAgentBriefingStep(systemPrompt);
+  }
+
+  // Has Step 8 but with the old "suggested first step" wording — replace just that
+  // section with the current canonical version so we don't blow away any other
+  // customizations the admin made to Steps 1-7.
+  if (systemPrompt.includes('agentBriefingHtml')
+      && /one suggested first step|suggested first step or thing to verify|Suggested first check/i.test(systemPrompt)) {
+    return replaceAgentBriefingStep(systemPrompt);
   }
 
   if (systemPrompt.includes('You are an IT helpdesk ticket assignment assistant.')) {
