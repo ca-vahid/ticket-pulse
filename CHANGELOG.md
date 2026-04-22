@@ -2,6 +2,47 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.76-preview] - 2026-04-22
+
+### Bug fix: "FS Manual" label disappeared on closed externally-assigned tickets
+
+The Decided tab's "Manually in FreshService" sub-tab was internally inconsistent — some rows in the sub-tab displayed the correct amber "FS Manual" pill, but others showed a yellow "Pending" pill despite being in the same sub-tab. The difference was the ticket's current status: any `pending_review` run whose ticket had an `assignedTechId` but was also `Closed`/`Resolved`/`Deleted`/`Spam` reverted to the default "Pending" label even though it had clearly been handled outside the pipeline.
+
+#### Root cause
+
+Two frontend sites had the same over-protective status guard:
+
+- `getDisplayDecision()` in `frontend/src/pages/AssignmentReview.jsx` (row-level pill on list views)
+- `externallyAssigned` check in `frontend/src/components/assignment/PipelineRunDetail.jsx` (header pill on the run detail page)
+
+Both were computed as:
+
+```js
+const externallyAssigned =
+  run.decision === 'pending_review'
+  && run.ticket?.assignedTechId
+  && !['Closed', 'Resolved', 'Deleted', 'Spam'].includes(run.ticket?.status);
+```
+
+But the **backend's** `outside_assigned` filter (in `assignmentRepository.getPendingQueue`) that powers the "Manually in FreshService" sub-tab had no such status guard — it's just `assignedTechId: { not: null }`. So the sub-tab and the per-row label disagreed the moment the ticket closed.
+
+#### Fix
+
+Dropped the status guard in both UI sites. If a pending_review run has an `assignedTechId`, the label is always "FS Manual" — regardless of current ticket status. The tooltip still reads *"Assigned in FreshService outside the pipeline — `<tech name>`. AI suggestion left unresolved."* which stays accurate even after the ticket is closed.
+
+This keeps the list view, detail view, and sub-tab filter all agreeing on the same question: **"was this ticket taken outside the pipeline?"** — a factual question whose answer doesn't change when the ticket later closes.
+
+#### Files touched
+
+- `frontend/src/pages/AssignmentReview.jsx` — drop status guard in `getDisplayDecision`
+- `frontend/src/components/assignment/PipelineRunDetail.jsx` — drop status guard in header `externallyAssigned` check
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.76-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No backend changes, no DB changes.
+
+---
+
 ## [1.9.75-preview] - 2026-04-22
 
 ### Bug fix: FreshService group member count was always zero

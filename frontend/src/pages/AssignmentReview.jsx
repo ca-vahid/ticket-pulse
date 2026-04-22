@@ -887,10 +887,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   // a clearer 'FS Manual' label with an amber pill instead of the
   // confusing yellow 'Pending'. Tooltip explains why.
   const getDisplayDecision = (run) => {
-    const externallyAssigned =
-      run.decision === 'pending_review'
-      && run.ticket?.assignedTechId
-      && !['Closed', 'Resolved', 'Deleted', 'Spam'].includes(run.ticket?.status);
+    // A pending_review run with an assignedTechId means someone took the
+    // ticket in FreshService directly, outside the pipeline. The label should
+    // reflect that regardless of the ticket's current status — showing
+    // "Pending" on a Closed ticket that was manually handled is misleading
+    // (implies action needed when nothing is). Also keeps this check in sync
+    // with the backend's "outside_assigned" filter (which doesn't look at
+    // status either), so the "Manually in FreshService" sub-tab and the
+    // per-row decision pill always agree.
+    const externallyAssigned = run.decision === 'pending_review' && run.ticket?.assignedTechId;
     if (externallyAssigned) {
       return {
         label: 'FS Manual',
