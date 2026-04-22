@@ -3,8 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { filterTickets } from '../utils/ticketFilter';
 import { getHolidayTooltip, getDateStyling } from '../utils/holidays';
-import { getLeaveForDate, getLeaveBadge, getLeaveTooltip } from '../utils/leaveInfo';
+import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveCount, isHalfDayLeave } from '../utils/leaveInfo';
 import { formatDateLocal } from '../utils/dateHelpers';
+
+/** Render a leave count tightly: 1, 0.5 → "½", 1.5 → "1½" — never "1.5". */
+function formatLeaveCount(n) {
+  const whole = Math.floor(n);
+  const isHalf = (n - whole) >= 0.5;
+  if (whole === 0) return '½';
+  return isHalf ? `${whole}½` : `${whole}`;
+}
 
 export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthChange, technicians = [], searchTerm = '', selectedCategories = [], onClearSelections: _onClearSelections }) {
   const navigate = useNavigate();
@@ -432,11 +440,16 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
 
                 const isHovered = hoveredDayDate === day.date;
 
-                // Count technicians on leave this day
+                // Count technicians on leave this day. Half-day leaves count
+                // as 0.5 so the aggregate reflects actual leave-time, not
+                // "at least one row exists".
                 const leaveCounts = { OFF: 0, WFH: 0, OTHER: 0 };
+                let leaveHasHalfDay = false;
                 for (const tech of technicians) {
                   const leave = getLeaveForDate(tech.leaveInfo, day.date);
-                  if (leave) leaveCounts[leave.category]++;
+                  if (!leave) continue;
+                  leaveCounts[leave.category] += getLeaveCount(leave);
+                  if (isHalfDayLeave(leave)) leaveHasHalfDay = true;
                 }
                 const hasLeave = leaveCounts.OFF + leaveCounts.WFH + leaveCounts.OTHER > 0;
 
@@ -690,22 +703,31 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                           <div className="mt-auto text-xs text-gray-300">No activity</div>
                         )}
 
-                        {/* Leave indicators */}
+                        {/* Leave indicators. Counts can be fractional when
+                            half-day leaves are present (e.g. 1.5 means one
+                            full-day + one half-day leave). The trailing "½"
+                            chip flags that at least one leave is partial so
+                            the viewer doesn't read 1.5 as a typo. */}
                         {hasLeave && !isHovered && (
                           <div className="flex items-center gap-1 mt-1 flex-wrap">
                             {leaveCounts.OFF > 0 && (
                               <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-amber-100 border border-amber-300 text-[8px] font-semibold text-amber-800">
-                                <span className="w-1 h-1 rounded-full bg-amber-400" />{leaveCounts.OFF} OFF
+                                <span className="w-1 h-1 rounded-full bg-amber-400" />{formatLeaveCount(leaveCounts.OFF)} OFF
                               </span>
                             )}
                             {leaveCounts.WFH > 0 && (
                               <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-teal-100 border border-teal-300 text-[8px] font-semibold text-teal-800">
-                                <span className="w-1 h-1 rounded-full bg-teal-400" />{leaveCounts.WFH} WFH
+                                <span className="w-1 h-1 rounded-full bg-teal-400" />{formatLeaveCount(leaveCounts.WFH)} WFH
                               </span>
                             )}
                             {leaveCounts.OTHER > 0 && (
                               <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-purple-100 border border-purple-300 text-[8px] font-semibold text-purple-800">
-                                <span className="w-1 h-1 rounded-full bg-purple-400" />{leaveCounts.OTHER} OTH
+                                <span className="w-1 h-1 rounded-full bg-purple-400" />{formatLeaveCount(leaveCounts.OTHER)} OTH
+                              </span>
+                            )}
+                            {leaveHasHalfDay && (
+                              <span className="inline-flex items-center px-1 py-0 rounded-full bg-gray-100 border border-gray-300 text-[8px] font-semibold text-gray-600" title="At least one leave on this day is a half-day">
+                                ½
                               </span>
                             )}
                           </div>

@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, ChevronDown, ChevronUp, Bot, RotateCcw } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
-import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle } from '../utils/leaveInfo';
+import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
 import { prefetchTechDetail } from '../hooks/usePrefetch';
 import ExpandableTicketList, { useGroupedTickets, getTicketsForView } from './ExpandableTicketList';
 
@@ -201,7 +201,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
       : (technician.rejected7d || 0);
   const periodLabel = viewMode === 'weekly' ? 'this week'
     : viewMode === 'monthly' ? 'this month'
-    : 'this day';
+      : 'this day';
 
   // Get ticket counts
   const openOnlyCount = technician.openOnlyCount || 0;
@@ -344,6 +344,8 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                   : 'text-gray-500 font-semibold';
               
               const leaveStyle = dayLeave ? getLeaveStyle(dayLeave.category) : null;
+              const dayLeaveIsHalf = isHalfDayLeave(dayLeave);
+              const dayLeaveSplit = dayLeaveIsHalf ? getLeaveSplit(dayLeave) : null;
 
               const containerClass = dayLeave
                 ? `${leaveStyle.bgClass} rounded-lg p-0.5`
@@ -356,7 +358,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                     : '';
 
               const getBoxClasses = () => {
-                if (dayLeave) {
+                if (dayLeave && !dayLeaveIsHalf) {
                   if (day.total === 0) return `${leaveStyle.borderClass} ${leaveStyle.bgClass} ${leaveStyle.textClass}`;
                   return `${leaveStyle.borderClass} ${leaveStyle.badgeBg} ${leaveStyle.badgeText}`;
                 }
@@ -408,8 +410,14 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                       <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
                     </div>
                   </div>
-                  <div className={`w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold border transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
-                    {day.total}
+                  <div className={`relative w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
+                    {dayLeaveSplit?.isSplit && dayLeaveSplit.topFill && (
+                      <div className={`absolute inset-x-0 top-0 h-1/2 ${dayLeaveSplit.topFill.splitFill} opacity-80 pointer-events-none`} />
+                    )}
+                    {dayLeaveSplit?.isSplit && dayLeaveSplit.bottomFill && (
+                      <div className={`absolute inset-x-0 bottom-0 h-1/2 ${dayLeaveSplit.bottomFill.splitFill} opacity-80 pointer-events-none`} />
+                    )}
+                    <span className="relative z-10">{day.total}</span>
                   </div>
                 </div>
               );
@@ -487,10 +495,10 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               }}
               className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-red-50 rounded border border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer"
               title={
-                `Rejected tickets — picked up then put back in queue\n` +
+                'Rejected tickets — picked up then put back in queue\n' +
                 `Selected ${periodLabel}: ${rejectedDisplay}\n` +
                 `Last 7d: ${technician.rejected7d || 0}  ·  Last 30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}\n\n` +
-                `Click to drill down`
+                'Click to drill down'
               }
             >
               <RotateCcw className="w-4 h-4 text-red-500 mb-1" />

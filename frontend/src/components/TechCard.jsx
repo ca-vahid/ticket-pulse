@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, Bot, RotateCcw } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
-import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle } from '../utils/leaveInfo';
+import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
 import { prefetchTechDetail } from '../hooks/usePrefetch';
 
 /**
@@ -189,7 +189,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
       : (technician.rejected7d || 0);
   const periodLabel = viewMode === 'weekly' ? 'this week'
     : viewMode === 'monthly' ? 'this month'
-    : 'this day';
+      : 'this day';
 
   // Get ticket counts - prioritize "Open" status (most important)
   // FreshService statuses: Open (active work), Pending (waiting/less urgent), Resolved, Closed
@@ -330,8 +330,13 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                     : 'text-gray-500 font-semibold';
                 
                 const leaveStyle = dayLeave ? getLeaveStyle(dayLeave.category) : null;
+                const dayLeaveIsHalf = isHalfDayLeave(dayLeave);
+                const dayLeaveSplit = dayLeaveIsHalf ? getLeaveSplit(dayLeave) : null;
 
-                // Container styling for leave/holiday/weekend
+                // Container styling for leave/holiday/weekend.
+                // Half-day leaves use the full-day container so the day still
+                // reads as "leave" at a glance; the box itself is what shows
+                // the AM/PM split.
                 const containerClass = dayLeave
                   ? `${leaveStyle.bgClass} rounded-lg p-0.5`
                   : isHolidayDay
@@ -342,9 +347,11 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                       ? 'bg-slate-50/50 rounded-lg p-0.5'
                       : '';
 
-                // Determine box styling - leave/holidays/weekends override normal colors
+                // Determine box styling - full-day leave/holidays/weekends
+                // override normal colors. Half-day leaves keep the normal
+                // ticket-count colour and add an AM/PM overlay below.
                 const getBoxClasses = () => {
-                  if (dayLeave) {
+                  if (dayLeave && !dayLeaveIsHalf) {
                     if (day.total === 0) return `${leaveStyle.borderClass} ${leaveStyle.bgClass} ${leaveStyle.textClass}`;
                     return `${leaveStyle.borderClass} ${leaveStyle.badgeBg} ${leaveStyle.badgeText}`;
                   }
@@ -402,8 +409,15 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                         <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
                       </div>
                     </div>
-                    <div className={`w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold border transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
-                      {day.total}
+                    <div className={`relative w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
+                      {/* Half-day overlay: top half = AM, bottom half = PM */}
+                      {dayLeaveSplit?.isSplit && dayLeaveSplit.topFill && (
+                        <div className={`absolute inset-x-0 top-0 h-1/2 ${dayLeaveSplit.topFill.splitFill} opacity-80 pointer-events-none`} />
+                      )}
+                      {dayLeaveSplit?.isSplit && dayLeaveSplit.bottomFill && (
+                        <div className={`absolute inset-x-0 bottom-0 h-1/2 ${dayLeaveSplit.bottomFill.splitFill} opacity-80 pointer-events-none`} />
+                      )}
+                      <span className="relative z-10">{day.total}</span>
                     </div>
                   </div>
                 );
@@ -457,7 +471,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                 ? 'bg-sky-50 border-sky-200'
                 : 'bg-slate-50/50 border-slate-100 opacity-50'
             }`}
-            title={appAssigned > 0 ? `App-assigned tickets (by Ticket Pulse service account)` : 'No app-assigned tickets'}
+            title={appAssigned > 0 ? 'App-assigned tickets (by Ticket Pulse service account)' : 'No app-assigned tickets'}
           >
             <Bot className={`w-5 h-5 mb-1 ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`} />
             <div className={`text-lg font-bold ${appAssigned > 0 ? 'text-sky-800' : 'text-slate-300'}`}>{appAssigned}</div>
@@ -488,12 +502,12 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               }}
               className="flex flex-col items-center p-2 bg-red-50 rounded-lg shadow-sm border border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer"
               title={
-                `Rejected tickets — tech picked up then put back in queue\n` +
+                'Rejected tickets — tech picked up then put back in queue\n' +
                 `Selected ${periodLabel}: ${rejectedDisplay}\n` +
                 `Last 7d: ${technician.rejected7d || 0}\n` +
                 `Last 30d: ${technician.rejected30d || 0}\n` +
                 `Lifetime: ${technician.rejectedLifetime || 0}\n\n` +
-                `Click to see the list`
+                'Click to see the list'
               }
             >
               <RotateCcw className="w-5 h-5 text-red-500 mb-1" />

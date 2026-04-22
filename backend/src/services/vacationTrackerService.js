@@ -33,6 +33,45 @@ function formatDateUTC(date) {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * Derive the half-day metadata for a single VT leave record.
+ *
+ * Returns { isFullDay, halfDayPart, startMinute, endMinute }.
+ *
+ * Rules (verified against live IT-workspace VT data 2026-04-21):
+ *   - VT only marks a leave partial when isFullDayLeave === false. If the
+ *     flag is missing or true → treat as full day.
+ *   - Partial leaves always carry startHour/endHour (and startMinute/endMinute,
+ *     which can be 0 or 30 in practice).
+ *   - We never observed multi-day partial leaves in live data, but if VT ever
+ *     returns one we conservatively treat *every* day in the range as full
+ *     except the boundary (caller decides via `isBoundaryDay`). Today only the
+ *     single-day path is exercised.
+ *   - AM vs PM is decided by where the window's MIDPOINT falls relative to
+ *     12:00 noon. This handles edge cases like 09:00–13:00 (midpoint 11:00 →
+ *     AM) and 12:30–16:30 (midpoint 14:30 → PM).
+ */
+export function deriveHalfDayMeta(leave, isBoundaryDay = true) {
+  const fullDay = leave.isFullDayLeave !== false;
+  if (fullDay || !isBoundaryDay) {
+    return { isFullDay: true, halfDayPart: null, startMinute: null, endMinute: null };
+  }
+
+  const startMinute = (leave.startHour ?? 0) * 60 + (leave.startMinute ?? 0);
+  const endMinute = (leave.endHour ?? 0) * 60 + (leave.endMinute ?? 0);
+
+  // Defensive: if VT gave us a zero-length or inverted window, fall back to
+  // treating it as a full-day leave so we don't silently drop the row.
+  if (endMinute <= startMinute) {
+    return { isFullDay: true, halfDayPart: null, startMinute: null, endMinute: null };
+  }
+
+  const midpoint = (startMinute + endMinute) / 2;
+  const halfDayPart = midpoint < 12 * 60 ? 'AM' : 'PM';
+
+  return { isFullDay: false, halfDayPart, startMinute, endMinute };
+}
+
 class VacationTrackerService {
   _getClient(apiKey) {
     return new VacationTrackerClient(apiKey);
@@ -159,8 +198,14 @@ class VacationTrackerService {
         if (!ltInfo || ltInfo.category === 'IGNORED') continue;
 
         const dates = expandDateRange(leave.startDate, leave.endDate);
+        const isMultiDay = dates.length > 1;
 
         for (const date of dates) {
+          // Multi-day partial leaves haven't been seen in live data, but to
+          // avoid lying about midweek dates we only stamp half-day metadata
+          // on single-day partial leaves. Anything spanning multiple days is
+          // treated as full on every day.
+          const meta = deriveHalfDayMeta(leave, /*isBoundaryDay=*/!isMultiDay);
           leaveRows.push({
             workspaceId,
             technicianId: mapping.technicianId,
@@ -169,6 +214,10 @@ class VacationTrackerService {
             leaveTypeName: ltInfo.vtLeaveTypeName,
             category: ltInfo.category,
             status: leave.status || 'APPROVED',
+            isFullDay: meta.isFullDay,
+            halfDayPart: meta.halfDayPart,
+            startMinute: meta.startMinute,
+            endMinute: meta.endMinute,
           });
           validKeys.add(`${leave.id}|${date.toISOString().slice(0, 10)}`);
         }
@@ -229,6 +278,12 @@ class VacationTrackerService {
       byTechAndDate[techId][dateKey] = {
         category: leave.category,
         typeName: leave.leaveTypeName,
+        // Half-day fields. Always present (defaults: full day) so the frontend
+        // can branch without null-checking the nested shape.
+        isFullDay: leave.isFullDay !== false,
+        halfDayPart: leave.halfDayPart || null,
+        startMinute: leave.startMinute ?? null,
+        endMinute: leave.endMinute ?? null,
       };
     }
     return byTechAndDate;

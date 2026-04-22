@@ -27,7 +27,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'get_agent_availability',
-    description: 'Get detailed availability for all technicians right now. Returns three groups: OFF (on leave), WFH (remote only), and IN-OFFICE. Each agent includes their timezone, local date/time, personal schedule (start/end), whether they are currently on shift, and how much time remains in their shift. Use this to avoid assigning tickets to agents whose shift has ended or hasn\'t started yet.',
+    description: 'Get detailed availability for all technicians right now. Returns five groups: OFF (full-day leave), WFH (full-day remote), IN-OFFICE, HALF-DAY-OFF (off for only AM or PM), and HALF-DAY-WFH (remote for only AM or PM). Each agent includes their timezone, local date/time, personal schedule (start/end), whether they are currently on shift, and how much time remains in their shift. Half-day entries also include `halfDayPart` ("AM"|"PM"), `leaveWindow` ("HH:MM-HH:MM" workspace local), and `availabilityNote` — a human-readable line summarising whether the agent is reachable right now or only later in the day. ALWAYS read `availabilityNote` before excluding a half-day agent: e.g. someone in HALF-DAY-OFF (AM) is fully available in the afternoon. Use this to avoid assigning tickets to agents whose shift has ended, hasn\'t started yet, or who are only off for part of the day.',
     input_schema: {
       type: 'object',
       properties: {},
@@ -297,7 +297,70 @@ function getAgentShiftStatus(tech, hqTimezone) {
     startTime,
     endTime,
     isOvernightShift,
+    // Exposed so half-day leave notes can compare the leave window to "now".
+    nowMinutes,
   };
+}
+
+/**
+ * Format minutes-from-midnight (e.g. 810) as a workspace-local clock string ("13:30").
+ */
+function formatMinutes(min) {
+  if (min === null || min === undefined) return '';
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/**
+ * Build the human-readable availability note the LLM consumes for a half-day
+ * leave. Decides whether the agent is reachable RIGHT NOW vs only later in
+ * the day, based on the workspace-local clock vs the leave window.
+ *
+ * `category` is the leave category ('OFF' | 'WFH' | 'OTHER').
+ * `leave` carries halfDayPart, startMinute, endMinute.
+ * `nowMinutes` is the current workspace-local time in minutes from midnight.
+ */
+function buildHalfDayAvailabilityNote(category, leave, nowMinutes) {
+  const window = `${formatMinutes(leave.startMinute)}–${formatMinutes(leave.endMinute)}`;
+  const isAM = leave.halfDayPart === 'AM';
+  const verb = category === 'WFH'
+    ? (isAM ? 'WFH this morning' : 'WFH this afternoon')
+    : (isAM ? 'Off this morning' : 'Off this afternoon');
+
+  // Position vs leave window
+  const beforeWindow = nowMinutes < (leave.startMinute ?? 0);
+  const duringWindow = nowMinutes >= (leave.startMinute ?? 0) && nowMinutes < (leave.endMinute ?? 0);
+  const afterWindow  = nowMinutes >= (leave.endMinute ?? 0);
+
+  if (category === 'WFH') {
+    if (duringWindow) {
+      return `${verb} (${window}) — remote tasks only right now; in-office for the rest of the day.`;
+    }
+    if (beforeWindow) {
+      return `${verb} (${window}) — in office now, becomes remote-only at ${formatMinutes(leave.startMinute)}.`;
+    }
+    return `${verb} (${window}) — back in office now (WFH window has ended).`;
+  }
+
+  // OFF / OTHER (treated as unavailable during the window)
+  if (isAM) {
+    if (afterWindow || nowMinutes >= (leave.endMinute ?? 0)) {
+      return `${verb} (off ${window}) — back and available now for the rest of the day.`;
+    }
+    if (duringWindow) {
+      return `${verb} (off ${window}) — unavailable until ${formatMinutes(leave.endMinute)}; OK to assign tickets that don't need a response before then.`;
+    }
+    return `${verb} (off ${window}) — currently available; will be unavailable from ${formatMinutes(leave.startMinute)} to ${formatMinutes(leave.endMinute)}.`;
+  }
+  // PM
+  if (beforeWindow) {
+    return `${verb} (off ${window}) — available now, but leaves at ${formatMinutes(leave.startMinute)} for the rest of the day; only assign if it can wrap before then.`;
+  }
+  if (duringWindow) {
+    return `${verb} (off ${window}) — off for the rest of the day, unavailable.`;
+  }
+  return `${verb} (off ${window}) — leave window already ended; available.`;
 }
 
 async function getAgentAvailability(workspaceId) {
@@ -323,17 +386,30 @@ async function getAgentAvailability(workspaceId) {
     }),
   ]);
 
-  const leaveMap = {};
+  // One row per technician for today. If the same person has both a half-day
+  // OFF and a half-day WFH on the same day (rare but possible), keep both —
+  // we store an array per tech and let the renderer split them.
+  const leavesByTech = {};
   for (const l of leaves) {
-    leaveMap[l.technicianId] = { leaveType: l.leaveTypeName, category: l.category };
+    if (!leavesByTech[l.technicianId]) leavesByTech[l.technicianId] = [];
+    leavesByTech[l.technicianId].push({
+      leaveType: l.leaveTypeName,
+      category: l.category,
+      isFullDay: l.isFullDay !== false,
+      halfDayPart: l.halfDayPart || null,
+      startMinute: l.startMinute ?? null,
+      endMinute: l.endMinute ?? null,
+    });
   }
 
   const off = [];
   const wfh = [];
+  const halfDayOff = [];
+  const halfDayWfh = [];
   const inOffice = [];
 
   for (const t of techs) {
-    const leave = leaveMap[t.id];
+    const techLeaves = leavesByTech[t.id] || [];
     const shift = getAgentShiftStatus(t, hqTimezone);
     const agentInfo = {
       techId: t.id,
@@ -349,18 +425,59 @@ async function getAgentAvailability(workspaceId) {
       shiftStatus: shift.shiftNote,
     };
 
-    if (leave) {
+    // No leave today → in office, simplest path.
+    if (techLeaves.length === 0) {
+      inOffice.push(agentInfo);
+      continue;
+    }
+
+    // Pick a "representative" leave for bucket placement:
+    //   1. A full-day leave wins over half-day (if both exist for some reason).
+    //   2. Among full-day, OFF wins over WFH (most restrictive).
+    // Half-day leaves are emitted into the half-day buckets directly.
+    const fullDayLeaves = techLeaves.filter(l => l.isFullDay);
+    const partialLeaves = techLeaves.filter(l => !l.isFullDay);
+
+    if (fullDayLeaves.length > 0) {
+      const offLeave = fullDayLeaves.find(l => l.category === 'OFF');
+      const wfhLeave = fullDayLeaves.find(l => l.category === 'WFH');
+      const otherLeave = fullDayLeaves.find(l => l.category !== 'OFF' && l.category !== 'WFH' && l.category !== 'IGNORED');
+      const ignored = fullDayLeaves.every(l => l.category === 'IGNORED');
+
+      if (offLeave) {
+        off.push({ ...agentInfo, leaveType: offLeave.leaveType, note: 'On leave all day — fully unavailable for assignment.' });
+      } else if (wfhLeave) {
+        wfh.push({ ...agentInfo, leaveType: wfhLeave.leaveType, note: 'Working from home all day — available for remote tasks only, NOT for physical presence tasks.' });
+      } else if (otherLeave) {
+        off.push({ ...agentInfo, leaveType: otherLeave.leaveType, note: `Leave type: ${otherLeave.category} — treat as unavailable.` });
+      } else if (ignored) {
+        inOffice.push(agentInfo);
+      }
+      continue;
+    }
+
+    // Only half-day leaves remain.
+    for (const leave of partialLeaves) {
+      const note = buildHalfDayAvailabilityNote(leave.category, leave, shift.nowMinutes);
+      const window = `${formatMinutes(leave.startMinute)}-${formatMinutes(leave.endMinute)}`;
+      const enriched = {
+        ...agentInfo,
+        leaveType: leave.leaveType,
+        halfDayPart: leave.halfDayPart,
+        leaveWindow: window,
+        availabilityNote: note,
+      };
       if (leave.category === 'WFH') {
-        wfh.push({ ...agentInfo, leaveType: leave.leaveType, note: 'Working from home — available for remote tasks only, NOT for physical presence tasks' });
+        halfDayWfh.push(enriched);
       } else if (leave.category === 'OFF') {
-        off.push({ ...agentInfo, leaveType: leave.leaveType, note: 'On leave — fully unavailable for assignment' });
+        halfDayOff.push(enriched);
       } else if (leave.category === 'IGNORED') {
+        // Treat ignored half-day as fully in-office.
         inOffice.push(agentInfo);
       } else {
-        off.push({ ...agentInfo, leaveType: leave.leaveType, note: `Leave type: ${leave.category} — treat as unavailable` });
+        // OTHER (training, etc.) treated like a half-day OFF.
+        halfDayOff.push({ ...enriched, note: `Leave type: ${leave.category} — treat as unavailable during the leave window.` });
       }
-    } else {
-      inOffice.push(agentInfo);
     }
   }
 
@@ -372,10 +489,14 @@ async function getAgentAvailability(workspaceId) {
       inOffice: inOffice.length,
       workingFromHome: wfh.length,
       off: off.length,
+      halfDayOff: halfDayOff.length,
+      halfDayWfh: halfDayWfh.length,
     },
     inOffice,
     workingFromHome: wfh,
     off,
+    halfDayOff,
+    halfDayWfh,
   };
 }
 

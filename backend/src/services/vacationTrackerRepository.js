@@ -105,6 +105,12 @@ class VacationTrackerRepository {
         leaveTypeName: data.leaveTypeName,
         category: data.category,
         status: data.status,
+        // Half-day fields can flip when a user edits a leave in VT (e.g.
+        // shrinks a full-day leave to a half-day) — always write them.
+        isFullDay: data.isFullDay ?? true,
+        halfDayPart: data.halfDayPart ?? null,
+        startMinute: data.startMinute ?? null,
+        endMinute: data.endMinute ?? null,
       },
     });
   }

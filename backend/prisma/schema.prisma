@@ -538,6 +538,16 @@ model TechnicianLeave {
   leaveTypeName String     @db.VarChar(255) @map("leave_type_name")
   category      String     @db.VarChar(20)
   status        String     @default("APPROVED") @db.VarChar(20)
+  // Half-day support (added 2026-04). isFullDay defaults true so legacy rows
+  // and full-day VT leaves continue to behave exactly as before.
+  isFullDay     Boolean    @default(true) @map("is_full_day")
+  // 'AM' | 'PM' | null. Derived once at sync time from the leave window's
+  // midpoint vs noon, so all consumers (LLM tool, UI) agree on the bucket.
+  halfDayPart   String?    @db.VarChar(2) @map("half_day_part")
+  // Raw window in workspace-local minutes-from-midnight. Kept for the LLM
+  // so it can give precise "available from HH:MM onward" notes.
+  startMinute   Int?       @map("start_minute")
+  endMinute     Int?       @map("end_minute")
   createdAt     DateTime   @default(now()) @map("created_at")
   updatedAt     DateTime   @updatedAt @map("updated_at")
 

@@ -22,6 +22,10 @@ Call **get_agent_availability** to see who is available right now:
 - **OFF** agents are fully unavailable — do NOT recommend them.
 - **WFH** agents can handle remote tasks but NOT physical presence tasks.
 - **In-office** agents can handle everything.
+- **HALF-DAY-OFF** and **HALF-DAY-WFH** agents are only off / remote for part of the day. Read their \`availabilityNote\` and \`leaveWindow\` carefully:
+  - HALF-DAY-OFF (AM) means the agent is unavailable in the morning but **fully available in the afternoon**. They are a perfectly valid candidate for tickets that don't need a same-morning response.
+  - HALF-DAY-OFF (PM) means the agent is available now but unavailable later. Only assign if the ticket can plausibly wrap before the leave window starts.
+  - HALF-DAY-WFH works the same way for physical-presence eligibility — they can't do on-site work during the WFH window, but can outside of it.
 - Check each agent's **onShift** status and **shiftStatus** — agents whose shift has ended or hasn't started yet should be deprioritized. Prefer agents currently on shift with time remaining.
 - Agents are in different timezones (e.g., Toronto is 3 hours ahead of Vancouver). A ticket analyzed at 9am PT can be assigned to an Eastern agent who started at 8am ET and is already 3 hours into their shift.
 
@@ -61,7 +65,7 @@ Call **submit_recommendation** with your final ranked list. You MUST always call
 If the ticket is noise/FYI, call submit_recommendation with an empty recommendations array and explain why.
 
 ## Decision Rules (in priority order)
-1. **Availability** — Never assign to someone who is OFF. Deprioritize agents whose shift has ended or hasn't started yet.
+1. **Availability** — Never assign to someone who is OFF for the full day. For half-day leaves, treat the agent as available for the other half — read \`availabilityNote\` to decide whether the ticket fits that window. Deprioritize agents whose shift has ended or hasn't started yet.
 2. **On-shift preference** — Prefer agents currently on shift with time remaining. An agent with 6 hours left is better than one ending in 30 minutes for non-urgent work.
 3. **Physical presence** — If required, exclude WFH agents; prefer agents at the matching location
 4. **Competency** — Higher proficiency in the matching category wins
