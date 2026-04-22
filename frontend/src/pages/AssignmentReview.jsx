@@ -373,88 +373,113 @@ function StatTile({ icon: Icon, label, value, sublabel, tone = 'slate' }) {
 function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTotal, onRefresh }) {
   const today = queueStatus?.today || {};
   const stats = {
-    autoAssigned: today.autoAssigned || 0,
-    handledInFs: today.handledInFs || 0,
-    noiseDismissed: today.noiseDismissed || 0,
+    autoAssigned: today.autoAssigned || 0,        // decision='auto_assigned' — no human in the loop
+    approved: today.approved || 0,                // decision='approved' OR 'modified' — admin clicked approve
+    handledInFs: today.handledInFs || 0,          // pending_review + assignedTechId set — agent grabbed in FS
+    noiseDismissed: today.noiseDismissed || 0,    // decision='noise_dismissed'
     manualReviewRequired: today.manualReviewRequired || 0,
     inProgress: today.inProgress || 0,
+    rebounds: today.rebounds || 0,
     totalRuns: today.totalRuns || 0,
   };
   const excludedGroupCount = queueStatus?.excludedGroupCount || 0;
   const latest = today.latestAutoAssignment || null;
   const dryRun = queueStatus?.dryRunMode;
+  // Real-time in-progress beats today's snapshot when there's actual activity
+  // happening right now. The today.inProgress field is bound by createdAt
+  // window; this catches runs that started just now even if they outlive
+  // the window.
+  const liveInProgress = inProgressCount > 0 ? inProgressCount : stats.inProgress;
 
   return (
-    <div className="py-8 sm:py-10 px-3 sm:px-6">
+    <div className="py-6 sm:py-8 px-3 sm:px-6">
       {/* Header — auto-assign is on, page intentionally empty */}
-      <div className="text-center max-w-2xl mx-auto mb-6 sm:mb-8">
+      <div className="text-center max-w-2xl mx-auto mb-5 sm:mb-6">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold mb-3">
           <Bot className="w-3.5 h-3.5" />
           <span>Auto-Assign is ON</span>
+          {dryRun && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 text-[10px] font-semibold">DRY-RUN</span>}
         </div>
         <h3 className="text-xl sm:text-2xl font-bold text-slate-800">No tickets are waiting for you right now.</h3>
         <p className="text-sm text-slate-500 mt-2 leading-relaxed">
-          The pipeline is analyzing tickets as they arrive and assigning them automatically.
-          Tickets only land here when they need a human decision — for example, items in {' '}
+          The pipeline is processing tickets in the background. Items only land here when they genuinely need a human decision — like tickets in {' '}
           <span className="font-semibold text-slate-700">excluded groups</span>
           {excludedGroupCount > 0 ? ` (${excludedGroupCount} configured)` : ''}, rebound exhaustion, or LLM uncertainty.
         </p>
       </div>
 
-      {/* Hero stat — today's auto-assignments */}
-      <div className="max-w-3xl mx-auto mb-4">
-        <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-violet-50 border border-blue-200 rounded-2xl p-5 sm:p-6 flex items-center gap-4 sm:gap-6">
-          <div className="flex-shrink-0 w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white/70 border border-blue-200 flex items-center justify-center">
-            <Sparkles className="w-7 h-7 sm:w-8 sm:h-8 text-blue-600" />
+      {/* Hero — total processed today, with a short breakdown ribbon */}
+      <div className="max-w-4xl mx-auto mb-3 sm:mb-4">
+        <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-violet-50 border border-blue-200 rounded-2xl p-4 sm:p-5 flex items-center gap-4 sm:gap-5">
+          <div className="flex-shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white/70 border border-blue-200 flex items-center justify-center">
+            <Sparkles className="w-6 h-6 sm:w-7 sm:h-7 text-blue-600" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Today</div>
             <div className="text-3xl sm:text-4xl font-bold text-slate-900 tabular-nums leading-tight">
-              {stats.autoAssigned}
-              <span className="text-sm sm:text-base font-medium text-slate-500 ml-2">auto-assigned</span>
-            </div>
-            <div className="text-xs text-slate-500 mt-1">
-              out of <span className="font-semibold text-slate-700">{stats.totalRuns}</span> total ticket{stats.totalRuns === 1 ? '' : 's'} processed by the pipeline
-              {dryRun && <span className="ml-2 px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 text-[10px] font-semibold">DRY-RUN</span>}
+              {stats.totalRuns}
+              <span className="text-sm sm:text-base font-medium text-slate-500 ml-2">tickets processed by the pipeline</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Secondary stats grid */}
-      <div className="max-w-3xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 mb-5">
+      {/* Outcome tiles — 4 distinct paths a ticket can end up in.
+          The math: autoAssigned + approved + handledInFs + noiseDismissed
+          should equal totalRuns minus (manualReviewRequired + inProgress +
+          queuedForLater + any failed runs). */}
+      <div className="max-w-4xl mx-auto grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mb-3">
+        <StatTile
+          icon={Bot}
+          label="Auto-assigned by AI"
+          value={stats.autoAssigned}
+          sublabel="pipeline routed without review"
+          tone="emerald"
+        />
+        <StatTile
+          icon={Check}
+          label="Approved by you"
+          value={stats.approved}
+          sublabel="admin clicked approve in app"
+          tone="blue"
+        />
         <StatTile
           icon={Users}
-          label="Handled in FS"
+          label="Picked up in FreshService"
           value={stats.handledInFs}
-          sublabel="agents picked up directly"
+          sublabel="agent grabbed it directly"
           tone="amber"
         />
         <StatTile
           icon={XCircle}
-          label="Noise dismissed"
+          label="Dismissed as noise"
           value={stats.noiseDismissed}
-          sublabel="auto-classified as non-actionable"
+          sublabel="auto-classified non-actionable"
           tone="slate"
-        />
-        <StatTile
-          icon={ShieldCheck}
-          label="Needed review"
-          value={stats.manualReviewRequired}
-          sublabel="excluded groups + rebound"
-          tone="rose"
-        />
-        <StatTile
-          icon={Brain}
-          label="In progress"
-          value={inProgressCount || stats.inProgress}
-          sublabel="LLM analyzing now"
-          tone="blue"
         />
       </div>
 
-      {/* Latest auto-assignment + queued count strip */}
-      <div className="max-w-3xl mx-auto space-y-2">
+      {/* Process state — only render rows that are actually non-zero so the
+          panel doesn't drown in greyed-out tiles when nothing's happening. */}
+      {(liveInProgress > 0 || stats.rebounds > 0 || stats.manualReviewRequired > 0 || queuedRunsTotal > 0) && (
+        <div className="max-w-4xl mx-auto flex flex-wrap items-stretch gap-2 mb-3">
+          {liveInProgress > 0 && (
+            <SmallStatPill icon={Brain} tone="blue" value={liveInProgress} label={`currently analyzing${liveInProgress === 1 ? '' : ''}`} />
+          )}
+          {stats.rebounds > 0 && (
+            <SmallStatPill icon={RotateCcw} tone="amber" value={stats.rebounds} label={`rebound${stats.rebounds === 1 ? '' : 's'} today`} title="Tickets that bounced back after a rejection and triggered a fresh pipeline run" />
+          )}
+          {stats.manualReviewRequired > 0 && (
+            <SmallStatPill icon={ShieldCheck} tone="rose" value={stats.manualReviewRequired} label={`need${stats.manualReviewRequired === 1 ? 's' : ''} your attention`} title="Excluded groups, rebound exhaustion, or LLM uncertainty" />
+          )}
+          {queuedRunsTotal > 0 && (
+            <SmallStatPill icon={Clock} tone="slate" value={queuedRunsTotal} label="queued for after-hours" title="Will run automatically when business hours start" />
+          )}
+        </div>
+      )}
+
+      {/* Latest auto-assignment strip */}
+      <div className="max-w-4xl mx-auto">
         {latest && (
           <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-3.5 flex items-center gap-3">
             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
@@ -481,23 +506,37 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
             </a>
           </div>
         )}
-
-        {queuedRunsTotal > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2.5 text-xs text-amber-800">
-            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-            <span>
-              <span className="font-semibold">{queuedRunsTotal}</span> ticket{queuedRunsTotal === 1 ? ' is' : 's are'} queued for next business hours and will run automatically when business hours start.
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Refresh */}
-      <div className="text-center mt-5">
+      <div className="text-center mt-4">
         <button onClick={onRefresh} className="text-xs text-slate-500 hover:text-slate-700 inline-flex items-center gap-1">
           <RefreshCw className="w-3.5 h-3.5" /> Refresh stats
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Compact inline pill for the "process state" row — smaller than a StatTile
+ * (used when the metric is more "happening right now" than "outcome of the day").
+ * Only rendered when value > 0 to keep the panel uncluttered.
+ */
+function SmallStatPill({ icon: Icon, label, value, tone = 'slate', title }) {
+  const TONE_CLASSES = {
+    blue:    'bg-blue-50 border-blue-200 text-blue-800',
+    emerald: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+    amber:   'bg-amber-50 border-amber-200 text-amber-800',
+    rose:    'bg-rose-50 border-rose-200 text-rose-800',
+    slate:   'bg-slate-50 border-slate-200 text-slate-700',
+  };
+  const tc = TONE_CLASSES[tone] || TONE_CLASSES.slate;
+  return (
+    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs ${tc}`} title={title || undefined}>
+      <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+      <span className="font-semibold tabular-nums">{value}</span>
+      <span>{label}</span>
     </div>
   );
 }

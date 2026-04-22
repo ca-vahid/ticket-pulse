@@ -132,6 +132,38 @@ describe('tallyGroupedRuns — bucket assignment', () => {
     expect(t.queuedForLater).toBe(3);
     expect(t.totalRuns).toBe(45);
   });
+
+  test('outcome buckets together with handled-in-FS adjustment cover the full picture', () => {
+    // Verifies the math the empty-state panel relies on: every completed
+    // run with a "settled" decision lands in exactly one of:
+    //   autoAssigned, approved, noiseDismissed, handledInFs, manualReviewRequired
+    // (plus inProgress + queuedForLater for runs that haven't settled yet).
+    // Failed/superseded statuses count in totalRuns but no outcome bucket.
+    const t = tallyGroupedRuns([
+      row('completed', 'auto_assigned', 4),
+      row('completed', 'approved', 3),
+      row('completed', 'modified', 1),
+      row('completed', 'noise_dismissed', 2),
+      row('completed', 'pending_review', 5),  // before split: 5 in manualReviewRequired
+      row('running', null, 1),
+      row('queued', null, 0),
+    ]);
+    expect(t.totalRuns).toBe(16);
+    expect(t.manualReviewRequired).toBe(5);
+
+    // After the caller splits handled-in-FS off (say 3 of those 5 pending_review
+    // runs were FS-handled), manualReviewRequired drops by 3.
+    adjustForHandledInFs(t, 3);
+    expect(t.manualReviewRequired).toBe(2);
+
+    // The accounting:
+    //   autoAssigned (4) + approved (4) + noise (2) + handledInFs (3) +
+    //   manualReviewRequired (2) + inProgress (1) = 16 = totalRuns ✓
+    const accounted =
+      t.autoAssigned + t.approved + t.noiseDismissed + 3 + t.manualReviewRequired
+      + t.inProgress + t.queuedForLater;
+    expect(accounted).toBe(t.totalRuns);
+  });
 });
 
 describe('adjustForHandledInFs', () => {
