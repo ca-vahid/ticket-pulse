@@ -2,6 +2,88 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.78-preview] - 2026-04-22
+
+### Rich empty-state panel on the Review Queue when Auto-Assign is on
+
+The Review Queue used to render a sad "No tickets awaiting decision" placeholder whenever the queue was empty — which is the *normal steady state* when auto-assign is on, since the pipeline routes tickets without human intervention. The result was a page that looked broken even though it was working perfectly. This release adds a richer, informative empty-state for that case.
+
+#### What's new
+
+When `subView === 'pending'` is empty AND `autoAssign === true`, the placeholder is replaced with:
+
+1. **Header strip** — green "Auto-Assign is ON" pill, headline ("No tickets are waiting for you right now."), and a one-liner explaining when tickets WILL show up here (excluded groups, rebound exhaustion, LLM uncertainty), with a contextual count of currently-configured excluded groups.
+
+2. **Hero card** — large display of today's auto-assigned count, with an explanatory sub-line ("out of N total tickets processed by the pipeline"). DRY-RUN badge appears next to the count if dry-run mode is on.
+
+3. **4-tile stats grid** — Handled in FS / Noise dismissed / Needed review / In progress. Each tile is a `StatTile` with icon, big tabular-num value, and short sub-label. Color-coded by tone so the meaningful tiles pop.
+
+4. **Most recent auto-assignment strip** — shows the latest auto-assigned ticket with a relative timestamp ("3 min ago") and a quick link into the run detail page. Updates every 30s without forcing a page refresh.
+
+5. **Queued-for-later strip** — when there are tickets queued outside business hours, shows their count and reminds the admin they'll run automatically when business hours resume.
+
+The old sparse placeholder still renders when auto-assign is **off** (no behavior change there) or for any tab that isn't `pending` (Decided / Dismissed / Rejected / Deleted).
+
+#### Backend
+
+`GET /assignment/queue-status` now returns:
+
+```json
+{
+  "isBusinessHours": true,
+  "queuedCount": 3,
+  "nextWindow": null,
+  "autoAssign": true,
+  "autoCloseNoise": true,
+  "pipelineEnabled": true,
+  "dryRunMode": false,
+  "excludedGroupCount": 1,
+  "today": {
+    "range": { "start": "...", "end": "...", "timezone": "America/Los_Angeles" },
+    "totalRuns": 45,
+    "autoAssigned": 23,
+    "approved": 5,
+    "handledInFs": 4,
+    "noiseDismissed": 6,
+    "manualReviewRequired": 5,
+    "inProgress": 1,
+    "queuedForLater": 3,
+    "latestAutoAssignment": { "runId": 552, "ticketSubject": "...", "techName": "Andrew", "decidedAt": "..." }
+  }
+}
+```
+
+Today's stats are bounded by the **workspace timezone** (using the existing `getTodayRange()` helper), so "today" matches what the coordinator considers the current shift. Two cheap queries (one Prisma `groupBy` for outcome counts, one count for the handled-in-FS subset) — no new tables, no new joins.
+
+#### Pure aggregation extracted for testability
+
+The Prisma-result-to-bucket mapping logic lives in a new `assignmentStatsAggregation.js` module with two pure helpers:
+
+- `tallyGroupedRuns(grouped)` — collapse `groupBy` rows into the stat buckets
+- `adjustForHandledInFs(tally, handledInFs)` — subtract the FS-picked subset from `manualReviewRequired` so buckets don't double-count
+
+18 new unit tests cover all bucket assignments, empty/null/invalid inputs, the `approved`/`modified` merge, the failed-status counts-toward-total-but-no-bucket case, unknown decision values (defensive), a realistic mixed day, and the clamp-to-zero edge case for `adjustForHandledInFs` during read races.
+
+Test suite: 59 passing (was 41). New module at 100% line coverage.
+
+#### Verified against prod
+
+Ran `getTodayStats()` against the live prod DB before opening this PR — produces clean output for the current workspace's timezone window.
+
+#### Files touched
+
+- `backend/src/services/assignmentStatsAggregation.js` — new pure helper module
+- `backend/src/services/assignmentDailyStats.js` — DB query orchestration, calls the helpers
+- `backend/src/routes/assignment.routes.js` — extend `queue-status` response
+- `backend/tests/statsAggregation.test.js` — 18 new tests
+- `frontend/src/pages/AssignmentReview.jsx` — `AutoAssignActiveEmptyState`, `StatTile`, `RelativeTime` components + conditional render
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.78-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No DB migration. No prompt changes.
+
+---
+
 ## [1.9.77-preview] - 2026-04-22
 
 ### UX polish: renamed "FS Manual" decision pill to "Handled in FS"

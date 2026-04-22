@@ -1,6 +1,15 @@
-export const APP_VERSION = '1.9.77-preview';
+export const APP_VERSION = '1.9.78-preview';
 
 export const changelog = [
+  {
+    version: '1.9.78-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'new', text: 'Rich empty-state panel on the Review Queue when Auto-Assign is on -- the page used to render a sad "No tickets awaiting decision" placeholder when the queue was empty, which made it look like nothing was happening even though the pipeline was busy auto-assigning tickets in the background. Replaced with a hero stats panel showing today\u2019s auto-assigned count, plus a 4-tile breakdown (Handled in FS, Noise dismissed, Needed review, In progress), and a "most recent auto-assignment" preview strip with a quick link to the run detail. Includes a contextual mention of how many groups are excluded so the admin remembers why some tickets WILL still appear here. Old empty-state shows when Auto-Assign is off (no behavior change there)' },
+      { type: 'new', text: 'GET /assignment/queue-status now returns autoAssign / autoCloseNoise / pipelineEnabled / dryRunMode / excludedGroupCount / today stats, all in one shot. Today stats are workspace-timezone scoped (so "today" matches what the coordinator considers the current shift) and cover totalRuns, autoAssigned, approved, handledInFs, noiseDismissed, manualReviewRequired, inProgress, queuedForLater, plus the most-recent auto-assignment preview' },
+      { type: 'improved', text: 'Pure stats aggregation logic extracted to assignmentStatsAggregation.js (tallyGroupedRuns + adjustForHandledInFs) so the Prisma groupBy -> bucket mapping is unit-tested. 18 new tests covering empty/null inputs, all bucket assignments, mixed realistic days, and the handled-in-FS subtraction edge cases. Module at 100% line coverage' },
+    ],
+  },
   {
     version: '1.9.77-preview',
     date: 'April 22, 2026',
