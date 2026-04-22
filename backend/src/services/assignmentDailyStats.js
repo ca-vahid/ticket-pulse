@@ -29,6 +29,7 @@ import { tallyGroupedRuns, adjustForHandledInFs } from './assignmentStatsAggrega
  *   queuedForLater: number,
  *   rebounds: number,
  *   noiseFiltered: number,
+ *   pipelineBypass: number,
  *   latestAutoAssignment: null | { runId: number, ticketSubject: string, ticketId: number, freshserviceTicketId: string|null, techName: string|null, techPhotoUrl: string|null, decidedAt: string },
  * }>}
  */
@@ -49,17 +50,31 @@ export async function getTodayStats(workspaceId, timezone) {
 
   const tally = tallyGroupedRuns(grouped);
 
-  // "Handled in FS" — count tickets that ended up assigned today WITHOUT
-  // going through our pipeline (or where our pipeline returned pending_review
-  // and the agent grabbed it in FS afterwards). The previous version only
-  // counted pending_review runs with assignedTechId set, but missed the
-  // common case where an agent grabs a ticket in FS within the 30s window
-  // before our poll fires — those tickets never get a pipeline run at all.
-  //
-  // Definition: tickets created today that are now assigned, MINUS the ones
-  // we successfully assigned via the pipeline (auto_assigned / approved /
-  // modified). Whatever's left was handled outside the pipeline by FS.
-  const [assignedTodayCount, pipelineDrivenAssignmentTicketIds] = await Promise.all([
+  // "Handled in FS" — pipeline runs that completed as pending_review BUT
+  // whose ticket later got an assignedTechId (the agent grabbed it in FS
+  // before the admin could review). This count matches what the
+  // "Manually in FreshService" sub-tab shows, so clicking the card
+  // navigates to a list with the same number of rows. Pipeline-bypass
+  // tickets (those that never had a run at all) are surfaced separately
+  // as `pipelineBypass` below — listing them in the same tab would be
+  // confusing because they have no AI Suggestion / Decision columns.
+  const handledInFs = await prisma.assignmentPipelineRun.count({
+    where: {
+      workspaceId,
+      createdAt: { gte: start, lte: end },
+      status: 'completed',
+      decision: 'pending_review',
+      ticket: { is: { assignedTechId: { not: null } } },
+    },
+  });
+  adjustForHandledInFs(tally, handledInFs);
+
+  // Pipeline-bypass — tickets that arrived today and got assigned in FS
+  // entirely outside our system (no pipeline run created at all, usually
+  // because the agent grabbed it in the ~30s window before our next poll).
+  // Surfaced as a small pill in the empty-state's process row so the admin
+  // can see how many tickets are slipping past auto-assign.
+  const [assignedTodayCount, pipelineSeenTicketIds] = await Promise.all([
     prisma.ticket.count({
       where: {
         workspaceId,
@@ -71,27 +86,12 @@ export async function getTodayStats(workspaceId, timezone) {
       where: {
         workspaceId,
         createdAt: { gte: start, lte: end },
-        decision: { in: ['auto_assigned', 'approved', 'modified'] },
       },
       select: { ticketId: true },
       distinct: ['ticketId'],
     }),
   ]);
-  const pipelineDrivenTicketCount = pipelineDrivenAssignmentTicketIds.length;
-  const handledInFs = Math.max(0, assignedTodayCount - pipelineDrivenTicketCount);
-  // Old query (pending_review + assignedTechId) drove the manualReviewRequired
-  // adjustment; preserve that behaviour by computing the legacy count
-  // separately just for the bucket-double-counting fix.
-  const pendingReviewWithAssignee = await prisma.assignmentPipelineRun.count({
-    where: {
-      workspaceId,
-      createdAt: { gte: start, lte: end },
-      status: 'completed',
-      decision: 'pending_review',
-      ticket: { is: { assignedTechId: { not: null } } },
-    },
-  });
-  adjustForHandledInFs(tally, pendingReviewWithAssignee);
+  const pipelineBypass = Math.max(0, assignedTodayCount - pipelineSeenTicketIds.length);
 
   // "Noise filtered" — tickets we deliberately skipped because a noise rule
   // matched. Surfacing this lets the admin see WHY some tickets aren't being
@@ -157,6 +157,7 @@ export async function getTodayStats(workspaceId, timezone) {
     queuedForLater: tally.queuedForLater,
     rebounds,
     noiseFiltered,
+    pipelineBypass,
     latestAutoAssignment: latest
       ? {
         runId: latest.id,

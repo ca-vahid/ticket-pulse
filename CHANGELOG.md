@@ -2,6 +2,49 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.85-preview] - 2026-04-22
+
+### Bug fix: click-through count now exactly matches destination
+
+User reported: clicking "Picked up in FreshService 7" landed on a tab showing 1 (status filter defaulted to In Progress, hiding closed tickets) or 3 (after manually changing to All) — neither matching the promised 7. Two distinct bugs underneath.
+
+#### Bug 1: status filter override silently dropped tickets
+
+The Decided tab auto-resets `ticketStatusFilter` to `'in_progress'` whenever `subView` becomes `'assigned'` (intentional default for that tab). The empty-state navigation set `ticketStatusFilter='all'` — but the `useEffect` watching `subView` fired AFTER, overwriting it back to `'in_progress'`.
+
+**Fix**: added a `skipNextStatusReset` ref. When navigation drills in, we set the ref to true, then the useEffect skips its auto-reset for that one render. Subsequent navigation back to the tab (without going through the empty-state) gets the normal `'in_progress'` default.
+
+#### Bug 2: handledInFs metric conflated two unrelated things
+
+Old `handledInFs` counted "tickets created today now assigned, MINUS tickets we successfully assigned via pipeline". This bundled together:
+
+- **(a) Pipeline analyzed it, then agent grabbed in FS** — has a `pending_review` run with `assignedTechId` set. Visible in the "Manually in FreshService" sub-tab.
+- **(b) Pipeline never saw the ticket** — agent grabbed it within the 30s window before our next poll fired. NO pipeline run exists. NOT visible in the sub-tab (no run record to show).
+
+Tile said 7, sub-tab showed 3, because 4 of those 7 were case (b) and had no rows.
+
+**Fix**: split into two metrics:
+
+- `handledInFs` — **only case (a)**. Matches what the sub-tab actually renders. Click-through count is exact.
+- `pipelineBypass` — **only case (b)**. Surfaced as a separate amber pill in the process row with a tooltip explaining why these tickets aren't visible in the sub-tab (no run record).
+
+Verified on prod: previously `handledInFs=7` total. After split: `handledInFs=0` (zero pending_review-with-assignee runs today) + `pipelineBypass=5` (tickets the agent grabbed before we could poll).
+
+#### Tile sublabel updated
+
+"Picked up in FreshService" sublabel changed from "assigned outside the pipeline" → **"agent grabbed after AI analysis"** so it accurately describes only case (a).
+
+#### Files touched
+
+- `backend/src/services/assignmentDailyStats.js` — split `handledInFs` and add `pipelineBypass` metric
+- `frontend/src/pages/AssignmentReview.jsx` — `skipNextStatusReset` ref guard, navigation now passes `ticketStatus: 'all'`, new `pipelineBypass` pill in process row, updated sublabel
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.85-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No DB schema change.
+
+---
+
 ## [1.9.84-preview] - 2026-04-22
 
 ### Empty-state polish: assignee avatar + precise click-through filters
