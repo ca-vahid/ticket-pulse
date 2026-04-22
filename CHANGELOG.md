@@ -2,6 +2,77 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.81-preview] - 2026-04-22
+
+### Bug fix: "Picked up in FreshService" undercounted; new noise-filtered visibility
+
+User reported the empty-state stats panel showing **0 picked up in FS** when they knew at least 2 tickets had been grabbed by agents directly. Also reported one specific ticket ("Threat Intelligence" by Neville) that was created in FS, sat unassigned for minutes, and never got an auto-assignment despite Auto-Assign being on.
+
+#### Audit findings (against prod)
+
+```
+Tickets created today and now assigned:                14 (from tickets table)
+  - via our pipeline (auto_assigned/approved/modified):  8
+  - bypassed our pipeline entirely:                      6   <-- INVISIBLE before
+```
+
+Examples of the 6 bypassed tickets:
+- #219709 "NIch Stone - the upgrade" → Gaby Tonnova (`isSelfPicked=true`, no pipeline run)
+- #219699 "Microsoft Visio Install" → Andrew Fong (`isSelfPicked=true`, no pipeline run)
+- #219692 "Wifi connections" → Andrew Fong (`isSelfPicked=true`, no pipeline run)
+- ...and 3 more
+
+Plus a separate finding:
+
+```
+Tickets created today with isNoise=true:               3   <-- also INVISIBLE
+```
+
+One of those was the user's "Threat Intelligence" ticket — matched the security/Vulnerability rule on the keyword "Threat" and got silently excluded from the polling query (`isNoise: false` filter). The pipeline never analyzed it, so it never showed up in the panel.
+
+#### Root cause: bug 1 (Picked up in FreshService)
+
+Old query only counted **pending_review pipeline runs** whose ticket later got an `assignedTechId` set. Misses the much more common path: agent grabs the ticket in FS within the 30-second window before our next poll fires, so we never create a pipeline run for it at all. From the metric's perspective those tickets simply don't exist.
+
+**New definition**:
+```
+handledInFs = (tickets created today now assigned)
+              - (distinct tickets we assigned via the pipeline ourselves)
+```
+
+`handledInFs` jumped from `0` → `6` on the prod data with no other changes.
+
+#### Root cause: bug 2 (Neville's ticket disappeared)
+
+`_pollForUnassignedTickets` in syncService has `isNoise: false` in its WHERE clause — by design, since noise tickets shouldn't waste LLM tokens. But the admin had no way to see WHICH tickets were being filtered, so when a noise rule false-positives on a real ticket, it just vanishes silently.
+
+Added `today.noiseFiltered` count and surface it as a small **slate pill** in the empty-state's process-state row with a tooltip:
+
+> "Tickets matched a noise rule and were silently excluded from polling. If a ticket you expected to see auto-assigned is missing, check the Noise Rules page — a rule may be over-matching."
+
+Today on prod: **3 noise-filtered tickets** would now be visible (including Neville's).
+
+#### What I deliberately did NOT change
+
+The user also reported "manual sync only analyzed 1 of 2 tickets". After auditing this turned out to **not be a bug**:
+
+- Polling iterates `for (const ticket...) { await runPipeline(...) }` sequentially
+- Each LLM run takes 30-60s, so a poll cycle of 5 candidates takes 2.5-5 minutes
+- The "second ticket" the user expected to see analyzed was actually Neville's — which was noise-filtered
+
+The new noise-filtered pill makes this story visible to the user without needing to change the polling architecture.
+
+#### Files touched
+
+- `backend/src/services/assignmentDailyStats.js` — rewrite `handledInFs` query, add `noiseFiltered` count
+- `frontend/src/pages/AssignmentReview.jsx` — read `noiseFiltered` from queueStatus, render new pill, update `handledInFs` sublabel
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.81-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No DB schema change. No new migration. Existing 65 tests still pass.
+
+---
+
 ## [1.9.80-preview] - 2026-04-22
 
 ### Auto-Assign empty-state stats: honest math + rebounds visibility + clearer terminology

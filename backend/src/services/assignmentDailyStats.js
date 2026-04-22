@@ -28,6 +28,7 @@ import { tallyGroupedRuns, adjustForHandledInFs } from './assignmentStatsAggrega
  *   inProgress: number,
  *   queuedForLater: number,
  *   rebounds: number,
+ *   noiseFiltered: number,
  *   latestAutoAssignment: null | { runId: number, ticketSubject: string, ticketId: number, freshserviceTicketId: string|null, techName: string|null, decidedAt: string },
  * }>}
  */
@@ -48,11 +49,40 @@ export async function getTodayStats(workspaceId, timezone) {
 
   const tally = tallyGroupedRuns(grouped);
 
-  // "Handled in FS" is a UI label, not a stored decision — it's
-  // pending_review runs whose ticket got picked up in FS directly. Count
-  // separately so the empty state can surface "X tickets handled outside
-  // the pipeline today" honestly.
-  const handledInFs = await prisma.assignmentPipelineRun.count({
+  // "Handled in FS" — count tickets that ended up assigned today WITHOUT
+  // going through our pipeline (or where our pipeline returned pending_review
+  // and the agent grabbed it in FS afterwards). The previous version only
+  // counted pending_review runs with assignedTechId set, but missed the
+  // common case where an agent grabs a ticket in FS within the 30s window
+  // before our poll fires — those tickets never get a pipeline run at all.
+  //
+  // Definition: tickets created today that are now assigned, MINUS the ones
+  // we successfully assigned via the pipeline (auto_assigned / approved /
+  // modified). Whatever's left was handled outside the pipeline by FS.
+  const [assignedTodayCount, pipelineDrivenAssignmentTicketIds] = await Promise.all([
+    prisma.ticket.count({
+      where: {
+        workspaceId,
+        createdAt: { gte: start, lte: end },
+        assignedTechId: { not: null },
+      },
+    }),
+    prisma.assignmentPipelineRun.findMany({
+      where: {
+        workspaceId,
+        createdAt: { gte: start, lte: end },
+        decision: { in: ['auto_assigned', 'approved', 'modified'] },
+      },
+      select: { ticketId: true },
+      distinct: ['ticketId'],
+    }),
+  ]);
+  const pipelineDrivenTicketCount = pipelineDrivenAssignmentTicketIds.length;
+  const handledInFs = Math.max(0, assignedTodayCount - pipelineDrivenTicketCount);
+  // Old query (pending_review + assignedTechId) drove the manualReviewRequired
+  // adjustment; preserve that behaviour by computing the legacy count
+  // separately just for the bucket-double-counting fix.
+  const pendingReviewWithAssignee = await prisma.assignmentPipelineRun.count({
     where: {
       workspaceId,
       createdAt: { gte: start, lte: end },
@@ -61,7 +91,18 @@ export async function getTodayStats(workspaceId, timezone) {
       ticket: { is: { assignedTechId: { not: null } } },
     },
   });
-  adjustForHandledInFs(tally, handledInFs);
+  adjustForHandledInFs(tally, pendingReviewWithAssignee);
+
+  // "Noise filtered" — tickets we deliberately skipped because a noise rule
+  // matched. Surfacing this lets the admin see WHY some tickets aren't being
+  // auto-assigned (silently dying in the noise filter looks like a bug).
+  const noiseFiltered = await prisma.ticket.count({
+    where: {
+      workspaceId,
+      createdAt: { gte: start, lte: end },
+      isNoise: true,
+    },
+  });
 
   // Rebound activity: tickets that bounced back today and triggered a fresh
   // pipeline run (or hit the rebound_exhausted manual-review state). We
@@ -115,6 +156,7 @@ export async function getTodayStats(workspaceId, timezone) {
     inProgress: tally.inProgress,
     queuedForLater: tally.queuedForLater,
     rebounds,
+    noiseFiltered,
     latestAutoAssignment: latest
       ? {
         runId: latest.id,
