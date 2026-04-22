@@ -1,6 +1,13 @@
-export const APP_VERSION = '1.9.76-preview';
+export const APP_VERSION = '1.9.77-preview';
 
 export const changelog = [
+  {
+    version: '1.9.77-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'improved', text: 'Renamed the amber decision pill from "FS Manual" to "Handled in FS" -- the old label read like a field name from a form rather than a user-facing status, and the word "Manual" felt like the admin still had to do something. "Handled in FS" makes it clear that the work is already in motion outside the pipeline and no in-app decision is needed. Tooltip is unchanged ("Assigned in FreshService outside the pipeline \u2014 <tech>. AI suggestion left unresolved."). Applies to both the list view pill in Decided > Manually in FreshService and the header pill on the run detail page' },
+    ],
+  },
   {
     version: '1.9.76-preview',
     date: 'April 22, 2026',
