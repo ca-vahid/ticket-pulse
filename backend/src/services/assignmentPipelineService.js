@@ -10,9 +10,11 @@ import { formatDateInTimezone } from '../utils/timezone.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-// Pure helper extracted to its own module so unit tests can exercise the
-// rebound-context user-message logic without pulling in Prisma/Anthropic.
+// Pure helpers extracted to their own modules so unit tests can exercise the
+// rebound-context user-message logic and the auto-assign decision rules
+// without pulling in Prisma/Anthropic.
 import { buildUserMessage } from './assignmentUserMessage.js';
+import { isGroupExcluded } from './assignmentDecisionRules.js';
 
 const MAX_TURNS = 20;
 const CLOSED_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
@@ -545,6 +547,34 @@ class AssignmentPipelineService {
         }
       }
 
+      // Group exclusion: when the ticket's FS group is in
+      // assignmentConfig.excludedGroupIds, force pending_review even with
+      // autoAssign=true. The admin still sees the LLM recommendation, but
+      // has to click approve manually. Looks up group name for the error
+      // message and the UI strip.
+      let groupExcluded = false;
+      let excludedGroupName = null;
+      if (recommendation && !isNoise && assignmentConfig?.autoAssign) {
+        try {
+          const ticketRow = await prisma.ticket.findUnique({
+            where: { id: ticketId },
+            select: { groupId: true },
+          });
+          if (isGroupExcluded(ticketRow?.groupId, assignmentConfig?.excludedGroupIds)) {
+            groupExcluded = true;
+            // Cheap name lookup: settings UI knows the names but the pipeline
+            // doesn't cache them. Fall back to "#<id>" if FS lookup is slow
+            // or fails — this is purely cosmetic for the error message.
+            excludedGroupName = `#${ticketRow.groupId}`;
+            logger.info('Pipeline: ticket group is excluded from auto-assignment, downgrading to pending_review', {
+              runId, ticketId, groupId: String(ticketRow.groupId),
+            });
+          }
+        } catch (err) {
+          logger.debug('Could not check group exclusion for ticket', { runId, error: err.message });
+        }
+      }
+
       let decision;
       if (!recommendation) {
         decision = null;
@@ -552,6 +582,11 @@ class AssignmentPipelineService {
         decision = 'noise_dismissed';
       } else if (llmIgnoredRebound) {
         // Force manual review when the LLM ignored the rebound constraint.
+        decision = 'pending_review';
+      } else if (groupExcluded) {
+        // Force manual review when the ticket's group is on the workspace's
+        // excluded-from-auto-assign list. LLM recommendation is still there
+        // for the admin to approve; we just don't act on it automatically.
         decision = 'pending_review';
       } else if (assignmentConfig?.autoAssign) {
         decision = 'auto_assigned';
@@ -563,6 +598,10 @@ class AssignmentPipelineService {
       let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
       if (llmIgnoredRebound) {
         errorMessage = `LLM re-suggested ${topRec.techName || `tech #${topRec.techId}`}, who already rejected this ticket — downgraded to pending_review for manual handling.`;
+      } else if (groupExcluded) {
+        // The "Group <X>" prefix is what the run detail page keys on to render
+        // the blue "Manual approval required" strip — keep this format stable.
+        errorMessage = `Group ${excludedGroupName} is excluded from auto-assignment — manual approval required.`;
       }
 
       await assignmentRepository.updatePipelineRun(runId, {
