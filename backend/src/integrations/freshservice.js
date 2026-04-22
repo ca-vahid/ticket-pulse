@@ -175,6 +175,7 @@ class FreshServiceClient {
     if (endpoint.includes('/requesters')) return data.requesters || [];
     if (endpoint.includes('/activities')) return data.activities || [];
     if (endpoint.includes('/workspaces')) return data.workspaces || [];
+    if (endpoint.includes('/groups')) return data.groups || [];
     return data;
   }
 
@@ -449,6 +450,28 @@ class FreshServiceClient {
     } catch (error) {
       logger.error(`Error fetching group ${groupId}:`, error);
       return null;
+    }
+  }
+
+  /**
+   * List all FreshService groups in a workspace. Returns the full set
+   * (paginated 100/page). Used by the assignment config UI to populate the
+   * "exclude from auto-assign" picker.
+   * @param {object}  [filters]
+   * @param {number}  [filters.workspace_id]
+   * @returns {Promise<Array<{id:number,name:string,description?:string,agent_ids?:number[]}>>}
+   */
+  async listGroups(filters = {}) {
+    try {
+      const params = {};
+      if (filters.workspace_id) {
+        params.workspace_id = filters.workspace_id;
+      }
+      const groups = await this.fetchAllPages('/groups', params);
+      return groups;
+    } catch (error) {
+      logger.error('Error listing groups:', error);
+      throw error;
     }
   }
 

@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
   ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag, Sparkles,
-  RotateCcw, OctagonAlert,
+  RotateCcw, OctagonAlert, ShieldCheck,
 } from 'lucide-react';
 import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
@@ -675,6 +675,25 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           </div>
         </div>
       ) : null}
+
+      {/* Group-exclusion strip — fires when _executeRun downgraded an
+          auto-assigned run to pending_review because the ticket's FS group
+          is on the workspace's excluded-from-auto-assign list. We key on the
+          errorMessage prefix written by the backend; it always starts with
+          "Group " and contains "excluded from auto-assignment". */}
+      {run.decision === 'pending_review' && typeof run.errorMessage === 'string'
+        && run.errorMessage.startsWith('Group ')
+        && run.errorMessage.includes('excluded from auto-assignment') && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2.5">
+          <ShieldCheck className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-blue-800">Manual approval required</p>
+            <p className="text-xs text-blue-700 mt-1">
+              {run.errorMessage} The AI recommendation below is ready for your review — no auto-assignment will happen until you approve.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Ticket Details + AI Reasoning side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4 items-start">

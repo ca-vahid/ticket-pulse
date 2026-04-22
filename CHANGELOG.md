@@ -2,6 +2,79 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.74-preview] - 2026-04-22
+
+### Per-group exclusion from auto-assignment
+
+Some FreshService groups are catch-all queues (e.g. "Everyone IT") where every ticket needs human eyes before assignment, regardless of how confident the LLM is. This release adds a workspace-level allowlist to enforce that.
+
+#### How it works
+
+```mermaid
+flowchart TD
+  Sync[Ticket arrives in FS] --> Pipe[runPipeline]
+  Pipe --> LLM[LLM analyzes, produces ranked recommendation]
+  LLM --> Cfg{autoAssign on?}
+  Cfg -->|no| PR[decision=pending_review]
+  Cfg -->|yes| GExcl{ticket.groupId in\nexcludedGroupIds?}
+  GExcl -->|no| AA[decision=auto_assigned -> FS write-back]
+  GExcl -->|yes| Down["decision=pending_review\nerrorMessage='Group X excluded\nfrom auto-assignment'"]
+  Down --> UI["Review Queue + blue\n'Manual approval required'\nstrip on run detail"]
+```
+
+When a ticket arrives in an excluded group, the LLM still runs and produces a full recommendation (so the admin has all the AI's analysis at hand), but the system never auto-executes — the run lands in *Awaiting Decision* with a blue **"Manual approval required"** strip explaining why. One click to approve and it goes through normally.
+
+#### Configuration UI
+
+New section in *Assignment > Configuration*: **Excluded Groups (Manual Approval)**. Live-fetches the FreshService group list via `GET /assignment/groups` each time the tab opens, shows the agent count per group, and supports filtering when there are more than 8 groups. Selections persist on the workspace's `AssignmentConfig` and survive across sessions.
+
+If FreshService is unreachable when the picker loads, the previously-saved group IDs are still rendered as opaque chips so the admin doesn't lose their selection silently.
+
+A small inline hint reminds the admin that the list has no effect when Auto-Assign is off.
+
+#### Backend
+
+- New `Int[]` column `excluded_group_ids` on `assignment_configs` (default `{}`)
+- `_executeRun` checks `assignmentConfig.excludedGroupIds` against `ticket.groupId` after the LLM produces a recommendation. If matched, decision is forced to `pending_review` with `errorMessage = "Group #<id> is excluded from auto-assignment — manual approval required."` Same downgrade pattern as the v1.9.73 rebound-rejecter and preflight-failure paths.
+- New `listGroups()` method on the FreshService client (paginated 100/page, scoped to workspace)
+- New `GET /assignment/groups` admin-only route returning `[{id, name, agentCount}]` sorted by name
+- Pure helper `isGroupExcluded(ticketGroupId, excludedGroupIds)` extracted to `assignmentDecisionRules.js` so the BigInt vs Int normalization is unit-tested (Prisma returns `tickets.groupId` as `BigInt`, but the column is `Int[]` — a naive `===` check would silently miss every match)
+
+#### Files touched
+
+- `backend/prisma/schema.prisma` — new column on `AssignmentConfig`
+- `backend/prisma/migrations/20260422000000_add_excluded_group_ids/migration.sql` — additive
+- `backend/src/integrations/freshservice.js` — `listGroups()` + `_extractResults` extension for `/groups`
+- `backend/src/routes/assignment.routes.js` — `GET /assignment/groups` + accept `excludedGroupIds` in `PUT /config` with input normalization
+- `backend/src/services/assignmentPipelineService.js` — exclusion check in `_executeRun`
+- `backend/src/services/assignmentDecisionRules.js` — new pure helper module
+- `backend/tests/groupExclusion.test.js` — 13 unit tests covering empty/null cases, BigInt↔Int coercion, and invalid input handling
+- `frontend/src/services/api.js` — `assignmentAPI.getGroups()`
+- `frontend/src/pages/AssignmentReview.jsx` — new `ExcludedGroupsPicker` component + section in `ConfigTab`
+- `frontend/src/components/assignment/PipelineRunDetail.jsx` — blue "Manual approval required" strip
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.74-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+#### What stays the same
+
+- Auto-Close Noise is independent (group exclusion only affects auto-assign)
+- Rebound logic from v1.9.73 unchanged — a rebound run into an excluded group still gets the group-exclusion downgrade (correct: re-routing into a manual-only group should still require manual approval)
+- LLM is **not told** about the exclusion — it analyzes as normal so the admin sees an honest recommendation. The override happens entirely at the decision layer.
+
+#### Database
+
+```bash
+prisma migrate deploy
+```
+
+Migration `20260422000000_add_excluded_group_ids` — additive, defaults preserve existing behaviour. Already applied to prod before deploying this release.
+
+#### Tests
+
+41 passing (was 28). 13 new tests in `groupExclusion.test.js` covering all the edge cases of `isGroupExcluded`. `assignmentDecisionRules.js` at 100% line and branch coverage.
+
+---
+
 ## [1.9.73-preview] - 2026-04-21
 
 ### Auto-fallback for rejected auto-assignments

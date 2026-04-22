@@ -1,6 +1,16 @@
-export const APP_VERSION = '1.9.73-preview';
+export const APP_VERSION = '1.9.74-preview';
 
 export const changelog = [
+  {
+    version: '1.9.74-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'new', text: 'Per-group exclusion from auto-assignment -- Configuration > Excluded Groups (Manual Approval) lets admins pick FreshService groups (e.g. catch-all groups like "Everyone IT") that should always require manual approval, even when Auto-Assign is on. The LLM still produces a recommendation for each ticket; the admin just has to click approve in the Review Queue before it gets written back to FreshService' },
+      { type: 'new', text: 'Live group picker in Configuration -- new section live-fetches the FreshService group list each time the config tab opens (GET /assignment/groups), shows agent count per group, and supports filtering when there are more than 8. Selections survive across sessions; if FreshService is unreachable the picker falls back to showing the currently-saved group IDs as opaque chips so the admin doesn\u2019t lose their choices' },
+      { type: 'new', text: 'Manual approval banner on excluded-group runs -- when _executeRun downgrades an auto-assigned run to pending_review because the ticket\u2019s group is on the excluded list, PipelineRunDetail surfaces a blue "Manual approval required" strip near the top with the group context. Joins the existing amber rebound strip and red auto-fallback-exhausted strip introduced in v1.9.73' },
+      { type: 'database', text: 'New migration 20260422000000_add_excluded_group_ids -- adds excluded_group_ids INTEGER[] NOT NULL DEFAULT \'{}\' column to assignment_configs. Already applied on prod before this release; run `prisma migrate deploy` on any other environments before deploying' },
+    ],
+  },
   {
     version: '1.9.73-preview',
     date: 'April 21, 2026',

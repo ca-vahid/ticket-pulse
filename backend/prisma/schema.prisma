@@ -602,6 +602,11 @@ model AssignmentConfig {
   lastEmailCheckAt        DateTime? @map("last_email_check_at")
   autoCloseNoise          Boolean   @default(false) @map("auto_close_noise")
   dryRunMode              Boolean   @default(true) @map("dry_run_mode")
+  // FreshService group IDs that are excluded from auto-assignment. When a
+  // ticket's group_id is in this list, the LLM still runs and produces a
+  // recommendation, but decision is forced to pending_review for manual
+  // approval — even when autoAssign=true. Empty array = no exclusions.
+  excludedGroupIds        Int[]     @default([]) @map("excluded_group_ids")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
 

@@ -14,6 +14,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check, TrendingUp,
+  ShieldCheck, Users,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -2183,6 +2184,150 @@ function ConfigSection({ icon: Icon, title, children, defaultOpen = true }) {
   );
 }
 
+/**
+ * Multi-select group picker. When `autoAssign` is off this whole control is
+ * informational only (any selections are saved but have no effect, so we
+ * surface a hint instead of disabling). Live-fetches the FreshService group
+ * list once on mount via GET /assignment/groups; if FS is unreachable we
+ * still render the currently-selected IDs as opaque chips so the admin
+ * doesn't lose their selection silently.
+ */
+function ExcludedGroupsPicker({ autoAssign, excludedGroupIds, onChange }) {
+  const [groups, setGroups] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [filter, setFilter] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const res = await assignmentAPI.getGroups();
+        if (!cancelled) {
+          setGroups(res?.data || []);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err.response?.data?.message || err.message || 'Could not load FreshService groups');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const selectedSet = new Set((excludedGroupIds || []).map(Number));
+  const toggle = (id) => {
+    const next = new Set(selectedSet);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onChange([...next]);
+  };
+
+  const visibleGroups = (groups || []).filter((g) =>
+    !filter || g.name.toLowerCase().includes(filter.toLowerCase()),
+  );
+
+  return (
+    <div className="py-3 space-y-3">
+      <p className="text-xs text-slate-500 leading-relaxed">
+        Tickets in any of the selected groups will <span className="font-semibold text-slate-700">always require manual approval</span> in the Review Queue, even when Auto-Assign is on. The LLM still produces a recommendation; an admin just has to click approve before it gets written back to FreshService.
+      </p>
+
+      {!autoAssign && (
+        <div className="flex items-start gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
+          <AlertCircle className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
+          <span>Auto-Assign is currently off, so this list has no effect right now. Selections are still saved.</span>
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading groups from FreshService...
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-start gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+          <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold">Could not load FreshService groups</p>
+            <p className="mt-0.5">{error}</p>
+            {selectedSet.size > 0 && (
+              <p className="mt-1.5 text-red-800">
+                Currently selected (by ID): {[...selectedSet].join(', ')}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && groups && (
+        <>
+          {groups.length > 8 && (
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter groups..."
+                className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-white"
+              />
+            </div>
+          )}
+
+          {selectedSet.size > 0 && (
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+              <Check className="w-3 h-3 text-emerald-600" />
+              <span>{selectedSet.size} group{selectedSet.size === 1 ? '' : 's'} excluded</span>
+              <button
+                onClick={() => onChange([])}
+                className="ml-auto text-blue-600 hover:text-blue-800 hover:underline"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
+
+          <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {visibleGroups.length === 0 && (
+              <div className="px-3 py-4 text-center text-xs text-slate-400">
+                {filter ? 'No groups match the filter.' : 'No FreshService groups in this workspace.'}
+              </div>
+            )}
+            {visibleGroups.map((g) => {
+              const checked = selectedSet.has(g.id);
+              return (
+                <label
+                  key={g.id}
+                  className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-slate-50 ${checked ? 'bg-blue-50/40' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(g.id)}
+                    className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 flex-shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-slate-800 truncate">{g.name}</div>
+                    <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                      <Users className="w-2.5 h-2.5" />
+                      {g.agentCount} agent{g.agentCount === 1 ? '' : 's'}
+                      <span className="text-slate-300">·</span>
+                      <span className="font-mono">#{g.id}</span>
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2204,12 +2349,13 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null,
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
+        excludedGroupIds: [],
         ...cfg,
       });
       setAnthropicConfigured(res?.anthropicConfigured ?? false);
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60 });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [] });
     } finally { setLoading(false); }
   }, []);
 
@@ -2250,6 +2396,15 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
           <p className="text-xs text-slate-500 mb-2">Number of technician recommendations the LLM should provide</p>
           <input type="number" min="1" max="10" value={config.maxRecommendations || 3} onChange={(e) => setConfig({ ...config, maxRecommendations: parseInt(e.target.value) || 3 })} className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         </div>
+      </ConfigSection>
+
+      {/* Section 2b: Excluded Groups — overrides auto-assign for specific FS groups. */}
+      <ConfigSection icon={ShieldCheck} title="Excluded Groups (Manual Approval)">
+        <ExcludedGroupsPicker
+          autoAssign={config.autoAssign}
+          excludedGroupIds={config.excludedGroupIds || []}
+          onChange={(ids) => setConfig({ ...config, excludedGroupIds: ids })}
+        />
       </ConfigSection>
 
       {/* Section 3: FreshService Sync */}

@@ -62,7 +62,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     scoringWeights, classificationPrompt, categorizationPrompt,
     recommendationPrompt, pollForUnassigned, pollMaxPerCycle,
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
-    autoCloseNoise, dryRunMode,
+    autoCloseNoise, dryRunMode, excludedGroupIds,
   } = req.body;
 
   const data = {};
@@ -81,6 +81,13 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (emailPollingIntervalSec !== undefined) data.emailPollingIntervalSec = emailPollingIntervalSec;
   if (autoCloseNoise !== undefined) data.autoCloseNoise = autoCloseNoise;
   if (dryRunMode !== undefined) data.dryRunMode = dryRunMode;
+  if (excludedGroupIds !== undefined) {
+    // Defensive normalization: accept array of numbers or numeric strings,
+    // coerce to ints, dedupe. Postgres Int[] rejects non-int values.
+    data.excludedGroupIds = Array.isArray(excludedGroupIds)
+      ? [...new Set(excludedGroupIds.map((v) => parseInt(v)).filter((v) => Number.isInteger(v) && v > 0))]
+      : [];
+  }
 
   const config = await assignmentRepository.upsertConfig(req.workspaceId, data);
 
@@ -94,6 +101,41 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   }
 
   res.json({ success: true, data: config });
+}));
+
+/**
+ * List all FreshService groups for the workspace. Used by the assignment
+ * config UI to populate the "exclude from auto-assign" picker. Live fetch
+ * from FS each time — no local cache, since group lists are short and rarely
+ * changing, and this endpoint is only hit when the admin opens the config tab.
+ */
+router.get('/groups', requireAdmin, asyncHandler(async (req, res) => {
+  const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(req.workspaceId);
+  if (!fsConfig?.domain || !fsConfig?.apiKey) {
+    return res.status(400).json({ success: false, message: 'FreshService not configured for this workspace' });
+  }
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: req.workspaceId },
+    select: { freshserviceWorkspaceId: true },
+  });
+  const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+  const filters = workspace?.freshserviceWorkspaceId
+    ? { workspace_id: Number(workspace.freshserviceWorkspaceId) }
+    : {};
+  try {
+    const groups = await client.listGroups(filters);
+    // Trim to just what the picker needs — names can be long, descriptions
+    // sometimes contain HTML, agent_ids can be hundreds long. Strip noise.
+    const trimmed = groups.map((g) => ({
+      id: Number(g.id),
+      name: g.name || `Group #${g.id}`,
+      agentCount: Array.isArray(g.agent_ids) ? g.agent_ids.length : 0,
+    })).sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ success: true, data: trimmed });
+  } catch (err) {
+    logger.error('Failed to list FreshService groups', { workspaceId: req.workspaceId, error: err.message });
+    res.status(502).json({ success: false, message: `Could not fetch groups from FreshService: ${err.message}` });
+  }
 }));
 
 // ─── Pipeline Runs ──────────────────────────────────────────────────────

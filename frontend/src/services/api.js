@@ -514,6 +514,7 @@ export const vacationTrackerAPI = {
 export const assignmentAPI = {
   getConfig: () => api.get('/assignment/config'),
   updateConfig: (data) => api.put('/assignment/config', data),
+  getGroups: () => api.get('/assignment/groups'),
 
   getQueuedRuns: () => api.get('/assignment/queued'),
   pruneQueuedRuns: () => api.post('/assignment/queued/prune'),
