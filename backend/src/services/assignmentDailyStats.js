@@ -29,7 +29,7 @@ import { tallyGroupedRuns, adjustForHandledInFs } from './assignmentStatsAggrega
  *   queuedForLater: number,
  *   rebounds: number,
  *   noiseFiltered: number,
- *   latestAutoAssignment: null | { runId: number, ticketSubject: string, ticketId: number, freshserviceTicketId: string|null, techName: string|null, decidedAt: string },
+ *   latestAutoAssignment: null | { runId: number, ticketSubject: string, ticketId: number, freshserviceTicketId: string|null, techName: string|null, techPhotoUrl: string|null, decidedAt: string },
  * }>}
  */
 export async function getTodayStats(workspaceId, timezone) {
@@ -137,7 +137,7 @@ export async function getTodayStats(workspaceId, timezone) {
       id: true,
       updatedAt: true,
       ticket: { select: { id: true, subject: true, freshserviceTicketId: true } },
-      assignedTech: { select: { name: true } },
+      assignedTech: { select: { name: true, photoUrl: true } },
     },
   });
 
@@ -166,6 +166,7 @@ export async function getTodayStats(workspaceId, timezone) {
           ? String(latest.ticket.freshserviceTicketId)
           : null,
         techName: latest.assignedTech?.name || null,
+        techPhotoUrl: latest.assignedTech?.photoUrl || null,
         decidedAt: latest.updatedAt.toISOString(),
       }
       : null,
