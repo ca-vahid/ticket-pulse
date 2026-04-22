@@ -519,6 +519,9 @@ export const assignmentAPI = {
   pruneQueuedRuns: () => api.post('/assignment/queued/prune'),
   getQueueStatus: () => api.get('/assignment/queue-status'),
   runNow: (id) => api.post(`/assignment/runs/${id}/run-now`),
+  // Returns the relative SSE path for streaming a queued run's promoted execution.
+  // Pass to readSSEStream / LivePipelineView.streamPath. POST with stream=true.
+  runNowStreamPath: (id) => `/assignment/runs/${id}/run-now?stream=true`,
   getQueue: (params) => api.get('/assignment/queue', { params }),
   getRuns: (params) => api.get('/assignment/runs', { params }),
   getRun: (id) => api.get(`/assignment/runs/${id}`),
