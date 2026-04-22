@@ -461,7 +461,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           <span>Auto-Assign is ON</span>
           {dryRun && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 text-[10px] font-semibold">DRY-RUN</span>}
         </div>
-        <h3 className="font-serif text-2xl sm:text-3xl font-semibold text-slate-900 tracking-tight leading-tight">
+        <h3 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-tight">
           No tickets are waiting for you right now.
         </h3>
         <p className="text-sm text-slate-500 mt-3 leading-relaxed">
@@ -471,29 +471,38 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
         </p>
       </div>
 
-      {/* Hero — dark-blue glassmorphism card. Today's total processed by the
-          pipeline as the focal point. Subtle radial gradient + bottom-right
-          sparkle adds depth without being distracting. */}
+      {/* Hero — light, centered card with today's total processed by the
+          pipeline as the focal point. Soft gradient background + decorative
+          icon flourishes on the sides match the rest of the app's bright,
+          friendly theme (the dark glassmorphism version felt off-brand). */}
       <div className="max-w-4xl mx-auto mb-4 sm:mb-5">
-        <div className="relative overflow-hidden rounded-2xl shadow-lg shadow-slate-900/10
-                        bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900
-                        border border-white/10 p-5 sm:p-6">
-          {/* Decorative gradient orb top-right */}
-          <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-blue-500/20 blur-3xl pointer-events-none" aria-hidden />
-          <div className="absolute -bottom-20 -left-10 w-56 h-56 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" aria-hidden />
+        <div className="relative overflow-hidden rounded-2xl shadow-sm
+                        bg-gradient-to-br from-blue-50 via-indigo-50/60 to-violet-50
+                        border border-blue-100 px-5 sm:px-8 py-6 sm:py-8">
+          {/* Decorative pastel orbs in the background — subtle layering */}
+          <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full bg-blue-200/30 blur-3xl pointer-events-none" aria-hidden />
+          <div className="absolute -bottom-24 -left-16 w-72 h-72 rounded-full bg-violet-200/30 blur-3xl pointer-events-none" aria-hidden />
 
-          <div className="relative flex items-center gap-4 sm:gap-5">
-            <div className="flex-shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-2xl
-                            bg-white/10 border border-white/20 backdrop-blur-sm
-                            flex items-center justify-center shadow-inner shadow-white/5">
-              <Sparkles className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
+          {/* Centered content with flanking decorative icons */}
+          <div className="relative flex flex-col items-center text-center">
+            {/* Top label with sparkle accent */}
+            <div className="inline-flex items-center gap-2 mb-2">
+              <Sparkles className="w-4 h-4 text-blue-500" />
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">Today</span>
+              <Sparkles className="w-4 h-4 text-blue-500" />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-200/80">Today</div>
-              <div className="mt-1 flex items-baseline gap-3 flex-wrap">
-                <span className="text-4xl sm:text-5xl font-bold tabular-nums leading-none text-white">{stats.totalRuns}</span>
-                <span className="text-sm sm:text-base font-medium text-blue-100/80">tickets processed by the pipeline</span>
+
+            {/* Big number with flanking icon flourishes (hidden on small) */}
+            <div className="flex items-center gap-3 sm:gap-5">
+              <Bot className="hidden sm:block w-7 h-7 text-emerald-500/70" aria-hidden />
+              <div className="text-5xl sm:text-6xl font-bold tabular-nums leading-none text-slate-900">
+                {stats.totalRuns}
               </div>
+              <Zap className="hidden sm:block w-7 h-7 text-amber-500/70" aria-hidden />
+            </div>
+
+            <div className="mt-2 text-sm sm:text-base font-medium text-slate-600">
+              tickets processed by the pipeline
             </div>
           </div>
         </div>
