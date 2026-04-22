@@ -375,11 +375,12 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
   const stats = {
     autoAssigned: today.autoAssigned || 0,        // decision='auto_assigned' — no human in the loop
     approved: today.approved || 0,                // decision='approved' OR 'modified' — admin clicked approve
-    handledInFs: today.handledInFs || 0,          // pending_review + assignedTechId set — agent grabbed in FS
-    noiseDismissed: today.noiseDismissed || 0,    // decision='noise_dismissed'
+    handledInFs: today.handledInFs || 0,          // tickets created today now assigned, but NOT via our pipeline
+    noiseDismissed: today.noiseDismissed || 0,    // decision='noise_dismissed' (pipeline ran, classified as noise)
     manualReviewRequired: today.manualReviewRequired || 0,
     inProgress: today.inProgress || 0,
     rebounds: today.rebounds || 0,
+    noiseFiltered: today.noiseFiltered || 0,      // tickets with isNoise=true — silently skipped by polling
     totalRuns: today.totalRuns || 0,
   };
   const excludedGroupCount = queueStatus?.excludedGroupCount || 0;
@@ -447,7 +448,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           icon={Users}
           label="Picked up in FreshService"
           value={stats.handledInFs}
-          sublabel="agent grabbed it directly"
+          sublabel="assigned outside the pipeline"
           tone="amber"
         />
         <StatTile
@@ -461,13 +462,22 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
 
       {/* Process state — only render rows that are actually non-zero so the
           panel doesn't drown in greyed-out tiles when nothing's happening. */}
-      {(liveInProgress > 0 || stats.rebounds > 0 || stats.manualReviewRequired > 0 || queuedRunsTotal > 0) && (
+      {(liveInProgress > 0 || stats.rebounds > 0 || stats.noiseFiltered > 0 || stats.manualReviewRequired > 0 || queuedRunsTotal > 0) && (
         <div className="max-w-4xl mx-auto flex flex-wrap items-stretch gap-2 mb-3">
           {liveInProgress > 0 && (
-            <SmallStatPill icon={Brain} tone="blue" value={liveInProgress} label={`currently analyzing${liveInProgress === 1 ? '' : ''}`} />
+            <SmallStatPill icon={Brain} tone="blue" value={liveInProgress} label="currently analyzing" />
           )}
           {stats.rebounds > 0 && (
             <SmallStatPill icon={RotateCcw} tone="amber" value={stats.rebounds} label={`rebound${stats.rebounds === 1 ? '' : 's'} today`} title="Tickets that bounced back after a rejection and triggered a fresh pipeline run" />
+          )}
+          {stats.noiseFiltered > 0 && (
+            <SmallStatPill
+              icon={XCircle}
+              tone="slate"
+              value={stats.noiseFiltered}
+              label={`noise-filtered (skipped before analysis)`}
+              title="Tickets matched a noise rule and were silently excluded from polling. If a ticket you expected to see auto-assigned is missing, check the Noise Rules page — a rule may be over-matching."
+            />
           )}
           {stats.manualReviewRequired > 0 && (
             <SmallStatPill icon={ShieldCheck} tone="rose" value={stats.manualReviewRequired} label={`need${stats.manualReviewRequired === 1 ? 's' : ''} your attention`} title="Excluded groups, rebound exhaustion, or LLM uncertainty" />

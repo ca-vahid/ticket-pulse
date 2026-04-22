@@ -1,6 +1,15 @@
-export const APP_VERSION = '1.9.80-preview';
+export const APP_VERSION = '1.9.81-preview';
 
 export const changelog = [
+  {
+    version: '1.9.81-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'fixed', text: '"Picked up in FreshService" tile severely undercounted -- it only counted pending_review pipeline runs whose ticket later got an assignedTechId, but the most common path (agent grabs the ticket in FS within the 30s window before our poll fires, so we never even create a pipeline run) was completely invisible. Verified on prod: 6 tickets today were assigned in FS without ever going through our pipeline. Reworked the metric to count tickets created today that ended up assigned, MINUS the ones we successfully assigned ourselves -- whatever\u2019s left was handled outside the pipeline. handledInFs went from 0 to 6 with no other changes' },
+      { type: 'new', text: 'New "noise-filtered today" metric -- when a ticket matches a noise rule, our polling silently excludes it from analysis (correct default behaviour, but invisible until now). A user reported a ticket "Threat Intelligence" not getting auto-assigned; turned out to be over-matched by the security rule. Added today.noiseFiltered count to the queue-status response, surfaced as a small slate pill in the empty-state panel\u2019s process-state row with a tooltip pointing to the Noise Rules page if a ticket the admin expected to see auto-assigned is missing' },
+      { type: 'improved', text: 'Updated the "Picked up in FreshService" tile sublabel from "agent grabbed it directly" to "assigned outside the pipeline" -- more accurate description now that the metric also covers tickets that were noise-filtered or assigned via FS automation routing rules' },
+    ],
+  },
   {
     version: '1.9.80-preview',
     date: 'April 22, 2026',
