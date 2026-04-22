@@ -14,7 +14,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check, TrendingUp,
-  ShieldCheck, Users, Bot, Sparkles, ExternalLink, Clock,
+  ShieldCheck, Users, Bot, Sparkles, Clock,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -412,7 +412,12 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
     totalRuns: today.totalRuns || 0,
   };
   const excludedGroupCount = queueStatus?.excludedGroupCount || 0;
-  const latest = today.latestAutoAssignment || null;
+  // Up to 10 recent auto-assignments. Backend returns array; older shape
+  // (singular latestAutoAssignment) is no longer sent but the fallback
+  // keeps things from crashing if a stale frontend hits an old backend.
+  const recent = Array.isArray(today.recentAutoAssignments)
+    ? today.recentAutoAssignments
+    : (today.latestAutoAssignment ? [today.latestAutoAssignment] : []);
   const dryRun = queueStatus?.dryRunMode;
   // Real-time in-progress beats today's snapshot when there's actual activity
   // happening right now. The today.inProgress field is bound by createdAt
@@ -485,10 +490,14 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
 
           {/* Centered content with flanking decorative icons */}
           <div className="relative flex flex-col items-center text-center">
-            {/* Top label with sparkle accent */}
+            {/* Top label with sparkle accent. "Last 24h" instead of "Today"
+                because the underlying query is a rolling 24h window — needed
+                so the empty-state counts match the destination tabs (which
+                also use rolling 24h). Calling it "Today" here while the
+                destinations are rolling caused real user confusion. */}
             <div className="inline-flex items-center gap-2 mb-2">
               <Sparkles className="w-4 h-4 text-blue-500" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">Today</span>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">{queueStatus?.today?.range?.label || 'Last 24h'}</span>
               <Sparkles className="w-4 h-4 text-blue-500" />
             </div>
 
@@ -586,43 +595,45 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
         </div>
       )}
 
-      {/* Latest auto-assignment strip — clickable card pointing at the run
-          detail page. Updated layout per UX redesign: cleaner spacing, button
-          on the right. Whole card is clickable. Shows the assignee's profile
-          photo when available, falls back to initials. */}
-      {latest && (
+      {/* Recent auto-assignments — up to 10 from the last 24h. Each row is a
+          clickable link to the run detail page. Shows the assignee's profile
+          photo (with green check badge), ticket id + subject, assignee name,
+          and a relative timestamp. */}
+      {recent.length > 0 && (
         <div className="max-w-4xl mx-auto">
-          <a
-            href={`/assignments/history/${latest.runId}`}
-            className="group block bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-all duration-150 p-3.5 sm:p-4"
-          >
-            <div className="flex items-center gap-3 sm:gap-4">
-              <TechAvatar
-                photoUrl={latest.techPhotoUrl}
-                name={latest.techName}
-                size="lg"
-                badge={<Check className="w-3.5 h-3.5 text-white" />}
-                badgeClass="bg-emerald-500 ring-2 ring-white"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Most recent auto-assignment</div>
-                <div className="text-sm sm:text-base text-slate-900 truncate font-medium mt-0.5" title={latest.ticketSubject}>
-                  {latest.freshserviceTicketId && <span className="text-slate-400 mr-1.5 font-normal">#{latest.freshserviceTicketId}</span>}
-                  {latest.ticketSubject}
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2 px-1">
+            Recent auto-assignments {recent.length > 1 && <span className="text-slate-400 normal-case font-normal">· last {recent.length}</span>}
+          </div>
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden divide-y divide-slate-100">
+            {recent.map((r) => (
+              <a
+                key={r.runId}
+                href={`/assignments/history/${r.runId}`}
+                className="group flex items-center gap-3 sm:gap-4 px-3.5 sm:px-4 py-2.5 sm:py-3 hover:bg-slate-50 transition-colors"
+              >
+                <TechAvatar
+                  photoUrl={r.techPhotoUrl}
+                  name={r.techName}
+                  size="md"
+                  badge={<Check className="w-3 h-3 text-white" />}
+                  badgeClass="bg-emerald-500 ring-2 ring-white"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-900 truncate font-medium" title={r.ticketSubject}>
+                    {r.freshserviceTicketId && <span className="text-slate-400 mr-1.5 font-normal">#{r.freshserviceTicketId}</span>}
+                    {r.ticketSubject}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                    <span>to <span className="font-semibold text-slate-700">{r.techName || 'Unknown'}</span></span>
+                    <span className="text-slate-300">·</span>
+                    <Clock className="w-3 h-3 text-slate-400" />
+                    <RelativeTime iso={r.decidedAt} />
+                  </div>
                 </div>
-                <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                  <span>to <span className="font-semibold text-slate-700">{latest.techName || 'Unknown'}</span></span>
-                  <span className="text-slate-300">·</span>
-                  <Clock className="w-3 h-3 text-slate-400" />
-                  <RelativeTime iso={latest.decidedAt} />
-                </div>
-              </div>
-              <span className="hidden sm:inline-flex flex-shrink-0 items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-700 bg-blue-50 group-hover:bg-blue-100 transition-colors">
-                View ticket <ExternalLink className="w-3 h-3" />
-              </span>
-              <ChevronRight className="sm:hidden flex-shrink-0 w-4 h-4 text-slate-400" />
-            </div>
-          </a>
+                <ChevronRight className="flex-shrink-0 w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors" />
+              </a>
+            ))}
+          </div>
         </div>
       )}
 
