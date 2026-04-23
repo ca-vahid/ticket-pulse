@@ -1246,51 +1246,50 @@ router.get('/calibration/runs/:id', requireAdmin, asyncHandler(async (req, res) 
 
 // ─── Daily Review ────────────────────────────────────────────────────────
 
+// POST /daily-review now ALWAYS kicks off the run in the background and
+// returns the run row to the caller within ~50ms. Live progress is exposed
+// via the `progress` JSON column on the run row, which the frontend polls
+// with GET /daily-review/runs/:id every 1-2s. This is robust against the
+// Azure App Service Linux 230-second request timeout that used to kill
+// long-lived SSE connections mid-collection (502 Bad Gateway in the
+// browser even though the work itself was healthy).
 router.post('/daily-review', requireAdmin, asyncHandler(async (req, res) => {
   const { reviewDate, force, forceRefreshThreads } = req.body;
-  const stream = req.query.stream === 'true';
   const triggeredBy = req.session?.user?.email || 'admin';
 
-  if (!stream) {
-    const result = await assignmentDailyReviewService.runReview(req.workspaceId, reviewDate, triggeredBy, {
-      triggerSource: 'manual',
-      force: !!force,
-      forceRefreshThreads: !!forceRefreshThreads,
-    });
-    return res.json({ success: true, data: result });
-  }
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders?.();
-
-  let clientDisconnected = false;
-  req.on('close', () => { clientDisconnected = true; clearInterval(heartbeat); });
-
-  const heartbeat = setInterval(() => {
-    if (clientDisconnected) return;
-    try { res.write(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`); } catch { /* client gone */ }
-  }, 15000);
-
-  await assignmentDailyReviewService.runReview(req.workspaceId, reviewDate, triggeredBy, {
+  const result = await assignmentDailyReviewService.kickOffReview(req.workspaceId, reviewDate, triggeredBy, {
     triggerSource: 'manual',
     force: !!force,
     forceRefreshThreads: !!forceRefreshThreads,
-    onEvent: (event) => {
-      if (clientDisconnected) return;
-      try {
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
-      } catch { /* client gone */ }
-    },
   });
 
-  clearInterval(heartbeat);
-  if (!clientDisconnected) {
-    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-    res.end();
+  res.status(202).json({ success: true, data: result });
+}));
+
+// Lightweight polling endpoint — returns just the latest live progress
+// payload + status without the heavy summary/cases/recommendations the
+// full run-detail GET serializes. Reduces traffic when the UI polls every
+// 1-2 seconds during an active run.
+router.get('/daily-review/runs/:id/progress', requireAdmin, asyncHandler(async (req, res) => {
+  const runId = parseInt(req.params.id, 10);
+  const row = await prisma.assignmentDailyReviewRun.findUnique({
+    where: { id: runId },
+    select: {
+      id: true,
+      workspaceId: true,
+      status: true,
+      progress: true,
+      progressUpdatedAt: true,
+      errorMessage: true,
+      completedAt: true,
+      totalDurationMs: true,
+    },
+  });
+  if (!row) return res.status(404).json({ success: false, message: 'Run not found' });
+  if (row.workspaceId !== req.workspaceId) {
+    return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
   }
+  res.json({ success: true, data: row });
 }));
 
 router.get('/daily-review/runs', requireAdmin, asyncHandler(async (req, res) => {

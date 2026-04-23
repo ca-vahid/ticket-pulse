@@ -906,6 +906,14 @@ model AssignmentDailyReviewRun {
   meetingBriefingTokens      Int?      @map("meeting_briefing_tokens")
   meetingBriefingModel       String?   @db.VarChar(100) @map("meeting_briefing_model")
   meetingBriefingBy          String?   @db.VarChar(255) @map("meeting_briefing_by")
+  // Lightweight live progress object updated throughout the run so a
+  // polling client can render the same step-by-step view that SSE used to
+  // provide. Persisting to the row keeps progress observable even if the
+  // HTTP request that triggered the run is killed by Azure's 230s
+  // load-balancer timeout — the work continues in the background and the
+  // UI keeps catching up via polling.
+  progress                   Json?     @map("progress")
+  progressUpdatedAt          DateTime? @map("progress_updated_at")
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
   recommendations        AssignmentDailyReviewRecommendation[]

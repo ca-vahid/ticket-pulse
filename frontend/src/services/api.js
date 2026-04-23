@@ -588,7 +588,7 @@ export const assignmentAPI = {
   rerunDailyReviewRun: (id) => api.post(`/assignment/daily-review/runs/${id}/rerun`),
   generateDailyReviewBriefing: (id, data = {}) => apiLongTimeout.post(`/assignment/daily-review/runs/${id}/meeting-briefing`, data),
   runDailyReview: (data) => api.post('/assignment/daily-review', data),
-  runDailyReviewStreamPath: () => '/assignment/daily-review?stream=true',
+  getDailyReviewRunProgress: (id) => api.get(`/assignment/daily-review/runs/${id}/progress`),
 };
 
 /**

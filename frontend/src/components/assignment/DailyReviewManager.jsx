@@ -1,7 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { assignmentAPI } from '../../services/api';
-import { useStreamingFetch } from '../../hooks/useStreamingFetch';
 import { formatDateLocal, formatDateOnlyInTimezone, formatDateTimeInTimezone } from '../../utils/dateHelpers';
 import {
   Loader2, Brain, CheckCircle, XCircle, History, RefreshCw, Play,
@@ -884,9 +883,20 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
   const [liveStats, setLiveStats] = useState({});
   const [activityLog, setActivityLog] = useState([]);
   const [isCancelling, setIsCancelling] = useState(false);
+  // status: idle | starting | running | completed | cancelled | error
+  const [status, setStatus] = useState('starting');
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [error, setError] = useState(null);
+
+  const startedAtRef = useRef(null);
+  const pollTimerRef = useRef(null);
+  const stoppedRef = useRef(false);
+  const lastMessageRef = useRef(null);
 
   const appendActivity = useCallback((message, eventPhase = 'update') => {
     if (!message) return;
+    if (lastMessageRef.current === message) return;
+    lastMessageRef.current = message;
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       phase: eventPhase,
@@ -900,77 +910,163 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
     setActivityLog((prev) => [entry, ...prev].slice(0, 8));
   }, []);
 
-  const handleEvent = useCallback((event, controls) => {
-    switch (event.type) {
-    case 'daily_review_started':
-      setRunId(event.runId);
-      appendActivity(`Started daily review for ${event.workspaceName || 'workspace'} on ${event.reviewDate}.`, 'started');
-      break;
-    case 'phase_update':
-      setPhase(event.phase);
-      setPhaseMessage(event.message);
-      if (typeof event.percent === 'number') setProgressPct(event.percent);
-      if (event.stats && typeof event.stats === 'object') {
-        setLiveStats((prev) => ({ ...prev, ...event.stats }));
-      }
-      appendActivity(event.message, event.phase);
-      if (event.phase === 'cancelled') {
-        setIsCancelling(false);
-        controls.setStatus('cancelled');
-        controls.stopTimer();
-      }
-      if (event.phase === 'completed') {
-        controls.setStatus('completed');
-        controls.stopTimer();
-      }
-      break;
-    case 'dataset_collected':
-      setSummary(event.totals || null);
-      if (event.totals && typeof event.totals === 'object') {
-        setLiveStats((prev) => ({ ...prev, ...event.totals }));
-      }
-      appendActivity(`Collected dataset for ${event.totals?.totalTicketsReviewed || 0} ticket(s).`, 'dataset');
-      break;
-    case 'recommendations_ready':
-      setCounts({
-        prompt: event.promptCount || 0,
-        process: event.processCount || 0,
-        skill: event.skillCount || 0,
-      });
-      setExecutiveSummary(event.executiveSummary || '');
-      appendActivity(
-        `Recommendations ready: ${event.promptCount || 0} prompt, ${event.processCount || 0} process, ${event.skillCount || 0} skill.`,
-        'recommendations',
-      );
-      break;
-    case 'cancelled':
-      setIsCancelling(false);
-      setPhase('cancelled');
-      setPhaseMessage(event.message || 'Daily review cancelled.');
-      controls.setStatus('cancelled');
-      controls.stopTimer();
-      appendActivity(event.message || 'Daily review cancelled.', 'cancelled');
-      break;
-    case 'daily_review_complete':
-      setRunId(event.runId);
-      appendActivity(`Run #${event.runId} finished.`, 'completed');
-      break;
-    case 'error':
-      setIsCancelling(false);
-      controls.setError(event.message);
-      appendActivity(event.message, 'error');
-      break;
-    default:
-      break;
-    }
-  }, [appendActivity]);
+  // Independent ticking timer — separate from the work itself, so it ticks
+  // smoothly even between polls. Stops when we reach a terminal status.
+  useEffect(() => {
+    if (startedAtRef.current === null) return undefined;
+    if (status !== 'starting' && status !== 'running') return undefined;
+    const id = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [status]);
 
-  const { status, elapsedSec, error } = useStreamingFetch({
-    url: assignmentAPI.runDailyReviewStreamPath(),
-    body: { reviewDate, force: true, forceRefreshThreads },
-    onEvent: handleEvent,
-    deps: [reviewDate],
-  });
+  // Kick off the run and start polling. Polling is the source of truth
+  // since the backend now runs the work in the background and persists
+  // progress to the run row — no SSE, no Azure 230s timeout to fight.
+  useEffect(() => {
+    let cancelled = false;
+    stoppedRef.current = false;
+    startedAtRef.current = Date.now();
+    setStatus('starting');
+    setElapsedSec(0);
+    setError(null);
+    setRunId(null);
+    setPhase(null);
+    setPhaseMessage('Queuing daily review on the server...');
+    setProgressPct(2);
+    setLiveStats({});
+    setActivityLog([]);
+    setSummary(null);
+    setCounts({ prompt: 0, process: 0, skill: 0 });
+    setExecutiveSummary('');
+    lastMessageRef.current = null;
+
+    const stopPolling = () => {
+      stoppedRef.current = true;
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+
+    const applyProgress = (row) => {
+      if (!row) return;
+      const p = row.progress || {};
+      if (p.phase) setPhase(p.phase);
+      if (p.message) {
+        setPhaseMessage(p.message);
+        appendActivity(p.message, p.phase || row.status || 'update');
+      }
+      if (typeof p.percent === 'number') setProgressPct(Math.max(2, p.percent));
+      if (p.stats && typeof p.stats === 'object') {
+        setLiveStats((prev) => ({ ...prev, ...p.stats }));
+        if (typeof p.stats.totalTicketsReviewed === 'number') {
+          setSummary((prev) => ({ ...(prev || {}), ...p.stats }));
+        }
+      }
+      if (row.status === 'completed') {
+        setStatus('completed');
+        stopPolling();
+      } else if (row.status === 'failed') {
+        setStatus('error');
+        setError(row.errorMessage || 'Daily review failed');
+        stopPolling();
+      } else if (row.status === 'cancelled') {
+        setStatus('cancelled');
+        setIsCancelling(false);
+        stopPolling();
+      } else {
+        setStatus('running');
+      }
+    };
+
+    const pollOnce = async (id) => {
+      if (cancelled || stoppedRef.current) return;
+      try {
+        const res = await assignmentAPI.getDailyReviewRunProgress(id);
+        applyProgress(res?.data || null);
+      } catch (err) {
+        // Polling failure is transient — log to activity but keep trying.
+        appendActivity(`Polling hiccup: ${err?.message || 'network error'}`, 'warn');
+      }
+      if (!cancelled && !stoppedRef.current) {
+        pollTimerRef.current = setTimeout(() => pollOnce(id), 1500);
+      }
+    };
+
+    const fetchFinalDetails = async (id) => {
+      try {
+        const res = await assignmentAPI.getDailyReviewRun(id);
+        const row = res?.data;
+        if (!row) return;
+        const totals = row.summaryMetrics?.totals || {};
+        setSummary(totals);
+        setCounts({
+          prompt: (row.promptRecommendations || []).length,
+          process: (row.processRecommendations || []).length,
+          skill: (row.skillRecommendations || []).length,
+        });
+        setExecutiveSummary(row.summaryMetrics?.executiveSummary || '');
+      } catch {
+        /* non-fatal — the user can still navigate to the run detail */
+      }
+    };
+
+    (async () => {
+      try {
+        const res = await assignmentAPI.runDailyReview({
+          reviewDate,
+          force: true,
+          forceRefreshThreads,
+        });
+        const row = res?.data;
+        if (cancelled) return;
+        const id = row?.id;
+        if (!id) throw new Error('Server did not return a run id');
+        setRunId(id);
+        appendActivity(`Started daily review run #${id}.`, 'started');
+        applyProgress(row);
+        // If kickoff returned an already-completed row (force=false, cached),
+        // skip polling and pull final details immediately.
+        if (row.status === 'completed' || row.status === 'failed' || row.status === 'cancelled') {
+          await fetchFinalDetails(id);
+          return;
+        }
+        pollOnce(id);
+      } catch (err) {
+        if (cancelled) return;
+        setStatus('error');
+        setError(err?.message || 'Failed to start daily review');
+        appendActivity(err?.message || 'Failed to start daily review', 'error');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewDate, forceRefreshThreads]);
+
+  // When status flips to completed, fetch the full run detail to populate
+  // summary / counts / executiveSummary. Polling endpoint is intentionally
+  // lightweight and doesn't include those.
+  useEffect(() => {
+    if (status === 'completed' && runId) {
+      assignmentAPI.getDailyReviewRun(runId).then((res) => {
+        const row = res?.data;
+        if (!row) return;
+        setSummary(row.summaryMetrics?.totals || null);
+        setCounts({
+          prompt: (row.promptRecommendations || []).length,
+          process: (row.processRecommendations || []).length,
+          skill: (row.skillRecommendations || []).length,
+        });
+        setExecutiveSummary(row.summaryMetrics?.executiveSummary || '');
+      }).catch(() => { /* non-fatal */ });
+    }
+  }, [status, runId]);
 
   const visibleLiveStats = Object.entries(LIVE_STAT_LABELS)
     .filter(([key]) => liveStats[key] != null)
@@ -996,7 +1092,7 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {status === 'running' ? (
+          {(status === 'running' || status === 'starting') ? (
             <Brain className="w-5 h-5 text-purple-600 animate-spin" />
           ) : status === 'cancelled' ? (
             <StopCircle className="w-5 h-5 text-amber-600" />
@@ -1014,7 +1110,7 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
                   ? 'text-red-700'
                   : 'text-purple-700'
           }`}>
-            {status === 'running'
+            {status === 'running' || status === 'starting'
               ? `Running daily review... (${elapsedSec}s)`
               : status === 'cancelled'
                 ? `Daily review cancelled (${elapsedSec}s)`
@@ -1025,7 +1121,7 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
           {runId && <span className="text-xs text-slate-400">Run #{runId}</span>}
         </div>
         <div className="flex items-center gap-3">
-          {(status === 'running' || status === 'connecting') && runId && (
+          {(status === 'running' || status === 'starting') && runId && (
             <button
               onClick={cancelRun}
               disabled={isCancelling}
