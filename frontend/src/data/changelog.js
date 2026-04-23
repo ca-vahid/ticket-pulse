@@ -1,6 +1,17 @@
-export const APP_VERSION = '1.9.86-preview';
+export const APP_VERSION = '1.9.87-preview';
 
 export const changelog = [
+  {
+    version: '1.9.87-preview',
+    date: 'April 22, 2026',
+    entries: [
+      { type: 'new', text: 'Meeting Briefing on the Daily Review run detail -- new opt-in section that turns the analyzed dataset into a story-style one-pager for the next-day operations standup. Click "Generate Briefing" on a completed run and the LLM produces (1) a punchy headline specific to the day, (2) a 2-4 paragraph narrative telling the story chronologically, (3) 3-6 key metrics worth saying out loud (each with a tone -- good / bad / watch / neutral), (4) scannable highlights with optional supporting ticket pills, (5) optional shoutouts to technicians who carried meaningful load, (6) numbered talking points for the standup agenda, and (7) a "what to watch today" lookahead. Includes a Copy as Markdown button so the briefing can be pasted straight into Slack / email / a meeting agenda. Optional and explicit -- never auto-runs; click Generate / Regenerate when you want it' },
+      { type: 'new', text: 'Briefing persistence -- the briefing is stored on the run record (meetingBriefing JSONB + generatedAt / generatedBy / model / tokens metadata) so it survives refreshes and can be regenerated. Regenerating overwrites the previous version. The footer shows when the briefing was generated, by whom, and which model + token count was used so the cost trail stays visible' },
+      { type: 'new', text: 'POST /assignment/daily-review/runs/:id/meeting-briefing endpoint (admin only) -- accepts an optional tone parameter ("standup" or "executive") and returns the generated briefing. Reuses the workspace\u2019s configured llmModel from the run record so the briefing matches whichever model produced the recommendations' },
+      { type: 'improved', text: 'Same allow-list defence the recommendation flow uses applies to the briefing -- the analysis input ships explicit allowedSupportingTicketIds / allowedSupportingFreshserviceTicketIds lists and any ticket id the LLM cites in highlights.supportingFreshserviceTicketIds outside those sets is dropped before persistence. Plus the system prompt names the active workspace and explicitly says "this workspace ONLY" so cross-workspace leakage can\u2019t sneak into the standup narrative' },
+      { type: 'database', text: 'New migration 20260423030000_add_daily_review_meeting_briefing -- adds meeting_briefing JSONB + meeting_briefing_generated_at + meeting_briefing_tokens + meeting_briefing_model + meeting_briefing_by columns to assignment_daily_review_runs. Run `prisma migrate deploy` on any environment before deploying' },
+    ],
+  },
   {
     version: '1.9.86-preview',
     date: 'April 22, 2026',

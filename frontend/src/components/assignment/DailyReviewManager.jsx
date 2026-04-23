@@ -6,7 +6,8 @@ import { formatDateLocal, formatDateOnlyInTimezone, formatDateTimeInTimezone } f
 import {
   Loader2, Brain, CheckCircle, XCircle, History, RefreshCw, Play,
   CalendarDays, FileText, Settings2, Award, ChevronRight, StopCircle,
-  ArrowLeft, ExternalLink,
+  ArrowLeft, ExternalLink, Sparkles, Copy, ThumbsUp, AlertTriangle,
+  Eye, MessageCircle, TrendingUp,
 } from 'lucide-react';
 
 function StatusBadge({ status }) {
@@ -309,6 +310,329 @@ function CasesTable({ cases = [], workspaceTimezone }) {
   );
 }
 
+const TONE_STYLES = {
+  good: {
+    border: 'border-green-200',
+    bg: 'bg-green-50',
+    text: 'text-green-800',
+    pill: 'bg-green-100 text-green-700',
+    icon: ThumbsUp,
+  },
+  bad: {
+    border: 'border-red-200',
+    bg: 'bg-red-50',
+    text: 'text-red-800',
+    pill: 'bg-red-100 text-red-700',
+    icon: AlertTriangle,
+  },
+  watch: {
+    border: 'border-amber-200',
+    bg: 'bg-amber-50',
+    text: 'text-amber-800',
+    pill: 'bg-amber-100 text-amber-800',
+    icon: Eye,
+  },
+  neutral: {
+    border: 'border-slate-200',
+    bg: 'bg-slate-50',
+    text: 'text-slate-800',
+    pill: 'bg-slate-100 text-slate-700',
+    icon: MessageCircle,
+  },
+};
+
+function toneOf(value) {
+  return TONE_STYLES[value] || TONE_STYLES.neutral;
+}
+
+function briefingToMarkdown(briefing, run, workspaceTimezone) {
+  if (!briefing) return '';
+  const lines = [];
+  const dateLabel = formatDateOnlyInTimezone(run.reviewDate, workspaceTimezone);
+  lines.push(`# Daily Briefing — ${run.summaryMetrics?.workspaceName || 'Workspace'} · ${dateLabel}`);
+  if (briefing.headline) {
+    lines.push('');
+    lines.push(`**${briefing.headline}**`);
+  }
+  if (briefing.narrative) {
+    lines.push('');
+    lines.push(briefing.narrative);
+  }
+  if (Array.isArray(briefing.keyMetrics) && briefing.keyMetrics.length > 0) {
+    lines.push('');
+    lines.push('## Key metrics');
+    for (const m of briefing.keyMetrics) {
+      const ctx = m.context ? ` _(${m.context})_` : '';
+      lines.push(`- **${m.label}:** ${m.value}${ctx}`);
+    }
+  }
+  if (Array.isArray(briefing.highlights) && briefing.highlights.length > 0) {
+    lines.push('');
+    lines.push('## Highlights');
+    for (const h of briefing.highlights) {
+      const ids = Array.isArray(h.supportingFreshserviceTicketIds) && h.supportingFreshserviceTicketIds.length > 0
+        ? ` (tickets: ${h.supportingFreshserviceTicketIds.map((id) => `#${id}`).join(', ')})`
+        : '';
+      lines.push(`- _[${h.tone || 'neutral'}]_ **${h.title}** — ${h.detail}${ids}`);
+    }
+  }
+  if (Array.isArray(briefing.shoutouts) && briefing.shoutouts.length > 0) {
+    lines.push('');
+    lines.push('## Shoutouts');
+    for (const s of briefing.shoutouts) {
+      lines.push(`- **${s.name}** — ${s.reason}`);
+    }
+  }
+  if (Array.isArray(briefing.talkingPoints) && briefing.talkingPoints.length > 0) {
+    lines.push('');
+    lines.push('## Talking points');
+    briefing.talkingPoints.forEach((p, idx) => {
+      lines.push(`${idx + 1}. ${p}`);
+    });
+  }
+  if (briefing.lookahead) {
+    lines.push('');
+    lines.push('## Lookahead');
+    lines.push(briefing.lookahead);
+  }
+  return lines.join('\n');
+}
+
+function MeetingBriefingSection({ run, workspaceTimezone }) {
+  const briefing = run.meetingBriefing || null;
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [localBriefing, setLocalBriefing] = useState(briefing);
+  const [generatedAt, setGeneratedAt] = useState(run.meetingBriefingGeneratedAt || null);
+  const [generatedBy, setGeneratedBy] = useState(run.meetingBriefingBy || null);
+  const [model, setModel] = useState(run.meetingBriefingModel || null);
+
+  useEffect(() => {
+    setLocalBriefing(run.meetingBriefing || null);
+    setGeneratedAt(run.meetingBriefingGeneratedAt || null);
+    setGeneratedBy(run.meetingBriefingBy || null);
+    setModel(run.meetingBriefingModel || null);
+  }, [run.id, run.meetingBriefing, run.meetingBriefingGeneratedAt, run.meetingBriefingBy, run.meetingBriefingModel]);
+
+  const generate = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await assignmentAPI.generateDailyReviewBriefing(run.id, { tone: 'standup' });
+      setLocalBriefing(res?.data?.briefing || null);
+      setGeneratedAt(res?.data?.generatedAt || new Date().toISOString());
+      setGeneratedBy(res?.data?.generatedBy || null);
+      setModel(res?.data?.model || null);
+    } catch (err) {
+      setError(err?.message || 'Failed to generate the meeting briefing.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const copyAsMarkdown = async () => {
+    if (!localBriefing) return;
+    const md = briefingToMarkdown(localBriefing, run, workspaceTimezone);
+    try {
+      await navigator.clipboard.writeText(md);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard may be blocked; ignore */
+    }
+  };
+
+  const isCompleted = run.status === 'completed';
+
+  return (
+    <div className="rounded-xl border border-purple-200 bg-gradient-to-br from-purple-50 to-indigo-50 p-4 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-purple-600" />
+          <h3 className="text-base font-semibold text-purple-900">Meeting Briefing</h3>
+          {localBriefing && (
+            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-purple-700">
+              Ready
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {localBriefing && (
+            <button
+              type="button"
+              onClick={copyAsMarkdown}
+              className="inline-flex items-center gap-1 rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50"
+            >
+              <Copy className="h-3.5 w-3.5" /> {copied ? 'Copied!' : 'Copy as Markdown'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={generate}
+            disabled={!isCompleted || generating}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:from-purple-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {generating
+              ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating...</>
+              : localBriefing
+                ? <><RefreshCw className="h-3.5 w-3.5" /> Regenerate</>
+                : <><Sparkles className="h-3.5 w-3.5" /> Generate Briefing</>}
+          </button>
+        </div>
+      </div>
+
+      <p className="mb-4 text-sm text-purple-800">
+        A one-page narrative summary of the day for tomorrow&apos;s standup. Optional — generates only when you click. Uses the same analyzed dataset as the recommendations, scoped to this workspace only.
+      </p>
+
+      {error && (
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {!isCompleted && !localBriefing && (
+        <div className="rounded-lg border border-dashed border-purple-200 bg-white/50 px-4 py-8 text-center text-sm text-purple-700">
+          The meeting briefing can be generated once the daily review reaches the <strong>completed</strong> status.
+        </div>
+      )}
+
+      {isCompleted && !localBriefing && !generating && (
+        <div className="rounded-lg border border-dashed border-purple-200 bg-white/50 px-4 py-8 text-center text-sm text-purple-800">
+          No briefing yet. Click <strong>Generate Briefing</strong> to produce a story-style summary, key metrics, highlights, and talking points for the next standup.
+        </div>
+      )}
+
+      {generating && !localBriefing && (
+        <div className="rounded-lg border border-purple-200 bg-white px-4 py-8 text-center text-sm text-purple-800">
+          <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-purple-600" />
+          Asking the model to write your briefing...
+        </div>
+      )}
+
+      {localBriefing && (
+        <div className="space-y-4">
+          {localBriefing.headline && (
+            <div className="rounded-lg border border-purple-200 bg-white p-4">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-purple-500">Headline</div>
+              <div className="text-lg font-semibold leading-snug text-slate-900">{localBriefing.headline}</div>
+            </div>
+          )}
+
+          {localBriefing.narrative && (
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <FileText className="h-3.5 w-3.5" /> Story of the day
+              </div>
+              <div className="space-y-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                {localBriefing.narrative}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(localBriefing.keyMetrics) && localBriefing.keyMetrics.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <TrendingUp className="h-3.5 w-3.5" /> Numbers worth saying out loud
+              </div>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                {localBriefing.keyMetrics.map((metric, idx) => {
+                  const tone = toneOf(metric.tone);
+                  return (
+                    <div key={idx} className={`rounded-lg border ${tone.border} ${tone.bg} p-3`}>
+                      <div className={`text-2xl font-bold ${tone.text}`}>{metric.value}</div>
+                      <div className="text-xs font-medium text-slate-700">{metric.label}</div>
+                      {metric.context && (
+                        <div className="mt-1 text-[11px] text-slate-500">{metric.context}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(localBriefing.highlights) && localBriefing.highlights.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Highlights</div>
+              <div className="space-y-2">
+                {localBriefing.highlights.map((item, idx) => {
+                  const tone = toneOf(item.tone);
+                  const Icon = tone.icon;
+                  return (
+                    <div key={idx} className={`rounded-lg border ${tone.border} ${tone.bg} p-3`}>
+                      <div className="mb-1 flex items-start gap-2">
+                        <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${tone.text}`} />
+                        <div className="flex-1">
+                          <div className={`text-sm font-semibold ${tone.text}`}>{item.title}</div>
+                          <div className="mt-0.5 text-sm text-slate-700">{item.detail}</div>
+                          {Array.isArray(item.supportingFreshserviceTicketIds) && item.supportingFreshserviceTicketIds.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {item.supportingFreshserviceTicketIds.map((id) => (
+                                <span key={id} className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${tone.pill}`}>
+                                  #{id}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(localBriefing.shoutouts) && localBriefing.shoutouts.length > 0 && (
+            <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+              <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-green-700">
+                <ThumbsUp className="h-3.5 w-3.5" /> Shoutouts
+              </div>
+              <div className="space-y-2">
+                {localBriefing.shoutouts.map((s, idx) => (
+                  <div key={idx} className="rounded-lg bg-white px-3 py-2 text-sm text-slate-700">
+                    <span className="font-semibold text-green-800">{s.name}</span> — {s.reason}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(localBriefing.talkingPoints) && localBriefing.talkingPoints.length > 0 && (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+              <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+                <MessageCircle className="h-3.5 w-3.5" /> Talking points for the standup
+              </div>
+              <ol className="space-y-2 pl-5 text-sm text-slate-800" style={{ listStyleType: 'decimal' }}>
+                {localBriefing.talkingPoints.map((point, idx) => (
+                  <li key={idx} className="leading-relaxed">{point}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {localBriefing.lookahead && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                <Eye className="h-3.5 w-3.5" /> What to watch today
+              </div>
+              <div className="text-sm italic text-amber-900">{localBriefing.lookahead}</div>
+            </div>
+          )}
+
+          <div className="text-[11px] text-slate-400">
+            Generated {generatedAt ? formatDateTimeInTimezone(generatedAt, workspaceTimezone) : ''}
+            {generatedBy ? ` by ${generatedBy}` : ''}
+            {model ? ` · ${model}` : ''}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecommendationId }) {
   const summary = run.summaryMetrics || {};
   const totals = summary.totals || {};
@@ -373,6 +697,8 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
           Rebound metric: {summary.definitions.rebounds}
         </div>
       )}
+
+      <MeetingBriefingSection run={run} workspaceTimezone={workspaceTimezone} />
 
       <div className="grid lg:grid-cols-3 gap-4">
         <RecommendationSection

@@ -586,6 +586,7 @@ export const assignmentAPI = {
   bulkUpdateDailyReviewRecommendationStatus: (data) => api.post('/assignment/daily-review/recommendations/bulk-status', data),
   cancelDailyReviewRun: (id) => api.post(`/assignment/daily-review/runs/${id}/cancel`),
   rerunDailyReviewRun: (id) => api.post(`/assignment/daily-review/runs/${id}/rerun`),
+  generateDailyReviewBriefing: (id, data = {}) => apiLongTimeout.post(`/assignment/daily-review/runs/${id}/meeting-briefing`, data),
   runDailyReview: (data) => api.post('/assignment/daily-review', data),
   runDailyReviewStreamPath: () => '/assignment/daily-review?stream=true',
 };

@@ -1362,6 +1362,20 @@ router.post('/daily-review/runs/:id/cancel', requireAdmin, asyncHandler(async (r
   res.json({ success: true, data: result });
 }));
 
+router.post('/daily-review/runs/:id/meeting-briefing', requireAdmin, asyncHandler(async (req, res) => {
+  const runId = parseInt(req.params.id, 10);
+  try {
+    const result = await assignmentDailyReviewService.generateMeetingBriefing(runId, req.workspaceId, {
+      actorEmail: req.session?.user?.email || 'admin',
+      tone: req.body?.tone || 'standup',
+    });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    logger.warn('Daily review meeting briefing generation failed', { runId, error: error.message });
+    res.status(400).json({ success: false, message: error.message });
+  }
+}));
+
 router.post('/daily-review/runs/:id/rerun', requireAdmin, asyncHandler(async (req, res) => {
   const existing = await assignmentDailyReviewService.getRun(parseInt(req.params.id, 10));
   if (!existing) return res.status(404).json({ success: false, message: 'Daily review run not found' });

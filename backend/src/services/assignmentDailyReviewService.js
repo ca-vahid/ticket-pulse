@@ -1767,6 +1767,252 @@ Rules:
     };
   }
 
+  // Generates a one-page meeting briefing from a completed daily review.
+  // The briefing is intentionally separate from the structured prompt /
+  // process / skill recommendations: those are *operational* artifacts the
+  // admin acts on; the briefing is a *narrative* summary the team reads at
+  // the next-day standup. We persist it on the run record so it survives
+  // refreshes; regeneration overwrites the previous version.
+  async generateMeetingBriefing(runId, workspaceId, { actorEmail = 'admin', tone = 'standup' } = {}) {
+    const run = await prisma.assignmentDailyReviewRun.findUnique({ where: { id: runId } });
+    if (!run) throw new Error('Daily review run not found');
+    if (run.workspaceId !== workspaceId) throw new Error('Run belongs to a different workspace');
+    if (run.status !== 'completed') {
+      throw new Error(`Briefing can only be generated for completed runs (current status: ${run.status})`);
+    }
+
+    const apiKey = appConfig.anthropic.apiKey;
+    if (!apiKey) throw new Error('Anthropic API key is not configured on the server');
+
+    const summary = run.summaryMetrics || {};
+    const totals = summary.totals || {};
+    const rates = summary.rates || {};
+    const cases = Array.isArray(run.evidenceCases) ? run.evidenceCases : [];
+
+    // Compact case payload — same shape we use for the recommendation
+    // analysis, but also passing finalAssignee and rebound context so the
+    // briefing can name names and tell a chronological story.
+    const trimmedCases = cases
+      .slice(0, 30)
+      .map((item) => ({
+        ticketId: item.ticketId,
+        freshserviceTicketId: item.freshserviceTicketId,
+        subject: item.subject,
+        category: item.category,
+        priority: item.priority,
+        status: item.status,
+        outcome: item.outcome,
+        primaryTag: item.primaryTag,
+        decision: item.decision,
+        triggerSource: item.triggerSource,
+        topRecommendation: item.topRecommendation?.techName || null,
+        finalAssignee: item.finalAssignee?.name || null,
+        rebounded: item.tags?.includes('rebounded') || false,
+        overrideReason: item.overrideReason || null,
+        decisionNote: item.decisionNote || null,
+        ticketCreatedAt: item.ticketCreatedAt,
+        resolvedAt: item.resolvedAt,
+      }));
+
+    const recommendationsContext = {
+      prompt: (run.promptRecommendations || []).slice(0, 5).map((rec) => ({
+        title: rec.title,
+        severity: rec.severity,
+        rationale: rec.rationale,
+      })),
+      process: (run.processRecommendations || []).slice(0, 5).map((rec) => ({
+        title: rec.title,
+        severity: rec.severity,
+        rationale: rec.rationale,
+      })),
+      skill: (run.skillRecommendations || []).slice(0, 5).map((rec) => ({
+        title: rec.title,
+        severity: rec.severity,
+        rationale: rec.rationale,
+      })),
+    };
+
+    const reviewDateStr = run.reviewDate instanceof Date
+      ? run.reviewDate.toISOString().slice(0, 10)
+      : String(run.reviewDate).slice(0, 10);
+
+    const allowedFreshserviceIds = new Set(
+      trimmedCases.map((c) => Number(c.freshserviceTicketId)).filter(Boolean),
+    );
+    const allowedInternalIds = new Set(
+      trimmedCases.map((c) => Number(c.ticketId)).filter(Boolean),
+    );
+
+    const briefingInput = {
+      workspaceName: summary.workspaceName || 'this workspace',
+      reviewDate: reviewDateStr,
+      timezone: run.timezone,
+      reviewWindow: summary.reviewWindow || null,
+      totals,
+      rates,
+      topCategories: summary.topCategories || [],
+      topTechnicians: summary.topTechnicians || [],
+      executiveSummary: summary.executiveSummary || null,
+      cases: trimmedCases,
+      recommendations: recommendationsContext,
+      warnings: run.warnings || [],
+      allowedSupportingTicketIds: Array.from(allowedInternalIds),
+      allowedSupportingFreshserviceTicketIds: Array.from(allowedFreshserviceIds),
+    };
+
+    const TOOL = {
+      name: 'submit_meeting_briefing',
+      description: `Submit the one-page meeting briefing for the "${briefingInput.workspaceName}" workspace's ${reviewDateStr} daily review. Call this tool exactly once. Every ticket id you cite must come from briefingInput.allowedSupportingFreshserviceTicketIds — do not invent ids or technician names.`,
+      input_schema: {
+        type: 'object',
+        properties: {
+          headline: {
+            type: 'string',
+            description: 'A punchy, specific one-line summary of the day (max ~120 chars). Avoid generic phrasing like "Daily review summary"; name what actually drove the day.',
+          },
+          narrative: {
+            type: 'string',
+            description: 'A 2-4 short paragraph story of the day in clear conversational English. Tell the day chronologically when possible. Reference real ticket categories, technician names, and notable cases. Keep it readable in under 60 seconds out loud.',
+          },
+          keyMetrics: {
+            type: 'array',
+            description: 'The 3-6 numbers worth saying out loud at the standup. Each is a label + value + a short bit of context.',
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string' },
+                value: { type: 'string', description: 'The metric value as a string (e.g., "47", "92%", "2 reroutes").' },
+                context: { type: 'string', description: 'Optional short qualifier (e.g., "vs typical 35").' },
+                tone: { type: 'string', enum: ['good', 'bad', 'neutral', 'watch'] },
+              },
+              required: ['label', 'value', 'tone'],
+            },
+          },
+          highlights: {
+            type: 'array',
+            description: 'Scannable callouts grouped by tone. Examples: a clean win, a problem ticket, a tech who carried load, a category that caused friction.',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string' },
+                detail: { type: 'string' },
+                tone: { type: 'string', enum: ['good', 'bad', 'neutral', 'watch'] },
+                supportingFreshserviceTicketIds: {
+                  type: 'array',
+                  items: { type: 'integer' },
+                  description: 'Optional ticket ids from briefingInput.allowedSupportingFreshserviceTicketIds that back up this highlight.',
+                },
+              },
+              required: ['title', 'detail', 'tone'],
+            },
+          },
+          talkingPoints: {
+            type: 'array',
+            description: 'Concrete questions or follow-ups for the team to discuss in the standup (e.g., "Should we add a Tableau competency?").',
+            items: { type: 'string' },
+          },
+          shoutouts: {
+            type: 'array',
+            description: 'Optional named shoutouts to technicians who carried meaningful load or handled tricky cases. Only include techs that appear in the supplied cases.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                reason: { type: 'string' },
+              },
+              required: ['name', 'reason'],
+            },
+          },
+          lookahead: {
+            type: 'string',
+            description: '1-2 sentences about what the team should watch today (carried-over tickets, repeat offenders, follow-ups).',
+          },
+        },
+        required: ['headline', 'narrative', 'keyMetrics', 'highlights', 'talkingPoints', 'lookahead'],
+      },
+    };
+
+    const toneGuidance = tone === 'executive'
+      ? 'Tone: executive briefing. Crisp, business-focused, no jargon.'
+      : 'Tone: morning standup. Conversational, scannable, useful for a 5-minute daily team sync.';
+
+    const systemPrompt = `You are preparing a one-page meeting briefing for the "${briefingInput.workspaceName}" team's daily standup. The briefing covers the previous business day of automated ticket assignments.
+
+${toneGuidance}
+
+Hard rules:
+- Make the day come alive: highlight what went well, what went wrong, who carried the load, what categories caused friction, and what should be on the team's radar today.
+- The headline must be specific to today's data — never generic.
+- Reference real ticket categories, technician names, and ticket numbers from the supplied cases. Do NOT invent ids, names, or events that are not in the data.
+- Every ticket id you cite in highlights.supportingFreshserviceTicketIds MUST come from briefingInput.allowedSupportingFreshserviceTicketIds. Anything else will be discarded.
+- Stay scoped to the "${briefingInput.workspaceName}" workspace. Do not reference other workspaces.
+- Use the tool exactly once.`;
+
+    const userMessage = `Daily review dataset for the meeting briefing:\n\n${JSON.stringify(briefingInput, null, 2)}\n\nSubmit the briefing using the tool.`;
+
+    const llmModel = run.llmModel || 'claude-sonnet-4-6-20260217';
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model: llmModel,
+      max_tokens: 3000,
+      system: systemPrompt,
+      tools: [TOOL],
+      messages: [{ role: 'user', content: userMessage }],
+    });
+
+    const submission = response.content.find(
+      (block) => block.type === 'tool_use' && block.name === 'submit_meeting_briefing',
+    )?.input;
+
+    if (!submission) {
+      throw new Error('LLM did not return a structured meeting briefing');
+    }
+
+    // Defence-in-depth: same allow-list filtering pattern we use for the
+    // recommendation supporting-ids, applied to the briefing's highlight
+    // citations. Any ticket id outside the allow-list is dropped to prevent
+    // hallucinated cross-workspace references from leaking into the standup.
+    const cleanedHighlights = (submission.highlights || []).map((item) => {
+      const cleanedIds = Array.isArray(item.supportingFreshserviceTicketIds)
+        ? item.supportingFreshserviceTicketIds.filter((id) => allowedFreshserviceIds.has(Number(id)))
+        : [];
+      return { ...item, supportingFreshserviceTicketIds: cleanedIds };
+    });
+
+    const briefing = {
+      headline: String(submission.headline || '').trim(),
+      narrative: String(submission.narrative || '').trim(),
+      keyMetrics: Array.isArray(submission.keyMetrics) ? submission.keyMetrics : [],
+      highlights: cleanedHighlights,
+      talkingPoints: Array.isArray(submission.talkingPoints) ? submission.talkingPoints : [],
+      shoutouts: Array.isArray(submission.shoutouts) ? submission.shoutouts : [],
+      lookahead: String(submission.lookahead || '').trim(),
+      generatedAt: new Date().toISOString(),
+      tone,
+    };
+
+    const tokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+
+    const updated = await prisma.assignmentDailyReviewRun.update({
+      where: { id: runId },
+      data: {
+        meetingBriefing: briefing,
+        meetingBriefingGeneratedAt: new Date(),
+        meetingBriefingTokens: tokens,
+        meetingBriefingModel: llmModel,
+        meetingBriefingBy: actorEmail,
+      },
+    });
+
+    return {
+      briefing: updated.meetingBriefing,
+      generatedAt: updated.meetingBriefingGeneratedAt,
+      tokens: updated.meetingBriefingTokens,
+      model: updated.meetingBriefingModel,
+      generatedBy: updated.meetingBriefingBy,
+    };
+  }
+
   async cancelRun(id, workspaceId, cancelledBy = 'admin') {
     const run = await prisma.assignmentDailyReviewRun.findUnique({ where: { id } });
     if (!run) return null;
