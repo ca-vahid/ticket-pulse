@@ -200,6 +200,41 @@ router.post(
 );
 
 /**
+ * POST /api/sync/backfill-thread-entries
+ * Backfill persisted FreshService thread entries for recent tickets.
+ * Query params:
+ *   - limit=100
+ *   - daysToSync=14
+ *   - processAll=true
+ *   - refreshExisting=false
+ */
+router.post(
+  '/backfill-thread-entries',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const daysToSync = parseInt(req.query.daysToSync, 10) || 14;
+    const processAll = req.query.processAll === 'true';
+    const refreshExisting = req.query.refreshExisting === 'true';
+
+    logger.info(`Manual thread-entry backfill triggered (limit=${limit}, days=${daysToSync}, processAll=${processAll}, refreshExisting=${refreshExisting})`);
+
+    const result = await syncService.backfillThreadEntries({
+      limit,
+      daysToSync,
+      processAll,
+      refreshExisting,
+      workspaceId: req.workspaceId,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  }),
+);
+
+/**
  * POST /api/sync/reset
  * Force-stop a stuck sync — clears the in-memory running flag and marks all
  * open sync log entries as failed.  Safe to call at any time; if no sync is

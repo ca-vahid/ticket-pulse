@@ -8,6 +8,7 @@ import emailPollingService from './emailPollingService.js';
 import availabilityService from './availabilityService.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
 import assignmentRepository from './assignmentRepository.js';
+import assignmentDailyReviewService from './assignmentDailyReviewService.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -95,6 +96,15 @@ class ScheduledSyncService {
         } catch (error) {
           logger.error(`[${wsName}] Queue drain failed:`, error);
         }
+
+        try {
+          const reviewResult = await assignmentDailyReviewService.maybeRunScheduledReview(workspace);
+          if (reviewResult.triggered) {
+            logger.info(`[${wsName}] Scheduled daily review triggered`);
+          }
+        } catch (error) {
+          logger.error(`[${wsName}] Scheduled daily review check failed:`, error);
+        }
       },
       {
         scheduled: true,
@@ -133,6 +143,15 @@ class ScheduledSyncService {
             logger.info(`[${wsName}] Draining ${queuedCount} queued assignment run(s) after initial sync`);
             await assignmentPipelineService.drainQueuedRuns(wsId, 5);
           }
+        }
+
+        try {
+          const reviewResult = await assignmentDailyReviewService.maybeRunScheduledReview(workspace);
+          if (reviewResult.triggered) {
+            logger.info(`[${wsName}] Scheduled daily review triggered after initial sync`);
+          }
+        } catch (error) {
+          logger.error(`[${wsName}] Initial daily review check failed:`, error);
         }
       } catch (error) {
         logger.error(`[${wsName}] Initial sync failed:`, error);

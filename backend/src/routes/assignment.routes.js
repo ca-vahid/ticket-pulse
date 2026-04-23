@@ -8,6 +8,7 @@ import competencyPromptRepository from '../services/competencyPromptRepository.j
 import freshServiceActionService from '../services/freshServiceActionService.js';
 import competencyFeedbackService from '../services/competencyFeedbackService.js';
 import calibrationService from '../services/calibrationService.js';
+import assignmentDailyReviewService from '../services/assignmentDailyReviewService.js';
 import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
@@ -50,6 +51,10 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
       lastEmailCheckAt: null,
       autoCloseNoise: false,
       dryRunMode: true,
+      dailyReviewEnabled: false,
+      dailyReviewRunHour: 18,
+      dailyReviewRunMinute: 5,
+      dailyReviewLookbackDays: 14,
     },
     anthropicConfigured: anthropicService.isConfigured(),
     graphConfigured: graphMailClient.isConfigured(),
@@ -63,6 +68,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     recommendationPrompt, pollForUnassigned, pollMaxPerCycle,
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
     autoCloseNoise, dryRunMode, excludedGroupIds,
+    dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
   } = req.body;
 
   const data = {};
@@ -81,6 +87,10 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (emailPollingIntervalSec !== undefined) data.emailPollingIntervalSec = emailPollingIntervalSec;
   if (autoCloseNoise !== undefined) data.autoCloseNoise = autoCloseNoise;
   if (dryRunMode !== undefined) data.dryRunMode = dryRunMode;
+  if (dailyReviewEnabled !== undefined) data.dailyReviewEnabled = dailyReviewEnabled;
+  if (dailyReviewRunHour !== undefined) data.dailyReviewRunHour = Math.max(0, Math.min(23, parseInt(dailyReviewRunHour, 10) || 0));
+  if (dailyReviewRunMinute !== undefined) data.dailyReviewRunMinute = Math.max(0, Math.min(59, parseInt(dailyReviewRunMinute, 10) || 0));
+  if (dailyReviewLookbackDays !== undefined) data.dailyReviewLookbackDays = Math.max(1, Math.min(90, parseInt(dailyReviewLookbackDays, 10) || 14));
   if (excludedGroupIds !== undefined) {
     // Defensive normalization: accept array of numbers or numeric strings,
     // coerce to ints, dedupe. Postgres Int[] rejects non-int values.
@@ -1232,6 +1242,144 @@ router.get('/calibration/runs/:id', requireAdmin, asyncHandler(async (req, res) 
     return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
   }
   res.json({ success: true, data: run });
+}));
+
+// ─── Daily Review ────────────────────────────────────────────────────────
+
+router.post('/daily-review', requireAdmin, asyncHandler(async (req, res) => {
+  const { reviewDate, force } = req.body;
+  const stream = req.query.stream === 'true';
+  const triggeredBy = req.session?.user?.email || 'admin';
+
+  if (!stream) {
+    const result = await assignmentDailyReviewService.runReview(req.workspaceId, reviewDate, triggeredBy, {
+      triggerSource: 'manual',
+      force: !!force,
+    });
+    return res.json({ success: true, data: result });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  let clientDisconnected = false;
+  req.on('close', () => { clientDisconnected = true; clearInterval(heartbeat); });
+
+  const heartbeat = setInterval(() => {
+    if (clientDisconnected) return;
+    try { res.write(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`); } catch { /* client gone */ }
+  }, 15000);
+
+  await assignmentDailyReviewService.runReview(req.workspaceId, reviewDate, triggeredBy, {
+    triggerSource: 'manual',
+    force: !!force,
+    onEvent: (event) => {
+      if (clientDisconnected) return;
+      try {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      } catch { /* client gone */ }
+    },
+  });
+
+  clearInterval(heartbeat);
+  if (!clientDisconnected) {
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    res.end();
+  }
+}));
+
+router.get('/daily-review/runs', requireAdmin, asyncHandler(async (req, res) => {
+  const limit = parseInt(req.query.limit) || 20;
+  const offset = parseInt(req.query.offset) || 0;
+  const result = await assignmentDailyReviewService.getRuns(req.workspaceId, { limit, offset });
+  res.json({ success: true, ...result });
+}));
+
+router.get('/daily-review/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const run = await assignmentDailyReviewService.getRun(parseInt(req.params.id, 10));
+  if (!run) return res.status(404).json({ success: false, message: 'Daily review run not found' });
+  if (run.workspaceId !== req.workspaceId) {
+    return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+  }
+  res.json({ success: true, data: run });
+}));
+
+router.get('/daily-review/recommendations/weekly-rollup', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await assignmentDailyReviewService.getWeeklyRecommendationRollup(req.workspaceId, {
+    weekStart: req.query.weekStart,
+    status: req.query.status || 'approved',
+    kind: req.query.kind || 'all',
+  });
+  res.json({ success: true, data: result });
+}));
+
+router.get('/daily-review/recommendations', requireAdmin, asyncHandler(async (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 100;
+  const offset = parseInt(req.query.offset, 10) || 0;
+  const result = await assignmentDailyReviewService.listRecommendations(req.workspaceId, {
+    status: req.query.status,
+    kind: req.query.kind,
+    startDate: req.query.startDate,
+    endDate: req.query.endDate,
+    runId: req.query.runId,
+    limit,
+    offset,
+  });
+  res.json({ success: true, ...result });
+}));
+
+router.post('/daily-review/recommendations/bulk-status', requireAdmin, asyncHandler(async (req, res) => {
+  const { ids, status, reviewNotes } = req.body;
+  const result = await assignmentDailyReviewService.bulkUpdateRecommendations(req.workspaceId, {
+    ids,
+    status,
+    reviewNotes,
+    actorEmail: req.session?.user?.email || 'admin',
+  });
+  res.json({ success: true, data: result });
+}));
+
+router.post('/daily-review/recommendations/:id/status', requireAdmin, asyncHandler(async (req, res) => {
+  const recommendationId = parseInt(req.params.id, 10);
+  const { status, reviewNotes } = req.body;
+  const result = await assignmentDailyReviewService.updateRecommendation(recommendationId, req.workspaceId, {
+    status,
+    reviewNotes,
+    actorEmail: req.session?.user?.email || 'admin',
+  });
+  if (!result) {
+    return res.status(404).json({ success: false, message: 'Daily review recommendation not found' });
+  }
+  res.json({ success: true, data: result });
+}));
+
+router.post('/daily-review/runs/:id/cancel', requireAdmin, asyncHandler(async (req, res) => {
+  const runId = parseInt(req.params.id, 10);
+  const result = await assignmentDailyReviewService.cancelRun(runId, req.workspaceId, req.session?.user?.email || 'admin');
+  res.json({ success: true, data: result });
+}));
+
+router.post('/daily-review/runs/:id/rerun', requireAdmin, asyncHandler(async (req, res) => {
+  const existing = await assignmentDailyReviewService.getRun(parseInt(req.params.id, 10));
+  if (!existing) return res.status(404).json({ success: false, message: 'Daily review run not found' });
+  if (existing.workspaceId !== req.workspaceId) {
+    return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+  }
+
+  const reviewDate = existing.reviewDate instanceof Date
+    ? existing.reviewDate.toISOString().slice(0, 10)
+    : String(existing.reviewDate).slice(0, 10);
+  const result = await assignmentDailyReviewService.runReview(
+    req.workspaceId,
+    reviewDate,
+    req.session?.user?.email || 'admin',
+    { triggerSource: 'rerun', force: true },
+  );
+
+  res.json({ success: true, data: result });
 }));
 
 export default router;

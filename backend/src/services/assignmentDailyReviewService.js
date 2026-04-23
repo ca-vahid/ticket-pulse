@@ -1,0 +1,1705 @@
+import Anthropic from '@anthropic-ai/sdk';
+import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
+import prisma from './prisma.js';
+import logger from '../utils/logger.js';
+import appConfig from '../config/index.js';
+import availabilityService from './availabilityService.js';
+import promptRepository from './promptRepository.js';
+import ticketThreadRepository from './ticketThreadRepository.js';
+import settingsRepository from './settingsRepository.js';
+import {
+  DAILY_REVIEW_OUTCOMES,
+  DAILY_REVIEW_PRIMARY_TAGS,
+  classifyDailyReviewCase,
+  isClosedLikeStatus,
+} from './dailyReviewDefinitions.js';
+import { createFreshServiceClient } from '../integrations/freshservice.js';
+import { transformTicketThreadEntries } from '../integrations/freshserviceTransformer.js';
+
+const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
+const STALE_RUNNING_MS = 30 * 60 * 1000;
+const MAX_CASES_FOR_ANALYSIS = 15;
+const MAX_THREAD_EXCERPTS = 6;
+const RECOMMENDATION_KIND_CONFIG = [
+  { kind: 'prompt', field: 'promptRecommendations' },
+  { kind: 'process', field: 'processRecommendations' },
+  { kind: 'skill', field: 'skillRecommendations' },
+];
+const RECOMMENDATION_STATUSES = ['pending', 'approved', 'rejected', 'applied'];
+
+class DailyReviewCancelledError extends Error {
+  constructor(message = 'Daily review cancelled by user') {
+    super(message);
+    this.name = 'DailyReviewCancelledError';
+  }
+}
+
+function reviewDateKey(dateStr) {
+  return new Date(`${dateStr}T00:00:00.000Z`);
+}
+
+function truncate(text, max = 280) {
+  if (!text) return null;
+  const normalized = String(text).replace(/\s+/g, ' ').trim();
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}...` : normalized;
+}
+
+function toPct(part, whole) {
+  if (!whole) return 0;
+  return Math.round((part / whole) * 100);
+}
+
+function bucketCounts(items, getKey, limit = 5) {
+  const counts = new Map();
+  for (const item of items) {
+    const key = getKey(item);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, count }));
+}
+
+function toArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function addDaysUtc(date, days) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+class AssignmentDailyReviewService {
+  constructor() {
+    this.activeRunControllers = new Map();
+  }
+
+  _throwIfCancelled(signal) {
+    if (signal?.aborted) {
+      throw new DailyReviewCancelledError();
+    }
+  }
+
+  _isCancellationError(error) {
+    return error instanceof DailyReviewCancelledError
+      || error?.name === 'DailyReviewCancelledError'
+      || error?.name === 'APIUserAbortError';
+  }
+
+  _validateRecommendationStatus(status) {
+    if (!RECOMMENDATION_STATUSES.includes(status)) {
+      throw new Error(`Invalid recommendation status: ${status}`);
+    }
+  }
+
+  _validateRecommendationKind(kind) {
+    if (!['prompt', 'process', 'skill', 'all'].includes(kind)) {
+      throw new Error(`Invalid recommendation kind: ${kind}`);
+    }
+  }
+
+  _toRecommendationDto(row) {
+    return {
+      id: row.id,
+      runId: row.runId,
+      workspaceId: row.workspaceId,
+      reviewDate: row.reviewDate,
+      kind: row.kind,
+      ordinal: row.ordinal,
+      title: row.title,
+      severity: row.severity,
+      rationale: row.rationale,
+      suggestedAction: row.suggestedAction,
+      skillsAffected: toArray(row.skillsAffected),
+      supportingTicketIds: toArray(row.supportingTicketIds),
+      supportingFreshserviceTicketIds: toArray(row.supportingFreshserviceTicketIds),
+      status: row.status,
+      reviewNotes: row.reviewNotes,
+      reviewedBy: row.reviewedBy,
+      reviewedAt: row.reviewedAt,
+      appliedBy: row.appliedBy,
+      appliedAt: row.appliedAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      run: row.run ? {
+        id: row.run.id,
+        reviewDate: row.run.reviewDate,
+        triggeredBy: row.run.triggeredBy,
+        status: row.run.status,
+      } : undefined,
+    };
+  }
+
+  _buildRecommendationCreateData(run, recommendationGroups = {}) {
+    const reviewDate = run.reviewDate instanceof Date
+      ? run.reviewDate
+      : reviewDateKey(String(run.reviewDate).slice(0, 10));
+    const rows = [];
+
+    for (const { kind, field } of RECOMMENDATION_KIND_CONFIG) {
+      const items = toArray(recommendationGroups[field] ?? run[field]);
+      items.forEach((item, index) => {
+        rows.push({
+          workspaceId: run.workspaceId,
+          runId: run.id,
+          reviewDate,
+          kind,
+          ordinal: index,
+          title: String(item.title || `${kind} recommendation ${index + 1}`),
+          severity: String(item.severity || 'low'),
+          rationale: String(item.rationale || ''),
+          suggestedAction: String(item.suggestedAction || ''),
+          skillsAffected: toArray(item.skillsAffected),
+          supportingTicketIds: toArray(item.supportingTicketIds),
+          supportingFreshserviceTicketIds: toArray(item.supportingFreshserviceTicketIds),
+        });
+      });
+    }
+
+    return rows;
+  }
+
+  async _replaceRecommendationsForRun(tx, run, recommendationGroups = {}) {
+    const rows = this._buildRecommendationCreateData(run, recommendationGroups);
+    await tx.assignmentDailyReviewRecommendation.deleteMany({ where: { runId: run.id } });
+    if (rows.length > 0) {
+      await tx.assignmentDailyReviewRecommendation.createMany({ data: rows });
+    }
+  }
+
+  _groupRecommendations(rows = []) {
+    const grouped = {
+      promptRecommendations: [],
+      processRecommendations: [],
+      skillRecommendations: [],
+      recommendationStatusCounts: {
+        pending: 0,
+        approved: 0,
+        rejected: 0,
+        applied: 0,
+      },
+    };
+
+    for (const row of rows) {
+      const dto = this._toRecommendationDto(row);
+      if (dto.kind === 'prompt') grouped.promptRecommendations.push(dto);
+      if (dto.kind === 'process') grouped.processRecommendations.push(dto);
+      if (dto.kind === 'skill') grouped.skillRecommendations.push(dto);
+      if (grouped.recommendationStatusCounts[dto.status] !== undefined) {
+        grouped.recommendationStatusCounts[dto.status] += 1;
+      }
+    }
+
+    return grouped;
+  }
+
+  async _ensureRecommendationRowsForRuns(workspaceId, runs = []) {
+    for (const run of runs) {
+      if (!run || run.workspaceId !== workspaceId) continue;
+      const existingCount = await prisma.assignmentDailyReviewRecommendation.count({
+        where: { runId: run.id },
+      });
+      if (existingCount > 0) continue;
+
+      const rows = this._buildRecommendationCreateData(run);
+      if (rows.length === 0) continue;
+
+      await prisma.assignmentDailyReviewRecommendation.createMany({ data: rows });
+    }
+  }
+
+  async _ensureRecommendationRowsForWorkspace(workspaceId, { startDate, endDate } = {}) {
+    const where = {
+      workspaceId,
+      status: 'completed',
+    };
+
+    if (startDate || endDate) {
+      where.reviewDate = {};
+      if (startDate) where.reviewDate.gte = reviewDateKey(startDate);
+      if (endDate) where.reviewDate.lte = reviewDateKey(endDate);
+    }
+
+    const runs = await prisma.assignmentDailyReviewRun.findMany({
+      where,
+      select: {
+        id: true,
+        workspaceId: true,
+        reviewDate: true,
+        promptRecommendations: true,
+        processRecommendations: true,
+        skillRecommendations: true,
+      },
+      orderBy: { reviewDate: 'desc' },
+      take: 500,
+    });
+
+    await this._ensureRecommendationRowsForRuns(workspaceId, runs);
+  }
+
+  async _markStaleRunsFailed() {
+    const staleBefore = new Date(Date.now() - STALE_RUNNING_MS);
+    await prisma.assignmentDailyReviewRun.updateMany({
+      where: {
+        status: { in: ACTIVE_STATUSES },
+        updatedAt: { lt: staleBefore },
+      },
+      data: {
+        status: 'failed',
+        errorMessage: 'Marked stale after 30 minutes without progress',
+        completedAt: new Date(),
+      },
+    });
+  }
+
+  async _getWorkspaceContext(workspaceId) {
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: {
+        id: true,
+        name: true,
+        defaultTimezone: true,
+      },
+    });
+
+    if (!workspace) {
+      throw new Error(`Workspace ${workspaceId} not found`);
+    }
+
+    const config = await prisma.assignmentConfig.findUnique({
+      where: { workspaceId },
+      select: {
+        llmModel: true,
+        dailyReviewEnabled: true,
+        dailyReviewRunHour: true,
+        dailyReviewRunMinute: true,
+        dailyReviewLookbackDays: true,
+      },
+    });
+
+    return {
+      workspace,
+      config,
+      timezone: workspace.defaultTimezone || 'America/Los_Angeles',
+    };
+  }
+
+  async _getBusinessDayRange(workspaceId, dateStr, timezone) {
+    const reference = new Date(`${dateStr}T12:00:00.000Z`);
+    const zoned = toZonedTime(reference, timezone);
+    const dayOfWeek = zoned.getDay();
+    const hours = await availabilityService.getBusinessHours(workspaceId);
+    const dayConfig = hours.find((entry) => entry.dayOfWeek === dayOfWeek && entry.isEnabled);
+
+    const startTime = dayConfig?.startTime || '00:00';
+    const endTime = dayConfig?.endTime || '23:59';
+    const startIso = formatInTimeZone(reference, timezone, `yyyy-MM-dd'T'${startTime}:00XXX`);
+    const endSuffix = endTime === '23:59' ? ':59.999' : ':00.000';
+    const endIso = formatInTimeZone(reference, timezone, `yyyy-MM-dd'T'${endTime}${endSuffix}XXX`);
+
+    return {
+      start: new Date(startIso),
+      end: new Date(endIso),
+      startTime,
+      endTime,
+      isBusinessDay: !!dayConfig,
+      localDate: dateStr,
+    };
+  }
+
+  async _hydrateMissingThreads(workspaceId, tickets = [], options = {}) {
+    this._throwIfCancelled(options.signal);
+    const missing = tickets.filter((ticket) => (ticket?._count?.threadEntries || 0) === 0);
+    const emitProgress = (payload) => {
+      try { options.onProgress?.(payload); } catch { /* ignore progress errors */ }
+    };
+    if (missing.length === 0) {
+      emitProgress({
+        processed: 0,
+        total: 0,
+        hydrated: 0,
+        failed: 0,
+        message: 'Thread history already exists locally for all tickets in this review.',
+      });
+      return { hydrated: 0, warnings: [] };
+    }
+
+    const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+    if (!fsConfig?.domain || !fsConfig?.apiKey) {
+      return {
+        hydrated: 0,
+        warnings: ['FreshService is not configured, so missing ticket threads could not be hydrated.'],
+      };
+    }
+
+    const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+    let hydrated = 0;
+    let failed = 0;
+    const warnings = [];
+
+    emitProgress({
+      processed: 0,
+      total: missing.length,
+      hydrated: 0,
+      failed: 0,
+      message: `Hydrating missing FreshService thread history for ${missing.length} ticket(s).`,
+    });
+
+    for (let index = 0; index < missing.length; index += 1) {
+      this._throwIfCancelled(options.signal);
+      const ticket = missing[index];
+      try {
+        const activities = await client.fetchTicketActivities(Number(ticket.freshserviceTicketId));
+        this._throwIfCancelled(options.signal);
+        if (!activities?.length) continue;
+        const entries = transformTicketThreadEntries(activities, {
+          ticketId: ticket.id,
+          workspaceId,
+        });
+        await ticketThreadRepository.bulkUpsert(entries);
+        this._throwIfCancelled(options.signal);
+        hydrated++;
+      } catch (error) {
+        if (this._isCancellationError(error)) throw error;
+        failed++;
+        warnings.push(`Could not hydrate thread data for ticket #${ticket.freshserviceTicketId}: ${error.message}`);
+      } finally {
+        const processed = index + 1;
+        if (processed === 1 || processed === missing.length || processed % 5 === 0) {
+          emitProgress({
+            processed,
+            total: missing.length,
+            hydrated,
+            failed,
+            message: `Hydrating FreshService thread history (${processed}/${missing.length})...`,
+          });
+        }
+      }
+    }
+
+    return { hydrated, warnings };
+  }
+
+  _buildThreadExcerptMap(entries = []) {
+    const byTicketId = new Map();
+    for (const entry of entries) {
+      if (!byTicketId.has(entry.ticketId)) byTicketId.set(entry.ticketId, []);
+      const excerptText = truncate(entry.bodyText || entry.content || entry.title, 220);
+      if (!excerptText) continue;
+      const current = byTicketId.get(entry.ticketId);
+      if (current.length >= MAX_THREAD_EXCERPTS) continue;
+      current.push({
+        id: entry.id,
+        eventType: entry.eventType,
+        visibility: entry.visibility,
+        actorName: entry.actorName || null,
+        occurredAt: entry.occurredAt,
+        excerpt: excerptText,
+      });
+    }
+    return byTicketId;
+  }
+
+  _buildAssignmentActionMap(assignments = []) {
+    const byTicketId = new Map();
+    for (const item of assignments) {
+      if (!byTicketId.has(item.ticketId)) byTicketId.set(item.ticketId, []);
+      byTicketId.get(item.ticketId).push(item);
+    }
+    return byTicketId;
+  }
+
+  _buildEpisodeMap(episodes = []) {
+    const byTicketId = new Map();
+    for (const item of episodes) {
+      if (!byTicketId.has(item.ticketId)) byTicketId.set(item.ticketId, []);
+      byTicketId.get(item.ticketId).push(item);
+    }
+    return byTicketId;
+  }
+
+  _summarizeCase(caseItem) {
+    const parts = [];
+    if (caseItem.category) parts.push(`Category: ${caseItem.category}`);
+    if (caseItem.topRecommendation?.techName) parts.push(`Top rec: ${caseItem.topRecommendation.techName}`);
+    if (caseItem.finalAssignee?.name) parts.push(`Final assignee: ${caseItem.finalAssignee.name}`);
+    if (caseItem.overrideReason) parts.push(`Override: ${truncate(caseItem.overrideReason, 180)}`);
+    if (caseItem.decisionNote) parts.push(`Decision note: ${truncate(caseItem.decisionNote, 180)}`);
+    if (caseItem.threadExcerpts?.length) {
+      parts.push(`Thread: ${caseItem.threadExcerpts.map((excerpt) => excerpt.excerpt).join(' | ')}`);
+    }
+    return parts.join(' | ');
+  }
+
+  async collectDailyDataset(workspaceId, reviewDate, options = {}) {
+    const emitProgress = (message, extra = {}) => {
+      try {
+        options.onProgress?.({
+          phase: 'collecting',
+          message,
+          ...extra,
+        });
+      } catch {
+        /* ignore progress errors */
+      }
+    };
+    const throwIfCancelled = () => this._throwIfCancelled(options.signal);
+
+    const { workspace, config, timezone } = await this._getWorkspaceContext(workspaceId);
+    const dateStr = reviewDate || formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd');
+    const range = await this._getBusinessDayRange(workspaceId, dateStr, timezone);
+    throwIfCancelled();
+
+    emitProgress(
+      `Reviewing ${workspace.name} for ${dateStr} in ${timezone} (${range.startTime}-${range.endTime}).`,
+      {
+        percent: 8,
+        stats: {
+          workspaceName: workspace.name,
+          reviewDate: dateStr,
+          timezone,
+          rangeStart: range.start.toISOString(),
+          rangeEnd: range.end.toISOString(),
+        },
+      },
+    );
+
+    const runWhere = {
+      workspaceId,
+      status: { notIn: ['skipped_stale', 'superseded'] },
+      OR: [
+        { createdAt: { gte: range.start, lte: range.end } },
+        { decidedAt: { gte: range.start, lte: range.end } },
+      ],
+    };
+
+    emitProgress('Loading pipeline runs from the review window...', {
+      percent: 18,
+    });
+
+    const runs = await prisma.assignmentPipelineRun.findMany({
+      where: runWhere,
+      include: {
+        assignedTech: { select: { id: true, name: true, email: true } },
+        promptVersion: { select: { id: true, version: true } },
+        ticket: {
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            subject: true,
+            category: true,
+            ticketCategory: true,
+            status: true,
+            priority: true,
+            createdAt: true,
+            updatedAt: true,
+            resolvedAt: true,
+            closedAt: true,
+            rejectionCount: true,
+            assignedTechId: true,
+            assignedTech: { select: { id: true, name: true, email: true } },
+            requester: { select: { id: true, name: true, email: true } },
+            _count: { select: { threadEntries: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    throwIfCancelled();
+
+    emitProgress('Loading direct FreshService assignments that bypassed the pipeline...', {
+      percent: 26,
+    });
+
+    const bypassTickets = await prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        createdAt: { gte: range.start, lte: range.end },
+        assignedTechId: { not: null },
+        pipelineRuns: {
+          none: {
+            OR: [
+              { createdAt: { gte: range.start, lte: range.end } },
+              { decidedAt: { gte: range.start, lte: range.end } },
+            ],
+          },
+        },
+      },
+      select: {
+        id: true,
+        freshserviceTicketId: true,
+        subject: true,
+        category: true,
+        ticketCategory: true,
+        status: true,
+        priority: true,
+        createdAt: true,
+        updatedAt: true,
+        resolvedAt: true,
+        closedAt: true,
+        rejectionCount: true,
+        assignedTechId: true,
+        assignedTech: { select: { id: true, name: true, email: true } },
+        requester: { select: { id: true, name: true, email: true } },
+        _count: { select: { threadEntries: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    throwIfCancelled();
+
+    emitProgress(
+      `Loaded ${runs.length} pipeline run(s) and ${bypassTickets.length} direct FreshService assignment(s).`,
+      {
+        percent: 34,
+        stats: {
+          pipelineRuns: runs.length,
+          bypassedTickets: bypassTickets.length,
+        },
+      },
+    );
+
+    const ticketsForHydration = [
+      ...runs.map((run) => run.ticket).filter(Boolean),
+      ...bypassTickets,
+    ];
+
+    const missingThreadCount = ticketsForHydration.filter((ticket) => (ticket?._count?.threadEntries || 0) === 0).length;
+    emitProgress(
+      missingThreadCount > 0
+        ? `Checking local thread history for ${ticketsForHydration.length} ticket(s); ${missingThreadCount} need FreshService hydration.`
+        : `Checking local thread history for ${ticketsForHydration.length} ticket(s); all thread history is already available locally.`,
+      {
+        percent: 42,
+        stats: {
+          candidateTickets: ticketsForHydration.length,
+          ticketsNeedingThreadHydration: missingThreadCount,
+        },
+      },
+    );
+
+    const hydration = await this._hydrateMissingThreads(workspaceId, ticketsForHydration, {
+      signal: options.signal,
+      onProgress: ({ processed, total, hydrated, failed, message }) => {
+        emitProgress(message, {
+          percent: total > 0 ? Math.min(68, 42 + Math.floor((processed / total) * 26)) : 68,
+          stats: {
+            ticketsNeedingThreadHydration: total,
+            threadHydrationProcessed: processed,
+            threadsHydrated: hydrated,
+            threadHydrationFailures: failed,
+          },
+        });
+      },
+    });
+    throwIfCancelled();
+
+    emitProgress(
+      `Thread history ready. Hydrated ${hydration.hydrated} ticket(s) with ${hydration.warnings.length} warning(s).`,
+      {
+        percent: 70,
+        stats: {
+          threadsHydrated: hydration.hydrated,
+          threadHydrationWarnings: hydration.warnings.length,
+        },
+      },
+    );
+
+    const ticketIds = Array.from(new Set(ticketsForHydration.map((ticket) => ticket.id)));
+    emitProgress('Loading assignment episodes, assignment actions, and thread excerpts...', {
+      percent: 78,
+      stats: {
+        ticketIds: ticketIds.length,
+      },
+    });
+    const [episodes, assignments, threadEntries, competencyCategories] = await Promise.all([
+      prisma.ticketAssignmentEpisode.findMany({
+        where: { ticketId: { in: ticketIds } },
+        include: { technician: { select: { id: true, name: true } } },
+        orderBy: { startedAt: 'asc' },
+      }),
+      prisma.ticketAssignment.findMany({
+        where: {
+          workspaceId,
+          ticketId: { in: ticketIds },
+          createdAt: { lte: range.end },
+        },
+        include: { assignedTo: { select: { id: true, name: true } } },
+        orderBy: { createdAt: 'asc' },
+      }),
+      ticketThreadRepository.listForTickets(ticketIds, { end: range.end }),
+      prisma.competencyCategory.findMany({
+        where: { workspaceId, isActive: true },
+        select: { id: true, name: true, description: true },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+    throwIfCancelled();
+
+    emitProgress(
+      `Loaded ${episodes.length} assignment episode(s), ${assignments.length} assignment action(s), and ${threadEntries.length} thread excerpt record(s).`,
+      {
+        percent: 88,
+        stats: {
+          episodes: episodes.length,
+          assignmentActions: assignments.length,
+          threadEntries: threadEntries.length,
+          competencyCategories: competencyCategories.length,
+        },
+      },
+    );
+
+    const episodesByTicket = this._buildEpisodeMap(episodes);
+    const assignmentsByTicket = this._buildAssignmentActionMap(assignments);
+    const threadByTicket = this._buildThreadExcerptMap(threadEntries);
+
+    const runCases = runs.map((run) => {
+      const recs = run.recommendation?.recommendations || [];
+      const ticket = run.ticket;
+      const ticketEpisodes = episodesByTicket.get(ticket.id) || [];
+      const hasRebound = ticketEpisodes.some((episode) => episode.endMethod === 'rejected')
+        || ['rebound', 'rebound_exhausted'].includes(run.triggerSource);
+      const classification = classifyDailyReviewCase({
+        finalTechId: ticket.assignedTechId,
+        recommendationPoolIds: recs.map((rec) => rec.techId),
+        topRecommendationId: recs[0]?.techId || null,
+        hasRebound,
+        isPendingReview: run.decision === 'pending_review',
+      });
+
+      const tags = [...classification.tags];
+      if (!isClosedLikeStatus(ticket.status)) {
+        tags.push(DAILY_REVIEW_PRIMARY_TAGS.stillOpen);
+      }
+
+      return {
+        type: 'pipeline',
+        runId: run.id,
+        ticketId: ticket.id,
+        freshserviceTicketId: ticket.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null,
+        subject: ticket.subject || '(no subject)',
+        category: ticket.ticketCategory || ticket.category || null,
+        priority: ticket.priority,
+        status: ticket.status,
+        triggerSource: run.triggerSource,
+        decision: run.decision,
+        outcome: classification.outcome,
+        primaryTag: classification.primaryTag,
+        tags: Array.from(new Set(tags)),
+        topRecommendation: recs[0]
+          ? {
+            techId: recs[0].techId,
+            techName: recs[0].techName || null,
+            score: recs[0].score ?? null,
+          }
+          : null,
+        recommendationPool: recs.slice(0, 5).map((rec) => ({
+          techId: rec.techId,
+          techName: rec.techName || null,
+          score: rec.score ?? null,
+        })),
+        pipelineAssignedTech: run.assignedTech
+          ? { id: run.assignedTech.id, name: run.assignedTech.name }
+          : null,
+        finalAssignee: ticket.assignedTech
+          ? { id: ticket.assignedTech.id, name: ticket.assignedTech.name }
+          : null,
+        changedFromTopRecommendation: !!(
+          recs[0]?.techId
+          && ticket.assignedTechId
+          && recs[0].techId !== ticket.assignedTechId
+        ),
+        handledInFreshService: run.decision === 'pending_review' && !!ticket.assignedTechId,
+        overrideReason: run.overrideReason || null,
+        decisionNote: run.decisionNote || null,
+        decidedAt: run.decidedAt,
+        decidedByEmail: run.decidedByEmail,
+        promptVersion: run.promptVersion
+          ? { id: run.promptVersion.id, version: run.promptVersion.version }
+          : null,
+        rejectionCount: ticket.rejectionCount || 0,
+        ticketCreatedAt: ticket.createdAt,
+        resolvedAt: ticket.resolvedAt,
+        closedAt: ticket.closedAt,
+        requester: ticket.requester,
+        episodeSummary: ticketEpisodes.map((episode) => ({
+          technicianId: episode.technicianId,
+          technicianName: episode.technician?.name || null,
+          startedAt: episode.startedAt,
+          endedAt: episode.endedAt,
+          startMethod: episode.startMethod,
+          endMethod: episode.endMethod,
+          endActorName: episode.endActorName,
+        })),
+        assignmentActions: (assignmentsByTicket.get(ticket.id) || []).slice(-5).map((item) => ({
+          id: item.id,
+          source: item.source,
+          assignedToId: item.assignedToId,
+          assignedToName: item.assignedTo?.name || null,
+          assignedByEmail: item.assignedByEmail,
+          createdAt: item.createdAt,
+          note: item.note,
+        })),
+        threadExcerpts: threadByTicket.get(ticket.id) || [],
+      };
+    });
+
+    const bypassCases = bypassTickets.map((ticket) => {
+      const tags = [DAILY_REVIEW_PRIMARY_TAGS.pipelineBypassed];
+      if (!isClosedLikeStatus(ticket.status)) tags.push(DAILY_REVIEW_PRIMARY_TAGS.stillOpen);
+      return {
+        type: 'pipeline_bypass',
+        runId: null,
+        ticketId: ticket.id,
+        freshserviceTicketId: ticket.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null,
+        subject: ticket.subject || '(no subject)',
+        category: ticket.ticketCategory || ticket.category || null,
+        priority: ticket.priority,
+        status: ticket.status,
+        triggerSource: 'freshservice_only',
+        decision: 'pipeline_bypassed',
+        outcome: DAILY_REVIEW_OUTCOMES.failure,
+        primaryTag: DAILY_REVIEW_PRIMARY_TAGS.pipelineBypassed,
+        tags,
+        topRecommendation: null,
+        recommendationPool: [],
+        pipelineAssignedTech: null,
+        finalAssignee: ticket.assignedTech
+          ? { id: ticket.assignedTech.id, name: ticket.assignedTech.name }
+          : null,
+        changedFromTopRecommendation: false,
+        handledInFreshService: true,
+        overrideReason: null,
+        decisionNote: null,
+        decidedAt: null,
+        decidedByEmail: null,
+        promptVersion: null,
+        rejectionCount: ticket.rejectionCount || 0,
+        ticketCreatedAt: ticket.createdAt,
+        resolvedAt: ticket.resolvedAt,
+        closedAt: ticket.closedAt,
+        requester: ticket.requester,
+        episodeSummary: (episodesByTicket.get(ticket.id) || []).map((episode) => ({
+          technicianId: episode.technicianId,
+          technicianName: episode.technician?.name || null,
+          startedAt: episode.startedAt,
+          endedAt: episode.endedAt,
+          startMethod: episode.startMethod,
+          endMethod: episode.endMethod,
+          endActorName: episode.endActorName,
+        })),
+        assignmentActions: (assignmentsByTicket.get(ticket.id) || []).slice(-5).map((item) => ({
+          id: item.id,
+          source: item.source,
+          assignedToId: item.assignedToId,
+          assignedToName: item.assignedTo?.name || null,
+          assignedByEmail: item.assignedByEmail,
+          createdAt: item.createdAt,
+          note: item.note,
+        })),
+        threadExcerpts: threadByTicket.get(ticket.id) || [],
+      };
+    });
+
+    const allCases = [...runCases, ...bypassCases];
+    const pipelineCases = runCases.filter((item) => item.type === 'pipeline');
+    const consideredCases = pipelineCases.filter((item) => item.primaryTag !== DAILY_REVIEW_PRIMARY_TAGS.awaitingReview);
+    const uniqueReviewedTicketIds = Array.from(new Set(allCases.map((item) => item.ticketId)));
+    const uniqueReboundedTicketIds = Array.from(new Set(
+      allCases
+        .filter((item) => item.tags.includes(DAILY_REVIEW_PRIMARY_TAGS.rebounded))
+        .map((item) => item.ticketId),
+    ));
+    throwIfCancelled();
+
+    emitProgress(`Built ${allCases.length} review case(s); summarizing daily metrics...`, {
+      percent: 95,
+      stats: {
+        totalCases: allCases.length,
+        pipelineCases: pipelineCases.length,
+        consideredCases: consideredCases.length,
+      },
+    });
+
+    const summaryMetrics = {
+      reviewDate: dateStr,
+      workspaceName: workspace.name,
+      timezone,
+      reviewWindow: {
+        start: range.start.toISOString(),
+        end: range.end.toISOString(),
+        localDate: range.localDate,
+        startTime: range.startTime,
+        endTime: range.endTime,
+        isBusinessDay: range.isBusinessDay,
+      },
+      definitions: {
+        cohortAnchor: 'Tickets with assignment pipeline activity during the selected workspace business day, plus tickets created that day that were assigned directly in FreshService without a pipeline run.',
+        success: 'Top recommendation stayed the final assignee by review time and the ticket did not rebound.',
+        partialSuccess: 'The final assignee was in the recommendation pool, but not the top recommendation.',
+        failure: 'The final assignee was outside the recommendation pool, the ticket rebounded, or the pipeline was bypassed.',
+        unresolved: 'The ticket is still awaiting review, missing a recommendation, or lacks enough final assignment evidence yet.',
+        rebounds: 'Unique tickets that rebounded at least once during the review cohort. Multiple rebounds on the same ticket count once.',
+      },
+      totals: {
+        pipelineRuns: runs.length,
+        bypassedTickets: bypassCases.length,
+        totalTicketsReviewed: allCases.length,
+        distinctTicketsReviewed: uniqueReviewedTicketIds.length,
+        autoAssigned: pipelineCases.filter((item) => item.decision === 'auto_assigned').length,
+        approved: pipelineCases.filter((item) => item.decision === 'approved').length,
+        modified: pipelineCases.filter((item) => item.decision === 'modified').length,
+        rejected: pipelineCases.filter((item) => item.decision === 'rejected').length,
+        pendingReview: pipelineCases.filter((item) => item.decision === 'pending_review').length,
+        handledInFreshService: pipelineCases.filter((item) => item.handledInFreshService).length,
+        success: consideredCases.filter((item) => item.outcome === DAILY_REVIEW_OUTCOMES.success).length,
+        partialSuccess: consideredCases.filter((item) => item.outcome === DAILY_REVIEW_OUTCOMES.partialSuccess).length,
+        failure: allCases.filter((item) => item.outcome === DAILY_REVIEW_OUTCOMES.failure).length,
+        unresolved: allCases.filter((item) => item.outcome === DAILY_REVIEW_OUTCOMES.unresolved).length,
+        rebounds: uniqueReboundedTicketIds.length,
+        stillOpen: allCases.filter((item) => !isClosedLikeStatus(item.status)).length,
+        resolvedOrClosed: allCases.filter((item) => isClosedLikeStatus(item.status)).length,
+      },
+      rates: {},
+      topCategories: bucketCounts(
+        allCases.filter((item) =>
+          item.outcome === DAILY_REVIEW_OUTCOMES.failure
+          || item.decision === 'modified'
+          || item.decision === 'rejected',
+        ),
+        (item) => item.category || 'Uncategorized',
+      ),
+      topTechnicians: bucketCounts(
+        allCases.filter((item) => item.changedFromTopRecommendation || item.tags.includes(DAILY_REVIEW_PRIMARY_TAGS.rebounded)),
+        (item) => item.finalAssignee?.name || item.pipelineAssignedTech?.name || null,
+      ),
+      competencyCategories: competencyCategories.map((item) => item.name),
+    };
+
+    const denominator = Math.max(consideredCases.length, 1);
+    summaryMetrics.rates = {
+      successRate: toPct(summaryMetrics.totals.success, denominator),
+      partialSuccessRate: toPct(summaryMetrics.totals.partialSuccess, denominator),
+      failureRate: toPct(summaryMetrics.totals.failure, allCases.length || 1),
+      rejectionRate: toPct(
+        pipelineCases.filter((item) => item.decision === 'rejected').length,
+        Math.max(pipelineCases.length, 1),
+      ),
+      reboundRate: toPct(summaryMetrics.totals.rebounds, Math.max(uniqueReviewedTicketIds.length, 1)),
+    };
+
+    const warnings = [...hydration.warnings];
+    if (hydration.hydrated > 0) {
+      warnings.push(`Hydrated missing FreshService thread history for ${hydration.hydrated} ticket(s) during this review run.`);
+    }
+
+    emitProgress(`Collection complete: ${summaryMetrics.totals.totalTicketsReviewed} ticket(s) are ready for analysis.`, {
+      percent: 100,
+      stats: {
+        totalTicketsReviewed: summaryMetrics.totals.totalTicketsReviewed,
+        success: summaryMetrics.totals.success,
+        failure: summaryMetrics.totals.failure,
+        unresolved: summaryMetrics.totals.unresolved,
+      },
+    });
+
+    return {
+      workspaceId,
+      workspaceName: workspace.name,
+      timezone,
+      reviewDate: dateStr,
+      range,
+      config,
+      summaryMetrics,
+      cases: allCases,
+      warnings,
+      analyzedTicketIds: allCases.map((item) => item.ticketId),
+      competencyCategories,
+    };
+  }
+
+  _buildHeuristicRecommendations(dataset) {
+    const promptRecommendations = [];
+    const processRecommendations = [];
+    const skillRecommendations = [];
+
+    const failureCases = dataset.cases.filter((item) => item.outcome === DAILY_REVIEW_OUTCOMES.failure);
+    const outsidePoolCases = failureCases.filter((item) => item.primaryTag === DAILY_REVIEW_PRIMARY_TAGS.rejectedReassigned);
+    const reboundCases = failureCases.filter((item) => item.primaryTag === DAILY_REVIEW_PRIMARY_TAGS.rebounded);
+
+    if (outsidePoolCases.length >= 2) {
+      promptRecommendations.push({
+        title: 'Tighten reasoning around override patterns',
+        severity: outsidePoolCases.length >= 4 ? 'high' : 'medium',
+        rationale: 'Multiple tickets finished with a technician outside the recommendation pool, which suggests the prompt is missing an operational signal the reviewers are using.',
+        suggestedAction: 'Review these tickets and add explicit prompt guidance for the missing routing factors, especially around category interpretation and when to trust historical ownership over the immediate recommendation.',
+        supportingTicketIds: outsidePoolCases.slice(0, 5).map((item) => item.ticketId),
+        supportingFreshserviceTicketIds: outsidePoolCases.slice(0, 5).map((item) => item.freshserviceTicketId),
+      });
+    }
+
+    if (reboundCases.length > 0) {
+      processRecommendations.push({
+        title: 'Audit rebound handling and rejection follow-up',
+        severity: reboundCases.length >= 3 ? 'high' : 'medium',
+        rationale: 'Tickets rebounded after assignment, which indicates the system is still routing some tickets to agents who will not keep ownership.',
+        suggestedAction: 'Review rejection notes, group routing, and rebound guardrails. Consider earlier manual review for similar tickets or stronger exclusion logic for recently rejected technician-ticket pairs.',
+        supportingTicketIds: reboundCases.slice(0, 5).map((item) => item.ticketId),
+        supportingFreshserviceTicketIds: reboundCases.slice(0, 5).map((item) => item.freshserviceTicketId),
+      });
+    }
+
+    const topCategory = dataset.summaryMetrics.topCategories[0];
+    if (topCategory && topCategory.name && topCategory.name !== 'Uncategorized') {
+      skillRecommendations.push({
+        title: `Review skill coverage for ${topCategory.name}`,
+        severity: topCategory.count >= 3 ? 'high' : 'medium',
+        rationale: 'The highest-friction category from this review day likely needs cleaner competency coverage or better normalization in the skill matrix.',
+        suggestedAction: `Check whether "${topCategory.name}" should be added, split, merged, or mapped more explicitly to one or more technician competencies.`,
+        supportingTicketIds: dataset.cases
+          .filter((item) => item.category === topCategory.name)
+          .slice(0, 5)
+          .map((item) => item.ticketId),
+        supportingFreshserviceTicketIds: dataset.cases
+          .filter((item) => item.category === topCategory.name)
+          .slice(0, 5)
+          .map((item) => item.freshserviceTicketId),
+      });
+    }
+
+    if (dataset.summaryMetrics.totals.bypassedTickets > 0) {
+      processRecommendations.push({
+        title: 'Investigate pipeline bypass tickets',
+        severity: dataset.summaryMetrics.totals.bypassedTickets >= 3 ? 'high' : 'medium',
+        rationale: 'Some tickets were assigned in FreshService without a pipeline run, which reduces the review loop quality and weakens training data.',
+        suggestedAction: 'Check poll timing, webhook coverage, and manual assignment timing to reduce untracked same-day ownership changes.',
+        supportingTicketIds: dataset.cases
+          .filter((item) => item.primaryTag === DAILY_REVIEW_PRIMARY_TAGS.pipelineBypassed)
+          .slice(0, 5)
+          .map((item) => item.ticketId),
+        supportingFreshserviceTicketIds: dataset.cases
+          .filter((item) => item.primaryTag === DAILY_REVIEW_PRIMARY_TAGS.pipelineBypassed)
+          .slice(0, 5)
+          .map((item) => item.freshserviceTicketId),
+      });
+    }
+
+    return {
+      executiveSummary: `Reviewed ${dataset.summaryMetrics.totals.totalTicketsReviewed} ticket(s) for ${dataset.reviewDate}. Success rate was ${dataset.summaryMetrics.rates.successRate}% with ${dataset.summaryMetrics.totals.failure} failure-classified case(s) and ${dataset.summaryMetrics.totals.rebounds} rebound(s).`,
+      promptRecommendations,
+      processRecommendations,
+      skillRecommendations,
+      warnings: ['Used heuristic recommendations because LLM analysis was unavailable.'],
+      transcript: '',
+      totalTokensUsed: 0,
+    };
+  }
+
+  async _analyzeDataset(workspaceId, dataset, llmModel, options = {}) {
+    this._throwIfCancelled(options.signal);
+    const apiKey = appConfig.anthropic.apiKey;
+    if (!apiKey) {
+      return this._buildHeuristicRecommendations(dataset);
+    }
+
+    try {
+      this._throwIfCancelled(options.signal);
+      const publishedPrompt = await promptRepository.getPublished(workspaceId);
+      const analysisInput = {
+        reviewDate: dataset.reviewDate,
+        workspaceName: dataset.workspaceName,
+        timezone: dataset.timezone,
+        summary: dataset.summaryMetrics,
+        cases: dataset.cases
+          .filter((item) => item.outcome === DAILY_REVIEW_OUTCOMES.failure || item.outcome === DAILY_REVIEW_OUTCOMES.partialSuccess)
+          .slice(0, MAX_CASES_FOR_ANALYSIS)
+          .map((item) => ({
+            ticketId: item.ticketId,
+            freshserviceTicketId: item.freshserviceTicketId,
+            subject: item.subject,
+            category: item.category,
+            outcome: item.outcome,
+            primaryTag: item.primaryTag,
+            decision: item.decision,
+            summary: this._summarizeCase(item),
+          })),
+        competencyCategories: dataset.competencyCategories.map((item) => item.name),
+        currentPromptVersion: publishedPrompt?.version || null,
+      };
+
+      const TOOL = {
+        name: 'submit_daily_review_findings',
+        description: 'Submit the final daily review findings. You must call this tool exactly once.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            executiveSummary: { type: 'string' },
+            promptRecommendations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+                  rationale: { type: 'string' },
+                  suggestedAction: { type: 'string' },
+                  supportingTicketIds: { type: 'array', items: { type: 'integer' } },
+                  supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
+                },
+                required: ['title', 'severity', 'rationale', 'suggestedAction'],
+              },
+            },
+            processRecommendations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+                  rationale: { type: 'string' },
+                  suggestedAction: { type: 'string' },
+                  supportingTicketIds: { type: 'array', items: { type: 'integer' } },
+                  supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
+                },
+                required: ['title', 'severity', 'rationale', 'suggestedAction'],
+              },
+            },
+            skillRecommendations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+                  rationale: { type: 'string' },
+                  suggestedAction: { type: 'string' },
+                  skillsAffected: { type: 'array', items: { type: 'string' } },
+                  supportingTicketIds: { type: 'array', items: { type: 'integer' } },
+                  supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
+                },
+                required: ['title', 'severity', 'rationale', 'suggestedAction'],
+              },
+            },
+            warnings: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
+          required: [
+            'executiveSummary',
+            'promptRecommendations',
+            'processRecommendations',
+            'skillRecommendations',
+            'warnings',
+          ],
+        },
+      };
+
+      const systemPrompt = `You are reviewing one business day of IT auto-assignment outcomes.
+
+Your job is to recommend improvements in exactly three areas:
+1. Prompt changes
+2. Process changes
+3. Skill matrix changes
+
+Rules:
+- Base every recommendation on evidence from the supplied cases and metrics.
+- Be conservative. Fewer strong recommendations are better than many weak ones.
+- Do not rewrite the prompt or mutate the competency matrix directly.
+- Focus on why the system missed and how to improve future assignments.
+- Use the tool once with concise, actionable recommendations.`;
+
+      const userMessage = `Daily review dataset:
+\n\n${JSON.stringify(analysisInput, null, 2)}\n\nSubmit the structured findings using the tool.`;
+
+      const client = new Anthropic({ apiKey });
+      const response = await client.messages.create({
+        model: llmModel || 'claude-sonnet-4-6-20260217',
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools: [TOOL],
+        messages: [{ role: 'user', content: userMessage }],
+      }, {
+        signal: options.signal,
+      });
+      this._throwIfCancelled(options.signal);
+
+      const transcript = response.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n');
+      const submission = response.content.find(
+        (block) => block.type === 'tool_use' && block.name === 'submit_daily_review_findings',
+      )?.input;
+
+      if (!submission) {
+        logger.warn('Daily review analysis returned without a tool submission');
+        const heuristic = this._buildHeuristicRecommendations(dataset);
+        heuristic.warnings.push('LLM response did not contain a structured submission; heuristic recommendations were used instead.');
+        heuristic.transcript = transcript;
+        heuristic.totalTokensUsed = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+        return heuristic;
+      }
+
+      return {
+        executiveSummary: submission.executiveSummary || '',
+        promptRecommendations: submission.promptRecommendations || [],
+        processRecommendations: submission.processRecommendations || [],
+        skillRecommendations: submission.skillRecommendations || [],
+        warnings: submission.warnings || [],
+        transcript,
+        totalTokensUsed: (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0),
+      };
+    } catch (error) {
+      if (this._isCancellationError(error)) throw error;
+      logger.error('Daily review LLM analysis failed, falling back to heuristics', {
+        workspaceId,
+        error: error.message,
+      });
+      const heuristic = this._buildHeuristicRecommendations(dataset);
+      heuristic.warnings.push(`LLM analysis failed: ${error.message}`);
+      return heuristic;
+    }
+  }
+
+  async runReview(workspaceId, reviewDate, triggeredBy = 'system', options = {}) {
+    const startedAt = Date.now();
+    const emit = (event) => {
+      try { options.onEvent?.(event); } catch { /* ignore stream errors */ }
+    };
+    let run;
+    let lastHeartbeatAt = 0;
+    const heartbeatRun = (status) => {
+      const now = Date.now();
+      if (!run?.id || now - lastHeartbeatAt < 10000) return;
+      lastHeartbeatAt = now;
+      prisma.assignmentDailyReviewRun.update({
+        where: { id: run.id },
+        data: { status },
+      }).catch((error) => {
+        logger.warn('Daily review heartbeat failed', { runId: run.id, error: error.message });
+      });
+    };
+
+    await this._markStaleRunsFailed();
+
+    const { workspace, config, timezone } = await this._getWorkspaceContext(workspaceId);
+    const dateStr = reviewDate || formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd');
+    const reviewDateValue = reviewDateKey(dateStr);
+
+    const activeExisting = await prisma.assignmentDailyReviewRun.findFirst({
+      where: {
+        workspaceId,
+        reviewDate: reviewDateValue,
+        status: { in: ACTIVE_STATUSES },
+      },
+    });
+    if (activeExisting) {
+      emit({ type: 'error', message: `A daily review is already running for ${dateStr} (run #${activeExisting.id}).` });
+      return activeExisting;
+    }
+
+    // When force is false (e.g. the scheduled job calling in), short-circuit
+    // if today's review has already completed so we don't pile on duplicate
+    // rows for the same date. Manual UI clicks always pass force=true and
+    // therefore always create a fresh run row below — that's why each rerun
+    // now gets its own id (Run #2, #3, ...) instead of overwriting Run #1.
+    if (!options.force) {
+      const lastCompleted = await prisma.assignmentDailyReviewRun.findFirst({
+        where: {
+          workspaceId,
+          reviewDate: reviewDateValue,
+          status: 'completed',
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (lastCompleted) {
+        return lastCompleted;
+      }
+    }
+
+    run = await prisma.assignmentDailyReviewRun.create({
+      data: {
+        workspaceId,
+        reviewDate: reviewDateValue,
+        timezone,
+        triggerSource: options.triggerSource || 'manual',
+        status: 'collecting',
+        triggeredBy,
+        llmModel: config?.llmModel || 'claude-sonnet-4-6-20260217',
+      },
+    });
+    const abortController = new AbortController();
+    this.activeRunControllers.set(run.id, abortController);
+
+    emit({ type: 'daily_review_started', runId: run.id, reviewDate: dateStr, workspaceName: workspace.name });
+
+    try {
+      emit({
+        type: 'phase_update',
+        phase: 'collecting',
+        message: 'Collecting ticket outcomes, thread history, and assignment evidence...',
+        percent: 2,
+      });
+      const dataset = await this.collectDailyDataset(workspaceId, dateStr, {
+        signal: abortController.signal,
+        onProgress: (event) => {
+          heartbeatRun('collecting');
+          emit({
+            type: 'phase_update',
+            phase: event.phase || 'collecting',
+            message: event.message,
+            percent: event.percent,
+            stats: event.stats,
+          });
+        },
+      });
+
+      await prisma.assignmentDailyReviewRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'analyzing',
+          rangeStart: dataset.range.start,
+          rangeEnd: dataset.range.end,
+          summaryMetrics: dataset.summaryMetrics,
+          analyzedTicketIds: dataset.analyzedTicketIds,
+          evidenceCases: dataset.cases,
+          warnings: dataset.warnings,
+        },
+      });
+
+      emit({
+        type: 'dataset_collected',
+        totals: dataset.summaryMetrics.totals,
+        topCategories: dataset.summaryMetrics.topCategories,
+      });
+      emit({
+        type: 'phase_update',
+        phase: 'analyzing',
+        message: 'Generating prompt, process, and skill-matrix recommendations...',
+        percent: 92,
+      });
+
+      this._throwIfCancelled(abortController.signal);
+      const analysis = await this._analyzeDataset(workspaceId, dataset, config?.llmModel, {
+        signal: abortController.signal,
+      });
+      this._throwIfCancelled(abortController.signal);
+      const mergedWarnings = [...dataset.warnings, ...(analysis.warnings || [])];
+
+      run = await prisma.$transaction(async (tx) => {
+        const updatedRun = await tx.assignmentDailyReviewRun.update({
+          where: { id: run.id },
+          data: {
+            status: 'completed',
+            summaryMetrics: {
+              ...dataset.summaryMetrics,
+              executiveSummary: analysis.executiveSummary,
+            },
+            analyzedTicketIds: dataset.analyzedTicketIds,
+            evidenceCases: dataset.cases,
+            promptRecommendations: analysis.promptRecommendations,
+            processRecommendations: analysis.processRecommendations,
+            skillRecommendations: analysis.skillRecommendations,
+            warnings: mergedWarnings,
+            fullTranscript: analysis.transcript || null,
+            totalTokensUsed: analysis.totalTokensUsed || 0,
+            totalDurationMs: Date.now() - startedAt,
+            completedAt: new Date(),
+          },
+        });
+        await this._replaceRecommendationsForRun(tx, updatedRun, {
+          promptRecommendations: analysis.promptRecommendations,
+          processRecommendations: analysis.processRecommendations,
+          skillRecommendations: analysis.skillRecommendations,
+        });
+        return updatedRun;
+      });
+
+      emit({
+        type: 'recommendations_ready',
+        executiveSummary: analysis.executiveSummary,
+        promptCount: analysis.promptRecommendations?.length || 0,
+        processCount: analysis.processRecommendations?.length || 0,
+        skillCount: analysis.skillRecommendations?.length || 0,
+      });
+      emit({ type: 'phase_update', phase: 'completed', message: 'Daily review complete.', percent: 100 });
+      emit({ type: 'daily_review_complete', runId: run.id });
+      return run;
+    } catch (error) {
+      if (this._isCancellationError(error)) {
+        run = await prisma.assignmentDailyReviewRun.update({
+          where: { id: run.id },
+          data: {
+            status: 'cancelled',
+            totalDurationMs: Date.now() - startedAt,
+            completedAt: new Date(),
+          },
+        });
+        emit({ type: 'phase_update', phase: 'cancelled', message: error.message, percent: 100 });
+        emit({ type: 'cancelled', runId: run.id, message: error.message });
+        emit({ type: 'daily_review_complete', runId: run.id });
+        return run;
+      }
+
+      logger.error('Daily review run failed', { workspaceId, reviewDate: dateStr, error: error.message });
+      run = await prisma.assignmentDailyReviewRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'failed',
+          errorMessage: error.message,
+          totalDurationMs: Date.now() - startedAt,
+          completedAt: new Date(),
+        },
+      });
+      emit({ type: 'error', message: error.message });
+      emit({ type: 'daily_review_complete', runId: run.id });
+      return run;
+    } finally {
+      this.activeRunControllers.delete(run?.id);
+    }
+  }
+
+  async getRuns(workspaceId, { limit = 20, offset = 0 } = {}) {
+    const [items, total] = await Promise.all([
+      prisma.assignmentDailyReviewRun.findMany({
+        where: { workspaceId },
+        orderBy: [{ reviewDate: 'desc' }, { createdAt: 'desc' }],
+        take: limit,
+        skip: offset,
+      }),
+      prisma.assignmentDailyReviewRun.count({ where: { workspaceId } }),
+    ]);
+    await this._ensureRecommendationRowsForRuns(workspaceId, items);
+
+    const runIds = items.map((item) => item.id);
+    const rows = runIds.length > 0
+      ? await prisma.assignmentDailyReviewRecommendation.findMany({
+        where: { runId: { in: runIds } },
+        select: { runId: true, status: true },
+      })
+      : [];
+
+    const countsByRun = new Map();
+    for (const row of rows) {
+      if (!countsByRun.has(row.runId)) {
+        countsByRun.set(row.runId, {
+          pending: 0,
+          approved: 0,
+          rejected: 0,
+          applied: 0,
+        });
+      }
+      countsByRun.get(row.runId)[row.status] += 1;
+    }
+
+    return {
+      items: items.map((item) => ({
+        ...item,
+        recommendationStatusCounts: countsByRun.get(item.id) || {
+          pending: 0,
+          approved: 0,
+          rejected: 0,
+          applied: 0,
+        },
+      })),
+      total,
+    };
+  }
+
+  async getRun(id) {
+    const run = await prisma.assignmentDailyReviewRun.findUnique({ where: { id } });
+    if (!run) return null;
+
+    await this._ensureRecommendationRowsForRuns(run.workspaceId, [run]);
+    const rows = await prisma.assignmentDailyReviewRecommendation.findMany({
+      where: { runId: id },
+      include: {
+        run: {
+          select: { id: true, reviewDate: true, triggeredBy: true, status: true },
+        },
+      },
+      orderBy: [{ kind: 'asc' }, { ordinal: 'asc' }],
+    });
+
+    return {
+      ...run,
+      ...this._groupRecommendations(rows),
+    };
+  }
+
+  async listRecommendations(workspaceId, {
+    status,
+    kind,
+    startDate,
+    endDate,
+    runId,
+    limit = 100,
+    offset = 0,
+  } = {}) {
+    if (status && status !== 'all') this._validateRecommendationStatus(status);
+    if (kind) this._validateRecommendationKind(kind);
+
+    await this._ensureRecommendationRowsForWorkspace(workspaceId, { startDate, endDate });
+
+    const where = { workspaceId };
+    if (status && status !== 'all') where.status = status;
+    if (kind && kind !== 'all') where.kind = kind;
+    if (startDate || endDate) {
+      where.reviewDate = {};
+      if (startDate) where.reviewDate.gte = reviewDateKey(startDate);
+      if (endDate) where.reviewDate.lte = reviewDateKey(endDate);
+    }
+    // Accepts a numeric id, a numeric string, or a label like "Run #12" /
+    // "#12" / "run 12" — anything the admin would type after seeing the
+    // "Run #N" label in the UI. Non-matching input narrows to no rows so
+    // the UI shows "no results" instead of silently ignoring the filter.
+    if (runId !== undefined && runId !== null && runId !== '') {
+      const numeric = typeof runId === 'number'
+        ? runId
+        : parseInt(String(runId).replace(/[^0-9]/g, ''), 10);
+      where.runId = Number.isInteger(numeric) && numeric > 0 ? numeric : -1;
+    }
+
+    const [items, total] = await Promise.all([
+      prisma.assignmentDailyReviewRecommendation.findMany({
+        where,
+        include: {
+          run: {
+            select: { id: true, reviewDate: true, triggeredBy: true, status: true },
+          },
+        },
+        orderBy: [{ reviewDate: 'desc' }, { kind: 'asc' }, { ordinal: 'asc' }],
+        take: limit,
+        skip: offset,
+      }),
+      prisma.assignmentDailyReviewRecommendation.count({ where }),
+    ]);
+
+    return {
+      items: items.map((item) => this._toRecommendationDto(item)),
+      total,
+    };
+  }
+
+  async getWeeklyRecommendationRollup(workspaceId, {
+    weekStart,
+    status = 'approved',
+    kind = 'all',
+  } = {}) {
+    this._validateRecommendationKind(kind);
+    const normalizedWeekStart = weekStart || formatInTimeZone(new Date(), 'UTC', 'yyyy-MM-dd');
+    const start = reviewDateKey(normalizedWeekStart);
+    const end = addDaysUtc(start, 6);
+    const normalizedWeekEnd = end.toISOString().slice(0, 10);
+    const { items } = await this.listRecommendations(workspaceId, {
+      status,
+      kind,
+      startDate: normalizedWeekStart,
+      endDate: normalizedWeekEnd,
+      limit: 500,
+      offset: 0,
+    });
+
+    const days = new Map();
+    const countsByKind = { prompt: 0, process: 0, skill: 0 };
+
+    for (const item of items) {
+      const reviewDate = item.reviewDate instanceof Date
+        ? item.reviewDate.toISOString().slice(0, 10)
+        : String(item.reviewDate).slice(0, 10);
+      if (!days.has(reviewDate)) {
+        days.set(reviewDate, {
+          reviewDate,
+          promptRecommendations: [],
+          processRecommendations: [],
+          skillRecommendations: [],
+          total: 0,
+        });
+      }
+      const day = days.get(reviewDate);
+      day.total += 1;
+      if (item.kind === 'prompt') day.promptRecommendations.push(item);
+      if (item.kind === 'process') day.processRecommendations.push(item);
+      if (item.kind === 'skill') day.skillRecommendations.push(item);
+      countsByKind[item.kind] += 1;
+    }
+
+    return {
+      weekStart: normalizedWeekStart,
+      weekEnd: normalizedWeekEnd,
+      status,
+      kind,
+      total: items.length,
+      countsByKind,
+      days: Array.from(days.values()).sort((a, b) => a.reviewDate.localeCompare(b.reviewDate)),
+    };
+  }
+
+  async updateRecommendation(id, workspaceId, { status, reviewNotes, actorEmail }) {
+    this._validateRecommendationStatus(status);
+
+    const existing = await prisma.assignmentDailyReviewRecommendation.findUnique({
+      where: { id },
+      include: {
+        run: {
+          select: { id: true, reviewDate: true, triggeredBy: true, status: true },
+        },
+      },
+    });
+    if (!existing) return null;
+    if (existing.workspaceId !== workspaceId) {
+      throw new Error('Recommendation belongs to a different workspace');
+    }
+    if (status === 'applied' && !['approved', 'applied'].includes(existing.status)) {
+      throw new Error('Recommendation must be approved before it can be marked as applied');
+    }
+
+    const now = new Date();
+    const data = {
+      status,
+    };
+
+    if (reviewNotes !== undefined) {
+      data.reviewNotes = reviewNotes?.trim() || null;
+    }
+
+    if (status === 'pending') {
+      data.reviewedBy = null;
+      data.reviewedAt = null;
+      data.appliedBy = null;
+      data.appliedAt = null;
+    } else if (status === 'approved' || status === 'rejected') {
+      data.reviewedBy = actorEmail;
+      data.reviewedAt = now;
+      data.appliedBy = null;
+      data.appliedAt = null;
+    } else if (status === 'applied') {
+      data.appliedBy = actorEmail;
+      data.appliedAt = now;
+      if (!existing.reviewedAt) {
+        data.reviewedBy = actorEmail;
+        data.reviewedAt = now;
+      }
+    }
+
+    const updated = await prisma.assignmentDailyReviewRecommendation.update({
+      where: { id },
+      data,
+      include: {
+        run: {
+          select: { id: true, reviewDate: true, triggeredBy: true, status: true },
+        },
+      },
+    });
+
+    return this._toRecommendationDto(updated);
+  }
+
+  async bulkUpdateRecommendations(workspaceId, { ids = [], status, reviewNotes, actorEmail }) {
+    this._validateRecommendationStatus(status);
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new Error('ids must contain at least one recommendation id');
+    }
+
+    const existing = await prisma.assignmentDailyReviewRecommendation.findMany({
+      where: { id: { in: ids } },
+      include: {
+        run: {
+          select: { id: true, reviewDate: true, triggeredBy: true, status: true },
+        },
+      },
+    });
+
+    if (existing.some((item) => item.workspaceId !== workspaceId)) {
+      throw new Error('One or more recommendations belong to a different workspace');
+    }
+    if (status === 'applied' && existing.some((item) => !['approved', 'applied'].includes(item.status))) {
+      throw new Error('All selected recommendations must be approved before they can be marked as applied');
+    }
+
+    const updates = await Promise.all(existing.map((item) => this.updateRecommendation(item.id, workspaceId, {
+      status,
+      reviewNotes,
+      actorEmail,
+    })));
+
+    return {
+      updated: updates.length,
+      items: updates,
+    };
+  }
+
+  async cancelRun(id, workspaceId, cancelledBy = 'admin') {
+    const run = await prisma.assignmentDailyReviewRun.findUnique({ where: { id } });
+    if (!run) return null;
+    if (run.workspaceId !== workspaceId) {
+      throw new Error('Run belongs to a different workspace');
+    }
+    if (!ACTIVE_STATUSES.includes(run.status)) {
+      throw new Error(`Run is not running (status: ${run.status})`);
+    }
+
+    this.activeRunControllers.get(id)?.abort();
+
+    return prisma.assignmentDailyReviewRun.update({
+      where: { id },
+      data: {
+        status: 'cancelled',
+        errorMessage: `Cancelled by ${cancelledBy}`,
+        completedAt: new Date(),
+      },
+    });
+  }
+
+  async maybeRunScheduledReview(workspace) {
+    const { config, timezone } = await this._getWorkspaceContext(workspace.id);
+    if (!config?.dailyReviewEnabled) return { triggered: false, reason: 'disabled' };
+
+    const now = new Date();
+    const zoned = toZonedTime(now, timezone);
+    const dayOfWeek = zoned.getDay();
+    const hours = await availabilityService.getBusinessHours(workspace.id);
+    const dayConfig = hours.find((entry) => entry.dayOfWeek === dayOfWeek && entry.isEnabled);
+    if (!dayConfig) return { triggered: false, reason: 'non_business_day' };
+
+    const reviewDate = formatInTimeZone(now, timezone, 'yyyy-MM-dd');
+    const scheduledAt = new Date(
+      formatInTimeZone(
+        new Date(`${reviewDate}T12:00:00.000Z`),
+        timezone,
+        `yyyy-MM-dd'T'${String(config.dailyReviewRunHour).padStart(2, '0')}:${String(config.dailyReviewRunMinute).padStart(2, '0')}:00XXX`,
+      ),
+    );
+
+    if (now < scheduledAt) {
+      return { triggered: false, reason: 'before_window' };
+    }
+
+    // Latest run for this date — there can now be multiple (each manual rerun
+    // creates a fresh row), so we look at the newest one to decide whether
+    // the scheduled job should pile on yet another run.
+    const existing = await prisma.assignmentDailyReviewRun.findFirst({
+      where: {
+        workspaceId: workspace.id,
+        reviewDate: reviewDateKey(reviewDate),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (existing && ['completed', 'running', 'collecting', 'analyzing'].includes(existing.status)) {
+      return { triggered: false, reason: 'already_exists' };
+    }
+
+    await this.runReview(workspace.id, reviewDate, 'scheduled_daily_review', {
+      triggerSource: 'scheduled',
+      force: false,
+    });
+    return { triggered: true };
+  }
+}
+
+export default new AssignmentDailyReviewService();
