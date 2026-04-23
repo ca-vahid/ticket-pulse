@@ -2156,37 +2156,61 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           chopping content off-screen. */}
       <div className="border border-slate-200 rounded-lg">
         <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2 rounded-t-lg space-y-2">
-          {/* Row 1 — primary tabs */}
+          {/* Row 1 — primary tabs.
+              Rejected runs are intentionally NOT a top-level tab (low traffic, user
+              didn't recognize the term); they still appear in the All view and remain
+              fully tracked in state for the All total below. The All tab is
+              visually separated by a divider so it reads as the catch-all rather
+              than just another sibling. */}
           <div className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <div className="inline-flex shrink-0 items-center gap-0.5 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/60">
               {[
                 { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
                 { id: 'assigned', label: 'Decided', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
                 { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400', activeRing: 'ring-slate-200' },
-                { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-rose-400', activeRing: 'ring-rose-200' },
                 { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500', activeRing: 'ring-red-200' },
-                { id: 'all', label: 'All', count: null, dot: null, activeRing: 'ring-slate-200' },
+                {
+                  id: 'all',
+                  label: 'All',
+                  // Sum of every category we know about, including the now-hidden Rejected count.
+                  // Keeps the All total honest as a "show me everything" anchor.
+                  count:
+                    (queue.totals?.unassigned ?? 0)
+                    + (assignedTotal || 0)
+                    + (dismissedRuns.total || 0)
+                    + (rejectedRuns.total || 0)
+                    + (deletedRuns.total || 0),
+                  dot: null,
+                  activeRing: 'ring-blue-200',
+                  separated: true,
+                },
               ].map((tab) => {
                 const isActive = subView === tab.id;
                 const isZero = tab.count === 0;
                 return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setSubView(tab.id)}
-                    className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
-                      isActive
-                        ? `bg-white text-slate-900 shadow-sm ring-1 ${tab.activeRing}`
-                        : `${isZero ? 'text-slate-400' : 'text-slate-600'} hover:text-slate-900 hover:bg-white/70`
-                    }`}
-                  >
-                    {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot} ${isZero && !isActive ? 'opacity-40' : ''}`} />}
-                    <span>{tab.label}</span>
-                    {tab.count != null && (
-                      <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-slate-500' : isZero ? 'text-slate-300' : 'text-slate-400'}`}>
-                        {tab.count}
-                      </span>
+                  <span key={tab.id} className="inline-flex items-center">
+                    {tab.separated && (
+                      // Vertical divider that visually breaks "All" out of the segment group.
+                      // Subtle on its own but enough cue that "All" isn't just one more sibling.
+                      <span className="mx-1 h-4 w-px bg-slate-300/80" aria-hidden="true" />
                     )}
-                  </button>
+                    <button
+                      onClick={() => setSubView(tab.id)}
+                      className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
+                        isActive
+                          ? `bg-white text-slate-900 shadow-sm ring-1 ${tab.activeRing}`
+                          : `${isZero ? 'text-slate-400' : tab.id === 'all' ? 'text-blue-700' : 'text-slate-600'} hover:text-slate-900 hover:bg-white/70`
+                      }`}
+                    >
+                      {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot} ${isZero && !isActive ? 'opacity-40' : ''}`} />}
+                      <span>{tab.label}</span>
+                      {tab.count != null && (
+                        <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-slate-500' : isZero ? 'text-slate-300' : 'text-slate-400'}`}>
+                          {tab.count}
+                        </span>
+                      )}
+                    </button>
+                  </span>
                 );
               })}
             </div>
