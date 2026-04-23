@@ -2,6 +2,83 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.86-preview] - 2026-04-22
+
+### Daily Review: end-to-end approval workflow + workspace-scope hardening
+
+Major new admin feature on `Assignment Review` plus an immediate hot-fix that came out of the first prod run. The Daily Review analyzes one full business day of auto-assignment outcomes for the active workspace and produces structured recommendations across **prompt changes**, **process changes**, and **skill matrix changes** — each now a real reviewable work item with a `pending → approved/rejected → applied` lifecycle.
+
+#### What ships in this release
+
+- **Daily Review run engine** — `assignmentDailyReviewService` collects every pipeline run + every direct FreshService assignment in the workspace's configured business window, hydrates any missing FreshService thread history into a new local `TicketThreadEntry` table, classifies every case (success / partial success / failure / unresolved) with primary tags (`rebounded`, `pipeline_bypassed`, `handled_in_freshservice`, `awaiting_review`, etc.), then sends the cohort summary + worst cases to Claude via a tool-use schema that returns concrete recommendations.
+- **Approval workflow** — normalized `assignment_daily_review_recommendations` table materializes prompt/process/skill recommendations with stable ids, reviewer/applier audit fields, optional review notes, and the `pending → approved/rejected → applied` lifecycle. Each recommendation card in run detail now has Approve / Reject / Mark Applied actions; status badges and reviewer/timestamps render inline.
+- **Recommendation Backlog + Weekly Approved Rollup** — new sections on the Daily Review tab. Backlog filters by status, kind, date range, and run (the run filter is a typeable autocomplete dropdown populated from run history). Weekly Rollup groups approved items by review date for the selected week with batch "Mark Selected Applied" so prompt-side approvals can be rolled out together.
+- **Persistent FreshService thread history** — new `TicketThreadEntry` model + `ticketThreadRepository` capture every comment / note / activity body locally during sync (`transformTicketThreadEntries` hashes each entry for idempotent upserts). The Daily Review uses this so failure analysis can quote actual conversation context instead of opaque ticket ids.
+- **Scheduled Daily Review** — new `dailyReviewEnabled` / `dailyReviewRunHour` / `dailyReviewRunMinute` / `dailyReviewLookbackDays` settings on `AssignmentConfig`. `scheduledSyncService` calls `assignmentDailyReviewService.maybeRunScheduledReview` which respects business-hour gates and short-circuits if today's review is already complete.
+- **Cancel Run** — backend keeps an `AbortController` per active run; cancel propagates through every long-running step (FreshService thread hydration loop, dataset collection, Anthropic SDK call) so an in-flight review actually stops instead of just having its DB row marked cancelled. The UI shows a dedicated cancelled state.
+
+#### Bug fix: Daily Review was producing recommendations referencing tickets/agents from other workspaces
+
+User reported on first prod run that the IT Daily Review surfaced recommendations citing ticket `#219648` and a technician (Heather Thomas) that don't exist in IT. Two real causes:
+
+1. **Hard-coded "IT" in the system prompt.** Every workspace's review told the LLM `"You are reviewing one business day of IT auto-assignment outcomes."`, biasing the model into IT-flavored language regardless of the actual workspace being reviewed.
+2. **Unvalidated supporting ticket ids.** The `submit_daily_review_findings` tool schema accepted any integer for `supportingTicketIds` / `supportingFreshserviceTicketIds` and we persisted whatever the LLM returned, so any plausible-looking hallucinated id ended up stored verbatim into the recommendation row.
+
+Fixes:
+
+- System prompt + tool description now name the active workspace, include a `"this workspace ONLY"` rule, and explicitly reference the allowed-ids lists.
+- The analysis input now ships explicit `allowedSupportingTicketIds` and `allowedSupportingFreshserviceTicketIds` lists. After the model returns, every supporting id is filtered against those sets before persistence; dropped ids are counted, logged, and surfaced as a run warning ("Dropped N hallucinated supporting ticket id reference(s)...").
+- **Cross-workspace technician detection.** Pre-existing data integrity issues (a workspace's ticket whose `assignedTechId` points at a technician row from a different workspace) are now surfaced as a run warning and the foreign tech's name is redacted in the LLM input as `"(out-of-workspace technician)"` so it can't be quoted as if they were a member of the current workspace.
+- **Defence-in-depth workspace scoping** on every related-data query: `ticketAssignmentEpisode.findMany` now filters by `workspaceId`; `ticketThreadRepository.listForTickets` accepts and applies a `workspaceId` filter; technician selects include `workspaceId` so cross-workspace mismatches can be detected.
+
+#### Bug fix: rebound metric counted events instead of unique tickets
+
+A single ticket bounced 3 times showed up as `"3 rebounds"`. Now counts unique tickets with at least one rebound; `reboundRate` denominator switched from "all cases" to "unique tickets reviewed" so the percentage is honest. Same fix applied to `assignmentDailyStats` today/24h aggregation so the dashboard pill matches. Definition is surfaced inline on the run detail:
+
+> Rebound metric: Unique tickets that rebounded at least once during the review cohort. Multiple rebounds on the same ticket count once.
+
+#### Bug fix: each manual rerun for the same date showed as "Run #1"
+
+The run table had a unique constraint on `(workspaceId, reviewDate)` and the service did an upsert, so reruns overwrote the same row instead of creating a new one. Dropped the unique constraint and switched `runReview()` from upsert to `create` when `force=true` (manual UI clicks); each rerun now produces its own `Run #N` row with a fresh id. Scheduled-job calls (`force=false`) still short-circuit to the latest completed run for that date so the cron loop doesn't pile on duplicates. `maybeRunScheduledReview` switched from `findUnique` to `findFirst` ordered desc accordingly.
+
+#### Bug fix: live Daily Review timer was stuck at "(0s)" forever
+
+`useStreamingFetch` set `startTimeRef.current = Date.now()` and called `setElapsedSec(0)` *inside the same effect* that wired up the SSE stream. Anything that re-triggered that effect cleared the interval and reset the start time before its first tick ever fired, so the elapsed counter perpetually rebased to 0.
+
+**Fix**: split the timer into its own `useEffect` that depends only on `startedAt` + `status`. The SSE setup effect now just sets `startedAt = Date.now()` once per stream; the timer effect then ticks every 1s independently, so re-renders or extra dep churn can't reset it. `controls.stopTimer()` now sets a `stopRequestedRef` flag the timer effect honors instead of yanking the interval out from under it.
+
+#### Files touched
+
+- `backend/prisma/schema.prisma` — `TicketThreadEntry`, `AssignmentDailyReviewRun`, `AssignmentDailyReviewRecommendation` models; `dailyReview*` columns on `AssignmentConfig`; drop unique `(workspaceId, reviewDate)` on `AssignmentDailyReviewRun`
+- `backend/src/services/assignmentDailyReviewService.js` — new file, the full daily review engine including `_sanitizeRecommendationItems`, `_detectCrossWorkspaceAssignments`, `_redactForeignTechFromCase`, `_replaceRecommendationsForRun`, `getWeeklyRecommendationRollup`, `bulkUpdateRecommendations`, etc.
+- `backend/src/services/dailyReviewDefinitions.js` — new file, outcome / primary tag enums + `classifyDailyReviewCase`
+- `backend/src/services/ticketThreadRepository.js` — new file, persistent thread history + optional `workspaceId` scoping on `listForTickets`
+- `backend/src/integrations/freshserviceTransformer.js` — `transformTicketThreadEntries` (hashed external ids for idempotent upserts)
+- `backend/src/services/syncService.js` — write thread entries during sync; `backfillThreadEntries`
+- `backend/src/services/scheduledSyncService.js` — call `maybeRunScheduledReview` per workspace
+- `backend/src/routes/assignment.routes.js` — `/daily-review` (manual + SSE), `/daily-review/runs[/:id|/:id/cancel|/:id/rerun]`, `/daily-review/recommendations[*]`, `/daily-review/recommendations/weekly-rollup`, `/daily-review/recommendations/bulk-status`, `/config` extended for new daily-review fields
+- `backend/src/routes/sync.routes.js` — `POST /api/sync/backfill-thread-entries`
+- `backend/src/services/assignmentDailyStats.js` — rebound metric now counts unique tickets
+- `frontend/src/components/assignment/DailyReviewManager.jsx` — new file, full UI (live view, run detail, backlog with autocomplete run filter, weekly approved rollup, batch apply)
+- `frontend/src/pages/AssignmentReview.jsx` — new Daily Review tab + config tab fields for the scheduled-run settings
+- `frontend/src/services/api.js` — daily review API client methods (runs, run detail, recommendations, weekly rollup, bulk status, cancel, rerun, SSE path)
+- `frontend/src/hooks/useStreamingFetch.js` — split elapsed-time timer into its own effect (fixes 0s timer bug)
+- `backend/scripts/find-ticket.js`, `backend/scripts/requeue-ticket.js` — operator scripts (DATABASE_URL from env)
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.86-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+#### Database migrations
+
+Three new migrations. Run `prisma migrate deploy` on any environment before deploying.
+
+| Migration | Purpose |
+|---|---|
+| `20260423000000_add_daily_assignment_review` | Adds `dailyReview*` columns to `assignment_configs`, plus the new `ticket_thread_entries` and `assignment_daily_review_runs` tables |
+| `20260423010000_add_daily_review_recommendations` | Adds `assignment_daily_review_recommendations` (lifecycle status, audit fields, supporting-id JSON columns, `(run_id, kind, ordinal)` unique constraint) |
+| `20260423020000_allow_multiple_daily_reviews_per_day` | Drops the unique index on `assignment_daily_review_runs(workspace_id, review_date)` and replaces it with a non-unique index so each rerun can create its own row |
+
+---
+
 ## [1.9.85-preview] - 2026-04-22
 
 ### Bug fix: click-through count now exactly matches destination
