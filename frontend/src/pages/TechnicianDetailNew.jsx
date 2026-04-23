@@ -2,8 +2,6 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { dashboardAPI } from '../services/api';
-import SearchBox from '../components/SearchBox';
-import CategoryFilter from '../components/CategoryFilter';
 import { filterTickets, getAvailableCategories } from '../utils/ticketFilter';
 import TechDetailHeader from '../components/tech-detail/TechDetailHeader';
 import MetricsRibbon from '../components/tech-detail/MetricsRibbon';
@@ -541,7 +539,7 @@ export default function TechnicianDetailNew() {
 
             {activeTab === 'tickets' && (
               <div className="space-y-3">
-                {/* Metrics ribbon — tickets-only context */}
+                {/* Metrics ribbon — at-a-glance context for the whole tab */}
                 <MetricsRibbon
                   openCount={openCount}
                   pendingCount={pendingCount}
@@ -556,24 +554,9 @@ export default function TechnicianDetailNew() {
                   weekRangeLabel={weekRangeLabel}
                   monthLabel={monthLabel}
                 />
-                {/* Search + filter */}
-                <div className="flex gap-2 items-start">
-                  <SearchBox
-                    value={searchTerm}
-                    onChange={setSearchTerm}
-                    placeholder="Search tickets… (use OR or | for alternatives)"
-                    resultsCount={isFiltering ? searchResultsCount : null}
-                    className="flex-1"
-                  />
-                  {availableCategories.length > 0 && (
-                    <CategoryFilter
-                      categories={availableCategories}
-                      selected={selectedCategories}
-                      onChange={setSelectedCategories}
-                      placeholder="Filter by category"
-                    />
-                  )}
-                </div>
+                {/* Consolidated control bar (view pills + search + category) and
+                    the table all live inside TicketBoardTab now — one fewer row
+                    above the list and a single source of styling for filters. */}
                 <TicketBoardTab
                   activeView={ticketView}
                   onViewChange={setTicketView}
@@ -584,6 +567,13 @@ export default function TechnicianDetailNew() {
                   selfPickedCount={selfPickedCount}
                   assignedCount={assignedCount}
                   closedCount={closedCount}
+                  searchTerm={searchTerm}
+                  onSearchChange={setSearchTerm}
+                  searchResultsCount={searchResultsCount}
+                  isFiltering={isFiltering}
+                  availableCategories={availableCategories}
+                  selectedCategories={selectedCategories}
+                  onCategoryChange={setSelectedCategories}
                 />
               </div>
             )}

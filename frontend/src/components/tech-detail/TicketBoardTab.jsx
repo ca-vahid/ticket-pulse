@@ -1,8 +1,9 @@
-import { ExternalLink, CheckCircle2 } from 'lucide-react';
+import { ExternalLink, CheckCircle2, Search, X } from 'lucide-react';
+import CategoryFilter from '../CategoryFilter';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from './constants';
 import { formatResolutionTime, calculatePickupTime, calculateAgeSinceCreation } from './utils';
 
-// ── Sub-navigation pills ──────────────────────────────────────────────────────
+// ── View definitions ──────────────────────────────────────────────────────────
 
 const TICKET_VIEWS = [
   { id: 'all',      label: 'All Open' },
@@ -11,27 +12,90 @@ const TICKET_VIEWS = [
   { id: 'closed',   label: 'Closed' },
 ];
 
-function SubNav({ active, onChange, counts }) {
+// ── Consolidated control bar ──────────────────────────────────────────────────
+// One row: view pills (left) + search (flex grow) + category filter (right).
+// Replaces the previous 3 separate rows (metrics ribbon stays above).
+
+function ControlBar({
+  active,
+  onChange,
+  counts,
+  searchTerm,
+  onSearchChange,
+  searchResultsCount,
+  isFiltering,
+  availableCategories,
+  selectedCategories,
+  onCategoryChange,
+}) {
   return (
-    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg w-fit">
-      {TICKET_VIEWS.map((v) => (
-        <button
-          key={v.id}
-          onClick={() => onChange(v.id)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-            active === v.id
-              ? 'bg-white text-slate-900 shadow-sm'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          {v.label}
-          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-            active === v.id ? 'bg-slate-100 text-slate-700' : 'bg-slate-200 text-slate-500'
-          }`}>
-            {counts[v.id] ?? 0}
-          </span>
-        </button>
-      ))}
+    <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg p-1.5">
+      {/* View pills — left-aligned, segmented control style */}
+      <div className="flex items-center gap-0.5 bg-slate-100 rounded-md p-0.5 flex-shrink-0">
+        {TICKET_VIEWS.map((v) => {
+          const isActive = active === v.id;
+          const c = counts[v.id] ?? 0;
+          return (
+            <button
+              key={v.id}
+              onClick={() => onChange(v.id)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold transition-all touch-manipulation ${
+                isActive
+                  ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              {v.label}
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full tabular-nums ${
+                isActive ? 'bg-slate-100 text-slate-700' : c === 0 ? 'bg-slate-200 text-slate-400' : 'bg-slate-200 text-slate-600'
+              }`}>
+                {c}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Search — grows to fill available space */}
+      <div className="relative flex-1 min-w-[180px]">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search subject or requester (use | for OR)"
+          className="w-full rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-7 text-[12px] placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+        />
+        {searchTerm && (
+          <button
+            type="button"
+            onClick={() => onSearchChange('')}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            title="Clear search"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+
+      {/* Result count chip — only when actively filtering */}
+      {isFiltering && (
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+          searchResultsCount === 0 ? 'bg-rose-50 text-rose-700' : 'bg-blue-50 text-blue-700'
+        }`}>
+          {searchResultsCount === 0 ? 'No matches' : `${searchResultsCount} ${searchResultsCount === 1 ? 'match' : 'matches'}`}
+        </span>
+      )}
+
+      {/* Category filter — right-aligned, only render when there are categories to filter on */}
+      {availableCategories.length > 0 && (
+        <CategoryFilter
+          categories={availableCategories}
+          selected={selectedCategories}
+          onChange={onCategoryChange}
+          placeholder="Categories"
+        />
+      )}
     </div>
   );
 }
@@ -64,22 +128,25 @@ function CSATDot({ score, totalScore, feedback }) {
 
 // ── Table header ──────────────────────────────────────────────────────────────
 
+const ROW_GRID = 'grid-cols-[18px_90px_minmax(0,1fr)_90px_140px_140px_60px]';
+
 function TableHeader({ activeView }) {
   return (
-    <div className="grid grid-cols-[20px_80px_1fr_90px_120px_140px] gap-x-3 px-3 py-2 bg-slate-50 border-b border-slate-200 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+    <div className={`hidden md:grid ${ROW_GRID} items-center gap-3 px-3 py-2 bg-slate-50 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-wide text-slate-400`}>
       <span />
-      <span>Ticket #</span>
+      <span>Ticket</span>
       <span>Subject / Requester</span>
       <span>Status</span>
       <span>Category</span>
-      <span>{activeView === 'assigned' ? 'Assigned by' : activeView === 'closed' ? 'Resolution' : 'Time Metric'}</span>
+      <span>{activeView === 'assigned' ? 'Assigned by' : activeView === 'closed' ? 'Resolution' : 'Time metric'}</span>
+      <span className="text-right">Open</span>
     </div>
   );
 }
 
-// ── Single ticket row ─────────────────────────────────────────────────────────
+// ── Single ticket row — single-line column grid (matches BouncedTab) ──────────
 
-function TicketRow({ ticket, technicianName, activeView, isAlternate }) {
+function TicketRow({ ticket, technicianName, activeView }) {
   if (!ticket) return null;
 
   const isClosed = ticket.status === 'Closed' || ticket.status === 'Resolved';
@@ -97,50 +164,58 @@ function TicketRow({ ticket, technicianName, activeView, isAlternate }) {
     })
     : null;
 
+  // Right-most "metric" column varies by view to keep the most decision-relevant
+  // signal at a glance: who assigned (assigned tab), how long it took to close
+  // (closed tab), or how fast it was picked up (open/all/self).
   let timeMetric = null;
   if (activeView === 'assigned' && assignedByName) {
     timeMetric = (
-      <span className="text-slate-500 text-[11px]">
+      <span className="text-slate-500 text-[11px] truncate" title={assignedAtTime ? `${assignedByName} · ${assignedAtTime}` : assignedByName}>
         {assignedByName}{assignedAtTime ? ` · ${assignedAtTime}` : ''}
       </span>
     );
   } else if (isClosed) {
     timeMetric = resolutionTime
       ? <span className="text-slate-500 text-[11px]">{resolutionTime}</span>
-      : null;
+      : <span className="text-slate-300 text-[11px]">—</span>;
   } else if (pickupTime) {
     timeMetric = <span className="text-emerald-600 text-[11px] font-medium">Pickup {pickupTime}</span>;
   } else {
     timeMetric = <span className="text-slate-400 text-[11px] italic">Age {ageSinceCreation}</span>;
   }
 
+  const fsUrl = `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`;
+
   return (
-    <div className={`grid grid-cols-[20px_80px_1fr_90px_120px_140px] gap-x-3 items-center px-3 py-2.5 border-b border-slate-100 text-sm hover:bg-blue-50/30 transition-colors ${isAlternate ? 'bg-slate-50/50' : 'bg-white'}`}>
+    <div className={`grid ${ROW_GRID} items-center gap-3 px-3 py-2 text-[12px] hover:bg-slate-50/70 transition-colors`}>
       {/* Priority dot */}
       <div className="flex items-center justify-center">
         <PriorityDot priority={ticket.priority} />
       </div>
 
-      {/* Ticket ID */}
-      <a
-        href={`https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-[11px] truncate"
-      >
-        #{ticket.freshserviceTicketId}
-        <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-      </a>
+      {/* Ticket ID + (only when relevant) self-picked tag stacked beneath */}
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <a
+          href={fsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-[11px] truncate"
+          onClick={(e) => e.stopPropagation()}
+        >
+          #{ticket.freshserviceTicketId}
+          <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+        </a>
+        {isSelf && (
+          <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[9px] font-semibold uppercase tracking-wide">
+            Self
+          </span>
+        )}
+      </div>
 
-      {/* Subject + Requester */}
-      <div className="min-w-0">
+      {/* Subject + requester (stacked, both truncated) */}
+      <div className="min-w-0 flex flex-col gap-0.5">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-slate-800 font-medium text-xs truncate">{ticket.subject}</span>
-          {isSelf && (
-            <span className="flex-shrink-0 text-[9px] text-slate-400 font-semibold uppercase tracking-wide">
-              · self
-            </span>
-          )}
+          <span className="font-medium text-slate-800 truncate" title={ticket.subject}>{ticket.subject}</span>
           {hasCSAT && (
             <span className="flex-shrink-0">
               <CSATDot score={ticket.csatScore} totalScore={ticket.csatTotalScore} feedback={ticket.csatFeedback} />
@@ -148,35 +223,48 @@ function TicketRow({ ticket, technicianName, activeView, isAlternate }) {
           )}
         </div>
         {ticket.requesterName && (
-          <div className="text-[10px] text-slate-400 truncate">
+          <div className="text-[10px] text-slate-400 truncate" title={ticket.requesterEmail || ticket.requesterName}>
             {ticket.requesterName}{ticket.requesterEmail ? ` · ${ticket.requesterEmail}` : ''}
-          </div>
-        )}
-        {hasCSAT && ticket.csatFeedback && (
-          <div className="text-[10px] text-slate-400 italic truncate mt-0.5">
-            &ldquo;{ticket.csatFeedback}&rdquo;
           </div>
         )}
       </div>
 
-      {/* Status */}
+      {/* Status pill */}
       <div>
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_COLORS[ticket.status] || 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
           {ticket.status}
         </span>
       </div>
 
-      {/* Category */}
-      <div className="truncate">
+      {/* Category — subtle pill, truncated */}
+      <div className="min-w-0">
         {ticket.ticketCategory ? (
-          <span className="text-[11px] text-slate-500 truncate">{ticket.ticketCategory}</span>
+          <span
+            className="inline-block max-w-full truncate align-middle text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded"
+            title={ticket.ticketCategory}
+          >
+            {ticket.ticketCategory}
+          </span>
         ) : (
           <span className="text-slate-300 text-[11px]">—</span>
         )}
       </div>
 
-      {/* Time metric / assignment */}
-      <div>{timeMetric}</div>
+      {/* Time metric / assigner */}
+      <div className="min-w-0">{timeMetric}</div>
+
+      {/* Action — lightweight link */}
+      <span className="text-right">
+        <a
+          href={fsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
+          onClick={(e) => e.stopPropagation()}
+        >
+          Open <ExternalLink className="w-3 h-3" />
+        </a>
+      </span>
     </div>
   );
 }
@@ -211,6 +299,17 @@ export default function TicketBoardTab({
   selfPickedCount,
   assignedCount,
   closedCount,
+  // New: consolidated control bar receives search + category state from the parent.
+  // The parent still owns this state because it's also used to derive
+  // displayedTickets (filtering happens upstream so the All Open count chip and
+  // the visible rows stay in lockstep).
+  searchTerm,
+  onSearchChange,
+  searchResultsCount,
+  isFiltering,
+  availableCategories,
+  selectedCategories,
+  onCategoryChange,
 }) {
   const counts = {
     all:      openCount + pendingCount,
@@ -221,7 +320,18 @@ export default function TicketBoardTab({
 
   return (
     <div className="space-y-3">
-      <SubNav active={activeView} onChange={onViewChange} counts={counts} />
+      <ControlBar
+        active={activeView}
+        onChange={onViewChange}
+        counts={counts}
+        searchTerm={searchTerm}
+        onSearchChange={onSearchChange}
+        searchResultsCount={searchResultsCount}
+        isFiltering={isFiltering}
+        availableCategories={availableCategories}
+        selectedCategories={selectedCategories}
+        onCategoryChange={onCategoryChange}
+      />
 
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         {displayedTickets.length === 0 ? (
@@ -229,14 +339,13 @@ export default function TicketBoardTab({
         ) : (
           <>
             <TableHeader activeView={activeView} />
-            <div>
-              {displayedTickets.map((ticket, i) => (
+            <div className="divide-y divide-slate-100">
+              {displayedTickets.map((ticket) => (
                 <TicketRow
                   key={ticket.id}
                   ticket={ticket}
                   technicianName={technicianName}
                   activeView={activeView}
-                  isAlternate={i % 2 === 1}
                 />
               ))}
             </div>
