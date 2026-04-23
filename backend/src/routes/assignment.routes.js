@@ -24,6 +24,7 @@ import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
+const ASSIGNMENT_STATS_TIMEZONE = 'America/Los_Angeles';
 
 router.get('/freshservice-domain', requireReviewer, (req, res) => {
   const domain = appConfig.freshservice.domain;
@@ -275,7 +276,7 @@ router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {
   // row read for config, one groupBy + one count for stats.
   const cfg = await assignmentRepository.getConfig(req.workspaceId);
   const { getTodayStats } = await import('../services/assignmentDailyStats.js');
-  const today = await getTodayStats(req.workspaceId, tz);
+  const today = await getTodayStats(req.workspaceId, ASSIGNMENT_STATS_TIMEZONE);
 
   res.json({
     success: true,

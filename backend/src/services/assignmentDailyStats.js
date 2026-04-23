@@ -1,31 +1,34 @@
 import prisma from './prisma.js';
 import { tallyGroupedRuns, adjustForHandledInFs } from './assignmentStatsAggregation.js';
+import { getTodayRange } from '../utils/timezone.js';
 
-const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+const PACIFIC_TIMEZONE = 'America/Los_Angeles';
+
+export function getStatsDayWindow(timezone = PACIFIC_TIMEZONE, reference = new Date()) {
+  const { start } = getTodayRange(timezone, reference);
+  return {
+    start,
+    end: reference,
+    timezone,
+  };
+}
 
 /**
- * Aggregate the last 24 hours of pipeline activity for a workspace, used by
+ * Aggregate the current day's pipeline activity for a workspace, used by
  * the Review Queue's auto-assign empty-state panel.
  *
- * IMPORTANT — window choice:
- * Originally this used a workspace-tz "today" window (midnight to midnight in
- * the workspace's local timezone). That made the counts disagree with the
- * destination tabs whenever a row created late yesterday Pacific was visible
- * in the rolling-24h destination but excluded by today's calendar bounds.
- * The user reported "card says 0 but the tab shows 3" exactly because of
- * this. The fix is to use the same rolling-24h window the destination tabs
- * use — that way clicking a card always lands on a tab whose count matches.
- *
- * The empty state header label was renamed from "TODAY" to "LAST 24H" to
- * reflect this honestly.
+ * Product decision:
+ * The assignment workflow is operated in Pacific Time, so this panel should
+ * show "today so far" in PT (midnight PT -> now), not a rolling 24-hour
+ * window. The queue tab uses the same PT-day anchor for its short-range
+ * filter so card counts and drill-downs stay aligned.
  *
  * Pure-ish: takes Prisma + tz, returns a plain object. Nothing in here
  * mutates state.
  *
  * @param {number} workspaceId
- * @param {string} timezone     IANA zone for the workspace (kept on the
- *                              response so the UI can format times correctly,
- *                              but no longer used to anchor the window).
+ * @param {string} timezone     IANA zone that defines the stats day window.
+ *                              The assignment page pins this to PT.
  * @returns {Promise<{
  *   range: { start: string, end: string, timezone: string, label: string },
  *   totalRuns: number,
@@ -45,9 +48,8 @@ const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
  *   recentNoiseFiltered: Array<object>,
  * }>}
  */
-export async function getTodayStats(workspaceId, timezone) {
-  const end = new Date();
-  const start = new Date(end.getTime() - TWENTY_FOUR_HOURS_MS);
+export async function getTodayStats(workspaceId, timezone = PACIFIC_TIMEZONE) {
+  const { start, end, timezone: statsTimezone } = getStatsDayWindow(timezone, new Date());
 
   // One grouped query for outcome counts. createdAt bounds the window;
   // updatedAt would let stale "running" runs from days ago count today,
@@ -78,7 +80,7 @@ export async function getTodayStats(workspaceId, timezone) {
   });
   adjustForHandledInFs(tally, handledInFs);
 
-  // Pipeline-bypass — tickets that arrived in the last 24h and got assigned
+  // Pipeline-bypass — tickets that arrived in the current PT day and got assigned
   // in FS entirely outside our system (no pipeline run created at all,
   // usually because the agent grabbed it in the ~30s window before our next
   // poll). Surfaced as a separate pill so it doesn't conflate with handledInFs.
@@ -117,7 +119,7 @@ export async function getTodayStats(workspaceId, timezone) {
   // rebound runs and edge cases where metadata was attached but the trigger
   // source label drifted. Useful because the "in progress" tile is a
   // snapshot that misses brief rebound runs (LLM finishes in 30-60s); a
-  // 24h count persists across refreshes so the admin sees rebounds happened.
+  // day count persists across refreshes so the admin sees rebounds happened.
   const reboundRows = await prisma.assignmentPipelineRun.findMany({
     where: {
       workspaceId,
@@ -132,7 +134,7 @@ export async function getTodayStats(workspaceId, timezone) {
   });
   const rebounds = reboundRows.length;
 
-  // Last 10 auto-assignments — feeds the recent activity feed at the bottom
+  // Last 10 auto-assignments in today's PT window — feeds the recent activity feed at the bottom
   // of the empty state. Was previously a single "most recent" row; expanded
   // so the admin can see the AI's recent batch at a glance.
   const recentRuns = await prisma.assignmentPipelineRun.findMany({
@@ -227,8 +229,8 @@ export async function getTodayStats(workspaceId, timezone) {
     range: {
       start: start.toISOString(),
       end: end.toISOString(),
-      timezone,
-      label: 'Last 24h',
+      timezone: statsTimezone,
+      label: statsTimezone === PACIFIC_TIMEZONE ? 'Today PT' : 'Today',
     },
     totalRuns: tally.totalRuns,
     autoAssigned: tally.autoAssigned,
