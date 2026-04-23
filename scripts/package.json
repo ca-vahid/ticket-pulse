@@ -5,9 +5,12 @@
   "type": "module",
   "description": "One-off maintenance scripts (e.g. generating demo-mode avatars). Not part of the runtime app.",
   "scripts": {
-    "generate-demo-avatars": "node generate-demo-avatars.mjs"
+    "generate-demo-avatars": "node generate-demo-avatars.mjs",
+    "generate-brand-assets": "node generate-brand-assets.mjs",
+    "prepare-brand-assets": "node prepare-brand-assets.mjs"
   },
   "dependencies": {
-    "@google/genai": "^1.50.1"
+    "@google/genai": "^1.50.1",
+    "sharp": "^0.34.5"
   }
 }

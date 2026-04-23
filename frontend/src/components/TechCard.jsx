@@ -430,14 +430,23 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
           <div className="flex items-center justify-center gap-6">
             {/* Open Count - Only show in daily view */}
             {viewMode === 'daily' && (
-              <div className="text-center">
-                <div className="text-5xl font-bold text-gray-900 leading-none">{openOnlyCount}</div>
-                <div className="text-xs text-gray-700 uppercase font-bold mt-1">Open</div>
-                {pendingCount > 0 && (
-                  <div className="text-xs text-gray-500 font-medium mt-0.5">
-                    ({pendingCount} pend)
-                  </div>
-                )}
+              <div className="text-center flex items-center gap-3">
+                <img
+                  src="/brand/icon-workload.png"
+                  alt=""
+                  aria-hidden="true"
+                  title={`Workload: ${openOnlyCount} open ticket${openOnlyCount === 1 ? '' : 's'}`}
+                  className="w-9 h-9 flex-shrink-0 opacity-90"
+                />
+                <div>
+                  <div className="text-5xl font-bold text-gray-900 leading-none">{openOnlyCount}</div>
+                  <div className="text-xs text-gray-700 uppercase font-bold mt-1">Open</div>
+                  {pendingCount > 0 && (
+                    <div className="text-xs text-gray-500 font-medium mt-0.5">
+                      ({pendingCount} pend)
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

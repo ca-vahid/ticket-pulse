@@ -2,6 +2,22 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.10.0-preview] - 2026-04-23
+
+### Brand identity launch + login redesign
+
+- **Brand assets**: Ticket Pulse logo, wordmark, app badge, full favicon set (16/32/48/180/192/512), dashboard background, hero illustration, and 6 themed UI icons. Generated with OpenAI `gpt-image-2` and chroma-keyed/optimized via `sharp`.
+- **Login page** redesigned as a modern split-screen — left pane is the team hero illustration with brand overlay (logo mark + animated pulse halo + "Ticket Pulse" wordmark); right pane is a centered glassmorphic sign-in card on a soft indigo→teal mesh background with feature pills, layered depth (halo glow + ring + shadow), and BGC Engineering copyright.
+- **Dashboard surfaces** wired to brand assets — header wordmark replaces the plain text title (mobile + desktop), subtle topographic background sits behind all cards, loading state shows the animated pulse icon, empty state shows the team icon + faded hero, and the Technicians section header gets a brand tech icon.
+- **TechCard (daily view)** shows a workload-meter icon next to the Open ticket count for clearer at-a-glance load reading.
+- **Workspace Picker** swaps the generic Lucide `Layers` icon for the Ticket Pulse brand mark + wordmark over the topographic background.
+- **Interactive Brand Mockup Studio** at `/branding-mockups/mockup.html` — loads all 64 generated mockup variants and lets you swap any of them live in a realistic fake-dashboard preview, then exports your picks as JSON. Used to choose the production set in this release.
+- **Two new scripts** under `scripts/`: `generate-brand-assets.mjs` (OpenAI `gpt-image-2` image generator) and `prepare-brand-assets.mjs` (chroma-keys picked variants, generates favicon sizes, compresses webp). Run via `npm run generate-brand-assets` / `npm run prepare-brand-assets`.
+
+### Fixes
+
+- **Assignment Review status filter** no longer silently forces `in_progress` when the dropdown reads "Status: any" — both the dropdown label and the actual query now agree on all non-deleted statuses.
+
 ## [1.9.89-preview] - 2026-04-23
 
 ### Daily Review on prod: background execution + DB-persisted progress (fix for Azure 502 Bad Gateway on long runs)

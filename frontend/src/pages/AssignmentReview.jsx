@@ -1059,9 +1059,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [outsideAssignedRuns, setOutsideAssignedRuns] = useState({ items: [], total: 0 });
   const [deletedRuns, setDeletedRuns] = useState({ items: [], total: 0 });
   const [assignedFilter, setAssignedFilter] = useState('all'); // 'all' | 'via_pipeline' | 'manually_in_fs'
-  // Multi-select status filter. Empty array means "tab default" (Decided uses
-  // 'in_progress' to hide closed tickets by default, every other tab shows
-  // all non-deleted statuses). Drill-in from the empty-state outcome cards
+  // Multi-select status filter. Empty array means "any non-deleted status" on
+  // every tab — matches the "Status: any" label the dropdown renders when the
+  // user hasn't picked anything. Drill-in from the empty-state outcome cards
   // explicitly sets this so the destination matches the card's promise.
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   // Multi-select decision filter (Decided / Dismissed / Rejected tabs).
@@ -1209,10 +1209,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       // multi-select replaces the old single-string filter — pass it via the
       // backend's `statuses=` CSV param when one or more are picked, falling
       // back to the legacy single `ticketStatus` for the tab default.
+      // When the user leaves the Status filter empty the dropdown shows
+      // "Status: any" — so the backend default must also mean "any non-deleted
+      // status". Previously the Decided/Outside tabs silently forced
+      // `in_progress`, which hid closed/resolved tickets even when the UI
+      // said no filter was applied (a hidden double-filter).
       const statusesCsv = selectedStatuses.length > 0 ? selectedStatuses.join(',') : undefined;
-      // Tab defaults preserved from the previous implementation: Decided defaults to
-      // in_progress (hide closed by default), every other tab shows all non-deleted.
-      const assignedTicketStatus = statusesCsv ? undefined : (subView === 'assigned' ? 'in_progress' : 'in_progress');
+      const assignedTicketStatus = statusesCsv ? undefined : 'all';
       const dismissedTicketStatus = statusesCsv ? undefined : 'all';
       const rejectedTicketStatus = statusesCsv ? undefined : 'all';
 

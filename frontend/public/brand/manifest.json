@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-04-23T23:15:42.796Z",
+  "selections": {
+    "headerLogo": "logo/logo-01-wordmark-pulse-v3.png",
+    "appBadge": "logo/logo-02-icon-mark-pulse-ticket-v2.png",
+    "background": "background/bg-03-topographic-neutral-v4.png",
+    "panelBackground": "background/bg-02-light-mesh-gradient-v4.png",
+    "hero": "hero/hero-01-isometric-team-v2.png",
+    "iconPulse": "icon/icon-01-heartbeat-app-v2.png",
+    "iconTicket": "icon/icon-02-ticket-flat-v4.png",
+    "iconSync": "icon/icon-03-sync-refresh-v1.png",
+    "iconTech": "icon/icon-04-technician-headset-v1.png",
+    "iconWorkload": "icon/icon-05-workload-meter-v2.png",
+    "iconCalendar": "icon/icon-06-week-calendar-v3.png"
+  },
+  "outputs": {
+    "headerLogo": "logo-wordmark.png",
+    "appBadge": "logo-mark.png",
+    "background": "dashboard-background.webp",
+    "panelBackground": "panel-background.webp",
+    "hero": "hero-welcome.webp",
+    "iconPulse": "icon-pulse.png",
+    "iconTicket": "icon-ticket.png",
+    "iconSync": "icon-sync.png",
+    "iconTech": "icon-tech.png",
+    "iconWorkload": "icon-workload.png",
+    "iconCalendar": "icon-calendar.png"
+  },
+  "favicons": [
+    "favicon-16.png",
+    "favicon-32.png",
+    "favicon-48.png",
+    "favicon-180.png",
+    "favicon-192.png",
+    "favicon-512.png",
+    "favicon.png"
+  ]
+}

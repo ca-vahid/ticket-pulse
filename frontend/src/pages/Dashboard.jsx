@@ -748,10 +748,17 @@ export default function Dashboard() {
 
   if (isLoading && !dashboardData) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600">Loading dashboard...</p>
+      <div
+        className="min-h-screen flex items-center justify-center bg-gray-100 bg-no-repeat bg-cover bg-fixed"
+        style={{ backgroundImage: 'url(/brand/dashboard-background.webp)' }}
+      >
+        <div className="text-center bg-white/80 backdrop-blur-sm px-6 py-5 rounded-xl shadow-sm border border-gray-200">
+          <img
+            src="/brand/icon-pulse.png"
+            alt=""
+            className="w-14 h-14 mx-auto mb-3 animate-pulse"
+          />
+          <p className="text-gray-700 font-medium">Loading dashboard…</p>
         </div>
       </div>
     );
@@ -759,8 +766,11 @@ export default function Dashboard() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md">
+      <div
+        className="min-h-screen flex items-center justify-center bg-gray-100 bg-no-repeat bg-cover bg-fixed"
+        style={{ backgroundImage: 'url(/brand/dashboard-background.webp)' }}
+      >
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md shadow-sm">
           <XCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
           <p className="text-red-800 text-center">{error}</p>
           <button
@@ -1157,7 +1167,10 @@ export default function Dashboard() {
     : 0;
 
   return (
-    <div className="min-h-screen bg-gray-100 relative">
+    <div
+      className="min-h-screen bg-gray-100 relative bg-no-repeat bg-cover bg-fixed"
+      style={{ backgroundImage: 'url(/brand/dashboard-background.webp)' }}
+    >
       {/* Fancy Loading Overlay */}
       {(isColdLoading && (dashboardData || weeklyData || monthlyData)) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
@@ -1201,7 +1214,11 @@ export default function Dashboard() {
           <div className="flex items-center justify-between gap-2 md:hidden">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
-                <h1 className="text-base font-bold text-gray-800 truncate">Ticket Pulse</h1>
+                <img
+                  src="/brand/logo-wordmark.png"
+                  alt="Ticket Pulse"
+                  className="h-7 w-auto flex-shrink-0"
+                />
                 <button onClick={() => setShowChangelog(true)} className="text-[9px] font-semibold text-blue-600 bg-blue-50 px-1 py-0.5 rounded border border-blue-200 flex-shrink-0">v{APP_VERSION}</button>
               </div>
             </div>
@@ -1232,7 +1249,11 @@ export default function Dashboard() {
             {/* Left: Title + User - 3 cols */}
             <div className="col-span-3">
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold text-gray-800">Ticket Pulse Dashboard</h1>
+                <img
+                  src="/brand/logo-wordmark.png"
+                  alt="Ticket Pulse"
+                  className="h-8 w-auto flex-shrink-0"
+                />
                 <button
                   onClick={() => setShowChangelog(true)}
                   className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md hover:bg-blue-100 border border-blue-200 transition-colors"
@@ -1963,7 +1984,13 @@ export default function Dashboard() {
         <div>
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
-              <div className="flex items-baseline gap-2">
+              <div className="flex items-center gap-2">
+                <img
+                  src="/brand/icon-tech.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="w-6 h-6 flex-shrink-0"
+                />
                 <h2 className="text-base sm:text-lg font-semibold">Technicians</h2>
                 <span className="text-xs text-gray-500">
                   ({searchTerm || selectedCategories.length > 0 ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
@@ -2092,10 +2119,21 @@ export default function Dashboard() {
             </div>
           ) : techsWithRanks.length === 0 ? (
             /* No technicians found (daily/weekly only) */
-            <div className="bg-white rounded-lg shadow-sm p-8 text-center border border-gray-200">
-              <Users className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600">
-                {searchTerm || selectedCategories.length > 0 ? 'No matching tickets found' : 'No technicians found'}
+            <div className="bg-white rounded-lg shadow-sm p-8 text-center border border-gray-200 overflow-hidden relative">
+              <img
+                src="/brand/hero-welcome.webp"
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 w-full h-full object-cover opacity-15 pointer-events-none"
+              />
+              <div className="relative">
+                <img
+                  src="/brand/icon-tech.png"
+                  alt=""
+                  className="w-16 h-16 mx-auto mb-3 opacity-70"
+                />
+                <p className="text-gray-700 font-medium">
+                  {searchTerm || selectedCategories.length > 0 ? 'No matching tickets found' : 'No technicians found'}
               </p>
               <p className="text-sm text-gray-500 mt-2">
                 {searchTerm || selectedCategories.length > 0
@@ -2104,26 +2142,27 @@ export default function Dashboard() {
                     ? 'All technicians are hidden. Click "Show Hidden" to restore them.'
                     : 'Sync with FreshService to see technicians'}
               </p>
-              {(searchTerm || selectedCategories.length > 0) && (
-                <div className="flex gap-2 justify-center mt-4">
-                  {searchTerm && (
-                    <button
-                      onClick={() => setSearchTerm('')}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                      Clear Search
-                    </button>
-                  )}
-                  {selectedCategories.length > 0 && (
-                    <button
-                      onClick={() => setSelectedCategories([])}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                      Clear Filters
-                    </button>
-                  )}
-                </div>
-              )}
+                {(searchTerm || selectedCategories.length > 0) && (
+                  <div className="flex gap-2 justify-center mt-4">
+                    {searchTerm && (
+                      <button
+                        onClick={() => setSearchTerm('')}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Clear Search
+                      </button>
+                    )}
+                    {selectedCategories.length > 0 && (
+                      <button
+                        onClick={() => setSelectedCategories([])}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Clear Filters
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             /* Grid or List layout based on view mode (daily/weekly) */

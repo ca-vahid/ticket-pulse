@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ticket Pulse — Brand Mockup Studio</title>
+  <style>
+    /* =====================================================================
+     * Layout
+     * ===================================================================== */
+    :root {
+      --sidebar-w: 360px;
+      --indigo: #6366f1;
+      --teal: #2dd4bf;
+      --emerald: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+      background: #0b1226;
+      color: #e2e8f0;
+      overflow: hidden;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      height: 100vh;
+    }
+
+    /* =====================================================================
+     * Sidebar (asset picker)
+     * ===================================================================== */
+    aside {
+      background: #0f172a;
+      border-right: 1px solid rgba(148,163,184,.15);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    aside header {
+      padding: 16px 18px 14px;
+      border-bottom: 1px solid rgba(148,163,184,.12);
+    }
+    aside header h1 {
+      margin: 0; font-size: 14px; letter-spacing: .04em;
+      color: #f1f5f9; text-transform: uppercase;
+    }
+    aside header p {
+      margin: 4px 0 0; font-size: 12px; color: #64748b;
+    }
+    aside .actions {
+      padding: 12px 18px;
+      border-bottom: 1px solid rgba(148,163,184,.12);
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .btn {
+      font-size: 12px; padding: 6px 10px; border-radius: 6px;
+      background: rgba(99,102,241,.15); color: #c7d2fe;
+      border: 1px solid rgba(99,102,241,.3);
+      cursor: pointer; font-family: inherit;
+    }
+    .btn:hover { background: rgba(99,102,241,.25); }
+    .btn.primary { background: var(--indigo); color: white; border-color: var(--indigo); }
+    .btn.primary:hover { background: #4f46e5; }
+    .btn.ghost { background: transparent; color: #94a3b8; border-color: rgba(148,163,184,.25); }
+
+    .picker { flex: 1; overflow-y: auto; padding: 8px 0 24px; }
+    .picker::-webkit-scrollbar { width: 8px; }
+    .picker::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+
+    .slot { padding: 14px 18px 10px; border-bottom: 1px dashed rgba(148,163,184,.08); }
+    .slot h2 {
+      margin: 0 0 4px; font-size: 11px; letter-spacing: .12em;
+      color: var(--teal); text-transform: uppercase;
+    }
+    .slot p.help { margin: 0 0 10px; font-size: 11px; color: #64748b; }
+    .concept-group { margin-top: 6px; }
+    .concept-group .concept-name {
+      font-size: 10px; color: #94a3b8;
+      text-transform: uppercase; letter-spacing: .08em;
+      margin: 8px 0 4px;
+    }
+    .thumbs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .thumb {
+      position: relative;
+      aspect-ratio: 1/1;
+      border-radius: 6px;
+      overflow: hidden;
+      background:
+        linear-gradient(45deg, #1e293b 25%, transparent 25%) 0 0/14px 14px,
+        linear-gradient(-45deg, #1e293b 25%, transparent 25%) 0 7px/14px 14px,
+        linear-gradient(45deg, transparent 75%, #1e293b 75%) 7px -7px/14px 14px,
+        linear-gradient(-45deg, transparent 75%, #1e293b 75%) -7px 0/14px 14px,
+        #0b1226;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: border-color .15s ease, transform .1s ease;
+    }
+    .thumb:hover { transform: scale(1.04); border-color: rgba(99,102,241,.35); }
+    .thumb.selected { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(45,212,191,.3); }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .thumb .v-tag {
+      position: absolute; top: 2px; right: 4px;
+      font-size: 9px; color: white;
+      background: rgba(0,0,0,.5); padding: 1px 4px; border-radius: 3px;
+      pointer-events: none;
+    }
+    .thumb.selected::after {
+      content: "✓"; position: absolute; bottom: 2px; right: 4px;
+      width: 16px; height: 16px; background: var(--teal); color: #0f172a;
+      border-radius: 50%; font-size: 11px; line-height: 16px; text-align: center;
+      font-weight: bold;
+    }
+
+    /* =====================================================================
+     * Mockup canvas (right side)
+     * ===================================================================== */
+    main {
+      position: relative;
+      overflow-y: auto;
+      background: #0b1226;
+    }
+    main .canvas-bg {
+      position: absolute; inset: 0;
+      background-size: cover; background-position: center;
+      pointer-events: none;
+      z-index: 0;
+    }
+    main .canvas-content {
+      position: relative; z-index: 1;
+      min-height: 100%;
+    }
+
+    /* Theme variables flip when .light-theme is set on .canvas-content */
+    .canvas-content {
+      --t-text: #e2e8f0;
+      --t-text-muted: #94a3b8;
+      --t-card: rgba(15,23,42,.78);
+      --t-card-border: rgba(148,163,184,.18);
+      --t-divider: rgba(148,163,184,.15);
+      --t-icon-tile: #ffffff;
+      color: var(--t-text);
+    }
+    .canvas-content.light-theme {
+      --t-text: #0f172a;
+      --t-text-muted: #475569;
+      --t-card: rgba(255,255,255,.82);
+      --t-card-border: rgba(15,23,42,.08);
+      --t-divider: rgba(15,23,42,.08);
+      --t-icon-tile: #ffffff;
+    }
+
+    /* Top bar */
+    .topbar {
+      display: flex; align-items: center; gap: 18px;
+      padding: 14px 28px;
+      background: var(--t-card);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--t-divider);
+      position: sticky; top: 0; z-index: 5;
+      min-width: 0;
+    }
+    .topbar .brand {
+      display: flex; align-items: center; gap: 12px;
+      min-width: 0; flex: 0 1 auto;
+    }
+    .topbar .badge {
+      width: 44px; height: 44px; border-radius: 10px;
+      background: var(--t-icon-tile);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden; flex-shrink: 0;
+      box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    }
+    .topbar .badge img {
+      max-width: 100%; max-height: 100%;
+      width: auto; height: auto;
+      object-fit: contain; display: block;
+    }
+    .topbar .wordmark {
+      height: 56px;
+      flex: 0 0 240px;
+      background: var(--t-icon-tile);
+      border-radius: 8px;
+      padding: 4px 10px;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    }
+    .topbar .wordmark img {
+      max-height: 100%; max-width: 100%;
+      width: auto; height: auto;
+      object-fit: contain; display: block;
+    }
+    .topbar nav { display: flex; gap: 4px; margin-left: auto; align-items: center; flex-shrink: 0; }
+    .topbar nav a {
+      padding: 6px 12px; border-radius: 6px; font-size: 13px;
+      color: var(--t-text-muted); text-decoration: none; cursor: pointer;
+    }
+    .topbar nav a.active {
+      background: rgba(99,102,241,.15); color: var(--indigo);
+    }
+    .topbar .ghost-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      background: var(--t-icon-tile);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden; cursor: pointer; flex-shrink: 0;
+    }
+    .topbar .ghost-icon img {
+      max-width: 100%; max-height: 100%;
+      width: auto; height: auto;
+      object-fit: contain;
+    }
+
+    /* Stat cards */
+    .stats {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 14px; padding: 22px 28px 0;
+    }
+    .stat {
+      background: var(--t-card);
+      border: 1px solid var(--t-card-border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex; align-items: center; gap: 14px;
+      backdrop-filter: blur(4px);
+    }
+    .stat .icon-tile {
+      width: 44px; height: 44px; flex-shrink: 0;
+      background: var(--t-icon-tile);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      box-shadow: inset 0 0 0 1px rgba(15,23,42,.04);
+    }
+    .stat .icon-tile img {
+      max-width: 100%; max-height: 100%; width: auto; height: auto;
+      object-fit: contain; padding: 4px; box-sizing: border-box;
+    }
+    .stat .num {
+      font-size: 22px; font-weight: 700; line-height: 1;
+      color: var(--t-text);
+    }
+    .stat .lbl { font-size: 12px; color: var(--t-text-muted); margin-top: 4px; }
+
+    /* Section headings */
+    .section-title {
+      padding: 24px 28px 8px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .section-title h3 {
+      margin: 0; font-size: 14px; color: var(--t-text);
+      text-transform: uppercase; letter-spacing: .08em;
+    }
+    .section-title .sub { font-size: 12px; color: var(--t-text-muted); }
+
+    /* Technician grid */
+    .tech-grid {
+      padding: 0 28px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .tech-card {
+      background: var(--t-card);
+      border: 1px solid var(--t-card-border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      backdrop-filter: blur(4px);
+    }
+    .tech-card .row1 {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .tech-card .av {
+      width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+      background: var(--t-icon-tile);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      box-shadow: inset 0 0 0 1px rgba(15,23,42,.05);
+    }
+    .tech-card .av img {
+      max-width: 100%; max-height: 100%; width: auto; height: auto;
+      object-fit: contain; padding: 3px; box-sizing: border-box;
+    }
+    .tech-card .name { font-weight: 600; font-size: 13px; color: var(--t-text); }
+    .tech-card .role { font-size: 11px; color: var(--t-text-muted); }
+    .tech-card .row2 {
+      display: flex; align-items: center; gap: 10px; margin-top: 12px;
+      padding-top: 10px; border-top: 1px solid var(--t-divider);
+    }
+    .tech-card .meter {
+      width: 24px; height: 24px; border-radius: 5px;
+      background: var(--t-icon-tile);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .tech-card .meter img {
+      max-width: 100%; max-height: 100%; width: auto; height: auto;
+      object-fit: contain; padding: 2px; box-sizing: border-box;
+    }
+    .tech-card .ticket-count { font-size: 12px; color: var(--t-text-muted); flex: 1; }
+    .pill {
+      font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 600;
+    }
+    .pill.light  { background: rgba(16,185,129,.18); color: var(--emerald); }
+    .pill.medium { background: rgba(245,158,11,.18); color: var(--amber); }
+    .pill.heavy  { background: rgba(239,68,68,.18);  color: var(--red); }
+
+    /* Hero panel */
+    .hero-panel {
+      margin: 28px;
+      background: var(--t-card);
+      border: 1px solid var(--t-card-border);
+      border-radius: 14px;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 0;
+      backdrop-filter: blur(4px);
+    }
+    .hero-panel .hero-img {
+      min-height: 240px;
+      background-size: cover; background-position: center;
+      background-color: #0b1226;
+    }
+    .hero-panel .hero-text { padding: 28px 28px 24px; }
+    .hero-panel h4 {
+      margin: 0 0 8px; font-size: 20px; color: var(--t-text);
+    }
+    .hero-panel p {
+      margin: 0 0 14px; font-size: 13px; color: var(--t-text-muted); line-height: 1.55;
+    }
+    .hero-panel .cta {
+      display: inline-block; padding: 8px 14px; border-radius: 6px;
+      background: var(--indigo); color: white; font-size: 13px; cursor: pointer;
+    }
+
+    .canvas-content footer {
+      padding: 24px 28px 40px;
+      font-size: 11px; color: var(--t-text-muted);
+      text-align: center; opacity: .7;
+    }
+
+    /* Toolbar above the canvas (theme + save) */
+    .toolbar {
+      position: absolute;
+      top: 12px; right: 16px;
+      display: flex; gap: 8px;
+      z-index: 10;
+    }
+    .toolbar .btn { backdrop-filter: blur(8px); background: rgba(15,23,42,.8); border-color: rgba(148,163,184,.25); color: #e2e8f0; }
+    .toolbar .btn:hover { background: rgba(15,23,42,.95); }
+
+    /* Modal for export */
+    .modal-bg {
+      position: fixed; inset: 0; background: rgba(0,0,0,.6);
+      display: none; place-items: center; z-index: 100;
+    }
+    .modal-bg.open { display: grid; }
+    .modal {
+      background: #0f172a; border: 1px solid rgba(148,163,184,.25);
+      border-radius: 12px; padding: 22px;
+      width: min(640px, 92vw); max-height: 80vh; display: flex; flex-direction: column;
+    }
+    .modal h3 { margin: 0 0 6px; font-size: 16px; }
+    .modal p { margin: 0 0 12px; font-size: 12px; color: #94a3b8; }
+    .modal textarea {
+      flex: 1; min-height: 280px; resize: vertical;
+      background: #0b1226; color: #e2e8f0; border: 1px solid rgba(148,163,184,.2);
+      border-radius: 6px; padding: 12px; font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 12px; line-height: 1.5;
+    }
+    .modal .row {
+      display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;
+    }
+
+    /* Empty state when no manifest */
+    .empty {
+      padding: 80px 24px; text-align: center; color: #94a3b8;
+    }
+    code { background: rgba(148,163,184,.12); padding: 1px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <header>
+        <h1>Brand Mockup Studio</h1>
+        <p>Click any thumbnail to apply it. Mix &amp; match across slots, then export your picks.</p>
+      </header>
+      <div class="actions">
+        <button class="btn primary" id="btnSave">Save selections…</button>
+        <button class="btn ghost" id="btnReset">Reset</button>
+        <a class="btn ghost" href="index.html" style="text-decoration:none;">Gallery view</a>
+      </div>
+      <div class="picker" id="picker"></div>
+    </aside>
+
+    <main>
+      <div class="canvas-bg" id="canvasBg"></div>
+      <div class="toolbar">
+        <button class="btn" id="btnTheme">Light theme</button>
+      </div>
+      <div class="canvas-content" id="canvas">
+        <!-- Top bar -->
+        <div class="topbar">
+          <div class="brand">
+            <div class="badge"><img id="img-app-badge" alt="" /></div>
+            <div class="wordmark"><img id="img-header-logo" alt="ticket pulse" /></div>
+          </div>
+          <nav>
+            <a class="active">Today</a>
+            <a>Weekly</a>
+            <a>Settings</a>
+            <span class="ghost-icon" title="Sync now"><img id="img-icon-sync" alt="" /></span>
+          </nav>
+        </div>
+
+        <!-- Stats row -->
+        <div class="stats">
+          <div class="stat">
+            <div class="icon-tile"><img id="img-icon-pulse" alt="" /></div>
+            <div><div class="num">47</div><div class="lbl">Open tickets</div></div>
+          </div>
+          <div class="stat">
+            <div class="icon-tile"><img id="img-icon-ticket" alt="" /></div>
+            <div><div class="num">312</div><div class="lbl">Tickets this week</div></div>
+          </div>
+          <div class="stat">
+            <div class="icon-tile"><img id="img-icon-tech" alt="" /></div>
+            <div><div class="num">11</div><div class="lbl">Active technicians</div></div>
+          </div>
+          <div class="stat">
+            <div class="icon-tile"><img id="img-icon-calendar" alt="" /></div>
+            <div><div class="num">Mon Apr 23</div><div class="lbl">Today, PST</div></div>
+          </div>
+        </div>
+
+        <!-- Technicians -->
+        <div class="section-title">
+          <h3>Technicians</h3>
+          <span class="sub">Real-time workload distribution</span>
+        </div>
+        <div class="tech-grid" id="techGrid"></div>
+
+        <!-- Hero panel -->
+        <div class="hero-panel">
+          <div class="hero-img" id="heroImg"></div>
+          <div class="hero-text">
+            <h4>Welcome back, Coordinator.</h4>
+            <p>
+              Live ticket distribution synced two minutes ago. Hover any technician card
+              to see today's breakdown of self-picked vs. assigned tickets, or switch
+              to Weekly view to backfill historical data.
+            </p>
+            <span class="cta">View today's queue →</span>
+          </div>
+        </div>
+
+        <footer>
+          Mockup using your generated brand assets — pick what you like, then click "Save selections…" to hand the choices back to the team.
+        </footer>
+      </div>
+    </main>
+  </div>
+
+  <!-- Export modal -->
+  <div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>Your selections</h3>
+      <p>Copy this JSON and paste it back to the developer, or download the file.</p>
+      <textarea id="exportText" readonly></textarea>
+      <div class="row">
+        <button class="btn ghost" id="btnClose">Close</button>
+        <button class="btn" id="btnDownload">Download JSON</button>
+        <button class="btn primary" id="btnCopy">Copy to clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =======================================================================
+    // Slot definitions: which concepts can fill each slot in the mockup.
+    // =======================================================================
+    const SLOTS = [
+      {
+        id: 'header-logo',
+        label: 'Header wordmark',
+        help: 'Used as the main brand logo in the top bar.',
+        concepts: ['logo-01-wordmark-pulse'],
+      },
+      {
+        id: 'app-badge',
+        label: 'App badge / favicon',
+        help: 'Square mark used as favicon and PWA install icon.',
+        concepts: [
+          'logo-02-icon-mark-pulse-ticket',
+          'logo-03-monogram-tp',
+          'logo-04-flat-badge',
+        ],
+      },
+      {
+        id: 'background',
+        label: 'Dashboard background',
+        help: 'Applied behind the entire dashboard. Pair with theme toggle above.',
+        concepts: [
+          'bg-01-dark-pulse-waves',
+          'bg-02-light-mesh-gradient',
+          'bg-03-topographic-neutral',
+        ],
+      },
+      {
+        id: 'hero',
+        label: 'Hero illustration',
+        help: 'Used in the welcome / empty state panel.',
+        concepts: [
+          'hero-01-isometric-team',
+          'hero-02-abstract-data-flow',
+          'hero-03-friendly-flat-coordinator',
+        ],
+      },
+      { id: 'icon-pulse',    label: 'Stat icon — Open tickets',     concepts: ['icon-01-heartbeat-app'] },
+      { id: 'icon-ticket',   label: 'Stat icon — Total tickets',    concepts: ['icon-02-ticket-flat'] },
+      { id: 'icon-sync',     label: 'Top-bar icon — Sync',          concepts: ['icon-03-sync-refresh'] },
+      { id: 'icon-tech',     label: 'Stat icon — Technicians',      concepts: ['icon-04-technician-headset'] },
+      { id: 'icon-workload', label: 'Card icon — Workload meter',   concepts: ['icon-05-workload-meter'] },
+      { id: 'icon-calendar', label: 'Stat icon — Calendar',         concepts: ['icon-06-week-calendar'] },
+    ];
+
+    const CATEGORY_OF_CONCEPT = {
+      'logo-01-wordmark-pulse': 'logo',
+      'logo-02-icon-mark-pulse-ticket': 'logo',
+      'logo-03-monogram-tp': 'logo',
+      'logo-04-flat-badge': 'logo',
+      'hero-01-isometric-team': 'hero',
+      'hero-02-abstract-data-flow': 'hero',
+      'hero-03-friendly-flat-coordinator': 'hero',
+      'bg-01-dark-pulse-waves': 'background',
+      'bg-02-light-mesh-gradient': 'background',
+      'bg-03-topographic-neutral': 'background',
+      'icon-01-heartbeat-app': 'icon',
+      'icon-02-ticket-flat': 'icon',
+      'icon-03-sync-refresh': 'icon',
+      'icon-04-technician-headset': 'icon',
+      'icon-05-workload-meter': 'icon',
+      'icon-06-week-calendar': 'icon',
+    };
+
+    const FAKE_TECHS = [
+      { name: 'Alex Chen',      role: 'Network',  load: 'light',  count: 3 },
+      { name: 'Priya Patel',    role: 'Hardware', load: 'medium', count: 7 },
+      { name: 'Jordan Reyes',   role: 'Software', load: 'heavy',  count: 12 },
+      { name: 'Sam O’Brien',    role: 'AV',       load: 'light',  count: 4 },
+      { name: 'Maya Johnson',   role: 'Cloud',    load: 'medium', count: 8 },
+      { name: 'David Kim',      role: 'Security', load: 'light',  count: 2 },
+      { name: 'Hannah Lopez',   role: 'Helpdesk', load: 'heavy',  count: 11 },
+      { name: 'Ravi Sharma',    role: 'Backup',   load: 'medium', count: 6 },
+    ];
+
+    const STORAGE_KEY = 'ticket-pulse-brand-mockup-selections-v1';
+
+    let manifest = null;        // raw manifest.json
+    let assetsByConcept = {};   // concept name -> sorted variants array
+    let selections = {};        // slotId -> file path (e.g. "logo/logo-01-wordmark-pulse-v3.png")
+
+    // =====================================================================
+    // Boot
+    // =====================================================================
+    async function boot() {
+      try {
+        const res = await fetch('manifest.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error('manifest.json missing');
+        manifest = await res.json();
+      } catch (err) {
+        document.getElementById('canvas').innerHTML =
+          `<div class="empty"><h2>No mockups found yet</h2>
+           <p>Run <code>npm run generate-brand-assets</code> in <code>scripts/</code> first.</p></div>`;
+        return;
+      }
+
+      assetsByConcept = {};
+      for (const a of manifest.assets) {
+        (assetsByConcept[a.concept] ||= []).push(a);
+      }
+      for (const concept of Object.keys(assetsByConcept)) {
+        assetsByConcept[concept].sort((a, b) => a.variant - b.variant);
+      }
+
+      loadSelections();
+      buildPicker();
+      buildTechGrid();
+      applyAllSelections();
+      detectAndApplyTheme();
+    }
+
+    function loadSelections() {
+      try {
+        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        selections = stored.selections || {};
+      } catch { selections = {}; }
+
+      for (const slot of SLOTS) {
+        if (selections[slot.id] && fileExists(selections[slot.id])) continue;
+        const firstConcept = slot.concepts.find(c => assetsByConcept[c]?.length);
+        if (firstConcept) {
+          selections[slot.id] = assetsByConcept[firstConcept][0].file;
+        }
+      }
+      saveSelections();
+    }
+
+    function fileExists(file) {
+      return manifest.assets.some(a => a.file === file);
+    }
+
+    function saveSelections() {
+      const theme = document.getElementById('canvas').classList.contains('light-theme') ? 'light' : 'dark';
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ selections, theme }));
+    }
+
+    // =====================================================================
+    // Picker UI
+    // =====================================================================
+    function buildPicker() {
+      const root = document.getElementById('picker');
+      root.innerHTML = '';
+      for (const slot of SLOTS) {
+        const slotEl = document.createElement('div');
+        slotEl.className = 'slot';
+        slotEl.innerHTML = `
+          <h2>${slot.label}</h2>
+          <p class="help">${slot.help || ''}</p>
+        `;
+        for (const conceptName of slot.concepts) {
+          const variants = assetsByConcept[conceptName];
+          if (!variants || variants.length === 0) continue;
+          const groupEl = document.createElement('div');
+          groupEl.className = 'concept-group';
+          if (slot.concepts.length > 1) {
+            const cn = document.createElement('div');
+            cn.className = 'concept-name';
+            cn.textContent = conceptName;
+            groupEl.appendChild(cn);
+          }
+          const grid = document.createElement('div');
+          grid.className = 'thumbs';
+          for (const v of variants) {
+            const t = document.createElement('div');
+            t.className = 'thumb';
+            t.title = `${v.concept} v${v.variant}`;
+            if (selections[slot.id] === v.file) t.classList.add('selected');
+            t.innerHTML = `
+              <img src="${v.file}" alt="${v.concept} v${v.variant}" loading="lazy" />
+              <span class="v-tag">v${v.variant}</span>
+            `;
+            t.addEventListener('click', () => selectAsset(slot.id, v.file));
+            grid.appendChild(t);
+          }
+          groupEl.appendChild(grid);
+          slotEl.appendChild(groupEl);
+        }
+        root.appendChild(slotEl);
+      }
+    }
+
+    function selectAsset(slotId, file) {
+      selections[slotId] = file;
+      saveSelections();
+      // Update picker selected state
+      document.querySelectorAll(`.slot`).forEach(slotEl => { /* no-op global */ });
+      buildPicker();
+      applySlot(slotId);
+      if (slotId === 'background') detectAndApplyTheme(true);
+    }
+
+    // =====================================================================
+    // Apply selections to mockup
+    // =====================================================================
+    function applyAllSelections() {
+      for (const slot of SLOTS) applySlot(slot.id);
+    }
+
+    function applySlot(slotId) {
+      const file = selections[slotId];
+      if (!file) return;
+      switch (slotId) {
+        case 'header-logo':
+          setImg('img-header-logo', file); break;
+        case 'app-badge':
+          setImg('img-app-badge', file); break;
+        case 'background':
+          document.getElementById('canvasBg').style.backgroundImage = `url("${file}")`;
+          break;
+        case 'hero':
+          document.getElementById('heroImg').style.backgroundImage = `url("${file}")`;
+          break;
+        case 'icon-pulse':    setImg('img-icon-pulse', file); break;
+        case 'icon-ticket':   setImg('img-icon-ticket', file); break;
+        case 'icon-sync':     setImg('img-icon-sync', file); break;
+        case 'icon-tech':     setImg('img-icon-tech', file); break;
+        case 'icon-workload': updateAllWorkloadIcons(file); break;
+        case 'icon-calendar': setImg('img-icon-calendar', file); break;
+      }
+    }
+
+    function setImg(id, src) {
+      const el = document.getElementById(id);
+      if (el) el.src = src;
+    }
+
+    function updateAllWorkloadIcons(file) {
+      document.querySelectorAll('.tech-card .meter img').forEach(img => { img.src = file; });
+    }
+
+    // =====================================================================
+    // Technician grid
+    // =====================================================================
+    function buildTechGrid() {
+      const grid = document.getElementById('techGrid');
+      grid.innerHTML = '';
+      const wlFile = selections['icon-workload'];
+      const techFile = selections['icon-tech'];
+      for (const t of FAKE_TECHS) {
+        const card = document.createElement('div');
+        card.className = 'tech-card';
+        card.innerHTML = `
+          <div class="row1">
+            <div class="av"><img src="${techFile || ''}" alt="" /></div>
+            <div>
+              <div class="name">${t.name}</div>
+              <div class="role">${t.role}</div>
+            </div>
+            <span class="pill ${t.load}" style="margin-left:auto;">${t.load}</span>
+          </div>
+          <div class="row2">
+            <div class="meter"><img src="${wlFile || ''}" alt="" /></div>
+            <div class="ticket-count">${t.count} open · ${Math.max(0, t.count - 2)} self-picked</div>
+          </div>
+        `;
+        grid.appendChild(card);
+      }
+    }
+
+    // =====================================================================
+    // Theme handling
+    // =====================================================================
+    function detectAndApplyTheme(autoFromBg = false) {
+      const canvas = document.getElementById('canvas');
+      let savedTheme = null;
+      try { savedTheme = (JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}).theme; } catch {}
+
+      // Auto-pick theme based on background concept the first time it's selected.
+      if (autoFromBg) {
+        const bg = selections.background || '';
+        if (bg.includes('bg-01-dark-')) savedTheme = 'dark';
+        else if (bg.includes('bg-02-light-') || bg.includes('bg-03-topographic')) savedTheme = 'light';
+      }
+
+      if (!savedTheme) savedTheme = 'dark';
+      canvas.classList.toggle('light-theme', savedTheme === 'light');
+      document.getElementById('btnTheme').textContent =
+        savedTheme === 'light' ? 'Dark theme' : 'Light theme';
+      saveSelections();
+    }
+
+    document.getElementById('btnTheme').addEventListener('click', () => {
+      const canvas = document.getElementById('canvas');
+      const isLight = canvas.classList.toggle('light-theme');
+      document.getElementById('btnTheme').textContent = isLight ? 'Dark theme' : 'Light theme';
+      saveSelections();
+    });
+
+    // =====================================================================
+    // Save / export
+    // =====================================================================
+    function buildExportPayload() {
+      const out = {
+        generatedAt: new Date().toISOString(),
+        baseDir: 'frontend/public/branding-mockups/',
+        theme: document.getElementById('canvas').classList.contains('light-theme') ? 'light' : 'dark',
+        selections: {},
+      };
+      for (const slot of SLOTS) {
+        out.selections[slot.id] = selections[slot.id]
+          ? {
+              label: slot.label,
+              file: selections[slot.id],
+              concept: selections[slot.id].split('/')[1].replace(/-v\d+\.png$/, ''),
+              variant: Number((selections[slot.id].match(/-v(\d+)\.png$/) || [])[1] || 0),
+            }
+          : null;
+      }
+      return out;
+    }
+
+    document.getElementById('btnSave').addEventListener('click', () => {
+      const payload = buildExportPayload();
+      document.getElementById('exportText').value = JSON.stringify(payload, null, 2);
+      document.getElementById('modalBg').classList.add('open');
+    });
+    document.getElementById('btnClose').addEventListener('click', () => {
+      document.getElementById('modalBg').classList.remove('open');
+    });
+    document.getElementById('modalBg').addEventListener('click', (e) => {
+      if (e.target.id === 'modalBg') document.getElementById('modalBg').classList.remove('open');
+    });
+    document.getElementById('btnCopy').addEventListener('click', async () => {
+      const ta = document.getElementById('exportText');
+      try {
+        await navigator.clipboard.writeText(ta.value);
+        const btn = document.getElementById('btnCopy');
+        const old = btn.textContent;
+        btn.textContent = 'Copied ✓';
+        setTimeout(() => (btn.textContent = old), 1500);
+      } catch {
+        ta.select();
+        document.execCommand('copy');
+      }
+    });
+    document.getElementById('btnDownload').addEventListener('click', () => {
+      const blob = new Blob([document.getElementById('exportText').value], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'ticket-pulse-brand-selections.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    document.getElementById('btnReset').addEventListener('click', () => {
+      if (!confirm('Reset all selections to defaults (v1 of each concept)?')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      selections = {};
+      loadSelections();
+      buildPicker();
+      buildTechGrid();
+      applyAllSelections();
+      detectAndApplyTheme();
+    });
+
+    boot();
+  </script>
+</body>
+</html>

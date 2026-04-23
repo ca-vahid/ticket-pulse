@@ -1,0 +1,521 @@
+{
+  "generatedAt": "2026-04-23T22:17:53.127Z",
+  "model": "gpt-image-2",
+  "quality": "medium",
+  "variantsRequested": 4,
+  "count": 64,
+  "assets": [
+    {
+      "category": "logo",
+      "concept": "logo-01-wordmark-pulse",
+      "variant": 1,
+      "file": "logo/logo-01-wordmark-pulse-v1.png",
+      "size": "1536x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-01-wordmark-pulse",
+      "variant": 2,
+      "file": "logo/logo-01-wordmark-pulse-v2.png",
+      "size": "1536x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-01-wordmark-pulse",
+      "variant": 3,
+      "file": "logo/logo-01-wordmark-pulse-v3.png",
+      "size": "1536x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-01-wordmark-pulse",
+      "variant": 4,
+      "file": "logo/logo-01-wordmark-pulse-v4.png",
+      "size": "1536x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-02-icon-mark-pulse-ticket",
+      "variant": 1,
+      "file": "logo/logo-02-icon-mark-pulse-ticket-v1.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-02-icon-mark-pulse-ticket",
+      "variant": 2,
+      "file": "logo/logo-02-icon-mark-pulse-ticket-v2.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-02-icon-mark-pulse-ticket",
+      "variant": 3,
+      "file": "logo/logo-02-icon-mark-pulse-ticket-v3.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-02-icon-mark-pulse-ticket",
+      "variant": 4,
+      "file": "logo/logo-02-icon-mark-pulse-ticket-v4.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-03-monogram-tp",
+      "variant": 1,
+      "file": "logo/logo-03-monogram-tp-v1.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-03-monogram-tp",
+      "variant": 2,
+      "file": "logo/logo-03-monogram-tp-v2.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-03-monogram-tp",
+      "variant": 3,
+      "file": "logo/logo-03-monogram-tp-v3.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-03-monogram-tp",
+      "variant": 4,
+      "file": "logo/logo-03-monogram-tp-v4.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-04-flat-badge",
+      "variant": 1,
+      "file": "logo/logo-04-flat-badge-v1.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-04-flat-badge",
+      "variant": 2,
+      "file": "logo/logo-04-flat-badge-v2.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-04-flat-badge",
+      "variant": 3,
+      "file": "logo/logo-04-flat-badge-v3.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "logo",
+      "concept": "logo-04-flat-badge",
+      "variant": 4,
+      "file": "logo/logo-04-flat-badge-v4.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "hero",
+      "concept": "hero-01-isometric-team",
+      "variant": 1,
+      "file": "hero/hero-01-isometric-team-v1.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-01-isometric-team",
+      "variant": 2,
+      "file": "hero/hero-01-isometric-team-v2.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-01-isometric-team",
+      "variant": 3,
+      "file": "hero/hero-01-isometric-team-v3.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-01-isometric-team",
+      "variant": 4,
+      "file": "hero/hero-01-isometric-team-v4.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-02-abstract-data-flow",
+      "variant": 1,
+      "file": "hero/hero-02-abstract-data-flow-v1.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-02-abstract-data-flow",
+      "variant": 2,
+      "file": "hero/hero-02-abstract-data-flow-v2.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-02-abstract-data-flow",
+      "variant": 3,
+      "file": "hero/hero-02-abstract-data-flow-v3.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-02-abstract-data-flow",
+      "variant": 4,
+      "file": "hero/hero-02-abstract-data-flow-v4.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-03-friendly-flat-coordinator",
+      "variant": 1,
+      "file": "hero/hero-03-friendly-flat-coordinator-v1.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-03-friendly-flat-coordinator",
+      "variant": 2,
+      "file": "hero/hero-03-friendly-flat-coordinator-v2.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-03-friendly-flat-coordinator",
+      "variant": 3,
+      "file": "hero/hero-03-friendly-flat-coordinator-v3.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "hero",
+      "concept": "hero-03-friendly-flat-coordinator",
+      "variant": 4,
+      "file": "hero/hero-03-friendly-flat-coordinator-v4.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-01-dark-pulse-waves",
+      "variant": 1,
+      "file": "background/bg-01-dark-pulse-waves-v1.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-01-dark-pulse-waves",
+      "variant": 2,
+      "file": "background/bg-01-dark-pulse-waves-v2.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-01-dark-pulse-waves",
+      "variant": 3,
+      "file": "background/bg-01-dark-pulse-waves-v3.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-01-dark-pulse-waves",
+      "variant": 4,
+      "file": "background/bg-01-dark-pulse-waves-v4.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-02-light-mesh-gradient",
+      "variant": 1,
+      "file": "background/bg-02-light-mesh-gradient-v1.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-02-light-mesh-gradient",
+      "variant": 2,
+      "file": "background/bg-02-light-mesh-gradient-v2.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-02-light-mesh-gradient",
+      "variant": 3,
+      "file": "background/bg-02-light-mesh-gradient-v3.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-02-light-mesh-gradient",
+      "variant": 4,
+      "file": "background/bg-02-light-mesh-gradient-v4.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-03-topographic-neutral",
+      "variant": 1,
+      "file": "background/bg-03-topographic-neutral-v1.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-03-topographic-neutral",
+      "variant": 2,
+      "file": "background/bg-03-topographic-neutral-v2.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-03-topographic-neutral",
+      "variant": 3,
+      "file": "background/bg-03-topographic-neutral-v3.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "background",
+      "concept": "bg-03-topographic-neutral",
+      "variant": 4,
+      "file": "background/bg-03-topographic-neutral-v4.png",
+      "size": "1536x1024",
+      "transparent": false
+    },
+    {
+      "category": "icon",
+      "concept": "icon-01-heartbeat-app",
+      "variant": 1,
+      "file": "icon/icon-01-heartbeat-app-v1.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-01-heartbeat-app",
+      "variant": 2,
+      "file": "icon/icon-01-heartbeat-app-v2.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-01-heartbeat-app",
+      "variant": 3,
+      "file": "icon/icon-01-heartbeat-app-v3.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-01-heartbeat-app",
+      "variant": 4,
+      "file": "icon/icon-01-heartbeat-app-v4.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-02-ticket-flat",
+      "variant": 1,
+      "file": "icon/icon-02-ticket-flat-v1.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-02-ticket-flat",
+      "variant": 2,
+      "file": "icon/icon-02-ticket-flat-v2.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-02-ticket-flat",
+      "variant": 3,
+      "file": "icon/icon-02-ticket-flat-v3.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-02-ticket-flat",
+      "variant": 4,
+      "file": "icon/icon-02-ticket-flat-v4.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-03-sync-refresh",
+      "variant": 1,
+      "file": "icon/icon-03-sync-refresh-v1.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-03-sync-refresh",
+      "variant": 2,
+      "file": "icon/icon-03-sync-refresh-v2.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-03-sync-refresh",
+      "variant": 3,
+      "file": "icon/icon-03-sync-refresh-v3.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-03-sync-refresh",
+      "variant": 4,
+      "file": "icon/icon-03-sync-refresh-v4.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-04-technician-headset",
+      "variant": 1,
+      "file": "icon/icon-04-technician-headset-v1.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-04-technician-headset",
+      "variant": 2,
+      "file": "icon/icon-04-technician-headset-v2.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-04-technician-headset",
+      "variant": 3,
+      "file": "icon/icon-04-technician-headset-v3.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-04-technician-headset",
+      "variant": 4,
+      "file": "icon/icon-04-technician-headset-v4.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-05-workload-meter",
+      "variant": 1,
+      "file": "icon/icon-05-workload-meter-v1.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-05-workload-meter",
+      "variant": 2,
+      "file": "icon/icon-05-workload-meter-v2.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-05-workload-meter",
+      "variant": 3,
+      "file": "icon/icon-05-workload-meter-v3.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-05-workload-meter",
+      "variant": 4,
+      "file": "icon/icon-05-workload-meter-v4.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-06-week-calendar",
+      "variant": 1,
+      "file": "icon/icon-06-week-calendar-v1.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-06-week-calendar",
+      "variant": 2,
+      "file": "icon/icon-06-week-calendar-v2.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-06-week-calendar",
+      "variant": 3,
+      "file": "icon/icon-06-week-calendar-v3.png",
+      "size": "1024x1024",
+      "transparent": true
+    },
+    {
+      "category": "icon",
+      "concept": "icon-06-week-calendar",
+      "variant": 4,
+      "file": "icon/icon-06-week-calendar-v4.png",
+      "size": "1024x1024",
+      "transparent": true
+    }
+  ]
+}

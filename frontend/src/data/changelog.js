@@ -1,6 +1,20 @@
-export const APP_VERSION = '1.9.89-preview';
+export const APP_VERSION = '1.10.0-preview';
 
 export const changelog = [
+  {
+    version: '1.10.0-preview',
+    date: 'April 23, 2026',
+    entries: [
+      { type: 'new', text: 'Brand identity launch — Ticket Pulse logo, wordmark, app badge, full favicon set (16/32/48/180/192/512), dashboard background, hero illustration, and 6 themed UI icons. Generated with OpenAI gpt-image-2 and chroma-keyed/optimized via sharp.' },
+      { type: 'new', text: 'Login page redesigned as a modern split-screen — left pane is the team hero illustration with brand overlay (logo mark + animated pulse halo + "Ticket Pulse" wordmark); right pane is a centered glassmorphic sign-in card on a soft indigo→teal mesh background with feature pills, layered depth (halo glow + ring + shadow), and BGC Engineering copyright.' },
+      { type: 'new', text: 'Dashboard surfaces wired to brand assets — header wordmark replaces the plain text title (mobile + desktop), subtle topographic background sits behind all cards, loading state shows the animated pulse icon, empty state shows the team icon + faded hero, and the Technicians section header gets a brand tech icon.' },
+      { type: 'new', text: 'TechCard (daily view) now shows a workload-meter icon next to the Open ticket count for clearer at-a-glance load reading.' },
+      { type: 'new', text: 'Workspace Picker swaps the generic Lucide Layers icon for the Ticket Pulse brand mark + wordmark over the topographic background.' },
+      { type: 'new', text: 'Interactive Brand Mockup Studio at /branding-mockups/mockup.html — loads all 64 generated mockup variants (4 logo concepts × 4 + 3 hero × 4 + 3 background × 4 + 6 icon × 4) and lets you swap any of them live in a realistic fake-dashboard preview, then exports your picks as JSON. Used to choose the production set in this release.' },
+      { type: 'new', text: 'Two new scripts under scripts/: generate-brand-assets.mjs (OpenAI gpt-image-2 image generator with concept × variants × concurrency) and prepare-brand-assets.mjs (chroma-keys the picked variants to PNG, generates favicon sizes, compresses bg + hero to webp). Run via `npm run generate-brand-assets` / `npm run prepare-brand-assets`.' },
+      { type: 'fixed', text: 'Assignment Review status filter no longer silently forces "in_progress" when the dropdown reads "Status: any" — both the dropdown label and the actual query now agree on all non-deleted statuses.' },
+    ],
+  },
   {
     version: '1.9.89-preview',
     date: 'April 23, 2026',

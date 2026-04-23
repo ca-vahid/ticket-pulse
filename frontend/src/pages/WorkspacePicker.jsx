@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
-import { Layers, LogOut, ArrowRight } from 'lucide-react';
+import { LogOut, ArrowRight } from 'lucide-react';
 import { useDemoMode, useDemoLabel, scrubFreeText as scrubDemoText } from '../utils/demoMode';
 
 export default function WorkspacePicker() {
@@ -35,12 +35,22 @@ export default function WorkspacePicker() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
+    <div
+      className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-50 to-blue-50 bg-no-repeat bg-cover"
+      style={{ backgroundImage: 'url(/brand/dashboard-background.webp)' }}
+    >
       <div className="w-full max-w-2xl">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
-            <Layers className="w-8 h-8 text-white" />
-          </div>
+          <img
+            src="/brand/logo-mark.png"
+            alt=""
+            className="w-16 h-16 mx-auto mb-4 drop-shadow-md"
+          />
+          <img
+            src="/brand/logo-wordmark.png"
+            alt="Ticket Pulse"
+            className="h-7 w-auto mx-auto mb-4"
+          />
           <h1 className="text-2xl font-bold text-gray-900">Select Workspace</h1>
           <p className="text-gray-500 mt-1">
             Welcome, {welcomeName}. Choose a workspace to continue.
