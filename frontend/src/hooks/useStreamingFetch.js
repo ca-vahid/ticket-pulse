@@ -82,13 +82,18 @@ export function useStreamingFetch({
   enabled = true,
   deps = [],
 }) {
-  const [status, setStatus] = useState('idle'); // idle | connecting | running | completed | error
+  const [status, setStatus] = useState('idle'); // idle | connecting | running | completed | cancelled | error
   const [error, setError] = useState(null);
   const [elapsedSec, setElapsedSec] = useState(0);
+  // startedAt is state (not ref) so the timer effect can react to a fresh
+  // stream starting. Using a ref here was the original bug — the timer
+  // effect lived inside the same setup effect that re-set startTime, so
+  // tearing it down + restarting it on every dep change kept the interval
+  // from ever firing its first tick.
+  const [startedAt, setStartedAt] = useState(null);
 
   const abortRef = useRef(null);
-  const timerRef = useRef(null);
-  const startTimeRef = useRef(null);
+  const stopRequestedRef = useRef(false);
   const statusRef = useRef('idle');
   const onEventRef = useRef(onEvent);
   const onDoneRef = useRef(onDone);
@@ -99,24 +104,35 @@ export function useStreamingFetch({
     abortRef.current?.abort();
   }, []);
 
+  // Independent ticking timer. Runs whenever there is an active stream and
+  // the consumer has not signalled stop via `controls.stopTimer()`. This is
+  // intentionally separated from the SSE setup effect so that any extra
+  // re-render of the SSE setup never resets the visible elapsed counter.
   useEffect(() => {
-    if (!enabled || !url) return;
+    if (startedAt === null) return undefined;
+    if (status !== 'connecting' && status !== 'running') return undefined;
+    if (stopRequestedRef.current) return undefined;
+    const id = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [startedAt, status]);
+
+  useEffect(() => {
+    if (!enabled || !url) return undefined;
 
     const abortController = new AbortController();
     abortRef.current = abortController;
+    stopRequestedRef.current = false;
 
     statusRef.current = 'connecting';
     setStatus('connecting');
     setError(null);
     setElapsedSec(0);
-
-    startTimeRef.current = Date.now();
-    timerRef.current = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
-    }, 1000);
+    setStartedAt(Date.now());
 
     const stopTimer = () => {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      stopRequestedRef.current = true;
     };
 
     const controls = { setStatus: (s) => { statusRef.current = s; setStatus(s); }, setError, stopTimer };

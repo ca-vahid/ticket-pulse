@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import PipelineRunDetail from '../components/assignment/PipelineRunDetail';
 import CompetencyManager from '../components/assignment/CompetencyManager';
 import CalibrationManager from '../components/assignment/CalibrationManager';
+import DailyReviewManager from '../components/assignment/DailyReviewManager';
 import PromptManager from '../components/assignment/PromptManager';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
 import LivePipelineView from '../components/assignment/LivePipelineView';
@@ -14,12 +15,13 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check, TrendingUp,
-  ShieldCheck, Users, Bot, Sparkles, Clock,
+  ShieldCheck, Users, Bot, Sparkles, Clock, X, CalendarDays,
 } from 'lucide-react';
 
 const ALL_TABS = [
   { id: 'queue', label: 'Review Queue', icon: Inbox, minRole: 'reviewer' },
   { id: 'history', label: 'History', icon: History, minRole: 'reviewer' },
+  { id: 'daily-review', label: 'Daily Review', icon: CalendarDays, minRole: 'admin' },
   { id: 'calibration', label: 'Calibration', icon: TrendingUp, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'prompts', label: 'Prompts', icon: FileText, minRole: 'admin' },
@@ -419,6 +421,32 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
     ? today.recentAutoAssignments
     : (today.latestAutoAssignment ? [today.latestAutoAssignment] : []);
   const dryRun = queueStatus?.dryRunMode;
+
+  // Pill detail modal — none of these three pills (rebounds, bypassed,
+  // noise-filtered) have an existing destination tab in the app, so
+  // clicking one opens an inline modal listing the actual tickets that
+  // contributed to the count. Backend ships the lists alongside the
+  // counts so there's no extra round-trip on click.
+  const [pillDetail, setPillDetail] = useState(null);
+  const closePillDetail = () => setPillDetail(null);
+  const openReboundsDetail = () => setPillDetail({
+    title: 'Rebounds in the last 24h',
+    description: 'Tickets that bounced back after a rejection and triggered a fresh pipeline run.',
+    items: today.recentRebounds || [],
+    kind: 'rebound',
+  });
+  const openBypassedDetail = () => setPillDetail({
+    title: 'Bypassed pipeline (no analysis)',
+    description: 'Tickets created in the last 24h that ended up assigned in FreshService but never had a pipeline run — typically because an agent grabbed them within the ~30s window before our next poll fired.',
+    items: today.recentBypassed || [],
+    kind: 'bypassed',
+  });
+  const openNoiseFilteredDetail = () => setPillDetail({
+    title: 'Noise-filtered (skipped before analysis)',
+    description: 'Tickets that matched a noise rule and were silently excluded from polling. If something here looks legitimate, the matching rule may be over-matching — review it on the Noise Rules page.',
+    items: today.recentNoiseFiltered || [],
+    kind: 'noise',
+  });
   // Real-time in-progress beats today's snapshot when there's actual activity
   // happening right now. The today.inProgress field is bound by createdAt
   // window; this catches runs that started just now even if they outlive
@@ -559,14 +587,25 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
 
       {/* Process state — only render pills that are actually non-zero so the
           panel doesn't drown in greyed-out tiles when nothing's happening.
-          More compact pill styling per UX redesign. */}
+          Centered horizontally to balance with the centered tile/hero rows
+          above. The 3 data-list pills (rebounds, bypassed, noise-filtered)
+          are clickable and open a modal listing the contributing tickets;
+          the others (analyzing, needs attention, queued) describe state
+          that's already visible elsewhere on this tab. */}
       {(liveInProgress > 0 || stats.rebounds > 0 || stats.pipelineBypass > 0 || stats.noiseFiltered > 0 || stats.manualReviewRequired > 0 || queuedRunsTotal > 0) && (
-        <div className="max-w-4xl mx-auto flex flex-wrap items-center gap-2 mb-4 sm:mb-5">
+        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-center gap-2 mb-4 sm:mb-5">
           {liveInProgress > 0 && (
             <SmallStatPill icon={Brain} tone="blue" value={liveInProgress} label="currently analyzing" />
           )}
           {stats.rebounds > 0 && (
-            <SmallStatPill icon={RotateCcw} tone="amber" value={stats.rebounds} label={`rebound${stats.rebounds === 1 ? '' : 's'} today`} title="Tickets that bounced back after a rejection and triggered a fresh pipeline run" />
+            <SmallStatPill
+              icon={RotateCcw}
+              tone="amber"
+              value={stats.rebounds}
+              label={`rebound${stats.rebounds === 1 ? '' : 's'} today`}
+              title="Tickets that bounced back after a rejection and triggered a fresh pipeline run. Click to see the list."
+              onClick={openReboundsDetail}
+            />
           )}
           {stats.pipelineBypass > 0 && (
             <SmallStatPill
@@ -574,7 +613,8 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
               tone="amber"
               value={stats.pipelineBypass}
               label="bypassed pipeline (no analysis)"
-              title="Tickets created today that ended up assigned in FreshService but never had a pipeline run — typically because the agent grabbed them within the 30s window before our next poll fired. Not visible in the Manually in FreshService tab because there's no run record."
+              title="Tickets created today that ended up assigned in FreshService but never had a pipeline run — typically because the agent grabbed them within the 30s window before our next poll fired. Click to see the list."
+              onClick={openBypassedDetail}
             />
           )}
           {stats.noiseFiltered > 0 && (
@@ -583,7 +623,8 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
               tone="slate"
               value={stats.noiseFiltered}
               label="noise-filtered (skipped before analysis)"
-              title="Tickets matched a noise rule and were silently excluded from polling. If a ticket you expected to see auto-assigned is missing, check the Noise Rules page — a rule may be over-matching."
+              title="Tickets matched a noise rule and were silently excluded from polling. Click to see which tickets and which rule matched."
+              onClick={openNoiseFilteredDetail}
             />
           )}
           {stats.manualReviewRequired > 0 && (
@@ -595,42 +636,43 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
         </div>
       )}
 
-      {/* Recent auto-assignments — up to 10 from the last 24h. Each row is a
-          clickable link to the run detail page. Shows the assignee's profile
-          photo (with green check badge), ticket id + subject, assignee name,
-          and a relative timestamp. */}
+      {/* Recent auto-assignments — up to 10 from the last 24h. Compact
+          2-column grid on desktop (1-column on mobile) so the list fills
+          the horizontal space instead of running a long thin column on
+          the left. Each cell is a single-line chip linking to the run
+          detail page: small avatar, ticket id, subject, assignee, time. */}
       {recent.length > 0 && (
         <div className="max-w-4xl mx-auto">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2 px-1">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2 text-center">
             Recent auto-assignments {recent.length > 1 && <span className="text-slate-400 normal-case font-normal">· last {recent.length}</span>}
           </div>
-          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden divide-y divide-slate-100">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
             {recent.map((r) => (
               <a
                 key={r.runId}
                 href={`/assignments/history/${r.runId}`}
-                className="group flex items-center gap-3 sm:gap-4 px-3.5 sm:px-4 py-2.5 sm:py-3 hover:bg-slate-50 transition-colors"
+                className="group flex items-center gap-2.5 px-3 py-2 bg-white border border-slate-200/80 rounded-xl shadow-sm hover:shadow hover:border-slate-300 transition-all min-w-0"
+                title={r.ticketSubject}
               >
                 <TechAvatar
                   photoUrl={r.techPhotoUrl}
                   name={r.techName}
-                  size="md"
-                  badge={<Check className="w-3 h-3 text-white" />}
+                  size="sm"
+                  badge={<Check className="w-2.5 h-2.5 text-white" />}
                   badgeClass="bg-emerald-500 ring-2 ring-white"
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-slate-900 truncate font-medium" title={r.ticketSubject}>
-                    {r.freshserviceTicketId && <span className="text-slate-400 mr-1.5 font-normal">#{r.freshserviceTicketId}</span>}
+                  <div className="text-[13px] text-slate-900 truncate font-medium leading-tight">
+                    {r.freshserviceTicketId && <span className="text-slate-400 mr-1 font-normal">#{r.freshserviceTicketId}</span>}
                     {r.ticketSubject}
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                    <span>to <span className="font-semibold text-slate-700">{r.techName || 'Unknown'}</span></span>
-                    <span className="text-slate-300">·</span>
-                    <Clock className="w-3 h-3 text-slate-400" />
+                  <div className="text-[11px] text-slate-500 truncate leading-tight mt-0.5">
+                    to <span className="font-semibold text-slate-700">{r.techName || 'Unknown'}</span>
+                    <span className="text-slate-300 mx-1.5">·</span>
                     <RelativeTime iso={r.decidedAt} />
                   </div>
                 </div>
-                <ChevronRight className="flex-shrink-0 w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                <ChevronRight className="flex-shrink-0 w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 transition-colors" />
               </a>
             ))}
           </div>
@@ -642,6 +684,156 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
         <button onClick={onRefresh} className="text-xs text-slate-400 hover:text-slate-600 inline-flex items-center gap-1.5 transition-colors">
           <RefreshCw className="w-3 h-3" /> Refresh stats
         </button>
+      </div>
+
+      {pillDetail && (
+        <PillDetailModal detail={pillDetail} onClose={closePillDetail} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Modal that lists the contributing tickets for one of the clickable
+ * process-state pills (rebounds / bypassed / noise-filtered). Backend ships
+ * up to 20 rows per pill so the modal is always client-side paginated.
+ *
+ * Renders different per-row info based on `kind`:
+ *   - 'rebound':  ticket + assignee + trigger source
+ *   - 'bypassed': ticket + assignee (no run record)
+ *   - 'noise':    ticket + requester + rule that matched
+ */
+function PillDetailModal({ detail, onClose }) {
+  // Esc to close — keyboard accessibility for non-mouse users.
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const { title, description, items, kind } = detail;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl max-h-[80vh] flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-slate-200 bg-slate-50/50">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+            {description && (
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">{description}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-shrink-0 -mr-1 -mt-1 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {items.length === 0 ? (
+            <div className="px-5 py-12 text-center text-sm text-slate-500">
+              Nothing to show here right now.
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {items.map((item, i) => (
+                <li key={item.runId || item.ticketId || i} className="px-5 py-3 hover:bg-slate-50/60 transition-colors">
+                  <PillDetailRow item={item} kind={kind} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Single row inside the pill detail modal. Shape varies by `kind`.
+ */
+function PillDetailRow({ item, kind }) {
+  const ticketLabel = (
+    <span className="text-sm text-slate-900 font-medium leading-tight">
+      {item.freshserviceTicketId && <span className="text-slate-400 mr-1.5 font-normal">#{item.freshserviceTicketId}</span>}
+      {item.ticketSubject}
+    </span>
+  );
+  const time = (
+    <span className="text-[11px] text-slate-500 inline-flex items-center gap-1">
+      <Clock className="w-3 h-3 text-slate-400" />
+      <RelativeTime iso={item.createdAt || item.decidedAt} />
+    </span>
+  );
+
+  if (kind === 'rebound') {
+    const trigger = item.triggerSource === 'rebound_exhausted'
+      ? <span className="text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded text-[10px] font-semibold">REBOUND EXHAUSTED</span>
+      : <span className="text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded text-[10px] font-semibold">REBOUND</span>;
+    return (
+      <a href={`/assignments/history/${item.runId}`} className="block group">
+        <div className="flex items-center gap-3 min-w-0">
+          <TechAvatar photoUrl={item.techPhotoUrl} name={item.techName} size="sm" />
+          <div className="flex-1 min-w-0">
+            <div className="truncate">{ticketLabel}</div>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              {trigger}
+              {item.techName && <span className="text-[11px] text-slate-500">re-routed to <span className="font-semibold text-slate-700">{item.techName}</span></span>}
+              <span className="text-slate-300 text-[11px]">·</span>
+              {time}
+            </div>
+          </div>
+          <ChevronRight className="flex-shrink-0 w-4 h-4 text-slate-300 group-hover:text-slate-500" />
+        </div>
+      </a>
+    );
+  }
+
+  if (kind === 'bypassed') {
+    return (
+      <div className="flex items-center gap-3 min-w-0">
+        <TechAvatar photoUrl={item.techPhotoUrl} name={item.techName} size="sm" />
+        <div className="flex-1 min-w-0">
+          <div className="truncate">{ticketLabel}</div>
+          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span>grabbed in FS by <span className="font-semibold text-slate-700">{item.techName || 'Unknown'}</span></span>
+            <span className="text-slate-300">·</span>
+            {time}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // kind === 'noise'
+  return (
+    <div className="flex items-center gap-3 min-w-0">
+      <span className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 text-slate-500">
+        <XCircle className="w-4 h-4" />
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="truncate">{ticketLabel}</div>
+        <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+          {item.requesterName && <span>from <span className="font-semibold text-slate-700">{item.requesterName}</span></span>}
+          {item.noiseRuleMatched && (
+            <>
+              {item.requesterName && <span className="text-slate-300">·</span>}
+              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-mono">{item.noiseRuleMatched}</span>
+            </>
+          )}
+          <span className="text-slate-300">·</span>
+          {time}
+        </div>
       </div>
     </div>
   );
@@ -656,25 +848,44 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
  * the left and a bold tabular-num value, then a quieter label. Reads like
  * "[icon] 2 rebounds today" at a glance.
  */
-function SmallStatPill({ icon: Icon, label, value, tone = 'slate', title }) {
+function SmallStatPill({ icon: Icon, label, value, tone = 'slate', title, onClick }) {
   const TONE_CLASSES = {
-    blue:    { iconBg: 'bg-blue-100',    iconText: 'text-blue-700',    text: 'text-blue-900',    border: 'border-blue-200/70' },
-    emerald: { iconBg: 'bg-emerald-100', iconText: 'text-emerald-700', text: 'text-emerald-900', border: 'border-emerald-200/70' },
-    amber:   { iconBg: 'bg-amber-100',   iconText: 'text-amber-700',   text: 'text-amber-900',   border: 'border-amber-200/70' },
-    rose:    { iconBg: 'bg-rose-100',    iconText: 'text-rose-700',    text: 'text-rose-900',    border: 'border-rose-200/70' },
-    slate:   { iconBg: 'bg-slate-200',   iconText: 'text-slate-600',   text: 'text-slate-700',   border: 'border-slate-200' },
+    blue:    { iconBg: 'bg-blue-100',    iconText: 'text-blue-700',    text: 'text-blue-900',    border: 'border-blue-200/70',    hover: 'hover:bg-blue-50/60 hover:border-blue-300' },
+    emerald: { iconBg: 'bg-emerald-100', iconText: 'text-emerald-700', text: 'text-emerald-900', border: 'border-emerald-200/70', hover: 'hover:bg-emerald-50/60 hover:border-emerald-300' },
+    amber:   { iconBg: 'bg-amber-100',   iconText: 'text-amber-700',   text: 'text-amber-900',   border: 'border-amber-200/70',   hover: 'hover:bg-amber-50/60 hover:border-amber-300' },
+    rose:    { iconBg: 'bg-rose-100',    iconText: 'text-rose-700',    text: 'text-rose-900',    border: 'border-rose-200/70',    hover: 'hover:bg-rose-50/60 hover:border-rose-300' },
+    slate:   { iconBg: 'bg-slate-200',   iconText: 'text-slate-600',   text: 'text-slate-700',   border: 'border-slate-200',      hover: 'hover:bg-slate-50 hover:border-slate-300' },
   };
   const tc = TONE_CLASSES[tone] || TONE_CLASSES.slate;
-  return (
-    <div
-      className={`inline-flex items-center gap-2 pl-1 pr-3 py-1 rounded-full bg-white border ${tc.border} shadow-sm text-xs ${tc.text}`}
-      title={title || undefined}
-    >
+  // Render as button when onClick is provided so the pill behaves as an
+  // affordance (cursor-pointer, hover, keyboard-accessible). Non-clickable
+  // pills stay as <div> so they don't show a misleading hover state.
+  const sharedClass = `inline-flex items-center gap-2 pl-1 pr-3 py-1 rounded-full bg-white border ${tc.border} shadow-sm text-xs ${tc.text}`;
+  const inner = (
+    <>
       <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full ${tc.iconBg}`}>
         <Icon className={`w-3 h-3 ${tc.iconText}`} />
       </span>
       <span className="font-semibold tabular-nums">{value}</span>
       <span className="text-slate-600">{label}</span>
+      {onClick && <ChevronRight className={`w-3 h-3 -ml-0.5 ${tc.iconText} opacity-60`} />}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${sharedClass} ${tc.hover} cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-300`}
+        title={title || undefined}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className={sharedClass} title={title || undefined}>
+      {inner}
     </div>
   );
 }
@@ -776,6 +987,119 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
         <QuickApproveInner run={run} recs={recs} {...innerProps} />
       </div>
     </div>
+  );
+}
+
+function QueueFilterRail({
+  subView,
+  assignedTotal,
+  assignedRunsTotal,
+  outsideAssignedTotal,
+  assignedFilter,
+  onAssignedFilterChange,
+  decidedDecisionFilter,
+  onDecidedDecisionFilterChange,
+  ticketStatusFilter,
+  onTicketStatusFilterChange,
+  differentAgentCount,
+}) {
+  if (subView === 'deleted' || subView === 'pending') {
+    return null;
+  }
+
+  const groups = [];
+
+  if (subView === 'assigned' && assignedTotal > 0) {
+    groups.push({
+      id: 'source',
+      label: 'Source',
+      value: assignedFilter,
+      onChange: onAssignedFilterChange,
+      options: [
+        { id: 'all', label: 'All', count: assignedTotal, activeClass: 'bg-slate-900 text-white shadow-sm' },
+        { id: 'via_pipeline', label: 'Pipeline', count: assignedRunsTotal, activeClass: 'bg-emerald-500 text-white shadow-sm' },
+        { id: 'manually_in_fs', label: 'FreshService', count: outsideAssignedTotal, activeClass: 'bg-amber-300 text-amber-950 shadow-sm' },
+      ],
+    });
+  }
+
+  if (subView === 'assigned' && assignedFilter === 'via_pipeline') {
+    groups.push({
+      id: 'decision',
+      label: 'Decision',
+      value: decidedDecisionFilter,
+      onChange: onDecidedDecisionFilterChange,
+      options: [
+        { id: 'all', label: 'All', activeClass: 'bg-slate-900 text-white shadow-sm' },
+        { id: 'auto_assigned', label: 'AI Auto', activeClass: 'bg-emerald-500 text-white shadow-sm' },
+        { id: 'approved', label: 'Approved', activeClass: 'bg-blue-500 text-white shadow-sm' },
+      ],
+    });
+  }
+
+  groups.push({
+    id: 'status',
+    label: 'Status',
+    value: ticketStatusFilter,
+    onChange: onTicketStatusFilterChange,
+    options: [
+      { id: 'all', label: 'All', activeClass: 'bg-slate-900 text-white shadow-sm' },
+      { id: 'in_progress', label: 'In Progress', activeClass: 'bg-emerald-500 text-white shadow-sm' },
+      { id: 'pending', label: 'Pending', activeClass: 'bg-amber-300 text-amber-950 shadow-sm' },
+      { id: 'closed_resolved', label: 'Closed', activeClass: 'bg-slate-500 text-white shadow-sm' },
+    ],
+  });
+
+  return (
+    <>
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 shadow-sm shrink-0">
+        <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+        Filters
+      </span>
+
+      {groups.map((group) => (
+        <div
+          key={group.id}
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50/90 p-1 shadow-sm"
+        >
+          <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 ring-1 ring-slate-200/80">
+            {group.label}
+          </span>
+          {group.options.map((option) => {
+            const isActive = group.value === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => group.onChange(option.id)}
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all duration-150 touch-manipulation ${
+                  isActive
+                    ? option.activeClass
+                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                }`}
+              >
+                <span>{option.label}</span>
+                {option.count != null && (
+                  <span className={`tabular-nums text-[10px] ${isActive ? 'opacity-80' : 'text-slate-400'}`}>
+                    {option.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+
+      {subView === 'assigned' && differentAgentCount > 0 && assignedFilter !== 'manually_in_fs' && (
+        <span
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-[10px] font-medium text-blue-700 shadow-sm"
+          title="Pipeline runs where the final assignee differed from the AI's top recommendation"
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+          {differentAgentCount} different agent chosen
+        </span>
+      )}
+    </>
   );
 }
 
@@ -1301,7 +1625,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   const isTicketOpen = (run) => ['Open', 'open', '2', 'Pending', 'pending', '3'].includes(String(run.ticket?.status || ''));
   const isTicketDeleted = (run) => ['deleted', 'spam'].includes(String(run.ticket?.status || '').toLowerCase());
-  const isTicketUnassigned = (run) => !run.ticket?.assignedTechId;
   const getTicketFlag = (run) => {
     if (!run.ticket) return null;
     if (isTicketDeleted(run)) return 'deleted';
@@ -1698,54 +2021,69 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       {/* Sub-view tabs + filters + toolbar (single compact row; ticket status only on Pending) */}
       <div className="border border-slate-200 rounded-lg">
         <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2 rounded-t-lg">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-            {/* Primary tabs — modern segmented control with subtle elevation on active */}
-            <div className="inline-flex items-center gap-0.5 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/60">
-              {[
-                { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
-                { id: 'assigned', label: 'Decided', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
-                { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400', activeRing: 'ring-slate-200' },
-                { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-rose-400', activeRing: 'ring-rose-200' },
-                { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500', activeRing: 'ring-red-200' },
-                { id: 'all', label: 'All', count: null, dot: null, activeRing: 'ring-slate-200' },
-              ].map((tab) => {
-                const isActive = subView === tab.id;
-                const isZero = tab.count === 0;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => { setSubView(tab.id); setAssignedFilter('all'); setDecidedDecisionFilter('all'); }}
-                    className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
-                      isActive
-                        ? `bg-white text-slate-900 shadow-sm ring-1 ${tab.activeRing}`
-                        : `${isZero ? 'text-slate-400' : 'text-slate-600'} hover:text-slate-900 hover:bg-white/70`
-                    }`}
-                  >
-                    {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot} ${isZero && !isActive ? 'opacity-40' : ''}`} />}
-                    <span>{tab.label}</span>
-                    {tab.count != null && (
-                      <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-slate-500' : isZero ? 'text-slate-300' : 'text-slate-400'}`}>
-                        {tab.count}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex min-w-max items-center gap-2">
+              {/* Primary tabs — modern segmented control with subtle elevation on active */}
+              <div className="inline-flex shrink-0 items-center gap-0.5 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/60">
+                {[
+                  { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
+                  { id: 'assigned', label: 'Decided', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
+                  { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400', activeRing: 'ring-slate-200' },
+                  { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-rose-400', activeRing: 'ring-rose-200' },
+                  { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500', activeRing: 'ring-red-200' },
+                  { id: 'all', label: 'All', count: null, dot: null, activeRing: 'ring-slate-200' },
+                ].map((tab) => {
+                  const isActive = subView === tab.id;
+                  const isZero = tab.count === 0;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => { setSubView(tab.id); setAssignedFilter('all'); setDecidedDecisionFilter('all'); }}
+                      className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
+                        isActive
+                          ? `bg-white text-slate-900 shadow-sm ring-1 ${tab.activeRing}`
+                          : `${isZero ? 'text-slate-400' : 'text-slate-600'} hover:text-slate-900 hover:bg-white/70`
+                      }`}
+                    >
+                      {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot} ${isZero && !isActive ? 'opacity-40' : ''}`} />}
+                      <span>{tab.label}</span>
+                      {tab.count != null && (
+                        <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-slate-500' : isZero ? 'text-slate-300' : 'text-slate-400'}`}>
+                          {tab.count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
 
-            {filterPriority !== 'all' && (
-              <button
-                type="button"
-                onClick={() => setFilterPriority('all')}
-                className="text-[10px] font-medium text-blue-600 hover:text-blue-800"
-              >
-                Clear priority
-              </button>
-            )}
+              <QueueFilterRail
+                subView={subView}
+                assignedTotal={assignedTotal}
+                assignedRunsTotal={assignedRuns.total}
+                outsideAssignedTotal={outsideAssignedRuns.total}
+                assignedFilter={assignedFilter}
+                onAssignedFilterChange={setAssignedFilter}
+                decidedDecisionFilter={decidedDecisionFilter}
+                onDecidedDecisionFilterChange={setDecidedDecisionFilter}
+                ticketStatusFilter={ticketStatusFilter}
+                onTicketStatusFilterChange={setTicketStatusFilter}
+                differentAgentCount={differentAgentCount}
+              />
 
-            <div className="hidden min-w-[0.5rem] flex-1 lg:block" />
+              <div className="min-w-4 flex-1" />
 
-            <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:gap-2 lg:ml-auto">
+              {filterPriority !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setFilterPriority('all')}
+                  className="shrink-0 text-[10px] font-medium text-blue-600 hover:text-blue-800"
+                >
+                  Clear priority
+                </button>
+              )}
+
+              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
               <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="touch-manipulation rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] shadow-sm">
                 <option value="all">Priority</option>
                 <option value="4">Urgent</option>
@@ -1774,103 +2112,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               <button type="button" onClick={handleSmartRefresh} disabled={refreshing} className="touch-manipulation p-1 text-blue-600 hover:text-blue-800 disabled:opacity-50" title="Sync with FreshService & refresh">
                 <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               </button>
+              </div>
             </div>
           </div>
         </div>
-
-        {/* Unified secondary filter row — Source drilldown (Assigned only) + Status filter,
-            stacked beneath the primary tabs for a clearer visual hierarchy. */}
-        {subView !== 'deleted' && subView !== 'pending' && (
-          <div className="border-b border-slate-100 bg-white px-3 sm:px-4 py-2 space-y-1.5">
-            {/* Source drilldown — Assigned tab only */}
-            {subView === 'assigned' && assignedTotal > 0 && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold w-14 shrink-0">Source</span>
-                {[
-                  { id: 'all', label: 'All', count: assignedTotal, activeColor: 'border-slate-700 text-slate-900' },
-                  { id: 'via_pipeline', label: 'Via Pipeline', count: assignedRuns.total, activeColor: 'border-emerald-500 text-emerald-700' },
-                  { id: 'manually_in_fs', label: 'Manually in FreshService', count: outsideAssignedRuns.total, activeColor: 'border-amber-500 text-amber-700' },
-                ].map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setAssignedFilter(f.id)}
-                    className={`relative pb-1 text-[11px] font-medium transition-colors duration-150 touch-manipulation border-b-2 ${
-                      assignedFilter === f.id
-                        ? f.activeColor
-                        : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'
-                    }`}
-                  >
-                    {f.label}
-                    <span className={`ml-1 tabular-nums ${assignedFilter === f.id ? 'opacity-60' : 'opacity-50'}`}>({f.count})</span>
-                  </button>
-                ))}
-                {differentAgentCount > 0 && assignedFilter !== 'manually_in_fs' && (
-                  <span
-                    className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-blue-200"
-                    title="Pipeline runs where the final assignee differed from the AI's top recommendation"
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                    {differentAgentCount} different agent chosen
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Decision sub-filter — only meaningful when looking at Via
-                Pipeline (those runs split into two distinct outcomes:
-                auto-assigned by AI vs admin-approved). Set automatically
-                when drilling in from the empty-state outcome cards so the
-                count matches the card; user can toggle freely too. */}
-            {subView === 'assigned' && assignedFilter === 'via_pipeline' && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold w-14 shrink-0">Decision</span>
-                {[
-                  { id: 'all', label: 'All', activeColor: 'border-slate-700 text-slate-900' },
-                  { id: 'auto_assigned', label: 'Auto-assigned by AI', activeColor: 'border-emerald-500 text-emerald-700' },
-                  { id: 'approved', label: 'Approved by you', activeColor: 'border-blue-500 text-blue-700' },
-                ].map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setDecidedDecisionFilter(f.id)}
-                    className={`relative pb-1 text-[11px] font-medium transition-colors duration-150 touch-manipulation border-b-2 ${
-                      decidedDecisionFilter === f.id
-                        ? f.activeColor
-                        : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'
-                    }`}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Ticket-status filter — applies to all tabs except Awaiting Decision/Deleted */}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold w-14 shrink-0">Status</span>
-              {[
-                { id: 'all', label: 'All', activeColor: 'border-slate-700 text-slate-900' },
-                { id: 'in_progress', label: 'In Progress', activeColor: 'border-emerald-500 text-emerald-700' },
-                { id: 'pending', label: 'Pending', activeColor: 'border-amber-500 text-amber-700' },
-                { id: 'closed_resolved', label: 'Closed/Resolved', activeColor: 'border-slate-400 text-slate-600' },
-              ].map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => setTicketStatusFilter(f.id)}
-                  className={`relative pb-1 text-[11px] font-medium transition-colors duration-150 touch-manipulation border-b-2 ${
-                    ticketStatusFilter === f.id
-                      ? f.activeColor
-                      : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Clear all confirmation */}
         {showClearConfirm && (
@@ -2869,12 +3114,13 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
         excludedGroupIds: [],
+        dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
         ...cfg,
       });
       setAnthropicConfigured(res?.anthropicConfigured ?? false);
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [] });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14 });
     } finally { setLoading(false); }
   }, []);
 
@@ -2999,6 +3245,54 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
             </div>
           </div>
         )}
+      </ConfigSection>
+
+      {/* Section 6: Advanced */}
+      <ConfigSection icon={CalendarDays} title="Daily Review Automation" defaultOpen={false}>
+        <ConfigToggle
+          label="Enable Scheduled Daily Review"
+          description="Automatically run the daily assignment review after business hours using the configured local time."
+          checked={config.dailyReviewEnabled}
+          onChange={() => setConfig({ ...config, dailyReviewEnabled: !config.dailyReviewEnabled })}
+        />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 py-3">
+          <div>
+            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Run Hour</h4>
+            <input
+              type="number"
+              min="0"
+              max="23"
+              value={config.dailyReviewRunHour ?? 18}
+              onChange={(e) => setConfig({ ...config, dailyReviewRunHour: Math.max(0, Math.min(23, parseInt(e.target.value, 10) || 0)) })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Run Minute</h4>
+            <input
+              type="number"
+              min="0"
+              max="59"
+              value={config.dailyReviewRunMinute ?? 5}
+              onChange={(e) => setConfig({ ...config, dailyReviewRunMinute: Math.max(0, Math.min(59, parseInt(e.target.value, 10) || 0)) })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Thread Backfill Window</h4>
+            <input
+              type="number"
+              min="1"
+              max="90"
+              value={config.dailyReviewLookbackDays ?? 14}
+              onChange={(e) => setConfig({ ...config, dailyReviewLookbackDays: Math.max(1, Math.min(90, parseInt(e.target.value, 10) || 14)) })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+        <div className="text-xs text-slate-500">
+          Runs are evaluated in the workspace timezone ({workspaceTimezone}). The thread backfill window controls how far back the system should be prepared to hydrate missing FreshService thread data for manual reviews.
+        </div>
       </ConfigSection>
 
       {/* Section 6: Advanced */}
@@ -3233,6 +3527,7 @@ export default function AssignmentReview() {
           <div className="px-3 py-3 sm:px-6 sm:py-5">
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'calibration' && <CalibrationManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'prompts' && <PromptManager workspaceTimezone={workspaceTimezone} />}

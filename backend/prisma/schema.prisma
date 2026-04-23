@@ -45,8 +45,11 @@ model Workspace {
   competencyPrompts      CompetencyPromptVersion[]
   competencyRuns         CompetencyAnalysisRun[]
   calibrationRuns        CalibrationRun[]
+  dailyReviewRuns        AssignmentDailyReviewRun[]
+  dailyReviewRecommendations AssignmentDailyReviewRecommendation[]
   assignmentEpisodes     TicketAssignmentEpisode[]
   backfillRuns           BackfillRun[]
+  ticketThreadEntries    TicketThreadEntry[]
 
   @@map("workspaces")
 }
@@ -200,6 +203,7 @@ model Ticket {
   ticketAssignments    TicketAssignment[]
   pipelineRuns         AssignmentPipelineRun[]
   assignmentEpisodes   TicketAssignmentEpisode[]
+  threadEntries        TicketThreadEntry[]
 
   @@map("tickets")
   @@index([workspaceId])
@@ -246,6 +250,36 @@ model TicketActivity {
   @@index([ticketId])
   @@index([performedAt])
   @@index([activityType])
+}
+
+model TicketThreadEntry {
+  id                  Int       @id @default(autoincrement())
+  ticketId            Int       @map("ticket_id")
+  ticket              Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  workspaceId         Int       @map("workspace_id")
+  workspace           Workspace @relation(fields: [workspaceId], references: [id])
+  externalEntryId     String    @db.VarChar(191) @map("external_entry_id")
+  source              String    @default("freshservice_activity") @db.VarChar(50)
+  eventType           String    @default("activity") @db.VarChar(50) @map("event_type")
+  actorName           String?   @db.VarChar(255) @map("actor_name")
+  actorEmail          String?   @db.VarChar(255) @map("actor_email")
+  actorFreshserviceId BigInt?   @map("actor_freshservice_id")
+  incoming            Boolean?  @map("incoming")
+  isPrivate           Boolean?  @map("is_private")
+  visibility          String?   @db.VarChar(20)
+  title               String?   @db.VarChar(255)
+  content             String?   @db.Text
+  bodyHtml            String?   @db.Text @map("body_html")
+  bodyText            String?   @db.Text @map("body_text")
+  occurredAt          DateTime  @map("occurred_at")
+  syncedAt            DateTime  @default(now()) @map("synced_at")
+  rawPayload          Json?     @map("raw_payload")
+
+  @@map("ticket_thread_entries")
+  @@unique([ticketId, externalEntryId])
+  @@index([workspaceId, occurredAt])
+  @@index([ticketId, occurredAt])
+  @@index([eventType])
 }
 
 model TicketAssignmentEpisode {
@@ -602,6 +636,10 @@ model AssignmentConfig {
   lastEmailCheckAt        DateTime? @map("last_email_check_at")
   autoCloseNoise          Boolean   @default(false) @map("auto_close_noise")
   dryRunMode              Boolean   @default(true) @map("dry_run_mode")
+  dailyReviewEnabled      Boolean   @default(false) @map("daily_review_enabled")
+  dailyReviewRunHour      Int       @default(18) @map("daily_review_run_hour")
+  dailyReviewRunMinute    Int       @default(5) @map("daily_review_run_minute")
+  dailyReviewLookbackDays Int       @default(14) @map("daily_review_lookback_days")
   // FreshService group IDs that are excluded from auto-assignment. When a
   // ticket's group_id is in this list, the LLM still runs and produces a
   // recommendation, but decision is forced to pending_review for manual
@@ -835,6 +873,72 @@ model CalibrationRun {
   @@index([workspaceId])
   @@index([status])
   @@index([createdAt])
+}
+
+model AssignmentDailyReviewRun {
+  id                     Int       @id @default(autoincrement())
+  workspaceId            Int       @map("workspace_id")
+  workspace              Workspace @relation(fields: [workspaceId], references: [id])
+  reviewDate             DateTime  @db.Date @map("review_date")
+  timezone               String    @db.VarChar(50)
+  triggerSource          String    @db.VarChar(20) @map("trigger_source") // manual | scheduled | rerun
+  status                 String    @default("running") @db.VarChar(30) // running | collecting | analyzing | completed | failed | cancelled
+  rangeStart             DateTime? @map("range_start")
+  rangeEnd               DateTime? @map("range_end")
+  triggeredBy            String?   @db.VarChar(255) @map("triggered_by")
+  llmModel               String?   @db.VarChar(100) @map("llm_model")
+  summaryMetrics         Json?     @map("summary_metrics")
+  analyzedTicketIds      Json?     @map("analyzed_ticket_ids")
+  evidenceCases          Json?     @map("evidence_cases")
+  promptRecommendations  Json?     @map("prompt_recommendations")
+  processRecommendations Json?     @map("process_recommendations")
+  skillRecommendations   Json?     @map("skill_recommendations")
+  warnings               Json?     @map("warnings")
+  totalDurationMs        Int?      @map("total_duration_ms")
+  totalTokensUsed        Int?      @map("total_tokens_used")
+  errorMessage           String?   @db.Text @map("error_message")
+  fullTranscript         String?   @db.Text @map("full_transcript")
+  completedAt            DateTime? @map("completed_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+  recommendations        AssignmentDailyReviewRecommendation[]
+
+  @@map("assignment_daily_review_runs")
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, reviewDate])
+  @@index([status])
+}
+
+model AssignmentDailyReviewRecommendation {
+  id                            Int                      @id @default(autoincrement())
+  workspaceId                   Int                      @map("workspace_id")
+  workspace                     Workspace                @relation(fields: [workspaceId], references: [id])
+  runId                         Int                      @map("run_id")
+  run                           AssignmentDailyReviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  reviewDate                    DateTime                 @db.Date @map("review_date")
+  kind                          String                   @db.VarChar(20)
+  ordinal                       Int
+  title                         String                   @db.VarChar(255)
+  severity                      String                   @db.VarChar(20)
+  rationale                     String                   @db.Text
+  suggestedAction               String                   @db.Text @map("suggested_action")
+  skillsAffected                Json?                    @map("skills_affected")
+  supportingTicketIds           Json?                    @map("supporting_ticket_ids")
+  supportingFreshserviceTicketIds Json?                  @map("supporting_freshservice_ticket_ids")
+  status                        String                   @default("pending") @db.VarChar(20)
+  reviewNotes                   String?                  @db.Text @map("review_notes")
+  reviewedBy                    String?                  @db.VarChar(255) @map("reviewed_by")
+  reviewedAt                    DateTime?                @map("reviewed_at")
+  appliedBy                     String?                  @db.VarChar(255) @map("applied_by")
+  appliedAt                     DateTime?                @map("applied_at")
+  createdAt                     DateTime                 @default(now()) @map("created_at")
+  updatedAt                     DateTime                 @updatedAt @map("updated_at")
+
+  @@map("assignment_daily_review_recommendations")
+  @@unique([runId, kind, ordinal])
+  @@index([workspaceId, status])
+  @@index([workspaceId, reviewDate])
+  @@index([workspaceId, kind])
 }
 
 model CompetencyAnalysisStep {

@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import logger from '../utils/logger.js';
 import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
 
@@ -378,6 +379,100 @@ export function transformTicketActivity(fsActivity, ticketId) {
     logger.error('Error transforming ticket activity:', error);
     return null;
   }
+}
+
+function inferThreadEventType(fsActivity) {
+  const content = String(fsActivity?.content || '');
+  if (fsActivity?.incoming) return 'customer_reply';
+  if (fsActivity?.private) return 'private_note';
+  if (/set Agent as /i.test(content)) return 'assignment_event';
+  if (/set Group as /i.test(content)) return 'group_event';
+  if (/set Status as /i.test(content)) return 'status_event';
+  if (
+    (typeof fsActivity?.body_text === 'string' && fsActivity.body_text.trim().length > 0)
+    || (typeof fsActivity?.body === 'string' && fsActivity.body.trim().length > 0)
+    || (typeof fsActivity?.note === 'string' && fsActivity.note.trim().length > 0)
+  ) {
+    return 'public_reply';
+  }
+  return 'activity';
+}
+
+function buildThreadExternalEntryId(fsActivity) {
+  if (fsActivity?.id) {
+    return `fs-activity:${fsActivity.id}`;
+  }
+
+  const fingerprint = {
+    created_at: fsActivity?.created_at || null,
+    content: fsActivity?.content || null,
+    body_text: fsActivity?.body_text || null,
+    actor_id: fsActivity?.actor?.id || null,
+    actor_name: fsActivity?.actor?.name || null,
+    incoming: fsActivity?.incoming === true,
+    private: fsActivity?.private === true,
+  };
+
+  return `fs-fallback:${createHash('sha1').update(JSON.stringify(fingerprint)).digest('hex')}`;
+}
+
+/**
+ * Transform a FreshService activity into a durable thread-entry record.
+ * Used for long-term review/analytics, not the lightweight TicketActivity table.
+ *
+ * @param {Object} fsActivity
+ * @param {Object} context
+ * @param {number} context.ticketId
+ * @param {number} context.workspaceId
+ * @returns {Object|null}
+ */
+export function transformTicketThreadEntry(fsActivity, { ticketId, workspaceId }) {
+  if (!fsActivity || !ticketId || !workspaceId) {
+    logger.warn('Invalid thread activity context');
+    return null;
+  }
+
+  try {
+    const visibility = fsActivity.private === true
+      ? 'private'
+      : fsActivity.incoming === true
+        ? 'customer'
+        : 'public';
+
+    return {
+      ticketId,
+      workspaceId,
+      externalEntryId: buildThreadExternalEntryId(fsActivity),
+      source: 'freshservice_activity',
+      eventType: inferThreadEventType(fsActivity),
+      actorName: fsActivity.actor?.name || null,
+      actorEmail: fsActivity.actor?.email || null,
+      actorFreshserviceId: fsActivity.actor?.id ? BigInt(fsActivity.actor.id) : null,
+      incoming: fsActivity.incoming === undefined ? null : fsActivity.incoming === true,
+      isPrivate: fsActivity.private === undefined ? null : fsActivity.private === true,
+      visibility,
+      title: fsActivity.title || null,
+      content: fsActivity.content || null,
+      bodyHtml: fsActivity.body || null,
+      bodyText: fsActivity.body_text || fsActivity.note || null,
+      occurredAt: fsActivity.created_at ? new Date(fsActivity.created_at) : new Date(),
+      rawPayload: fsActivity,
+    };
+  } catch (error) {
+    logger.error('Error transforming ticket thread entry:', error);
+    return null;
+  }
+}
+
+export function transformTicketThreadEntries(fsActivities, context) {
+  if (!Array.isArray(fsActivities)) {
+    logger.warn('Invalid thread activities array');
+    return [];
+  }
+
+  return fsActivities
+    .map(activity => transformTicketThreadEntry(activity, context))
+    .filter(Boolean);
 }
 
 /**

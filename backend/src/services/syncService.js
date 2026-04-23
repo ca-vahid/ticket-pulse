@@ -4,11 +4,13 @@ import {
   transformAgents,
   mapTechnicianIds,
   analyzeTicketActivities,
+  transformTicketThreadEntries,
 } from '../integrations/freshserviceTransformer.js';
 import technicianRepository from './technicianRepository.js';
 import ticketRepository from './ticketRepository.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import requesterRepository from './requesterRepository.js';
+import ticketThreadRepository from './ticketThreadRepository.js';
 import settingsRepository from './settingsRepository.js';
 import syncLogRepository from './syncLogRepository.js';
 import csatService from './csatService.js';
@@ -467,6 +469,16 @@ class SyncService {
     }
   }
 
+  async _writeThreadEntries(ticketId, workspaceId, activities) {
+    try {
+      const entries = transformTicketThreadEntries(activities, { ticketId, workspaceId });
+      if (entries.length === 0) return;
+      await ticketThreadRepository.bulkUpsert(entries);
+    } catch (error) {
+      logger.error(`Failed to write thread entries for ticket ${ticketId}:`, error);
+    }
+  }
+
   // ========================================
   // CORE SYNC METHODS (Private - Single Source of Truth)
   // ========================================
@@ -559,7 +571,7 @@ class SyncService {
         const activities = await client.fetchTicketActivities(Number(ticketId));
         if (activities && activities.length > 0) {
           const analysis = analyzeTicketActivities(activities);
-          analysisMap.set(ticketId.toString(), analysis);
+          analysisMap.set(ticketId.toString(), { analysis, activities });
           processedCount++;
         } else {
           processedCount++;
@@ -617,8 +629,10 @@ class SyncService {
 
     let updatedCount = 0;
 
-    for (const [ticketId, analysis] of analysisMap.entries()) {
+    for (const [ticketId, payload] of analysisMap.entries()) {
       try {
+        const analysis = payload?.analysis || payload;
+        const activities = payload?.activities || null;
         const updated = await prisma.ticket.update({
           where: { freshserviceTicketId: BigInt(ticketId) },
           data: {
@@ -640,6 +654,10 @@ class SyncService {
         }
         if (analysis.events?.length) {
           await this._writeEventActivities(updated.id, analysis.events);
+        }
+        if (activities?.length) {
+          const wsId = updated.workspaceId || workspaceId;
+          await this._writeThreadEntries(updated.id, wsId, activities);
         }
       } catch (error) {
         logger.warn(`Failed to update ticket ${ticketId} with analysis: ${error.message || error}`);
@@ -941,7 +959,9 @@ class SyncService {
           let firstAssignedAt = null;
           let rejectionCount = existingTicket?.rejectionCount || 0;
 
-          const analysis = activityAnalysisMap.get(ticket.freshserviceTicketId.toString());
+          const analyzedPayload = activityAnalysisMap.get(ticket.freshserviceTicketId.toString());
+          const analysis = analyzedPayload?.analysis || null;
+          const activities = analyzedPayload?.activities || null;
           if (analysis) {
             isSelfPicked = analysis.currentIsSelfPicked;
             assignedBy = analysis.assignedBy;
@@ -1002,6 +1022,9 @@ class SyncService {
           // --- Write FS-sourced event activities (richer than snapshot diffs) ---
           if (analysis && analysis.events && analysis.events.length > 0) {
             await this._writeEventActivities(upsertedTicket.id, analysis.events);
+          }
+          if (activities && activities.length > 0) {
+            await this._writeThreadEntries(upsertedTicket.id, ticketWorkspaceId, activities);
           }
 
           // --- Bounce detection: ticket was assigned then unassigned ---
@@ -1318,6 +1341,7 @@ class SyncService {
 
       // Analyze activities to get firstAssignedAt
       const analysis = analyzeTicketActivities(activities);
+      await this._writeThreadEntries(ticket.id, ticket.workspaceId || 1, activities);
 
       if (analysis.firstAssignedAt || analysis.firstPublicAgentReplyAt) {
         // Update ticket with activity-derived timestamps
@@ -1426,6 +1450,7 @@ class SyncService {
           select: {
             id: true,
             freshserviceTicketId: true,
+            workspaceId: true,
           },
           take: limit,
         });
@@ -1479,6 +1504,81 @@ class SyncService {
       return summary;
     } catch (error) {
       logger.error('Pickup time backfill failed:', error);
+      throw error;
+    }
+  }
+
+  async backfillThreadEntries(options = {}) {
+    const limit = options.limit || 100;
+    const daysToSync = options.daysToSync || 14;
+    const processAll = options.processAll || false;
+    const workspaceId = options.workspaceId || 1;
+
+    try {
+      logger.info(`Starting thread-entry backfill (workspace=${workspaceId}, limit=${limit}, days=${daysToSync})`);
+      const client = await this._initializeClient();
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysToSync);
+
+      let totalProcessed = 0;
+      let totalHydrated = 0;
+      let totalErrors = 0;
+      let batchNumber = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const tickets = await prisma.ticket.findMany({
+          where: {
+            workspaceId,
+            createdAt: { gte: cutoffDate },
+          },
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            _count: { select: { threadEntries: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+          skip: (batchNumber - 1) * limit,
+        });
+
+        if (tickets.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        for (const ticket of tickets) {
+          totalProcessed++;
+          if (ticket._count?.threadEntries > 0 && !options.refreshExisting) {
+            continue;
+          }
+
+          try {
+            const activities = await client.fetchTicketActivities(Number(ticket.freshserviceTicketId));
+            if (!activities?.length) continue;
+            await this._writeThreadEntries(ticket.id, workspaceId, activities);
+            totalHydrated++;
+          } catch (error) {
+            totalErrors++;
+            logger.warn(`Thread-entry backfill failed for ticket ${ticket.freshserviceTicketId}: ${error.message}`);
+          }
+        }
+
+        if (!processAll || tickets.length < limit) {
+          hasMore = false;
+        }
+        batchNumber++;
+      }
+
+      return {
+        ticketsProcessed: totalProcessed,
+        ticketsHydrated: totalHydrated,
+        errors: totalErrors,
+        batches: batchNumber - 1,
+        daysToSync,
+      };
+    } catch (error) {
+      logger.error('Thread-entry backfill failed:', error);
       throw error;
     }
   }
@@ -2412,6 +2512,7 @@ class SyncService {
             }
 
             const analysis = analyzeTicketActivities(activities);
+            await this._writeThreadEntries(ticket.id, wsId, activities);
 
             if (analysis.episodes && analysis.episodes.length > 0) {
               await this._reconcileEpisodes(ticket.id, wsId, analysis, techNameMap);

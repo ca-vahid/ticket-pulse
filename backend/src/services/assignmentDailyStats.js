@@ -40,6 +40,9 @@ const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
  *   noiseFiltered: number,
  *   pipelineBypass: number,
  *   recentAutoAssignments: Array<{ runId: number, ticketSubject: string, ticketId: number, freshserviceTicketId: string|null, techName: string|null, techPhotoUrl: string|null, decidedAt: string }>,
+ *   recentRebounds: Array<object>,
+ *   recentBypassed: Array<object>,
+ *   recentNoiseFiltered: Array<object>,
  * }>}
  */
 export async function getTodayStats(workspaceId, timezone) {
@@ -115,7 +118,7 @@ export async function getTodayStats(workspaceId, timezone) {
   // source label drifted. Useful because the "in progress" tile is a
   // snapshot that misses brief rebound runs (LLM finishes in 30-60s); a
   // 24h count persists across refreshes so the admin sees rebounds happened.
-  const rebounds = await prisma.assignmentPipelineRun.count({
+  const reboundRows = await prisma.assignmentPipelineRun.findMany({
     where: {
       workspaceId,
       createdAt: { gte: start, lte: end },
@@ -124,7 +127,10 @@ export async function getTodayStats(workspaceId, timezone) {
         { reboundFrom: { not: null } },
       ],
     },
+    select: { ticketId: true },
+    distinct: ['ticketId'],
   });
+  const rebounds = reboundRows.length;
 
   // Last 10 auto-assignments — feeds the recent activity feed at the bottom
   // of the empty state. Was previously a single "most recent" row; expanded
@@ -145,6 +151,77 @@ export async function getTodayStats(workspaceId, timezone) {
       assignedTech: { select: { name: true, photoUrl: true } },
     },
   });
+
+  // Ticket-list previews for the clickable process-state pills. Each capped
+  // at 20 rows so the modal stays scannable. These power the modal that
+  // opens when the admin clicks the "rebounds today" / "bypassed pipeline" /
+  // "noise-filtered" pills — there's no existing destination tab for any
+  // of these because they're not regular pipeline-run outcomes.
+  const [recentRebounds, recentBypassed, recentNoiseFilteredTickets] = await Promise.all([
+    prisma.assignmentPipelineRun.findMany({
+      where: {
+        workspaceId,
+        createdAt: { gte: start, lte: end },
+        OR: [
+          { triggerSource: { in: ['rebound', 'rebound_exhausted'] } },
+          { reboundFrom: { not: null } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        ticketId: true,
+        createdAt: true,
+        triggerSource: true,
+        reboundFrom: true,
+        ticket: { select: { id: true, subject: true, freshserviceTicketId: true } },
+        assignedTech: { select: { name: true, photoUrl: true } },
+      },
+    }),
+    // Bypassed: created today, now assigned, no pipeline run exists.
+    // Find candidates then filter out anything with a run.
+    (async () => {
+      const candidates = await prisma.ticket.findMany({
+        where: {
+          workspaceId,
+          createdAt: { gte: start, lte: end },
+          assignedTechId: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+          id: true,
+          subject: true,
+          freshserviceTicketId: true,
+          createdAt: true,
+          assignedTech: { select: { name: true, photoUrl: true } },
+          pipelineRuns: { select: { id: true }, take: 1 },
+        },
+      });
+      return candidates
+        .filter((t) => !t.pipelineRuns || t.pipelineRuns.length === 0)
+        .slice(0, 20)
+        .map(({ pipelineRuns: _ignore, ...t }) => t);
+    })(),
+    prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        createdAt: { gte: start, lte: end },
+        isNoise: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        subject: true,
+        freshserviceTicketId: true,
+        createdAt: true,
+        noiseRuleMatched: true,
+        requester: { select: { name: true } },
+      },
+    }),
+  ]);
 
   return {
     range: {
@@ -174,6 +251,40 @@ export async function getTodayStats(workspaceId, timezone) {
       techName: r.assignedTech?.name || null,
       techPhotoUrl: r.assignedTech?.photoUrl || null,
       decidedAt: r.updatedAt.toISOString(),
+    })),
+    recentRebounds: Array.from(
+      recentRebounds.reduce((map, run) => {
+        if (!map.has(run.ticketId)) map.set(run.ticketId, run);
+        return map;
+      }, new Map()).values(),
+    ).map((r) => ({
+      runId: r.id,
+      ticketId: r.ticket?.id,
+      ticketSubject: r.ticket?.subject || '(no subject)',
+      freshserviceTicketId: r.ticket?.freshserviceTicketId
+        ? String(r.ticket.freshserviceTicketId)
+        : null,
+      techName: r.assignedTech?.name || null,
+      techPhotoUrl: r.assignedTech?.photoUrl || null,
+      triggerSource: r.triggerSource,
+      reboundFromRunId: r.reboundFrom?.runId ?? null,
+      createdAt: r.createdAt.toISOString(),
+    })),
+    recentBypassed: recentBypassed.map((t) => ({
+      ticketId: t.id,
+      ticketSubject: t.subject || '(no subject)',
+      freshserviceTicketId: t.freshserviceTicketId ? String(t.freshserviceTicketId) : null,
+      techName: t.assignedTech?.name || null,
+      techPhotoUrl: t.assignedTech?.photoUrl || null,
+      createdAt: t.createdAt.toISOString(),
+    })),
+    recentNoiseFiltered: recentNoiseFilteredTickets.map((t) => ({
+      ticketId: t.id,
+      ticketSubject: t.subject || '(no subject)',
+      freshserviceTicketId: t.freshserviceTicketId ? String(t.freshserviceTicketId) : null,
+      requesterName: t.requester?.name || null,
+      noiseRuleMatched: t.noiseRuleMatched || null,
+      createdAt: t.createdAt.toISOString(),
     })),
   };
 }

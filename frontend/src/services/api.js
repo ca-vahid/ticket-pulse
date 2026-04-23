@@ -577,6 +577,17 @@ export const assignmentAPI = {
   getCalibrationRuns: (params) => api.get('/assignment/calibration/runs', { params }),
   getCalibrationRun: (id) => api.get(`/assignment/calibration/runs/${id}`),
   cancelCalibrationRun: (id) => api.post(`/assignment/calibration/runs/${id}/cancel`),
+
+  getDailyReviewRuns: (params) => api.get('/assignment/daily-review/runs', { params }),
+  getDailyReviewRun: (id) => api.get(`/assignment/daily-review/runs/${id}`),
+  getDailyReviewRecommendations: (params) => api.get('/assignment/daily-review/recommendations', { params }),
+  getDailyReviewWeeklyRollup: (params) => api.get('/assignment/daily-review/recommendations/weekly-rollup', { params }),
+  updateDailyReviewRecommendationStatus: (id, data) => api.post(`/assignment/daily-review/recommendations/${id}/status`, data),
+  bulkUpdateDailyReviewRecommendationStatus: (data) => api.post('/assignment/daily-review/recommendations/bulk-status', data),
+  cancelDailyReviewRun: (id) => api.post(`/assignment/daily-review/runs/${id}/cancel`),
+  rerunDailyReviewRun: (id) => api.post(`/assignment/daily-review/runs/${id}/rerun`),
+  runDailyReview: (data) => api.post('/assignment/daily-review', data),
+  runDailyReviewStreamPath: () => '/assignment/daily-review?stream=true',
 };
 
 /**
