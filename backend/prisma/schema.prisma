@@ -899,6 +899,13 @@ model AssignmentDailyReviewRun {
   errorMessage           String?   @db.Text @map("error_message")
   fullTranscript         String?   @db.Text @map("full_transcript")
   completedAt            DateTime? @map("completed_at")
+  // Optional human-readable meeting briefing (one-pager + talking points)
+  // generated on-demand from the analyzed dataset for the next-day standup.
+  meetingBriefing            Json?     @map("meeting_briefing")
+  meetingBriefingGeneratedAt DateTime? @map("meeting_briefing_generated_at")
+  meetingBriefingTokens      Int?      @map("meeting_briefing_tokens")
+  meetingBriefingModel       String?   @db.VarChar(100) @map("meeting_briefing_model")
+  meetingBriefingBy          String?   @db.VarChar(255) @map("meeting_briefing_by")
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
   recommendations        AssignmentDailyReviewRecommendation[]

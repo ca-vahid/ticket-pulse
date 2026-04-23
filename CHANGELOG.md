@@ -2,6 +2,64 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.87-preview] - 2026-04-22
+
+### Daily Review: opt-in Meeting Briefing for the next-day standup
+
+After a Daily Review completes, the run detail page now has a new **Meeting Briefing** section that turns the analyzed dataset into a story-style one-pager for the next-day operations standup. It's optional — never auto-runs — but with one click you get a structured narrative + numbers + talking points you can paste straight into a meeting agenda.
+
+#### What the briefing contains
+
+The briefing is shipped as a structured tool-call from Claude with seven sections:
+
+| Section | Purpose |
+|---|---|
+| **Headline** | A punchy one-liner specific to today's data (e.g. *"Quiet morning, then a Tableau spike pushed two reroutes by mid-afternoon"*) |
+| **Narrative** | 2-4 short paragraphs telling the story of the day chronologically. Reads in under 60 seconds out loud |
+| **Key metrics** | 3-6 numbers worth saying out loud, each with a label / value / context / tone (`good` / `bad` / `watch` / `neutral`) |
+| **Highlights** | Scannable callouts with tone-coded cards. Each highlight can cite supporting ticket numbers (validated against the actual cohort) |
+| **Shoutouts** | Optional named recognition for technicians who carried meaningful load or handled tricky cases |
+| **Talking points** | Numbered list of concrete questions / follow-ups to drive the standup discussion |
+| **Lookahead** | 1-2 sentences about what to watch today (carried-over tickets, repeat offenders, follow-ups) |
+
+#### Generation flow
+
+- Section appears on every completed daily review run with a **Generate Briefing** button.
+- Click → 5-15s later the briefing renders inline. **Regenerate** is available afterwards.
+- **Copy as Markdown** button serializes the briefing into a clean markdown one-pager for Slack / email / meeting agendas.
+- Footer shows generation timestamp, generator email, model name, and token count so the cost trail is visible.
+
+#### Persistence
+
+The briefing is stored directly on the `AssignmentDailyReviewRun` row (new `meetingBriefing` JSONB column + `meetingBriefingGeneratedAt` / `meetingBriefingTokens` / `meetingBriefingModel` / `meetingBriefingBy` metadata) so it survives refreshes. Regenerating replaces the previous version in place.
+
+#### Workspace-scope hardening (same defence as the recommendation flow)
+
+- Analysis input ships explicit `allowedSupportingTicketIds` and `allowedSupportingFreshserviceTicketIds` lists.
+- Any ticket id the LLM cites in `highlights.supportingFreshserviceTicketIds` outside those sets is filtered out before persistence.
+- System prompt names the active workspace and includes a `"this workspace ONLY"` rule so the briefing can't reference foreign workspaces.
+
+#### Files touched
+
+- `backend/prisma/schema.prisma` — `meetingBriefing` JSONB + 4 metadata columns on `AssignmentDailyReviewRun`
+- `backend/prisma/migrations/20260423030000_add_daily_review_meeting_briefing/migration.sql` — schema migration
+- `backend/src/services/assignmentDailyReviewService.js` — new `generateMeetingBriefing()` method (tool-use schema, allow-list filtering, persistence)
+- `backend/src/routes/assignment.routes.js` — `POST /api/assignment/daily-review/runs/:id/meeting-briefing` endpoint
+- `frontend/src/services/api.js` — `generateDailyReviewBriefing(id, data)` client method (uses long-timeout axios instance)
+- `frontend/src/components/assignment/DailyReviewManager.jsx` — new `MeetingBriefingSection` component + `briefingToMarkdown` helper, wired into `RunDetail`
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.87-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+#### Database migration
+
+| Migration | Purpose |
+|---|---|
+| `20260423030000_add_daily_review_meeting_briefing` | Adds `meeting_briefing` JSONB + `meeting_briefing_generated_at` + `meeting_briefing_tokens` + `meeting_briefing_model` + `meeting_briefing_by` columns to `assignment_daily_review_runs` |
+
+Run `prisma migrate deploy` on any environment before deploying.
+
+---
+
 ## [1.9.86-preview] - 2026-04-22
 
 ### Daily Review: end-to-end approval workflow + workspace-scope hardening
