@@ -1206,6 +1206,16 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
+              {backgroundSyncRunning && (
+                <button
+                  onClick={handleKillSync}
+                  disabled={killingSync}
+                  className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 touch-manipulation"
+                  title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing… (tap to stop)'}
+                >
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                </button>
+              )}
               {canReview && (
                 <button onClick={handleAssignments} className="flex items-center gap-1 px-2.5 py-2 rounded-full text-xs font-semibold border border-purple-200 bg-purple-50 text-purple-700 touch-manipulation" title="Assignment">
                   <Sparkles className="w-4 h-4" /> <span className="hidden xs:inline">Assign</span>
@@ -1259,9 +1269,9 @@ export default function Dashboard() {
             </div>
 
             {/* Center: Status + Last Updated - 6 cols */}
-            <div className="col-span-6 flex items-center justify-center gap-4">
+            <div className="col-span-6 flex items-center justify-center gap-3 min-w-0">
               {/* SSE Status */}
-              <div className="flex items-center gap-1.5 text-xs">
+              <div className="flex items-center gap-1.5 text-xs flex-shrink-0">
                 {sseConnectionStatus === 'connected' ? (
                   <>
                     <Wifi className="w-3.5 h-3.5 text-green-600" />
@@ -1280,35 +1290,54 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* Background Sync Status */}
-              {backgroundSyncRunning && (
-                <div className="flex items-center gap-1 text-xs bg-blue-50 border border-blue-200 rounded-lg px-2 py-1 max-w-[260px]">
-                  <RefreshCw className="w-3 h-3 text-blue-500 animate-spin flex-none" />
-                  <div className="flex flex-col min-w-0 mx-1">
-                    <span className="font-semibold text-blue-700 leading-tight">Syncing…</span>
-                    {backgroundSyncStep && (
-                      <span className="text-[9px] text-blue-500 truncate leading-tight">{backgroundSyncStep}</span>
-                    )}
-                  </div>
-                  <button
-                    onClick={handleKillSync}
-                    disabled={killingSync}
-                    className="flex-none ml-1 p-0.5 rounded hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
-                    title="Force-stop stuck sync"
+              {/* Background Sync Status — compact icon-only with hover tooltip and optional progress bar */}
+              {backgroundSyncRunning && (() => {
+                const progressMatch = backgroundSyncStep && backgroundSyncStep.match(/(\d+)\s*\/\s*(\d+)/);
+                const pct = progressMatch
+                  ? Math.min(100, Math.max(0, (parseInt(progressMatch[1], 10) / Math.max(1, parseInt(progressMatch[2], 10))) * 100))
+                  : null;
+                const tooltip = backgroundSyncStep
+                  ? `Syncing: ${backgroundSyncStep}\n(click X to stop)`
+                  : 'Syncing… (click X to stop)';
+                return (
+                  <div
+                    className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-full px-1.5 py-0.5 flex-shrink-0"
+                    title={tooltip}
                   >
-                    <XCircle className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
+                    <div className="relative flex items-center justify-center w-5 h-5">
+                      <RefreshCw className="w-3.5 h-3.5 text-blue-500 animate-spin" />
+                      {pct !== null && (
+                        <svg className="absolute inset-0 w-5 h-5 -rotate-90" viewBox="0 0 20 20">
+                          <circle cx="10" cy="10" r="8" fill="none" stroke="#bfdbfe" strokeWidth="2" />
+                          <circle
+                            cx="10" cy="10" r="8" fill="none"
+                            stroke="#2563eb" strokeWidth="2"
+                            strokeDasharray={`${(pct / 100) * 2 * Math.PI * 8} ${2 * Math.PI * 8}`}
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleKillSync}
+                      disabled={killingSync}
+                      className="flex-none p-0.5 rounded-full hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+                      title="Force-stop stuck sync"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })()}
 
               {/* Last Updated / Refreshing indicator */}
               {isRefreshing && !isColdLoading ? (
-                <span className="text-xs text-blue-500 flex items-center gap-1">
+                <span className="text-xs text-blue-500 flex items-center gap-1 flex-shrink-0">
                   <RefreshCw className="w-3 h-3 animate-spin" />
                   Refreshing...
                 </span>
               ) : lastUpdated ? (
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-gray-500 truncate min-w-0" title={`Updated: ${new Date(lastUpdated).toLocaleString()}`}>
                   Updated: {new Date(lastUpdated).toLocaleTimeString()}
                 </span>
               ) : null}
