@@ -385,6 +385,31 @@ router.post('/runs/:id/run-now', requireAdmin, asyncHandler(async (req, res) => 
   }
 }));
 
+// Parse a comma-separated query param into an array of trimmed non-empty strings.
+// Returns undefined when the param is missing or yields no values, so downstream
+// repository code can rely on `if (param)` to mean "filter requested".
+function parseCsv(raw) {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : undefined;
+}
+
+// Parse CSV of integers, dropping any non-numeric entries. Same undefined-when-empty contract.
+function parseCsvInt(raw) {
+  const parts = parseCsv(raw);
+  if (!parts) return undefined;
+  const ints = parts.map((p) => parseInt(p, 10)).filter((n) => Number.isFinite(n));
+  return ints.length > 0 ? ints : undefined;
+}
+
+// Sanitize free-text search to keep accidental load-balancer rejection at bay.
+// 200 chars is more than enough for ticket subject / requester name / #ID.
+function parseSearch(raw) {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim().slice(0, 200);
+  return trimmed || undefined;
+}
+
 router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
@@ -395,7 +420,19 @@ router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
     ? req.query.ticketStatus
     : 'all';
   const { since, sinceField } = req.query;
-  const result = await assignmentRepository.getPendingQueue(req.workspaceId, { limit, offset, assignmentStatus, ticketStatus, since, sinceField });
+  const result = await assignmentRepository.getPendingQueue(req.workspaceId, {
+    limit,
+    offset,
+    assignmentStatus,
+    ticketStatus,
+    since,
+    sinceField,
+    priorities: parseCsvInt(req.query.priorities),
+    statuses: parseCsv(req.query.statuses),
+    assignedTechIds: parseCsvInt(req.query.assignedTechIds),
+    reboundFromTechIds: parseCsvInt(req.query.reboundFromTechIds),
+    search: parseSearch(req.query.search),
+  });
   res.json({ success: true, ...result });
 }));
 
@@ -407,7 +444,21 @@ router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
   const ticketStatus = ['all', 'active', 'in_progress', 'pending', 'closed_resolved', 'deleted'].includes(req.query.ticketStatus)
     ? req.query.ticketStatus
     : undefined;
-  const result = await assignmentRepository.getPipelineRuns(req.workspaceId, { limit, offset, status, decision, since, sinceField, decisions: decisionsArr, ticketStatus });
+  const result = await assignmentRepository.getPipelineRuns(req.workspaceId, {
+    limit,
+    offset,
+    status,
+    decision,
+    since,
+    sinceField,
+    decisions: decisionsArr,
+    ticketStatus,
+    priorities: parseCsvInt(req.query.priorities),
+    statuses: parseCsv(req.query.statuses),
+    assignedTechIds: parseCsvInt(req.query.assignedTechIds),
+    reboundFromTechIds: parseCsvInt(req.query.reboundFromTechIds),
+    search: parseSearch(req.query.search),
+  });
   res.json({ success: true, ...result });
 }));
 

@@ -11,6 +11,9 @@ import DailyReviewManager from '../components/assignment/DailyReviewManager';
 import PromptManager from '../components/assignment/PromptManager';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
 import LivePipelineView from '../components/assignment/LivePipelineView';
+import FilterDropdown from '../components/FilterDropdown';
+import FilterBar from '../components/FilterBar';
+import useFilterUrlSync from '../hooks/useFilterUrlSync';
 import {
   ArrowLeft, Inbox, History, Settings2, Award, RefreshCw, Loader2,
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
@@ -1000,117 +1003,54 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
   );
 }
 
-function QueueFilterRail({
-  subView,
-  assignedTotal,
-  assignedRunsTotal,
-  outsideAssignedTotal,
-  assignedFilter,
-  onAssignedFilterChange,
-  decidedDecisionFilter,
-  onDecidedDecisionFilterChange,
-  ticketStatusFilter,
-  onTicketStatusFilterChange,
-  differentAgentCount,
-}) {
-  if (subView === 'deleted' || subView === 'pending') {
-    return null;
-  }
+// Centralized labels and dot colors for the Status / Priority / Decision filters.
+// Dot colors mirror the legacy segmented-control accents so the new dropdown options
+// still feel visually consistent with the rest of the page.
+const STATUS_OPTIONS = [
+  { id: 'in_progress', label: 'In Progress', dotClass: 'bg-emerald-500' },
+  { id: 'pending', label: 'Pending', dotClass: 'bg-amber-400' },
+  { id: 'closed_resolved', label: 'Closed / Resolved', dotClass: 'bg-slate-400' },
+];
 
-  const groups = [];
+const PRIORITY_OPTIONS = [
+  { id: 4, label: 'Urgent', dotClass: 'bg-red-500' },
+  { id: 3, label: 'High', dotClass: 'bg-orange-500' },
+  { id: 2, label: 'Medium', dotClass: 'bg-amber-400' },
+  { id: 1, label: 'Low', dotClass: 'bg-slate-400' },
+];
 
-  if (subView === 'assigned' && assignedTotal > 0) {
-    groups.push({
-      id: 'source',
-      label: 'Source',
-      value: assignedFilter,
-      onChange: onAssignedFilterChange,
-      options: [
-        { id: 'all', label: 'All', count: assignedTotal, activeClass: 'bg-slate-900 text-white shadow-sm' },
-        { id: 'via_pipeline', label: 'Pipeline', count: assignedRunsTotal, activeClass: 'bg-emerald-500 text-white shadow-sm' },
-        { id: 'manually_in_fs', label: 'FreshService', count: outsideAssignedTotal, activeClass: 'bg-amber-300 text-amber-950 shadow-sm' },
-      ],
-    });
-  }
+const SOURCE_OPTIONS = [
+  { id: 'all', label: 'All sources' },
+  { id: 'via_pipeline', label: 'Pipeline', dotClass: 'bg-emerald-500' },
+  { id: 'manually_in_fs', label: 'FreshService (manual)', dotClass: 'bg-amber-400' },
+];
 
-  if (subView === 'assigned' && assignedFilter === 'via_pipeline') {
-    groups.push({
-      id: 'decision',
-      label: 'Decision',
-      value: decidedDecisionFilter,
-      onChange: onDecidedDecisionFilterChange,
-      options: [
-        { id: 'all', label: 'All', activeClass: 'bg-slate-900 text-white shadow-sm' },
-        { id: 'auto_assigned', label: 'AI Auto', activeClass: 'bg-emerald-500 text-white shadow-sm' },
-        { id: 'approved', label: 'Approved', activeClass: 'bg-blue-500 text-white shadow-sm' },
-      ],
-    });
-  }
+const DECISION_OPTIONS = [
+  { id: 'auto_assigned', label: 'AI Auto', dotClass: 'bg-purple-500' },
+  { id: 'approved', label: 'Approved', dotClass: 'bg-emerald-500' },
+  { id: 'modified', label: 'Override', dotClass: 'bg-blue-500' },
+];
 
-  groups.push({
-    id: 'status',
-    label: 'Status',
-    value: ticketStatusFilter,
-    onChange: onTicketStatusFilterChange,
-    options: [
-      { id: 'all', label: 'All', activeClass: 'bg-slate-900 text-white shadow-sm' },
-      { id: 'in_progress', label: 'In Progress', activeClass: 'bg-emerald-500 text-white shadow-sm' },
-      { id: 'pending', label: 'Pending', activeClass: 'bg-amber-300 text-amber-950 shadow-sm' },
-      { id: 'closed_resolved', label: 'Closed', activeClass: 'bg-slate-500 text-white shadow-sm' },
-    ],
-  });
+const DISMISSED_DECISION_OPTIONS = [
+  { id: 'noise_dismissed', label: 'Noise', dotClass: 'bg-slate-400' },
+];
 
-  return (
-    <>
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 shadow-sm shrink-0">
-        <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-        Filters
-      </span>
+const REJECTED_DECISION_OPTIONS = [
+  { id: 'rejected', label: 'Rejected', dotClass: 'bg-rose-500' },
+];
 
-      {groups.map((group) => (
-        <div
-          key={group.id}
-          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50/90 p-1 shadow-sm"
-        >
-          <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 ring-1 ring-slate-200/80">
-            {group.label}
-          </span>
-          {group.options.map((option) => {
-            const isActive = group.value === option.id;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => group.onChange(option.id)}
-                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all duration-150 touch-manipulation ${
-                  isActive
-                    ? option.activeClass
-                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
-                }`}
-              >
-                <span>{option.label}</span>
-                {option.count != null && (
-                  <span className={`tabular-nums text-[10px] ${isActive ? 'opacity-80' : 'text-slate-400'}`}>
-                    {option.count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      ))}
-
-      {subView === 'assigned' && differentAgentCount > 0 && assignedFilter !== 'manually_in_fs' && (
-        <span
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-[10px] font-medium text-blue-700 shadow-sm"
-          title="Pipeline runs where the final assignee differed from the AI's top recommendation"
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-          {differentAgentCount} different agent chosen
-        </span>
-      )}
-    </>
-  );
+// Map the in-app technician map (keyed by id) into the option shape FilterDropdown expects.
+// Includes avatarUrl when the technician has a photo so the popover renders nice avatars.
+function buildTechOptions(techPhotos) {
+  return Object.values(techPhotos || {})
+    .filter((t) => t && t.id != null && t.name)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .map((t) => ({
+      id: t.id,
+      label: t.name,
+      avatarUrl: t.photoUrl || t.avatarUrl || undefined,
+      hint: t.email || undefined,
+    }));
 }
 
 function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles', timeRange = '7d', onTimeRangeChange }) {
@@ -1119,12 +1059,60 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [outsideAssignedRuns, setOutsideAssignedRuns] = useState({ items: [], total: 0 });
   const [deletedRuns, setDeletedRuns] = useState({ items: [], total: 0 });
   const [assignedFilter, setAssignedFilter] = useState('all'); // 'all' | 'via_pipeline' | 'manually_in_fs'
-  // Sub-filter inside Decided > Via Pipeline: 'all' (auto+approved+modified),
-  // 'auto_assigned' (just AI), or 'approved' (just admin-approved/modified).
-  // Set by drilling into the empty-state outcome cards so the destination
-  // shows EXACTLY the count the card promised. Cleared by the chip's X.
-  const [decidedDecisionFilter, setDecidedDecisionFilter] = useState('all');
-  const [ticketStatusFilter, setTicketStatusFilter] = useState('in_progress'); // 'all' | 'in_progress' | 'pending' | 'closed_resolved'
+  // Multi-select status filter. Empty array means "tab default" (Decided uses
+  // 'in_progress' to hide closed tickets by default, every other tab shows
+  // all non-deleted statuses). Drill-in from the empty-state outcome cards
+  // explicitly sets this so the destination matches the card's promise.
+  const [selectedStatuses, setSelectedStatuses] = useState([]);
+  // Multi-select decision filter (Decided / Dismissed / Rejected tabs).
+  // Empty = "all decisions valid for this tab". Replaces the old single-value
+  // `decidedDecisionFilter` while staying compatible with the drill-in flow,
+  // which now sets an array (e.g. ['approved', 'modified']) directly.
+  const [selectedDecisions, setSelectedDecisions] = useState([]);
+  const [selectedPriorities, setSelectedPriorities] = useState([]); // number[] (1..4)
+  const [selectedReboundFromTechIds, setSelectedReboundFromTechIds] = useState([]); // tech ids
+  const [selectedAssignedToTechIds, setSelectedAssignedToTechIds] = useState([]); // tech ids
+  const [searchQuery, setSearchQuery] = useState('');
+  // Visible-page-only post-filter that hides runs where the AI's top
+  // recommendation matches the final assignee. Replaces the standalone
+  // "12 different agent chosen" badge with an actionable toggle.
+  const [differentAgentOnly, setDifferentAgentOnly] = useState(false);
+
+  // Two-way URL sync for shareable filter views. Only non-default values are
+  // serialized so a clean ?-less URL stays clean. The hook hydrates from the
+  // URL once on mount, then writes back on every change via replaceState.
+  useFilterUrlSync(
+    {
+      search: searchQuery,
+      source: assignedFilter,
+      decisions: selectedDecisions,
+      statuses: selectedStatuses,
+      priorities: selectedPriorities,
+      returnedFrom: selectedReboundFromTechIds,
+      assignedTo: selectedAssignedToTechIds,
+      diffAgent: differentAgentOnly,
+    },
+    {
+      search: setSearchQuery,
+      source: setAssignedFilter,
+      decisions: setSelectedDecisions,
+      statuses: setSelectedStatuses,
+      priorities: setSelectedPriorities,
+      returnedFrom: setSelectedReboundFromTechIds,
+      assignedTo: setSelectedAssignedToTechIds,
+      diffAgent: setDifferentAgentOnly,
+    },
+    {
+      search: { type: 'string', default: '' },
+      source: { type: 'string', default: 'all' },
+      decisions: { type: 'csv', default: [] },
+      statuses: { type: 'csv', default: [] },
+      priorities: { type: 'csvInt', default: [] },
+      returnedFrom: { type: 'csvInt', default: [] },
+      assignedTo: { type: 'csvInt', default: [] },
+      diffAgent: { type: 'bool', default: false },
+    },
+  );
   const [assignedRuns, setAssignedRuns] = useState({ items: [], total: 0 });
   const [queuedRuns, setQueuedRuns] = useState([]);
   const [queuedRunsMeta, setQueuedRunsMeta] = useState({ totalCount: 0, truncated: false });
@@ -1143,7 +1131,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [clearing, setClearing] = useState(false);
   const [sortField, setSortField] = useState('createdAt');
   const [sortDir, setSortDir] = useState('desc');
-  const [filterPriority, setFilterPriority] = useState('all');
   const [queueStatus, setQueueStatus] = useState(null);
   const [subView, setSubView] = useState('pending');
   const [dismissedRuns, setDismissedRuns] = useState({ items: [], total: 0 });
@@ -1217,9 +1204,28 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       // Awaiting Review: only ACTIVE tickets (open or pending status) - excludes closed/resolved/deleted.
       // These are the only tickets that genuinely need a review decision.
       const pendingTicketStatus = 'active';
-      const assignedTicketStatus = subView === 'assigned' ? ticketStatusFilter : 'in_progress';
-      const dismissedTicketStatus = subView === 'dismissed' ? ticketStatusFilter : 'all';
-      const rejectedTicketStatus = subView === 'rejected' ? ticketStatusFilter : 'all';
+
+      // Resolve the ticket-status filter for each non-pending tab. The new
+      // multi-select replaces the old single-string filter — pass it via the
+      // backend's `statuses=` CSV param when one or more are picked, falling
+      // back to the legacy single `ticketStatus` for the tab default.
+      const statusesCsv = selectedStatuses.length > 0 ? selectedStatuses.join(',') : undefined;
+      // Tab defaults preserved from the previous implementation: Decided defaults to
+      // in_progress (hide closed by default), every other tab shows all non-deleted.
+      const assignedTicketStatus = statusesCsv ? undefined : (subView === 'assigned' ? 'in_progress' : 'in_progress');
+      const dismissedTicketStatus = statusesCsv ? undefined : 'all';
+      const rejectedTicketStatus = statusesCsv ? undefined : 'all';
+
+      // Common per-run filters layered on every list call. Backend will ignore
+      // empty / undefined values, so we don't need defensive trimming here.
+      const commonFilters = {
+        priorities: selectedPriorities.length > 0 ? selectedPriorities.join(',') : undefined,
+        statuses: statusesCsv,
+        assignedTechIds: selectedAssignedToTechIds.length > 0 ? selectedAssignedToTechIds.join(',') : undefined,
+        reboundFromTechIds: selectedReboundFromTechIds.length > 0 ? selectedReboundFromTechIds.join(',') : undefined,
+        search: searchQuery.trim() || undefined,
+      };
+
       const aggregatedResultsLimit = resultsPageSize * (resultsPage + 1);
       const queueLimit = subView === 'pending'
         ? queuePageSize
@@ -1229,6 +1235,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       const queueOffset = subView === 'pending' ? queuePage * queuePageSize : 0;
       const nonPendingLimit = subView === 'pending' ? 1 : aggregatedResultsLimit;
 
+      // Decided tab decisions: empty selection means "every decision valid for
+      // this tab" (auto + approved + modified). When the user picks specific
+      // ones, we send only those. The drill-in flow now writes the array form
+      // directly (e.g. ['approved', 'modified']) so this branch keeps working.
+      const decidedDecisionsCsv = selectedDecisions.length > 0
+        ? selectedDecisions.join(',')
+        : 'approved,modified,auto_assigned';
+
       const [queueRes, outsideRes, assignedRes, dismissedRes, rejectedRes, deletedRes, queuedRes, statusRes] = await Promise.all([
         assignmentAPI.getQueue({
           limit: queueLimit,
@@ -1237,6 +1251,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           ticketStatus: pendingTicketStatus,
           since,
           sinceField: 'createdAt',
+          ...commonFilters,
         }),
         assignmentAPI.getQueue({
           limit: nonPendingLimit,
@@ -1245,25 +1260,19 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           ticketStatus: assignedTicketStatus,
           since,
           sinceField: 'createdAt',
+          ...commonFilters,
         }),
-        // The decision list narrows when the empty-state cards drill in:
-        //   'auto_assigned'  → only AI-decided runs
-        //   'approved'       → only admin-approved (approved + modified)
-        //   'all'            → everything that lives under "Via Pipeline"
         assignmentAPI.getRuns({
-          decisions: decidedDecisionFilter === 'auto_assigned'
-            ? 'auto_assigned'
-            : decidedDecisionFilter === 'approved'
-              ? 'approved,modified'
-              : 'approved,modified,auto_assigned',
+          decisions: decidedDecisionsCsv,
           since,
           sinceField: 'decidedAt',
           limit: nonPendingLimit,
           ticketStatus: assignedTicketStatus,
+          ...commonFilters,
         }),
-        assignmentAPI.getRuns({ decisions: 'noise_dismissed', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: dismissedTicketStatus }),
-        assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: rejectedTicketStatus }),
-        assignmentAPI.getRuns({ since, sinceField: 'createdAt', limit: nonPendingLimit, ticketStatus: 'deleted' }),
+        assignmentAPI.getRuns({ decisions: 'noise_dismissed', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: dismissedTicketStatus, ...commonFilters }),
+        assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: rejectedTicketStatus, ...commonFilters }),
+        assignmentAPI.getRuns({ since, sinceField: 'createdAt', limit: nonPendingLimit, ticketStatus: 'deleted', ...commonFilters }),
         assignmentAPI.getQueuedRuns(),
         assignmentAPI.getQueueStatus().catch(() => null),
       ]);
@@ -1302,7 +1311,18 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         setRefreshing(false);
       }
     }
-  }, [timeRange, queuePage, resultsPage, ticketStatusFilter, subView, decidedDecisionFilter]);
+  }, [
+    timeRange,
+    queuePage,
+    resultsPage,
+    subView,
+    selectedStatuses,
+    selectedDecisions,
+    selectedPriorities,
+    selectedReboundFromTechIds,
+    selectedAssignedToTechIds,
+    searchQuery,
+  ]);
 
   const handleSmartRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1363,34 +1383,54 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     setNewIds(new Set());
   }, [queuePage]);
 
-  // Reset secondary status filter to that tab's default whenever the tab changes.
-  // Awaiting Review (pending) doesn't use the filter at all; Assigned defaults to 'in_progress'.
-  // EXCEPT: when navigating in from the empty-state outcome cards, the caller
-  // sets ticketStatusFilter='all' explicitly so closed tickets stay visible
-  // and the count matches the card. Skip the auto-reset for one render in
-  // that case.
+  // Reset tab-specific filters whenever the user moves between sub-views so
+  // a stale Source/Decision selection from a previous tab doesn't silently
+  // hide rows on the next one. Status defaults are intentionally NOT reset
+  // here — selectedStatuses=[] already means "tab default" in the fetch
+  // effect, so leaving it alone preserves any explicit user choice.
+  // EXCEPTIONS:
+  //   1. When navigating in from the empty-state outcome cards, the caller
+  //      sets the new filter values explicitly — skip the reset for one
+  //      render so those values aren't immediately clobbered.
+  //   2. On the very first render, useFilterUrlSync hydrates filter state
+  //      from the URL. We must not reset on that initial mount, otherwise a
+  //      shareable link like `?source=via_pipeline` would lose its filter
+  //      the moment the page paints.
   const skipNextStatusReset = useRef(false);
+  const subViewChangeIsRealRef = useRef(false);
   useEffect(() => {
+    if (!subViewChangeIsRealRef.current) {
+      subViewChangeIsRealRef.current = true;
+      return;
+    }
     if (skipNextStatusReset.current) {
       skipNextStatusReset.current = false;
       setQueuePage(0);
       setResultsPage(0);
       return;
     }
-    if (subView === 'assigned') {
-      setTicketStatusFilter('in_progress');
-    } else {
-      setTicketStatusFilter('all');
-    }
+    setAssignedFilter('all');
+    setSelectedDecisions([]);
+    setDifferentAgentOnly(false);
     setQueuePage(0);
     setResultsPage(0);
   }, [subView]);
 
-  // Reset pagination when the current view's filters change.
+  // Reset pagination when any of the modern filters change so the user always
+  // lands back on page 1 after narrowing/widening their search.
   useEffect(() => {
     setQueuePage(0);
     setResultsPage(0);
-  }, [timeRange, ticketStatusFilter, assignedFilter, decidedDecisionFilter]);
+  }, [
+    timeRange,
+    assignedFilter,
+    selectedStatuses,
+    selectedDecisions,
+    selectedPriorities,
+    selectedReboundFromTechIds,
+    selectedAssignedToTechIds,
+    searchQuery,
+  ]);
 
   // Auto-poll every 30 seconds (matches backend sync interval)
   useEffect(() => {
@@ -1663,10 +1703,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     return 'open';
   };
 
-  // queue.items is already filtered server-side by assignmentStatus + ticketStatus.
-  // We only apply client-side priority filter and sorting here.
+  // queue.items is already filtered server-side (assignmentStatus, ticketStatus,
+  // priorities, search, etc. — see fetchQueue). We only apply sorting here.
   const filteredItems = [...queue.items]
-    .filter((r) => filterPriority === 'all' || String(r.ticket?.priority) === filterPriority)
     .sort((a, b) => {
       let av, bv;
       if (sortField === 'createdAt') { av = new Date(a.createdAt); bv = new Date(b.createdAt); }
@@ -1762,8 +1801,49 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       _siblingCount: count - 1, // 0 if unique, otherwise count of older runs we hid
     }));
   })();
-  const combinedAssignedItems = allAssignedItems.slice(resultsPageStart, resultsPageEnd);
-  const differentAgentCount = combinedAssignedItems.filter(wasDifferentAgentChosen).length;
+  // Apply the "different agent only" toggle as a client-side post-filter on
+  // the loaded page. Backend support would require a Prisma raw query against
+  // the recommendation JSON column — defer that until pagination + this
+  // filter combine to cause real pain. See plan: out of scope for this PR.
+  const allAssignedItemsFiltered = differentAgentOnly
+    ? allAssignedItems.filter(wasDifferentAgentChosen)
+    : allAssignedItems;
+  const combinedAssignedItems = allAssignedItemsFiltered.slice(resultsPageStart, resultsPageEnd);
+  const differentAgentCount = allAssignedItems.filter(wasDifferentAgentChosen).length;
+
+  // Tech list — sort+map the techPhotos object into FilterDropdown-shaped options.
+  // Plain assignment (not useMemo) because we're below the early-return for
+  // `selectedRun` / `loading` and the rules-of-hooks lint rule forbids hooks
+  // there. Cost is trivial: ~11 entries, sorted once per render.
+  const techOptions = buildTechOptions(techPhotos);
+
+  // Count of non-default filters drives the "N active" pill and decides whether
+  // the "Clear all" link is visible.
+  const activeFilterCount =
+    (searchQuery.trim() ? 1 : 0) +
+    (assignedFilter !== 'all' ? 1 : 0) +
+    (selectedDecisions.length > 0 ? 1 : 0) +
+    (selectedStatuses.length > 0 ? 1 : 0) +
+    (selectedPriorities.length > 0 ? 1 : 0) +
+    (selectedReboundFromTechIds.length > 0 ? 1 : 0) +
+    (selectedAssignedToTechIds.length > 0 ? 1 : 0) +
+    (differentAgentOnly ? 1 : 0);
+
+  // "Clear all filters" — resets every filter on the bar back to its default.
+  // Tab choice (`subView`) and the page-level time range are intentionally NOT
+  // reset; they're navigation, not filters. Plain function (not useCallback)
+  // for the same rules-of-hooks reason as `techOptions` above; FilterBar
+  // accepts the inline reference fine.
+  const handleClearAllFilters = () => {
+    setSearchQuery('');
+    setAssignedFilter('all');
+    setSelectedDecisions([]);
+    setSelectedStatuses([]);
+    setSelectedPriorities([]);
+    setSelectedReboundFromTechIds([]);
+    setSelectedAssignedToTechIds([]);
+    setDifferentAgentOnly(false);
+  };
 
   const TechAvatar = ({ techId, name, size = 'sm', ring = '' }) => {
     const tech = techPhotos[techId];
@@ -2068,103 +2148,173 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         </button>
       )}
 
-      {/* Sub-view tabs + filters + toolbar (single compact row; ticket status only on Pending) */}
+      {/* Sub-view tabs + modern filter bar.
+          Row 1: primary tabs (segmented control)
+          Row 2: standardized FilterBar — search, per-filter dropdowns, trailing toolbar
+          Both rows live in the same bordered card. The FilterBar itself wraps on
+          narrow widths (no horizontal scroll), so the layout breathes without
+          chopping content off-screen. */}
       <div className="border border-slate-200 rounded-lg">
-        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2 rounded-t-lg">
+        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2 rounded-t-lg space-y-2">
+          {/* Row 1 — primary tabs */}
           <div className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <div className="flex min-w-max items-center gap-2">
-              {/* Primary tabs — modern segmented control with subtle elevation on active */}
-              <div className="inline-flex shrink-0 items-center gap-0.5 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/60">
-                {[
-                  { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
-                  { id: 'assigned', label: 'Decided', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
-                  { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400', activeRing: 'ring-slate-200' },
-                  { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-rose-400', activeRing: 'ring-rose-200' },
-                  { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500', activeRing: 'ring-red-200' },
-                  { id: 'all', label: 'All', count: null, dot: null, activeRing: 'ring-slate-200' },
-                ].map((tab) => {
-                  const isActive = subView === tab.id;
-                  const isZero = tab.count === 0;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => { setSubView(tab.id); setAssignedFilter('all'); setDecidedDecisionFilter('all'); }}
-                      className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
-                        isActive
-                          ? `bg-white text-slate-900 shadow-sm ring-1 ${tab.activeRing}`
-                          : `${isZero ? 'text-slate-400' : 'text-slate-600'} hover:text-slate-900 hover:bg-white/70`
-                      }`}
-                    >
-                      {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot} ${isZero && !isActive ? 'opacity-40' : ''}`} />}
-                      <span>{tab.label}</span>
-                      {tab.count != null && (
-                        <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-slate-500' : isZero ? 'text-slate-300' : 'text-slate-400'}`}>
-                          {tab.count}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <QueueFilterRail
-                subView={subView}
-                assignedTotal={assignedTotal}
-                assignedRunsTotal={assignedRuns.total}
-                outsideAssignedTotal={outsideAssignedRuns.total}
-                assignedFilter={assignedFilter}
-                onAssignedFilterChange={setAssignedFilter}
-                decidedDecisionFilter={decidedDecisionFilter}
-                onDecidedDecisionFilterChange={setDecidedDecisionFilter}
-                ticketStatusFilter={ticketStatusFilter}
-                onTicketStatusFilterChange={setTicketStatusFilter}
-                differentAgentCount={differentAgentCount}
-              />
-
-              <div className="min-w-4 flex-1" />
-
-              {filterPriority !== 'all' && (
-                <button
-                  type="button"
-                  onClick={() => setFilterPriority('all')}
-                  className="shrink-0 text-[10px] font-medium text-blue-600 hover:text-blue-800"
-                >
-                  Clear priority
-                </button>
-              )}
-
-              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-              <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="touch-manipulation rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] shadow-sm">
-                <option value="all">Priority</option>
-                <option value="4">Urgent</option>
-                <option value="3">High</option>
-                <option value="2">Medium</option>
-                <option value="1">Low</option>
-              </select>
-
-              {subView === 'pending' && (queue.totals?.all ?? queue.total) > 0 && isAdmin && (
-                <button type="button" onClick={() => setShowClearConfirm(true)} className="flex touch-manipulation items-center gap-1 rounded border border-red-200 px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 hover:text-red-700">
-                  <Trash2 className="h-3 w-3" /> Delete all
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setAvatarView((v) => !v)}
-                className={`touch-manipulation rounded border px-2 py-1 text-[10px] font-medium transition-colors ${avatarView ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
-                title={avatarView ? 'Switch to text view' : 'Switch to avatar view'}
-              >
-                {avatarView ? '≡ Text' : '⊙ Avatars'}
-              </button>
-              <span className="hidden sm:flex items-center gap-1 text-[10px] font-medium text-emerald-600 select-none" title="Auto-refreshes every 30 seconds">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live
-              </span>
-              <button type="button" onClick={handleSmartRefresh} disabled={refreshing} className="touch-manipulation p-1 text-blue-600 hover:text-blue-800 disabled:opacity-50" title="Sync with FreshService & refresh">
-                <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              </button>
-              </div>
+            <div className="inline-flex shrink-0 items-center gap-0.5 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/60">
+              {[
+                { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
+                { id: 'assigned', label: 'Decided', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
+                { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400', activeRing: 'ring-slate-200' },
+                { id: 'rejected', label: 'Rejected', count: rejectedRuns.total, dot: 'bg-rose-400', activeRing: 'ring-rose-200' },
+                { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500', activeRing: 'ring-red-200' },
+                { id: 'all', label: 'All', count: null, dot: null, activeRing: 'ring-slate-200' },
+              ].map((tab) => {
+                const isActive = subView === tab.id;
+                const isZero = tab.count === 0;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSubView(tab.id)}
+                    className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
+                      isActive
+                        ? `bg-white text-slate-900 shadow-sm ring-1 ${tab.activeRing}`
+                        : `${isZero ? 'text-slate-400' : 'text-slate-600'} hover:text-slate-900 hover:bg-white/70`
+                    }`}
+                  >
+                    {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot} ${isZero && !isActive ? 'opacity-40' : ''}`} />}
+                    <span>{tab.label}</span>
+                    {tab.count != null && (
+                      <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-slate-500' : isZero ? 'text-slate-300' : 'text-slate-400'}`}>
+                        {tab.count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
+
+          {/* Row 2 — modern filter bar (hidden on Deleted, which has nothing meaningful to filter) */}
+          {subView !== 'deleted' && (
+            <FilterBar
+              activeCount={activeFilterCount}
+              onClearAll={handleClearAllFilters}
+              searchValue={searchQuery}
+              onSearchChange={setSearchQuery}
+              trailing={
+                <>
+                  {subView === 'pending' && (queue.totals?.all ?? queue.total) > 0 && isAdmin && (
+                    <button type="button" onClick={() => setShowClearConfirm(true)} className="flex touch-manipulation items-center gap-1 rounded border border-red-200 px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 hover:text-red-700">
+                      <Trash2 className="h-3 w-3" /> Delete all
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setAvatarView((v) => !v)}
+                    className={`touch-manipulation rounded border px-2 py-1 text-[10px] font-medium transition-colors ${avatarView ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
+                    title={avatarView ? 'Switch to text view' : 'Switch to avatar view'}
+                  >
+                    {avatarView ? '≡ Text' : '⊙ Avatars'}
+                  </button>
+                  <span className="hidden sm:flex items-center gap-1 text-[10px] font-medium text-emerald-600 select-none" title="Auto-refreshes every 30 seconds">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Live
+                  </span>
+                  <button type="button" onClick={handleSmartRefresh} disabled={refreshing} className="touch-manipulation p-1 text-blue-600 hover:text-blue-800 disabled:opacity-50" title="Sync with FreshService & refresh">
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                  </button>
+                </>
+              }
+            >
+              {/* Source — only meaningful on Decided (Pipeline vs FreshService manual) */}
+              {subView === 'assigned' && (
+                <FilterDropdown
+                  label="Source"
+                  value={assignedFilter}
+                  options={SOURCE_OPTIONS.map((o) => ({
+                    ...o,
+                    count: o.id === 'all' ? assignedTotal : o.id === 'via_pipeline' ? assignedRuns.total : outsideAssignedRuns.total,
+                  }))}
+                  onChange={setAssignedFilter}
+                />
+              )}
+
+              {/* Decision — Decided / Dismissed / Rejected each get their own option set */}
+              {(subView === 'assigned' || subView === 'dismissed' || subView === 'rejected') && (
+                <FilterDropdown
+                  label="Decision"
+                  multi
+                  value={selectedDecisions}
+                  options={subView === 'assigned' ? DECISION_OPTIONS : subView === 'dismissed' ? DISMISSED_DECISION_OPTIONS : REJECTED_DECISION_OPTIONS}
+                  onChange={setSelectedDecisions}
+                />
+              )}
+
+              {/* Status — every tab except Pending (which is always active-only) and Deleted */}
+              {subView !== 'pending' && (
+                <FilterDropdown
+                  label="Status"
+                  multi
+                  value={selectedStatuses}
+                  options={STATUS_OPTIONS}
+                  onChange={setSelectedStatuses}
+                />
+              )}
+
+              {/* Priority — always available */}
+              <FilterDropdown
+                label="Priority"
+                multi
+                value={selectedPriorities}
+                options={PRIORITY_OPTIONS}
+                onChange={setSelectedPriorities}
+              />
+
+              {/* Returned From — every tab where rebound context is meaningful */}
+              {(subView === 'pending' || subView === 'assigned' || subView === 'dismissed' || subView === 'rejected') && (
+                <FilterDropdown
+                  label="Returned from"
+                  multi
+                  value={selectedReboundFromTechIds}
+                  options={techOptions}
+                  onChange={setSelectedReboundFromTechIds}
+                />
+              )}
+
+              {/* Assigned To — only meaningful for tabs that show currently-assigned tickets */}
+              {(subView === 'assigned' || subView === 'dismissed' || subView === 'rejected') && (
+                <FilterDropdown
+                  label="Assigned to"
+                  multi
+                  value={selectedAssignedToTechIds}
+                  options={techOptions}
+                  onChange={setSelectedAssignedToTechIds}
+                />
+              )}
+
+              {/* Different agent only — Decided tab toggle. Replaces the legacy
+                  "12 different agent chosen" badge with an actionable client-side
+                  post-filter on the visible page. */}
+              {subView === 'assigned' && differentAgentCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setDifferentAgentOnly((v) => !v)}
+                  title={differentAgentOnly
+                    ? 'Showing only runs where the AI top pick was overridden (visible page)'
+                    : 'Show only runs where the AI top pick was overridden'}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm transition-colors touch-manipulation ${
+                    differentAgentOnly
+                      ? 'border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+                  }`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${differentAgentOnly ? 'bg-blue-500' : 'bg-slate-300'}`} />
+                  Different agent only
+                  <span className={`tabular-nums text-[10px] ${differentAgentOnly ? 'text-blue-700' : 'text-slate-400'}`}>
+                    {differentAgentCount}
+                  </span>
+                </button>
+              )}
+            </FilterBar>
+          )}
         </div>
 
         {/* Clear all confirmation */}
@@ -2243,8 +2393,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           </div>
         )}
 
-        {/* List content - key triggers a subtle fade-in on tab/filter/page change */}
-        <div key={`${subView}-${assignedFilter}-${queuePage}-${resultsPage}-${ticketStatusFilter}`} className="animate-in fade-in duration-150">
+        {/* List content - key triggers a subtle fade-in on tab/filter/page change.
+            Includes the modern filter primitives so the fade fires when the user
+            narrows or widens via any of the new dropdowns, not just Source/Status. */}
+        <div
+          key={`${subView}-${assignedFilter}-${queuePage}-${resultsPage}-${selectedStatuses.join(',')}-${selectedDecisions.join(',')}-${selectedPriorities.join(',')}-${selectedReboundFromTechIds.join(',')}-${selectedAssignedToTechIds.join(',')}-${differentAgentOnly}-${searchQuery}`}
+          className="animate-in fade-in duration-150"
+        >
           {activeItems.length === 0 ? (
             // When auto-assign is on and the pending queue is empty, the
             // pipeline is doing its job behind the scenes — show today's
@@ -2268,14 +2423,32 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   // Reset filters when not provided so a stale value from a
                   // previous visit doesn't leak through.
                   setAssignedFilter(target.assignedFilter || 'all');
-                  setDecidedDecisionFilter(target.decidedDecisionFilter || 'all');
+                  // Translate the legacy single-value drill-in payload into
+                  // the new multi-select array form. 'auto_assigned' means
+                  // just AI; 'approved' historically meant approved+modified
+                  // (admin clicked approve, with or without an override),
+                  // and 'all' / undefined means no decision narrowing.
+                  if (target.decidedDecisionFilter === 'auto_assigned') {
+                    setSelectedDecisions(['auto_assigned']);
+                  } else if (target.decidedDecisionFilter === 'approved') {
+                    setSelectedDecisions(['approved', 'modified']);
+                  } else {
+                    setSelectedDecisions([]);
+                  }
                   // Default to 'all' ticket statuses on drill-down so closed/
                   // resolved tickets aren't silently hidden by the
                   // 'in_progress' default — the empty-state counts include
                   // every ticket regardless of current status. Skip the
-                  // subView useEffect's auto-reset for this render.
+                  // subView useEffect's auto-reset for this render. With the
+                  // new multi-select status filter, 'all' = empty array
+                  // (== no narrowing), specific values pass through as a
+                  // single-element array.
                   skipNextStatusReset.current = true;
-                  setTicketStatusFilter(target.ticketStatus || 'all');
+                  if (!target.ticketStatus || target.ticketStatus === 'all') {
+                    setSelectedStatuses([]);
+                  } else {
+                    setSelectedStatuses([target.ticketStatus]);
+                  }
                   if (target.timeRange && onTimeRangeChange) {
                     onTimeRangeChange(target.timeRange);
                   }
