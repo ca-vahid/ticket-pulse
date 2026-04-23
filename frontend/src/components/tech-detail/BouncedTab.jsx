@@ -1,13 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { RotateCcw, ExternalLink, Clock, AlertTriangle, Loader2, User } from 'lucide-react';
+import { RotateCcw, ExternalLink, Clock, AlertTriangle, Loader2 } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { FRESHSERVICE_DOMAIN } from './constants';
-
-const PRESET_PILLS = [
-  { id: '7d',  label: 'Last 7 days' },
-  { id: '30d', label: 'Last 30 days' },
-  { id: 'all', label: 'Lifetime' },
-];
 
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 const PRIORITY_PILL = {
@@ -56,15 +50,16 @@ function toIsoDate(d) {
 }
 
 /**
- * Derive the contextual pill from the parent page's live view mode + selected
- * date/week/month. This keeps the pill in sync when the user changes the
- * top-of-page date filter AFTER arriving via a deep link.
+ * Resolve the date range from the parent page's view mode + selected date.
+ * The Bounced tab now relies SOLELY on this — the in-tab preset pills were
+ * removed because their counts couldn't keep the parent's tab badge in sync
+ * (the badge reads `technician.rejectedThisPeriod`, which only the page-level
+ * date filter updates). Single source of truth = no surprises.
  */
-function getContextualPill({ viewMode, selectedDate, selectedWeek, selectedMonth }) {
+function getRange({ viewMode, selectedDate, selectedWeek, selectedMonth }) {
   if (viewMode === 'daily') {
     const isoDate = toIsoDate(selectedDate) || toIsoDate(new Date());
     return {
-      id: `day-${isoDate}`,
       label: formatShortDate(isoDate),
       start: isoDate,
       end: isoDate,
@@ -77,7 +72,6 @@ function getContextualPill({ viewMode, selectedDate, selectedWeek, selectedMonth
     endDate.setDate(endDate.getDate() + 6);
     const end = toIsoDate(endDate);
     return {
-      id: `week-${start}`,
       label: `${formatShortDate(start)} – ${formatShortDate(end)}`,
       start,
       end,
@@ -87,35 +81,46 @@ function getContextualPill({ viewMode, selectedDate, selectedWeek, selectedMonth
     const m = typeof selectedMonth === 'string' ? new Date(selectedMonth) : selectedMonth;
     const startDate = new Date(m.getFullYear(), m.getMonth(), 1);
     const endDate = new Date(m.getFullYear(), m.getMonth() + 1, 0);
-    const start = toIsoDate(startDate);
     return {
-      id: `month-${start}`,
-      label: formatMonthLabel(start),
-      start,
+      label: formatMonthLabel(toIsoDate(startDate)),
+      start: toIsoDate(startDate),
       end: toIsoDate(endDate),
     };
   }
+  // Fallback: last 7 days when nothing's been selected (rare, e.g. deep-link
+  // landed without view mode set). Keeps the tab functional instead of empty.
   return null;
 }
 
+/**
+ * Owner cell — small avatar (or initials fallback) + first name. Used in the
+ * "Now with" column so the row scans like a modern data table instead of
+ * sentence fragments.
+ */
+function Owner({ name, photoUrl }) {
+  if (!name) {
+    return <span className="text-amber-700 text-[11px] font-medium">Back in queue</span>;
+  }
+  const initials = name.split(' ').map((n) => n[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?';
+  return (
+    <span className="inline-flex items-center gap-1.5 min-w-0">
+      {photoUrl ? (
+        <img src={photoUrl} alt="" className="h-5 w-5 rounded-full object-cover ring-1 ring-slate-200 flex-shrink-0" />
+      ) : (
+        <span className="h-5 w-5 rounded-full bg-slate-200 text-slate-600 text-[9px] font-bold flex items-center justify-center flex-shrink-0">
+          {initials}
+        </span>
+      )}
+      <span className="truncate text-[12px] text-slate-700">{name}</span>
+    </span>
+  );
+}
+
 export default function BouncedTab({ technician, viewMode = 'daily', selectedDate, selectedWeek, selectedMonth }) {
-  const contextualPill = useMemo(
-    () => getContextualPill({ viewMode, selectedDate, selectedWeek, selectedMonth }),
+  const range = useMemo(
+    () => getRange({ viewMode, selectedDate, selectedWeek, selectedMonth }),
     [viewMode, selectedDate, selectedWeek, selectedMonth],
   );
-
-  // Default to the contextual pill; user can still pick a preset
-  const [selectedId, setSelectedId] = useState(contextualPill?.id || '7d');
-
-  // When the contextual pill changes (date picker moved, view mode toggled),
-  // auto-follow it unless the user has explicitly picked a preset pill.
-  const [userPickedPreset, setUserPickedPreset] = useState(false);
-  useEffect(() => {
-    if (!userPickedPreset && contextualPill) {
-      setSelectedId(contextualPill.id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextualPill?.id]);
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -126,86 +131,46 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
     setLoading(true);
     setError(null);
 
-    const opts = {};
-    if (contextualPill && selectedId === contextualPill.id) {
-      opts.start = contextualPill.start;
-      opts.end = contextualPill.end;
-    } else {
-      opts.window = selectedId;
-    }
+    // Range may be null briefly while the parent page resolves its initial
+    // view-mode state. Fall back to the API's '7d' default so the user still
+    // sees something instead of an empty card.
+    const opts = range
+      ? { start: range.start, end: range.end }
+      : { window: '7d' };
 
     dashboardAPI.getTechnicianBounced(technician.id, opts)
       .then((res) => setRows(res?.data?.rejections || []))
       .catch((err) => setError(err.message || 'Failed to load bounced tickets'))
       .finally(() => setLoading(false));
-  }, [technician?.id, selectedId, contextualPill?.id, contextualPill?.start, contextualPill?.end]);
-
-  // Counts for the always-shown pills (7d/30d/all) come from the tech object
-  const staticCounts = {
-    '7d': technician?.rejected7d || 0,
-    '30d': technician?.rejected30d || 0,
-    'all': technician?.rejectedLifetime || 0,
-  };
-
-  // The contextual pill's count = rows.length when it's the selected pill (we
-  // just fetched exactly those rows). Otherwise show a neutral dash.
-  const contextualCount = selectedId === contextualPill?.id ? rows.length : null;
-
-  const handleSelectPreset = (id) => {
-    setSelectedId(id);
-    setUserPickedPreset(true);
-  };
-  const handleSelectContextual = () => {
-    setSelectedId(contextualPill.id);
-    setUserPickedPreset(false);
-  };
+    // Intentionally depend on the primitive start/end — the `range` object
+    // identity changes every render but its values don't, so a `range` dep
+    // would re-fetch infinitely.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [technician?.id, range?.start, range?.end]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
             <RotateCcw className="w-4 h-4 text-red-500" />
             Bounced tickets
+            {range?.label && (
+              <span className="text-[11px] font-medium text-slate-400 normal-case">
+                · {range.label}
+              </span>
+            )}
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
             Tickets {technician?.name || 'this technician'} picked up and then put back in the queue.
+            <span className="text-slate-400"> Use the date filter at the top of the page to change the range.</span>
           </p>
         </div>
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
-          {contextualPill && (
-            <button
-              type="button"
-              onClick={handleSelectContextual}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                selectedId === contextualPill.id
-                  ? 'bg-white text-slate-900 shadow-sm ring-1 ring-indigo-200'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="Matches the date filter at the top of the page"
-            >
-              {contextualPill.label}
-              {contextualCount != null && (
-                <span className="ml-1.5 text-[10px] text-slate-400">({contextualCount})</span>
-              )}
-            </button>
-          )}
-          {PRESET_PILLS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => handleSelectPreset(p.id)}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                selectedId === p.id
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {p.label}
-              <span className="ml-1.5 text-[10px] text-slate-400">({staticCounts[p.id]})</span>
-            </button>
-          ))}
-        </div>
+        {rows.length > 0 && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-sm">
+            {rows.length} bounced
+          </span>
+        )}
       </div>
 
       {loading && (
@@ -233,77 +198,116 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
       )}
 
       {!loading && !error && rows.length > 0 && (
-        <div className="space-y-2">
-          {rows.map((row) => {
-            const ticket = row.ticket;
-            const fsUrl = ticket?.freshserviceTicketId
-              ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
-              : null;
-            const held = durationBetween(row.startedAt, row.endedAt);
-            const currentHolder = ticket?.assignedTech?.name;
-            const isSelfPick = row.startMethod === 'self_picked';
+        <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+          {/* Column header — pure presentational, mirrors the row grid below.
+              Hidden on narrow screens (rows still read fine without it because
+              each cell is intrinsically labelled by content/icon). */}
+          <div className="hidden md:grid grid-cols-[110px_minmax(0,1fr)_72px_120px_70px_140px_minmax(0,160px)_70px] items-center gap-3 px-3 py-2 bg-slate-50 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <span>Ticket</span>
+            <span>Title</span>
+            <span>Priority</span>
+            <span>Category</span>
+            <span>Held</span>
+            <span>Rejected</span>
+            <span>Now with</span>
+            <span className="text-right">Actions</span>
+          </div>
 
-            return (
-              <div key={row.episodeId} className="bg-white border border-slate-200 rounded-lg p-3 hover:border-slate-300 transition-colors">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="text-xs text-slate-400 font-mono">#{ticket?.freshserviceTicketId || '?'}</span>
-                      {ticket?.priority && (
-                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${PRIORITY_PILL[ticket.priority] || 'bg-slate-100'}`}>
-                          {PRIORITY_LABELS[ticket.priority] || '—'}
-                        </span>
-                      )}
-                      {ticket?.ticketCategory && (
-                        <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{ticket.ticketCategory}</span>
-                      )}
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                        isSelfPick ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'
-                      }`}>
-                        {isSelfPick ? 'Self-picked' : 'Assigned'}
+          <div className="divide-y divide-slate-100">
+            {rows.map((row) => {
+              const ticket = row.ticket;
+              const fsUrl = ticket?.freshserviceTicketId
+                ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
+                : null;
+              const held = durationBetween(row.startedAt, row.endedAt);
+              const currentHolder = ticket?.assignedTech?.name;
+              const currentHolderPhoto = ticket?.assignedTech?.photoUrl;
+              const isSelfPick = row.startMethod === 'self_picked';
+              const priLabel = PRIORITY_LABELS[ticket?.priority];
+              const priClass = PRIORITY_PILL[ticket?.priority] || 'bg-slate-100 text-slate-500';
+
+              return (
+                <div
+                  key={row.episodeId}
+                  className="grid grid-cols-[110px_minmax(0,1fr)_72px_120px_70px_140px_minmax(0,160px)_70px] items-center gap-3 px-3 py-2 text-[12px] hover:bg-slate-50/70 transition-colors"
+                >
+                  {/* Ticket ID + (only when relevant) self-picked tag stacked beneath */}
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <span className="font-mono text-[11px] text-slate-500 truncate">
+                      #{ticket?.freshserviceTicketId || '?'}
+                    </span>
+                    {isSelfPick && (
+                      <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[9px] font-semibold uppercase tracking-wide">
+                        Self-picked
                       </span>
-                    </div>
-                    <p className="text-sm font-medium text-slate-800 leading-snug break-words">
-                      {ticket?.subject || 'Unknown ticket'}
-                    </p>
-                    <div className="flex items-center gap-3 mt-1.5 text-[11px] text-slate-500 flex-wrap">
-                      {ticket?.requester?.name && (
-                        <span className="flex items-center gap-1">
-                          <User className="w-3 h-3" />
-                          {ticket.requester.name}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        Held {held || 'briefly'} · rejected {formatWhen(row.endedAt)}
-                      </span>
-                      {currentHolder && (
-                        <span className="flex items-center gap-1 text-slate-600">
-                          → now with <strong>{currentHolder}</strong>
-                        </span>
-                      )}
-                      {!currentHolder && ticket && (
-                        <span className="text-amber-700 font-medium">
-                          → back in queue
-                        </span>
-                      )}
-                    </div>
+                    )}
                   </div>
-                  {fsUrl && (
-                    <a
-                      href={fsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-0.5 flex-shrink-0"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Open <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
+
+                  {/* Title — dominant, truncated with native tooltip */}
+                  <span
+                    className="font-medium text-slate-800 truncate"
+                    title={ticket?.subject || 'Unknown ticket'}
+                  >
+                    {ticket?.subject || 'Unknown ticket'}
+                  </span>
+
+                  {/* Priority — compact pill */}
+                  <span>
+                    {priLabel ? (
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${priClass}`}>
+                        {priLabel}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 text-[11px]">—</span>
+                    )}
+                  </span>
+
+                  {/* Category — subtle pill */}
+                  <span className="min-w-0">
+                    {ticket?.ticketCategory ? (
+                      <span
+                        className="inline-block max-w-full truncate align-middle text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded"
+                        title={ticket.ticketCategory}
+                      >
+                        {ticket.ticketCategory}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 text-[11px]">—</span>
+                    )}
+                  </span>
+
+                  {/* Held — small clock icon + duration */}
+                  <span className="inline-flex items-center gap-1 text-slate-500 text-[11px]">
+                    <Clock className="w-3 h-3" />
+                    {held || '—'}
+                  </span>
+
+                  {/* Rejected timestamp — short format */}
+                  <span className="text-slate-500 text-[11px] truncate" title={row.endedAt ? new Date(row.endedAt).toLocaleString() : ''}>
+                    {formatWhen(row.endedAt)}
+                  </span>
+
+                  {/* Owner — avatar + name (or "Back in queue") */}
+                  <Owner name={currentHolder} photoUrl={currentHolderPhoto} />
+
+                  {/* Action — lightweight link */}
+                  <span className="text-right">
+                    {fsUrl && (
+                      <a
+                        href={fsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Open <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </span>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

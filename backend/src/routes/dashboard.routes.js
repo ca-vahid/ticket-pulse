@@ -1083,7 +1083,7 @@ router.get(
             priority: true,
             ticketCategory: true,
             assignedTechId: true,
-            assignedTech: { select: { id: true, name: true } },
+            assignedTech: { select: { id: true, name: true, photoUrl: true } },
             requester: { select: { name: true, email: true } },
           },
         },
