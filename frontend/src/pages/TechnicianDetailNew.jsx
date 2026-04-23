@@ -539,7 +539,12 @@ export default function TechnicianDetailNew() {
 
             {activeTab === 'tickets' && (
               <div className="space-y-3">
-                {/* Metrics ribbon — at-a-glance context for the whole tab */}
+                {/* Metrics ribbon — also doubles as the sub-view selector now.
+                    Passing activeView + onSelectView turns the four count
+                    cells (Open / Self-Picked / Assigned / Closed) into
+                    buttons, so the list of segmented pills below is no
+                    longer needed and the bar above the table reads as
+                    "filters only" (search + category). */}
                 <MetricsRibbon
                   openCount={openCount}
                   pendingCount={pendingCount}
@@ -553,20 +558,13 @@ export default function TechnicianDetailNew() {
                   displayDate={displayDate}
                   weekRangeLabel={weekRangeLabel}
                   monthLabel={monthLabel}
+                  activeView={ticketView}
+                  onSelectView={setTicketView}
                 />
-                {/* Consolidated control bar (view pills + search + category) and
-                    the table all live inside TicketBoardTab now — one fewer row
-                    above the list and a single source of styling for filters. */}
                 <TicketBoardTab
                   activeView={ticketView}
-                  onViewChange={setTicketView}
                   displayedTickets={displayedTickets}
                   technicianName={technician.name}
-                  openCount={openCount}
-                  pendingCount={pendingCount}
-                  selfPickedCount={selfPickedCount}
-                  assignedCount={assignedCount}
-                  closedCount={closedCount}
                   searchTerm={searchTerm}
                   onSearchChange={setSearchTerm}
                   searchResultsCount={searchResultsCount}

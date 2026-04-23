@@ -3,23 +3,13 @@ import CategoryFilter from '../CategoryFilter';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from './constants';
 import { formatResolutionTime, calculatePickupTime, calculateAgeSinceCreation } from './utils';
 
-// ── View definitions ──────────────────────────────────────────────────────────
+// ── Search + category bar ─────────────────────────────────────────────────────
+// View selection is handled by clicking the metrics ribbon above this row, so
+// this bar only carries free-text search + category filter. Cuts the previous
+// three-row layout down to two and removes the duplicated count chips that
+// used to live both here AND in the ribbon.
 
-const TICKET_VIEWS = [
-  { id: 'all',      label: 'All Open' },
-  { id: 'self',     label: 'Self-Picked' },
-  { id: 'assigned', label: 'Assigned' },
-  { id: 'closed',   label: 'Closed' },
-];
-
-// ── Consolidated control bar ──────────────────────────────────────────────────
-// One row: view pills (left) + search (flex grow) + category filter (right).
-// Replaces the previous 3 separate rows (metrics ribbon stays above).
-
-function ControlBar({
-  active,
-  onChange,
-  counts,
+function SearchBar({
   searchTerm,
   onSearchChange,
   searchResultsCount,
@@ -30,32 +20,6 @@ function ControlBar({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg p-1.5">
-      {/* View pills — left-aligned, segmented control style */}
-      <div className="flex items-center gap-0.5 bg-slate-100 rounded-md p-0.5 flex-shrink-0">
-        {TICKET_VIEWS.map((v) => {
-          const isActive = active === v.id;
-          const c = counts[v.id] ?? 0;
-          return (
-            <button
-              key={v.id}
-              onClick={() => onChange(v.id)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold transition-all touch-manipulation ${
-                isActive
-                  ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              {v.label}
-              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full tabular-nums ${
-                isActive ? 'bg-slate-100 text-slate-700' : c === 0 ? 'bg-slate-200 text-slate-400' : 'bg-slate-200 text-slate-600'
-              }`}>
-                {c}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
       {/* Search — grows to fill available space */}
       <div className="relative flex-1 min-w-[180px]">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -291,18 +255,11 @@ function EmptyState({ view }) {
 
 export default function TicketBoardTab({
   activeView,
-  onViewChange,
   displayedTickets,
   technicianName,
-  openCount,
-  pendingCount,
-  selfPickedCount,
-  assignedCount,
-  closedCount,
-  // New: consolidated control bar receives search + category state from the parent.
-  // The parent still owns this state because it's also used to derive
-  // displayedTickets (filtering happens upstream so the All Open count chip and
-  // the visible rows stay in lockstep).
+  // Search + category state still lives in the parent because it's also used
+  // upstream to derive displayedTickets — keeping a single source means the
+  // metrics ribbon's view counts stay in lockstep with the visible rows.
   searchTerm,
   onSearchChange,
   searchResultsCount,
@@ -311,19 +268,9 @@ export default function TicketBoardTab({
   selectedCategories,
   onCategoryChange,
 }) {
-  const counts = {
-    all:      openCount + pendingCount,
-    self:     selfPickedCount,
-    assigned: assignedCount,
-    closed:   closedCount,
-  };
-
   return (
     <div className="space-y-3">
-      <ControlBar
-        active={activeView}
-        onChange={onViewChange}
-        counts={counts}
+      <SearchBar
         searchTerm={searchTerm}
         onSearchChange={onSearchChange}
         searchResultsCount={searchResultsCount}

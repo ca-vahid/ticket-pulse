@@ -1,24 +1,62 @@
 import { CircleDot, Hand, Send, CheckCircle2, Star } from 'lucide-react';
 
-function Metric({ icon: Icon, iconClass, label, value, sub }) {
-  return (
-    <div className="flex items-center gap-2.5 px-4">
+/**
+ * Single metric cell. Renders as a plain div, OR as a button when both
+ * `viewId` and `onSelect` are provided — used by the Tickets tab to make
+ * the ribbon double as the sub-view selector. Active state is signalled
+ * with a ring + bolder background so it reads as "you are here" without
+ * adding a separate row of pills below.
+ */
+function Metric({ icon: Icon, iconClass, label, value, sub, viewId, activeViewId, onSelect, isZero }) {
+  const isActive = viewId && activeViewId === viewId;
+  const isClickable = !!(viewId && onSelect);
+
+  // Color-keyed dim/dim-inactive states so the active cell stands out without
+  // making inactive ones feel disabled.
+  const baseClasses = 'flex items-center gap-2.5 px-4 py-2 transition-colors w-full text-left';
+  const activeClasses = 'bg-blue-50 ring-1 ring-blue-200 ring-inset';
+  const idleClasses = isClickable ? 'hover:bg-slate-50 cursor-pointer' : '';
+  const inactiveTextDim = isClickable && !isActive && isZero ? 'opacity-60' : '';
+
+  const inner = (
+    <>
       <Icon className={`w-4 h-4 flex-shrink-0 ${iconClass}`} />
-      <div>
+      <div className="min-w-0">
         <div className="flex items-baseline gap-1.5">
-          <span className="text-lg font-bold text-slate-900 leading-none">{value}</span>
+          <span className={`text-lg font-bold leading-none tabular-nums ${isActive ? 'text-blue-700' : 'text-slate-900'}`}>{value}</span>
           {sub && <span className="text-xs text-amber-600 font-medium">{sub}</span>}
         </div>
-        <div className="text-[10px] text-slate-400 uppercase tracking-wide font-medium leading-none mt-0.5">{label}</div>
+        <div className={`text-[10px] uppercase tracking-wide font-medium leading-none mt-0.5 ${isActive ? 'text-blue-600' : 'text-slate-400'}`}>{label}</div>
       </div>
-    </div>
+    </>
   );
+
+  if (isClickable) {
+    return (
+      <button
+        type="button"
+        onClick={() => onSelect(viewId)}
+        className={`${baseClasses} ${isActive ? activeClasses : idleClasses} ${inactiveTextDim}`}
+        aria-pressed={isActive}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return <div className={baseClasses}>{inner}</div>;
 }
 
 function Divider() {
   return <div className="w-px h-8 bg-slate-200 flex-shrink-0" />;
 }
 
+/**
+ * Tickets-tab metrics ribbon. When `activeView` + `onSelectView` are passed,
+ * the four count metrics (Open / Self-picked / Assigned / Closed) become
+ * clickable and drive the underlying ticket sub-view. CSAT stays static
+ * because it lives on its own tab.
+ */
 export default function MetricsRibbon({
   openCount,
   pendingCount,
@@ -32,6 +70,9 @@ export default function MetricsRibbon({
   displayDate,
   weekRangeLabel,
   monthLabel,
+  // Optional — when present, the four count metrics double as sub-view buttons.
+  activeView,
+  onSelectView,
 }) {
   const periodLabel = viewMode === 'monthly'
     ? (monthLabel || 'This Month')
@@ -42,13 +83,17 @@ export default function MetricsRibbon({
         : displayDate?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg flex items-center divide-x divide-slate-200 overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-lg flex items-stretch divide-x divide-slate-200 overflow-hidden">
       <Metric
         icon={CircleDot}
         iconClass="text-red-400"
         label="Open now"
         value={openCount}
         sub={pendingCount > 0 ? `+${pendingCount} pending` : null}
+        viewId="all"
+        activeViewId={activeView}
+        onSelect={onSelectView}
+        isZero={openCount + pendingCount === 0}
       />
       <Divider />
       <Metric
@@ -56,6 +101,10 @@ export default function MetricsRibbon({
         iconClass="text-slate-400"
         label={`Self-picked · ${periodLabel}`}
         value={selfPickedCount}
+        viewId="self"
+        activeViewId={activeView}
+        onSelect={onSelectView}
+        isZero={selfPickedCount === 0}
       />
       <Divider />
       <Metric
@@ -63,6 +112,10 @@ export default function MetricsRibbon({
         iconClass="text-slate-400"
         label={`Assigned · ${periodLabel}`}
         value={assignedCount}
+        viewId="assigned"
+        activeViewId={activeView}
+        onSelect={onSelectView}
+        isZero={assignedCount === 0}
       />
       <Divider />
       <Metric
@@ -70,6 +123,10 @@ export default function MetricsRibbon({
         iconClass="text-emerald-500"
         label={`Closed · ${periodLabel}`}
         value={closedCount}
+        viewId="closed"
+        activeViewId={activeView}
+        onSelect={onSelectView}
+        isZero={closedCount === 0}
       />
       <Divider />
       <Metric
