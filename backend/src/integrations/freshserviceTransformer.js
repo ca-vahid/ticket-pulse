@@ -476,6 +476,77 @@ export function transformTicketThreadEntries(fsActivities, context) {
 }
 
 /**
+ * Transform a FreshService conversation entry (note or reply) into a
+ * TicketThreadEntry row. Conversations carry the actual reply / note body
+ * text — the `/activities` endpoint only carries the *event* of a note
+ * being added, not its body. Both shapes converge on the same TicketThread
+ * row so the daily review can read them uniformly.
+ *
+ * @param {Object} conversation - A FreshService conversation object
+ * @param {Object} context
+ * @param {number} context.ticketId
+ * @param {number} context.workspaceId
+ */
+export function transformTicketConversationEntry(conversation, { ticketId, workspaceId }) {
+  if (!conversation || !ticketId || !workspaceId) return null;
+
+  try {
+    const isPrivate = conversation.private === true;
+    const isIncoming = conversation.incoming === true;
+    const visibility = isPrivate ? 'private' : (isIncoming ? 'customer' : 'public');
+    const eventType = isPrivate
+      ? 'private_note'
+      : isIncoming
+        ? 'customer_reply'
+        : 'public_reply';
+
+    const externalEntryId = conversation.id
+      ? `fs-conversation:${conversation.id}`
+      : `fs-conversation-fallback:${createHash('sha1').update(JSON.stringify({
+        created_at: conversation.created_at || null,
+        body: conversation.body || null,
+        body_text: conversation.body_text || null,
+        user_id: conversation.user_id || null,
+      })).digest('hex')}`;
+
+    return {
+      ticketId,
+      workspaceId,
+      externalEntryId,
+      source: 'freshservice_conversation',
+      eventType,
+      actorName: conversation.from_email
+        || conversation.support_email
+        || (conversation.user?.name || null),
+      actorEmail: conversation.from_email || conversation.support_email || (conversation.user?.email || null),
+      actorFreshserviceId: conversation.user_id ? BigInt(conversation.user_id) : null,
+      incoming: isIncoming,
+      isPrivate,
+      visibility,
+      title: conversation.subject || null,
+      content: null,
+      bodyHtml: conversation.body || null,
+      bodyText: conversation.body_text || null,
+      occurredAt: conversation.created_at ? new Date(conversation.created_at) : new Date(),
+      rawPayload: conversation,
+    };
+  } catch (error) {
+    logger.error('Error transforming ticket conversation entry:', error);
+    return null;
+  }
+}
+
+export function transformTicketConversationEntries(conversations, context) {
+  if (!Array.isArray(conversations)) {
+    logger.warn('Invalid conversations array');
+    return [];
+  }
+  return conversations
+    .map((c) => transformTicketConversationEntry(c, context))
+    .filter(Boolean);
+}
+
+/**
  * Batch transform tickets
  * @param {Array} fsTickets - Array of FreshService tickets
  * @returns {Array} Array of transformed tickets

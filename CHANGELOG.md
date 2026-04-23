@@ -2,6 +2,122 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.88-preview] - 2026-04-22
+
+### Daily Review: real conversation bodies now reach the LLM (silent /conversations fetch bug + collection diagnostics)
+
+User reported that Daily Review recommendations referenced ticket activity that "looked completely incomplete" — the LLM was only getting state-change entries like `Vahid Haeri: added a private note` with no actual note body. Two real causes plus a defence-in-depth diagnostics layer.
+
+#### Root cause #1: silent bug in `_extractResults` swallowed every conversation fetch
+
+`freshservice._extractResults` checked endpoint paths in this order:
+
+```js
+if (endpoint.includes('/tickets'))    return data.tickets    || [];
+if (endpoint.includes('/agents'))     return data.agents     || [];
+// ...
+if (endpoint.includes('/activities')) return data.activities || [];
+```
+
+The generic `/tickets` check matched FIRST on any URL containing the word "tickets" — including `/tickets/:id/conversations` and `/tickets/:id/activities`. The response shape on those endpoints is `{ conversations: [...] }` and `{ activities: [...] }`, never `{ tickets: [...] }`, so the helper returned `data.tickets` (undefined) and every paged fetch silently returned `[]`. The activities path happened to work in practice because `fetchTicketActivities` calls `_fetchWithRetry` directly and pulls `response.data.activities` itself — but the new conversations fetch went through `fetchAllPages` and hit the bug.
+
+**Fix**: reordered `_extractResults` to check sub-resource paths (`/conversations`, `/activities`, `/notes`, `/time_entries`) BEFORE the generic top-level path checks.
+
+#### Root cause #2: we never called `/conversations` at all
+
+`/tickets/:id/activities` returns the ticket's activity stream — assignment events, status changes, group changes, workflow runs, and "added a private note" *events*. It does NOT return the body of the note. Bodies live at `/tickets/:id/conversations` only, which had no client method.
+
+**Fix**:
+
+- New `fetchTicketConversations(ticketId, { maxEntries })` method on the FreshService client.
+- New `transformTicketConversationEntry(conversation, ctx)` that maps each conversation into the existing `TicketThreadEntry` shape with `source: 'freshservice_conversation'` (vs `'freshservice_activity'` for the existing path). Both shapes coexist in the same table; queries stay simple.
+- `_hydrateMissingThreads` now fetches BOTH endpoints per ticket. A pre-fetch `groupBy(ticketId, source)` query checks per-source local coverage so we only call FreshService for what's actually missing.
+
+#### Verified end-to-end
+
+| Metric | Before | After (force refresh) |
+|---|---|---|
+| Conversation rows fetched | 0 | 82 |
+| Tickets with conversation bodies in analysis | 0 / 52 | 42 / 52 |
+| Tickets with no thread context at all | unknown | 6 (genuine — those tickets have no activities or conversations in FS) |
+
+Sample LLM input after the fix (ticket #219670, escalation alert):
+
+> `[private_note/private] Anton logged in and confirmed shaw is up and running in Calgary`
+
+vs. before the fix:
+
+> *(nothing — the model only saw "added a private note" with no body)*
+
+#### Improved thread excerpt builder
+
+- `MAX_THREAD_EXCERPTS` bumped from 6 to 12 per ticket.
+- Per-excerpt character cap raised from 220 to 600.
+- HTML stripped before passing to the model so it sees clean plaintext (FS conversation bodies are HTML).
+- Real conversation bodies are prioritized over state-change activity entries — the model fills its slots with the most-recent N notes/replies first, then state-change events for chronological context. Final list is re-sorted oldest → newest so the model can read the thread in narrative order.
+
+#### Per-case payload sent to the LLM is now structured
+
+In addition to the existing joined `summary` string, every analyzed case now also ships:
+
+- `priority`, `status`, `triggerSource`, `rejectionCount`, `rebounded`, `changedFromTopRecommendation`, `handledInFreshService`
+- `topRecommendation`, `finalAssignee`, `pipelineAssignedTech`
+- `episodeSummary` (technician name + start/end method per episode)
+- `assignmentActions` (source + assignedToName + assignedByEmail + note)
+- `threadExcerpts` array (each with source / eventType / visibility / actorName / occurredAt / excerpt) — this is the big one
+
+Allow-list defence is unchanged: every ticket id the LLM cites in `supportingTicketIds` / `supportingFreshserviceTicketIds` must come from the actual cohort or it's dropped.
+
+#### Force refresh from FreshService — new option
+
+The Daily Review trigger panel now has a `Force refresh from FreshService` checkbox. When ticked, the run bypasses the local thread cache and re-pulls every ticket's activities + conversations from FreshService. Slow (one round-trip per ticket per source) but useful when a ticket has had recent activity since the last sync. Wired through `runReview` → `collectDailyDataset` → `_hydrateMissingThreads`.
+
+#### Collection Diagnostics section in Run Detail
+
+New section in the run detail page that shows exactly what the LLM had to read:
+
+| Metric | What it tells you |
+|---|---|
+| Candidate Tickets | How many tickets are in the review cohort |
+| With Conversations (X / Y, Z%) | Color-coded green / amber / red — coverage of real conversation bodies |
+| With Activity Log (X / Y, Z%) | Coverage of state-change events |
+| No Thread Context | Tickets the LLM saw with metadata only — explicitly red-flagged |
+| Local cache before this run | What was already in the DB (split by activities / conversations) |
+| Pulled from FreshService this run | What was newly fetched (split by source + total row counts) |
+| Hydration failures | Per-ticket errors |
+| Total / Conversation / Activity entries available | Raw counts feeding the excerpt builder |
+
+If any tickets have no thread context, a red callout points the admin to the new Force Refresh option.
+
+#### Live progress messages spell out what's happening
+
+Before:
+
+> Hydrating thread history (10/46)…
+
+After:
+
+> Local cache: 38/52 fully cached. Pulling 14 missing activity stream(s) and 14 missing conversation stream(s) from FreshService.
+> Hydrating FreshService threads (10/46); pulled 150 activity row(s) + 23 conversation row(s) so far.
+> Collection complete: 52 ticket(s) ready. 42/52 have conversation bodies for the LLM to read.
+
+So when subsequent runs of the same day finish quickly, you'll explicitly see the cache hit instead of guessing whether the run did anything.
+
+#### Files touched
+
+- `backend/src/integrations/freshservice.js` — `fetchTicketConversations`; `_extractResults` ordering fix
+- `backend/src/integrations/freshserviceTransformer.js` — `transformTicketConversationEntry` + `transformTicketConversationEntries`
+- `backend/src/services/assignmentDailyReviewService.js` — rewritten `_hydrateMissingThreads` (both endpoints, per-ticket diagnostics, force-refresh option), upgraded `_buildThreadExcerptMap` (HTML strip, prioritize conversations, larger limits), per-case payload enrichment, `collectionDiagnostics` persisted on the run summary
+- `backend/src/routes/assignment.routes.js` — `forceRefreshThreads` accepted on `POST /daily-review`
+- `frontend/src/services/api.js` — already accepts arbitrary body, no shape change needed
+- `frontend/src/components/assignment/DailyReviewManager.jsx` — Force Refresh checkbox on the trigger panel, new `CollectionDiagnosticsSection` rendered above Meeting Briefing in `RunDetail`
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.88-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+No DB schema change.
+
+---
+
 ## [1.9.87-preview] - 2026-04-22
 
 ### Daily Review: opt-in Meeting Briefing for the next-day standup
