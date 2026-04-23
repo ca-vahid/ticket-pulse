@@ -1417,6 +1417,8 @@ class AssignmentDailyReviewService {
         allowedSupportingFreshserviceTicketIds: Array.from(allowedFreshserviceIds),
       };
 
+      const workspaceLabel = dataset.workspaceName || 'this';
+
       const TOOL = {
         name: 'submit_daily_review_findings',
         description: `Submit the final daily review findings for the "${workspaceLabel}" workspace. You must call this tool exactly once. Every supportingTicketIds entry must come from analysisInput.allowedSupportingTicketIds and every supportingFreshserviceTicketIds entry must come from analysisInput.allowedSupportingFreshserviceTicketIds — do not invent ids.`,
@@ -1485,7 +1487,6 @@ class AssignmentDailyReviewService {
         },
       };
 
-      const workspaceLabel = dataset.workspaceName || 'this';
       const systemPrompt = `You are reviewing one business day of auto-assignment outcomes for the "${workspaceLabel}" workspace ONLY.
 
 Strict scoping rules:
@@ -1578,25 +1579,43 @@ Rules:
     }
   }
 
-  async runReview(workspaceId, reviewDate, triggeredBy = 'system', options = {}) {
-    const startedAt = Date.now();
-    const emit = (event) => {
-      try { options.onEvent?.(event); } catch { /* ignore stream errors */ }
-    };
-    let run;
-    let lastHeartbeatAt = 0;
-    const heartbeatRun = (status) => {
-      const now = Date.now();
-      if (!run?.id || now - lastHeartbeatAt < 10000) return;
-      lastHeartbeatAt = now;
+  // Throttled progress persister: writes the latest progress payload to the
+  // run row no more than once per second. Polling clients read this column
+  // to render the live phase / percent / message / stats — same UX SSE
+  // used to provide, but resilient to the Azure App Service 230-second
+  // request timeout that kills long-lived SSE connections.
+  _makeProgressPersister(runId) {
+    const state = { lastPersistAt: 0, latest: null, pendingTimer: null };
+    const flush = () => {
+      const payload = state.latest;
+      state.latest = null;
+      state.lastPersistAt = Date.now();
+      state.pendingTimer = null;
       prisma.assignmentDailyReviewRun.update({
-        where: { id: run.id },
-        data: { status },
-      }).catch((error) => {
-        logger.warn('Daily review heartbeat failed', { runId: run.id, error: error.message });
+        where: { id: runId },
+        data: {
+          progress: payload,
+          progressUpdatedAt: new Date(),
+        },
+      }).catch((err) => {
+        logger.warn('Daily review progress persist failed', { runId, error: err.message });
       });
     };
+    return (payload) => {
+      state.latest = payload;
+      const elapsed = Date.now() - state.lastPersistAt;
+      if (elapsed >= 1000) {
+        flush();
+      } else if (!state.pendingTimer) {
+        state.pendingTimer = setTimeout(flush, 1000 - elapsed);
+      }
+    };
+  }
 
+  // Look up an existing run, or create a new one. The HTTP-facing kickoff
+  // path uses this and then dispatches _executeRun() in the background so
+  // it can return a runId to the client without holding the request open.
+  async _setupRun(workspaceId, reviewDate, triggeredBy, options = {}) {
     await this._markStaleRunsFailed();
 
     const { workspace, config, timezone } = await this._getWorkspaceContext(workspaceId);
@@ -1611,30 +1630,23 @@ Rules:
       },
     });
     if (activeExisting) {
-      emit({ type: 'error', message: `A daily review is already running for ${dateStr} (run #${activeExisting.id}).` });
-      return activeExisting;
+      return { run: activeExisting, alreadyActive: true, workspace, config, timezone, dateStr, reviewDateValue };
     }
 
-    // When force is false (e.g. the scheduled job calling in), short-circuit
-    // if today's review has already completed so we don't pile on duplicate
-    // rows for the same date. Manual UI clicks always pass force=true and
-    // therefore always create a fresh run row below — that's why each rerun
-    // now gets its own id (Run #2, #3, ...) instead of overwriting Run #1.
+    // When force is false (scheduled job), short-circuit if today's review
+    // has already completed so we don't pile on duplicate rows. Manual UI
+    // clicks always pass force=true so each rerun gets its own row.
     if (!options.force) {
       const lastCompleted = await prisma.assignmentDailyReviewRun.findFirst({
-        where: {
-          workspaceId,
-          reviewDate: reviewDateValue,
-          status: 'completed',
-        },
+        where: { workspaceId, reviewDate: reviewDateValue, status: 'completed' },
         orderBy: { createdAt: 'desc' },
       });
       if (lastCompleted) {
-        return lastCompleted;
+        return { run: lastCompleted, alreadyCompleted: true, workspace, config, timezone, dateStr, reviewDateValue };
       }
     }
 
-    run = await prisma.assignmentDailyReviewRun.create({
+    const run = await prisma.assignmentDailyReviewRun.create({
       data: {
         workspaceId,
         reviewDate: reviewDateValue,
@@ -1643,32 +1655,99 @@ Rules:
         status: 'collecting',
         triggeredBy,
         llmModel: config?.llmModel || 'claude-sonnet-4-6-20260217',
+        progress: {
+          phase: 'collecting',
+          percent: 2,
+          message: 'Queued for execution. Pulling dataset shortly...',
+          stats: {},
+        },
+        progressUpdatedAt: new Date(),
       },
     });
+    return { run, workspace, config, timezone, dateStr, reviewDateValue };
+  }
+
+  // Background-friendly entry point used by the HTTP layer. Creates the
+  // run row, fires _executeRun in the background, and returns the row to
+  // the caller within milliseconds. The frontend polls the run row to
+  // render progress instead of holding an SSE connection open.
+  async kickOffReview(workspaceId, reviewDate, triggeredBy = 'system', options = {}) {
+    const setup = await this._setupRun(workspaceId, reviewDate, triggeredBy, options);
+    if (setup.alreadyActive || setup.alreadyCompleted) {
+      return setup.run;
+    }
+
+    // Fire-and-forget: errors are caught inside _executeRun and persisted
+    // to the run row (status='failed', errorMessage), so nothing should
+    // ever escape this promise.
+    setImmediate(() => {
+      this._executeRun(setup, { ...options, _runStartedAt: Date.now() }).catch((err) => {
+        logger.error('Background daily review crashed', { runId: setup.run.id, error: err.message });
+      });
+    });
+
+    return setup.run;
+  }
+
+  // Backwards-compatible synchronous run (used by the scheduled job and by
+  // the test scripts). The HTTP layer now uses kickOffReview() instead.
+  async runReview(workspaceId, reviewDate, triggeredBy = 'system', options = {}) {
+    const setup = await this._setupRun(workspaceId, reviewDate, triggeredBy, options);
+    if (setup.alreadyActive || setup.alreadyCompleted) {
+      try { options.onEvent?.({ type: 'error', message: `A daily review is already running for ${setup.dateStr} (run #${setup.run.id}).` }); } catch { /* ignore */ }
+      return setup.run;
+    }
+    return this._executeRun(setup, { ...options, _runStartedAt: Date.now() });
+  }
+
+  async _executeRun(setup, options = {}) {
+    const startedAt = options._runStartedAt || Date.now();
+    const { workspace, config, dateStr } = setup;
+    let run = setup.run;
+    const persistProgress = this._makeProgressPersister(run.id);
+    const emit = (event) => {
+      try { options.onEvent?.(event); } catch { /* ignore stream errors */ }
+    };
+    let lastHeartbeatAt = 0;
+    const heartbeatRun = (status) => {
+      const now = Date.now();
+      if (!run?.id || now - lastHeartbeatAt < 10000) return;
+      lastHeartbeatAt = now;
+      prisma.assignmentDailyReviewRun.update({
+        where: { id: run.id },
+        data: { status },
+      }).catch((error) => {
+        logger.warn('Daily review heartbeat failed', { runId: run.id, error: error.message });
+      });
+    };
+
     const abortController = new AbortController();
     this.activeRunControllers.set(run.id, abortController);
 
     emit({ type: 'daily_review_started', runId: run.id, reviewDate: dateStr, workspaceName: workspace.name });
 
     try {
-      emit({
-        type: 'phase_update',
+      const startMsg = {
         phase: 'collecting',
-        message: 'Collecting ticket outcomes, thread history, and assignment evidence...',
         percent: 2,
-      });
-      const dataset = await this.collectDailyDataset(workspaceId, dateStr, {
+        message: 'Collecting ticket outcomes, thread history, and assignment evidence...',
+        stats: {},
+      };
+      emit({ type: 'phase_update', ...startMsg });
+      persistProgress(startMsg);
+      const dataset = await this.collectDailyDataset(workspace.id, dateStr, {
         signal: abortController.signal,
         forceRefreshThreads: options.forceRefreshThreads === true,
         onProgress: (event) => {
           heartbeatRun('collecting');
-          emit({
-            type: 'phase_update',
+          const payload = {
             phase: event.phase || 'collecting',
             message: event.message,
             percent: event.percent,
             stats: event.stats,
-          });
+          };
+          emit({ type: 'phase_update', ...payload });
+          persistProgress(payload);
         },
       });
 
@@ -1693,15 +1772,17 @@ Rules:
         totals: dataset.summaryMetrics.totals,
         topCategories: dataset.summaryMetrics.topCategories,
       });
-      emit({
-        type: 'phase_update',
+      const analyzingPayload = {
         phase: 'analyzing',
-        message: 'Generating prompt, process, and skill-matrix recommendations...',
         percent: 92,
-      });
+        message: 'Generating prompt, process, and skill-matrix recommendations...',
+        stats: dataset.summaryMetrics.totals || {},
+      };
+      emit({ type: 'phase_update', ...analyzingPayload });
+      persistProgress(analyzingPayload);
 
       this._throwIfCancelled(abortController.signal);
-      const analysis = await this._analyzeDataset(workspaceId, dataset, config?.llmModel, {
+      const analysis = await this._analyzeDataset(workspace.id, dataset, config?.llmModel, {
         signal: abortController.signal,
       });
       this._throwIfCancelled(abortController.signal);
@@ -1744,7 +1825,19 @@ Rules:
         processCount: analysis.processRecommendations?.length || 0,
         skillCount: analysis.skillRecommendations?.length || 0,
       });
-      emit({ type: 'phase_update', phase: 'completed', message: 'Daily review complete.', percent: 100 });
+      const completedPayload = {
+        phase: 'completed',
+        percent: 100,
+        message: 'Daily review complete.',
+        stats: dataset.summaryMetrics.totals || {},
+      };
+      emit({ type: 'phase_update', ...completedPayload });
+      // Final flush: write the terminal payload directly so polling clients
+      // see "completed" the moment the next poll lands without any throttle delay.
+      await prisma.assignmentDailyReviewRun.update({
+        where: { id: run.id },
+        data: { progress: completedPayload, progressUpdatedAt: new Date() },
+      }).catch(() => { /* progress is best-effort */ });
       emit({ type: 'daily_review_complete', runId: run.id });
       return run;
     } catch (error) {
@@ -1755,6 +1848,8 @@ Rules:
             status: 'cancelled',
             totalDurationMs: Date.now() - startedAt,
             completedAt: new Date(),
+            progress: { phase: 'cancelled', percent: 100, message: error.message, stats: {} },
+            progressUpdatedAt: new Date(),
           },
         });
         emit({ type: 'phase_update', phase: 'cancelled', message: error.message, percent: 100 });
@@ -1763,7 +1858,7 @@ Rules:
         return run;
       }
 
-      logger.error('Daily review run failed', { workspaceId, reviewDate: dateStr, error: error.message });
+      logger.error('Daily review run failed', { workspaceId: workspace.id, reviewDate: dateStr, error: error.message });
       run = await prisma.assignmentDailyReviewRun.update({
         where: { id: run.id },
         data: {
@@ -1771,6 +1866,8 @@ Rules:
           errorMessage: error.message,
           totalDurationMs: Date.now() - startedAt,
           completedAt: new Date(),
+          progress: { phase: 'failed', percent: 100, message: error.message, stats: {} },
+          progressUpdatedAt: new Date(),
         },
       });
       emit({ type: 'error', message: error.message });

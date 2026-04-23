@@ -1,6 +1,18 @@
-export const APP_VERSION = '1.9.88-preview';
+export const APP_VERSION = '1.9.89-preview';
 
 export const changelog = [
+  {
+    version: '1.9.89-preview',
+    date: 'April 23, 2026',
+    entries: [
+      { type: 'fixed', text: 'Daily Review failed in prod with "POST /api/assignment/daily-review?stream=true net::ERR_FAILED 502 (Bad Gateway)" -- root cause was Azure App Service Linux\u2019s hard 230-second front-door request timeout killing the long-lived SSE connection mid-collection. There\u2019s no way to raise that limit on Linux App Service plans; the architecture had to change. Decoupled the work from the HTTP request lifecycle: POST /daily-review now kicks off the run in the BACKGROUND and returns the run row to the caller in ~50-100ms (HTTP 202). The work continues in a fire-and-forget setImmediate, immune to any HTTP timeout. Verified locally: kickOffReview returned in 84ms; the full 50-ticket review completed in 115s in the background and the polling client saw every state transition (collecting -> 48% -> 68% -> analyzing -> 92% -> completed -> 100%)' },
+      { type: 'new', text: 'Background execution + DB-persisted progress for Daily Review. Live progress is now written to a new `progress` JSONB column on assignment_daily_review_runs (with progressUpdatedAt timestamp) throttled to once per second. The frontend polls a new lightweight GET /api/assignment/daily-review/runs/:id/progress endpoint every 1.5s during an active run -- no more SSE, no more 502s, no more "Failed to fetch" mystery errors. Same step-by-step UI (phase / percent / message / stats / activity log), driven by polling instead of streaming. Cancellation still works through the existing /cancel endpoint and propagates through the in-memory AbortController' },
+      { type: 'new', text: 'Service refactor: split monolithic runReview() into _setupRun() (creates the run row, returns immediately) + _executeRun() (does the actual work). New kickOffReview() public method composes both for the HTTP path: setupRun -> dispatch _executeRun in setImmediate -> return the row. Existing runReview() is kept as a synchronous wrapper for the scheduled job and CLI test scripts so backward compat is preserved' },
+      { type: 'fixed', text: 'Latent bug in _analyzeDataset: workspaceLabel was referenced in the TOOL.description string before its const declaration, throwing "Cannot access \'workspaceLabel\' before initialization" at runtime. Every LLM analysis was silently falling back to the heuristic recommendations. Moved the const declaration above the TOOL definition. Verified: real Anthropic LLM analysis path now executes successfully on local prod copy' },
+      { type: 'improved', text: 'Frontend LiveDailyReviewView replaced its useStreamingFetch(SSE) call with a poll-based effect. The independent ticking timer (separate from the polling cycle) keeps the elapsed counter ticking smoothly between polls. Activity log dedups consecutive identical messages so polling doesn\u2019t spam the same line. When the run reaches completed, a single GET /daily-review/runs/:id pulls the heavy summary/cases/recommendations payload to populate the final view' },
+      { type: 'database', text: 'New migration 20260423040000_add_daily_review_progress -- adds progress JSONB + progress_updated_at columns to assignment_daily_review_runs. Run `prisma migrate deploy` on any environment before deploying' },
+    ],
+  },
   {
     version: '1.9.88-preview',
     date: 'April 22, 2026',

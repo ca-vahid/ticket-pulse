@@ -2,6 +2,82 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [1.9.89-preview] - 2026-04-23
+
+### Daily Review on prod: background execution + DB-persisted progress (fix for Azure 502 Bad Gateway on long runs)
+
+User triggered the Daily Review in prod and it died with `POST /api/assignment/daily-review?stream=true net::ERR_FAILED 502 (Bad Gateway)` and a "Failed to fetch" UI error. The work itself was healthy — Azure App Service Linux's hard **230-second front-door request timeout** was killing the long-lived SSE connection mid-collection. There's no way to raise that limit on Linux App Service plans; the architecture had to change.
+
+#### Architecture: SSE → background execution + polling
+
+- `POST /api/assignment/daily-review` now kicks the work off in the **background** and returns the run row to the caller in ~50-100ms (HTTP 202).
+- The work continues in a fire-and-forget `setImmediate`, immune to any HTTP request timeout.
+- Live progress is written to a new `progress` JSONB column on `assignment_daily_review_runs` (with a `progressUpdatedAt` timestamp), throttled to once per second.
+- The frontend polls a new lightweight endpoint `GET /api/assignment/daily-review/runs/:id/progress` every 1.5 seconds during an active run.
+- No more SSE, no more 502s, no more "Failed to fetch" mystery errors. Same step-by-step UI (phase / percent / message / stats / activity log), now driven by polling.
+
+#### Service refactor
+
+Monolithic `runReview()` split into:
+
+| Method | Purpose |
+|---|---|
+| `_setupRun()` | Creates the run row (or returns the existing active/completed row if applicable). Returns synchronously after one DB roundtrip. |
+| `_executeRun(setup, options)` | Does the actual work: collection, hydration, LLM analysis, recommendation persistence, error handling. |
+| `kickOffReview(workspaceId, reviewDate, triggeredBy, options)` | New public method: setupRun → dispatch _executeRun in `setImmediate` → return the row immediately. Used by the HTTP layer. |
+| `runReview(...)` | Kept as a synchronous wrapper (setup + await execute) for the scheduled job and CLI test scripts so backward compat is preserved. |
+
+#### Throttled progress persister
+
+The new `_makeProgressPersister(runId)` helper writes the latest progress payload to the run row no more than once per second via a self-rescheduling timer. Polling clients read this column to render the live UI. Final terminal payloads (`completed` / `cancelled` / `failed`) bypass the throttle and write directly so the next poll lands the terminal state immediately.
+
+#### Bug fix: `workspaceLabel` was referenced before initialization in `_analyzeDataset`
+
+When I refactored the system prompt to be workspace-aware in v1.9.86, I left a stale reference to `workspaceLabel` inside the `TOOL.description` string template that ran *before* the `const workspaceLabel = ...` declaration. Every LLM analysis was silently throwing `Cannot access 'workspaceLabel' before initialization` and falling back to the heuristic recommendations.
+
+**Fix**: moved the const declaration above the `TOOL` definition. Verified locally: real Anthropic LLM analysis path now executes successfully and returns structured recommendations.
+
+#### Frontend changes
+
+`LiveDailyReviewView` was rewritten:
+- Removed the `useStreamingFetch(SSE)` call entirely.
+- Replaced with a poll-based effect: POST once to start, then `setTimeout`-driven polls every 1.5s.
+- Independent ticking timer (separate from the polling cycle) keeps the elapsed counter ticking smoothly between polls.
+- Activity log dedups consecutive identical messages so polling doesn't spam the same line.
+- When the run reaches `completed`, a single GET `/daily-review/runs/:id` pulls the heavy summary/cases/recommendations payload to populate the final view.
+- Cancel button still works (calls the existing `/cancel` endpoint, propagates through the in-memory AbortController).
+
+#### Verified end-to-end on local prod copy
+
+| Metric | Result |
+|---|---|
+| `kickOffReview` return time | **84ms** |
+| Full 52-ticket review duration (background) | 115s |
+| Polling captured every state transition | yes (collecting → 48% → 68% → analyzing → 92% → completed → 100%) |
+| LLM analysis path | succeeded (no more `workspaceLabel` crash) |
+| Conversation coverage in analysis | 42/52 tickets (unchanged from v1.9.88) |
+| Final progress persisted | `{ phase: 'completed', percent: 100, message: 'Daily review complete.', stats: { ... } }` |
+
+#### Files touched
+
+- `backend/prisma/schema.prisma` + `backend/prisma/migrations/20260423040000_add_daily_review_progress/migration.sql` — new `progress` + `progress_updated_at` columns
+- `backend/src/services/assignmentDailyReviewService.js` — `_makeProgressPersister`, `_setupRun`, `_executeRun`, `kickOffReview`; refactored `runReview` to compose them; `workspaceLabel` reordering fix
+- `backend/src/routes/assignment.routes.js` — `POST /daily-review` returns 202 immediately; new lightweight `GET /daily-review/runs/:id/progress` for polling
+- `frontend/src/services/api.js` — added `getDailyReviewRunProgress(id)`; removed `runDailyReviewStreamPath`
+- `frontend/src/components/assignment/DailyReviewManager.jsx` — replaced SSE-based `LiveDailyReviewView` with poll-based version, independent elapsed-time timer, deduped activity log
+- `backend/package.json`, `frontend/package.json` — bump to `1.9.89-preview`
+- `CHANGELOG.md`, `frontend/src/data/changelog.js` — release notes
+
+#### Database migration
+
+| Migration | Purpose |
+|---|---|
+| `20260423040000_add_daily_review_progress` | Adds `progress` JSONB + `progress_updated_at` columns to `assignment_daily_review_runs` |
+
+Run `prisma migrate deploy` on any environment before deploying.
+
+---
+
 ## [1.9.88-preview] - 2026-04-22
 
 ### Daily Review: real conversation bodies now reach the LLM (silent /conversations fetch bug + collection diagnostics)
