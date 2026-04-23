@@ -615,10 +615,14 @@ class AssignmentDailyReviewService {
         ticketIds: ticketIds.length,
       },
     });
+    // Defence-in-depth: every related-data query is scoped by workspaceId
+    // even though the ticketId set is already workspace-scoped. This protects
+    // the analysis input from any pre-existing cross-workspace data integrity
+    // issues (e.g. an assignment episode whose ticket id was reused).
     const [episodes, assignments, threadEntries, competencyCategories] = await Promise.all([
       prisma.ticketAssignmentEpisode.findMany({
-        where: { ticketId: { in: ticketIds } },
-        include: { technician: { select: { id: true, name: true } } },
+        where: { workspaceId, ticketId: { in: ticketIds } },
+        include: { technician: { select: { id: true, name: true, workspaceId: true } } },
         orderBy: { startedAt: 'asc' },
       }),
       prisma.ticketAssignment.findMany({
@@ -627,10 +631,10 @@ class AssignmentDailyReviewService {
           ticketId: { in: ticketIds },
           createdAt: { lte: range.end },
         },
-        include: { assignedTo: { select: { id: true, name: true } } },
+        include: { assignedTo: { select: { id: true, name: true, workspaceId: true } } },
         orderBy: { createdAt: 'asc' },
       }),
-      ticketThreadRepository.listForTickets(ticketIds, { end: range.end }),
+      ticketThreadRepository.listForTickets(ticketIds, { end: range.end, workspaceId }),
       prisma.competencyCategory.findMany({
         where: { workspaceId, isActive: true },
         select: { id: true, name: true, description: true },
@@ -998,6 +1002,93 @@ class AssignmentDailyReviewService {
     };
   }
 
+  // Strip any supporting ticket id the LLM returned that wasn't in the
+  // input set. The tool schema accepts arbitrary integers so an unbounded
+  // model can (and does, occasionally) invent plausible-looking ticket
+  // numbers. Keeping only ids we sent in guarantees every recommendation
+  // is grounded in the current workspace's review cohort.
+  _sanitizeRecommendationItems(items = [], { allowedInternalIds, allowedFreshserviceIds }) {
+    if (!Array.isArray(items)) return { items: [], droppedInternal: 0, droppedExternal: 0 };
+    let droppedInternal = 0;
+    let droppedExternal = 0;
+    const sanitized = items.map((item) => {
+      const cleanedInternal = Array.isArray(item.supportingTicketIds)
+        ? item.supportingTicketIds.filter((id) => {
+          if (allowedInternalIds.has(Number(id))) return true;
+          droppedInternal++;
+          return false;
+        })
+        : [];
+      const cleanedExternal = Array.isArray(item.supportingFreshserviceTicketIds)
+        ? item.supportingFreshserviceTicketIds.filter((id) => {
+          if (allowedFreshserviceIds.has(Number(id))) return true;
+          droppedExternal++;
+          return false;
+        })
+        : [];
+      return {
+        ...item,
+        supportingTicketIds: cleanedInternal,
+        supportingFreshserviceTicketIds: cleanedExternal,
+      };
+    });
+    return { items: sanitized, droppedInternal, droppedExternal };
+  }
+
+  // Some prod tickets have an assignedTechId pointing at a technician row
+  // belonging to a different workspace (a pre-existing data integrity issue
+  // we don't try to fix here). We still want the daily review to be honest
+  // about the scope, so we surface those as warnings and blank the tech
+  // names so they don't end up quoted in the LLM's output as if they were
+  // members of the current workspace.
+  async _detectCrossWorkspaceAssignments(workspaceId, cases = []) {
+    const techIds = new Set();
+    for (const item of cases) {
+      if (item.finalAssignee?.id) techIds.add(item.finalAssignee.id);
+      if (item.pipelineAssignedTech?.id) techIds.add(item.pipelineAssignedTech.id);
+      for (const action of item.assignmentActions || []) {
+        if (action.assignedToId) techIds.add(action.assignedToId);
+      }
+      for (const episode of item.episodeSummary || []) {
+        if (episode.technicianId) techIds.add(episode.technicianId);
+      }
+    }
+    if (techIds.size === 0) return { foreignTechIds: new Set(), warnings: [] };
+
+    const techs = await prisma.technician.findMany({
+      where: { id: { in: Array.from(techIds) } },
+      select: { id: true, workspaceId: true, name: true },
+    });
+    const foreign = techs.filter((t) => t.workspaceId !== workspaceId);
+    const foreignTechIds = new Set(foreign.map((t) => t.id));
+    const warnings = foreign.length > 0
+      ? [`${foreign.length} technician reference(s) in this review (e.g. ${foreign.slice(0, 3).map((t) => t.name).join(', ')}) belong to other workspaces. Their names were redacted from the LLM input to avoid cross-workspace recommendations.`]
+      : [];
+    return { foreignTechIds, warnings };
+  }
+
+  _redactForeignTechFromCase(item, foreignTechIds) {
+    if (foreignTechIds.size === 0) return item;
+    const safe = (tech) => (tech && foreignTechIds.has(tech.id)
+      ? { id: tech.id, name: '(out-of-workspace technician)' }
+      : tech);
+    return {
+      ...item,
+      finalAssignee: safe(item.finalAssignee),
+      pipelineAssignedTech: safe(item.pipelineAssignedTech),
+      assignmentActions: (item.assignmentActions || []).map((action) => (
+        action.assignedToId && foreignTechIds.has(action.assignedToId)
+          ? { ...action, assignedToName: '(out-of-workspace technician)' }
+          : action
+      )),
+      episodeSummary: (item.episodeSummary || []).map((episode) => (
+        episode.technicianId && foreignTechIds.has(episode.technicianId)
+          ? { ...episode, technicianName: '(out-of-workspace technician)' }
+          : episode
+      )),
+    };
+  }
+
   async _analyzeDataset(workspaceId, dataset, llmModel, options = {}) {
     this._throwIfCancelled(options.signal);
     const apiKey = appConfig.anthropic.apiKey;
@@ -1008,31 +1099,48 @@ class AssignmentDailyReviewService {
     try {
       this._throwIfCancelled(options.signal);
       const publishedPrompt = await promptRepository.getPublished(workspaceId);
+
+      const { foreignTechIds, warnings: techWarnings } = await this._detectCrossWorkspaceAssignments(
+        workspaceId,
+        dataset.cases,
+      );
+      const safeCases = dataset.cases.map((item) => this._redactForeignTechFromCase(item, foreignTechIds));
+
+      const analyzedCases = safeCases
+        .filter((item) => item.outcome === DAILY_REVIEW_OUTCOMES.failure || item.outcome === DAILY_REVIEW_OUTCOMES.partialSuccess)
+        .slice(0, MAX_CASES_FOR_ANALYSIS);
+
+      // The id sets the LLM is allowed to cite as supporting evidence — built
+      // from the actual cases we hand to the model. Anything the model returns
+      // outside these sets is treated as a hallucination and dropped.
+      const allowedInternalIds = new Set(analyzedCases.map((item) => Number(item.ticketId)).filter(Boolean));
+      const allowedFreshserviceIds = new Set(analyzedCases.map((item) => Number(item.freshserviceTicketId)).filter(Boolean));
+
       const analysisInput = {
         reviewDate: dataset.reviewDate,
+        workspaceId,
         workspaceName: dataset.workspaceName,
         timezone: dataset.timezone,
         summary: dataset.summaryMetrics,
-        cases: dataset.cases
-          .filter((item) => item.outcome === DAILY_REVIEW_OUTCOMES.failure || item.outcome === DAILY_REVIEW_OUTCOMES.partialSuccess)
-          .slice(0, MAX_CASES_FOR_ANALYSIS)
-          .map((item) => ({
-            ticketId: item.ticketId,
-            freshserviceTicketId: item.freshserviceTicketId,
-            subject: item.subject,
-            category: item.category,
-            outcome: item.outcome,
-            primaryTag: item.primaryTag,
-            decision: item.decision,
-            summary: this._summarizeCase(item),
-          })),
+        cases: analyzedCases.map((item) => ({
+          ticketId: item.ticketId,
+          freshserviceTicketId: item.freshserviceTicketId,
+          subject: item.subject,
+          category: item.category,
+          outcome: item.outcome,
+          primaryTag: item.primaryTag,
+          decision: item.decision,
+          summary: this._summarizeCase(item),
+        })),
         competencyCategories: dataset.competencyCategories.map((item) => item.name),
         currentPromptVersion: publishedPrompt?.version || null,
+        allowedSupportingTicketIds: Array.from(allowedInternalIds),
+        allowedSupportingFreshserviceTicketIds: Array.from(allowedFreshserviceIds),
       };
 
       const TOOL = {
         name: 'submit_daily_review_findings',
-        description: 'Submit the final daily review findings. You must call this tool exactly once.',
+        description: `Submit the final daily review findings for the "${workspaceLabel}" workspace. You must call this tool exactly once. Every supportingTicketIds entry must come from analysisInput.allowedSupportingTicketIds and every supportingFreshserviceTicketIds entry must come from analysisInput.allowedSupportingFreshserviceTicketIds — do not invent ids.`,
         input_schema: {
           type: 'object',
           properties: {
@@ -1098,7 +1206,14 @@ class AssignmentDailyReviewService {
         },
       };
 
-      const systemPrompt = `You are reviewing one business day of IT auto-assignment outcomes.
+      const workspaceLabel = dataset.workspaceName || 'this';
+      const systemPrompt = `You are reviewing one business day of auto-assignment outcomes for the "${workspaceLabel}" workspace ONLY.
+
+Strict scoping rules:
+- Every recommendation must be about the "${workspaceLabel}" workspace. Do not reference tickets, technicians, or processes from any other workspace.
+- supportingTicketIds MUST come from the analysisInput.allowedSupportingTicketIds list. Anything else will be discarded as a hallucination.
+- supportingFreshserviceTicketIds MUST come from the analysisInput.allowedSupportingFreshserviceTicketIds list. Anything else will be discarded as a hallucination.
+- Never invent ticket numbers, technician names, or workflow names that are not present in the supplied cases.
 
 Your job is to recommend improvements in exactly three areas:
 1. Prompt changes
@@ -1144,12 +1259,31 @@ Rules:
         return heuristic;
       }
 
+      // Strip any supporting ticket id the LLM hallucinated; everything cited
+      // must be present in the actual analyzedCases set we sent in.
+      const sanitizationCtx = { allowedInternalIds, allowedFreshserviceIds };
+      const promptSanitized = this._sanitizeRecommendationItems(submission.promptRecommendations, sanitizationCtx);
+      const processSanitized = this._sanitizeRecommendationItems(submission.processRecommendations, sanitizationCtx);
+      const skillSanitized = this._sanitizeRecommendationItems(submission.skillRecommendations, sanitizationCtx);
+      const totalDroppedInternal = promptSanitized.droppedInternal + processSanitized.droppedInternal + skillSanitized.droppedInternal;
+      const totalDroppedExternal = promptSanitized.droppedExternal + processSanitized.droppedExternal + skillSanitized.droppedExternal;
+      const sanitizationWarnings = [];
+      if (totalDroppedInternal > 0 || totalDroppedExternal > 0) {
+        const dropMsg = `Dropped ${totalDroppedInternal + totalDroppedExternal} hallucinated supporting ticket id reference(s) (${totalDroppedInternal} internal, ${totalDroppedExternal} freshservice) returned by the LLM that were not part of this workspace's review cohort.`;
+        logger.warn(dropMsg, { workspaceId, runDate: dataset.reviewDate });
+        sanitizationWarnings.push(dropMsg);
+      }
+
       return {
         executiveSummary: submission.executiveSummary || '',
-        promptRecommendations: submission.promptRecommendations || [],
-        processRecommendations: submission.processRecommendations || [],
-        skillRecommendations: submission.skillRecommendations || [],
-        warnings: submission.warnings || [],
+        promptRecommendations: promptSanitized.items,
+        processRecommendations: processSanitized.items,
+        skillRecommendations: skillSanitized.items,
+        warnings: [
+          ...(submission.warnings || []),
+          ...techWarnings,
+          ...sanitizationWarnings,
+        ],
         transcript,
         totalTokensUsed: (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0),
       };

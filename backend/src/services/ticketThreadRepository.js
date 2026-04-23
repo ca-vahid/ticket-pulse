@@ -51,7 +51,7 @@ class TicketThreadRepository {
     return { upserted };
   }
 
-  async listForTickets(ticketIds = [], { start = null, end = null } = {}) {
+  async listForTickets(ticketIds = [], { start = null, end = null, workspaceId = null } = {}) {
     if (!Array.isArray(ticketIds) || ticketIds.length === 0) {
       return [];
     }
@@ -59,6 +59,13 @@ class TicketThreadRepository {
     const where = {
       ticketId: { in: ticketIds },
     };
+
+    // Optional defence-in-depth scoping: callers from a workspace context
+    // (e.g. the daily review service) pass workspaceId so a cross-workspace
+    // ticket id collision can never leak into their analysis input.
+    if (workspaceId) {
+      where.workspaceId = workspaceId;
+    }
 
     if (start || end) {
       where.occurredAt = {};
