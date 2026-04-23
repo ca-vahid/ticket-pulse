@@ -40,6 +40,68 @@ function buildTicketStatusFilter(ticketStatus) {
   return {};
 }
 
+/**
+ * Build the per-ticket fields contributed by the modern multi-select filters
+ * (priorities, statuses, assignedTechIds, reboundFromTechIds, search).
+ *
+ * Returns an object that should be spread INTO an existing `ticket.is` clause —
+ * not the full `{ ticket: { is: ... } }` wrapper — so callers can compose with
+ * the legacy single-status / assignment-state clauses without losing fields.
+ *
+ * Returns {} when nothing is filtered, so callers can spread unconditionally.
+ */
+function buildAdvancedTicketFilter({ priorities, statuses, assignedTechIds, reboundFromTechIds, search } = {}) {
+  const clause = {};
+
+  // Multi-status (overrides any single-status filter when present).
+  if (Array.isArray(statuses) && statuses.length > 0) {
+    const expanded = [];
+    for (const s of statuses) {
+      if (TICKET_STATUS_GROUPS[s]) expanded.push(...TICKET_STATUS_GROUPS[s]);
+    }
+    if (expanded.length > 0) {
+      clause.status = { in: [...new Set(expanded)] };
+    }
+  }
+
+  if (Array.isArray(priorities) && priorities.length > 0) {
+    clause.priority = { in: priorities };
+  }
+
+  if (Array.isArray(assignedTechIds) && assignedTechIds.length > 0) {
+    clause.assignedTechId = { in: assignedTechIds };
+  }
+
+  // "Returned from agent X" — match tickets that have at least one rejected
+  // assignment episode against any of the given technicians. Same relation
+  // used by _enrichRunsWithReboundContext, just queried as a `some` filter.
+  if (Array.isArray(reboundFromTechIds) && reboundFromTechIds.length > 0) {
+    clause.assignmentEpisodes = {
+      some: {
+        endMethod: 'rejected',
+        technicianId: { in: reboundFromTechIds },
+      },
+    };
+  }
+
+  if (search && typeof search === 'string') {
+    const q = search.trim();
+    if (q) {
+      const orClauses = [
+        { subject: { contains: q, mode: 'insensitive' } },
+        { requester: { is: { name: { contains: q, mode: 'insensitive' } } } },
+      ];
+      const asNumber = parseInt(q.replace(/^#/, ''), 10);
+      if (Number.isFinite(asNumber)) {
+        orClauses.push({ freshserviceTicketId: asNumber });
+      }
+      clause.OR = orClauses;
+    }
+  }
+
+  return clause;
+}
+
 class AssignmentRepository {
   // ─── Assignment Config ────────────────────────────────────────────────
 
@@ -157,7 +219,19 @@ class AssignmentRepository {
     }
   }
 
-  async getPendingQueue(workspaceId, { limit = 50, offset = 0, assignmentStatus = 'all', ticketStatus = 'all', since, sinceField } = {}) {
+  async getPendingQueue(workspaceId, {
+    limit = 50,
+    offset = 0,
+    assignmentStatus = 'all',
+    ticketStatus = 'all',
+    since,
+    sinceField,
+    priorities,
+    statuses,
+    assignedTechIds,
+    reboundFromTechIds,
+    search,
+  } = {}) {
     try {
       await this.sweepStaleRunningRuns(workspaceId);
 
@@ -188,6 +262,17 @@ class AssignmentRepository {
       // Build itemsWhere by extending baseWhere so it inherits the time-range filter (since).
       // The assignmentClause's `ticket` field overrides baseWhere's `ticket` field via spread.
       const itemsWhere = { ...baseWhere, ...assignmentClause };
+
+      // Layer the modern multi-select filters into the items-only `ticket.is` clause.
+      // Counts (totalAll / totalUnassigned / totalOutsideAssigned) intentionally
+      // ignore these so the tab badges keep showing the unfiltered scope —
+      // matches the Decided sub-tab counts which are also unfiltered by Source/Status.
+      const advancedTicketClause = buildAdvancedTicketFilter({ priorities, statuses, assignedTechIds, reboundFromTechIds, search });
+      if (Object.keys(advancedTicketClause).length > 0) {
+        // Multi-status (when given) takes precedence over the single ticketStatus value.
+        const merged = { ...itemsWhere.ticket.is, ...advancedTicketClause };
+        itemsWhere.ticket = { is: merged };
+      }
 
       // For the Awaiting Review tab count, restrict to ACTIVE tickets (open or pending) - excludes
       // closed/resolved tickets that are technically still in our pending_review queue but no
@@ -278,7 +363,21 @@ class AssignmentRepository {
     }
   }
 
-  async getPipelineRuns(workspaceId, { limit = 50, offset = 0, status, decision, since, sinceField, decisions, ticketStatus } = {}) {
+  async getPipelineRuns(workspaceId, {
+    limit = 50,
+    offset = 0,
+    status,
+    decision,
+    since,
+    sinceField,
+    decisions,
+    ticketStatus,
+    priorities,
+    statuses,
+    assignedTechIds,
+    reboundFromTechIds,
+    search,
+  } = {}) {
     try {
       await this.sweepStaleRunningRuns(workspaceId);
       const where = { workspaceId };
@@ -292,6 +391,14 @@ class AssignmentRepository {
       // Apply ticket-status filter (defaults to excluding deleted tickets when not specified)
       const ticketFilter = buildTicketStatusFilter(ticketStatus);
       if (ticketFilter.ticket) where.ticket = ticketFilter.ticket;
+
+      // Layer the modern multi-select filters on top. When `statuses` is provided
+      // it overrides the single `ticketStatus` value (the multi-select wins).
+      const advancedTicketClause = buildAdvancedTicketFilter({ priorities, statuses, assignedTechIds, reboundFromTechIds, search });
+      if (Object.keys(advancedTicketClause).length > 0) {
+        const baseTicketIs = where.ticket?.is || {};
+        where.ticket = { is: { ...baseTicketIs, ...advancedTicketClause } };
+      }
 
       const [items, total] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({
