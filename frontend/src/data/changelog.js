@@ -1,8 +1,8 @@
-export const APP_VERSION = '1.10.0-preview';
+export const APP_VERSION = '2.0-preview';
 
 export const changelog = [
   {
-    version: '1.10.0-preview',
+    version: '2.0-preview',
     date: 'April 23, 2026',
     entries: [
       { type: 'new', text: 'Brand identity launch — Ticket Pulse logo, wordmark, app badge, full favicon set (16/32/48/180/192/512), dashboard background, hero illustration, and 6 themed UI icons. Generated with OpenAI gpt-image-2 and chroma-keyed/optimized via sharp.' },

@@ -2,7 +2,7 @@
 
 All notable changes and improvements to Ticket Pulse.
 
-## [1.10.0-preview] - 2026-04-23
+## [2.0-preview] - 2026-04-23
 
 ### Brand identity launch + login redesign
 
