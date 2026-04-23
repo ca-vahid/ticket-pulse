@@ -1157,6 +1157,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const newIdsInitializedRef = useRef(false);
   const [queuePage, setQueuePage] = useState(0);
   const queuePageSize = 50;
+  const [resultsPage, setResultsPage] = useState(0);
+  const resultsPageSize = 50;
   const queuedSectionRef = useRef(null);
   const [queuedExpanded, setQueuedExpanded] = useState(false);
 
@@ -1218,17 +1220,32 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       const assignedTicketStatus = subView === 'assigned' ? ticketStatusFilter : 'in_progress';
       const dismissedTicketStatus = subView === 'dismissed' ? ticketStatusFilter : 'all';
       const rejectedTicketStatus = subView === 'rejected' ? ticketStatusFilter : 'all';
+      const aggregatedResultsLimit = resultsPageSize * (resultsPage + 1);
+      const queueLimit = subView === 'pending'
+        ? queuePageSize
+        : subView === 'all'
+          ? aggregatedResultsLimit
+          : 1;
+      const queueOffset = subView === 'pending' ? queuePage * queuePageSize : 0;
+      const nonPendingLimit = subView === 'pending' ? 1 : aggregatedResultsLimit;
 
       const [queueRes, outsideRes, assignedRes, dismissedRes, rejectedRes, deletedRes, queuedRes, statusRes] = await Promise.all([
         assignmentAPI.getQueue({
-          limit: queuePageSize,
-          offset: queuePage * queuePageSize,
+          limit: queueLimit,
+          offset: queueOffset,
           assignmentStatus: 'unassigned',
           ticketStatus: pendingTicketStatus,
           since,
           sinceField: 'createdAt',
         }),
-        assignmentAPI.getQueue({ limit: 100, offset: 0, assignmentStatus: 'outside_assigned', ticketStatus: assignedTicketStatus, since, sinceField: 'createdAt' }),
+        assignmentAPI.getQueue({
+          limit: nonPendingLimit,
+          offset: 0,
+          assignmentStatus: 'outside_assigned',
+          ticketStatus: assignedTicketStatus,
+          since,
+          sinceField: 'createdAt',
+        }),
         // The decision list narrows when the empty-state cards drill in:
         //   'auto_assigned'  → only AI-decided runs
         //   'approved'       → only admin-approved (approved + modified)
@@ -1241,12 +1258,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               : 'approved,modified,auto_assigned',
           since,
           sinceField: 'decidedAt',
-          limit: 50,
+          limit: nonPendingLimit,
           ticketStatus: assignedTicketStatus,
         }),
-        assignmentAPI.getRuns({ decisions: 'noise_dismissed', since, sinceField: 'decidedAt', limit: 50, ticketStatus: dismissedTicketStatus }),
-        assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: 50, ticketStatus: rejectedTicketStatus }),
-        assignmentAPI.getRuns({ since, sinceField: 'createdAt', limit: 100, ticketStatus: 'deleted' }),
+        assignmentAPI.getRuns({ decisions: 'noise_dismissed', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: dismissedTicketStatus }),
+        assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: rejectedTicketStatus }),
+        assignmentAPI.getRuns({ since, sinceField: 'createdAt', limit: nonPendingLimit, ticketStatus: 'deleted' }),
         assignmentAPI.getQueuedRuns(),
         assignmentAPI.getQueueStatus().catch(() => null),
       ]);
@@ -1285,7 +1302,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         setRefreshing(false);
       }
     }
-  }, [timeRange, queuePage, ticketStatusFilter, subView, decidedDecisionFilter]);
+  }, [timeRange, queuePage, resultsPage, ticketStatusFilter, subView, decidedDecisionFilter]);
 
   const handleSmartRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1357,6 +1374,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     if (skipNextStatusReset.current) {
       skipNextStatusReset.current = false;
       setQueuePage(0);
+      setResultsPage(0);
       return;
     }
     if (subView === 'assigned') {
@@ -1365,12 +1383,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       setTicketStatusFilter('all');
     }
     setQueuePage(0);
+    setResultsPage(0);
   }, [subView]);
 
-  // Reset pagination when ticket-status filter changes
+  // Reset pagination when the current view's filters change.
   useEffect(() => {
     setQueuePage(0);
-  }, [ticketStatusFilter]);
+    setResultsPage(0);
+  }, [timeRange, ticketStatusFilter, assignedFilter, decidedDecisionFilter]);
 
   // Auto-poll every 30 seconds (matches backend sync interval)
   useEffect(() => {
@@ -1712,7 +1732,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   // Combined "Assigned" view: pipeline-assigned runs + outside-pipeline-assigned runs (tickets that
   // got an assignee in FreshService before the pipeline review was decided).
   const assignedTotal = (assignedRuns?.total || 0) + (outsideAssignedRuns?.total || 0);
-  const combinedAssignedItems = (() => {
+  const resultsPageStart = resultsPage * resultsPageSize;
+  const resultsPageEnd = resultsPageStart + resultsPageSize;
+  const allAssignedItems = (() => {
     const viaPipeline = (assignedRuns?.items || []).map(r => ({ ...r, _source: 'via_pipeline' }));
     const manual = (outsideAssignedRuns?.items || []).map(r => ({ ...r, _source: 'manually_in_fs' }));
     if (assignedFilter === 'via_pipeline') return viaPipeline;
@@ -1740,7 +1762,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       _siblingCount: count - 1, // 0 if unique, otherwise count of older runs we hid
     }));
   })();
-  const differentAgentCount = (assignedRuns?.items || []).filter(wasDifferentAgentChosen).length;
+  const combinedAssignedItems = allAssignedItems.slice(resultsPageStart, resultsPageEnd);
+  const differentAgentCount = combinedAssignedItems.filter(wasDifferentAgentChosen).length;
 
   const TechAvatar = ({ techId, name, size = 'sm', ring = '' }) => {
     const tech = techPhotos[techId];
@@ -1839,13 +1862,30 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const activeItems = (() => {
     if (subView === 'pending') return filteredItems;
     if (subView === 'assigned') return combinedAssignedItems;
-    if (subView === 'dismissed') return dismissedRuns.items;
-    if (subView === 'rejected') return rejectedRuns.items;
-    if (subView === 'deleted') return deletedRuns.items;
-    return [...queue.items, ...combinedAssignedItems, ...dismissedRuns.items, ...rejectedRuns.items, ...deletedRuns.items]
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    if (subView === 'dismissed') return dismissedRuns.items.slice(resultsPageStart, resultsPageEnd);
+    if (subView === 'rejected') return rejectedRuns.items.slice(resultsPageStart, resultsPageEnd);
+    if (subView === 'deleted') return deletedRuns.items.slice(resultsPageStart, resultsPageEnd);
+    return [...queue.items, ...allAssignedItems, ...dismissedRuns.items, ...rejectedRuns.items, ...deletedRuns.items]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(resultsPageStart, resultsPageEnd);
   })();
   const showActions = subView === 'pending';
+  const activeResultsTotal = (() => {
+    if (subView === 'pending') return queue.total;
+    if (subView === 'assigned') {
+      if (assignedFilter === 'via_pipeline') return assignedRuns.total || 0;
+      if (assignedFilter === 'manually_in_fs') return outsideAssignedRuns.total || 0;
+      return assignedTotal;
+    }
+    if (subView === 'dismissed') return dismissedRuns.total || 0;
+    if (subView === 'rejected') return rejectedRuns.total || 0;
+    if (subView === 'deleted') return deletedRuns.total || 0;
+    return (queue.total || 0)
+      + assignedTotal
+      + (dismissedRuns.total || 0)
+      + (rejectedRuns.total || 0)
+      + (deletedRuns.total || 0);
+  })();
 
   const renderRunCard = (run) => {
     const topRec = run.recommendation?.recommendations?.[0];
@@ -2204,7 +2244,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         )}
 
         {/* List content - key triggers a subtle fade-in on tab/filter/page change */}
-        <div key={`${subView}-${assignedFilter}-${queuePage}-${ticketStatusFilter}`} className="animate-in fade-in duration-150">
+        <div key={`${subView}-${assignedFilter}-${queuePage}-${resultsPage}-${ticketStatusFilter}`} className="animate-in fade-in duration-150">
           {activeItems.length === 0 ? (
             // When auto-assign is on and the pending queue is empty, the
             // pipeline is doing its job behind the scenes — show today's
@@ -2451,6 +2491,34 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               <button
                 onClick={() => setQueuePage(p => Math.min(Math.ceil(queue.total / queuePageSize) - 1, p + 1))}
                 disabled={queuePage >= Math.ceil(queue.total / queuePageSize) - 1}
+                className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Pagination controls for all non-pending result tabs */}
+        {subView !== 'pending' && activeResultsTotal > resultsPageSize && (
+          <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/50 px-4 py-2.5 animate-in fade-in duration-150">
+            <span className="text-[11px] text-slate-500">
+              Showing {resultsPageStart + 1}–{Math.min(resultsPageEnd, activeResultsTotal)} of {activeResultsTotal}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setResultsPage((p) => Math.max(0, p - 1))}
+                disabled={resultsPage === 0}
+                className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Previous
+              </button>
+              <span className="text-[11px] text-slate-500 tabular-nums">
+                Page {resultsPage + 1} of {Math.ceil(activeResultsTotal / resultsPageSize)}
+              </span>
+              <button
+                onClick={() => setResultsPage((p) => Math.min(Math.ceil(activeResultsTotal / resultsPageSize) - 1, p + 1))}
+                disabled={resultsPage >= Math.ceil(activeResultsTotal / resultsPageSize) - 1}
                 className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 Next
