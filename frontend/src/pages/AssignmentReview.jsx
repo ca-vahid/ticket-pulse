@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { formatInTimeZone } from 'date-fns-tz';
 import { assignmentAPI, workspaceAPI, syncAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,6 +28,17 @@ const ALL_TABS = [
   { id: 'prompts', label: 'Prompts', icon: FileText, minRole: 'admin' },
   { id: 'config', label: 'Configuration', icon: Settings2, minRole: 'admin' },
 ];
+
+const PACIFIC_TIMEZONE = 'America/Los_Angeles';
+
+function getPacificDayStartISOString(reference = new Date()) {
+  const ptDate = formatInTimeZone(reference, PACIFIC_TIMEZONE, 'yyyy-MM-dd');
+  return formatInTimeZone(
+    new Date(`${ptDate}T12:00:00Z`),
+    PACIFIC_TIMEZONE,
+    "yyyy-MM-dd'T'00:00:00XXX",
+  );
+}
 
 function ManualTriggerPanel({ isAdmin = false }) {
   const navigate = useNavigate();
@@ -430,14 +442,14 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
   const [pillDetail, setPillDetail] = useState(null);
   const closePillDetail = () => setPillDetail(null);
   const openReboundsDetail = () => setPillDetail({
-    title: 'Rebounds in the last 24h',
+    title: 'Rebounds today (PT)',
     description: 'Tickets that bounced back after a rejection and triggered a fresh pipeline run.',
     items: today.recentRebounds || [],
     kind: 'rebound',
   });
   const openBypassedDetail = () => setPillDetail({
     title: 'Bypassed pipeline (no analysis)',
-    description: 'Tickets created in the last 24h that ended up assigned in FreshService but never had a pipeline run — typically because an agent grabbed them within the ~30s window before our next poll fired.',
+    description: 'Tickets created today in Pacific Time that ended up assigned in FreshService but never had a pipeline run — typically because an agent grabbed them within the ~30s window before our next poll fired.',
     items: today.recentBypassed || [],
     kind: 'bypassed',
   });
@@ -455,8 +467,8 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
 
   // Each outcome tile drills into the appropriate sub-tab + filter combo so
   // the cards double as quick links AND the destination shows exactly the
-  // count the card promised. Time range nudges to 24h (close to "today" in
-  // workspace tz). decidedDecisionFilter narrows Via Pipeline to the
+  // count the card promised. Time range nudges to the current PT day.
+  // decidedDecisionFilter narrows Via Pipeline to the
   // specific decision so AI vs admin counts match precisely.
   const goToAutoAssigned = () => onNavigate?.({
     subView: 'assigned',
@@ -518,14 +530,12 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
 
           {/* Centered content with flanking decorative icons */}
           <div className="relative flex flex-col items-center text-center">
-            {/* Top label with sparkle accent. "Last 24h" instead of "Today"
-                because the underlying query is a rolling 24h window — needed
-                so the empty-state counts match the destination tabs (which
-                also use rolling 24h). Calling it "Today" here while the
-                destinations are rolling caused real user confusion. */}
+            {/* Top label with sparkle accent. The backend anchors this panel
+                to the current Pacific day (midnight PT -> now), and the queue
+                tab uses the same PT-day window for drill-downs. */}
             <div className="inline-flex items-center gap-2 mb-2">
               <Sparkles className="w-4 h-4 text-blue-500" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">{queueStatus?.today?.range?.label || 'Last 24h'}</span>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">{queueStatus?.today?.range?.label || 'Today PT'}</span>
               <Sparkles className="w-4 h-4 text-blue-500" />
             </div>
 
@@ -636,7 +646,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
         </div>
       )}
 
-      {/* Recent auto-assignments — up to 10 from the last 24h. Compact
+      {/* Recent auto-assignments — up to 10 from today's PT window. Compact
           2-column grid on desktop (1-column on mobile) so the list fills
           the horizontal space instead of running a long thin column on
           the left. Each cell is a single-line chip linking to the run
@@ -1185,7 +1195,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const getSince = (range) => {
     if (range === 'all') return undefined;
     const now = new Date();
-    if (range === '24h') return new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    if (range === '24h') return getPacificDayStartISOString(now);
     if (range === '7d') return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
     if (range === '30d') return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
     return undefined;
@@ -2211,10 +2221,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 onNavigate={(target) => {
                   // Drive the parent's tab + sub-filter state from the
                   // empty-state stat tiles so they double as quick links.
-                  // Also nudge the time range to '24h' so the destination
-                  // shows ~today's window, matching what the cards just
-                  // promised. (Empty-state stats are workspace-tz "today"
-                  // bounds; 24h rolling overlaps ~95%.)
+                  // Also nudge the short-range filter so the destination
+                  // uses the same current-PT-day window the cards just
+                  // promised.
                   if (target.subView) setSubView(target.subView);
                   // Reset filters when not provided so a stale value from a
                   // previous visit doesn't leak through.
@@ -3506,13 +3515,14 @@ export default function AssignmentReview() {
                     key={range}
                     type="button"
                     onClick={() => setTimeRange(range)}
+                    title={range === '24h' ? 'Current Pacific day' : undefined}
                     className={`rounded px-2 py-1 text-[11px] font-semibold transition-all touch-manipulation ${
                       timeRange === range
                         ? 'bg-white text-slate-900 shadow-sm'
                         : 'text-white/80 hover:text-white hover:bg-white/10'
                     }`}
                   >
-                    {range === 'all' ? 'All' : range}
+                    {range === 'all' ? 'All' : range === '24h' ? 'Today' : range}
                   </button>
                 ))}
               </div>
