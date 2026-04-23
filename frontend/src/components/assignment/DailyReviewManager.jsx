@@ -633,6 +633,91 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
   );
 }
 
+function CollectionDiagnosticsSection({ summary }) {
+  const diag = summary?.collectionDiagnostics;
+  if (!diag) return null;
+
+  const totalCandidates = diag.candidateTickets || 0;
+  const ticketsWithoutContext = diag.ticketsWithNoThreadContext || 0;
+  const conversationCoverage = totalCandidates > 0
+    ? Math.round(((diag.ticketsWithConversations || 0) / totalCandidates) * 100)
+    : 0;
+  const activityCoverage = totalCandidates > 0
+    ? Math.round(((diag.ticketsWithActivities || 0) / totalCandidates) * 100)
+    : 0;
+
+  const conversationTone = conversationCoverage >= 80
+    ? 'green'
+    : conversationCoverage >= 40
+      ? 'amber'
+      : 'red';
+  const activityTone = activityCoverage >= 80 ? 'green' : 'amber';
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-800">Collection Diagnostics</h3>
+        <div className="text-xs text-slate-500">What the LLM actually had to read</div>
+      </div>
+
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <MetricCard label="Candidate Tickets" value={totalCandidates} />
+        <MetricCard label="With Conversations" value={`${diag.ticketsWithConversations || 0} (${conversationCoverage}%)`} tone={conversationTone} />
+        <MetricCard label="With Activity Log" value={`${diag.ticketsWithActivities || 0} (${activityCoverage}%)`} tone={activityTone} />
+        <MetricCard label="No Thread Context" value={ticketsWithoutContext} tone={ticketsWithoutContext > 0 ? 'red' : 'slate'} />
+      </div>
+
+      <div className="grid gap-3 text-xs text-slate-600 md:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Local cache (before this run)</div>
+          <div>Activities cached: <strong>{diag.ticketsWithLocalActivitiesBeforeRun || 0}</strong> / {totalCandidates}</div>
+          <div>Conversations cached: <strong>{diag.ticketsWithLocalConversationsBeforeRun || 0}</strong> / {totalCandidates}</div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            {diag.forceRefresh
+              ? 'Force-refresh was on — every ticket re-fetched from FreshService regardless of cache.'
+              : 'Run reused already-cached data when present; only missing pieces were pulled.'}
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pulled from FreshService this run</div>
+          <div>Activity rows fetched: <strong>{diag.activityRowsFetched || 0}</strong> across {diag.ticketsHydratedActivities || 0} ticket(s)</div>
+          <div>Conversation rows fetched: <strong>{diag.conversationRowsFetched || 0}</strong> across {diag.ticketsHydratedConversations || 0} ticket(s)</div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            {(diag.hydrationFailures || 0) > 0
+              ? <span className="text-red-600">{diag.hydrationFailures} ticket(s) had hydration errors — see warnings above.</span>
+              : 'No hydration errors.'}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-600 md:grid-cols-4">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[11px] font-medium text-slate-500">Total thread entries</div>
+          <div className="text-lg font-semibold text-slate-800">{diag.threadEntriesAvailable || 0}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[11px] font-medium text-slate-500">Conversation entries</div>
+          <div className="text-lg font-semibold text-slate-800">{diag.conversationEntriesAvailable || 0}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[11px] font-medium text-slate-500">Activity-stream entries</div>
+          <div className="text-lg font-semibold text-slate-800">{diag.activityEntriesAvailable || 0}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[11px] font-medium text-slate-500">Episodes / Assignments</div>
+          <div className="text-lg font-semibold text-slate-800">{diag.episodes || 0} / {diag.assignmentActions || 0}</div>
+        </div>
+      </div>
+
+      {ticketsWithoutContext > 0 && (
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {ticketsWithoutContext} ticket(s) reached the LLM with no thread context (no activities and no conversations). The model had only metadata for these. Try the <strong>Force refresh from FreshService</strong> option on a rerun.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecommendationId }) {
   const summary = run.summaryMetrics || {};
   const totals = summary.totals || {};
@@ -697,6 +782,8 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
           Rebound metric: {summary.definitions.rebounds}
         </div>
       )}
+
+      <CollectionDiagnosticsSection summary={summary} />
 
       <MeetingBriefingSection run={run} workspaceTimezone={workspaceTimezone} />
 
@@ -786,7 +873,7 @@ const LIVE_STAT_LABELS = {
   unresolved: 'Unresolved',
 };
 
-function LiveDailyReviewView({ reviewDate, onComplete }) {
+function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComplete }) {
   const [phase, setPhase] = useState(null);
   const [phaseMessage, setPhaseMessage] = useState('');
   const [runId, setRunId] = useState(null);
@@ -880,7 +967,7 @@ function LiveDailyReviewView({ reviewDate, onComplete }) {
 
   const { status, elapsedSec, error } = useStreamingFetch({
     url: assignmentAPI.runDailyReviewStreamPath(),
-    body: { reviewDate, force: true },
+    body: { reviewDate, force: true, forceRefreshThreads },
     onEvent: handleEvent,
     deps: [reviewDate],
   });
@@ -1039,6 +1126,7 @@ const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 export default function DailyReviewManager({ workspaceTimezone }) {
   const [view, setView] = useState('trigger');
   const [reviewDate, setReviewDate] = useState(formatDateLocal(new Date()));
+  const [forceRefreshThreads, setForceRefreshThreads] = useState(false);
   const [runs, setRuns] = useState([]);
   const [activeRun, setActiveRun] = useState(null);
   const [selectedRun, setSelectedRun] = useState(null);
@@ -1217,7 +1305,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         <button onClick={() => { setView('trigger'); loadRuns(); }} className="text-sm text-blue-600 hover:text-blue-800 mb-3 flex items-center gap-1">
           <ArrowLeft className="w-4 h-4" /> Back to Daily Review
         </button>
-        <LiveDailyReviewView reviewDate={reviewDate} onComplete={async (runId) => {
+        <LiveDailyReviewView reviewDate={reviewDate} forceRefreshThreads={forceRefreshThreads} onComplete={async (runId) => {
           loadRuns();
           if (runId) await loadRunDetail(runId);
         }} />
@@ -1301,6 +1389,18 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             >
               Today
             </button>
+            <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={forceRefreshThreads}
+                onChange={(e) => setForceRefreshThreads(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span>
+                <span className="font-medium text-slate-800">Force refresh from FreshService</span>
+                <span className="ml-1 text-slate-500">(bypass local cache; slower but pulls latest replies/notes)</span>
+              </span>
+            </label>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

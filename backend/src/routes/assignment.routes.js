@@ -1247,7 +1247,7 @@ router.get('/calibration/runs/:id', requireAdmin, asyncHandler(async (req, res) 
 // ─── Daily Review ────────────────────────────────────────────────────────
 
 router.post('/daily-review', requireAdmin, asyncHandler(async (req, res) => {
-  const { reviewDate, force } = req.body;
+  const { reviewDate, force, forceRefreshThreads } = req.body;
   const stream = req.query.stream === 'true';
   const triggeredBy = req.session?.user?.email || 'admin';
 
@@ -1255,6 +1255,7 @@ router.post('/daily-review', requireAdmin, asyncHandler(async (req, res) => {
     const result = await assignmentDailyReviewService.runReview(req.workspaceId, reviewDate, triggeredBy, {
       triggerSource: 'manual',
       force: !!force,
+      forceRefreshThreads: !!forceRefreshThreads,
     });
     return res.json({ success: true, data: result });
   }
@@ -1276,6 +1277,7 @@ router.post('/daily-review', requireAdmin, asyncHandler(async (req, res) => {
   await assignmentDailyReviewService.runReview(req.workspaceId, reviewDate, triggeredBy, {
     triggerSource: 'manual',
     force: !!force,
+    forceRefreshThreads: !!forceRefreshThreads,
     onEvent: (event) => {
       if (clientDisconnected) return;
       try {

@@ -14,12 +14,24 @@ import {
   isClosedLikeStatus,
 } from './dailyReviewDefinitions.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
-import { transformTicketThreadEntries } from '../integrations/freshserviceTransformer.js';
+import {
+  transformTicketThreadEntries,
+  transformTicketConversationEntries,
+} from '../integrations/freshserviceTransformer.js';
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const STALE_RUNNING_MS = 30 * 60 * 1000;
 const MAX_CASES_FOR_ANALYSIS = 15;
-const MAX_THREAD_EXCERPTS = 6;
+// Bumped from 6 → 12 so we can include both the conversation bodies and the
+// most-recent state-change events for a single ticket. The summarizer below
+// prioritizes notes/replies (real text) over activity-stream events.
+const MAX_THREAD_EXCERPTS = 12;
+// Cap conversation excerpt length; long replies eat tokens and rarely add
+// signal beyond the first paragraph or two.
+const THREAD_EXCERPT_CHARS = 600;
+// Conversations endpoint can return hundreds of entries on long-running
+// tickets; we only need recent context for daily review.
+const MAX_CONVERSATIONS_PER_TICKET = 30;
 const RECOMMENDATION_KIND_CONFIG = [
   { kind: 'prompt', field: 'promptRecommendations' },
   { kind: 'process', field: 'processRecommendations' },
@@ -42,6 +54,27 @@ function truncate(text, max = 280) {
   if (!text) return null;
   const normalized = String(text).replace(/\s+/g, ' ').trim();
   return normalized.length > max ? `${normalized.slice(0, max - 1)}...` : normalized;
+}
+
+// Strip HTML tags + collapse whitespace. FreshService conversation bodies
+// are HTML; bodyText is a best-effort plaintext rendering but is sometimes
+// missing on older entries, so we fall back to stripping bodyHtml ourselves.
+function stripHtml(text) {
+  if (!text) return null;
+  return String(text)
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>(\r?\n)?/gi, ' ')
+    .replace(/<\/?(p|div|li|tr|td|th|h[1-6])[^>]*>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function toPct(part, whole) {
@@ -313,93 +346,221 @@ class AssignmentDailyReviewService {
 
   async _hydrateMissingThreads(workspaceId, tickets = [], options = {}) {
     this._throwIfCancelled(options.signal);
-    const missing = tickets.filter((ticket) => (ticket?._count?.threadEntries || 0) === 0);
+    const forceRefresh = options.forceRefresh === true;
+
+    // We now hydrate two FreshService endpoints per ticket:
+    //   - /tickets/:id/activities  → state-change events (assignments, status, workflow runs)
+    //   - /tickets/:id/conversations → reply + note BODIES (the actual text)
+    // A ticket needs hydration if either source is missing locally. The
+    // forceRefresh flag bypasses the cache check so an admin can pull fresh
+    // data from FS even when something is already in our DB.
+    const ticketsForActivities = forceRefresh
+      ? tickets.slice()
+      : tickets.filter((t) => (t?.threadCounts?.activities ?? t?._count?.threadEntries ?? 0) === 0);
+    const ticketsForConversations = forceRefresh
+      ? tickets.slice()
+      : tickets.filter((t) => (t?.threadCounts?.conversations ?? 0) === 0);
+
     const emitProgress = (payload) => {
       try { options.onProgress?.(payload); } catch { /* ignore progress errors */ }
     };
-    if (missing.length === 0) {
+
+    if (ticketsForActivities.length === 0 && ticketsForConversations.length === 0) {
       emitProgress({
         processed: 0,
         total: 0,
-        hydrated: 0,
+        hydratedActivities: 0,
+        hydratedConversations: 0,
         failed: 0,
-        message: 'Thread history already exists locally for all tickets in this review.',
+        message: 'Thread history (activities + conversations) already cached locally for every ticket in this review.',
       });
-      return { hydrated: 0, warnings: [] };
+      return {
+        hydratedActivities: 0,
+        hydratedConversations: 0,
+        activitiesFetched: 0,
+        conversationsFetched: 0,
+        failed: 0,
+        warnings: [],
+        perTicket: [],
+      };
     }
 
     const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
     if (!fsConfig?.domain || !fsConfig?.apiKey) {
       return {
-        hydrated: 0,
+        hydratedActivities: 0,
+        hydratedConversations: 0,
+        activitiesFetched: 0,
+        conversationsFetched: 0,
+        failed: 0,
         warnings: ['FreshService is not configured, so missing ticket threads could not be hydrated.'],
+        perTicket: [],
       };
     }
 
     const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
-    let hydrated = 0;
+    const ticketIdsToProcess = Array.from(new Set([
+      ...ticketsForActivities.map((t) => t.id),
+      ...ticketsForConversations.map((t) => t.id),
+    ]));
+    const ticketById = new Map(tickets.map((t) => [t.id, t]));
+
+    let hydratedActivities = 0;
+    let hydratedConversations = 0;
+    let activitiesFetched = 0;
+    let conversationsFetched = 0;
     let failed = 0;
     const warnings = [];
+    const perTicket = [];
 
     emitProgress({
       processed: 0,
-      total: missing.length,
-      hydrated: 0,
-      failed: 0,
-      message: `Hydrating missing FreshService thread history for ${missing.length} ticket(s).`,
+      total: ticketIdsToProcess.length,
+      hydratedActivities,
+      hydratedConversations,
+      failed,
+      message: `Hydrating FreshService threads for ${ticketIdsToProcess.length} ticket(s) (activities + conversations${forceRefresh ? ', forced refresh' : ''}).`,
     });
 
-    for (let index = 0; index < missing.length; index += 1) {
+    for (let index = 0; index < ticketIdsToProcess.length; index += 1) {
       this._throwIfCancelled(options.signal);
-      const ticket = missing[index];
-      try {
-        const activities = await client.fetchTicketActivities(Number(ticket.freshserviceTicketId));
-        this._throwIfCancelled(options.signal);
-        if (!activities?.length) continue;
-        const entries = transformTicketThreadEntries(activities, {
-          ticketId: ticket.id,
-          workspaceId,
-        });
-        await ticketThreadRepository.bulkUpsert(entries);
-        this._throwIfCancelled(options.signal);
-        hydrated++;
-      } catch (error) {
-        if (this._isCancellationError(error)) throw error;
-        failed++;
-        warnings.push(`Could not hydrate thread data for ticket #${ticket.freshserviceTicketId}: ${error.message}`);
-      } finally {
-        const processed = index + 1;
-        if (processed === 1 || processed === missing.length || processed % 5 === 0) {
-          emitProgress({
-            processed,
-            total: missing.length,
-            hydrated,
-            failed,
-            message: `Hydrating FreshService thread history (${processed}/${missing.length})...`,
-          });
+      const ticketInternalId = ticketIdsToProcess[index];
+      const ticket = ticketById.get(ticketInternalId);
+      if (!ticket) continue;
+      const fsTicketId = Number(ticket.freshserviceTicketId);
+      const diag = {
+        ticketId: ticket.id,
+        freshserviceTicketId: fsTicketId,
+        activitiesFetched: 0,
+        conversationsFetched: 0,
+        activitiesError: null,
+        conversationsError: null,
+      };
+      let anyFailure = false;
+
+      const wantActivities = forceRefresh || ticketsForActivities.some((t) => t.id === ticket.id);
+      const wantConversations = forceRefresh || ticketsForConversations.some((t) => t.id === ticket.id);
+
+      if (wantActivities) {
+        try {
+          const activities = await client.fetchTicketActivities(fsTicketId);
+          this._throwIfCancelled(options.signal);
+          if (activities?.length) {
+            const entries = transformTicketThreadEntries(activities, { ticketId: ticket.id, workspaceId });
+            await ticketThreadRepository.bulkUpsert(entries);
+            hydratedActivities += 1;
+            activitiesFetched += entries.length;
+            diag.activitiesFetched = entries.length;
+          }
+        } catch (error) {
+          if (this._isCancellationError(error)) throw error;
+          anyFailure = true;
+          diag.activitiesError = error.message;
+          warnings.push(`Could not hydrate ACTIVITIES for ticket #${fsTicketId}: ${error.message}`);
         }
+      }
+
+      if (wantConversations) {
+        try {
+          const conversations = await client.fetchTicketConversations(fsTicketId, {
+            maxEntries: MAX_CONVERSATIONS_PER_TICKET,
+          });
+          this._throwIfCancelled(options.signal);
+          if (conversations?.length) {
+            const entries = transformTicketConversationEntries(conversations, {
+              ticketId: ticket.id,
+              workspaceId,
+            });
+            await ticketThreadRepository.bulkUpsert(entries);
+            hydratedConversations += 1;
+            conversationsFetched += entries.length;
+            diag.conversationsFetched = entries.length;
+          }
+        } catch (error) {
+          if (this._isCancellationError(error)) throw error;
+          anyFailure = true;
+          diag.conversationsError = error.message;
+          warnings.push(`Could not hydrate CONVERSATIONS for ticket #${fsTicketId}: ${error.message}`);
+        }
+      }
+
+      if (anyFailure) failed += 1;
+      perTicket.push(diag);
+
+      const processed = index + 1;
+      if (processed === 1 || processed === ticketIdsToProcess.length || processed % 5 === 0) {
+        emitProgress({
+          processed,
+          total: ticketIdsToProcess.length,
+          hydratedActivities,
+          hydratedConversations,
+          failed,
+          message: `Hydrating FreshService threads (${processed}/${ticketIdsToProcess.length}); pulled ${activitiesFetched} activity row(s) + ${conversationsFetched} conversation row(s) so far.`,
+        });
       }
     }
 
-    return { hydrated, warnings };
+    return {
+      hydratedActivities,
+      hydratedConversations,
+      activitiesFetched,
+      conversationsFetched,
+      failed,
+      warnings,
+      perTicket,
+      forceRefresh,
+    };
   }
 
+  // Build a per-ticket excerpt list for the LLM. Real conversation bodies
+  // (notes / replies) carry the most signal, so we return them first and
+  // fill the remaining slots with state-change activity-stream entries for
+  // chronological context. Each entry's text is normalized (HTML stripped)
+  // and truncated to keep token usage bounded.
   _buildThreadExcerptMap(entries = []) {
     const byTicketId = new Map();
+    const buckets = new Map();
     for (const entry of entries) {
-      if (!byTicketId.has(entry.ticketId)) byTicketId.set(entry.ticketId, []);
-      const excerptText = truncate(entry.bodyText || entry.content || entry.title, 220);
-      if (!excerptText) continue;
-      const current = byTicketId.get(entry.ticketId);
-      if (current.length >= MAX_THREAD_EXCERPTS) continue;
-      current.push({
+      const list = buckets.get(entry.ticketId) || { conversations: [], events: [] };
+      const cleanedBody = stripHtml(entry.bodyText || entry.bodyHtml || '');
+      const excerptText = truncate(cleanedBody || entry.content || entry.title, THREAD_EXCERPT_CHARS);
+      if (!excerptText) {
+        buckets.set(entry.ticketId, list);
+        continue;
+      }
+      const projected = {
         id: entry.id,
+        source: entry.source,
         eventType: entry.eventType,
         visibility: entry.visibility,
         actorName: entry.actorName || null,
         occurredAt: entry.occurredAt,
         excerpt: excerptText,
-      });
+      };
+      if (entry.source === 'freshservice_conversation') {
+        list.conversations.push(projected);
+      } else {
+        list.events.push(projected);
+      }
+      buckets.set(entry.ticketId, list);
+    }
+
+    for (const [ticketId, list] of buckets.entries()) {
+      // Sort each bucket newest first within itself so the freshest reply +
+      // freshest state-change event are guaranteed to land in the LLM's
+      // context window.
+      list.conversations.sort((a, b) => new Date(b.occurredAt) - new Date(a.occurredAt));
+      list.events.sort((a, b) => new Date(b.occurredAt) - new Date(a.occurredAt));
+      const conversationSlots = Math.min(list.conversations.length, MAX_THREAD_EXCERPTS);
+      const eventSlots = Math.max(0, MAX_THREAD_EXCERPTS - conversationSlots);
+      const merged = [
+        ...list.conversations.slice(0, conversationSlots),
+        ...list.events.slice(0, eventSlots),
+      ];
+      // Re-sort merged result chronologically (oldest → newest) so the
+      // model can read the thread in narrative order.
+      merged.sort((a, b) => new Date(a.occurredAt) - new Date(b.occurredAt));
+      byTicketId.set(ticketId, merged);
     }
     return byTicketId;
   }
@@ -567,29 +728,64 @@ class AssignmentDailyReviewService {
       ...bypassTickets,
     ];
 
-    const missingThreadCount = ticketsForHydration.filter((ticket) => (ticket?._count?.threadEntries || 0) === 0).length;
+    // Per-source thread counts for every candidate ticket so we can decide
+    // exactly what's missing (activities vs conversations) without fetching
+    // both endpoints unconditionally. groupBy on source keeps this to a
+    // single query regardless of cohort size.
+    const ticketIdSet = ticketsForHydration.map((t) => t.id);
+    const threadCountsRows = ticketIdSet.length > 0
+      ? await prisma.ticketThreadEntry.groupBy({
+        by: ['ticketId', 'source'],
+        where: { workspaceId, ticketId: { in: ticketIdSet } },
+        _count: { _all: true },
+      })
+      : [];
+    const threadCountsByTicket = new Map();
+    for (const row of threadCountsRows) {
+      const current = threadCountsByTicket.get(row.ticketId) || { activities: 0, conversations: 0 };
+      if (row.source === 'freshservice_conversation') {
+        current.conversations = row._count._all;
+      } else {
+        current.activities = row._count._all;
+      }
+      threadCountsByTicket.set(row.ticketId, current);
+    }
+    for (const t of ticketsForHydration) {
+      t.threadCounts = threadCountsByTicket.get(t.id) || { activities: 0, conversations: 0 };
+    }
+
+    const missingActivities = ticketsForHydration.filter((t) => t.threadCounts.activities === 0).length;
+    const missingConversations = ticketsForHydration.filter((t) => t.threadCounts.conversations === 0).length;
+    const cachedFully = ticketsForHydration.length - Math.max(missingActivities, missingConversations);
+    const forceRefresh = options.forceRefreshThreads === true;
     emitProgress(
-      missingThreadCount > 0
-        ? `Checking local thread history for ${ticketsForHydration.length} ticket(s); ${missingThreadCount} need FreshService hydration.`
-        : `Checking local thread history for ${ticketsForHydration.length} ticket(s); all thread history is already available locally.`,
+      forceRefresh
+        ? `Force-refreshing thread history for all ${ticketsForHydration.length} ticket(s) from FreshService...`
+        : (missingActivities + missingConversations > 0)
+          ? `Local cache: ${cachedFully}/${ticketsForHydration.length} ticket(s) fully cached. Pulling ${missingActivities} missing activity stream(s) and ${missingConversations} missing conversation stream(s) from FreshService.`
+          : `Local cache: all ${ticketsForHydration.length} ticket(s) already have both activities and conversations cached. No FreshService calls needed.`,
       {
         percent: 42,
         stats: {
           candidateTickets: ticketsForHydration.length,
-          ticketsNeedingThreadHydration: missingThreadCount,
+          ticketsFullyCached: cachedFully,
+          ticketsMissingActivities: missingActivities,
+          ticketsMissingConversations: missingConversations,
         },
       },
     );
 
     const hydration = await this._hydrateMissingThreads(workspaceId, ticketsForHydration, {
       signal: options.signal,
-      onProgress: ({ processed, total, hydrated, failed, message }) => {
+      forceRefresh,
+      onProgress: ({ processed, total, hydratedActivities, hydratedConversations, failed, message }) => {
         emitProgress(message, {
           percent: total > 0 ? Math.min(68, 42 + Math.floor((processed / total) * 26)) : 68,
           stats: {
-            ticketsNeedingThreadHydration: total,
+            ticketsBeingHydrated: total,
             threadHydrationProcessed: processed,
-            threadsHydrated: hydrated,
+            ticketsHydratedActivities: hydratedActivities,
+            ticketsHydratedConversations: hydratedConversations,
             threadHydrationFailures: failed,
           },
         });
@@ -598,11 +794,14 @@ class AssignmentDailyReviewService {
     throwIfCancelled();
 
     emitProgress(
-      `Thread history ready. Hydrated ${hydration.hydrated} ticket(s) with ${hydration.warnings.length} warning(s).`,
+      `Thread hydration complete: pulled ${hydration.activitiesFetched} activity row(s) + ${hydration.conversationsFetched} conversation row(s) across ${hydration.hydratedActivities + hydration.hydratedConversations} ticket-source pair(s); ${hydration.failed} ticket(s) had errors.`,
       {
         percent: 70,
         stats: {
-          threadsHydrated: hydration.hydrated,
+          activitiesFetched: hydration.activitiesFetched,
+          conversationsFetched: hydration.conversationsFetched,
+          ticketsHydratedActivities: hydration.hydratedActivities,
+          ticketsHydratedConversations: hydration.hydratedConversations,
           threadHydrationWarnings: hydration.warnings.length,
         },
       },
@@ -896,17 +1095,54 @@ class AssignmentDailyReviewService {
     };
 
     const warnings = [...hydration.warnings];
-    if (hydration.hydrated > 0) {
-      warnings.push(`Hydrated missing FreshService thread history for ${hydration.hydrated} ticket(s) during this review run.`);
+    if (hydration.hydratedActivities > 0 || hydration.hydratedConversations > 0) {
+      warnings.push(`Hydrated FreshService threads during this run: ${hydration.activitiesFetched} activity row(s) across ${hydration.hydratedActivities} ticket(s), ${hydration.conversationsFetched} conversation row(s) across ${hydration.hydratedConversations} ticket(s).`);
     }
 
-    emitProgress(`Collection complete: ${summaryMetrics.totals.totalTicketsReviewed} ticket(s) are ready for analysis.`, {
+    // Per-source coverage of what the LLM will actually see. These numbers
+    // are surfaced in the run detail so the admin can verify the analysis
+    // had real conversation context to work with — not just state-change
+    // events from the activity log.
+    const conversationEntries = threadEntries.filter((e) => e.source === 'freshservice_conversation');
+    const activityEntries = threadEntries.filter((e) => e.source !== 'freshservice_conversation');
+    const ticketsWithConversations = new Set(conversationEntries.map((e) => e.ticketId)).size;
+    const ticketsWithActivities = new Set(activityEntries.map((e) => e.ticketId)).size;
+
+    const collectionDiagnostics = {
+      candidateTickets: ticketsForHydration.length,
+      ticketsWithLocalActivitiesBeforeRun: ticketsForHydration.length - missingActivities,
+      ticketsWithLocalConversationsBeforeRun: ticketsForHydration.length - missingConversations,
+      ticketsRequestingActivities: missingActivities,
+      ticketsRequestingConversations: missingConversations,
+      ticketsHydratedActivities: hydration.hydratedActivities,
+      ticketsHydratedConversations: hydration.hydratedConversations,
+      activityRowsFetched: hydration.activitiesFetched,
+      conversationRowsFetched: hydration.conversationsFetched,
+      hydrationFailures: hydration.failed,
+      forceRefresh: hydration.forceRefresh === true,
+      threadEntriesAvailable: threadEntries.length,
+      conversationEntriesAvailable: conversationEntries.length,
+      activityEntriesAvailable: activityEntries.length,
+      ticketsWithConversations,
+      ticketsWithActivities,
+      ticketsWithNoThreadContext: Math.max(0, ticketsForHydration.length - new Set(threadEntries.map((e) => e.ticketId)).size),
+      perTicket: hydration.perTicket || [],
+      episodes: episodes.length,
+      assignmentActions: assignments.length,
+      pipelineRuns: runs.length,
+      bypassTickets: bypassTickets.length,
+    };
+
+    emitProgress(`Collection complete: ${summaryMetrics.totals.totalTicketsReviewed} ticket(s) ready. ${ticketsWithConversations}/${ticketsForHydration.length} have conversation bodies for the LLM to read.`, {
       percent: 100,
       stats: {
         totalTicketsReviewed: summaryMetrics.totals.totalTicketsReviewed,
         success: summaryMetrics.totals.success,
         failure: summaryMetrics.totals.failure,
         unresolved: summaryMetrics.totals.unresolved,
+        ticketsWithConversations,
+        ticketsWithActivities,
+        conversationEntriesAvailable: conversationEntries.length,
       },
     });
 
@@ -922,6 +1158,7 @@ class AssignmentDailyReviewService {
       warnings,
       analyzedTicketIds: allCases.map((item) => item.ticketId),
       competencyCategories,
+      collectionDiagnostics,
     };
   }
 
@@ -1122,14 +1359,56 @@ class AssignmentDailyReviewService {
         workspaceName: dataset.workspaceName,
         timezone: dataset.timezone,
         summary: dataset.summaryMetrics,
+        // Each case ships full structured context: header metadata, the
+        // chronological thread (notes + replies + state-change events with
+        // visibility tags) and a one-line summary line. The structured
+        // threadExcerpts give the model real conversation bodies to read,
+        // which is what was missing before — previously only the joined
+        // summary string was sent and it was capped to 220 chars per item
+        // and only included activity-stream events (no actual note bodies).
         cases: analyzedCases.map((item) => ({
           ticketId: item.ticketId,
           freshserviceTicketId: item.freshserviceTicketId,
           subject: item.subject,
           category: item.category,
+          priority: item.priority,
+          status: item.status,
           outcome: item.outcome,
           primaryTag: item.primaryTag,
           decision: item.decision,
+          triggerSource: item.triggerSource,
+          rejectionCount: item.rejectionCount,
+          topRecommendation: item.topRecommendation,
+          finalAssignee: item.finalAssignee,
+          pipelineAssignedTech: item.pipelineAssignedTech,
+          changedFromTopRecommendation: item.changedFromTopRecommendation,
+          handledInFreshService: item.handledInFreshService,
+          overrideReason: item.overrideReason,
+          decisionNote: item.decisionNote,
+          ticketCreatedAt: item.ticketCreatedAt,
+          resolvedAt: item.resolvedAt,
+          closedAt: item.closedAt,
+          rebounded: Array.isArray(item.tags) && item.tags.includes(DAILY_REVIEW_PRIMARY_TAGS.rebounded),
+          episodeSummary: (item.episodeSummary || []).map((ep) => ({
+            technicianName: ep.technicianName,
+            startMethod: ep.startMethod,
+            endMethod: ep.endMethod,
+            endActorName: ep.endActorName,
+          })),
+          assignmentActions: (item.assignmentActions || []).map((a) => ({
+            source: a.source,
+            assignedToName: a.assignedToName,
+            assignedByEmail: a.assignedByEmail,
+            note: a.note,
+          })),
+          threadExcerpts: (item.threadExcerpts || []).map((ex) => ({
+            source: ex.source,
+            eventType: ex.eventType,
+            visibility: ex.visibility,
+            actorName: ex.actorName,
+            occurredAt: ex.occurredAt,
+            excerpt: ex.excerpt,
+          })),
           summary: this._summarizeCase(item),
         })),
         competencyCategories: dataset.competencyCategories.map((item) => item.name),
@@ -1380,6 +1659,7 @@ Rules:
       });
       const dataset = await this.collectDailyDataset(workspaceId, dateStr, {
         signal: abortController.signal,
+        forceRefreshThreads: options.forceRefreshThreads === true,
         onProgress: (event) => {
           heartbeatRun('collecting');
           emit({
@@ -1398,7 +1678,10 @@ Rules:
           status: 'analyzing',
           rangeStart: dataset.range.start,
           rangeEnd: dataset.range.end,
-          summaryMetrics: dataset.summaryMetrics,
+          summaryMetrics: {
+            ...dataset.summaryMetrics,
+            collectionDiagnostics: dataset.collectionDiagnostics,
+          },
           analyzedTicketIds: dataset.analyzedTicketIds,
           evidenceCases: dataset.cases,
           warnings: dataset.warnings,
@@ -1432,6 +1715,7 @@ Rules:
             summaryMetrics: {
               ...dataset.summaryMetrics,
               executiveSummary: analysis.executiveSummary,
+              collectionDiagnostics: dataset.collectionDiagnostics,
             },
             analyzedTicketIds: dataset.analyzedTicketIds,
             evidenceCases: dataset.cases,

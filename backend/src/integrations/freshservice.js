@@ -170,10 +170,19 @@ class FreshServiceClient {
    * @returns {Array} Extracted results
    */
   _extractResults(data, endpoint) {
+    // CHECK SUB-RESOURCES FIRST. The previous order matched `/tickets` on
+    // any URL containing the word "tickets" — including `/tickets/:id/
+    // conversations` and `/tickets/:id/activities` — and tried to pull
+    // `data.tickets`, which doesn't exist on those responses, so every
+    // call silently returned []. Daily review thread hydration relied on
+    // this and got zero conversation bodies in prod.
+    if (endpoint.includes('/conversations')) return data.conversations || [];
+    if (endpoint.includes('/activities')) return data.activities || [];
+    if (endpoint.includes('/notes')) return data.notes || [];
+    if (endpoint.includes('/time_entries')) return data.time_entries || [];
     if (endpoint.includes('/tickets')) return data.tickets || [];
     if (endpoint.includes('/agents')) return data.agents || [];
     if (endpoint.includes('/requesters')) return data.requesters || [];
-    if (endpoint.includes('/activities')) return data.activities || [];
     if (endpoint.includes('/workspaces')) return data.workspaces || [];
     if (endpoint.includes('/groups')) return data.groups || [];
     return data;
@@ -276,6 +285,34 @@ class FreshServiceClient {
       return response.data.activities || [];
     } catch (error) {
       logger.error(`Error fetching activities for ticket ${ticketId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch all conversations (replies + notes, public + private) for a ticket.
+   * This is the only endpoint that returns the actual body text of replies
+   * and notes — `/activities` returns "added a private note" *events* but
+   * not the note body. Daily review analysis needs the bodies to make sense
+   * of why a ticket was rerouted, rejected, or escalated.
+   *
+   * Walks all pages because long-running tickets can have hundreds of
+   * conversation entries (FS default page size = 30, max = 100).
+   *
+   * @param {number} ticketId
+   * @param {object} [options]
+   * @param {number} [options.maxEntries] - Optional cap on returned entries (oldest preserved). Defaults to no cap.
+   * @returns {Promise<Array>} Array of conversation objects (body / body_text / private / incoming / user_id / created_at / id)
+   */
+  async fetchTicketConversations(ticketId, { maxEntries = null } = {}) {
+    try {
+      const all = await this.fetchAllPages(`/tickets/${ticketId}/conversations`, {});
+      if (maxEntries && all.length > maxEntries) {
+        return all.slice(-maxEntries);
+      }
+      return all;
+    } catch (error) {
+      logger.error(`Error fetching conversations for ticket ${ticketId}:`, error);
       throw error;
     }
   }
