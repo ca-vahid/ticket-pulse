@@ -2652,9 +2652,20 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                     ? 'bg-emerald-50/60'
                                     : '';
                           const priClass = PRIORITY_BORDER[run.ticket?.priority] || 'border-l-transparent';
-                          const assignee = subView !== 'pending'
-                            ? (run.assignedTech || run.ticket?.assignedTech)
-                            : run.ticket?.assignedTech;
+                          // The Status column is meant to show the ticket's CURRENT
+                          // owner (see comment on the cell below). On non-pending
+                          // tabs we previously preferred `run.assignedTech` (the
+                          // tech approved when this run was decided), but that is
+                          // stale the moment a ticket is rebounded/reassigned
+                          // externally — e.g. AI picks Andrew, Andrew rejects,
+                          // coordinator reassigns to Mehdi. The Decided tab would
+                          // still show Andrew next to a "Closed" status pill even
+                          // though the ticket is now owned (and was closed) by
+                          // Mehdi. Always trust the live ticket relation, and only
+                          // fall back to the run's recorded tech when the ticket
+                          // has no current owner (e.g. dismissed runs).
+                          const assignee = run.ticket?.assignedTech
+                            || (subView !== 'pending' ? run.assignedTech : null);
                           const statusLabel = getStatusLabel(run.ticket?.status);
                           const dd = showDecision ? getDisplayDecision(run) : null;
                           // Use a div role=button instead of a real <button> so the
