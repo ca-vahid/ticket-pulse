@@ -80,10 +80,10 @@ class SyncService {
    * Initialize FreshService client from settings
    * @returns {Promise<Object>} FreshService client instance
    */
-  async _initializeClient() {
+  async _initializeClient(options = {}) {
     try {
       const config = await settingsRepository.getFreshServiceConfig();
-      return createFreshServiceClient(config.domain, config.apiKey);
+      return createFreshServiceClient(config.domain, config.apiKey, options);
     } catch (error) {
       logger.error('Failed to initialize FreshService client:', error);
       throw new ExternalAPIError(
@@ -633,7 +633,10 @@ class SyncService {
 
       logger.info(`[preheat ws=${workspaceId}] Preheating threads for ${ticketsToHydrate.size}/${cohort.length} today-cohort ticket(s) (${jobs.length} FS endpoint call(s)).`);
 
-      const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+      const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+        priority: 'low',
+        source: 'thread-preheat',
+      });
 
       let activitiesFetched = 0;
       let conversationsFetched = 0;
@@ -1303,6 +1306,138 @@ class SyncService {
   }
 
   /**
+   * Fast path for the Assignment Review "sync now" button.
+   *
+   * This intentionally does NOT run the broad dashboard sync tail work
+   * (requesters, CSAT, stale-ticket reconciliation, thread preheat). It only
+   * pulls recently changed FS tickets for the active workspace, upserts their
+   * snapshot fields, then starts assignment polling for those exact rows.
+   */
+  async syncAssignmentCandidatesNow(workspaceId, options = {}) {
+    const lookbackMinutes = Math.max(5, Math.min(parseInt(options.lookbackMinutes, 10) || 90, 24 * 60));
+    const maxTickets = Math.max(1, Math.min(parseInt(options.maxTickets, 10) || 50, 200));
+    const maxPipelineRuns = Math.max(1, Math.min(parseInt(options.maxPipelineRuns, 10) || 10, 50));
+    const cutoff = new Date(Date.now() - lookbackMinutes * 60 * 1000);
+
+    logger.info('Assignment fast sync started', {
+      workspaceId,
+      lookbackMinutes,
+      maxTickets,
+      maxPipelineRuns,
+    });
+
+    const wsConfig = await this._getWorkspaceConfig(workspaceId);
+    const client = createFreshServiceClient(wsConfig.domain, wsConfig.apiKey, {
+      priority: 'high',
+      source: 'assignment-fast-sync',
+    });
+    const filters = {
+      include: 'requester,stats',
+      updated_since: cutoff.toISOString(),
+    };
+    if (wsConfig.workspaceId) {
+      filters.workspace_id = wsConfig.workspaceId;
+    }
+
+    const fsTickets = await client.fetchTickets(filters);
+    const recentTickets = [...fsTickets]
+      .sort((a, b) => {
+        const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
+        const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
+        return bTime - aTime;
+      })
+      .slice(0, maxTickets);
+
+    for (const fsTicket of recentTickets) {
+      if (fsTicket.requester_id && fsTicket.requester?.name) {
+        this._embeddedRequesterNames.set(
+          BigInt(fsTicket.requester_id).toString(),
+          fsTicket.requester.name,
+        );
+      }
+    }
+
+    const ticketsWithTechIds = await this._prepareTicketsForDatabase(recentTickets, workspaceId);
+    const ticketIds = ticketsWithTechIds.map(t => t.freshserviceTicketId);
+    const existingTicketsArray = await ticketRepository.getByFreshserviceIds(ticketIds);
+    const existingTicketsMap = new Map(
+      existingTicketsArray.map(t => [t.freshserviceTicketId.toString(), t]),
+    );
+
+    const upsertedIds = [];
+    let syncedCount = 0;
+
+    for (const ticket of ticketsWithTechIds) {
+      try {
+        const existingTicket = existingTicketsMap.get(ticket.freshserviceTicketId.toString());
+        const ticketWorkspaceId = ticket.workspaceId ?? workspaceId;
+
+        if (ticket.assignedFreshserviceId && !ticket.assignedTechId) {
+          const resolved = await this._resolveResponderTech(
+            ticket.assignedFreshserviceId,
+            ticketWorkspaceId,
+            client,
+          );
+          if (resolved) {
+            ticket.assignedTechId = resolved.techId;
+          }
+        }
+
+        const { isNoise, ruleId } = await noiseRuleService.evaluate(
+          ticket.subject,
+          ticket.createdAt ? new Date(ticket.createdAt) : null,
+          ticketWorkspaceId,
+        );
+
+        const upsertedTicket = await ticketRepository.upsert({
+          ...ticket,
+          workspaceId: ticketWorkspaceId,
+          isNoise,
+          noiseRuleMatched: ruleId,
+          isSelfPicked: existingTicket?.isSelfPicked || false,
+          assignedBy: existingTicket?.assignedBy || null,
+          firstAssignedAt: existingTicket?.firstAssignedAt || null,
+          rejectionCount: existingTicket?.rejectionCount || 0,
+        });
+
+        upsertedIds.push(upsertedTicket.id);
+        syncedCount++;
+      } catch (error) {
+        logger.warn('Assignment fast sync: failed to upsert ticket', {
+          workspaceId,
+          freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || ticket.freshserviceTicketId,
+          error: error.message,
+        });
+      }
+    }
+
+    const polling = await this._pollForUnassignedTickets(workspaceId, {
+      ticketIdsOverride: upsertedIds,
+      cutoffOverride: cutoff,
+      maxPerCycleOverride: maxPipelineRuns,
+      waitForCompletion: false,
+      settleAfterMs: 1000,
+    });
+
+    clearReadCache();
+
+    const result = {
+      status: 'completed',
+      mode: 'assignment-fast-sync',
+      lookbackMinutes,
+      ticketsFetched: fsTickets.length,
+      ticketsConsidered: recentTickets.length,
+      ticketsSynced: syncedCount,
+      candidateTicketIds: upsertedIds,
+      polling,
+      timestamp: new Date(),
+    };
+
+    logger.info('Assignment fast sync completed', result);
+    return result;
+  }
+
+  /**
    * Sync requesters from FreshService
    * Fetches requester details for all tickets that don't have cached requester data
    * @returns {Promise<number>} Number of requesters synced
@@ -1646,7 +1781,10 @@ class SyncService {
 
     try {
       logger.info(`Starting pickup time backfill (limit=${limit}, daysToSync=${daysToSync}, processAll=${processAll}, concurrency=${concurrency})`);
-      const client = await this._initializeClient();
+      const client = await this._initializeClient({
+        priority: 'low',
+        source: 'pickup-time-backfill',
+      });
 
       // Calculate date range
       const cutoffDate = new Date();
@@ -1739,7 +1877,10 @@ class SyncService {
 
     try {
       logger.info(`Starting thread-entry backfill (workspace=${workspaceId}, limit=${limit}, days=${daysToSync})`);
-      const client = await this._initializeClient();
+      const client = await this._initializeClient({
+        priority: 'low',
+        source: 'thread-entry-backfill',
+      });
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysToSync);
 
@@ -1835,7 +1976,10 @@ class SyncService {
       };
 
       logger.info(`Starting week sync: ${startDate} to ${endDate} (concurrency: ${concurrency})`);
-      const client = await this._initializeClient();
+      const client = await this._initializeClient({
+        priority: 'low',
+        source: 'week-sync',
+      });
       const wsConfig = await this._getWorkspaceConfig(workspaceId);
 
       // Convert dates to Date objects
@@ -2050,7 +2194,10 @@ class SyncService {
     const startTime = Date.now();
 
     try {
-      const client = await this._initializeClient();
+      const client = await this._initializeClient({
+        priority: 'low',
+        source: 'historical-backfill',
+      });
       const wsConfig = await this._getWorkspaceConfig(workspaceId);
 
       emit({ phase: 'init', step: 'Initializing backfill', pct: 0, detail: `${startDate} → ${endDate}` });
@@ -2335,7 +2482,10 @@ class SyncService {
   async syncRecentCSAT(daysBack = 30, workspaceId = null, options = {}) {
     try {
       const { limit = 200, onProgress = null, shouldCancel = null, minRecheckHours = 24 } = options;
-      const client = await this._initializeClient();
+      const client = await this._initializeClient({
+        priority: 'low',
+        source: 'csat-sync',
+      });
       return await csatService.syncRecentCSAT(
         client,
         ticketRepository,
@@ -2372,7 +2522,9 @@ class SyncService {
    */
   async _pollForUnassignedTickets(workspaceId, opts = {}) {
     const config = await assignmentRepository.getConfig(workspaceId);
-    if (!config?.isEnabled || !config?.pollForUnassigned) return;
+    if (!config?.isEnabled || !config?.pollForUnassigned) {
+      return { skipped: true, reason: 'assignment_polling_disabled', candidates: 0, triggered: 0 };
+    }
 
     const NORMAL_LOOKBACK_HOURS = 24;
     const OUTAGE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min between syncs counts as an outage
@@ -2411,13 +2563,19 @@ class SyncService {
     }
 
     const { default: prisma } = await import('./prisma.js');
+    const where = {
+      workspaceId,
+      assignedTechId: null,
+      isNoise: false,
+    };
+    if (Array.isArray(opts.ticketIdsOverride) && opts.ticketIdsOverride.length > 0) {
+      where.id = { in: opts.ticketIdsOverride };
+    } else {
+      where.createdAt = { gte: cutoff };
+    }
+
     const candidateTickets = await prisma.ticket.findMany({
-      where: {
-        workspaceId,
-        assignedTechId: null,
-        createdAt: { gte: cutoff },
-        isNoise: false,
-      },
+      where,
       select: {
         id: true,
         freshserviceTicketId: true,
@@ -2437,7 +2595,9 @@ class SyncService {
       .slice(0, maxPerCycle)
       .map(({ pipelineRuns: _pipelineRuns, ...ticket }) => ticket);
 
-    if (unassignedTickets.length === 0) return;
+    if (unassignedTickets.length === 0) {
+      return { skipped: false, mode, candidates: candidateTickets.length, triggered: 0 };
+    }
 
     logger.info('Assignment polling found unassigned tickets', {
       workspaceId,
@@ -2446,16 +2606,42 @@ class SyncService {
       cutoff: cutoff.toISOString(),
     });
 
+    const waitForCompletion = opts.waitForCompletion !== false;
+    const pipelinePromises = [];
+    let triggered = 0;
+
     for (const ticket of unassignedTickets) {
-      try {
-        await assignmentPipelineService.runPipeline(ticket.id, workspaceId, 'poll');
-      } catch (err) {
-        logger.warn('Assignment polling: pipeline failed for ticket', {
-          ticketId: ticket.id,
-          error: err.message,
+      const run = assignmentPipelineService.runPipeline(ticket.id, workspaceId, 'poll')
+        .catch((err) => {
+          logger.warn('Assignment polling: pipeline failed for ticket', {
+            ticketId: ticket.id,
+            error: err.message,
+          });
+          return { skipped: true, reason: 'pipeline_failed', error: err.message };
         });
+      triggered++;
+      if (waitForCompletion) {
+        await run;
+      } else {
+        pipelinePromises.push(run);
       }
     }
+
+    if (!waitForCompletion && opts.settleAfterMs) {
+      await Promise.race([
+        Promise.allSettled(pipelinePromises),
+        new Promise((resolve) => setTimeout(resolve, opts.settleAfterMs)),
+      ]);
+    }
+
+    return {
+      skipped: false,
+      mode,
+      async: !waitForCompletion,
+      candidates: candidateTickets.length,
+      triggered,
+      ticketIds: unassignedTickets.map(t => t.id),
+    };
   }
 
   /**
@@ -2529,7 +2715,10 @@ class SyncService {
 
     let client;
     try {
-      client = await this._initializeClient();
+      client = await this._initializeClient({
+        priority: 'low',
+        source: 'ticket-status-reconciliation',
+      });
     } catch {
       return;
     }
@@ -2689,7 +2878,10 @@ class SyncService {
 
     try {
       logger.info(`Starting episode backfill (days=${daysToSync}, limit=${limit}, concurrency=${concurrency})`);
-      const client = await this._initializeClient();
+      const client = await this._initializeClient({
+        priority: 'low',
+        source: 'episode-backfill',
+      });
 
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysToSync);

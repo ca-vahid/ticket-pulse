@@ -29,13 +29,15 @@ function getSharedRateLimiter() {
  * Handles all interactions with the FreshService API
  */
 class FreshServiceClient {
-  constructor(domain, apiKey) {
+  constructor(domain, apiKey, options = {}) {
     if (!domain || !apiKey) {
       throw new Error('FreshService domain and API key are required');
     }
 
     this.domain = domain;
     this.apiKey = apiKey;
+    this.rateLimitPriority = options.priority || 'normal';
+    this.rateLimitSource = options.source || null;
     // Handle both full domain (efusion.freshservice.com) and subdomain (efusion)
     const fullDomain = domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`;
     this.baseURL = `https://${fullDomain}/api/v2`;
@@ -109,7 +111,10 @@ class FreshServiceClient {
    * All HTTP calls should use this.
    */
   _throttledRequest(method, url, ...rest) {
-    return this.limiter.enqueue(() => this.client[method](url, ...rest));
+    return this.limiter.enqueue(
+      () => this.client[method](url, ...rest),
+      { priority: this.rateLimitPriority, source: this.rateLimitSource },
+    );
   }
 
   _get(url, config) { return this._throttledRequest('get', url, config); }
@@ -613,10 +618,11 @@ class FreshServiceClient {
  * Factory function to create FreshService client
  * @param {string} domain - FreshService domain
  * @param {string} apiKey - FreshService API key
+ * @param {Object} [options] - Rate-limit queue options
  * @returns {FreshServiceClient} FreshService client instance
  */
-export function createFreshServiceClient(domain, apiKey) {
-  return new FreshServiceClient(domain, apiKey);
+export function createFreshServiceClient(domain, apiKey, options = {}) {
+  return new FreshServiceClient(domain, apiKey, options);
 }
 
 export default FreshServiceClient;

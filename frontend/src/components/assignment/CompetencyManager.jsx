@@ -7,10 +7,10 @@ import remarkGfm from 'remark-gfm';
 import {
   Plus, Trash2, Loader2, Brain, CheckCircle, XCircle, RotateCcw,
   ChevronDown, ChevronRight, Wrench, AlertTriangle,
-  Search, Clock, Save, Upload, FileText, X, User, MapPin, History,
+  Search, Clock, Save, Upload, FileText, X, MapPin, History,
 } from 'lucide-react';
 import {
-  CopyBadge, ToolCallCard, mdComponents, StreamContent,
+  CopyBadge, ToolCallCard, StreamContent,
   cleanTranscript, processStreamEvent,
 } from './StreamingComponents';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
@@ -837,7 +837,6 @@ function CompetencyPromptTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [selectedVersion, setSelectedVersion] = useState(null);
   const [saveMsg, setSaveMsg] = useState(null);
   const [error, setError] = useState(null);
   const [tools, setTools] = useState([]);

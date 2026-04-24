@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from 'vitest';
 
 beforeAll(() => {
-  global.localStorage = {
+  globalThis.localStorage = {
     getItem: () => null,
     setItem: () => {},
     removeItem: () => {},

@@ -9,6 +9,7 @@ import freshServiceActionService from '../services/freshServiceActionService.js'
 import competencyFeedbackService from '../services/competencyFeedbackService.js';
 import calibrationService from '../services/calibrationService.js';
 import assignmentDailyReviewService from '../services/assignmentDailyReviewService.js';
+import syncService from '../services/syncService.js';
 import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
@@ -297,6 +298,20 @@ router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {
       today,
     },
   });
+}));
+
+router.post('/sync-now', requireAdmin, asyncHandler(async (req, res) => {
+  const lookbackMinutes = parseInt(req.query.lookbackMinutes || req.body?.lookbackMinutes, 10) || 90;
+  const maxTickets = parseInt(req.query.maxTickets || req.body?.maxTickets, 10) || 50;
+  const maxPipelineRuns = parseInt(req.query.maxPipelineRuns || req.body?.maxPipelineRuns, 10) || 10;
+
+  const result = await syncService.syncAssignmentCandidatesNow(req.workspaceId, {
+    lookbackMinutes,
+    maxTickets,
+    maxPipelineRuns,
+  });
+
+  res.json({ success: true, data: result });
 }));
 
 router.post('/runs/:id/run-now', requireAdmin, asyncHandler(async (req, res) => {
@@ -655,7 +670,10 @@ router.get('/runs/:id/freshness', requireReviewer, asyncHandler(async (req, res)
     return res.json({ success: true, data: { diffs: [], fresh: true } });
   }
 
-  const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+  const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+    priority: 'high',
+    source: 'assignment-freshness-check',
+  });
   const [fsTicket, fsActivities] = await Promise.all([
     client.getTicket(fsTicketId),
     client.fetchTicketActivities(fsTicketId),

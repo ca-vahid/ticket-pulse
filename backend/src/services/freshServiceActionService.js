@@ -158,7 +158,10 @@ class FreshServiceActionService {
         throw new Error('FreshService not configured for this workspace');
       }
 
-      const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+      const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+        priority: 'high',
+        source: 'freshservice-action',
+      });
 
       // --- Preflight checks (skip if force=true) ---
       if (!force) {

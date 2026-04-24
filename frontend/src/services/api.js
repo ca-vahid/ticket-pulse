@@ -536,6 +536,7 @@ export const assignmentAPI = {
   getRunFreshness: (id) => api.get(`/assignment/runs/${id}/freshness`),
   rerunPipeline: (id) => api.post(`/assignment/runs/${id}/rerun`),
   triggerPipeline: (ticketId) => api.post(`/assignment/trigger/${ticketId}`),
+  syncNow: (data = {}) => apiLongTimeout.post('/assignment/sync-now', data),
   getRecentTickets: (params) => api.get('/assignment/recent-tickets', { params }),
 
   emailTest: (mailbox) => api.post('/assignment/email/test', { mailbox }),

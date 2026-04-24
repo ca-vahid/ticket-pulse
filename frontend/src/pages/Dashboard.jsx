@@ -26,7 +26,6 @@ import ChangelogModal from '../components/ChangelogModal';
 import { APP_VERSION } from '../data/changelog';
 import { usePrefetch } from '../hooks/usePrefetch';
 import {
-  Users,
   CheckCircle,
   XCircle,
   Activity,

@@ -599,7 +599,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                       ))}
                     </div>
                   </div>,
-                  document.body
+                  document.body,
                 )}
               </div>
             ) : (

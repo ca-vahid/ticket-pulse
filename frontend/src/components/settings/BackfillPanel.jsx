@@ -241,7 +241,7 @@ export default function BackfillPanel() {
   // --- Cancel running backfill ---
   const handleCancel = useCallback(async () => {
     if (!activeRun || cancelling) return;
-    if (!confirm(`Cancel the running backfill?\n\nIt will stop at the next safe checkpoint (~10 seconds). Tickets already saved will remain.`)) return;
+    if (!confirm('Cancel the running backfill?\n\nIt will stop at the next safe checkpoint (~10 seconds). Tickets already saved will remain.')) return;
     setCancelling(true);
     try {
       await syncAPI.cancelBackfill(activeRun.id);

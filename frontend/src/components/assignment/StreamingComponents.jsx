@@ -188,7 +188,7 @@ export function cleanTranscript(raw) {
 /** Turn lines like **Step 2 — Title** into ## headings so Markdown spacing/layout applies. */
 export function promoteTranscriptStepHeadings(text) {
   if (!text) return '';
-  const stepLine = /^\*\*(Step \d+\s*[\u2014\u2013\-]\s*[^\n*]+)\*\*\s*:?\s*$/gm;
+  const stepLine = /^\*\*(Step \d+\s*[\u2014\u2013-]\s*[^\n*]+)\*\*\s*:?\s*$/gm;
   return text.replace(stepLine, (_, title) => `## ${title.trim()}`);
 }
 

@@ -389,7 +389,7 @@ function LiveCalibrationView({ periodStart, periodEnd, mode = 'full', onComplete
   );
 }
 
-function RunDetail({ run, workspaceTimezone }) {
+function RunDetail({ run, workspaceTimezone: _workspaceTimezone }) {
   const [expanded, setExpanded] = useState({ outcomes: false, findings: true, competencies: true });
   const navigate = useNavigate();
 
@@ -576,8 +576,6 @@ export default function CalibrationManager({ workspaceTimezone }) {
   const [selectedRun, setSelectedRun] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [activeRun, setActiveRun] = useState(null);
-  const navigate = useNavigate();
-
   const applyPreset = (days) => {
     const end = new Date();
     const start = new Date();

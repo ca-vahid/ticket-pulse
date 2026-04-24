@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { formatInTimeZone } from 'date-fns-tz';
-import { assignmentAPI, workspaceAPI, syncAPI } from '../services/api';
+import { assignmentAPI, workspaceAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
 import PipelineRunDetail from '../components/assignment/PipelineRunDetail';
@@ -1352,17 +1352,20 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const handleSmartRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await syncAPI.trigger();
+      await assignmentAPI.syncNow({
+        lookbackMinutes: 90,
+        maxTickets: 50,
+        maxPipelineRuns: 10,
+      });
     } catch {
       // Sync failed (e.g. network, auth) — still refresh from DB below
     }
     await fetchQueue();
     setRefreshing(false);
 
-    // The sync's pipeline-polling step is fire-and-forget — by the time
-    // we got our response and refreshed the queue, those runs may not
-    // have been created yet (or may still be in 'running' status). Poll
-    // a few extra times over the next 8s to catch them as they appear.
+    // The assignment fast-sync starts pipeline runs asynchronously after
+    // upserting fresh FS tickets. Poll a few extra times to catch newly
+    // created/running rows as soon as they land.
     // Once any inProgress runs land, the dedicated fast-poll effect
     // (4s interval) takes over until they all finish.
     for (let i = 0; i < 4; i++) {

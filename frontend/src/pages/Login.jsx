@@ -197,7 +197,7 @@ export default function Login() {
             {/* Footer */}
             <div className="mt-8 text-center text-xs text-slate-500 leading-relaxed">
               <p>
-                Authentication is managed by your organization's Microsoft Entra ID.
+                Authentication is managed by your organization&apos;s Microsoft Entra ID.
                 <br className="hidden sm:inline" />
                 Need help?{' '}
                 <a

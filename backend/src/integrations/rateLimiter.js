@@ -1,5 +1,12 @@
 import logger from '../utils/logger.js';
 
+const PRIORITIES = ['high', 'normal', 'low'];
+const DEFAULT_PRIORITY = 'normal';
+
+function normalizePriority(priority) {
+  return PRIORITIES.includes(priority) ? priority : DEFAULT_PRIORITY;
+}
+
 /**
  * Token-bucket rate limiter for FreshService API calls.
  *
@@ -18,13 +25,20 @@ export class FreshServiceRateLimiter {
     maxRequestsPerMinute = 120,
     minDelayMs = 550,
     maxConcurrent = 3,
+    highBurstLimit = 5,
   } = {}) {
     this.maxRequestsPerMinute = maxRequestsPerMinute;
     this.minDelayMs = minDelayMs;
     this.maxConcurrent = maxConcurrent;
+    this.highBurstLimit = Math.max(1, highBurstLimit);
     this.recentLaunches = []; // timestamps when requests were launched
     this.inFlight = 0;        // currently in-flight requests
-    this.queue = [];          // [{ fn, resolve, reject }]
+    this.queues = {
+      high: [],
+      normal: [],
+      low: [],
+    };                        // priority -> [{ fn, resolve, reject, priority, source }]
+    this.highBurstCount = 0;
     this.processing = false;
     this.slowdownUntil = 0;   // ms timestamp for 429 Retry-After pause
     this.lastLaunchAt = 0;
@@ -34,9 +48,43 @@ export class FreshServiceRateLimiter {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  async enqueue(fn) {
+  _totalQueueDepth() {
+    return this.queues.high.length + this.queues.normal.length + this.queues.low.length;
+  }
+
+  _dequeueNext() {
+    const hasHigh = this.queues.high.length > 0;
+    const hasNormal = this.queues.normal.length > 0;
+    const hasLow = this.queues.low.length > 0;
+
+    if (hasHigh && (this.highBurstCount < this.highBurstLimit || (!hasNormal && !hasLow))) {
+      this.highBurstCount++;
+      return this.queues.high.shift();
+    }
+
+    if (hasNormal) {
+      this.highBurstCount = 0;
+      return this.queues.normal.shift();
+    }
+
+    if (hasLow) {
+      this.highBurstCount = 0;
+      return this.queues.low.shift();
+    }
+
+    return null;
+  }
+
+  async enqueue(fn, options = {}) {
     return new Promise((resolve, reject) => {
-      this.queue.push({ fn, resolve, reject });
+      const priority = normalizePriority(options.priority);
+      this.queues[priority].push({
+        fn,
+        resolve,
+        reject,
+        priority,
+        source: options.source || null,
+      });
       this._pump().catch((e) => logger.error('RateLimiter pump error:', e));
     });
   }
@@ -50,12 +98,12 @@ export class FreshServiceRateLimiter {
     if (this.processing) return;
     this.processing = true;
     try {
-      while (this.queue.length > 0) {
+      while (this._totalQueueDepth() > 0) {
         // Block here until we're allowed to launch the next request
         await this._waitForLaunchWindow();
 
         // Still have an item? (someone could have drained us)
-        const item = this.queue.shift();
+        const item = this._dequeueNext();
         if (!item) break;
 
         const now = Date.now();
@@ -71,7 +119,7 @@ export class FreshServiceRateLimiter {
           .finally(() => {
             this.inFlight--;
             // Poke the pump in case it was parked waiting on concurrency cap
-            if (this.queue.length > 0 && !this.processing) {
+            if (this._totalQueueDepth() > 0 && !this.processing) {
               this._pump().catch((e) => logger.error('RateLimiter pump error:', e));
             }
           });
@@ -139,19 +187,26 @@ export class FreshServiceRateLimiter {
     const retryAfterSec = parseInt(headers?.['retry-after'], 10);
     const waitSec = !Number.isNaN(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec : 10;
     this.slowdownUntil = Math.max(this.slowdownUntil, Date.now() + waitSec * 1000);
-    logger.warn(`RateLimiter: 429 — pausing queue for ${waitSec}s (Retry-After: ${retryAfterSec || 'default'}), ${this.queue.length} queued, ${this.inFlight} in-flight`);
+    logger.warn(`RateLimiter: 429 — pausing queue for ${waitSec}s (Retry-After: ${retryAfterSec || 'default'}), ${this._totalQueueDepth()} queued, ${this.inFlight} in-flight`);
   }
 
   getStats() {
     const now = Date.now();
     const live = this.recentLaunches.filter((t) => now - t < 60000);
+    const queueDepthByPriority = {
+      high: this.queues.high.length,
+      normal: this.queues.normal.length,
+      low: this.queues.low.length,
+    };
     return {
       requestsLastMinute: live.length,
       inFlight: this.inFlight,
-      queueDepth: this.queue.length,
+      queueDepth: this._totalQueueDepth(),
+      queueDepthByPriority,
       maxRequestsPerMinute: this.maxRequestsPerMinute,
       maxConcurrent: this.maxConcurrent,
       minDelayMs: this.minDelayMs,
+      highBurstLimit: this.highBurstLimit,
       slowdownActive: this.slowdownUntil > now,
       slowdownMsLeft: Math.max(0, this.slowdownUntil - now),
     };
