@@ -51,14 +51,30 @@ export function getStatsDayWindow(timezone = PACIFIC_TIMEZONE, reference = new D
 export async function getTodayStats(workspaceId, timezone = PACIFIC_TIMEZONE) {
   const { start, end, timezone: statsTimezone } = getStatsDayWindow(timezone, new Date());
 
-  // One grouped query for outcome counts. createdAt bounds the window;
-  // updatedAt would let stale "running" runs from days ago count today,
-  // which is wrong.
+  // One grouped query for outcome counts. Completed outcomes are bounded by
+  // the time they were decided so this panel matches the Decided/Dismissed
+  // tabs. Live/queued/error rows still use createdAt so stale runs from prior
+  // days do not drift into today's snapshot.
   const grouped = await prisma.assignmentPipelineRun.groupBy({
     by: ['status', 'decision'],
     where: {
       workspaceId,
-      createdAt: { gte: start, lte: end },
+      OR: [
+        {
+          status: 'completed',
+          decision: { in: ['auto_assigned', 'approved', 'modified', 'noise_dismissed', 'rejected'] },
+          decidedAt: { gte: start, lte: end },
+        },
+        {
+          status: 'completed',
+          decision: 'pending_review',
+          updatedAt: { gte: start, lte: end },
+        },
+        {
+          status: { in: ['queued', 'running', 'failed', 'failed_schema_validation', 'cancelled', 'superseded', 'skipped_stale'] },
+          createdAt: { gte: start, lte: end },
+        },
+      ],
     },
     _count: { _all: true },
   });
@@ -140,7 +156,7 @@ export async function getTodayStats(workspaceId, timezone = PACIFIC_TIMEZONE) {
   const recentRuns = await prisma.assignmentPipelineRun.findMany({
     where: {
       workspaceId,
-      createdAt: { gte: start, lte: end },
+      decidedAt: { gte: start, lte: end },
       decision: 'auto_assigned',
       assignedTechId: { not: null },
     },
