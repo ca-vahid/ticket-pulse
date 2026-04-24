@@ -127,10 +127,10 @@ export default function FilterDropdown({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={popoverId}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm transition-colors touch-manipulation ${
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors touch-manipulation ${
           isAtDefault
-            ? 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
-            : 'border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100'
+            ? 'border-transparent bg-slate-100/70 text-slate-600 hover:bg-slate-200/70 hover:text-slate-900'
+            : 'border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100'
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
         {Icon && <Icon className="h-3 w-3 shrink-0" />}

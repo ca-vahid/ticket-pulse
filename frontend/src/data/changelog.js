@@ -1,6 +1,25 @@
-export const APP_VERSION = '2.0-preview';
+export const APP_VERSION = '2.01-preview';
 
 export const changelog = [
+  {
+    version: '2.01-preview',
+    date: 'April 23, 2026',
+    entries: [
+      { type: 'new', text: 'Assignment Review queue redesigned as a high-throughput decision interface — single-line ~52px CSS-Grid rows replace the wrapped table, AI Suggestion is now a first-class column, status pills are standardized (Open / Pending / etc.) with the assignee inline, decision pills are clean (Auto / Handled in FS / Approved / Override / Noise), and timestamps are normalized to "Apr 23, 4:13 PM". Result: ~2x more tickets fit on screen with zero vertical jumping.' },
+      { type: 'new', text: 'Smart row highlighting in Assignment Review — colored 3px left border encodes priority (transparent = Low, slate = Medium, orange = High, red = Urgent) so the dedicated Pri column could be dropped; returned-from-tech rows get a subtle rose-tinted background so reassignments stand out without shouting.' },
+      { type: 'new', text: 'Configurable page size on Assignment Review — new "Per page" selector (10 / 25 / 50 / 100) on both the Pending queue pager and the Decided/Dismissed/Deleted result pagers. Default lowered from 50 to 25 to match the new compact rows. Choice is persisted in localStorage so it survives reloads. Page resets to 0 whenever the size changes to prevent landing out of bounds.' },
+      { type: 'new', text: 'Compact technician table on the Dashboard — new sticky sortable column header (TechCompactHeader) and shared CSS-Grid template (compactLayout.js) keep the header and every row pixel-aligned. Click any column header (Open / Today / Self / App / Asgn / Done / Rej / CSAT) to sort; click again to flip direction. Sort choice is persisted in localStorage under `compactSort` so it survives reloads.' },
+      { type: 'new', text: 'Compact column-legend popover (LegendPopover) — replaces the full-width legend strip on the dashboard with a hover/focus-triggered info icon. Renders via React Portal at document.body so it escapes the per-row animate-slideInLeft transform that traps z-index, and the popup never gets clipped behind the sticky header anymore.' },
+      { type: 'improved', text: 'Assignment Review filter bar lighter and faster to read — search input promoted to leading slot, larger (w-64 sm:w-80) with a soft blue focus ring, since it\u2019s the highest-leverage control. The heavy "[ FILTERS / N ACTIVE ]" pill was replaced with a lightweight inline filter icon + count. Default-state filter chips lost their card border + shadow for flatter `bg-slate-100/70` chips that read as interactive without competing with the search box.' },
+      { type: 'improved', text: 'Dashboard CategoryFilter restyled as a pill with circular icon badge to match the visual language of the Timeline Explorer / Assignment buttons in the page header — consistent control vocabulary across the page.' },
+      { type: 'improved', text: 'Monthly Calendar — 1-second hover delay before a day cell zooms, so brushing the mouse across the grid no longer triggers the 1.5x expand. Tech sidebar redesigned as flat list rows (less chrome). CSAT indicator simplified to inline ★+count (no chip background). The three colored leave pills (OFF / WFH / OTH) collapsed into a single muted "N on leave" chip with the breakdown in the tooltip. Empty days drop the redundant "No activity" caption.' },
+      { type: 'improved', text: 'Header logo wordmark now visually fills its slot — the brand wordmark PNG had ~65% transparent vertical padding, so the rendered logo looked tiny. Wrapped it in a fixed-height crop container with the image rendered at 3x the wrapper height so the visible logo content fills after center-clipping. Mobile + desktop both get this treatment.' },
+      { type: 'improved', text: 'Tech card "assigners" popup now portal-rendered at document.body — escapes the per-row animation transform that was creating a stacking context and trapping the popup behind the sticky table header. Popup repositions on scroll/resize so it stays anchored to its trigger.' },
+      { type: 'improved', text: 'Dashboard control row condensed — Last Updated / Refreshing collapsed to icon + short time only, primary action buttons (Map / Settings / Logout) bumped to 2x2-rem touch targets with rounded-lg hover states for clearer affordance.' },
+      { type: 'fixed', text: 'Assignment Review pagination footer is now visible whenever total > 10 (the smallest page size), not just when total > current page size. Previously, with 30 rows at 50/page the footer was hidden, so the user had no way to lower the size to 25 to split the page. The "Per page" selector stays reachable in this case while Prev/Next stay hidden when there\u2019s only one page.' },
+      { type: 'fixed', text: 'Dashboard purple stats banner is no longer sticky — it now scrolls away with the page, freeing up vertical space. The compact table header is the only sticky element in the section, docked at top-[88px] (desktop) / top-[52px] (mobile) just below the app header.' },
+    ],
+  },
   {
     version: '2.0-preview',
     date: 'April 23, 2026',

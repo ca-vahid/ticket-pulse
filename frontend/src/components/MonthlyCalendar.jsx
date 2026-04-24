@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { filterTickets } from '../utils/ticketFilter';
@@ -20,6 +20,36 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
   const [clickedDayDate, setClickedDayDate] = useState(null);
   const [selectedTechnicianIds, setSelectedTechnicianIds] = useState([]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // Delay the day-cell zoom-on-hover so brushing the mouse across the grid
+  // doesn't trigger the 1.5x expand. Cells must be hovered continuously for
+  // HOVER_DELAY_MS before the expanded panel appears.
+  const HOVER_DELAY_MS = 1000;
+  const hoverTimerRef = useRef(null);
+
+  const clearHoverTimer = useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleHover = useCallback((date) => {
+    clearHoverTimer();
+    hoverTimerRef.current = setTimeout(() => {
+      setHoveredDayDate(date);
+      hoverTimerRef.current = null;
+    }, HOVER_DELAY_MS);
+  }, [clearHoverTimer]);
+
+  const cancelHover = useCallback(() => {
+    clearHoverTimer();
+    setHoveredDayDate(null);
+  }, [clearHoverTimer]);
+
+  // Always clear any pending hover timer when the component unmounts so we
+  // don't call setState on an unmounted tree.
+  useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
 
   // Clear technician selections when search/category filters are cleared
   useEffect(() => {
@@ -267,7 +297,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
               })}
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto px-2 py-3 space-y-1.5">
+            <div className="flex-1 overflow-y-auto px-1.5 py-2">
               {sortedTechnicians.map((tech) => {
                 const isSelected = selectedSet.has(tech.id);
                 return (
@@ -279,44 +309,37 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                         isSelected ? prev.filter((id) => id !== tech.id) : [...prev, tech.id],
                       )
                     }
-                    className={`w-full rounded-2xl border transition-all duration-200 text-left px-2 py-2 ${
+                    className={`w-full rounded-lg transition-colors duration-150 text-left px-2 py-1.5 flex items-center gap-2 ${
                       isSelected
-                        ? 'border-blue-300 bg-blue-50/80 shadow-sm'
-                        : 'border-transparent bg-gray-50 hover:bg-gray-100'
+                        ? 'bg-blue-50 ring-1 ring-blue-200'
+                        : 'hover:bg-gray-50'
                     }`}
+                    title={`${tech.name} • ${tech.monthlyTotal} tickets`}
                   >
-                    <div className="flex items-center gap-2">
-                      {tech.photoUrl ? (
-                        <img src={tech.photoUrl} alt={tech.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold text-gray-600 flex-shrink-0">
-                          {tech.name.charAt(0)}
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-semibold text-gray-800 truncate">{tech.name}</span>
-                          <span className="text-sm font-bold text-gray-700 flex-shrink-0">{tech.monthlyTotal}</span>
-                        </div>
-                        <div className="mt-1 flex gap-1.5 text-[10px] font-semibold flex-wrap">
-                          {tech.monthlySelfPicked > 0 && (
-                            <span className="px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">S:{tech.monthlySelfPicked}</span>
-                          )}
-                          {tech.monthlyAssigned > 0 && (
-                            <span className="px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">A:{tech.monthlyAssigned}</span>
-                          )}
-                          {tech.monthlyClosed > 0 && (
-                            <span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">C:{tech.monthlyClosed}</span>
-                          )}
-                          {tech.monthlyCSAT > 0 && (
-                            <span 
-                              className="px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700"
-                              title={tech.monthlyCSATAverage ? `Avg: ${tech.monthlyCSATAverage.toFixed(1)}/4` : undefined}
-                            >
-                              ⭐{tech.monthlyCSAT}
-                            </span>
-                          )}
-                        </div>
+                    {tech.photoUrl ? (
+                      <img src={tech.photoUrl} alt={tech.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-[11px] font-semibold text-gray-600 flex-shrink-0">
+                        {tech.name.charAt(0)}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[13px] font-medium text-gray-800 truncate leading-tight">{tech.name}</span>
+                        <span className="text-[13px] font-semibold text-gray-900 flex-shrink-0 tabular-nums leading-tight">{tech.monthlyTotal}</span>
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-500 font-medium tabular-nums">
+                        <span title="Self-picked">S:{tech.monthlySelfPicked}</span>
+                        <span title="Assigned">A:{tech.monthlyAssigned}</span>
+                        <span title="Closed">C:{tech.monthlyClosed}</span>
+                        {tech.monthlyCSAT > 0 && (
+                          <span
+                            className="text-amber-500 ml-auto"
+                            title={tech.monthlyCSATAverage ? `CSAT • Avg: ${tech.monthlyCSATAverage.toFixed(1)}/4` : 'CSAT responses'}
+                          >
+                            ★{tech.monthlyCSAT}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </button>
@@ -394,15 +417,15 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
           </button>
         </div>
 
-        <div className="grid grid-cols-7 gap-3 text-[11px] font-semibold px-2 pb-3 uppercase tracking-wide">
+        <div className="grid grid-cols-7 gap-3 text-[10px] font-medium px-2 pb-2 tracking-wider">
           {weekDays.map((day, index) => {
             const isWeekendHeader = index === 5 || index === 6; // Sat = 5, Sun = 6
             return (
-              <div 
-                key={day} 
-                className={`text-center ${isWeekendHeader ? 'text-slate-500 bg-slate-100/50 rounded py-0.5' : 'text-gray-500'}`}
+              <div
+                key={day}
+                className={`text-center ${isWeekendHeader ? 'text-slate-400' : 'text-gray-400'}`}
               >
-                {day}
+                {day.toUpperCase()}
               </div>
             );
           })}
@@ -489,9 +512,14 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                   <div key={dayIdx} className="relative h-40 w-full" style={{ overflow: 'visible', zIndex: isHovered ? 50 : 1 }}>
                     <button
                       type="button"
-                      onMouseEnter={() => hasTickets && setHoveredDayDate(day.date)}
-                      onMouseLeave={() => setHoveredDayDate(null)}
-                      onClick={() => hasTickets && setClickedDayDate(day.date)}
+                      onMouseEnter={() => hasTickets && scheduleHover(day.date)}
+                      onMouseLeave={cancelHover}
+                      onClick={() => {
+                        // Cancel any pending hover-expand so the click-modal
+                        // takes over cleanly without a half-second of zoom.
+                        cancelHover();
+                        if (hasTickets) setClickedDayDate(day.date);
+                      }}
                       title={holidayTooltip || undefined}
                       className={`absolute rounded-3xl border text-left transition-all duration-300 flex flex-col ${
                         isHovered
@@ -552,25 +580,28 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                       </div>
 
                       <div className={`flex items-baseline gap-2 ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'mt-1' : 'mt-2') : 'mt-1'}`}>
-                        <span className={`font-semibold text-gray-800 ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'text-3xl' : 'text-4xl') : 'text-3xl'}`}>{stats.total}</span>
-                        {stats.total > 0 && <span className={`text-gray-500 ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'text-xs' : 'text-sm') : 'text-xs'}`}>tickets</span>}
+                        <span className={`font-semibold tabular-nums ${hasTickets ? 'text-gray-800' : 'text-gray-300'} ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'text-3xl' : 'text-4xl') : 'text-3xl'}`}>{stats.total}</span>
+                        {/* Show "tickets" label only when hovered (cell is enlarged); the un-hovered grid stays scannable. */}
+                        {isHovered && stats.total > 0 && (
+                          <span className={`text-gray-500 ${hasFilter && dayTechnicians.length > 0 ? 'text-xs' : 'text-sm'}`}>tickets</span>
+                        )}
                       </div>
 
                       <div className={`flex flex-col ${isHovered ? 'flex-shrink-0 min-h-0' : 'flex-1'} ${hasFilter && !isHovered ? 'overflow-hidden' : ''}`}>
                         {hasTickets ? (
                           <>
-                            {/* Stats Breakdown - Always show in hover */}
+                            {/* Stats Breakdown — thin muted bars when un-hovered, labeled bars when hovered. */}
                             <div className={`${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'mb-2 space-y-1 flex-shrink-0' : 'mb-3 space-y-1.5 flex-shrink-0') : hasFilter ? 'pt-2 space-y-1' : 'mt-auto pt-3 space-y-1'}`}>
-                              <div className={`${isHovered ? 'space-y-0.5' : 'space-y-0.5'}`}>
+                              <div className="space-y-0.5">
                                 {isHovered && (
                                   <div className="text-[10px] font-semibold text-purple-700 flex items-center justify-between">
                                     <span>Self</span>
                                     <span>{stats.selfPicked}</span>
                                   </div>
                                 )}
-                                <div className={`rounded-full bg-gray-100 overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-2'}`}>
+                                <div className={`rounded-full bg-gray-100 overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-1'}`} title={!isHovered ? `Self-picked: ${stats.selfPicked}` : undefined}>
                                   <div
-                                    className="h-full bg-purple-500/80"
+                                    className={isHovered ? 'h-full bg-purple-500/80' : 'h-full bg-purple-400/60'}
                                     style={{
                                       width: `${stats.total > 0 ? Math.max((stats.selfPicked / stats.total) * 100, 2) : 0}%`,
                                       transition: 'width 200ms ease-out',
@@ -578,16 +609,16 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                   />
                                 </div>
                               </div>
-                              <div className={`${isHovered ? 'space-y-0.5' : 'space-y-0.5'}`}>
+                              <div className="space-y-0.5">
                                 {isHovered && (
                                   <div className="text-[10px] font-semibold text-orange-700 flex items-center justify-between">
                                     <span>Asgn</span>
                                     <span>{stats.assigned}</span>
                                   </div>
                                 )}
-                                <div className={`rounded-full bg-gray-100 overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-2'}`}>
+                                <div className={`rounded-full bg-gray-100 overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-1'}`} title={!isHovered ? `Assigned: ${stats.assigned}` : undefined}>
                                   <div
-                                    className="h-full bg-orange-500/80"
+                                    className={isHovered ? 'h-full bg-orange-500/80' : 'h-full bg-orange-400/60'}
                                     style={{
                                       width: `${stats.total > 0 ? Math.max((stats.assigned / stats.total) * 100, 2) : 0}%`,
                                       transition: 'width 200ms ease-out',
@@ -595,16 +626,16 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                   />
                                 </div>
                               </div>
-                              <div className={`${isHovered ? 'space-y-0.5' : 'space-y-0.5'}`}>
+                              <div className="space-y-0.5">
                                 {isHovered && (
                                   <div className="text-[10px] font-semibold text-green-700 flex items-center justify-between">
                                     <span>Closed</span>
                                     <span>{stats.closed}</span>
                                   </div>
                                 )}
-                                <div className={`rounded-full bg-gray-100 overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-2'}`}>
+                                <div className={`rounded-full bg-gray-100 overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-1'}`} title={!isHovered ? `Closed: ${stats.closed}` : undefined}>
                                   <div
-                                    className="h-full bg-green-500/80"
+                                    className={isHovered ? 'h-full bg-green-500/80' : 'h-full bg-green-500/70'}
                                     style={{
                                       width: `${stats.total > 0 ? Math.max((stats.closed / stats.total) * 100, 2) : 0}%`,
                                       transition: 'width 200ms ease-out',
@@ -612,25 +643,27 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                   />
                                 </div>
                               </div>
-                              {/* CSAT Indicator - Show differently based on filter state */}
+                              {/* CSAT — small inline star+count when not hovered (no chip background). */}
                               {stats.csatCount > 0 && !isHovered && !hasFilter && (
-                                <div className="mt-1.5 flex items-center justify-center">
-                                  <div className="px-2 py-0.5 rounded-full bg-yellow-100 border border-yellow-300 flex items-center gap-0.5">
-                                    <span className="text-yellow-600 text-xs">⭐</span>
-                                    <span className="text-[10px] font-bold text-yellow-700">{stats.csatCount}</span>
-                                  </div>
+                                <div
+                                  className="mt-1 flex items-center gap-0.5 text-amber-500 text-[11px] font-semibold leading-none"
+                                  title={`CSAT responses: ${stats.csatCount}`}
+                                >
+                                  <span>★</span>
+                                  <span className="text-amber-600">{stats.csatCount}</span>
                                 </div>
                               )}
-                              {/* CSAT in filtered view (not hovering) - position at top right to avoid avatar overlap */}
+                              {/* In filtered view, keep CSAT in the top-right corner so it doesn't collide with avatar row. */}
                               {stats.csatCount > 0 && !isHovered && hasFilter && (
-                                <div className="absolute top-2 right-2 z-10">
-                                  <div className="px-1.5 py-0.5 rounded-full bg-yellow-400 border border-yellow-500 flex items-center gap-0.5 shadow-sm">
-                                    <span className="text-xs">⭐</span>
-                                    <span className="text-[10px] font-bold text-yellow-900">{stats.csatCount}</span>
-                                  </div>
+                                <div
+                                  className="absolute top-1.5 right-9 z-10 flex items-center gap-0.5 text-amber-500 text-[11px] font-semibold leading-none"
+                                  title={`CSAT responses: ${stats.csatCount}`}
+                                >
+                                  <span>★</span>
+                                  <span className="text-amber-600">{stats.csatCount}</span>
                                 </div>
                               )}
-                              {/* CSAT when hovered */}
+                              {/* CSAT when hovered — keep the richer panel for context. */}
                               {stats.csatCount > 0 && isHovered && (
                                 <div className="mt-1.5 pt-1.5 border-t-2 border-yellow-300 bg-yellow-50/50 -mx-3 px-3 py-1 rounded flex-shrink-0">
                                   <div className="text-[11px] font-bold text-yellow-700 flex items-center justify-between">
@@ -700,38 +733,32 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                             )}
                           </>
                         ) : (
-                          <div className="mt-auto text-xs text-gray-300">No activity</div>
+                          // Quiet empty state — the "0" already renders as the big number above.
+                          // Removing the "No activity" text reduces chrome on empty days.
+                          null
                         )}
 
-                        {/* Leave indicators. Counts can be fractional when
-                            half-day leaves are present (e.g. 1.5 means one
-                            full-day + one half-day leave). The trailing "½"
-                            chip flags that at least one leave is partial so
-                            the viewer doesn't read 1.5 as a typo. */}
-                        {hasLeave && !isHovered && (
-                          <div className="flex items-center gap-1 mt-1 flex-wrap">
-                            {leaveCounts.OFF > 0 && (
-                              <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-amber-100 border border-amber-300 text-[8px] font-semibold text-amber-800">
-                                <span className="w-1 h-1 rounded-full bg-amber-400" />{formatLeaveCount(leaveCounts.OFF)} OFF
+                        {/* Leave indicator — single muted chip showing the total leave count for the day.
+                            Hover/title reveals the breakdown by category (OFF / WFH / OTH) and a half-day note. */}
+                        {hasLeave && !isHovered && (() => {
+                          const totalLeave = leaveCounts.OFF + leaveCounts.WFH + leaveCounts.OTHER;
+                          const parts = [];
+                          if (leaveCounts.OFF > 0) parts.push(`${formatLeaveCount(leaveCounts.OFF)} OFF`);
+                          if (leaveCounts.WFH > 0) parts.push(`${formatLeaveCount(leaveCounts.WFH)} WFH`);
+                          if (leaveCounts.OTHER > 0) parts.push(`${formatLeaveCount(leaveCounts.OTHER)} OTH`);
+                          const tooltip = parts.join(' • ') + (leaveHasHalfDay ? ' (incl. half-day)' : '');
+                          return (
+                            <div className="flex items-center mt-1.5">
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-gray-100 text-[9px] font-medium text-gray-600 leading-tight"
+                                title={tooltip}
+                              >
+                                <span className="w-1 h-1 rounded-full bg-gray-400" />
+                                {formatLeaveCount(totalLeave)} on leave
                               </span>
-                            )}
-                            {leaveCounts.WFH > 0 && (
-                              <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-teal-100 border border-teal-300 text-[8px] font-semibold text-teal-800">
-                                <span className="w-1 h-1 rounded-full bg-teal-400" />{formatLeaveCount(leaveCounts.WFH)} WFH
-                              </span>
-                            )}
-                            {leaveCounts.OTHER > 0 && (
-                              <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-purple-100 border border-purple-300 text-[8px] font-semibold text-purple-800">
-                                <span className="w-1 h-1 rounded-full bg-purple-400" />{formatLeaveCount(leaveCounts.OTHER)} OTH
-                              </span>
-                            )}
-                            {leaveHasHalfDay && (
-                              <span className="inline-flex items-center px-1 py-0 rounded-full bg-gray-100 border border-gray-300 text-[8px] font-semibold text-gray-600" title="At least one leave on this day is a half-day">
-                                ½
-                              </span>
-                            )}
-                          </div>
-                        )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     
                       {/* Bottom Tech Indicator Line - Only in hover when filtering */}

@@ -12,8 +12,11 @@ import {
 import DemoModeToggle from '../components/DemoModeToggle';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
+import TechCompactHeader from '../components/TechCompactHeader';
+import { getSortValue } from '../components/compactLayout';
 import SearchBox from '../components/SearchBox';
 import CategoryFilter from '../components/CategoryFilter';
+import LegendPopover from '../components/LegendPopover';
 import MonthlyCalendar from '../components/MonthlyCalendar';
 import ExportButton from '../components/ExportButton';
 import { filterTickets } from '../utils/ticketFilter';
@@ -163,6 +166,31 @@ export default function Dashboard() {
 
   // Expand-all override for compact view: null = individual control, true/false = forced
   const [expandAllOverride, setExpandAllOverride] = useState(null);
+
+  // Compact-table sort state — persisted in localStorage. `field === null`
+  // means "use the default ranking sort (self-picked desc)".
+  const [compactSort, setCompactSort] = useState(() => {
+    try {
+      const stored = localStorage.getItem('compactSort');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {
+      // ignore JSON parse errors and fall through to default
+    }
+    return { field: null, direction: 'desc' };
+  });
+
+  const handleCompactSort = (field, direction) => {
+    const next = { field, direction };
+    setCompactSort(next);
+    try {
+      localStorage.setItem('compactSort', JSON.stringify(next));
+    } catch {
+      // localStorage may be unavailable (private mode); silently ignore
+    }
+  };
 
   // Collapsible sections state - persisted in localStorage
   const [collapsedSections, setCollapsedSections] = useState(() => {
@@ -1214,11 +1242,13 @@ export default function Dashboard() {
           <div className="flex items-center justify-between gap-2 md:hidden">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
-                <img
-                  src="/brand/logo-wordmark.png"
-                  alt="Ticket Pulse"
-                  className="h-7 w-auto flex-shrink-0"
-                />
+                <div className="h-9 w-[125px] overflow-hidden flex items-center justify-start flex-shrink-0">
+                  <img
+                    src="/brand/logo-wordmark.png"
+                    alt="Ticket Pulse"
+                    className="h-24 w-auto"
+                  />
+                </div>
                 <button onClick={() => setShowChangelog(true)} className="text-[9px] font-semibold text-blue-600 bg-blue-50 px-1 py-0.5 rounded border border-blue-200 flex-shrink-0">v{APP_VERSION}</button>
               </div>
             </div>
@@ -1249,14 +1279,20 @@ export default function Dashboard() {
             {/* Left: Title + User - 3 cols */}
             <div className="col-span-3">
               <div className="flex items-center gap-2">
-                <img
-                  src="/brand/logo-wordmark.png"
-                  alt="Ticket Pulse"
-                  className="h-8 w-auto flex-shrink-0"
-                />
+                {/* Logo wrapper crops the wordmark PNG's transparent top/bottom
+                    padding (~65% of the image is whitespace). The image is
+                    rendered ~3x the wrapper height so the visible logo content
+                    fills the wrapper after center-clipping. */}
+                <div className="h-10 w-[150px] overflow-hidden flex items-center justify-start flex-shrink-0">
+                  <img
+                    src="/brand/logo-wordmark.png"
+                    alt="Ticket Pulse"
+                    className="h-28 w-auto"
+                  />
+                </div>
                 <button
                   onClick={() => setShowChangelog(true)}
-                  className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md hover:bg-blue-100 border border-blue-200 transition-colors"
+                  className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded hover:bg-blue-100 border border-blue-200 transition-colors flex-shrink-0"
                   title="View changelog"
                 >
                   v{APP_VERSION}
@@ -1351,15 +1387,20 @@ export default function Dashboard() {
                 );
               })()}
 
-              {/* Last Updated / Refreshing indicator */}
+              {/* Last Updated / Refreshing indicator — icon + short time
+                  to avoid crowding the export/sync buttons in the right col */}
               {isRefreshing && !isColdLoading ? (
                 <span className="text-xs text-blue-500 flex items-center gap-1 flex-shrink-0">
                   <RefreshCw className="w-3 h-3 animate-spin" />
-                  Refreshing...
+                  Refreshing
                 </span>
               ) : lastUpdated ? (
-                <span className="text-xs text-gray-500 truncate min-w-0" title={`Updated: ${new Date(lastUpdated).toLocaleString()}`}>
-                  Updated: {new Date(lastUpdated).toLocaleTimeString()}
+                <span
+                  className="text-xs text-gray-500 flex items-center gap-1 flex-shrink-0"
+                  title={`Last updated: ${new Date(lastUpdated).toLocaleString()}`}
+                >
+                  <Clock className="w-3 h-3" />
+                  {new Date(lastUpdated).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
                 </span>
               ) : null}
             </div>
@@ -1433,28 +1474,28 @@ export default function Dashboard() {
               {/* Visuals Button */}
               <button
                 onClick={handleVisuals}
-                className="p-1.5 hover:bg-gray-100 rounded transition-colors"
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                 title="Visuals"
               >
-                <Map className="w-4 h-4" />
+                <Map className="w-6 h-6" />
               </button>
 
               {/* Settings Button */}
               <button
                 onClick={handleSettings}
-                className="p-1.5 hover:bg-gray-100 rounded transition-colors"
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                 title="Settings"
               >
-                <Settings className="w-4 h-4" />
+                <Settings className="w-6 h-6" />
               </button>
 
               {/* Logout Button */}
               <button
                 onClick={handleLogout}
-                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600"
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-red-600"
                 title="Logout"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-6 h-6" />
               </button>
             </div>
           </div>
@@ -1573,7 +1614,7 @@ export default function Dashboard() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-2 sm:px-4 py-3">
         {/* Stats Bar: Date Navigation (left) + Stats + Self-Pick + View Toggle (right) */}
-        <div className="md:sticky md:top-[52px] z-30 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-2 sm:p-3 mb-3 sm:mb-4">
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-2 sm:p-3 mb-3 sm:mb-4">
           <div className="flex items-stretch gap-3 text-white">
 
             {/* LEFT ZONE: Date Navigation + Day Grid */}
@@ -1950,123 +1991,114 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Search and Filter Bar */}
-        <div className="mb-4 flex items-start gap-3">
-          <SearchBox
-            value={searchTerm}
-            onChange={setSearchTerm}
-            placeholder="Search tickets... (use OR or | for alternatives)"
-            resultsCount={searchTerm || selectedCategories.length > 0 ? searchResultsCount : null}
-            className="flex-1 max-w-2xl"
-          />
-          <CategoryFilter
-            categories={allCategories}
-            selected={selectedCategories}
-            onChange={setSelectedCategories}
-            placeholder="Category"
-          />
-          {(searchTerm || selectedCategories.length > 0 || (viewMode === 'monthly' && monthlyData)) && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearchTerm('');
-                setSelectedCategories([]);
-              }}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap"
-              title="Clear all filters"
-            >
-              Clear All Filters
-            </button>
-          )}
-        </div>
-
         {/* Technicians List - Cascading */}
         <div>
-          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-            <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
-                <img
-                  src="/brand/icon-tech.png"
-                  alt=""
-                  aria-hidden="true"
-                  className="w-6 h-6 flex-shrink-0"
-                />
-                <h2 className="text-base sm:text-lg font-semibold">Technicians</h2>
-                <span className="text-xs text-gray-500">
-                  ({searchTerm || selectedCategories.length > 0 ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
-                </span>
-              </div>
+          {/* Single merged controls row: Team identity + view controls (left)
+              and Search + Category + Legend popover (right). Wraps on narrow
+              screens via flex-wrap. */}
+          <div className="mb-3 flex items-center flex-wrap gap-2 lg:gap-3">
+            {/* Team identity */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <img
+                src="/brand/icon-tech.png"
+                alt=""
+                aria-hidden="true"
+                className="w-6 h-6 flex-shrink-0"
+              />
+              <h2 className="text-base sm:text-lg font-semibold">Team</h2>
+              <span className="text-xs text-gray-500">
+                ({searchTerm || selectedCategories.length > 0 ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
+              </span>
+            </div>
 
-              {/* View toggle — Card / Compact */}
-              <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-medium">
-                <button
-                  onClick={() => { if (isCompactView) toggleCompactView(); }}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
-                    !isCompactView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
-                  }`}
-                >
-                  <LayoutGrid className="w-3.5 h-3.5" />
-                  Cards
-                </button>
-                <button
-                  onClick={() => { if (!isCompactView) toggleCompactView(); }}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
-                    isCompactView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
-                  }`}
-                >
-                  <List className="w-3.5 h-3.5" />
-                  Compact
-                </button>
-              </div>
-
+            {/* View toggle — Card / Compact */}
+            <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-medium flex-shrink-0">
               <button
-                onClick={handleToggleNoise}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm transition-colors ${
-                  excludeNoise
-                    ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                onClick={() => { if (isCompactView) toggleCompactView(); }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
+                  !isCompactView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
                 }`}
-                title={excludeNoise ? 'Noise tickets are hidden. Click to show all tickets.' : 'Click to hide automated/noise tickets (alerts, backups, monitoring, spam)'}
               >
-                {excludeNoise ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                <span>{excludeNoise ? 'Noise Hidden' : 'Hide Noise'}</span>
+                <LayoutGrid className="w-3.5 h-3.5" />
+                Cards
               </button>
-              <DemoModeToggle onChange={() => { forceRefreshNoCache().catch(() => {}); }} />
-              {hiddenTechnicians.length > 0 && (
-                <button
-                  onClick={() => setShowHidden(!showHidden)}
-                  className="flex items-center gap-2 px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm transition-colors"
-                >
-                  {showHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  <span>{hiddenTechnicians.length} Hidden</span>
-                </button>
-              )}
-              {isCompactView && (
-                <button
-                  onClick={() => setExpandAllOverride(prev => prev === true ? null : true)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm transition-colors ${
-                    expandAllOverride === true
-                      ? 'bg-blue-100 hover:bg-blue-200 text-blue-700'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                  }`}
-                  title={expandAllOverride === true ? 'Collapse all ticket details' : 'Expand all ticket details'}
-                >
-                  {expandAllOverride === true ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  <span>{expandAllOverride === true ? 'Collapse All' : 'Expand All'}</span>
-                </button>
-              )}
+              <button
+                onClick={() => { if (!isCompactView) toggleCompactView(); }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
+                  isCompactView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                <List className="w-3.5 h-3.5" />
+                Compact
+              </button>
             </div>
-            <div className="text-xs text-gray-500 hidden md:block">
-              <span className="font-semibold">Legend:</span>
-              {/* Only show "Open" metric when viewing today (current workload) */}
-              {isToday && <span className="ml-2">Open = All Open Tickets</span>}
-              <span className="ml-2 text-blue-600">Today = Total Today</span>
-              <span className="ml-2 text-purple-600">Self = Self-Picked</span>
-              <span className="ml-2 text-sky-600">App = App Assigned</span>
-              <span className="ml-2 text-orange-600">Asgn = Coordinator Assigned</span>
-              <span className="ml-2 text-green-600">Done = Closed</span>
-              <span className="ml-2 text-yellow-600">⭐ = CSAT</span>
-            </div>
+
+            <button
+              onClick={handleToggleNoise}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
+                excludeNoise
+                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+              }`}
+              title={excludeNoise ? 'Noise tickets are hidden. Click to show all tickets.' : 'Click to hide automated/noise tickets (alerts, backups, monitoring, spam)'}
+            >
+              {excludeNoise ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              <span>{excludeNoise ? 'Noise Hidden' : 'Hide Noise'}</span>
+            </button>
+            <DemoModeToggle onChange={() => { forceRefreshNoCache().catch(() => {}); }} />
+            {hiddenTechnicians.length > 0 && (
+              <button
+                onClick={() => setShowHidden(!showHidden)}
+                className="flex items-center gap-1.5 px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+              >
+                {showHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                <span>{hiddenTechnicians.length} Hidden</span>
+              </button>
+            )}
+            {isCompactView && (
+              <button
+                onClick={() => setExpandAllOverride(prev => prev === true ? null : true)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
+                  expandAllOverride === true
+                    ? 'bg-blue-100 hover:bg-blue-200 text-blue-700'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                }`}
+                title={expandAllOverride === true ? 'Collapse all ticket details' : 'Expand all ticket details'}
+              >
+                {expandAllOverride === true ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                <span>{expandAllOverride === true ? 'Collapse All' : 'Expand All'}</span>
+              </button>
+            )}
+
+            {/* Right cluster: search + category filter + clear + legend info.
+                ml-auto on the SearchBox pushes the right cluster to the end. */}
+            <SearchBox
+              value={searchTerm}
+              onChange={setSearchTerm}
+              placeholder="Search tickets..."
+              resultsCount={searchTerm || selectedCategories.length > 0 ? searchResultsCount : null}
+              className="flex-1 min-w-[200px] max-w-md ml-auto"
+            />
+            <CategoryFilter
+              categories={allCategories}
+              selected={selectedCategories}
+              onChange={setSelectedCategories}
+              placeholder="Category"
+            />
+            {(searchTerm || selectedCategories.length > 0 || (viewMode === 'monthly' && monthlyData)) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm('');
+                  setSelectedCategories([]);
+                }}
+                className="px-2.5 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap flex-shrink-0"
+                title="Clear all filters"
+              >
+                Clear
+              </button>
+            )}
+            <LegendPopover showOpen={isToday} />
           </div>
 
           {/* Hidden Technicians Section */}
@@ -2134,14 +2166,14 @@ export default function Dashboard() {
                 />
                 <p className="text-gray-700 font-medium">
                   {searchTerm || selectedCategories.length > 0 ? 'No matching tickets found' : 'No technicians found'}
-              </p>
-              <p className="text-sm text-gray-500 mt-2">
-                {searchTerm || selectedCategories.length > 0
-                  ? 'Try adjusting your search or filters'
-                  : technicians.length > 0
-                    ? 'All technicians are hidden. Click "Show Hidden" to restore them.'
-                    : 'Sync with FreshService to see technicians'}
-              </p>
+                </p>
+                <p className="text-sm text-gray-500 mt-2">
+                  {searchTerm || selectedCategories.length > 0
+                    ? 'Try adjusting your search or filters'
+                    : technicians.length > 0
+                      ? 'All technicians are hidden. Click "Show Hidden" to restore them.'
+                      : 'Sync with FreshService to see technicians'}
+                </p>
                 {(searchTerm || selectedCategories.length > 0) && (
                   <div className="flex gap-2 justify-center mt-4">
                     {searchTerm && (
@@ -2185,31 +2217,60 @@ export default function Dashboard() {
                   });
                 }
 
+                // When the user has picked an explicit compact-table sort,
+                // resort `techsWithRanks` (a copy — keep the rank field as
+                // computed from the default self-picked ranking).
+                const compactRows = (() => {
+                  if (!isCompactView || !compactSort.field) return techsWithRanks;
+                  const dir = compactSort.direction === 'asc' ? 1 : -1;
+                  return [...techsWithRanks].sort((a, b) => {
+                    const av = getSortValue(a, compactSort.field, viewMode);
+                    const bv = getSortValue(b, compactSort.field, viewMode);
+                    if (typeof av === 'string' || typeof bv === 'string') {
+                      return (
+                        String(av ?? '').localeCompare(String(bv ?? '')) * dir
+                      );
+                    }
+                    const an = av ?? -Infinity;
+                    const bn = bv ?? -Infinity;
+                    if (an === bn) return (a.name || '').localeCompare(b.name || '');
+                    return (an - bn) * dir;
+                  });
+                })();
+
                 return isCompactView ? (
-                  /* Compact view - One row per technician */
-                  <div className="space-y-2 animate-fadeIn">
-                    {techsWithRanks.map((tech, index) => (
-                      <div
-                        key={tech.id}
-                        className="animate-slideInLeft"
-                        style={{ animationDelay: `${index * 30}ms` }}
-                      >
-                        <TechCardCompact
-                          technician={tech}
-                          rank={tech.rank}
-                          onHide={handleHideTechnician}
-                          selectedDate={selectedDate}
-                          selectedWeek={selectedWeek}
-                          selectedMonth={selectedMonth}
-                          maxOpenCount={maxOpenCount}
-                          maxDailyCount={maxDailyCount}
-                          viewMode={viewMode}
-                          searchTerm={searchTerm}
-                          selectedCategories={selectedCategories}
-                          forceExpand={expandAllOverride}
-                        />
-                      </div>
-                    ))}
+                  /* Compact view - data table with sticky column header */
+                  <div className="animate-fadeIn">
+                    <TechCompactHeader
+                      viewMode={viewMode}
+                      sortField={compactSort.field}
+                      sortDirection={compactSort.direction}
+                      onSort={handleCompactSort}
+                    />
+                    <div className="space-y-1.5">
+                      {compactRows.map((tech, index) => (
+                        <div
+                          key={tech.id}
+                          className="animate-slideInLeft"
+                          style={{ animationDelay: `${index * 20}ms` }}
+                        >
+                          <TechCardCompact
+                            technician={tech}
+                            rank={tech.rank}
+                            onHide={handleHideTechnician}
+                            selectedDate={selectedDate}
+                            selectedWeek={selectedWeek}
+                            selectedMonth={selectedMonth}
+                            maxOpenCount={maxOpenCount}
+                            maxDailyCount={maxDailyCount}
+                            viewMode={viewMode}
+                            searchTerm={searchTerm}
+                            selectedCategories={selectedCategories}
+                            forceExpand={expandAllOverride}
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   /* Normal view - Grid layout with cards */

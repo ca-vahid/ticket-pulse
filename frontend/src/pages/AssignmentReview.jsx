@@ -1143,9 +1143,30 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const seenIdsRef = useRef(null);
   const newIdsInitializedRef = useRef(false);
   const [queuePage, setQueuePage] = useState(0);
-  const queuePageSize = 50;
   const [resultsPage, setResultsPage] = useState(0);
-  const resultsPageSize = 50;
+  // Single page-size shared by both the Pending queue pager and the
+  // Decided/Dismissed/Deleted result pagers — keeps the UX consistent and the
+  // user only has to set their preference once. Persisted in localStorage so
+  // their choice survives reloads. Default is 25 (was 50, which felt too dense
+  // on the new compact rows). Allowed values: 10, 25, 50, 100.
+  const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+  const PAGE_SIZE_STORAGE_KEY = 'assignmentReview.pageSize';
+  const [pageSize, setPageSize] = useState(() => {
+    if (typeof window === 'undefined') return 25;
+    const raw = parseInt(window.localStorage?.getItem(PAGE_SIZE_STORAGE_KEY) || '', 10);
+    return PAGE_SIZE_OPTIONS.includes(raw) ? raw : 25;
+  });
+  useEffect(() => {
+    try { window.localStorage?.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize)); } catch { /* private mode / quota — fine to ignore */ }
+  }, [pageSize]);
+  // Always reset to the first page when the size changes, otherwise switching
+  // from 50→25 while sitting on page 4 would land on a now-out-of-bounds page.
+  useEffect(() => { setQueuePage(0); setResultsPage(0); }, [pageSize]);
+  // Aliases keep the rest of the component readable and make the intent
+  // ("queue page size" vs "results page size") explicit at the call site even
+  // though they currently share one source of truth.
+  const queuePageSize = pageSize;
+  const resultsPageSize = pageSize;
   const queuedSectionRef = useRef(null);
   const [queuedExpanded, setQueuedExpanded] = useState(false);
 
@@ -1318,6 +1339,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     timeRange,
     queuePage,
     resultsPage,
+    pageSize,
     subView,
     selectedStatuses,
     selectedDecisions,
@@ -1676,10 +1698,21 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     3: 'bg-orange-100 text-orange-800',
     4: 'bg-red-100 text-red-800',
   };
-  const PRIORITY_BORDER = { 1: 'border-l-slate-200', 2: 'border-l-slate-200', 3: 'border-l-slate-200', 4: 'border-l-slate-200' };
+  // Smart highlight: priority is encoded as a colored left border on each row
+  // (replaces the dedicated Pri column in the compact grid). Low/none are
+  // intentionally invisible so only High and Urgent actually attract attention.
+  const PRIORITY_BORDER = {
+    1: 'border-l-transparent',
+    2: 'border-l-slate-200',
+    3: 'border-l-orange-400',
+    4: 'border-l-red-500',
+  };
 
+  // Compact "Apr 23, 4:13 PM" — drops weekday & year that crowded the original
+  // verbose timestamps. `year: undefined` overrides the helper's default
+  // `year: 'numeric'`, since Intl.DateTimeFormat treats undefined as absent.
   const fmtDate = (d) => formatDateTimeInTimezone(d, workspaceTimezone, {
-    weekday: 'short',
+    year: undefined,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -1695,6 +1728,26 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-slate-400" />;
     return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />;
   };
+
+  // Inline "Per page: 25" dropdown rendered inside both pagination footers.
+  // Plain native <select> for zero-dependency a11y (keyboard, screen readers,
+  // and native mobile pickers all just work). Styled to blend with the
+  // existing Prev/Next chrome on the same row.
+  const PageSizeSelector = ({ value, options, onChange }) => (
+    <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 select-none">
+      <span>Per page</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(parseInt(e.target.value, 10))}
+        className="px-1.5 py-0.5 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-colors"
+        aria-label="Rows per page"
+      >
+        {options.map((n) => (
+          <option key={n} value={n}>{n}</option>
+        ))}
+      </select>
+    </label>
+  );
 
   const isTicketOpen = (run) => ['Open', 'open', '2', 'Pending', 'pending', '3'].includes(String(run.ticket?.status || ''));
   const isTicketDeleted = (run) => ['deleted', 'spam'].includes(String(run.ticket?.status || '').toLowerCase());
@@ -2524,208 +2577,343 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 ))}
               </div>
 
-              {/* Desktop table */}
-              <table className="hidden md:table w-full text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="text-left px-3 py-2 font-medium text-slate-500 cursor-pointer select-none" onClick={() => toggleSort('subject')}>
-                      <span className="flex items-center gap-1">Ticket <SortIcon field="subject" /></span>
-                    </th>
-                    <th className="text-left px-3 py-2 font-medium text-slate-500 cursor-pointer select-none" onClick={() => toggleSort('requester')}>
-                      <span className="flex items-center gap-1">Requester <SortIcon field="requester" /></span>
-                    </th>
-                    <th className="text-left px-3 py-2 font-medium text-slate-500 cursor-pointer select-none w-12" onClick={() => toggleSort('priority')}>
-                      <span className="flex items-center gap-1">Pri <SortIcon field="priority" /></span>
-                    </th>
-                    <th className="text-left px-3 py-2 font-medium text-slate-500">Status</th>
-                    <th className="text-left px-3 py-2 font-medium text-slate-500">AI Suggestion</th>
-                    {subView !== 'pending' && <th className="text-left px-3 py-2 font-medium text-slate-500">Decision</th>}
-                    <th className="text-left px-3 py-2 font-medium text-slate-500 cursor-pointer select-none" onClick={() => toggleSort('createdAt')}>
-                      <span className="flex items-center gap-1">{subView === 'pending' ? 'Analyzed' : 'Decided'} <SortIcon field="createdAt" /></span>
-                    </th>
-                    {showActions && <th className="px-3 py-2 font-medium text-slate-500 text-right w-20"></th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {activeItems.map((run) => {
-                    const topRec = run.recommendation?.recommendations?.[0];
-                    const flag = getTicketFlag(run);
-                    const rowDim = subView === 'pending' && flag === 'deleted' ? 'opacity-40' : subView === 'pending' && flag === 'closed' ? 'opacity-50' : '';
-                    return (
-                      <tr key={run.id} className={`hover:bg-blue-50 cursor-pointer group border-l-3 ${PRIORITY_BORDER[run.ticket?.priority] || 'border-l-slate-200'} ${subView === 'pending' && flag === 'deleted' ? 'bg-red-50/30' : subView === 'pending' && flag === 'closed' ? 'bg-slate-50' : subView === 'pending' && flag === 'assigned' ? 'bg-amber-50/30' : newIds.has(run.id) ? 'bg-emerald-50/60' : ''} transition-[opacity,background-color] duration-[240ms] ${removingIds.has(run.id) ? 'opacity-0' : ''}`} onClick={() => handleSelectRun(run.id)}>
-                        <td className={`px-3 py-1.5 ${rowDim}`}>
-                          <span className="font-medium text-slate-800 leading-snug flex items-center gap-1.5 flex-wrap">
-                            {run.ticket?.subject || 'No subject'}
-                            {flag === 'deleted' && <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />}
-                            {(run.reboundFrom || run.ticket?.lastReboundContext)?.previousTechName && (() => {
-                              const ctx = run.reboundFrom || run.ticket.lastReboundContext;
-                              return (
-                                <span
-                                  className="inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none"
-                                  title={`Returned from ${ctx.previousTechName}${ctx.unassignedAt ? ' at ' + new Date(ctx.unassignedAt).toLocaleString() : ''}${ctx.unassignedByName ? ' by ' + ctx.unassignedByName : ''}${ctx.reboundCount > 1 ? ' (rebound #' + ctx.reboundCount + ')' : ''}`}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <RotateCcw className="w-2.5 h-2.5" />
-                                  Returned from {ctx.previousTechName?.split(' ')[0]}
-                                </span>
-                              );
-                            })()}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
-                          {run.ticket?.ticketCategory && <span className="text-[10px] text-slate-300 ml-1.5">{run.ticket.ticketCategory}</span>}
-                          {run._siblingCount > 0 && (
-                            <span className="ml-1.5 text-[9px] text-slate-400" title={`${run._siblingCount} earlier run${run._siblingCount > 1 ? 's' : ''} for this ticket — switch to a sub-filter to see all`}>
-                              +{run._siblingCount} earlier
-                            </span>
-                          )}
-                        </td>
-                        <td className={`px-3 py-1.5 ${rowDim}`}>
-                          <span className="text-slate-700">{run.ticket?.requester?.name || '—'}</span>
-                          {run.ticket?.requester?.department && <span className="block text-[10px] text-slate-400">{run.ticket.requester.department}</span>}
-                          {run.ticket?.requester?.email && !run.ticket?.requester?.department && <span className="block text-[10px] text-slate-300">{run.ticket.requester.email}</span>}
-                        </td>
-                        <td className={`px-3 py-1.5 ${rowDim}`}>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
-                            {PRIORITY_LABELS[run.ticket?.priority] || '—'}
-                          </span>
-                        </td>
-                        {/* Status column */}
-                        <td className={`px-3 py-1.5 ${rowDim}`}>
-                          <div className="flex flex-col gap-0.5">
-                            <span className={`inline-flex self-start rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${getStatusPillStyle(getStatusLabel(run.ticket?.status))}`}>
-                              {getStatusLabel(run.ticket?.status)}
-                            </span>
-                            {(() => {
-                              const assignee = subView !== 'pending' ? (run.assignedTech || run.ticket?.assignedTech) : run.ticket?.assignedTech;
-                              if (assignee) return avatarView ? (
-                                <span className="inline-flex items-center gap-1 mt-0.5" title={assignee.name}>
-                                  <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
-                                  <span className="text-[10px] text-slate-600 truncate max-w-[80px]">{assignee.name?.split(' ')[0]}</span>
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-amber-700 font-medium truncate max-w-[100px]">{assignee.name}</span>
-                              );
-                              if (run.ticket?.assignedTechId) return <span className="text-[10px] text-slate-400 italic">External</span>;
-                              return <span className="text-[10px] text-slate-300">Unassigned</span>;
-                            })()}
-                          </div>
-                        </td>
-                        {/* AI Suggestion column */}
-                        <td className={`px-3 py-1.5 ${rowDim}`}>
-                          {run.recommendation?.recommendations?.length > 0 ? (
-                            avatarView ? (
-                              <AiPicks recommendations={run.recommendation.recommendations} />
-                            ) : (
-                              <div className="text-[11px] leading-snug">
-                                <span className="text-blue-700 font-medium">{topRec?.techName}</span>
-                                {run.recommendation.recommendations.length > 1 && (
-                                  <span className="text-blue-400 ml-1 text-[10px]">+{run.recommendation.recommendations.length - 1}</span>
+              {/* Desktop: CSS-Grid compact rows.
+                  One ~52px line per ticket so the eye scans left → right once
+                  instead of stacking metadata vertically. The Pri column was
+                  dropped — priority is now encoded as the colored left border
+                  (PRIORITY_BORDER), per the redesign brief's smart-highlight
+                  pattern. Header columns stay perfectly aligned with body rows
+                  because both use the same gridTemplateColumns string built
+                  once per render below. */}
+              <div className="hidden md:block">
+                {(() => {
+                  const showDecision = subView !== 'pending';
+                  // Track which header columns are present so the template
+                  // updates atomically with the cells below it.
+                  const cols = [
+                    'minmax(280px, 1.6fr)',  // Ticket (title + #ID/category)
+                    'minmax(160px, 0.85fr)', // Requester
+                    'minmax(150px, 0.85fr)', // Status (+ assignee inline)
+                    'minmax(160px, 0.95fr)', // AI Suggestion
+                    showDecision ? '120px' : null,
+                    '125px',                  // Time
+                    showActions ? '76px' : null,
+                  ].filter(Boolean).join(' ');
+
+                  return (
+                    <>
+                      {/* Header row — light, sticky-feeling; sortable headers
+                          render as buttons so keyboard users can sort too. */}
+                      <div
+                        className="grid items-center bg-slate-50/80 border-y border-slate-200 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+                        style={{ gridTemplateColumns: cols }}
+                      >
+                        <button type="button" onClick={() => toggleSort('subject')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
+                          Ticket <SortIcon field="subject" />
+                        </button>
+                        <button type="button" onClick={() => toggleSort('requester')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
+                          Requester <SortIcon field="requester" />
+                        </button>
+                        <span className="px-3 py-2">Status</span>
+                        <span className="px-3 py-2">AI Suggestion</span>
+                        {showDecision && <span className="px-3 py-2">Decision</span>}
+                        <button type="button" onClick={() => toggleSort('createdAt')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
+                          {subView === 'pending' ? 'Analyzed' : 'Decided'} <SortIcon field="createdAt" />
+                        </button>
+                        {showActions && <span className="px-3 py-2 text-right" />}
+                      </div>
+
+                      {/* Rows */}
+                      <div>
+                        {activeItems.map((run) => {
+                          const topRec = run.recommendation?.recommendations?.[0];
+                          const flag = getTicketFlag(run);
+                          const ctx = run.reboundFrom || run.ticket?.lastReboundContext;
+                          const isReturned = !!ctx?.previousTechName;
+                          // Dim rows that are no longer actionable but still visible
+                          // (deleted/closed in FreshService while sitting in our queue).
+                          const rowDim = subView === 'pending' && flag === 'deleted'
+                            ? 'opacity-40'
+                            : subView === 'pending' && flag === 'closed'
+                              ? 'opacity-50'
+                              : '';
+                          // Smart highlight: returned-from-tech rows get a subtle
+                          // rose tint so they stand out without shouting. State-flag
+                          // backgrounds (deleted/closed/assigned) take precedence.
+                          const bgClass = subView === 'pending' && flag === 'deleted'
+                            ? 'bg-red-50/30'
+                            : subView === 'pending' && flag === 'closed'
+                              ? 'bg-slate-50'
+                              : subView === 'pending' && flag === 'assigned'
+                                ? 'bg-amber-50/30'
+                                : isReturned
+                                  ? 'bg-rose-50/40'
+                                  : newIds.has(run.id)
+                                    ? 'bg-emerald-50/60'
+                                    : '';
+                          const priClass = PRIORITY_BORDER[run.ticket?.priority] || 'border-l-transparent';
+                          const assignee = subView !== 'pending'
+                            ? (run.assignedTech || run.ticket?.assignedTech)
+                            : run.ticket?.assignedTech;
+                          const statusLabel = getStatusLabel(run.ticket?.status);
+                          const dd = showDecision ? getDisplayDecision(run) : null;
+                          // Use a div role=button instead of a real <button> so the
+                          // ⋮ action buttons inside can keep their own click behavior
+                          // without needing nested <button> hacks.
+                          return (
+                            <div
+                              key={run.id}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => handleSelectRun(run.id)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectRun(run.id); } }}
+                              className={`relative grid items-center border-b border-slate-100 border-l-[3px] ${priClass} ${bgClass} hover:bg-blue-50/60 cursor-pointer group transition-[opacity,background-color] duration-[240ms] ${removingIds.has(run.id) ? 'opacity-0' : ''} focus:outline-none focus-visible:bg-blue-50`}
+                              style={{ gridTemplateColumns: cols, minHeight: '52px' }}
+                            >
+                              {/* Ticket: title bold + small muted ID/category line */}
+                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span
+                                    className="font-semibold text-slate-800 text-[13px] truncate"
+                                    title={run.ticket?.subject || 'No subject'}
+                                  >
+                                    {run.ticket?.subject || 'No subject'}
+                                  </span>
+                                  {flag === 'deleted' && (
+                                    <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />
+                                  )}
+                                  {isReturned && (
+                                    <span
+                                      className="inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none flex-shrink-0"
+                                      title={`Returned from ${ctx.previousTechName}${ctx.unassignedAt ? ' at ' + new Date(ctx.unassignedAt).toLocaleString() : ''}${ctx.unassignedByName ? ' by ' + ctx.unassignedByName : ''}${ctx.reboundCount > 1 ? ' (rebound #' + ctx.reboundCount + ')' : ''}`}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <RotateCcw className="w-2.5 h-2.5" />
+                                      Returned
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 leading-none truncate">
+                                  <span className="font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                                  {run.ticket?.ticketCategory && (
+                                    <>
+                                      <span className="text-slate-300">·</span>
+                                      <span className="truncate">{run.ticket.ticketCategory}</span>
+                                    </>
+                                  )}
+                                  {run._siblingCount > 0 && (
+                                    <span
+                                      className="text-slate-400"
+                                      title={`${run._siblingCount} earlier run${run._siblingCount > 1 ? 's' : ''} for this ticket — switch to a sub-filter to see all`}
+                                    >
+                                      · +{run._siblingCount} earlier
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Requester: avatar + name; secondary line shown only
+                                  when there's a department or email to display. */}
+                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {avatarView && run.ticket?.requester?.name && (
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[9px] font-bold flex items-center justify-center">
+                                      {run.ticket.requester.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                                    </span>
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="text-[12px] text-slate-700 truncate">
+                                      {run.ticket?.requester?.name || '—'}
+                                    </div>
+                                    {(run.ticket?.requester?.department || run.ticket?.requester?.email) && (
+                                      <div className="text-[10px] text-slate-400 truncate">
+                                        {run.ticket?.requester?.department || run.ticket?.requester?.email}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Status pill + current assignee inline (avatar/text
+                                  follows the avatarView toggle). */}
+                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none ${getStatusPillStyle(statusLabel)}`}>
+                                    {statusLabel}
+                                  </span>
+                                  {assignee ? (
+                                    avatarView ? (
+                                      <span className="inline-flex items-center gap-1 min-w-0" title={assignee.name}>
+                                        <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
+                                        <span className="text-[10px] text-slate-600 truncate max-w-[80px]">{assignee.name?.split(' ')[0]}</span>
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-amber-700 font-medium truncate max-w-[110px]" title={assignee.name}>
+                                        {assignee.name}
+                                      </span>
+                                    )
+                                  ) : run.ticket?.assignedTechId ? (
+                                    <span className="text-[10px] text-slate-400 italic">External</span>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              {/* AI Suggestion: top pick + compact "+N" indicator
+                                  for additional candidates. AvatarView swaps in the
+                                  AiPicks visual stack (existing component). */}
+                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                {run.recommendation?.recommendations?.length > 0 ? (
+                                  avatarView ? (
+                                    <AiPicks recommendations={run.recommendation.recommendations} />
+                                  ) : (
+                                    <div className="flex items-center gap-1.5 min-w-0 text-[12px] leading-snug">
+                                      <span className="text-blue-700 font-medium truncate" title={topRec?.techName}>
+                                        {topRec?.techName}
+                                      </span>
+                                      {run.recommendation.recommendations.length > 1 && (
+                                        <span className="flex-shrink-0 text-[10px] text-blue-400 font-semibold">
+                                          +{run.recommendation.recommendations.length - 1}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )
+                                ) : (
+                                  <span className="text-slate-300 text-[12px]">—</span>
                                 )}
                               </div>
-                            )
-                          ) : <span className="text-slate-300">—</span>}
-                        </td>
-                        {subView !== 'pending' && (() => {
-                          const dd = getDisplayDecision(run);
-                          return (
-                            <td className={`px-3 py-1.5 ${rowDim}`}>
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${dd.pillClass}`} title={dd.tooltip || undefined}>
-                                {dd.label}
-                              </span>
-                            </td>
-                          );
-                        })()}
-                        <td className={`px-3 py-1.5 text-slate-400 whitespace-nowrap ${rowDim}`}>{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</td>
-                        {showActions && (
-                          <td className="px-3 py-1.5 relative">
-                            <div className={`flex items-center justify-end gap-0.5 transition-opacity ${quickApproveId === run.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                              {run.recommendation?.recommendations?.length > 0 && flag !== 'deleted' && (
-                                <button onClick={(e) => openQuickApprove(e, run)} className={`p-1 rounded transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 hover:text-green-700 hover:bg-green-50'}`} title="Quick approve"><Check className="w-3.5 h-3.5" /></button>
+
+                              {/* Decision pill (non-pending tabs only) */}
+                              {showDecision && (
+                                <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                  <span
+                                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${dd.pillClass}`}
+                                    title={dd.tooltip || undefined}
+                                  >
+                                    {dd.label}
+                                  </span>
+                                </div>
                               )}
-                              {isAdmin && (
-                                <>
-                                  <button onClick={(e) => handleDismiss(e, run.id)} className="p-1 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 rounded" title="Dismiss"><XCircle className="w-3.5 h-3.5" /></button>
-                                  {confirmDeleteId === run.id ? (
-                                    <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
-                                  ) : (
-                                    <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
-                                  )}
-                                </>
+
+                              {/* Compact timestamp ("Apr 23, 4:13 PM") */}
+                              <div className={`min-w-0 px-3 py-2 text-[11px] text-slate-500 whitespace-nowrap truncate ${rowDim}`}>
+                                {fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}
+                              </div>
+
+                              {/* Actions (pending tab only): Quick Approve ✓,
+                                  Dismiss, Delete — appear on row hover, identical
+                                  behavior to the previous table version. */}
+                              {showActions && (
+                                <div className="px-3 py-2 relative">
+                                  <div className={`flex items-center justify-end gap-0.5 transition-opacity ${quickApproveId === run.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
+                                    {run.recommendation?.recommendations?.length > 0 && flag !== 'deleted' && (
+                                      <button onClick={(e) => openQuickApprove(e, run)} className={`p-1 rounded transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 hover:text-green-700 hover:bg-green-50'}`} title="Quick approve"><Check className="w-3.5 h-3.5" /></button>
+                                    )}
+                                    {isAdmin && (
+                                      <>
+                                        <button onClick={(e) => handleDismiss(e, run.id)} className="p-1 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 rounded" title="Dismiss"><XCircle className="w-3.5 h-3.5" /></button>
+                                        {confirmDeleteId === run.id ? (
+                                          <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
+                                        ) : (
+                                          <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                  <QuickApprovePopover run={run} quickApproveId={quickApproveId} popoverRef={quickApproveRef} {...qaInnerProps} />
+                                </div>
                               )}
                             </div>
-                            <QuickApprovePopover run={run} quickApproveId={quickApproveId} popoverRef={quickApproveRef} {...qaInnerProps} />
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
             </>
           )}
         </div>
 
-        {/* Pagination controls for pending queue */}
-        {subView === 'pending' && queue.total > queuePageSize && (
-          <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/50 px-4 py-2.5 animate-in fade-in duration-150">
-            <span className="text-[11px] text-slate-500">
-              Showing {queuePage * queuePageSize + 1}–{Math.min((queuePage + 1) * queuePageSize, queue.total)} of {queue.total}
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setQueuePage(p => Math.max(0, p - 1))}
-                disabled={queuePage === 0}
-                className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                Previous
-              </button>
-              {Array.from({ length: Math.ceil(queue.total / queuePageSize) }, (_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setQueuePage(i)}
-                  className={`w-7 h-7 text-[11px] font-medium rounded border transition-colors ${i === queuePage ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
-                >
-                  {i + 1}
-                </button>
-              ))}
-              <button
-                onClick={() => setQueuePage(p => Math.min(Math.ceil(queue.total / queuePageSize) - 1, p + 1))}
-                disabled={queuePage >= Math.ceil(queue.total / queuePageSize) - 1}
-                className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                Next
-              </button>
+        {/* Pagination controls for pending queue.
+            Threshold is the smallest selectable page size (10) rather than the
+            current pageSize, so the "Per page" selector remains reachable when
+            the user has e.g. 30 rows but is currently set to 50/page. */}
+        {subView === 'pending' && queue.total > PAGE_SIZE_OPTIONS[0] && (() => {
+          const totalPages = Math.max(1, Math.ceil(queue.total / queuePageSize));
+          return (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/50 px-4 py-2.5 animate-in fade-in duration-150">
+              <div className="flex items-center gap-3 text-[11px] text-slate-500">
+                <span>
+                  Showing {queuePage * queuePageSize + 1}–{Math.min((queuePage + 1) * queuePageSize, queue.total)} of {queue.total}
+                </span>
+                <PageSizeSelector value={pageSize} options={PAGE_SIZE_OPTIONS} onChange={setPageSize} />
+              </div>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setQueuePage(p => Math.max(0, p - 1))}
+                    disabled={queuePage === 0}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                  {Array.from({ length: totalPages }, (_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setQueuePage(i)}
+                      className={`w-7 h-7 text-[11px] font-medium rounded border transition-colors ${i === queuePage ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setQueuePage(p => Math.min(totalPages - 1, p + 1))}
+                    disabled={queuePage >= totalPages - 1}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Pagination controls for all non-pending result tabs */}
-        {subView !== 'pending' && activeResultsTotal > resultsPageSize && (
-          <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/50 px-4 py-2.5 animate-in fade-in duration-150">
-            <span className="text-[11px] text-slate-500">
-              Showing {resultsPageStart + 1}–{Math.min(resultsPageEnd, activeResultsTotal)} of {activeResultsTotal}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setResultsPage((p) => Math.max(0, p - 1))}
-                disabled={resultsPage === 0}
-                className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                Previous
-              </button>
-              <span className="text-[11px] text-slate-500 tabular-nums">
-                Page {resultsPage + 1} of {Math.ceil(activeResultsTotal / resultsPageSize)}
-              </span>
-              <button
-                onClick={() => setResultsPage((p) => Math.min(Math.ceil(activeResultsTotal / resultsPageSize) - 1, p + 1))}
-                disabled={resultsPage >= Math.ceil(activeResultsTotal / resultsPageSize) - 1}
-                className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                Next
-              </button>
+        {subView !== 'pending' && activeResultsTotal > PAGE_SIZE_OPTIONS[0] && (() => {
+          const totalPages = Math.max(1, Math.ceil(activeResultsTotal / resultsPageSize));
+          return (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/50 px-4 py-2.5 animate-in fade-in duration-150">
+              <div className="flex items-center gap-3 text-[11px] text-slate-500">
+                <span>
+                  Showing {resultsPageStart + 1}–{Math.min(resultsPageEnd, activeResultsTotal)} of {activeResultsTotal}
+                </span>
+                <PageSizeSelector value={pageSize} options={PAGE_SIZE_OPTIONS} onChange={setPageSize} />
+              </div>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setResultsPage((p) => Math.max(0, p - 1))}
+                    disabled={resultsPage === 0}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-[11px] text-slate-500 tabular-nums">
+                    Page {resultsPage + 1} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setResultsPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={resultsPage >= totalPages - 1}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Queued for business hours — collapsible (collapsed by default) */}

@@ -2,6 +2,44 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [2.01-preview] - 2026-04-23
+
+### Assignment Review — high-throughput decision interface
+
+- **Compact CSS-Grid rows** replace the wrapped `<table>` — single ~52px line per ticket: `[ Title + #ID/category ] [ Requester ] [ Status + assignee ] [ AI Suggestion ] [ Decision ] [ Time ] [ Actions ]`. Eyes scan left → right once, no vertical jumping. Roughly 2× more tickets visible per screen.
+- **AI Suggestion promoted to first-class column** — top pick + compact `+N` indicator for additional candidates, reinforcing AI as a decision driver.
+- **Standardized pills** — Status (Open / Pending / Closed / Resolved / etc.) and Decision (Auto / Handled in FS / Approved / Override / Noise / Rejected) all rendered as small rounded pills with consistent color semantics.
+- **Smart row highlighting** — colored 3px left border encodes priority (transparent = Low, slate = Medium, orange = High, red = Urgent), so the dedicated Pri column was dropped. Returned-from-tech rows get a subtle rose-tinted background.
+- **Compact timestamps** — normalized to `Apr 23, 4:13 PM` (dropped weekday + year).
+- **Configurable page size** — new `Per page` selector (10 / 25 / 50 / 100) on both the Pending queue pager and the Decided/Dismissed/Deleted result pagers. Default lowered from **50 → 25**, persisted in `localStorage`. Page resets to 0 when size changes to prevent landing out of bounds.
+- **Lighter filter bar** — search input promoted to leading slot, larger (`w-64 sm:w-80`) with a soft blue focus ring. The heavy `[ FILTERS / N ACTIVE ]` pill replaced with a lightweight inline filter icon + count. Default-state filter chips flattened (`bg-slate-100/70`, no border/shadow).
+- **Pagination footer visibility** — now appears whenever `total > 10`, not `total > current page size`, so the size selector stays reachable when results are modest. Prev/Next buttons stay hidden when there's only one page.
+
+### Dashboard — sortable compact table
+
+- **Sticky sortable column header** (`TechCompactHeader.jsx`) and shared CSS-Grid template (`compactLayout.js`) keep the header and every row pixel-aligned. Click any column (Open / Today / Self / App / Asgn / Done / Rej / CSAT) to sort; click again to flip direction. Defaults to high → low for numeric, A → Z for name.
+- **Sort persistence** — choice stored in `localStorage` under `compactSort` so it survives reloads.
+- **Compact legend popover** (`LegendPopover.jsx`) — replaces the full-width legend strip with a hover/focus info icon. Renders via React Portal at `document.body` so it escapes the per-row `animate-slideInLeft` transform that was trapping z-index and clipping it behind the sticky header.
+- **CategoryFilter restyled** as a pill with circular icon badge, matching the Timeline Explorer / Assignment buttons in the page header.
+- **Header logo wordmark crop fix** — the brand wordmark PNG has ~65% transparent vertical padding, so the rendered logo looked tiny. Wrapped in a fixed-height crop container with the image rendered at 3× wrapper height so the visible logo content fills after center-clipping. Mobile + desktop.
+- **Control row condensed** — Last Updated / Refreshing collapsed to icon + short time only, primary action buttons (Map / Settings / Logout) bumped to 2x2-rem touch targets with rounded-lg hover states.
+- **Tech card assigners popup** now portal-rendered at `document.body` — escapes the per-row animation transform that was trapping it behind the sticky table header. Repositions on scroll/resize so it stays anchored to its trigger.
+- **Stats banner no longer sticky** — scrolls with the page, freeing vertical space. Only the compact column header is sticky now (top-[88px] desktop / top-[52px] mobile).
+
+### Monthly Calendar refinements
+
+- **Hover-to-zoom delay** — day cells now require 1 second of continuous hover before the 1.5× zoom panel appears. Brushing the mouse across the grid no longer triggers it.
+- **Tech sidebar** redesigned as flat list rows instead of card-style chips (less chrome, denser).
+- **CSAT indicator** simplified to inline ★+count (no chip background) in the default view; richer panel kept for the hover state.
+- **Leave indicators consolidated** — three colored pills (OFF / WFH / OTH) collapsed into a single muted "N on leave" chip with the breakdown in the tooltip.
+- **Quieter empty days** — dropped the redundant "No activity" caption.
+
+### Files touched
+
+- Frontend only — no backend code, no DB migrations, no security-relevant changes in this release.
+- Modified: `frontend/src/pages/AssignmentReview.jsx`, `frontend/src/pages/Dashboard.jsx`, `frontend/src/components/TechCardCompact.jsx`, `frontend/src/components/MonthlyCalendar.jsx`, `frontend/src/components/CategoryFilter.jsx`, `frontend/src/components/FilterBar.jsx`, `frontend/src/components/FilterDropdown.jsx`.
+- Added: `frontend/src/components/TechCompactHeader.jsx`, `frontend/src/components/LegendPopover.jsx`, `frontend/src/components/compactLayout.js`.
+
 ## [2.0-preview] - 2026-04-23
 
 ### Brand identity launch + login redesign

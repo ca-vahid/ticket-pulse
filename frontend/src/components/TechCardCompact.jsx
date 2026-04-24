@@ -1,10 +1,12 @@
 import { useNavigate } from 'react-router-dom';
 import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, ChevronDown, ChevronUp, Bot, RotateCcw } from 'lucide-react';
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
 import { prefetchTechDetail } from '../hooks/usePrefetch';
 import ExpandableTicketList, { useGroupedTickets, getTicketsForView } from './ExpandableTicketList';
+import { getCompactGridTemplate } from './compactLayout';
 
 /**
  * Deep-link URL for the Bounced tab with a date range matching the current
@@ -69,8 +71,32 @@ const getInitials = (name) => {
 export default function TechCardCompact({ technician, onHide, rank, selectedDate, selectedWeek, selectedMonth, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [], forceExpand = null }) {
   const navigate = useNavigate();
   const [showAssignersPopup, setShowAssignersPopup] = useState(false);
+  const [assignersPopupPos, setAssignersPopupPos] = useState(null);
+  const assignersTriggerRef = useRef(null);
   const [localExpanded, setLocalExpanded] = useState(false);
   const hoverTimerRef = useRef(null);
+
+  // When the assigners popup opens, measure the trigger and stash the
+  // viewport-relative position. We render the popup via a Portal at
+  // document.body so it escapes the per-row animate-slideInLeft transform
+  // (which creates a stacking context that traps z-index, hiding the popup
+  // behind the sticky table header).
+  useLayoutEffect(() => {
+    if (!showAssignersPopup || !assignersTriggerRef.current) return;
+    const update = () => {
+      const rect = assignersTriggerRef.current?.getBoundingClientRect();
+      if (rect) {
+        setAssignersPopupPos({ left: rect.left, top: rect.top });
+      }
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [showAssignersPopup]);
 
   // forceExpand (true/false) overrides local state; null = use local
   const isExpanded = forceExpand !== null ? forceExpand : localExpanded;
@@ -115,6 +141,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
     if (e.target.closest('.hide-button')) return;
     if (e.target.closest('.expand-toggle')) return;
     if (e.target.closest('.expanded-tickets')) return;
+    if (e.target.closest('.no-row-nav')) return;
 
     navigate(`/technician/${technician.id}`, {
       state: {
@@ -181,7 +208,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
       : technician.csatAverage;
 
   const hasCSAT = csatCount > 0;
-  
+
   // CSAT color based on average
   const getCSATColor = (avg) => {
     if (!avg) return 'text-gray-400';
@@ -210,28 +237,42 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
   // Use "Open" status count for row background color
   const rowBgColor = getRowBackgroundColor(openOnlyCount, maxOpenCount);
 
+  const gridTemplate = getCompactGridTemplate(viewMode);
+
+  // Active leave for the current view's reference date (used in the name cell)
+  const activeLeave = (() => {
+    const dateStr = viewMode === 'daily'
+      ? (selectedDate ? (typeof selectedDate === 'string' ? selectedDate : selectedDate.toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10))
+      : new Date().toISOString().slice(0, 10);
+    return getLeaveForDate(technician.leaveInfo, dateStr);
+  })();
+  const leaveBadge = activeLeave ? getLeaveBadge(activeLeave) : null;
+
   return (
     <div
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`${rowBgColor} border border-gray-200 rounded-lg shadow-sm hover:shadow-lg transition-all duration-300 cursor-pointer group relative`}
+      className={`${rowBgColor} border border-gray-200 rounded-lg hover:shadow-md hover:border-gray-300 transition-all duration-200 cursor-pointer group relative`}
     >
-      {/* Main compact row */}
-      <div className="px-4 py-3 flex items-center gap-4">
-        {/* Hide Button */}
-        <button
-          onClick={handleHideToggle}
-          className="hide-button absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-100 rounded transition-opacity z-10"
-          title="Hide technician"
-        >
-          <EyeOff className="w-3 h-3 text-gray-400" />
-        </button>
+      {/* Hide Button */}
+      <button
+        onClick={handleHideToggle}
+        className="hide-button absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-100 rounded transition-opacity z-10"
+        title="Hide technician"
+      >
+        <EyeOff className="w-3 h-3 text-gray-400" />
+      </button>
 
-        {/* Expand toggle - always reserves space for alignment; only interactive when tickets exist */}
+      {/* Main row — CSS Grid template matches TechCompactHeader */}
+      <div
+        className="grid items-center gap-3 px-3 py-2"
+        style={{ gridTemplateColumns: gridTemplate }}
+      >
+        {/* Col 1: Expand chevron */}
         <button
           onClick={hasExpandableTickets ? handleToggleExpand : undefined}
-          className={`expand-toggle flex-shrink-0 p-1 rounded transition-colors w-6 h-6 flex items-center justify-center ${
+          className={`expand-toggle p-1 rounded transition-colors w-6 h-6 flex items-center justify-center ${
             hasExpandableTickets ? 'hover:bg-gray-200 cursor-pointer' : 'cursor-default'
           }`}
           title={hasExpandableTickets ? (isExpanded ? 'Collapse tickets' : 'Expand tickets') : undefined}
@@ -248,13 +289,13 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           )}
         </button>
 
-        {/* Profile Photo */}
-        <div className="flex-shrink-0">
+        {/* Col 2: Avatar + Name + inline pills */}
+        <div className="flex items-center gap-2 min-w-0">
           {technician.photoUrl ? (
             <img
               src={technician.photoUrl}
               alt={technician.name}
-              className="w-10 h-10 rounded-full object-cover shadow-md border border-gray-300 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer"
+              className="w-9 h-9 rounded-full object-cover shadow-sm border border-gray-300 flex-shrink-0 transition-all duration-300 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50"
               onError={(e) => {
                 // If the image URL is broken (404, CORS, etc.), hide the broken
                 // image so the alt text doesn't leak the technician's name.
@@ -262,21 +303,17 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               }}
             />
           ) : (
-            <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-10 h-10 shadow-md border border-blue-400 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer">
-              <span className="text-xs font-bold text-white">
+            <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-9 h-9 shadow-sm border border-blue-400 flex-shrink-0 transition-all duration-300 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50">
+              <span className="text-[11px] font-bold text-white">
                 {getInitials(technician.name)}
               </span>
             </div>
           )}
-        </div>
 
-        {/* Name */}
-        <div className="flex items-center gap-2 w-[160px] flex-shrink-0">
           {isTopPerformer && (
-            <div className={`
-              flex items-center justify-center rounded-full w-5 h-5 flex-shrink-0
-              ${rank === 1 ? 'bg-yellow-400' : rank === 2 ? 'bg-gray-300' : 'bg-orange-400'}
-            `}>
+            <div className={`flex items-center justify-center rounded-full w-5 h-5 flex-shrink-0 ${
+              rank === 1 ? 'bg-yellow-400' : rank === 2 ? 'bg-gray-300' : 'bg-orange-400'
+            }`}>
               {rank === 1 ? (
                 <Trophy className="w-3 h-3 text-yellow-900" />
               ) : (
@@ -284,47 +321,41 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               )}
             </div>
           )}
+
           <span className="font-semibold text-sm text-gray-900 truncate">
             {technician.name}
           </span>
-        </div>
 
-        {/* Badges (fixed width so day cells always align) */}
-        <div className="flex items-center gap-1 w-[90px] flex-shrink-0">
           {highSelfPickRate && (
-            <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-100 rounded-full">
+            <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-100 rounded-full flex-shrink-0">
               <Star className="w-2 h-2 text-purple-600 fill-purple-600" />
               <span className="text-[8px] text-purple-700 font-semibold">SELF</span>
             </div>
           )}
-          {(() => {
-            const dateStr = viewMode === 'daily'
-              ? (selectedDate ? (typeof selectedDate === 'string' ? selectedDate : selectedDate.toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10))
-              : new Date().toISOString().slice(0, 10);
-            const leave = getLeaveForDate(technician.leaveInfo, dateStr);
-            if (!leave) return null;
-            const badge = getLeaveBadge(leave);
-            return (
-              <div className={`flex items-center gap-0.5 px-1.5 py-0.5 ${badge.badgeBg} ${badge.badgeText} border ${badge.badgeBorder} rounded-full`} title={getLeaveTooltip(leave)}>
-                <div className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
-                <span className="text-[8px] font-semibold">{badge.shortText}</span>
-              </div>
-            );
-          })()}
+
+          {leaveBadge && (
+            <div
+              className={`flex items-center gap-0.5 px-1.5 py-0.5 ${leaveBadge.badgeBg} ${leaveBadge.badgeText} border ${leaveBadge.badgeBorder} rounded-full flex-shrink-0`}
+              title={getLeaveTooltip(activeLeave)}
+            >
+              <div className={`w-1.5 h-1.5 rounded-full ${leaveBadge.dotClass}`} />
+              <span className="text-[8px] font-semibold">{leaveBadge.shortText}</span>
+            </div>
+          )}
         </div>
 
-        {/* Weekly Breakdown Mini-Calendar - Only show in weekly view */}
-        {viewMode === 'weekly' && technician.dailyBreakdown && (
-          <div className="flex items-center gap-1 ml-4">
-            {technician.dailyBreakdown.map((day, index) => {
+        {/* Col 3: Weekly heatmap (weekly) OR Open count (daily) */}
+        {viewMode === 'weekly' ? (
+          <div className="flex items-center justify-center gap-1 no-row-nav">
+            {(technician.dailyBreakdown || []).map((day, index) => {
               const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
               const colorClass = getTicketColor(day.total, maxDailyCount);
-              
+
               const dateStyling = getDateStyling(day.date, { variant: 'box' });
               const holidayTooltip = getHolidayTooltip(day.date);
               const isWeekendDay = dateStyling.isWeekend;
               const isHolidayDay = dateStyling.isHoliday;
-              
+
               const dayLeave = getLeaveForDate(technician.leaveInfo, day.date);
               const leaveTooltip = getLeaveTooltip(dayLeave);
               const leaveDot = getLeaveDotClass(dayLeave);
@@ -334,27 +365,27 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               if (holidayTooltip) tooltipParts.push(holidayTooltip);
               if (leaveTooltip) tooltipParts.push(leaveTooltip);
               const fullTooltip = tooltipParts.join('\n');
-              
-              const labelClass = isHolidayDay 
-                ? dateStyling.isCanadian 
-                  ? 'text-rose-600 font-bold' 
+
+              const labelClass = isHolidayDay
+                ? dateStyling.isCanadian
+                  ? 'text-rose-600 font-bold'
                   : 'text-indigo-500 font-bold'
-                : isWeekendDay 
-                  ? 'text-slate-500 font-semibold' 
+                : isWeekendDay
+                  ? 'text-slate-500 font-semibold'
                   : 'text-gray-500 font-semibold';
-              
+
               const leaveStyle = dayLeave ? getLeaveStyle(dayLeave.category) : null;
               const dayLeaveIsHalf = isHalfDayLeave(dayLeave);
               const dayLeaveSplit = dayLeaveIsHalf ? getLeaveSplit(dayLeave) : null;
 
               const containerClass = dayLeave
-                ? `${leaveStyle.bgClass} rounded-lg p-0.5`
+                ? `${leaveStyle.bgClass} rounded p-0.5`
                 : isHolidayDay
                   ? dateStyling.isCanadian
-                    ? 'bg-rose-50/50 rounded-lg p-0.5'
-                    : 'bg-indigo-50/40 rounded-lg p-0.5'
+                    ? 'bg-rose-50/50 rounded p-0.5'
+                    : 'bg-indigo-50/40 rounded p-0.5'
                   : isWeekendDay
-                    ? 'bg-slate-50/50 rounded-lg p-0.5'
+                    ? 'bg-slate-50/50 rounded p-0.5'
                     : '';
 
               const getBoxClasses = () => {
@@ -394,7 +425,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               return (
                 <div
                   key={day.date}
-                  className={`flex flex-col items-center cursor-pointer w-[38px] ${containerClass}`}
+                  className={`flex flex-col items-center cursor-pointer w-[34px] ${containerClass}`}
                   title={fullTooltip}
                   onClick={handleDayBoxClick}
                 >
@@ -410,7 +441,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                       <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
                     </div>
                   </div>
-                  <div className={`relative w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
+                  <div className={`relative w-7 h-7 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
                     {dayLeaveSplit?.isSplit && (
                       <div className={`absolute inset-0 ${dayLeaveSplit.overlayClass} pointer-events-none`} />
                     )}
@@ -420,69 +451,66 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               );
             })}
           </div>
-        )}
-
-        {/* Open Count - Only show in daily view */}
-        {viewMode === 'daily' && (
-          <div className="flex items-center justify-center gap-1 w-[80px] flex-shrink-0">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-900 leading-none">{openOnlyCount}</div>
-              <div className="text-[8px] text-gray-600 uppercase font-bold">Open</div>
-            </div>
+        ) : (
+          /* Daily: Open count */
+          <div className="flex flex-col items-center justify-center" title={`${openOnlyCount} open${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`}>
+            <div className="text-2xl font-bold text-gray-900 leading-none">{openOnlyCount}</div>
             {pendingCount > 0 && (
-              <div className="text-[9px] text-gray-500">
-                ({pendingCount}p)
-              </div>
+              <div className="text-[9px] text-gray-500 mt-0.5">+{pendingCount}p</div>
             )}
           </div>
         )}
 
-        {/* Total Count */}
-        <div className="flex flex-col items-center justify-center flex-1 min-w-[60px]">
-          <div className="text-2xl font-bold text-indigo-600 leading-none">{totalTickets}</div>
-          <div className="text-[8px] text-indigo-400 uppercase font-semibold mt-0.5">{viewMode === 'weekly' || viewMode === 'monthly' ? 'total' : 'today'}</div>
+        {/* Col 4: Total / Today */}
+        <div className="flex items-center justify-center">
+          <span className="text-2xl font-bold text-indigo-600 leading-none">{totalTickets}</span>
         </div>
 
-        {/* Metrics - fixed-slot layout (Self · App · Asgn · Done · Rej · CSAT)
-            so all techs align vertically; optional metrics show as muted
-            placeholders when their count is 0. */}
-        <div className="flex items-center gap-3 flex-shrink-0">
-          {/* Self - always primary */}
-          <div className="flex flex-col items-center justify-center px-3 py-1.5 bg-purple-100 rounded border border-purple-200 w-[50px] h-[60px]">
-            <Hand className="w-4 h-4 text-purple-700 mb-1" />
-            <div className="text-base font-bold text-purple-900">{selfPicked}</div>
-            <div className="text-[7px] text-purple-700 uppercase font-bold">Self</div>
+        {/* Col 5: Self */}
+        <div className="flex items-center justify-center">
+          <div className="flex items-center justify-center w-11 h-11 rounded-md bg-purple-50 border border-purple-200">
+            <div className="flex flex-col items-center leading-none">
+              <Hand className="w-3.5 h-3.5 text-purple-600 mb-0.5" />
+              <span className="text-base font-bold text-purple-800">{selfPicked}</span>
+            </div>
           </div>
+        </div>
 
-          {/* App Assigned - muted when 0 */}
+        {/* Col 6: App */}
+        <div className="flex items-center justify-center">
           <div
-            className={`flex flex-col items-center justify-center px-3 py-1.5 rounded border w-[50px] h-[60px] ${
+            className={`flex items-center justify-center w-11 h-11 rounded-md border ${
               appAssigned > 0
                 ? 'bg-sky-50 border-sky-200'
                 : 'bg-slate-50/50 border-slate-100 opacity-50'
             }`}
             title={appAssigned > 0 ? 'App-assigned tickets' : 'No app-assigned tickets'}
           >
-            <Bot className={`w-4 h-4 mb-1 ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`} />
-            <div className={`text-base font-bold ${appAssigned > 0 ? 'text-sky-800' : 'text-slate-300'}`}>{appAssigned}</div>
-            <div className={`text-[7px] uppercase font-bold ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`}>App</div>
+            <div className="flex flex-col items-center leading-none">
+              <Bot className={`w-3.5 h-3.5 mb-0.5 ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`} />
+              <span className={`text-base font-bold ${appAssigned > 0 ? 'text-sky-800' : 'text-slate-300'}`}>{appAssigned}</span>
+            </div>
           </div>
+        </div>
 
-          {/* Assigned (by coordinator) - always shown */}
-          <div className="flex flex-col items-center justify-center w-[45px] h-[60px]">
-            <Send className="w-4 h-4 text-orange-600 mb-1" />
-            <div className="text-base font-bold text-orange-800">{assigned}</div>
-            <div className="text-[7px] text-orange-600 uppercase font-medium">Asgn</div>
+        {/* Col 7: Asgn (icon-only column) */}
+        <div className="flex items-center justify-center">
+          <div className="flex items-center gap-1" title={`Coordinator-assigned: ${assigned}`}>
+            <Send className="w-4 h-4 text-orange-600" />
+            <span className="text-base font-bold text-orange-800">{assigned}</span>
           </div>
+        </div>
 
-          {/* Done - always shown */}
-          <div className="flex flex-col items-center justify-center w-[45px] h-[60px]">
-            <CheckSquare className="w-4 h-4 text-green-600 mb-1" />
-            <div className="text-base font-bold text-green-800">{closed}</div>
-            <div className="text-[7px] text-green-600 uppercase font-medium">Done</div>
+        {/* Col 8: Done */}
+        <div className="flex items-center justify-center">
+          <div className="flex items-center gap-1" title={`Closed: ${closed}`}>
+            <CheckSquare className="w-4 h-4 text-green-600" />
+            <span className="text-base font-bold text-green-800">{closed}</span>
           </div>
+        </div>
 
-          {/* Rejected - count for SELECTED period; clickable when > 0, muted placeholder when 0 */}
+        {/* Col 9: Rejected (clickable when > 0) */}
+        <div className="flex items-center justify-center">
           {rejectedDisplay > 0 ? (
             <button
               type="button"
@@ -490,7 +518,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                 e.stopPropagation();
                 navigate(buildBouncedUrl(technician.id, viewMode, selectedDate, selectedWeek, selectedMonth));
               }}
-              className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-red-50 rounded border border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer"
+              className="no-row-nav flex items-center gap-1 px-1.5 py-1 rounded hover:bg-red-100 transition-colors cursor-pointer"
               title={
                 'Rejected tickets — picked up then put back in queue\n' +
                 `Selected ${periodLabel}: ${rejectedDisplay}\n` +
@@ -498,61 +526,67 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                 'Click to drill down'
               }
             >
-              <RotateCcw className="w-4 h-4 text-red-500 mb-1" />
-              <div className="text-base font-bold text-red-700">{rejectedDisplay}</div>
-              <div className="text-[7px] text-red-500 uppercase font-bold">Rej</div>
+              <RotateCcw className="w-4 h-4 text-red-500" />
+              <span className="text-base font-bold text-red-700">{rejectedDisplay}</span>
             </button>
           ) : (
             <div
-              className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-slate-50/50 rounded border border-slate-100 opacity-50"
+              className="flex items-center gap-1 opacity-40"
               title={
                 `No bounced tickets ${periodLabel}\n` +
                 `Last 7d: ${technician.rejected7d || 0}  ·  Last 30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}`
               }
             >
-              <RotateCcw className="w-4 h-4 text-slate-300 mb-1" />
-              <div className="text-base font-bold text-slate-300">0</div>
-              <div className="text-[7px] text-slate-300 uppercase font-bold">Rej</div>
-            </div>
-          )}
-
-          {/* CSAT - muted when 0 */}
-          {hasCSAT ? (
-            <div className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-yellow-50 rounded border border-yellow-200" title={`Average: ${csatAverage?.toFixed(1)}/4`}>
-              <Star className={`w-4 h-4 ${getCSATColor(csatAverage)} mb-1`} />
-              <div className={`text-base font-bold ${getCSATColor(csatAverage)}`}>{csatCount}</div>
-              <div className="text-[7px] text-yellow-700 uppercase font-bold">CSAT</div>
-            </div>
-          ) : (
-            <div
-              className="flex flex-col items-center justify-center w-[45px] h-[60px] bg-slate-50/50 rounded border border-slate-100 opacity-50"
-              title="No CSAT responses in this period"
-            >
-              <Star className="w-4 h-4 text-slate-300 mb-1" />
-              <div className="text-base font-bold text-slate-300">0</div>
-              <div className="text-[7px] text-slate-300 uppercase font-bold">CSAT</div>
+              <RotateCcw className="w-4 h-4 text-slate-400" />
+              <span className="text-base font-bold text-slate-400">0</span>
             </div>
           )}
         </div>
 
-        {/* Assigners Badges / Popup */}
-        <div className="flex items-center gap-1 ml-2 w-[120px] flex-shrink-0 relative">
+        {/* Col 10: CSAT */}
+        <div className="flex items-center justify-center">
+          {hasCSAT ? (
+            <div className="flex items-center gap-1" title={`Average: ${csatAverage?.toFixed(1)}/4 (${csatCount} responses)`}>
+              <Star className={`w-4 h-4 ${getCSATColor(csatAverage)}`} />
+              <span className={`text-base font-bold ${getCSATColor(csatAverage)}`}>{csatCount}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 opacity-40" title="No CSAT responses in this period">
+              <Star className="w-4 h-4 text-slate-400" />
+              <span className="text-base font-bold text-slate-400">0</span>
+            </div>
+          )}
+        </div>
+
+        {/* Col 11: Assigners (icon + count, hover popup in weekly view) */}
+        <div className="flex items-center justify-start relative no-row-nav">
           {viewMode === 'weekly' ? (
             technician.assigners && technician.assigners.length > 0 ? (
               <div
+                ref={assignersTriggerRef}
                 className="relative"
                 onMouseEnter={() => setShowAssignersPopup(true)}
                 onMouseLeave={() => setShowAssignersPopup(false)}
               >
-                <div className="flex items-center gap-1 px-2 py-1 bg-orange-100 rounded-full cursor-help">
+                <div className="flex items-center gap-1 px-2 py-0.5 bg-orange-100 rounded-full cursor-help">
                   <Users className="w-3 h-3 text-orange-600" />
-                  <span className="text-[9px] font-bold text-orange-800">
+                  <span className="text-[10px] font-bold text-orange-800">
                     {technician.assigners.length}
                   </span>
                 </div>
 
-                {showAssignersPopup && (
-                  <div className="absolute bottom-full left-0 mb-2 z-50 bg-white border-2 border-orange-300 rounded-lg shadow-xl p-2 min-w-[150px]">
+                {showAssignersPopup && assignersPopupPos && createPortal(
+                  <div
+                    className="fixed z-[100] bg-white border-2 border-orange-300 rounded-lg shadow-xl p-2 min-w-[160px] pointer-events-none"
+                    style={{
+                      // Anchor above the trigger; translateY(-100%) shifts the
+                      // popup up by its own height. 8px gap between popup and
+                      // trigger via the extra -8.
+                      left: assignersPopupPos.left,
+                      top: assignersPopupPos.top - 8,
+                      transform: 'translateY(-100%)',
+                    }}
+                  >
                     <div className="text-[8px] text-gray-500 uppercase font-bold mb-1">Assigned by:</div>
                     <div className="space-y-1">
                       {technician.assigners.map((assigner, idx) => (
@@ -564,15 +598,16 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
             ) : (
-              <div className="text-[9px] text-gray-400">—</div>
+              <span className="text-[10px] text-gray-300">—</span>
             )
           ) : (
             technician.assigners && technician.assigners.length > 0 ? (
-              <>
+              <div className="flex items-center gap-1 flex-wrap">
                 {technician.assigners.slice(0, 2).map((assigner, idx) => {
                   const nameParts = assigner.name.split(' ');
                   const initials = nameParts.map(p => p[0]).join('').substring(0, 2);
@@ -580,7 +615,8 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                   return (
                     <div
                       key={idx}
-                      className="flex items-center gap-0.5 px-1.5 py-0.5 bg-gradient-to-r from-orange-100 to-orange-200 border border-orange-300 rounded-full shadow-sm"
+                      className="flex items-center gap-0.5 px-1.5 py-0.5 bg-gradient-to-r from-orange-100 to-orange-200 border border-orange-300 rounded-full"
+                      title={`${assigner.name}: ${assigner.count}`}
                     >
                       <span className="text-[9px] font-semibold text-orange-800">
                         {initials}
@@ -592,13 +628,13 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                   );
                 })}
                 {technician.assigners.length > 2 && (
-                  <div className="text-[9px] text-gray-500 px-1">
+                  <div className="text-[9px] text-gray-500 px-0.5">
                     +{technician.assigners.length - 2}
                   </div>
                 )}
-              </>
+              </div>
             ) : (
-              <div className="text-[9px] text-gray-400">—</div>
+              <span className="text-[10px] text-gray-300">—</span>
             )
           )}
         </div>

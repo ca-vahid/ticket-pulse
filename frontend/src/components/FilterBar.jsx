@@ -49,28 +49,18 @@ export default function FilterBar({
 
   return (
     <div className="flex flex-wrap items-center gap-2 py-1">
-      {/* Active filter count pill — replaces the old "FILTERS" label and adds a count */}
-      <span
-        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] shadow-sm ${
-          activeCount > 0
-            ? 'border-blue-200 bg-blue-50 text-blue-700'
-            : 'border-slate-200 bg-slate-50 text-slate-500'
-        }`}
-      >
-        <Filter className="h-3 w-3" />
-        {activeCount > 0 ? `${activeCount} active` : 'Filters'}
-      </span>
-
-      {/* Search box — first because it's the highest-leverage filter */}
+      {/* Search box — promoted to the leading slot and visually weightier than
+          the dropdowns to reinforce that it's the highest-leverage control.
+          Wider (w-64 sm:w-80), slightly taller, with a clear focus ring. */}
       {onSearchChange && (
         <div className="relative shrink-0">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={localSearch}
             onChange={(e) => handleSearch(e.target.value)}
             placeholder={searchPlaceholder}
-            className="w-56 rounded-full border border-slate-200 bg-white py-1 pl-7 pr-7 text-[11px] shadow-sm placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
+            className="w-64 sm:w-80 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-7 text-[12px] shadow-sm placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 transition-shadow"
           />
           {localSearch && (
             <button
@@ -84,6 +74,21 @@ export default function FilterBar({
           )}
         </div>
       )}
+
+      {/* Lightweight filter indicator. The old heavy uppercase pill ("FILTERS"
+          / "N active") read as a button; this inline icon + count is just a
+          status cue, with no border or shadow competing with the dropdowns. */}
+      <span
+        className={`inline-flex shrink-0 items-center gap-1 text-[11px] font-medium ${
+          activeCount > 0 ? 'text-blue-700' : 'text-slate-400'
+        }`}
+        title={activeCount > 0 ? `${activeCount} filter${activeCount === 1 ? '' : 's'} active` : 'No filters applied'}
+      >
+        <Filter className="h-3.5 w-3.5" />
+        {activeCount > 0 && (
+          <span className="tabular-nums">{activeCount}</span>
+        )}
+      </span>
 
       {/* Filter dropdowns */}
       {children}
