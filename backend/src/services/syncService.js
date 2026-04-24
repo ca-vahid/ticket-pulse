@@ -1,11 +1,14 @@
-import { createFreshServiceClient } from '../integrations/freshservice.js';
+import { createFreshServiceClient, FORBIDDEN_TICKET } from '../integrations/freshservice.js';
 import {
   transformTickets,
   transformAgents,
   mapTechnicianIds,
   analyzeTicketActivities,
   transformTicketThreadEntries,
+  transformTicketConversationEntries,
 } from '../integrations/freshserviceTransformer.js';
+import { formatInTimeZone } from 'date-fns-tz';
+import { runJobsInPool } from '../utils/parallelPool.js';
 import technicianRepository from './technicianRepository.js';
 import ticketRepository from './ticketRepository.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
@@ -23,6 +26,21 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
+
+// Cap how much thread-preheat work runs per scheduled sync cycle so we keep
+// budget headroom on the shared FS rate limiter (110/min). At ~24% already
+// used by CSAT (see csat sync below), this leaves ~80 req/min available.
+// 60 tickets x ~2 endpoints = ~120 requests = well inside the headroom and
+// drains a typical day's backlog over 1-2 cycles.
+const MAX_PREHEAT_TICKETS_PER_CYCLE = 60;
+// Match the cap the daily review applies — keeps preheated and on-demand
+// hydration consistent in shape, and bounds the conversation pagination
+// for very long-running tickets.
+const PREHEAT_MAX_CONVERSATIONS_PER_TICKET = 30;
+// Worker-pool size for parallel FS calls during preheat. The shared rate
+// limiter (maxConcurrent: 3) is the real cap; oversizing the pool just lets
+// workers refill the limiter's queue without idle gaps.
+const PREHEAT_POOL_SIZE = 8;
 
 // Note: SSE manager will be imported lazily to avoid circular dependency
 let sseManager = null;
@@ -476,6 +494,202 @@ class SyncService {
       await ticketThreadRepository.bulkUpsert(entries);
     } catch (error) {
       logger.error(`Failed to write thread entries for ticket ${ticketId}:`, error);
+    }
+  }
+
+  /**
+   * Preheat ticket thread data (activities + conversations) for today's
+   * cohort during regular sync so the daily review has near-zero cold
+   * fetches and finishes in seconds instead of minutes.
+   *
+   * Cohort: any ticket created OR updated OR resolved OR closed since the
+   * start of today in the workspace's timezone — this matches the cohort
+   * the daily review actually scores.
+   *
+   * Skip rule: per (ticketId, source) pair, if the most recent cached
+   * thread entry's occurredAt is >= ticket.updatedAt, the cache is fresh
+   * for that source and we don't re-fetch.
+   *
+   * Cap: at most MAX_PREHEAT_TICKETS_PER_CYCLE tickets per call, oldest
+   * ticket.updatedAt first so a backlog drains over a few cycles and one
+   * cycle never blows the FS rate-limit budget.
+   *
+   * Errors on a single ticket are logged + swallowed; one bad ticket
+   * never aborts the cycle.
+   */
+  async _preheatTicketThreads(workspaceId) {
+    try {
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { id: true, name: true, defaultTimezone: true },
+      });
+      if (!workspace) return { skipped: true, reason: 'workspace_not_found' };
+
+      // Per-workspace opt-in. Workspaces that don't use Daily Review
+      // shouldn't pay the FS API budget tax for conversation pulls they
+      // will never read, so this is off by default. Admin enables it via
+      // Configuration → Daily Review Automation in the UI.
+      const assignmentConfig = await prisma.assignmentConfig.findUnique({
+        where: { workspaceId },
+        select: { dailyReviewPreheatEnabled: true },
+      });
+      if (!assignmentConfig?.dailyReviewPreheatEnabled) {
+        return { skipped: true, reason: 'preheat_disabled_for_workspace' };
+      }
+
+      const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+      if (!fsConfig?.domain || !fsConfig?.apiKey) {
+        return { skipped: true, reason: 'freshservice_not_configured' };
+      }
+
+      const tz = workspace.defaultTimezone || 'America/Los_Angeles';
+      const todayLocal = formatInTimeZone(new Date(), tz, 'yyyy-MM-dd');
+      // ISO datetime at 00:00 in the workspace TZ → JS Date in UTC
+      const startIso = formatInTimeZone(new Date(`${todayLocal}T12:00:00.000Z`), tz, 'yyyy-MM-dd\'T\'00:00:00XXX');
+      const startOfDay = new Date(startIso);
+
+      // Cohort: only include tickets whose FS-side state changed today.
+      // We deliberately do NOT key off `updatedAt` because Prisma's
+      // `@updatedAt` auto-bumps on every local DB write (every sync
+      // touches every recent ticket), which would balloon the cohort to
+      // thousands of tickets a day and the cap would never drain a
+      // useful subset.
+      const cohort = await prisma.ticket.findMany({
+        where: {
+          workspaceId,
+          OR: [
+            { createdAt: { gte: startOfDay } },
+            { assignedAt: { gte: startOfDay } },
+            { resolvedAt: { gte: startOfDay } },
+            { closedAt: { gte: startOfDay } },
+          ],
+        },
+        select: {
+          id: true,
+          freshserviceTicketId: true,
+          createdAt: true,
+          assignedAt: true,
+          resolvedAt: true,
+          closedAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (cohort.length === 0) {
+        return { skipped: false, ticketsConsidered: 0, ticketsHydrated: 0 };
+      }
+
+      // Per-source latest occurredAt across the entire cohort in one query
+      // instead of N round-trips; without this, preheat would ironically
+      // become its own bottleneck on workspaces with thousands of cached
+      // entries per ticket.
+      const cohortIds = cohort.map((t) => t.id);
+      const latestRows = await prisma.ticketThreadEntry.groupBy({
+        by: ['ticketId', 'source'],
+        where: { workspaceId, ticketId: { in: cohortIds } },
+        _max: { occurredAt: true },
+      });
+      const latestByPair = new Map(); // key = `${ticketId}::${source}` → Date
+      for (const row of latestRows) {
+        latestByPair.set(`${row.ticketId}::${row.source}`, row._max.occurredAt);
+      }
+
+      // Per-ticket "newest known FS state change" — used to decide whether
+      // the cache is fresh. Compare against the latest entry's occurredAt
+      // per source: if the cache hasn't seen this state change yet, refetch.
+      const newestFsChange = (t) => {
+        const candidates = [t.createdAt, t.assignedAt, t.resolvedAt, t.closedAt]
+          .filter(Boolean)
+          .map((d) => d.getTime());
+        return candidates.length > 0 ? new Date(Math.max(...candidates)) : null;
+      };
+
+      // Build the actual job list, applying the per-source freshness skip.
+      // Activities source key matches what transformTicketThreadEntries writes
+      // ("freshservice_activity"); conversations writes "freshservice_conversation".
+      const jobs = [];
+      const ticketsToHydrate = new Set();
+      for (const ticket of cohort) {
+        const fsChange = newestFsChange(ticket);
+        const latestActivities = latestByPair.get(`${ticket.id}::freshservice_activity`);
+        const latestConversations = latestByPair.get(`${ticket.id}::freshservice_conversation`);
+
+        if (!latestActivities || (fsChange && latestActivities < fsChange)) {
+          jobs.push({ ticket, kind: 'activities' });
+          ticketsToHydrate.add(ticket.id);
+        }
+        if (!latestConversations || (fsChange && latestConversations < fsChange)) {
+          jobs.push({ ticket, kind: 'conversations' });
+          ticketsToHydrate.add(ticket.id);
+        }
+
+        if (ticketsToHydrate.size >= MAX_PREHEAT_TICKETS_PER_CYCLE) break;
+      }
+
+      if (jobs.length === 0) {
+        logger.info(`[preheat ws=${workspaceId}] All ${cohort.length} today-cohort ticket(s) already have fresh thread cache.`);
+        return { skipped: false, ticketsConsidered: cohort.length, ticketsHydrated: 0 };
+      }
+
+      logger.info(`[preheat ws=${workspaceId}] Preheating threads for ${ticketsToHydrate.size}/${cohort.length} today-cohort ticket(s) (${jobs.length} FS endpoint call(s)).`);
+
+      const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+
+      let activitiesFetched = 0;
+      let conversationsFetched = 0;
+      let failures = 0;
+
+      const runJob = async (job) => {
+        const { ticket, kind } = job;
+        const fsTicketId = Number(ticket.freshserviceTicketId);
+        try {
+          if (kind === 'activities') {
+            const activities = await client.fetchTicketActivities(fsTicketId);
+            if (activities?.length) {
+              const entries = transformTicketThreadEntries(activities, {
+                ticketId: ticket.id, workspaceId,
+              });
+              if (entries.length) {
+                await ticketThreadRepository.bulkUpsert(entries);
+                activitiesFetched += entries.length;
+              }
+            }
+          } else {
+            const conversations = await client.fetchTicketConversations(fsTicketId, {
+              maxEntries: PREHEAT_MAX_CONVERSATIONS_PER_TICKET,
+            });
+            if (conversations?.length) {
+              const entries = transformTicketConversationEntries(conversations, {
+                ticketId: ticket.id, workspaceId,
+              });
+              if (entries.length) {
+                await ticketThreadRepository.bulkUpsert(entries);
+                conversationsFetched += entries.length;
+              }
+            }
+          }
+        } catch (error) {
+          failures += 1;
+          // Log but never abort the cycle — preheat is opportunistic.
+          logger.warn(`[preheat ws=${workspaceId}] ${kind} fetch failed for ticket #${fsTicketId}: ${error.message || error}`);
+        }
+      };
+
+      await runJobsInPool(jobs, runJob, { poolSize: PREHEAT_POOL_SIZE });
+
+      logger.info(`[preheat ws=${workspaceId}] Done: ${ticketsToHydrate.size} ticket(s), ${activitiesFetched} activity row(s) + ${conversationsFetched} conversation row(s), ${failures} failure(s).`);
+
+      return {
+        skipped: false,
+        ticketsConsidered: cohort.length,
+        ticketsHydrated: ticketsToHydrate.size,
+        activitiesFetched,
+        conversationsFetched,
+        failures,
+      };
+    } catch (error) {
+      logger.error(`[preheat ws=${workspaceId}] Preheat cycle failed:`, error);
+      return { skipped: true, reason: 'error', error: error.message };
     }
   }
 
@@ -1279,6 +1493,15 @@ class SyncService {
       // Reconcile ticket statuses: detect deleted/spam tickets not returned by list API (fire-and-forget)
       this._reconcileTicketStatuses(workspaceId).catch((err) => {
         logger.warn('Ticket status reconciliation failed (non-fatal)', { workspaceId, error: err.message });
+      });
+
+      // Preheat thread data (activities + conversation BODIES) for today's
+      // cohort so the daily review hits an already-warm cache and doesn't
+      // need to do dozens of cold FS calls right when the user clicks
+      // "Run Daily Review". Fire-and-forget; cap + skip-if-fresh logic
+      // bound the FS rate-limit budget per cycle.
+      this._preheatTicketThreads(workspaceId).catch((err) => {
+        logger.warn('Thread preheat failed (non-fatal)', { workspaceId, error: err.message });
       });
 
       return summary;
@@ -2315,10 +2538,26 @@ class SyncService {
     let deletedCount = 0;
     let spamCount = 0;
     let verifiedCount = 0;
+    let forbiddenCount = 0;
     for (const ticket of ticketsToCheck) {
       try {
         const fsTicket = await client.fetchTicketSafe(Number(ticket.freshserviceTicketId));
         await sleep(250);
+
+        // 403 from FS — ticket exists but this API key can't see it (e.g.
+        // moved to a workspace we're not authorized for). Don't mark as
+        // Deleted; just bump updatedAt so it rotates to the back of the
+        // reconciliation queue and we don't burn the FS budget on it
+        // every 5 minutes.
+        if (fsTicket === FORBIDDEN_TICKET) {
+          await prisma.ticket.update({
+            where: { id: ticket.id },
+            data: { updatedAt: new Date() },
+          });
+          forbiddenCount++;
+          continue;
+        }
+
         const isGone = fsTicket === null;
         const isSoftDeleted = fsTicket?.deleted === true;
         const isSpam = fsTicket?.spam === true;
@@ -2418,13 +2657,14 @@ class SyncService {
       }
     }
 
-    if (deletedCount > 0 || spamCount > 0 || verifiedCount > 0) {
+    if (deletedCount > 0 || spamCount > 0 || verifiedCount > 0 || forbiddenCount > 0) {
       logger.info('Ticket reconciliation complete', {
         workspaceId,
         checked: ticketsToCheck.length,
         deleted: deletedCount,
         spam: spamCount,
         verified: verifiedCount,
+        forbidden: forbiddenCount,
       });
     }
   }

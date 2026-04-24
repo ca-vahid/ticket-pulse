@@ -56,6 +56,7 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
       dailyReviewRunHour: 18,
       dailyReviewRunMinute: 5,
       dailyReviewLookbackDays: 14,
+      dailyReviewPreheatEnabled: false,
     },
     anthropicConfigured: anthropicService.isConfigured(),
     graphConfigured: graphMailClient.isConfigured(),
@@ -70,6 +71,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
     autoCloseNoise, dryRunMode, excludedGroupIds,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
+    dailyReviewPreheatEnabled,
   } = req.body;
 
   const data = {};
@@ -92,6 +94,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (dailyReviewRunHour !== undefined) data.dailyReviewRunHour = Math.max(0, Math.min(23, parseInt(dailyReviewRunHour, 10) || 0));
   if (dailyReviewRunMinute !== undefined) data.dailyReviewRunMinute = Math.max(0, Math.min(59, parseInt(dailyReviewRunMinute, 10) || 0));
   if (dailyReviewLookbackDays !== undefined) data.dailyReviewLookbackDays = Math.max(1, Math.min(90, parseInt(dailyReviewLookbackDays, 10) || 14));
+  if (dailyReviewPreheatEnabled !== undefined) data.dailyReviewPreheatEnabled = !!dailyReviewPreheatEnabled;
   if (excludedGroupIds !== undefined) {
     // Defensive normalization: accept array of numbers or numeric strings,
     // coerce to ints, dedupe. Postgres Int[] rejects non-int values.

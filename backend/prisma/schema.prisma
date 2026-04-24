@@ -640,6 +640,11 @@ model AssignmentConfig {
   dailyReviewRunHour      Int       @default(18) @map("daily_review_run_hour")
   dailyReviewRunMinute    Int       @default(5) @map("daily_review_run_minute")
   dailyReviewLookbackDays Int       @default(14) @map("daily_review_lookback_days")
+  // When true, the regular 5-min sync proactively pulls FreshService
+  // activity + conversation data for today's ticket cohort so the daily
+  // review can run with a near-warm cache. Off by default — workspaces
+  // that don't use Daily Review shouldn't pay the FS API budget tax.
+  dailyReviewPreheatEnabled Boolean @default(false) @map("daily_review_preheat_enabled")
   // FreshService group IDs that are excluded from auto-assignment. When a
   // ticket's group_id is in this list, the LLM still runs and produces a
   // recommendation, but decision is forced to pending_review for manual

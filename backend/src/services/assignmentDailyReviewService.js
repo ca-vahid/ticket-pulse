@@ -18,6 +18,7 @@ import {
   transformTicketThreadEntries,
   transformTicketConversationEntries,
 } from '../integrations/freshserviceTransformer.js';
+import { runJobsInPool } from '../utils/parallelPool.js';
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const STALE_RUNNING_MS = 30 * 60 * 1000;
@@ -32,6 +33,11 @@ const THREAD_EXCERPT_CHARS = 600;
 // Conversations endpoint can return hundreds of entries on long-running
 // tickets; we only need recent context for daily review.
 const MAX_CONVERSATIONS_PER_TICKET = 30;
+// Cap on the plaintext description we forward to the LLM. Long descriptions
+// (forwarded email chains, monitoring alerts) can be 10k+ chars each; a
+// 1500-char head plus the existing thread excerpts gives the LLM the user's
+// actual ask without blowing the per-case token budget.
+const MAX_DESCRIPTION_CHARS_FOR_LLM = 1500;
 const RECOMMENDATION_KIND_CONFIG = [
   { kind: 'prompt', field: 'promptRecommendations' },
   { kind: 'process', field: 'processRecommendations' },
@@ -399,11 +405,31 @@ class AssignmentDailyReviewService {
     }
 
     const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
+    const activityTicketIds = new Set(ticketsForActivities.map((t) => t.id));
+    const conversationTicketIds = new Set(ticketsForConversations.map((t) => t.id));
     const ticketIdsToProcess = Array.from(new Set([
-      ...ticketsForActivities.map((t) => t.id),
-      ...ticketsForConversations.map((t) => t.id),
+      ...activityTicketIds,
+      ...conversationTicketIds,
     ]));
     const ticketById = new Map(tickets.map((t) => [t.id, t]));
+
+    // Build a flat work-queue of independent FS jobs. Activities and
+    // conversations on the same ticket hit different endpoints so they can
+    // overlap freely; the shared rate limiter (maxConcurrent: 3, 110/min)
+    // is the real cap. The previous sequential per-ticket loop only ever
+    // had ONE in-flight request, wasting 2/3 of the limiter's budget and
+    // turning a ~90s job into a 30+ min slog.
+    const jobs = [];
+    for (const ticketInternalId of ticketIdsToProcess) {
+      const ticket = ticketById.get(ticketInternalId);
+      if (!ticket) continue;
+      if (activityTicketIds.has(ticket.id)) {
+        jobs.push({ ticket, kind: 'activities' });
+      }
+      if (conversationTicketIds.has(ticket.id)) {
+        jobs.push({ ticket, kind: 'conversations' });
+      }
+    }
 
     let hydratedActivities = 0;
     let hydratedConversations = 0;
@@ -411,7 +437,8 @@ class AssignmentDailyReviewService {
     let conversationsFetched = 0;
     let failed = 0;
     const warnings = [];
-    const perTicket = [];
+    const diagByTicketId = new Map();
+    const failedTickets = new Set();
 
     emitProgress({
       processed: 0,
@@ -422,27 +449,27 @@ class AssignmentDailyReviewService {
       message: `Hydrating FreshService threads for ${ticketIdsToProcess.length} ticket(s) (activities + conversations${forceRefresh ? ', forced refresh' : ''}).`,
     });
 
-    for (let index = 0; index < ticketIdsToProcess.length; index += 1) {
+    // Per-job runner. Errors on one job (or even one ticket) are isolated
+    // and never abort siblings — only cancellation propagates upward.
+    const runJob = async (job) => {
       this._throwIfCancelled(options.signal);
-      const ticketInternalId = ticketIdsToProcess[index];
-      const ticket = ticketById.get(ticketInternalId);
-      if (!ticket) continue;
+      const { ticket, kind } = job;
       const fsTicketId = Number(ticket.freshserviceTicketId);
-      const diag = {
-        ticketId: ticket.id,
-        freshserviceTicketId: fsTicketId,
-        activitiesFetched: 0,
-        conversationsFetched: 0,
-        activitiesError: null,
-        conversationsError: null,
-      };
-      let anyFailure = false;
+      let diag = diagByTicketId.get(ticket.id);
+      if (!diag) {
+        diag = {
+          ticketId: ticket.id,
+          freshserviceTicketId: fsTicketId,
+          activitiesFetched: 0,
+          conversationsFetched: 0,
+          activitiesError: null,
+          conversationsError: null,
+        };
+        diagByTicketId.set(ticket.id, diag);
+      }
 
-      const wantActivities = forceRefresh || ticketsForActivities.some((t) => t.id === ticket.id);
-      const wantConversations = forceRefresh || ticketsForConversations.some((t) => t.id === ticket.id);
-
-      if (wantActivities) {
-        try {
+      try {
+        if (kind === 'activities') {
           const activities = await client.fetchTicketActivities(fsTicketId);
           this._throwIfCancelled(options.signal);
           if (activities?.length) {
@@ -452,16 +479,7 @@ class AssignmentDailyReviewService {
             activitiesFetched += entries.length;
             diag.activitiesFetched = entries.length;
           }
-        } catch (error) {
-          if (this._isCancellationError(error)) throw error;
-          anyFailure = true;
-          diag.activitiesError = error.message;
-          warnings.push(`Could not hydrate ACTIVITIES for ticket #${fsTicketId}: ${error.message}`);
-        }
-      }
-
-      if (wantConversations) {
-        try {
+        } else {
           const conversations = await client.fetchTicketConversations(fsTicketId, {
             maxEntries: MAX_CONVERSATIONS_PER_TICKET,
           });
@@ -476,29 +494,97 @@ class AssignmentDailyReviewService {
             conversationsFetched += entries.length;
             diag.conversationsFetched = entries.length;
           }
-        } catch (error) {
-          if (this._isCancellationError(error)) throw error;
-          anyFailure = true;
+        }
+      } catch (error) {
+        if (this._isCancellationError(error)) throw error;
+        if (kind === 'activities') {
+          diag.activitiesError = error.message;
+          warnings.push(`Could not hydrate ACTIVITIES for ticket #${fsTicketId}: ${error.message}`);
+        } else {
           diag.conversationsError = error.message;
           warnings.push(`Could not hydrate CONVERSATIONS for ticket #${fsTicketId}: ${error.message}`);
         }
+        if (!failedTickets.has(ticket.id)) {
+          failedTickets.add(ticket.id);
+          failed += 1;
+        }
       }
+    };
 
-      if (anyFailure) failed += 1;
-      perTicket.push(diag);
-
-      const processed = index + 1;
-      if (processed === 1 || processed === ticketIdsToProcess.length || processed % 5 === 0) {
-        emitProgress({
-          processed,
-          total: ticketIdsToProcess.length,
-          hydratedActivities,
-          hydratedConversations,
-          failed,
-          message: `Hydrating FreshService threads (${processed}/${ticketIdsToProcess.length}); pulled ${activitiesFetched} activity row(s) + ${conversationsFetched} conversation row(s) so far.`,
-        });
-      }
+    // Track per-ticket completion (a ticket is "processed" once all of its
+    // jobs finish, so the progress counter matches `total = ticket count`).
+    const remainingByTicket = new Map();
+    for (const job of jobs) {
+      remainingByTicket.set(job.ticket.id, (remainingByTicket.get(job.ticket.id) || 0) + 1);
     }
+    let processedTickets = 0;
+    let lastEmittedProcessed = 0;
+    const total = ticketIdsToProcess.length;
+    const emitEvery = Math.max(1, Math.floor(total / 20)); // ~5% increments
+
+    const onJobDone = (ticketId) => {
+      const left = (remainingByTicket.get(ticketId) || 1) - 1;
+      remainingByTicket.set(ticketId, left);
+      if (left === 0) {
+        processedTickets += 1;
+        const shouldEmit = processedTickets === total
+          || processedTickets - lastEmittedProcessed >= emitEvery;
+        if (shouldEmit) {
+          lastEmittedProcessed = processedTickets;
+          emitProgress({
+            processed: processedTickets,
+            total,
+            hydratedActivities,
+            hydratedConversations,
+            failed,
+            message: `Hydrating FreshService threads (${processedTickets}/${total}); pulled ${activitiesFetched} activity row(s) + ${conversationsFetched} conversation row(s) so far.`,
+          });
+        }
+      }
+    };
+
+    // Worker pool. Pool size > limiter concurrency on purpose so workers
+    // refill the limiter's queue without idle gaps. The limiter still
+    // enforces maxConcurrent: 3 and 110/min, so we cannot trigger 429
+    // storms by oversizing the pool.
+    await runJobsInPool(
+      jobs,
+      async (job) => {
+        await runJob(job);
+        onJobDone(job.ticket.id);
+      },
+      {
+        poolSize: 8,
+        isCancellationError: (err) => this._isCancellationError(err),
+        // runJob already routes per-job FS errors into `warnings` /
+        // `failedTickets`; this onError catches the unexpected (e.g. a
+        // bug in transform/upsert) so the pool stops cleanly without
+        // taking the whole review down.
+        onError: (error, job) => {
+          if (!failedTickets.has(job.ticket.id)) {
+            failedTickets.add(job.ticket.id);
+            failed += 1;
+          }
+          warnings.push(`Unexpected error hydrating ticket #${job.ticket?.freshserviceTicketId}: ${error?.message || error}`);
+        },
+      },
+    );
+
+    // Final progress emit so the caller always sees 100% completion.
+    if (lastEmittedProcessed < processedTickets) {
+      emitProgress({
+        processed: processedTickets,
+        total,
+        hydratedActivities,
+        hydratedConversations,
+        failed,
+        message: `Hydrating FreshService threads (${processedTickets}/${total}); pulled ${activitiesFetched} activity row(s) + ${conversationsFetched} conversation row(s) so far.`,
+      });
+    }
+
+    const perTicket = ticketIdsToProcess
+      .map((tid) => diagByTicketId.get(tid))
+      .filter(Boolean);
 
     return {
       hydratedActivities,
@@ -652,6 +738,10 @@ class AssignmentDailyReviewService {
             id: true,
             freshserviceTicketId: true,
             subject: true,
+            // The plaintext description is the user's actual request — without
+            // it the LLM is reasoning about routing decisions blind to what
+            // the user wrote. We truncate at payload-build time, not here.
+            descriptionText: true,
             category: true,
             ticketCategory: true,
             status: true,
@@ -662,8 +752,18 @@ class AssignmentDailyReviewService {
             closedAt: true,
             rejectionCount: true,
             assignedTechId: true,
-            assignedTech: { select: { id: true, name: true, email: true } },
-            requester: { select: { id: true, name: true, email: true } },
+            assignedTech: {
+              select: {
+                id: true, name: true, email: true,
+                location: true, timezone: true,
+              },
+            },
+            requester: {
+              select: {
+                id: true, name: true, email: true,
+                department: true, jobTitle: true, timeZone: true,
+              },
+            },
             _count: { select: { threadEntries: true } },
           },
         },
@@ -694,6 +794,7 @@ class AssignmentDailyReviewService {
         id: true,
         freshserviceTicketId: true,
         subject: true,
+        descriptionText: true,
         category: true,
         ticketCategory: true,
         status: true,
@@ -704,8 +805,18 @@ class AssignmentDailyReviewService {
         closedAt: true,
         rejectionCount: true,
         assignedTechId: true,
-        assignedTech: { select: { id: true, name: true, email: true } },
-        requester: { select: { id: true, name: true, email: true } },
+        assignedTech: {
+          select: {
+            id: true, name: true, email: true,
+            location: true, timezone: true,
+          },
+        },
+        requester: {
+          select: {
+            id: true, name: true, email: true,
+            department: true, jobTitle: true, timeZone: true,
+          },
+        },
         _count: { select: { threadEntries: true } },
       },
       orderBy: { createdAt: 'asc' },
@@ -907,8 +1018,15 @@ class AssignmentDailyReviewService {
         pipelineAssignedTech: run.assignedTech
           ? { id: run.assignedTech.id, name: run.assignedTech.name }
           : null,
+        // Carry tech location + timezone through so the LLM can reason about
+        // "the wrong-region tech got assigned to a site-specific ticket".
         finalAssignee: ticket.assignedTech
-          ? { id: ticket.assignedTech.id, name: ticket.assignedTech.name }
+          ? {
+            id: ticket.assignedTech.id,
+            name: ticket.assignedTech.name,
+            location: ticket.assignedTech.location || null,
+            timezone: ticket.assignedTech.timezone || null,
+          }
           : null,
         changedFromTopRecommendation: !!(
           recs[0]?.techId
@@ -927,6 +1045,10 @@ class AssignmentDailyReviewService {
         ticketCreatedAt: ticket.createdAt,
         resolvedAt: ticket.resolvedAt,
         closedAt: ticket.closedAt,
+        // Plaintext description — the actual user request. Kept full here;
+        // truncated only at LLM-payload time so other consumers (heuristics,
+        // diagnostics) still have the whole text if they want it.
+        descriptionText: ticket.descriptionText || null,
         requester: ticket.requester,
         episodeSummary: ticketEpisodes.map((episode) => ({
           technicianId: episode.technicianId,
@@ -971,7 +1093,12 @@ class AssignmentDailyReviewService {
         recommendationPool: [],
         pipelineAssignedTech: null,
         finalAssignee: ticket.assignedTech
-          ? { id: ticket.assignedTech.id, name: ticket.assignedTech.name }
+          ? {
+            id: ticket.assignedTech.id,
+            name: ticket.assignedTech.name,
+            location: ticket.assignedTech.location || null,
+            timezone: ticket.assignedTech.timezone || null,
+          }
           : null,
         changedFromTopRecommendation: false,
         handledInFreshService: true,
@@ -984,6 +1111,7 @@ class AssignmentDailyReviewService {
         ticketCreatedAt: ticket.createdAt,
         resolvedAt: ticket.resolvedAt,
         closedAt: ticket.closedAt,
+        descriptionText: ticket.descriptionText || null,
         requester: ticket.requester,
         episodeSummary: (episodesByTicket.get(ticket.id) || []).map((episode) => ({
           technicianId: episode.technicianId,
@@ -1370,6 +1498,23 @@ class AssignmentDailyReviewService {
           ticketId: item.ticketId,
           freshserviceTicketId: item.freshserviceTicketId,
           subject: item.subject,
+          // The user's actual request, normalized + truncated. Without this,
+          // the LLM was reasoning about routing decisions blind to what was
+          // actually being asked for (which is exactly what made the output
+          // feel generic and uninformed in the screenshots).
+          description: truncate(item.descriptionText, MAX_DESCRIPTION_CHARS_FOR_LLM),
+          // Who asked, what they do, where they sit. Department + jobTitle
+          // explain why a "BST" ticket from Finance might be misrouted; the
+          // timezone explains why an after-hours assignment was suboptimal.
+          requester: item.requester
+            ? {
+              name: item.requester.name || null,
+              email: item.requester.email || null,
+              department: item.requester.department || null,
+              jobTitle: item.requester.jobTitle || null,
+              timeZone: item.requester.timeZone || null,
+            }
+            : null,
           category: item.category,
           priority: item.priority,
           status: item.status,
@@ -1379,6 +1524,8 @@ class AssignmentDailyReviewService {
           triggerSource: item.triggerSource,
           rejectionCount: item.rejectionCount,
           topRecommendation: item.topRecommendation,
+          // finalAssignee carries location + timezone now (set in collect step)
+          // so the LLM can flag wrong-region assignments and after-hours work.
           finalAssignee: item.finalAssignee,
           pipelineAssignedTech: item.pipelineAssignedTech,
           changedFromTopRecommendation: item.changedFromTopRecommendation,

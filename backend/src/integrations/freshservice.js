@@ -3,6 +3,12 @@ import logger from '../utils/logger.js';
 import { ExternalAPIError } from '../utils/errors.js';
 import { FreshServiceRateLimiter } from './rateLimiter.js';
 
+// Sentinel returned by fetchTicketSafe when FS replies 403 — the ticket
+// exists but this API key can't see it (most commonly: ticket was moved
+// to a workspace this key isn't authorized for). Reconciliation uses
+// this to skip without marking the row as Deleted.
+export const FORBIDDEN_TICKET = Object.freeze({ __forbidden: true });
+
 // Shared per-process singleton rate limiter so ALL callsites and workspaces
 // share a single budget against FreshService. Enterprise per-minute cap is
 // typically 140/min on /agents — we cap at 110 to leave headroom and avoid
@@ -13,7 +19,6 @@ function getSharedRateLimiter() {
     SHARED_RATE_LIMITER = new FreshServiceRateLimiter({
       maxRequestsPerMinute: 110,
       minDelayMs: 550,
-      slowDelayMs: 1500,
     });
   }
   return SHARED_RATE_LIMITER;
@@ -65,6 +70,22 @@ class FreshServiceClient {
           throw error;
         }
         if (status === 404 || status === 405) {
+          throw error;
+        }
+        // 403 on /csat_response is expected when the API key lacks CSAT
+        // scope or the module is disabled (common on dev). Let the caller
+        // handle it (fetchCSATResponse swallows it) instead of logging
+        // a full error + stack for every ticket in the sweep.
+        if (status === 403 && /\/csat_response(\b|$)/.test(error.config?.url || '')) {
+          throw error;
+        }
+        // 403 on a single-ticket fetch (/tickets/:id, optionally with a
+        // ?include= querystring) means the ticket exists but the API key
+        // can't see it — typically the ticket was moved to a workspace
+        // this key isn't authorized for. Reconciliation handles this by
+        // bumping updatedAt; logging it as an error here just produces
+        // noise on every sweep.
+        if (status === 403 && /\/tickets\/\d+(\?|$)/.test(error.config?.url || '')) {
           throw error;
         }
 
@@ -247,7 +268,11 @@ class FreshServiceClient {
 
   /**
    * Fetch a single ticket, returning null if deleted (404). 429s are handled
-   * by the shared limiter; we retry once.
+   * by the shared limiter; we retry once. A 403 (ticket exists but the API
+   * key can't see it — usually because it was moved to a workspace this
+   * key isn't authorized for) returns a typed sentinel so reconciliation
+   * can distinguish "gone" from "forbidden" without misclassifying the
+   * ticket as Deleted.
    */
   async fetchTicketSafe(ticketId) {
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -255,8 +280,10 @@ class FreshServiceClient {
         const response = await this._get(`/tickets/${ticketId}`);
         return response.data.ticket;
       } catch (error) {
-        if (error.response?.status === 404) return null;
-        if (error.response?.status === 429 && attempt < 3) continue;
+        const status = error.response?.status || error.originalError?.response?.status;
+        if (status === 404) return null;
+        if (status === 403) return FORBIDDEN_TICKET;
+        if (status === 429 && attempt < 3) continue;
         throw error;
       }
     }
@@ -273,7 +300,14 @@ class FreshServiceClient {
       const response = await this._fetchWithRetry(`/tickets/${ticketId}/csat_response`, {}, 3);
       return response.data.csat_response || null;
     } catch (error) {
-      if (error.response?.status === 404) return null;
+      // FreshService returns:
+      //   404 → ticket has no CSAT survey response
+      //   403 → API key lacks CSAT scope, or CSAT module not enabled for the
+      //         workspace (common on dev keys). Treat as "no CSAT" so we
+      //         stamp csat_checked_at and stop re-hitting it every sweep
+      //         instead of spamming error logs.
+      const status = error.response?.status || error.originalError?.response?.status;
+      if (status === 404 || status === 403) return null;
       logger.error(`Error fetching CSAT for ticket ${ticketId}:`, error);
       throw error;
     }

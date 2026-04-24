@@ -2,6 +2,64 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [2.02-preview] - 2026-04-23
+
+### Daily Review — performance + LLM context overhaul
+
+- **Thread hydration parallelized** — the pre-LLM "Hydrating FreshService threads" loop in `_hydrateMissingThreads` was sequential (one ticket at a time) even though the FS rate limiter supports `maxConcurrent: 3` + 110 req/min. Refactored to a bounded-concurrency worker pool that fans activities + conversations out as independent jobs (different FS endpoints, so they overlap freely). **A 50-ticket review now finishes in ~90 seconds instead of 30+ minutes.**
+- **Thread cache preheat during the regular 5-min sync** — new fire-and-forget `_preheatTicketThreads` tail step in `performFullSync` proactively pulls today's ticket cohort's activities + conversation BODIES so the daily review hits an already-warm cache.
+  - Cohort is keyed off **FS-side state changes only** (`createdAt` / `assignedAt` / `resolvedAt` / `closedAt`). Explicitly excludes Prisma's `@updatedAt` because it auto-bumps on every local DB write — including it ballooned the IT cohort to 6841 tickets/day in a dry run; the FS-only cohort is 75.
+  - Per-source freshness check skips `(ticket, source)` pairs whose cached `occurredAt` is fresher than the newest FS state change.
+  - Capped at 60 tickets per cycle so backlog drains over 1-2 cycles without blowing the FS rate-limit budget.
+- **Per-workspace preheat toggle** — new `dailyReviewPreheatEnabled` flag on `AssignmentConfig`, surfaced as a toggle in **Configuration → Daily Review Automation**. **OFF by default.** Workspaces that don't use Daily Review no longer pay the FS API budget tax for conversation pulls they'll never read.
+- **LLM payload now carries the user's actual request** — the daily-review case payload was silently dropping `descriptionText` AND `requester` (only `id`/`name`/`email` were even SELECTed, then stripped at payload mapping). The model was reasoning about routing decisions blind to who asked, what they asked for, where they sit, and where the assignee is located. Now ships:
+  - `description` (truncated to 1500 chars)
+  - full `requester` object (`name` / `email` / `department` / `jobTitle` / `timeZone`)
+  - `finalAssignee.location` + `.timezone`
+  - Token cost +~1.8KB per case, well inside the 4096-token output budget.
+- **Live ticket assignee in Decided Status column** — after a rebound chain (Andrew rejects → Adrian reassigned → Mehdi current) the column was showing the originally-approved tech because it preferred `run.assignedTech` (recorded at decision time) over the ticket's live `assignedTech` relation. Now trusts the ticket relation first; falls back to the run's recorded tech only when the ticket has no current owner (dismissed rows).
+
+### New utility
+
+- **`runJobsInPool`** (`backend/src/utils/parallelPool.js`) — small, pure bounded-concurrency worker pool used by both the daily-review hydration and the regular-sync preheat. Handles cancellation propagation, per-job error isolation, and pool sizing. Pool size > limiter concurrency on purpose so workers refill the limiter's queue without idle gaps.
+
+### Fixes
+
+- **Prod daily review crashed** with `The column assignment_daily_review_runs.meeting_briefing does not exist in the current database` — three migrations had landed in code but were never deployed. Applied to prod via `prisma migrate deploy`.
+- **Removed dead `slowDelayMs: 1500` option** that was being passed to the FreshService rate limiter constructor — the constructor never accepted it, so it was a silent no-op masquerading as a back-pressure setting.
+
+### Database migrations
+
+- **`20260424000000_add_daily_review_preheat_toggle`** — `assignment_configs.daily_review_preheat_enabled BOOLEAN NOT NULL DEFAULT false`. **Applied to dev + prod.** Existing rows get the safe default (off) so behavior is unchanged until an admin opts in.
+- Backlog deployed to prod in this release: **`20260423020000_allow_multiple_daily_reviews_per_day`** (drops the unique index so multiple "Run Daily Review" clicks per day produce fresh rows instead of overwriting), **`20260423030000_add_daily_review_meeting_briefing`** (adds `meeting_briefing` JSONB + 4 metadata columns), **`20260423040000_add_daily_review_progress`** (adds `progress` JSONB + `progress_updated_at` for poll-based progress UI).
+
+### Security
+
+- **Cohort allow-list is unchanged** — every `supportingTicketIds` / `supportingFreshserviceTicketIds` the LLM returns must come from `analysisInput.allowedSupportingTicketIds`; anything outside the set is dropped before persistence. The new richer payload (description / requester / location) does NOT widen the allow-list.
+- **Cross-workspace technician redactor** (`_redactForeignTechFromCase`) updated to strip the new `location` + `timezone` fields too, so the new fields can't leak across workspaces.
+- **Preheat is opt-in per workspace** — defaults to off, so a fresh workspace cannot accidentally start exfiltrating conversation bodies via the regular sync without an admin explicitly enabling it.
+
+### Tests
+
+- **97 / 97 passing** across 13 suites (was 75 / 75 across 11). New suites:
+  - `parallelPool.test.js` (12) — worker pool semantics, cancellation, partial failures
+  - `hydrateMissingThreads.test.js` (7) — parallel completion, failure isolation, cancellation, `forceRefresh`, progress monotonicity
+  - `preheatTicketThreads.test.js` (10) — cohort selection (FS-only timestamps, NOT `updatedAt`), freshness skip, 60-ticket cap, single-ticket failure isolation, **disabled-by-default + missing-config skip**
+  - `dailyReviewLlmPayload.test.js` (3) — regression guards for the `description` + `requester` + `tech-location` payload contract
+
+### New diagnostic scripts (`backend/scripts/`)
+
+- `preheatDryRun.js` — reports what the next preheat cycle would do without firing FS calls
+- `reviewContextProbe.js` — audits `descriptionText` / `requester` / `tech.location` coverage in the DB
+- `inspectLastReview.js` + `diagnoseRun.js` — full per-run inspection
+- `inspectPreheatFlag.js` — per-workspace preheat-flag audit
+- `inspectZeroContext.js` + `matchEmptyFetches.js` — investigate "no thread context" tickets
+
+### Files touched
+
+- Modified: `backend/prisma/schema.prisma`, `backend/src/integrations/freshservice.js`, `backend/src/services/syncService.js`, `backend/src/services/assignmentDailyReviewService.js`, `backend/src/routes/assignment.routes.js`, `frontend/src/pages/AssignmentReview.jsx`.
+- Added: `backend/src/utils/parallelPool.js`, `backend/prisma/migrations/20260424000000_add_daily_review_preheat_toggle/`, four test files, six diagnostic scripts.
+
 ## [2.01-preview] - 2026-04-23
 
 ### Assignment Review — high-throughput decision interface

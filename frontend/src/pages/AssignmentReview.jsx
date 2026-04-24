@@ -3591,12 +3591,13 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
         excludedGroupIds: [],
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
+        dailyReviewPreheatEnabled: false,
         ...cfg,
       });
       setAnthropicConfigured(res?.anthropicConfigured ?? false);
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14 });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false });
     } finally { setLoading(false); }
   }, []);
 
@@ -3768,6 +3769,16 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         </div>
         <div className="text-xs text-slate-500">
           Runs are evaluated in the workspace timezone ({workspaceTimezone}). The thread backfill window controls how far back the system should be prepared to hydrate missing FreshService thread data for manual reviews.
+        </div>
+        <div className="border-t border-slate-100 mt-4 pt-4">
+          <ConfigToggle
+            label="Preheat thread cache during regular sync"
+            description={
+              'When enabled, every 5-minute sync proactively pulls FreshService activity + conversation data for tickets created or assigned today, so Daily Review runs against an already-warm cache and finishes in seconds instead of minutes. Costs ~60 extra FreshService API calls per sync cycle for this workspace. Leave off for workspaces that don\u2019t use Daily Review \u2014 they shouldn\u2019t pay the API budget tax for data they\u2019ll never read.'
+            }
+            checked={config.dailyReviewPreheatEnabled}
+            onChange={() => setConfig({ ...config, dailyReviewPreheatEnabled: !config.dailyReviewPreheatEnabled })}
+          />
         </div>
       </ConfigSection>
 
