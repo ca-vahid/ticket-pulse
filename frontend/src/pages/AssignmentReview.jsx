@@ -1785,6 +1785,16 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   // a clearer 'Handled in FS' label with an amber pill instead of the
   // confusing yellow 'Pending'. Tooltip explains why.
   const getDisplayDecision = (run) => {
+    if (wasPipelineAssignmentReroutedInFs(run)) {
+      const originalTech = run.assignedTech?.name || 'the pipeline assignee';
+      const currentTech = run.ticket?.assignedTech?.name || 'the current FreshService assignee';
+      return {
+        label: 'Rerouted in FS',
+        pillClass: 'bg-amber-100 text-amber-800',
+        tooltip: `Originally routed by the pipeline to ${originalTech}; FreshService now has ${currentTech}. Treating as handled outside the pipeline.`,
+      };
+    }
+
     // A pending_review run with an assignedTechId means someone took the
     // ticket in FreshService directly, outside the pipeline. The label should
     // reflect that regardless of the ticket's current status — showing
@@ -1827,23 +1837,42 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     return Number(topTechId) !== Number(finalTechId);
   };
 
-  // Combined "Assigned" view: pipeline-assigned runs + outside-pipeline-assigned runs (tickets that
-  // got an assignee in FreshService before the pipeline review was decided).
+  const wasPipelineAssignmentReroutedInFs = (run) => {
+    if (!['auto_assigned', 'approved', 'modified'].includes(run?.decision)) return false;
+    const pipelineTechId = run.assignedTech?.id || run.assignedTechId;
+    const currentTechId = run.ticket?.assignedTech?.id || run.ticket?.assignedTechId;
+    if (!pipelineTechId || !currentTechId) return false;
+    return Number(pipelineTechId) !== Number(currentTechId);
+  };
+
+  // Combined "Assigned" view: pipeline-assigned runs + outside-pipeline-assigned
+  // runs. If the pipeline originally assigned a ticket but FreshService now
+  // shows a different owner, treat that row as FreshService-handled for the
+  // source filter. The original pipeline decision is still visible in the run
+  // detail, but the list should reflect the live operational outcome.
   const assignedTotal = (assignedRuns?.total || 0) + (outsideAssignedRuns?.total || 0);
   const resultsPageStart = resultsPage * resultsPageSize;
   const resultsPageEnd = resultsPageStart + resultsPageSize;
-  const allAssignedItems = (() => {
-    const viaPipeline = (assignedRuns?.items || []).map(r => ({ ...r, _source: 'via_pipeline' }));
+  const assignedSourceBuckets = (() => {
+    const pipelineAssigned = (assignedRuns?.items || []).map(r => ({ ...r, _source: 'via_pipeline' }));
+    const viaPipeline = pipelineAssigned.filter(r => !wasPipelineAssignmentReroutedInFs(r));
+    const reroutedInFs = pipelineAssigned
+      .filter(wasPipelineAssignmentReroutedInFs)
+      .map(r => ({ ...r, _source: 'manually_in_fs', _originalSource: 'via_pipeline' }));
     const manual = (outsideAssignedRuns?.items || []).map(r => ({ ...r, _source: 'manually_in_fs' }));
+    return { viaPipeline, manual, reroutedInFs };
+  })();
+  const allAssignedItems = (() => {
+    const { viaPipeline, manual, reroutedInFs } = assignedSourceBuckets;
     if (assignedFilter === 'via_pipeline') return viaPipeline;
-    if (assignedFilter === 'manually_in_fs') return manual;
+    if (assignedFilter === 'manually_in_fs') return [...manual, ...reroutedInFs];
     // 'all' view: a ticket can show up in BOTH lists (e.g. originally
     // decided via_pipeline, then bounced and now has a pending_review
     // rebound run that catches the manually_in_fs filter). Dedupe by
     // ticket — keep the most recent run, attach _siblingCount for a
     // subtle indicator. Sub-tabs intentionally don't dedupe so a user
     // investigating can still see the full history.
-    const merged = [...viaPipeline, ...manual]
+    const merged = [...viaPipeline, ...manual, ...reroutedInFs]
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     const seenByTicket = new Map();
     for (const run of merged) {
@@ -1869,6 +1898,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     : allAssignedItems;
   const combinedAssignedItems = allAssignedItemsFiltered.slice(resultsPageStart, resultsPageEnd);
   const differentAgentCount = allAssignedItems.filter(wasDifferentAgentChosen).length;
+  const reroutedInFsCount = assignedSourceBuckets.reroutedInFs.length;
+  const viaPipelineCount = Math.max(0, (assignedRuns.total || 0) - reroutedInFsCount);
+  const manuallyInFsCount = (outsideAssignedRuns.total || 0) + reroutedInFsCount;
 
   // Tech list — sort+map the techPhotos object into FilterDropdown-shaped options.
   // Plain assignment (not useMemo) because we're below the early-return for
@@ -2012,8 +2044,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const activeResultsTotal = (() => {
     if (subView === 'pending') return queue.total;
     if (subView === 'assigned') {
-      if (assignedFilter === 'via_pipeline') return assignedRuns.total || 0;
-      if (assignedFilter === 'manually_in_fs') return outsideAssignedRuns.total || 0;
+      if (differentAgentOnly) return allAssignedItemsFiltered.length;
+      if (assignedFilter === 'via_pipeline') return viaPipelineCount;
+      if (assignedFilter === 'manually_in_fs') return manuallyInFsCount;
       return assignedTotal;
     }
     if (subView === 'dismissed') return dismissedRuns.total || 0;
@@ -2038,7 +2071,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       ? 'border-emerald-300'
       : flag === 'deleted' ? 'border-red-200' : flag === 'closed' ? 'border-slate-200' : flag === 'assigned' ? 'border-amber-200' : 'border-slate-300';
     const statusLabel = getStatusLabel(run.ticket?.status);
-    const assignee = subView !== 'pending' ? (run.assignedTech || run.ticket?.assignedTech) : run.ticket?.assignedTech;
+    const assignee = run.ticket?.assignedTech
+      || (subView !== 'pending' ? run.assignedTech : null);
 
     return (
       <div
@@ -2314,7 +2348,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   value={assignedFilter}
                   options={SOURCE_OPTIONS.map((o) => ({
                     ...o,
-                    count: o.id === 'all' ? assignedTotal : o.id === 'via_pipeline' ? assignedRuns.total : outsideAssignedRuns.total,
+                    count: o.id === 'all'
+                      ? assignedTotal
+                      : o.id === 'via_pipeline'
+                        ? viaPipelineCount
+                        : manuallyInFsCount,
                   }))}
                   onChange={setAssignedFilter}
                 />
