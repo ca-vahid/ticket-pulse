@@ -441,23 +441,23 @@ export default function Visuals() {
       <div className="min-h-screen bg-gray-100 flex flex-col">
         {/* Header */}
         <header className="bg-white shadow-sm border-b border-gray-200">
-          <div className="max-w-7xl mx-auto px-4 py-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+          <div className="max-w-7xl mx-auto px-3 py-3 sm:px-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
                 <button
                   onClick={() => navigate('/dashboard')}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="min-h-[40px] min-w-[40px] p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Back to Dashboard"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <h1 className="text-2xl font-bold text-gray-800">Agent Map Visualization</h1>
+                <h1 className="min-w-0 truncate text-lg font-bold text-gray-800 sm:text-2xl">Agent Map Visualization</h1>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:items-center lg:gap-4">
                 {/* Radius Scale Slider */}
-                <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+                <div className="flex min-w-0 items-center gap-2 bg-gray-50 px-3 py-2 lg:py-1.5 rounded-lg border border-gray-200">
                   <Maximize className="w-4 h-4 text-gray-500" />
-                  <div className="flex flex-col w-32">
+                  <div className="flex min-w-0 flex-1 flex-col lg:w-32 lg:flex-none">
                     <label className="text-[10px] text-gray-500 font-medium leading-none mb-1">Spread Radius</label>
                     <input
                       type="range"
@@ -474,11 +474,11 @@ export default function Visuals() {
                 </div>
 
                 {/* Bubble Size Slider */}
-                <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+                <div className="flex min-w-0 items-center gap-2 bg-gray-50 px-3 py-2 lg:py-1.5 rounded-lg border border-gray-200">
                   <div className="w-4 h-4 flex items-center justify-center text-gray-500">
                     <div className="w-3 h-3 rounded-full border-2 border-current"></div>
                   </div>
-                  <div className="flex flex-col w-32">
+                  <div className="flex min-w-0 flex-1 flex-col lg:w-32 lg:flex-none">
                     <label className="text-[10px] text-gray-500 font-medium leading-none mb-1">Bubble Size</label>
                     <input
                       type="range"
@@ -494,7 +494,7 @@ export default function Visuals() {
                   <span className="text-xs text-gray-600 font-medium w-8 text-right">{bubbleScale.toFixed(1)}x</span>
                 </div>
 
-                <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 sm:col-span-2 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0">
                   <Users className="w-4 h-4" />
                   <span>{selectedAgents.size} of {agents.length} agents selected</span>
                 </div>
@@ -504,12 +504,12 @@ export default function Visuals() {
         </header>
 
         {/* Main Content */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden lg:flex-row">
           {/* Sidebar - Agent List */}
-          <div className={`bg-white border-r border-gray-200 overflow-y-auto transition-all duration-300 ${
-            sidebarCollapsed ? 'w-20' : 'w-80'
+          <div className={`bg-white border-b border-gray-200 overflow-y-auto transition-all duration-300 lg:border-b-0 lg:border-r ${
+            sidebarCollapsed ? 'max-h-24 lg:max-h-none lg:w-20' : 'max-h-[42vh] lg:max-h-none lg:w-80'
           }`}>
-            <div className={`p-4 ${sidebarCollapsed ? 'px-2' : ''}`}>
+            <div className={`p-3 sm:p-4 ${sidebarCollapsed ? 'lg:px-2' : ''}`}>
               {/* Header with Collapse Toggle */}
               <div className="flex items-center justify-between mb-4">
                 {!sidebarCollapsed && (
@@ -574,7 +574,7 @@ export default function Visuals() {
                   )}
 
                   {/* Agent List */}
-                  <div className={`space-y-2 ${sidebarCollapsed ? 'space-y-1' : ''}`}>
+                  <div className={`${sidebarCollapsed ? 'flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0' : 'space-y-2'}`}>
                     {agents
                       .sort((a, b) => {
                       // Sort: selected first, then by name
@@ -595,7 +595,7 @@ export default function Visuals() {
                             <div
                               key={agent.id}
                               onClick={() => toggleAgent(agent.id)}
-                              className={`relative cursor-pointer transition-all ${
+                              className={`relative flex-shrink-0 cursor-pointer transition-all ${
                                 isManager ? 'ring-2 ring-yellow-400 rounded-full' : ''
                               }`}
                               title={`${agent.name} - ${agent.location || 'No location'}`}
@@ -794,7 +794,7 @@ export default function Visuals() {
           </div>
 
           {/* Map Container */}
-          <div className="flex-1 relative">
+          <div className="relative min-h-[55vh] flex-1 lg:min-h-0">
             {loading ? (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
                 <div className="text-center">
@@ -822,7 +822,7 @@ export default function Visuals() {
                 key={mapKey}
                 center={[54.5, -105.0]}
                 zoom={4}
-                className="h-full w-full"
+                className="h-full min-h-[55vh] w-full lg:min-h-0"
                 scrollWheelZoom={true}
                 zoomSnap={0.1} // Allow finer zoom steps
                 zoomDelta={0.5} // Smaller zoom increments (was 1)
@@ -885,4 +885,3 @@ export default function Visuals() {
     </>
   );
 }
-

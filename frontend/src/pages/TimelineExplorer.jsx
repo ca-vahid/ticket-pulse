@@ -576,7 +576,7 @@ export default function TimelineExplorer() {
 
   // ── Render ──
   return (
-    <div className="h-screen bg-slate-50 flex flex-col overflow-hidden relative">
+    <div className="min-h-screen bg-slate-50 flex flex-col overflow-hidden relative">
       {/* Loading overlay — same style as Dashboard */}
       {(isLoading || techListLoading) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
@@ -603,11 +603,11 @@ export default function TimelineExplorer() {
 
       {/* ── White top bar ── */}
       <header className="bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
-        <div className="px-4 py-2 flex items-center gap-3">
+        <div className="px-3 sm:px-4 py-2 flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
           {/* Back */}
           <button
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors text-sm font-medium flex-shrink-0"
+            className="flex min-h-[40px] items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors text-sm font-medium flex-shrink-0"
           >
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
@@ -615,9 +615,9 @@ export default function TimelineExplorer() {
           <div className="w-px h-5 bg-slate-200 flex-shrink-0" />
 
           {/* Title */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex min-w-0 items-center gap-2 flex-shrink-0">
             <Layers className="w-4 h-4 text-blue-600 flex-shrink-0" />
-            <h1 className="text-sm font-bold text-slate-900">Timeline Explorer</h1>
+            <h1 className="min-w-0 truncate text-sm font-bold text-slate-900">Timeline Explorer</h1>
             {selectedTechIds.size > 0 && (
               <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
                 {selectedTechIds.size} tech{selectedTechIds.size > 1 ? 's' : ''}
@@ -629,7 +629,7 @@ export default function TimelineExplorer() {
 
           {/* Picked / Not-picked totals */}
           {totals && (
-            <div className="flex items-center gap-3 text-xs flex-shrink-0">
+            <div className="hidden items-center gap-3 text-xs flex-shrink-0 sm:flex">
               <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
                 Picked {totals.picked}
@@ -657,11 +657,11 @@ export default function TimelineExplorer() {
       </header>
 
       {/* ── Gradient date/period navigation bar ── */}
-      <div className="flex-shrink-0 px-4 pt-2 pb-2">
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-3 py-2 flex items-center gap-3 text-white">
+      <div className="flex-shrink-0 px-2 sm:px-4 pt-2 pb-2">
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-2 sm:px-3 py-2 flex flex-col gap-2 text-white lg:flex-row lg:items-center lg:gap-3">
 
           {/* LEFT: Date navigation */}
-          <div className="flex items-center gap-1.5 flex-shrink-0">
+          <div className="flex min-w-0 items-center gap-1.5 flex-shrink-0 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <button
               onClick={handlePrevious}
               className="p-1.5 hover:bg-white hover:bg-opacity-20 rounded transition-colors"
@@ -670,7 +670,7 @@ export default function TimelineExplorer() {
               <ChevronLeft className="w-4 h-4" />
             </button>
 
-            <div className="w-52 flex items-center justify-center">
+            <div className="flex w-44 flex-shrink-0 items-center justify-center sm:w-52">
               {viewMode === 'weekly' ? (
                 <span className="text-sm font-medium text-center w-full opacity-95">{periodLabel}</span>
               ) : viewMode === 'monthly' ? (
@@ -713,10 +713,10 @@ export default function TimelineExplorer() {
             )}
           </div>
 
-          <div className="flex-1" />
+          <div className="hidden flex-1 lg:block" />
 
           {/* RIGHT: Rolling/Combined + Daily/Weekly/Monthly */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 overflow-x-auto flex-shrink-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {/* Rolling/Combined toggle (only when multi-day) */}
             {isMultiDay && (
               <>
@@ -756,11 +756,11 @@ export default function TimelineExplorer() {
       </div>
 
       {/* ── Body ── */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         {/* Left sidebar — animated collapse */}
         <div
-          className={`flex-shrink-0 border-r border-slate-200 bg-white transition-all duration-300 ease-in-out flex flex-col ${
-            sidebarOpen ? 'w-64' : 'w-12'
+          className={`flex-shrink-0 border-b border-slate-200 bg-white transition-all duration-300 ease-in-out flex flex-col lg:border-b-0 lg:border-r ${
+            sidebarOpen ? 'max-h-[38vh] lg:max-h-none lg:w-64' : 'max-h-14 lg:max-h-none lg:w-12'
           }`}
         >
           {/* Toggle button row */}
@@ -789,9 +789,9 @@ export default function TimelineExplorer() {
         </div>
 
         {/* Right: filter bar + timeline */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0 pr-4 py-4 gap-3">
+        <div className="flex-1 flex min-w-0 flex-col gap-3 overflow-hidden px-2 py-3 sm:px-4 sm:py-4 lg:pl-0">
           {/* Filter bar */}
-          <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex-shrink-0 flex items-center gap-3">
+          <div className="bg-white border border-slate-200 rounded-xl px-3 sm:px-4 py-2.5 flex-shrink-0 flex flex-wrap items-center gap-2 sm:gap-3">
             <FilterBar
               allCategories={allCategories}
               excludeCats={excludeCats}
@@ -853,7 +853,7 @@ export default function TimelineExplorer() {
                 timelineItems={timelineItems}
                 defaultFirstName={techConfigs[0]?.firstName}
                 onExcludeCategory={addExcludeCat}
-                className="flex-1 overflow-y-auto px-5 py-3"
+                className="flex-1 overflow-y-auto px-3 py-3 sm:px-5"
                 emptyMessage="No tickets match the current filters."
                 showFullDate={viewMode !== 'daily'}
               />
@@ -861,7 +861,7 @@ export default function TimelineExplorer() {
 
             {/* Footer legend */}
             {techConfigs.length > 0 && (
-              <div className="px-5 py-2.5 border-t border-slate-100 flex-shrink-0">
+              <div className="px-3 sm:px-5 py-2.5 border-t border-slate-100 flex-shrink-0 overflow-x-auto">
                 <TimelineLegend techConfigs={techConfigs} />
               </div>
             )}

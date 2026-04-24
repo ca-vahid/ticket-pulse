@@ -13,7 +13,7 @@ function Metric({ icon: Icon, iconClass, label, value, sub, viewId, activeViewId
 
   // Color-keyed dim/dim-inactive states so the active cell stands out without
   // making inactive ones feel disabled.
-  const baseClasses = 'flex items-center gap-2.5 px-4 py-2 transition-colors w-full text-left';
+  const baseClasses = 'flex items-center gap-2.5 px-3 py-2.5 sm:px-4 sm:py-2 transition-colors w-full h-full text-left';
   const activeClasses = 'bg-blue-50 ring-1 ring-blue-200 ring-inset';
   const idleClasses = isClickable ? 'hover:bg-slate-50 cursor-pointer' : '';
   const inactiveTextDim = isClickable && !isActive && isZero ? 'opacity-60' : '';
@@ -26,7 +26,7 @@ function Metric({ icon: Icon, iconClass, label, value, sub, viewId, activeViewId
           <span className={`text-lg font-bold leading-none tabular-nums ${isActive ? 'text-blue-700' : 'text-slate-900'}`}>{value}</span>
           {sub && <span className="text-xs text-amber-600 font-medium">{sub}</span>}
         </div>
-        <div className={`text-[10px] uppercase tracking-wide font-medium leading-none mt-0.5 ${isActive ? 'text-blue-600' : 'text-slate-400'}`}>{label}</div>
+        <div className={`text-[10px] uppercase tracking-wide font-medium leading-tight mt-0.5 ${isActive ? 'text-blue-600' : 'text-slate-400'}`}>{label}</div>
       </div>
     </>
   );
@@ -45,10 +45,6 @@ function Metric({ icon: Icon, iconClass, label, value, sub, viewId, activeViewId
   }
 
   return <div className={baseClasses}>{inner}</div>;
-}
-
-function Divider() {
-  return <div className="w-px h-8 bg-slate-200 flex-shrink-0" />;
 }
 
 /**
@@ -83,7 +79,7 @@ export default function MetricsRibbon({
         : displayDate?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg flex items-stretch divide-x divide-slate-200 overflow-hidden">
+    <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white sm:grid-cols-3 lg:grid-cols-5 [&>*]:border-b [&>*]:border-r [&>*]:border-slate-200 lg:[&>*]:border-b-0">
       <Metric
         icon={CircleDot}
         iconClass="text-red-400"
@@ -95,7 +91,6 @@ export default function MetricsRibbon({
         onSelect={onSelectView}
         isZero={openCount + pendingCount === 0}
       />
-      <Divider />
       <Metric
         icon={Hand}
         iconClass="text-slate-400"
@@ -106,7 +101,6 @@ export default function MetricsRibbon({
         onSelect={onSelectView}
         isZero={selfPickedCount === 0}
       />
-      <Divider />
       <Metric
         icon={Send}
         iconClass="text-slate-400"
@@ -117,7 +111,6 @@ export default function MetricsRibbon({
         onSelect={onSelectView}
         isZero={assignedCount === 0}
       />
-      <Divider />
       <Metric
         icon={CheckCircle2}
         iconClass="text-emerald-500"
@@ -128,7 +121,6 @@ export default function MetricsRibbon({
         onSelect={onSelectView}
         isZero={closedCount === 0}
       />
-      <Divider />
       <Metric
         icon={Star}
         iconClass={csatCount > 0 ? 'text-amber-400 fill-amber-400' : 'text-slate-300'}

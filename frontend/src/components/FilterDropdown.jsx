@@ -127,7 +127,7 @@ export default function FilterDropdown({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={popoverId}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors touch-manipulation ${
+        className={`inline-flex max-w-[calc(100vw-2rem)] items-center gap-1.5 rounded-full border px-2.5 py-1.5 sm:py-1 text-[11px] font-medium transition-colors touch-manipulation ${
           isAtDefault
             ? 'border-transparent bg-slate-100/70 text-slate-600 hover:bg-slate-200/70 hover:text-slate-900'
             : 'border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100'
@@ -135,7 +135,7 @@ export default function FilterDropdown({
       >
         {Icon && <Icon className="h-3 w-3 shrink-0" />}
         <span className="text-slate-500">{label}:</span>
-        <span className="font-semibold">{summary}</span>
+        <span className="max-w-[8rem] truncate font-semibold">{summary}</span>
         {multi && Array.isArray(value) && value.length > 0 && (
           <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-bold text-white tabular-nums">
             {value.length}

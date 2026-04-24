@@ -438,7 +438,7 @@ export default function TechnicianDetailNew() {
         monthLabel={monthLabel}
       />
 
-      <main className="max-w-7xl mx-auto px-6 py-4 space-y-4">
+      <main className="mx-auto max-w-7xl space-y-4 px-3 py-3 sm:px-6 sm:py-4">
         {/* Primary tab bar */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           {/* Tab navigation — badges are period-aware where it makes sense:
@@ -446,7 +446,7 @@ export default function TechnicianDetailNew() {
               - CSAT: count of CSAT responses whose csatSubmittedAt falls in the period
               - Bounced: count of rejections in selected period
               A secondary "N total" hint is shown when the all-time count differs. */}
-          <div className="flex border-b border-slate-200 bg-slate-50/60">
+          <div className="flex overflow-x-auto border-b border-slate-200 bg-slate-50/60 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {PRIMARY_TABS.map((tab) => {
               const isActive = activeTab === tab.id;
 
@@ -500,7 +500,7 @@ export default function TechnicianDetailNew() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-5 py-3 text-sm transition-all relative border-b-2 -mb-px ${
+                  className={`relative -mb-px flex flex-shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-sm transition-all sm:px-5 ${
                     isActive
                       ? 'text-slate-900 font-semibold border-blue-600 bg-white'
                       : 'text-slate-400 font-medium border-transparent hover:text-slate-600 hover:bg-white/60'
@@ -525,7 +525,7 @@ export default function TechnicianDetailNew() {
           </div>
 
           {/* Tab content */}
-          <div className={activeTab === 'overview' ? 'bg-slate-50/60 p-4' : 'p-4'}>
+          <div className={activeTab === 'overview' ? 'bg-slate-50/60 p-2 sm:p-4' : 'p-2 sm:p-4'}>
             {activeTab === 'overview' && (
               <OverviewTab
                 technician={technician}

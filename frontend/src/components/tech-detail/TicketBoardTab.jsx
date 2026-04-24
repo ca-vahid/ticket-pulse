@@ -150,86 +150,135 @@ function TicketRow({ ticket, technicianName, activeView }) {
 
   const fsUrl = `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`;
 
+  const statusPill = (
+    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_COLORS[ticket.status] || 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
+      {ticket.status}
+    </span>
+  );
+
+  const categoryPill = ticket.ticketCategory ? (
+    <span
+      className="inline-block max-w-full truncate align-middle text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded"
+      title={ticket.ticketCategory}
+    >
+      {ticket.ticketCategory}
+    </span>
+  ) : (
+    <span className="text-slate-300 text-[11px]">—</span>
+  );
+
   return (
-    <div className={`grid ${ROW_GRID} items-center gap-3 px-3 py-2 text-[12px] hover:bg-slate-50/70 transition-colors`}>
-      {/* Priority dot */}
-      <div className="flex items-center justify-center">
-        <PriorityDot priority={ticket.priority} />
+    <>
+      <div className="md:hidden p-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex min-w-0 items-start gap-2">
+            <div className="pt-1">
+              <PriorityDot priority={ticket.priority} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 flex min-w-0 flex-wrap items-center gap-1.5">
+                <a
+                  href={fsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-[11px]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  #{ticket.freshserviceTicketId}
+                  <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                </a>
+                {isSelf && (
+                  <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[9px] font-semibold uppercase tracking-wide">
+                    Self
+                  </span>
+                )}
+                {hasCSAT && <CSATDot score={ticket.csatScore} totalScore={ticket.csatTotalScore} feedback={ticket.csatFeedback} />}
+              </div>
+              <div className="break-words text-sm font-semibold leading-snug text-slate-800" title={ticket.subject}>
+                {ticket.subject || 'No subject'}
+              </div>
+              {ticket.requesterName && (
+                <div className="mt-1 truncate text-[11px] text-slate-400" title={ticket.requesterEmail || ticket.requesterName}>
+                  {ticket.requesterName}{ticket.requesterEmail ? ` · ${ticket.requesterEmail}` : ''}
+                </div>
+              )}
+              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                {statusPill}
+                <span className="max-w-full">{categoryPill}</span>
+                <span className="min-w-0 text-[11px] text-slate-500">{timeMetric}</span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 flex justify-end">
+            <a
+              href={fsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-[36px] items-center justify-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-3 text-[11px] font-semibold text-blue-700"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Open in FreshService <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        </div>
       </div>
 
-      {/* Ticket ID + (only when relevant) self-picked tag stacked beneath */}
-      <div className="flex flex-col gap-0.5 min-w-0">
-        <a
-          href={fsUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-[11px] truncate"
-          onClick={(e) => e.stopPropagation()}
-        >
-          #{ticket.freshserviceTicketId}
-          <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-        </a>
-        {isSelf && (
-          <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[9px] font-semibold uppercase tracking-wide">
-            Self
-          </span>
-        )}
-      </div>
+      <div className={`hidden md:grid ${ROW_GRID} items-center gap-3 px-3 py-2 text-[12px] hover:bg-slate-50/70 transition-colors`}>
+        <div className="flex items-center justify-center">
+          <PriorityDot priority={ticket.priority} />
+        </div>
 
-      {/* Subject + requester (stacked, both truncated) */}
-      <div className="min-w-0 flex flex-col gap-0.5">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="font-medium text-slate-800 truncate" title={ticket.subject}>{ticket.subject}</span>
-          {hasCSAT && (
-            <span className="flex-shrink-0">
-              <CSATDot score={ticket.csatScore} totalScore={ticket.csatTotalScore} feedback={ticket.csatFeedback} />
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <a
+            href={fsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-[11px] truncate"
+            onClick={(e) => e.stopPropagation()}
+          >
+            #{ticket.freshserviceTicketId}
+            <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+          </a>
+          {isSelf && (
+            <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[9px] font-semibold uppercase tracking-wide">
+              Self
             </span>
           )}
         </div>
-        {ticket.requesterName && (
-          <div className="text-[10px] text-slate-400 truncate" title={ticket.requesterEmail || ticket.requesterName}>
-            {ticket.requesterName}{ticket.requesterEmail ? ` · ${ticket.requesterEmail}` : ''}
-          </div>
-        )}
-      </div>
 
-      {/* Status pill */}
-      <div>
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_COLORS[ticket.status] || 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
-          {ticket.status}
+        <div className="min-w-0 flex flex-col gap-0.5">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="font-medium text-slate-800 truncate" title={ticket.subject}>{ticket.subject}</span>
+            {hasCSAT && (
+              <span className="flex-shrink-0">
+                <CSATDot score={ticket.csatScore} totalScore={ticket.csatTotalScore} feedback={ticket.csatFeedback} />
+              </span>
+            )}
+          </div>
+          {ticket.requesterName && (
+            <div className="text-[10px] text-slate-400 truncate" title={ticket.requesterEmail || ticket.requesterName}>
+              {ticket.requesterName}{ticket.requesterEmail ? ` · ${ticket.requesterEmail}` : ''}
+            </div>
+          )}
+        </div>
+
+        <div>{statusPill}</div>
+        <div className="min-w-0">{categoryPill}</div>
+        <div className="min-w-0">{timeMetric}</div>
+
+        <span className="text-right">
+          <a
+            href={fsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Open <ExternalLink className="w-3 h-3" />
+          </a>
         </span>
       </div>
-
-      {/* Category — subtle pill, truncated */}
-      <div className="min-w-0">
-        {ticket.ticketCategory ? (
-          <span
-            className="inline-block max-w-full truncate align-middle text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded"
-            title={ticket.ticketCategory}
-          >
-            {ticket.ticketCategory}
-          </span>
-        ) : (
-          <span className="text-slate-300 text-[11px]">—</span>
-        )}
-      </div>
-
-      {/* Time metric / assigner */}
-      <div className="min-w-0">{timeMetric}</div>
-
-      {/* Action — lightweight link */}
-      <span className="text-right">
-        <a
-          href={fsUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
-          onClick={(e) => e.stopPropagation()}
-        >
-          Open <ExternalLink className="w-3 h-3" />
-        </a>
-      </span>
-    </div>
+    </>
   );
 }
 

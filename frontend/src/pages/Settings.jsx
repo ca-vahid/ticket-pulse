@@ -345,19 +345,19 @@ export default function Settings() {
   }
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
+    <div className="min-h-screen bg-gray-50 flex flex-col overflow-hidden">
       {/* Compact Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-2.5 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-4">
+      <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 flex-shrink-0">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           <button
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            className="flex min-h-[40px] flex-shrink-0 items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Back to Dashboard</span>
+            <span className="hidden sm:inline">Back to Dashboard</span>
           </button>
           <div className="h-4 w-px bg-gray-300"></div>
-          <h1 className="text-sm font-semibold text-gray-900">Settings</h1>
+          <h1 className="min-w-0 truncate text-sm font-semibold text-gray-900">Settings</h1>
         </div>
         {currentWorkspace && availableWorkspaces.length > 1 && (
           <select
@@ -379,17 +379,17 @@ export default function Settings() {
       </header>
 
       {/* Main Content with Sidebar */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden md:flex-row">
         {/* Left Navigation Pane */}
-        <aside className="w-52 bg-gray-50/70 border-r border-gray-200/80 flex-shrink-0">
-          <nav className="p-2 space-y-px h-full overflow-y-auto">
+        <aside className="w-full bg-gray-50/70 border-b border-gray-200/80 flex-shrink-0 md:w-52 md:border-b-0 md:border-r">
+          <nav className="flex gap-1 overflow-x-auto p-2 [scrollbar-width:none] [-ms-overflow-style:none] md:block md:h-full md:space-y-px md:overflow-y-auto [&::-webkit-scrollbar]:hidden">
             {navigationItems.map((item) => {
               const isActive = activeSection === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => setActiveSection(item.id)}
-                  className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[13px] text-left transition-all ${
+                  className={`flex flex-shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-all md:w-full ${
                     isActive
                       ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200/80 font-medium'
                       : 'text-gray-500 hover:text-gray-700 hover:bg-white/60'
@@ -404,7 +404,7 @@ export default function Settings() {
         </aside>
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto bg-gray-50">
+        <main className="min-w-0 flex-1 overflow-y-auto bg-gray-50">
           <div className="h-full">
             {/* FreshService Configuration */}
             {activeSection === 'freshservice' && (

@@ -93,22 +93,21 @@ export default function TechDetailHeader({
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-      <div className="max-w-7xl mx-auto px-6 py-3">
-        {/* Single row layout */}
-        <div className="flex items-center gap-4">
+      <div className="max-w-7xl mx-auto px-3 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center gap-3 lg:flex-nowrap lg:gap-4">
           {/* Back button */}
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors flex-shrink-0 text-sm font-medium"
+            className="flex min-h-[40px] flex-shrink-0 items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-800"
           >
             <ArrowLeft className="w-4 h-4" />
             Back
           </button>
 
-          <div className="w-px h-6 bg-slate-200 flex-shrink-0" />
+          <div className="hidden h-6 w-px flex-shrink-0 bg-slate-200 sm:block" />
 
           {/* Identity */}
-          <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             {technician.photoUrl ? (
               <img
                 src={technician.photoUrl}
@@ -121,19 +120,21 @@ export default function TechDetailHeader({
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="text-base font-bold text-slate-900 leading-tight">{technician.name}</h1>
+              <h1 className="truncate text-base font-bold leading-tight text-slate-900">{technician.name}</h1>
               <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 flex-wrap">
                 {location && (
-                  <span className="flex items-center gap-1">
+                  <span className="flex min-w-0 items-center gap-1">
                     <MapPin className="w-3 h-3" />
-                    {location}
+                    <span className="truncate">{location}</span>
                   </span>
                 )}
                 {timezone && (
-                  <span className="flex items-center gap-1">
+                  <span className="flex min-w-0 items-center gap-1">
                     <Clock className="w-3 h-3" />
-                    {timezone}
-                    {hasSchedule && ` · ${technician.workStartTime || '??'}–${technician.workEndTime || '??'}`}
+                    <span className="truncate">
+                      {timezone}
+                      {hasSchedule && ` · ${technician.workStartTime || '??'}–${technician.workEndTime || '??'}`}
+                    </span>
                   </span>
                 )}
               </div>
@@ -141,9 +142,9 @@ export default function TechDetailHeader({
           </div>
 
           {/* Right controls: Daily/Weekly/Monthly toggle + date nav + export */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex w-full flex-shrink-0 items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] lg:w-auto lg:overflow-visible lg:pb-0 [&::-webkit-scrollbar]:hidden">
             {/* Daily / Weekly / Monthly toggle */}
-            <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs font-semibold">
+            <div className="flex flex-shrink-0 bg-slate-100 rounded-lg p-0.5 text-xs font-semibold">
               <button
                 onClick={handleSwitchToDaily}
                 className={`px-3 py-1.5 rounded-md transition-all ${
@@ -170,7 +171,7 @@ export default function TechDetailHeader({
               </button>
             </div>
 
-            <div className="w-px h-5 bg-slate-200" />
+            <div className="h-5 w-px flex-shrink-0 bg-slate-200" />
 
             {/* Date / week / month navigation — fixed-width area so layout never shifts */}
             <button
@@ -182,7 +183,7 @@ export default function TechDetailHeader({
             </button>
 
             {/* Fixed-width date display: all three modes share the same 216px slot */}
-            <div className="w-[216px] flex items-center justify-center">
+            <div className="flex w-[160px] flex-shrink-0 items-center justify-center sm:w-[216px]">
               {viewMode === 'weekly' ? (
                 <span className="text-sm font-medium text-slate-700 text-center w-full text-center">
                   {weekDisplayLabel}
@@ -236,7 +237,7 @@ export default function TechDetailHeader({
               );
             })()}
 
-            <div className="w-px h-5 bg-slate-200" />
+            <div className="h-5 w-px flex-shrink-0 bg-slate-200" />
 
             <ExportButton
               tickets={allTickets}

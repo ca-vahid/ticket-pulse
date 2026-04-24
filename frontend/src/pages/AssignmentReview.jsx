@@ -137,7 +137,7 @@ function ManualTriggerPanel({ isAdmin = false }) {
                 {filtered.map((ticket) => {
                   const hasPipeline = ticket.pipelineRuns?.length > 0;
                   return (
-                    <div key={ticket.id} className="flex items-center justify-between bg-white border rounded-lg px-3 py-2.5 sm:py-2 gap-2">
+                    <div key={ticket.id} className="flex flex-col gap-2 bg-white border rounded-lg px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:py-2">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate">
                           <span className="text-gray-400 font-mono text-xs">#{ticket.freshserviceTicketId}</span>{' '}
@@ -151,7 +151,7 @@ function ManualTriggerPanel({ isAdmin = false }) {
                       </div>
                       <button
                         onClick={() => handleTrigger(ticket.id)}
-                        className={`px-3 py-2 sm:py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation min-h-[36px] flex-shrink-0 ${
+                        className={`w-full justify-center px-3 py-2 sm:w-auto sm:py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation min-h-[36px] flex-shrink-0 ${
                           hasPipeline
                             ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             : 'bg-blue-600 text-white hover:bg-blue-700'
@@ -2044,13 +2044,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       <div
         key={run.id}
         onClick={() => handleSelectRun(run.id)}
-        className={`px-3.5 py-3 active:bg-blue-50/60 touch-manipulation cursor-pointer border ${cardBorder} rounded-xl bg-white shadow-sm ${rowBg} transition-[border-color,box-shadow] duration-[2000ms] ${isNew ? 'shadow-emerald-100 shadow-md' : ''}`}
+        className={`min-w-0 px-3.5 py-3 active:bg-blue-50/60 touch-manipulation cursor-pointer border ${cardBorder} rounded-xl bg-white shadow-sm ${rowBg} transition-[border-color,box-shadow] duration-[2000ms] ${isNew ? 'shadow-emerald-100 shadow-md' : ''}`}
       >
         {/* Row 1: priority + ticket ID + category + decision (non-pending) + chevron */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex min-w-0 items-center gap-1.5 flex-wrap">
           <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${priPill}`}>{priLabel || '—'}</span>
           <span className="text-slate-400 font-mono text-[11px]">#{run.ticket?.freshserviceTicketId}</span>
-          {run.ticket?.ticketCategory && <span className="text-[10px] text-slate-400 bg-slate-100 rounded px-1 py-0.5">{run.ticket.ticketCategory}</span>}
+          {run.ticket?.ticketCategory && <span className="max-w-full truncate text-[10px] text-slate-400 bg-slate-100 rounded px-1 py-0.5">{run.ticket.ticketCategory}</span>}
           {(run.reboundFrom || run.ticket?.lastReboundContext)?.previousTechName && (() => {
             const ctx = run.reboundFrom || run.ticket.lastReboundContext;
             return (
@@ -2092,9 +2092,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         </div>
 
         {/* Row 4: Status + AI Suggestion side by side */}
-        <div className="flex items-start gap-3 mt-2">
+        <div className="flex flex-col gap-2 mt-2 sm:flex-row sm:items-start sm:gap-3">
           {/* Status section */}
-          <div className={`flex items-center gap-1.5 ${flag === 'closed' || flag === 'deleted' ? 'opacity-50' : ''}`}>
+          <div className={`flex min-w-0 flex-wrap items-center gap-1.5 ${flag === 'closed' || flag === 'deleted' ? 'opacity-50' : ''}`}>
             <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${getStatusPillStyle(statusLabel)}`}>{statusLabel}</span>
             {assignee ? (
               avatarView ? (
@@ -2103,7 +2103,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   <span className="text-[10px] text-slate-600">{assignee.name?.split(' ')[0]}</span>
                 </span>
               ) : (
-                <span className="text-[10px] text-amber-700 font-medium">{assignee.name?.split(' ')[0]}</span>
+                <span className="truncate text-[10px] text-amber-700 font-medium">{assignee.name?.split(' ')[0]}</span>
               )
             ) : run.ticket?.assignedTechId ? (
               <span className="text-[10px] text-slate-400 italic">External</span>
@@ -2114,7 +2114,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
           {/* AI Suggestion section */}
           {recs.length > 0 && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
               {avatarView ? (
                 <AiPicks recommendations={recs} />
               ) : (
@@ -2185,7 +2185,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         <button
           type="button"
           onClick={scrollToQueuedSection}
-          className="group flex items-center gap-2 w-full text-left px-3 py-2 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-50 hover:border-amber-300 transition-colors"
+          className="group flex w-full flex-wrap items-center gap-2 text-left px-3 py-2 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-50 hover:border-amber-300 transition-colors"
           title="Jump to queued tickets"
         >
           <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
@@ -2203,7 +2203,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           {queueStatus?.isBusinessHours && (
             <span className="text-[11px] text-emerald-600 font-medium">· active — processing on next sync</span>
           )}
-          <span className="ml-auto text-[11px] font-medium text-amber-700 opacity-0 group-hover:opacity-100 transition-opacity">View ↓</span>
+          <span className="ml-auto hidden text-[11px] font-medium text-amber-700 opacity-0 transition-opacity group-hover:opacity-100 sm:inline">View ↓</span>
         </button>
       )}
 
@@ -2453,21 +2453,21 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             looks empty even though analysis is underway. */}
         {subView === 'pending' && queue.inProgress && queue.inProgress.length > 0 && (
           <div className="border border-blue-200 bg-blue-50/40 rounded-lg overflow-hidden">
-            <div className="px-3 py-1.5 border-b border-blue-100 bg-blue-50/60 flex items-center gap-2">
+            <div className="px-3 py-2 border-b border-blue-100 bg-blue-50/60 flex flex-wrap items-center gap-x-2 gap-y-1">
               <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin flex-shrink-0" />
               <span className="text-[12px] font-semibold text-blue-800">
                 Analyzing {queue.inProgress.length} ticket{queue.inProgress.length !== 1 ? 's' : ''}…
               </span>
-              <span className="text-[10px] text-blue-600">
+              <span className="basis-full text-[10px] text-blue-600 sm:basis-auto">
                 AI is ranking candidates — usually 5–30s per ticket
               </span>
             </div>
             <div className="divide-y divide-blue-50">
               {queue.inProgress.map((run) => (
-                <div key={`ip-${run.id}`} className="px-3 py-1.5 flex items-center gap-2 text-xs">
+                <div key={`ip-${run.id}`} className="px-3 py-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                   <Loader2 className="w-3 h-3 text-blue-500 animate-spin flex-shrink-0 opacity-60" />
                   <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
-                  <span className="text-slate-700 font-medium truncate flex-1">{run.ticket?.subject || 'No subject'}</span>
+                  <span className="min-w-0 flex-1 truncate text-slate-700 font-medium">{run.ticket?.subject || 'No subject'}</span>
                   <span className="text-[10px] text-slate-400 hidden sm:inline">{run.ticket?.requester?.name || ''}</span>
                   <span className="text-[10px] text-blue-600 italic">analyzing…</span>
                 </div>
@@ -3954,19 +3954,19 @@ export default function AssignmentReview() {
     <div className="min-h-screen bg-slate-100 flex flex-col">
       {/* White top bar */}
       <header className="bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
-        <div className="px-3 sm:px-4 py-2 flex items-center gap-2 sm:gap-3">
-          <button onClick={handleHeaderBack} className={`flex items-center gap-1.5 transition-colors text-sm font-medium p-1 -ml-1 touch-manipulation min-h-[44px] ${isDetailView ? 'text-blue-600 hover:text-blue-800' : 'text-slate-500 hover:text-slate-800'}`}>
+        <div className="px-3 sm:px-4 py-2 flex min-w-0 items-center gap-2 sm:gap-3">
+          <button onClick={handleHeaderBack} className={`flex shrink-0 items-center gap-1.5 transition-colors text-sm font-medium p-1 -ml-1 touch-manipulation min-h-[44px] ${isDetailView ? 'text-blue-600 hover:text-blue-800' : 'text-slate-500 hover:text-slate-800'}`}>
             <ArrowLeft className="w-4 h-4" /> {headerBackLabel}
           </button>
           <div className="w-px h-5 bg-slate-200" />
-          <Brain className="w-4 h-4 text-blue-600" />
-          <h1 className="text-sm font-bold text-slate-900">Ticket Assignment</h1>
+          <Brain className="w-4 h-4 shrink-0 text-blue-600" />
+          <h1 className="min-w-0 truncate text-sm font-bold text-slate-900">Ticket Assignment</h1>
         </div>
       </header>
 
       {/* Purple gradient tab bar */}
       <div className="flex-shrink-0 px-2 sm:px-4 pt-3 pb-2">
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-1.5 sm:px-2 py-1 flex items-center gap-0.5 sm:gap-1 overflow-x-auto">
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-1.5 sm:px-2 py-1 flex items-center gap-0.5 sm:gap-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -3990,7 +3990,7 @@ export default function AssignmentReview() {
           {activeTab === 'queue' && (
             <>
               <div className="flex-1" />
-              <div className="inline-flex items-center gap-0.5 rounded-md bg-white/15 ring-1 ring-white/20 p-0.5">
+              <div className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md bg-white/15 ring-1 ring-white/20 p-0.5">
                 {['24h', '7d', '30d', 'all'].map((range) => (
                   <button
                     key={range}
@@ -4013,9 +4013,9 @@ export default function AssignmentReview() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 px-2 pb-2 sm:px-4 sm:pb-4 overflow-auto">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-full">
-          <div className="px-3 py-3 sm:px-6 sm:py-5">
+      <div className="flex-1 overflow-auto px-2 pb-2 sm:px-4 sm:pb-4">
+        <div className="min-h-full bg-white rounded-xl border border-slate-200 shadow-sm">
+          <div className="px-2 py-3 sm:px-6 sm:py-5">
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
