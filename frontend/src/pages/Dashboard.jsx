@@ -1,14 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
-import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
-import {
-  useDemoMode,
-  useDemoLabel,
-  scrubFreeText as scrubDemoText,
-} from '../utils/demoMode';
+import AppShell, { APP_BACKGROUND_CLASS, APP_BACKGROUND_STYLE } from '../components/AppShell';
 import DemoModeToggle from '../components/DemoModeToggle';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
@@ -18,22 +13,15 @@ import SearchBox from '../components/SearchBox';
 import CategoryFilter from '../components/CategoryFilter';
 import LegendPopover from '../components/LegendPopover';
 import MonthlyCalendar from '../components/MonthlyCalendar';
-import ExportButton from '../components/ExportButton';
 import { filterTickets } from '../utils/ticketFilter';
 import { getHolidayTooltip, getHolidayInfo, registerDynamicHolidays } from '../utils/holidays';
 import api from '../services/api';
-import ChangelogModal from '../components/ChangelogModal';
-import { APP_VERSION } from '../data/changelog';
 import { usePrefetch } from '../hooks/usePrefetch';
 import {
   CheckCircle,
   XCircle,
   Activity,
   RefreshCw,
-  LogOut,
-  Settings,
-  Wifi,
-  WifiOff,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
@@ -49,12 +37,10 @@ import {
   Inbox,
   CheckSquare,
   Clock,
-  Map,
   LayoutGrid,
   List,
   VolumeX,
   Volume2,
-  Sparkles,
   Bot,
 } from 'lucide-react';
 
@@ -66,11 +52,8 @@ export default function Dashboard() {
     monthlyData,
     primaryDataReady,
     isColdLoading,
-    isRefreshing,
     isLoading,
     error,
-    lastUpdated,
-    sseConnectionStatus,
     fetchDashboard,
     fetchWeeklyStats,
     fetchWeeklyDashboard,
@@ -81,22 +64,9 @@ export default function Dashboard() {
     clearCacheOnLogout,
     forceRefreshNoCache,
   } = useDashboard();
-  const { user, logout } = useAuth();
-  const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
+  const { currentWorkspace } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
-
-  const isGlobalAdmin = user?.role === 'admin';
-  const wsRole = (() => {
-    if (isGlobalAdmin) return 'admin';
-    const ws = availableWorkspaces?.find(w => w.id === currentWorkspace?.id);
-    return ws?.role || 'viewer';
-  })();
-  const canReview = wsRole === 'admin' || wsRole === 'reviewer';
-
-  // Demo Mode: when ON, anonymizes all sensitive data for screen recordings.
-  const demoMode = useDemoMode();
-  const welcomeLabel = useDemoLabel('name', user?.name || user?.username);
 
   const [refreshing, setRefreshing] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null); // null, 'syncing', 'success', 'error'
@@ -153,9 +123,6 @@ export default function Dashboard() {
 
   // Noise filter
   const [excludeNoise, setExcludeNoise] = useState(() => getGlobalExcludeNoise());
-
-  // Changelog modal
-  const [showChangelog, setShowChangelog] = useState(false);
 
   // Compact view state - persisted in localStorage
   const [isCompactView, setIsCompactView] = useState(() => {
@@ -735,12 +702,6 @@ export default function Dashboard() {
     }
   }, [selectedDate, selectedWeek, viewMode, fetchDashboard, formatDateLocal, refreshCurrentView, invalidateDateRange]);
 
-  const handleLogout = async () => {
-    clearCacheOnLogout();
-    await logout();
-    navigate('/login');
-  };
-
   const handleKillSync = async () => {
     if (!window.confirm('Force-stop the current sync? This will clear the stuck state so you can start a new sync. The sync in progress will be abandoned.')) return;
     setKillingSync(true);
@@ -757,27 +718,11 @@ export default function Dashboard() {
     }
   };
 
-  const handleSettings = () => {
-    navigate('/settings');
-  };
-
-  const handleVisuals = () => {
-    navigate('/visuals');
-  };
-
-  const handleTimeline = () => {
-    navigate('/timeline');
-  };
-
-  const handleAssignments = () => {
-    navigate('/assignments');
-  };
-
   if (isLoading && !dashboardData) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center bg-gray-100 bg-no-repeat bg-cover bg-fixed"
-        style={{ backgroundImage: 'url(/brand/dashboard-background.webp)' }}
+        className={`min-h-screen flex items-center justify-center ${APP_BACKGROUND_CLASS}`}
+        style={APP_BACKGROUND_STYLE}
       >
         <div className="text-center bg-white/80 backdrop-blur-sm px-6 py-5 rounded-xl shadow-sm border border-gray-200">
           <img
@@ -794,8 +739,8 @@ export default function Dashboard() {
   if (error) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center bg-gray-100 bg-no-repeat bg-cover bg-fixed"
-        style={{ backgroundImage: 'url(/brand/dashboard-background.webp)' }}
+        className={`min-h-screen flex items-center justify-center ${APP_BACKGROUND_CLASS}`}
+        style={APP_BACKGROUND_STYLE}
       >
         <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md shadow-sm">
           <XCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
@@ -1194,9 +1139,22 @@ export default function Dashboard() {
     : 0;
 
   return (
-    <div
-      className="min-h-screen bg-gray-100 relative bg-no-repeat bg-cover bg-fixed"
-      style={{ backgroundImage: 'url(/brand/dashboard-background.webp)' }}
+    <AppShell
+      activePage="dashboard"
+      contentClassName=""
+      headerProps={{
+        backgroundSyncRunning,
+        backgroundSyncStep,
+        killingSync,
+        onKillSync: handleKillSync,
+        clearCacheOnLogout,
+        isColdLoading,
+        dashboardActions: {
+          onRefresh: handleRefresh,
+          onSyncWeek: handleSyncWeek,
+          refreshing,
+        },
+      }}
     >
       {/* Fancy Loading Overlay */}
       {(isColdLoading && (dashboardData || weeklyData || monthlyData)) && (
@@ -1233,273 +1191,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-      
-      {/* Compact Header */}
-      <header className="sticky top-0 z-40 bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2">
-          {/* Mobile: two-row header */}
-          <div className="flex items-center justify-between gap-2 md:hidden">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <div className="h-9 w-[125px] overflow-hidden flex items-center justify-start flex-shrink-0">
-                  <img
-                    src="/brand/logo-wordmark.png"
-                    alt="Ticket Pulse"
-                    className="h-24 w-auto"
-                  />
-                </div>
-                <button onClick={() => setShowChangelog(true)} className="text-[9px] font-semibold text-blue-600 bg-blue-50 px-1 py-0.5 rounded border border-blue-200 flex-shrink-0">v{APP_VERSION}</button>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              {backgroundSyncRunning && (
-                <button
-                  onClick={handleKillSync}
-                  disabled={killingSync}
-                  className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 touch-manipulation"
-                  title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing… (tap to stop)'}
-                >
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                </button>
-              )}
-              {canReview && (
-                <button onClick={handleAssignments} className="flex items-center gap-1 px-2.5 py-2 rounded-full text-xs font-semibold border border-purple-200 bg-purple-50 text-purple-700 touch-manipulation" title="Assignment">
-                  <Sparkles className="w-4 h-4" /> <span className="hidden xs:inline">Assign</span>
-                </button>
-              )}
-              <button onClick={handleTimeline} className="p-2 hover:bg-gray-100 rounded-lg touch-manipulation" title="Timeline"><Clock className="w-4 h-4 text-indigo-600" /></button>
-              <button onClick={handleSettings} className="p-2 hover:bg-gray-100 rounded-lg touch-manipulation" title="Settings"><Settings className="w-4 h-4" /></button>
-              <button onClick={handleLogout} className="p-2 hover:bg-gray-100 rounded-lg touch-manipulation text-red-600" title="Logout"><LogOut className="w-4 h-4" /></button>
-            </div>
-          </div>
-
-          {/* Desktop: full 12-col grid */}
-          <div className="hidden md:grid grid-cols-12 gap-4 items-center">
-            {/* Left: Title + User - 3 cols */}
-            <div className="col-span-3">
-              <div className="flex items-center gap-2">
-                {/* Logo wrapper crops the wordmark PNG's transparent top/bottom
-                    padding (~65% of the image is whitespace). The image is
-                    rendered ~3x the wrapper height so the visible logo content
-                    fills the wrapper after center-clipping. */}
-                <div className="h-10 w-[150px] overflow-hidden flex items-center justify-start flex-shrink-0">
-                  <img
-                    src="/brand/logo-wordmark.png"
-                    alt="Ticket Pulse"
-                    className="h-28 w-auto"
-                  />
-                </div>
-                <button
-                  onClick={() => setShowChangelog(true)}
-                  className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded hover:bg-blue-100 border border-blue-200 transition-colors flex-shrink-0"
-                  title="View changelog"
-                >
-                  v{APP_VERSION}
-                </button>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-gray-600">
-                <span>Welcome, {welcomeLabel}</span>
-                {currentWorkspace && availableWorkspaces.length > 1 && (
-                  <select
-                    value={currentWorkspace.id}
-                    onChange={(e) => {
-                      const newId = Number(e.target.value);
-                      if (newId === currentWorkspace.id) return;
-                      switchWorkspace(newId);
-                      window.location.reload();
-                    }}
-                    className="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-medium cursor-pointer hover:bg-blue-100"
-                    title="Switch workspace"
-                  >
-                    {availableWorkspaces.map(ws => (
-                      <option key={ws.id} value={ws.id}>{demoMode ? scrubDemoText(ws.name) : ws.name}{ws.role ? ` [${ws.role}]` : ''}</option>
-                    ))}
-                  </select>
-                )}
-                {currentWorkspace && availableWorkspaces.length <= 1 && (
-                  <span className="bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-medium">
-                    {demoMode ? scrubDemoText(currentWorkspace.name) : currentWorkspace.name}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Center: Status + Last Updated - 6 cols */}
-            <div className="col-span-6 flex items-center justify-center gap-3 min-w-0">
-              {/* SSE Status */}
-              <div className="flex items-center gap-1.5 text-xs flex-shrink-0">
-                {sseConnectionStatus === 'connected' ? (
-                  <>
-                    <Wifi className="w-3.5 h-3.5 text-green-600" />
-                    <span className="text-green-600 font-medium">Live</span>
-                  </>
-                ) : sseConnectionStatus === 'connecting' ? (
-                  <>
-                    <Wifi className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-                    <span className="text-amber-500 font-medium">Connecting...</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="w-3.5 h-3.5 text-red-600" />
-                    <span className="text-red-600 font-medium">Offline</span>
-                  </>
-                )}
-              </div>
-
-              {/* Background Sync Status — compact icon-only with hover tooltip and optional progress bar */}
-              {backgroundSyncRunning && (() => {
-                const progressMatch = backgroundSyncStep && backgroundSyncStep.match(/(\d+)\s*\/\s*(\d+)/);
-                const pct = progressMatch
-                  ? Math.min(100, Math.max(0, (parseInt(progressMatch[1], 10) / Math.max(1, parseInt(progressMatch[2], 10))) * 100))
-                  : null;
-                const tooltip = backgroundSyncStep
-                  ? `Syncing: ${backgroundSyncStep}\n(click X to stop)`
-                  : 'Syncing… (click X to stop)';
-                return (
-                  <div
-                    className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-full px-1.5 py-0.5 flex-shrink-0"
-                    title={tooltip}
-                  >
-                    <div className="relative flex items-center justify-center w-5 h-5">
-                      <RefreshCw className="w-3.5 h-3.5 text-blue-500 animate-spin" />
-                      {pct !== null && (
-                        <svg className="absolute inset-0 w-5 h-5 -rotate-90" viewBox="0 0 20 20">
-                          <circle cx="10" cy="10" r="8" fill="none" stroke="#bfdbfe" strokeWidth="2" />
-                          <circle
-                            cx="10" cy="10" r="8" fill="none"
-                            stroke="#2563eb" strokeWidth="2"
-                            strokeDasharray={`${(pct / 100) * 2 * Math.PI * 8} ${2 * Math.PI * 8}`}
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                      )}
-                    </div>
-                    <button
-                      onClick={handleKillSync}
-                      disabled={killingSync}
-                      className="flex-none p-0.5 rounded-full hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
-                      title="Force-stop stuck sync"
-                    >
-                      <XCircle className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                );
-              })()}
-
-              {/* Last Updated / Refreshing indicator — icon + short time
-                  to avoid crowding the export/sync buttons in the right col */}
-              {isRefreshing && !isColdLoading ? (
-                <span className="text-xs text-blue-500 flex items-center gap-1 flex-shrink-0">
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                  Refreshing
-                </span>
-              ) : lastUpdated ? (
-                <span
-                  className="text-xs text-gray-500 flex items-center gap-1 flex-shrink-0"
-                  title={`Last updated: ${new Date(lastUpdated).toLocaleString()}`}
-                >
-                  <Clock className="w-3 h-3" />
-                  {new Date(lastUpdated).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-                </span>
-              ) : null}
-            </div>
-
-            {/* Right: Action Buttons - 3 cols */}
-            <div className="col-span-3 flex items-center justify-end gap-2">
-              {/* Export Button */}
-              <ExportButton
-                tickets={filteredTechnicians.flatMap(tech => getTechTickets(tech))}
-                technicians={filteredTechnicians}
-                viewMode={viewMode}
-                selectedDate={selectedDate}
-                selectedWeek={selectedWeek}
-                selectedMonth={selectedMonth}
-              />
-
-              {/* Sync buttons — greyed out when any sync is running */}
-              <div className="flex items-center">
-                <button
-                  onClick={handleRefresh}
-                  disabled={refreshing || backgroundSyncRunning}
-                  className={`p-1.5 rounded-l-lg border border-r-0 border-gray-300 transition-colors ${
-                    refreshing || backgroundSyncRunning
-                      ? 'opacity-40 cursor-not-allowed'
-                      : 'hover:bg-gray-100'
-                  }`}
-                  title="Sync All"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={handleSyncWeek}
-                  disabled={refreshing || backgroundSyncRunning}
-                  className={`p-1.5 rounded-r-lg border border-gray-300 transition-colors ${
-                    refreshing || backgroundSyncRunning
-                      ? 'opacity-40 cursor-not-allowed'
-                      : 'hover:bg-blue-50 hover:border-blue-300'
-                  }`}
-                  title="Sync Week (full detail sync for current week)"
-                >
-                  <Calendar className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Timeline Explorer */}
-              <button
-                onClick={handleTimeline}
-                className="group flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300 hover:shadow-sm whitespace-nowrap"
-                title="Timeline Explorer"
-              >
-                <span className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center group-hover:bg-indigo-700 transition-colors">
-                  <Clock className="w-3 h-3 text-white" />
-                </span>
-                Timeline Explorer
-              </button>
-
-              {/* Ticket Assignment -- visible to reviewers and admins only */}
-              {canReview && (
-                <button
-                  onClick={handleAssignments}
-                  className="group flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300 hover:shadow-sm whitespace-nowrap"
-                  title="AI Ticket Assignment"
-                >
-                  <span className="w-5 h-5 rounded-full bg-purple-600 flex items-center justify-center group-hover:bg-purple-700 transition-colors">
-                    <Sparkles className="w-3 h-3 text-white" />
-                  </span>
-                  Assignment
-                </button>
-              )}
-
-              {/* Visuals Button */}
-              <button
-                onClick={handleVisuals}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                title="Visuals"
-              >
-                <Map className="w-6 h-6" />
-              </button>
-
-              {/* Settings Button */}
-              <button
-                onClick={handleSettings}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                title="Settings"
-              >
-                <Settings className="w-6 h-6" />
-              </button>
-
-              {/* Logout Button */}
-              <button
-                onClick={handleLogout}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-red-600"
-                title="Logout"
-              >
-                <LogOut className="w-6 h-6" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
 
       {/* Sync Status Notification */}
       {syncStatus && (
@@ -2303,7 +1994,6 @@ export default function Dashboard() {
         </div>
       </main>
 
-      <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
-    </div>
+    </AppShell>
   );
 }

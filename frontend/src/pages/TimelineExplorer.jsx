@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, Layers, RefreshCw,
+  ChevronLeft, ChevronRight, ChevronDown, Layers, RefreshCw,
   Users, Check, Search, PanelLeftClose, PanelLeftOpen,
   EyeOff, Eye, VolumeX, Volume2, GitBranch,
 } from 'lucide-react';
 import { dashboardAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import { dataCache } from '../services/dataCache';
+import AppShell from '../components/AppShell';
 import FilterBar, { applyNotPickedFilters, applyPickedFilters } from '../components/tech-detail/FilterBar';
 import TimelineCore, { TimelineLegend } from '../components/timeline/TimelineCore';
 import {
@@ -323,8 +323,6 @@ function TechSelector({
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function TimelineExplorer() {
-  const navigate = useNavigate();
-
   // ── Tech state ──
   const [techList, setTechList] = useState([]);
   const [selectedTechIds, setSelectedTechIds] = useState(new Set());
@@ -627,10 +625,42 @@ export default function TimelineExplorer() {
   }, [excludeNoise, fetchTimeline]);
 
   const isMultiDay = days.length > 1;
+  const timelineHeaderActions = (
+    <>
+      {totals && (
+        <div className="hidden items-center gap-3 text-xs flex-shrink-0 xl:flex">
+          <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+            Picked {totals.picked}
+          </span>
+          <span className="flex items-center gap-1.5 text-slate-400 font-semibold">
+            <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" />
+            Not picked {totals.notPicked}
+          </span>
+          {totals.hidden > 0 && (
+            <span className="text-slate-300 text-[10px]">({totals.hidden} hidden)</span>
+          )}
+        </div>
+      )}
+      <button
+        onClick={fetchTimeline}
+        disabled={isLoading}
+        className={`p-1.5 hover:bg-slate-100 rounded-md transition-colors flex-shrink-0 ${isLoading ? 'opacity-50' : ''}`}
+        title={selectedTechIds.size > 0 ? `Refresh timeline for ${selectedTechIds.size} tech${selectedTechIds.size > 1 ? 's' : ''}` : 'Refresh Timeline Explorer'}
+      >
+        <RefreshCw className={`w-4 h-4 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
+      </button>
+    </>
+  );
 
   // ── Render ──
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col overflow-hidden relative">
+    <AppShell
+      activePage="timeline"
+      className="overflow-hidden"
+      contentClassName="max-w-7xl mx-auto w-full px-2 sm:px-4 py-3 flex min-h-[calc(100vh-64px)] flex-col"
+      headerProps={{ extraActions: timelineHeaderActions }}
+    >
       {/* Loading overlay — same style as Dashboard */}
       {(isLoading || techListLoading) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
@@ -655,63 +685,8 @@ export default function TimelineExplorer() {
         </div>
       )}
 
-      {/* ── White top bar ── */}
-      <header className="bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
-        <div className="px-3 sm:px-4 py-2 flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
-          {/* Back */}
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="flex min-h-[40px] items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors text-sm font-medium flex-shrink-0"
-          >
-            <ArrowLeft className="w-4 h-4" /> Back
-          </button>
-
-          <div className="w-px h-5 bg-slate-200 flex-shrink-0" />
-
-          {/* Title */}
-          <div className="flex min-w-0 items-center gap-2 flex-shrink-0">
-            <Layers className="w-4 h-4 text-blue-600 flex-shrink-0" />
-            <h1 className="min-w-0 truncate text-sm font-bold text-slate-900">Timeline Explorer</h1>
-            {selectedTechIds.size > 0 && (
-              <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
-                {selectedTechIds.size} tech{selectedTechIds.size > 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
-
-          <div className="flex-1" />
-
-          {/* Picked / Not-picked totals */}
-          {totals && (
-            <div className="hidden items-center gap-3 text-xs flex-shrink-0 sm:flex">
-              <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-                Picked {totals.picked}
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-400 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" />
-                Not picked {totals.notPicked}
-              </span>
-              {totals.hidden > 0 && (
-                <span className="text-slate-300 text-[10px]">({totals.hidden} hidden)</span>
-              )}
-            </div>
-          )}
-
-          {/* Refresh */}
-          <button
-            onClick={fetchTimeline}
-            disabled={isLoading}
-            className={`p-1.5 hover:bg-slate-100 rounded-md transition-colors flex-shrink-0 ${isLoading ? 'opacity-50' : ''}`}
-            title="Refresh"
-          >
-            <RefreshCw className={`w-4 h-4 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </header>
-
       {/* ── Gradient date/period navigation bar ── */}
-      <div className="flex-shrink-0 px-2 sm:px-4 pt-2 pb-2">
+      <div className="flex-shrink-0 pb-3">
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-2 sm:px-3 py-2 flex flex-col gap-2 text-white lg:flex-row lg:items-center lg:gap-3">
 
           {/* LEFT: Date navigation */}
@@ -810,7 +785,7 @@ export default function TimelineExplorer() {
       </div>
 
       {/* ── Body ── */}
-      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
+      <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white/80 shadow-sm lg:flex-row">
         {/* Left sidebar — animated collapse */}
         <div
           className={`flex-shrink-0 border-b border-slate-200 bg-white transition-all duration-300 ease-in-out flex flex-col lg:border-b-0 lg:border-r ${
@@ -934,6 +909,6 @@ export default function TimelineExplorer() {
           </div>
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

@@ -1,6 +1,17 @@
-export const APP_VERSION = '2.03';
+export const APP_VERSION = '2.04';
 
 export const changelog = [
+  {
+    version: '2.04',
+    date: 'April 24, 2026',
+    entries: [
+      { type: 'new', text: 'Shared AppShell/AppHeader now gives Dashboard, Assignment, and Timeline the same Ticket Pulse header, branded background, centered content width, workspace selector, live status, and user sign-out affordance.' },
+      { type: 'improved', text: 'Header navigation now shows only the other top-level destinations: Dashboard, Timeline, and Assignment. Timeline Explorer was shortened to Timeline, the workspace selector moved beside the logo/version, and the user name moved to the sign-out avatar tooltip.' },
+      { type: 'improved', text: 'Dashboard header no longer shows Export. Dashboard keeps its ticket sync controls, while Assignment exposes its FreshService queue sync in the same shared header slot for a unified control pattern.' },
+      { type: 'improved', text: 'Assignment Review queue sub-tabs now persist in the URL with values like ?queue=decided, so refreshing or opening a run detail preserves the current sub-view. In-page duplicate back buttons were removed now that browser back returns to the right tab context.' },
+      { type: 'fixed', text: 'Assignment Review filter area no longer shifts horizontally when switching between tabs with different content heights. The app now reserves a stable vertical scrollbar gutter so centered layouts do not nudge by a pixel.' },
+    ],
+  },
   {
     version: '2.03',
     date: 'April 24, 2026',

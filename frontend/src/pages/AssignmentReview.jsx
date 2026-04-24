@@ -4,6 +4,7 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { assignmentAPI, workspaceAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
+import AppShell from '../components/AppShell';
 import PipelineRunDetail from '../components/assignment/PipelineRunDetail';
 import CompetencyManager from '../components/assignment/CompetencyManager';
 import CalibrationManager from '../components/assignment/CalibrationManager';
@@ -33,6 +34,28 @@ const ALL_TABS = [
 ];
 
 const PACIFIC_TIMEZONE = 'America/Los_Angeles';
+const QUEUE_SUBVIEW_TO_URL = {
+  pending: 'awaiting',
+  assigned: 'decided',
+  dismissed: 'dismissed',
+  rejected: 'rejected',
+  deleted: 'deleted',
+  all: 'all',
+};
+const URL_TO_QUEUE_SUBVIEW = Object.fromEntries(
+  Object.entries(QUEUE_SUBVIEW_TO_URL).map(([subView, urlValue]) => [urlValue, subView]),
+);
+
+function readQueueSubViewFromUrl() {
+  if (typeof window === 'undefined') return 'pending';
+  const raw = new URLSearchParams(window.location.search).get('queue');
+  return URL_TO_QUEUE_SUBVIEW[raw] || 'pending';
+}
+
+function queueSubViewSearch(subView) {
+  const urlValue = QUEUE_SUBVIEW_TO_URL[subView];
+  return urlValue && urlValue !== QUEUE_SUBVIEW_TO_URL.pending ? `?queue=${urlValue}` : '';
+}
 
 function getPacificDayStartISOString(reference = new Date()) {
   const ptDate = formatInTimeZone(reference, PACIFIC_TIMEZONE, 'yyyy-MM-dd');
@@ -1053,7 +1076,7 @@ function buildTechOptions(techPhotos) {
     }));
 }
 
-function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles', timeRange = '7d', onTimeRangeChange }) {
+function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles', timeRange = '7d', onTimeRangeChange, onHeaderActionChange }) {
   const navigate = useNavigate();
   const [queue, setQueue] = useState({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 }, inProgress: [] });
   const [outsideAssignedRuns, setOutsideAssignedRuns] = useState({ items: [], total: 0 });
@@ -1132,7 +1155,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [sortField, setSortField] = useState('createdAt');
   const [sortDir, setSortDir] = useState('desc');
   const [queueStatus, setQueueStatus] = useState(null);
-  const [subView, setSubView] = useState('pending');
+  const [subView, setSubView] = useState(readQueueSubViewFromUrl);
   const [dismissedRuns, setDismissedRuns] = useState({ items: [], total: 0 });
   const [rejectedRuns, setRejectedRuns] = useState({ items: [], total: 0 });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -1374,7 +1397,39 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     }
   }, [fetchQueue]);
 
+  useEffect(() => {
+    if (!onHeaderActionChange) return undefined;
+    onHeaderActionChange(
+      <button
+        type="button"
+        onClick={handleSmartRefresh}
+        disabled={refreshing}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+        title="Sync assignment queue with FreshService and refresh"
+      >
+        <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+        <span className="hidden lg:inline">Sync</span>
+      </button>,
+    );
+    return () => onHeaderActionChange(null);
+  }, [handleSmartRefresh, onHeaderActionChange, refreshing]);
+
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlValue = QUEUE_SUBVIEW_TO_URL[subView];
+    if (!urlValue || urlValue === QUEUE_SUBVIEW_TO_URL.pending) {
+      params.delete('queue');
+    } else {
+      params.set('queue', urlValue);
+    }
+    const next = params.toString();
+    const newUrl = `${window.location.pathname}${next ? `?${next}` : ''}${window.location.hash}`;
+    if (newUrl !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+      window.history.replaceState(null, '', newUrl);
+    }
+  }, [subView]);
 
   // Detect genuinely new items arriving via silent polls (not on initial load).
   // We only start diffing AFTER the first non-empty load has been recorded, so
@@ -1495,7 +1550,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   const handleSelectRun = (runId) => {
     if (Date.now() - quickApproveGuardRef.current < 800) return;
-    navigate(`/assignments/run/${runId}`);
+    navigate(`/assignments/run/${runId}${queueSubViewSearch(subView)}`);
   };
 
   const handleDecide = async (decisionData) => {
@@ -1638,12 +1693,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   if (selectedRun) {
     return (
       <div>
-        <button
-          onClick={() => { setSelectedRun(null); navigate('/assignments/queue'); }}
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-3 py-1.5 mb-4 transition-colors"
-        >
-          <ChevronLeft className="w-4 h-4" /> Back to queue
-        </button>
         <PipelineRunDetail run={selectedRun} workspaceTimezone={workspaceTimezone} onDecide={handleDecide} deciding={deciding} isAdmin={isAdmin} onSyncComplete={async () => {
           try { const res = await assignmentAPI.getRun(selectedRun.id); setSelectedRun(res?.data || null); } catch { /* ignore */ }
         }} />
@@ -2335,9 +2384,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     Live
                   </span>
-                  <button type="button" onClick={handleSmartRefresh} disabled={refreshing} className="touch-manipulation p-1 text-blue-600 hover:text-blue-800 disabled:opacity-50" title="Sync with FreshService & refresh">
-                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-                  </button>
                 </>
               }
             >
@@ -3252,12 +3298,6 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
   if (selectedRun) {
     return (
       <div>
-        <button
-          onClick={() => { setSelectedRun(null); navigate('/assignments/history'); }}
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-3 py-1.5 mb-4 transition-colors"
-        >
-          <ChevronLeft className="w-4 h-4" /> Back to history
-        </button>
         <PipelineRunDetail run={selectedRun} workspaceTimezone={workspaceTimezone} onDecide={null} deciding={false} isAdmin={isAdmin} onSyncComplete={refreshSelectedRun} />
       </div>
     );
@@ -3859,6 +3899,7 @@ export default function AssignmentReview() {
   const params = useParams();
   const { currentWorkspace, availableWorkspaces } = useWorkspace();
   const { user } = useAuth();
+  const [assignmentHeaderAction, setAssignmentHeaderAction] = useState(null);
   const [workspaceTimezone, setWorkspaceTimezone] = useState('America/Los_Angeles');
   const [timeRange, setTimeRange] = useState('7d');
 
@@ -3936,8 +3977,8 @@ export default function AssignmentReview() {
   // Viewer guard -- redirect to dashboard if no review access
   if (!isReviewer) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center max-w-sm">
+      <AppShell activePage="assignments" contentClassName="max-w-7xl mx-auto w-full px-2 sm:px-4 py-8">
+        <div className="mx-auto bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center max-w-sm">
           <Brain className="w-10 h-10 text-slate-300 mx-auto mb-3" />
           <h2 className="text-lg font-semibold text-slate-800 mb-1">Access Restricted</h2>
           <p className="text-sm text-slate-500 mb-4">Ticket Assignment requires Reviewer or Admin access to this workspace.</p>
@@ -3945,65 +3986,40 @@ export default function AssignmentReview() {
             Back to Dashboard
           </button>
         </div>
-      </div>
+      </AppShell>
     );
   }
 
   // Live pipeline view (dedicated URL)
   if (liveTicketId) {
     return (
-      <div className="min-h-screen bg-slate-100 flex flex-col">
-        <header className="bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
-          <div className="px-4 py-2 flex items-center gap-3">
-            <button onClick={() => navigate('/assignments/queue')} className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors text-sm font-medium">
-              <ArrowLeft className="w-4 h-4" /> Back
-            </button>
-            <div className="w-px h-5 bg-slate-200" />
-            <Brain className="w-4 h-4 text-blue-600" />
-            <h1 className="text-sm font-bold text-slate-900">Pipeline Analysis</h1>
-          </div>
-        </header>
-        <div className="flex-1 px-2 py-2 pb-2 sm:px-4 sm:py-3 sm:pb-4 overflow-auto">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-3 py-3 sm:px-6 sm:py-5">
-            <LivePipelineView
-              ticketId={liveTicketId}
-              onComplete={() => navigate('/assignments/queue')}
-              onBack={() => navigate('/assignments/queue')}
-            />
-          </div>
+      <AppShell activePage="assignments">
+        <div className="mb-3 flex items-center gap-3">
+          <button onClick={() => navigate('/assignments/queue')} className="flex min-h-[40px] items-center gap-1.5 text-slate-600 hover:text-slate-900 transition-colors text-sm font-medium">
+            <ArrowLeft className="w-4 h-4" /> Back to Queue
+          </button>
+          <div className="w-px h-5 bg-slate-200" />
+          <Brain className="w-4 h-4 text-blue-600" />
+          <h1 className="text-sm font-bold text-slate-900">Pipeline Analysis</h1>
         </div>
-      </div>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-3 py-3 sm:px-6 sm:py-5">
+          <LivePipelineView
+            ticketId={liveTicketId}
+            onComplete={() => navigate('/assignments/queue')}
+            onBack={() => navigate('/assignments/queue')}
+          />
+        </div>
+      </AppShell>
     );
   }
 
-  const isDetailView = !!(deepRunId || historyRunId);
-  const handleHeaderBack = () => {
-    if (deepRunId) {
-      navigate('/assignments/queue');
-    } else if (historyRunId) {
-      navigate('/assignments/history');
-    } else {
-      navigate('/dashboard');
-    }
-  };
-  const headerBackLabel = deepRunId ? 'Back to Queue' : historyRunId ? 'Back to History' : 'Back';
-
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
-      {/* White top bar */}
-      <header className="bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
-        <div className="px-3 sm:px-4 py-2 flex min-w-0 items-center gap-2 sm:gap-3">
-          <button onClick={handleHeaderBack} className={`flex shrink-0 items-center gap-1.5 transition-colors text-sm font-medium p-1 -ml-1 touch-manipulation min-h-[44px] ${isDetailView ? 'text-blue-600 hover:text-blue-800' : 'text-slate-500 hover:text-slate-800'}`}>
-            <ArrowLeft className="w-4 h-4" /> {headerBackLabel}
-          </button>
-          <div className="w-px h-5 bg-slate-200" />
-          <Brain className="w-4 h-4 shrink-0 text-blue-600" />
-          <h1 className="min-w-0 truncate text-sm font-bold text-slate-900">Ticket Assignment</h1>
-        </div>
-      </header>
-
+    <AppShell
+      activePage="assignments"
+      headerProps={{ extraActions: activeTab === 'queue' ? assignmentHeaderAction : null }}
+    >
       {/* Purple gradient tab bar */}
-      <div className="flex-shrink-0 px-2 sm:px-4 pt-3 pb-2">
+      <div className="flex-shrink-0 pb-3">
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-1.5 sm:px-2 py-1 flex items-center gap-0.5 sm:gap-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {TABS.map((tab) => {
             const Icon = tab.icon;
@@ -4051,10 +4067,10 @@ export default function AssignmentReview() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto px-2 pb-2 sm:px-4 sm:pb-4">
+      <div>
         <div className="min-h-full bg-white rounded-xl border border-slate-200 shadow-sm">
           <div className="px-2 py-3 sm:px-6 sm:py-5">
-            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} />}
+            {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} onHeaderActionChange={setAssignmentHeaderAction} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'calibration' && <CalibrationManager workspaceTimezone={workspaceTimezone} />}
@@ -4064,6 +4080,6 @@ export default function AssignmentReview() {
           </div>
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
