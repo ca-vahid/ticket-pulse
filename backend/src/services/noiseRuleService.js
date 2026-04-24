@@ -187,10 +187,10 @@ class NoiseRuleService {
    *
    * @param {string|null} subject - Ticket subject line
    * @param {Date|null} createdAt - Ticket creation date (needed for dedup check)
-   * @returns {Promise<{isNoise: boolean, ruleId: string|null}>}
+   * @returns {Promise<{isNoise: boolean, ruleId: string|null, category: string|null}>}
    */
   async evaluate(subject, createdAt = null, workspaceId = 1) {
-    if (!subject) return { isNoise: false, ruleId: null };
+    if (!subject) return { isNoise: false, ruleId: null, category: null };
 
     const wsId = workspaceId ?? 1;
     const rules = await this._getRules(wsId);
@@ -211,14 +211,14 @@ class NoiseRuleService {
 
         if (existingCount === 0) {
           // First occurrence in this window - keep as actionable
-          return { isNoise: false, ruleId: null };
+          return { isNoise: false, ruleId: null, category: null };
         }
-        return { isNoise: true, ruleId: rule.name };
+        return { isNoise: true, ruleId: rule.name, category: rule.category };
       }
 
-      return { isNoise: true, ruleId: rule.name };
+      return { isNoise: true, ruleId: rule.name, category: rule.category };
     }
-    return { isNoise: false, ruleId: null };
+    return { isNoise: false, ruleId: null, category: null };
   }
 
   async getAllRules(workspaceId) {

@@ -4,6 +4,11 @@ import prisma from './prisma.js';
 import { shouldCloseNoiseDismissedRun } from './assignmentFlowGuards.js';
 import logger from '../utils/logger.js';
 
+function mapClosedStatus(status) {
+  if (Number(status) === 5) return 'Closed';
+  return 'Resolved';
+}
+
 class FreshServiceActionService {
   /**
    * Build the FreshService actions for a pipeline run decision.
@@ -216,6 +221,21 @@ class FreshServiceActionService {
         } else if (action.type === 'close') {
           const result = await client.closeTicket(action.ticketId, action.status);
           if (result?.alreadyClosed) { ticketGone = true; }
+          await prisma.ticket.update({
+            where: { id: run.ticketId },
+            data: {
+              status: mapClosedStatus(action.status),
+              resolvedAt: new Date(),
+              updatedAt: new Date(),
+            },
+          }).catch((updateError) => {
+            logger.warn('FreshService sync: ticket closed but local status update failed', {
+              ticketId: run.ticketId,
+              freshserviceTicketId: action.ticketId,
+              runId,
+              error: updateError.message,
+            });
+          });
           logger.info('FreshService: ticket closed', { ticketId: action.ticketId, runId });
         } else if (action.type === 'note') {
           const result = await client.addPrivateNote(action.ticketId, action.body);

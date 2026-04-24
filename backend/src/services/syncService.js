@@ -41,6 +41,17 @@ const PREHEAT_MAX_CONVERSATIONS_PER_TICKET = 30;
 // limiter (maxConcurrent: 3) is the real cap; oversizing the pool just lets
 // workers refill the limiter's queue without idle gaps.
 const PREHEAT_POOL_SIZE = 8;
+const NOISE_RULE_TRIGGER_SOURCE = 'noise_rule';
+const ACTIONABLE_TICKET_STATUSES = new Set(['Open', 'Pending']);
+
+function formatNoiseCategory(category) {
+  if (!category) return null;
+  return String(category)
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
 
 // Note: SSE manager will be imported lazily to avoid circular dependency
 let sseManager = null;
@@ -1143,10 +1154,12 @@ class SyncService {
 
       // Step 6: Upsert tickets with merge logic, activity logging, and episode reconciliation
       let syncedCount = 0;
+      const touchedWorkspaceIds = new Set();
       for (const ticket of ticketsWithTechIds) {
         try {
           const existingTicket = existingTicketsMap.get(ticket.freshserviceTicketId.toString());
           const ticketWorkspaceId = ticket.workspaceId ?? options.workspaceId ?? 1;
+          touchedWorkspaceIds.add(ticketWorkspaceId);
 
           // Resolve unknown-to-us responders. FS may assign tickets to agents
           // we don't track (external contractors, agents deactivated from
@@ -1165,11 +1178,12 @@ class SyncService {
             }
           }
 
-          const { isNoise, ruleId } = await noiseRuleService.evaluate(
+          const { isNoise, ruleId, category: noiseCategory } = await noiseRuleService.evaluate(
             ticket.subject,
             ticket.createdAt ? new Date(ticket.createdAt) : null,
             ticketWorkspaceId,
           );
+          const normalizedNoiseCategory = formatNoiseCategory(noiseCategory);
 
           let isSelfPicked = false;
           let assignedBy = null;
@@ -1195,10 +1209,16 @@ class SyncService {
             workspaceId: ticketWorkspaceId,
             isNoise,
             noiseRuleMatched: ruleId,
+            ticketCategory: ticket.ticketCategory || normalizedNoiseCategory,
             isSelfPicked,
             assignedBy,
             firstAssignedAt,
             rejectionCount,
+          });
+
+          await this._ensureNoiseTicketDismissed(upsertedTicket, ticketWorkspaceId, {
+            noiseRuleCategory: normalizedNoiseCategory,
+            waitForSync: false,
           });
 
           // Create activity log if assignment changed
@@ -1296,6 +1316,18 @@ class SyncService {
         }
       }
 
+      const recoveryWorkspaceIds = touchedWorkspaceIds.size > 0
+        ? [...touchedWorkspaceIds]
+        : (options.workspaceId ? [options.workspaceId] : []);
+      for (const workspaceId of recoveryWorkspaceIds) {
+        this._recoverOpenNoiseTickets(workspaceId, { waitForSync: false }).catch((err) => {
+          logger.warn('Open noise-ticket recovery failed (non-fatal)', {
+            workspaceId,
+            error: err.message,
+          });
+        });
+      }
+
       this.progress.ticketsSynced = syncedCount;
       logger.info(`Synced ${syncedCount} tickets`);
       return syncedCount;
@@ -1383,17 +1415,19 @@ class SyncService {
           }
         }
 
-        const { isNoise, ruleId } = await noiseRuleService.evaluate(
+        const { isNoise, ruleId, category: noiseCategory } = await noiseRuleService.evaluate(
           ticket.subject,
           ticket.createdAt ? new Date(ticket.createdAt) : null,
           ticketWorkspaceId,
         );
+        const normalizedNoiseCategory = formatNoiseCategory(noiseCategory);
 
         const upsertedTicket = await ticketRepository.upsert({
           ...ticket,
           workspaceId: ticketWorkspaceId,
           isNoise,
           noiseRuleMatched: ruleId,
+          ticketCategory: ticket.ticketCategory || normalizedNoiseCategory,
           isSelfPicked: existingTicket?.isSelfPicked || false,
           assignedBy: existingTicket?.assignedBy || null,
           firstAssignedAt: existingTicket?.firstAssignedAt || null,
@@ -1401,6 +1435,10 @@ class SyncService {
         });
 
         upsertedIds.push(upsertedTicket.id);
+        await this._ensureNoiseTicketDismissed(upsertedTicket, ticketWorkspaceId, {
+          noiseRuleCategory: normalizedNoiseCategory,
+          waitForSync: true,
+        });
         syncedCount++;
       } catch (error) {
         logger.warn('Assignment fast sync: failed to upsert ticket', {
@@ -1418,6 +1456,16 @@ class SyncService {
       waitForCompletion: false,
       settleAfterMs: 1000,
     });
+    const noiseRecovery = await this._recoverOpenNoiseTickets(workspaceId, {
+      waitForSync: true,
+      limit: Math.max(10, maxTickets),
+    }).catch((err) => {
+      logger.warn('Assignment fast sync: open noise-ticket recovery failed', {
+        workspaceId,
+        error: err.message,
+      });
+      return { skipped: true, reason: 'recovery_failed', error: err.message };
+    });
 
     clearReadCache();
 
@@ -1430,11 +1478,182 @@ class SyncService {
       ticketsSynced: syncedCount,
       candidateTicketIds: upsertedIds,
       polling,
+      noiseRecovery,
       timestamp: new Date(),
     };
 
     logger.info('Assignment fast sync completed', result);
     return result;
+  }
+
+  async _recoverOpenNoiseTickets(workspaceId, options = {}) {
+    const config = await assignmentRepository.getConfig(workspaceId);
+    if (!config?.isEnabled || !config?.autoCloseNoise) {
+      return { skipped: true, reason: 'noise_auto_close_disabled', checked: 0, created: 0 };
+    }
+
+    const limit = Math.max(1, Math.min(parseInt(options.limit, 10) || 25, 100));
+    const lookbackDays = Math.max(1, Math.min(parseInt(options.lookbackDays, 10) || 7, 30));
+    const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+
+    const tickets = await prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        assignedTechId: null,
+        isNoise: true,
+        status: { in: [...ACTIONABLE_TICKET_STATUSES] },
+        createdAt: { gte: cutoff },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    let created = 0;
+    let skipped = 0;
+    let syncTriggered = 0;
+    const runIds = [];
+
+    for (const ticket of tickets) {
+      const result = await this._ensureNoiseTicketDismissed(ticket, workspaceId, {
+        config,
+        waitForSync: !!options.waitForSync,
+      });
+      if (result.created) {
+        created++;
+        runIds.push(result.runId);
+      } else {
+        skipped++;
+      }
+      if (result.syncTriggered) syncTriggered++;
+    }
+
+    if (created > 0 || syncTriggered > 0) {
+      logger.info('Recovered open noise tickets', {
+        workspaceId,
+        checked: tickets.length,
+        created,
+        syncTriggered,
+        runIds,
+      });
+    }
+
+    return { skipped: false, checked: tickets.length, created, alreadyHandled: skipped, syncTriggered, runIds };
+  }
+
+  async _ensureNoiseTicketDismissed(ticket, workspaceId, options = {}) {
+    if (!ticket?.isNoise) {
+      return { skipped: true, reason: 'not_noise' };
+    }
+    if (ticket.assignedTechId || !ACTIONABLE_TICKET_STATUSES.has(ticket.status)) {
+      return { skipped: true, reason: 'not_open_unassigned' };
+    }
+
+    const config = options.config || await assignmentRepository.getConfig(workspaceId);
+    if (!config?.isEnabled || !config?.autoCloseNoise) {
+      return { skipped: true, reason: 'noise_auto_close_disabled' };
+    }
+
+    let matchedNoiseCategory = options.noiseRuleCategory || null;
+    if (!matchedNoiseCategory && ticket.noiseRuleMatched) {
+      const matchedRule = await prisma.noiseRule.findFirst({
+        where: { workspaceId, name: ticket.noiseRuleMatched },
+        select: { category: true },
+      });
+      matchedNoiseCategory = formatNoiseCategory(matchedRule?.category);
+    }
+    const noiseRuleCategory = matchedNoiseCategory || ticket.ticketCategory || ticket.category || 'Noise';
+    if (!ticket.ticketCategory && noiseRuleCategory) {
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { ticketCategory: noiseRuleCategory },
+      });
+    }
+    const closureNoticeHtml = 'This ticket matched an automated non-actionable notification rule and does not require helpdesk follow-up.';
+    const now = new Date();
+    const runResult = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ticket.id})`;
+      const existing = await tx.assignmentPipelineRun.findFirst({
+        where: {
+          ticketId: ticket.id,
+          decision: 'noise_dismissed',
+          status: 'completed',
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, syncStatus: true },
+      });
+      if (existing) return { existing };
+
+      const run = await tx.assignmentPipelineRun.create({
+        data: {
+          ticketId: ticket.id,
+          workspaceId,
+          status: 'completed',
+          triggerSource: NOISE_RULE_TRIGGER_SOURCE,
+          llmModel: 'noise-rule',
+          totalDurationMs: 0,
+          totalTokensUsed: 0,
+          decision: 'noise_dismissed',
+          decidedAt: now,
+          recommendation: {
+            recommendations: [],
+            overallReasoning: `Matched noise rule: ${ticket.noiseRuleMatched || 'unknown'}.`,
+            closureNoticeHtml,
+            ticketClassification: noiseRuleCategory,
+            noiseRuleMatched: ticket.noiseRuleMatched || null,
+            noiseRuleCategory,
+            source: 'noise_rule',
+          },
+          errorMessage: ticket.noiseRuleMatched
+            ? `Auto-dismissed by noise rule: ${ticket.noiseRuleMatched}`
+            : 'Auto-dismissed by noise rule',
+          syncStatus: 'pending',
+        },
+        select: { id: true },
+      });
+      return { run };
+    });
+
+    if (runResult.existing) {
+      return {
+        skipped: true,
+        reason: 'existing_noise_dismissal',
+        runId: runResult.existing.id,
+        syncStatus: runResult.existing.syncStatus,
+      };
+    }
+
+    const run = runResult.run;
+
+    logger.info('Created noise dismissal run for rule-filtered ticket', {
+      workspaceId,
+      ticketId: ticket.id,
+      freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || ticket.freshserviceTicketId,
+      runId: run.id,
+      noiseRuleMatched: ticket.noiseRuleMatched,
+      noiseRuleCategory,
+    });
+
+    const executeSync = () => freshServiceActionService.execute(
+      run.id,
+      workspaceId,
+      config?.dryRunMode ?? true,
+    ).catch((err) => {
+      logger.warn('FreshService noise close failed after rule dismissal run', {
+        workspaceId,
+        ticketId: ticket.id,
+        runId: run.id,
+        error: err.message,
+      });
+      return { success: false, error: err.message };
+    });
+
+    if (options.waitForSync) {
+      await executeSync();
+    } else {
+      executeSync();
+    }
+
+    return { created: true, runId: run.id, syncTriggered: true };
   }
 
   /**
