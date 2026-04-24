@@ -95,6 +95,102 @@ const transformTicket = (ticket) => {
   return transformed;
 };
 
+const TIMELINE_EVENT_TYPES = [
+  'self_picked',
+  'coordinator_assigned',
+  'rejected',
+  'reassigned',
+  'group_changed',
+];
+
+const forEachTimelineTicket = (technicians, callback) => {
+  for (const tech of technicians || []) {
+    for (const day of tech.avoidance?.days || []) {
+      for (const listName of ['tickets', 'extendedTickets']) {
+        for (const ticket of day[listName] || []) {
+          callback(ticket, tech, day, listName);
+        }
+      }
+    }
+  }
+};
+
+async function enrichTimelineTicketsWithHistory(technicians, workspaceId) {
+  const ticketIds = new Set();
+  forEachTimelineTicket(technicians, (ticket) => {
+    if (ticket?.id) ticketIds.add(ticket.id);
+  });
+  if (ticketIds.size === 0) return;
+
+  const ids = [...ticketIds];
+  const [episodes, activities] = await Promise.all([
+    prisma.ticketAssignmentEpisode.findMany({
+      where: { workspaceId, ticketId: { in: ids } },
+      orderBy: { startedAt: 'asc' },
+      include: { technician: { select: { id: true, name: true, photoUrl: true } } },
+    }),
+    prisma.ticketActivity.findMany({
+      where: {
+        ticketId: { in: ids },
+        activityType: { in: TIMELINE_EVENT_TYPES },
+      },
+      orderBy: { performedAt: 'asc' },
+    }),
+  ]);
+
+  const episodesByTicket = new Map();
+  for (const episode of episodes) {
+    const arr = episodesByTicket.get(episode.ticketId) || [];
+    arr.push({
+      id: episode.id,
+      techId: episode.technicianId,
+      techName: episode.technician?.name || null,
+      techPhotoUrl: episode.technician?.photoUrl || null,
+      startedAt: episode.startedAt,
+      endedAt: episode.endedAt,
+      startMethod: episode.startMethod,
+      startAssignedByName: episode.startAssignedByName,
+      endMethod: episode.endMethod,
+      endActorName: episode.endActorName,
+    });
+    episodesByTicket.set(episode.ticketId, arr);
+  }
+
+  const activitiesByTicket = new Map();
+  for (const activity of activities) {
+    const arr = activitiesByTicket.get(activity.ticketId) || [];
+    arr.push({
+      id: activity.id,
+      type: activity.activityType,
+      at: activity.performedAt,
+      by: activity.performedBy,
+      details: activity.details,
+    });
+    activitiesByTicket.set(activity.ticketId, arr);
+  }
+
+  forEachTimelineTicket(technicians, (ticket, tech) => {
+    const ticketEpisodes = episodesByTicket.get(ticket.id) || [];
+    const ticketActivities = activitiesByTicket.get(ticket.id) || [];
+    const rejectedEpisodes = ticketEpisodes.filter((episode) => episode.endMethod === 'rejected');
+    const lastRejected = rejectedEpisodes[rejectedEpisodes.length - 1] || null;
+    const activeEpisode = ticketEpisodes.find((episode) => episode.endMethod === 'still_active')
+      || ticketEpisodes.find((episode) => !episode.endedAt)
+      || null;
+
+    ticket.assignmentEpisodes = ticketEpisodes;
+    ticket.assignmentEvents = ticketActivities;
+    ticket.handoffCount = ticketEpisodes.length;
+    ticket.wasRejected = rejectedEpisodes.length > 0;
+    ticket.rejectionCount = ticket.rejectionCount || rejectedEpisodes.length;
+    ticket.lastRejectedAt = lastRejected?.endedAt || null;
+    ticket.lastRejectedByName = lastRejected?.endActorName || lastRejected?.techName || null;
+    ticket.currentHolderName = activeEpisode?.techName || ticket.assignedTechName || null;
+    ticket.currentHolderId = activeEpisode?.techId || ticket.assignedTechId || null;
+    ticket.pickedByTech = ticket.pickedByTech || ticketEpisodes.some((episode) => episode.techId === tech.id);
+  });
+}
+
 /**
  * GET /api/dashboard
  * Get complete dashboard data
@@ -846,6 +942,7 @@ router.get(
     );
 
     const technicians = techResults.filter(Boolean);
+    await enrichTimelineTicketsWithHistory(technicians, req.workspaceId);
 
     res.json({
       success: true,

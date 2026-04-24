@@ -376,12 +376,13 @@ export function buildTimeline(days, mergedFiltered, mergedViewMode, techConfigs)
   };
 
   for (const day of days) {
-    const dayTickets = mergedFiltered.filter((t) => t._day === day.date);
-    if (dayTickets.length === 0) {
+    const dayItems = mergedFiltered.filter((t) => t._day === day.date);
+    if (dayItems.length === 0) {
       emptyBuffer.push(day.date);
       continue;
     }
     flushEmpty();
+    const dayTickets = dayItems.filter((t) => !t._timelineEvent);
     const dayPicked = dayTickets.filter((t) => t._picked).length;
     const dayTotal = dayTickets.length;
     result.push({
@@ -392,7 +393,7 @@ export function buildTimeline(days, mergedFiltered, mergedViewMode, techConfigs)
       dayNotPicked: dayTotal - dayPicked,
       dayTotal,
     });
-    result.push(...insertMarkersForDay(dayTickets, day.date, techConfigs, days));
+    result.push(...insertMarkersForDay(dayItems, day.date, techConfigs, days));
   }
   flushEmpty();
   return result;

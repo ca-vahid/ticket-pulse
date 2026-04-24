@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, Layers, RefreshCw,
   Users, Check, Search, PanelLeftClose, PanelLeftOpen,
-  EyeOff, Eye, VolumeX, Volume2,
+  EyeOff, Eye, VolumeX, Volume2, GitBranch,
 } from 'lucide-react';
 import { dashboardAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import { dataCache } from '../services/dataCache';
@@ -26,6 +26,44 @@ function getMonday(date) {
   d.setDate(d.getDate() - day);
   d.setHours(0, 0, 0, 0);
   return d;
+}
+
+function buildHandoffEvents(tickets) {
+  const events = [];
+  const seen = new Set();
+
+  for (const ticket of tickets || []) {
+    if (!Array.isArray(ticket.assignmentEpisodes) || ticket.assignmentEpisodes.length === 0) continue;
+    const episodes = ticket.assignmentEpisodes;
+    episodes.forEach((episode, index) => {
+      if (!episode.endedAt || !['rejected', 'reassigned'].includes(episode.endMethod)) return;
+      const key = `${ticket.id}-${episode.id || index}-${episode.endMethod}-${episode.endedAt}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      const nextEpisode = episodes[index + 1] || null;
+      events.push({
+        _timelineEvent: true,
+        key: `handoff-${key}`,
+        id: `handoff-${key}`,
+        ticketId: ticket.id,
+        freshserviceTicketId: ticket.freshserviceTicketId,
+        subject: ticket.subject,
+        createdAt: episode.endedAt,
+        _day: ticket._day,
+        eventType: episode.endMethod,
+        fromTechId: episode.techId,
+        fromTechName: episode.techName,
+        fromTechPhotoUrl: episode.techPhotoUrl || null,
+        toTechId: nextEpisode?.techId || null,
+        toTechName: episode.endMethod === 'reassigned' ? nextEpisode?.techName : null,
+        toTechPhotoUrl: episode.endMethod === 'reassigned' ? nextEpisode?.techPhotoUrl || null : null,
+        by: episode.endActorName,
+      });
+    });
+  }
+
+  return events;
 }
 
 /**
@@ -63,6 +101,7 @@ function mergeMultiTechData(techDataArray, accentMap) {
         if (t.pickedByTech) {
           const existing = merged._seen.get(t.id);
           existing.pickedByTech = true;
+          existing._techId = tech.id;
           existing._techFirstName = firstName;
           existing._techPhotoUrl = photoUrl;
           existing._accent = accent;
@@ -78,6 +117,7 @@ function mergeMultiTechData(techDataArray, accentMap) {
         if (t.pickedByTech) {
           const existing = merged._seenExt.get(t.id);
           existing.pickedByTech = true;
+          existing._techId = tech.id;
           existing._techFirstName = firstName;
           existing._techPhotoUrl = photoUrl;
           existing._accent = accent;
@@ -330,6 +370,7 @@ export default function TimelineExplorer() {
   const [includeText, setIncludeText] = useState('');
   const [excludeNoise, setExcludeNoise] = useState(() => getGlobalExcludeNoise());
   const [hideNonPicked, setHideNonPicked] = useState(false);
+  const [showHandoffEvents, setShowHandoffEvents] = useState(true);
 
   // ── Data state ──
   const [techData, setTechData]   = useState(null);  // raw API response
@@ -513,7 +554,7 @@ export default function TimelineExplorer() {
       const accent = tcs[0].accent;
       mergedDays.forEach((day) => {
         (day.tickets || []).forEach((t) => {
-          const enriched = { ...t, _day: day.date, _techFirstName: firstName, _techPhotoUrl: photoUrl, _accent: accent };
+          const enriched = { ...t, _day: day.date, _techId: tcs[0].id, _techFirstName: firstName, _techPhotoUrl: photoUrl, _accent: accent };
           (t.pickedByTech ? allPicked : allNotPicked).push(enriched);
         });
       });
@@ -527,14 +568,27 @@ export default function TimelineExplorer() {
     }
 
     const filters = { excludeCats, excludeText, includeCats, includeText };
-    const allMerged = mergeTicketsForTimeline(mergedDays, allPicked, allNotPicked);
+    const allMerged = mergeTicketsForTimeline(mergedDays, allPicked, allNotPicked).map((t) => {
+      if (techDataArray.length !== 1 || !t._picked || t._techId) return t;
+      return {
+        ...t,
+        _techId: tcs[0].id,
+        _techFirstName: tcs[0].firstName,
+        _techPhotoUrl: tcs[0].photoUrl,
+        _accent: tcs[0].accent,
+      };
+    });
     const filtered = allMerged.filter((t) => {
       if (t._picked) return applyPickedFilters(t, filters);
       if (hideNonPicked) return false;
       return applyNotPickedFilters(t, filters);
     });
 
-    const rawItems = buildTimeline(mergedDays, filtered, mergedViewMode, tcs);
+    const handoffEvents = showHandoffEvents ? buildHandoffEvents(filtered) : [];
+    const timelineInput = [...filtered, ...handoffEvents].sort(
+      (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+    );
+    const rawItems = buildTimeline(mergedDays, timelineInput, mergedViewMode, tcs);
     const items = collapseMarkers(rawItems);
 
     const cats = [...new Set([...allPicked, ...allNotPicked].map((t) => t.ticketCategory).filter(Boolean))].sort();
@@ -826,6 +880,18 @@ export default function TimelineExplorer() {
             >
               {hideNonPicked ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
               {hideNonPicked ? 'Picked Only' : 'Hide Non-Picked'}
+            </button>
+            <button
+              onClick={() => setShowHandoffEvents(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+                showHandoffEvents
+                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+              }`}
+              title={showHandoffEvents ? 'Handoff and rejection event rows are shown' : 'Show handoff and rejection event rows'}
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              {showHandoffEvents ? 'Handoffs Shown' : 'Show Handoffs'}
             </button>
           </div>
 

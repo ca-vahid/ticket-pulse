@@ -1,5 +1,6 @@
 import { Moon, Sunrise } from 'lucide-react';
 import { TimelineSeparator, MergedSeparator, DayHeader, EmptyDayGap } from './TimelineSeparators';
+import TimelineEventRow from './TimelineEventRow';
 import TimelineTicketRow from './TimelineTicketRow';
 
 /**
@@ -57,6 +58,15 @@ export default function TimelineCore({
           }
           if (item._marker) {
             return <TimelineSeparator key={item.key} label={item.label} color={item.color} />;
+          }
+          if (item._timelineEvent) {
+            return (
+              <TimelineEventRow
+                key={item.key || `event-${item.id}-${idx}`}
+                event={item}
+                showFullDate={showFullDate}
+              />
+            );
           }
           return (
             <TimelineTicketRow

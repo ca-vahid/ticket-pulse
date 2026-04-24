@@ -1,6 +1,17 @@
-export const APP_VERSION = '2.02-preview';
+export const APP_VERSION = '2.03';
 
 export const changelog = [
+  {
+    version: '2.03',
+    date: 'April 24, 2026',
+    entries: [
+      { type: 'new', text: 'Timeline Explorer now shows handoff and rejection story rows in-line with the ticket stream. Reassignments render as avatar-to-avatar movement, and returned tickets render as avatar-to-queue movement so ownership changes are visible without opening the ticket.' },
+      { type: 'new', text: 'Ticket rows now surface handoff context directly: Self / Assigned source badges, Rejected count, handoff count, current holder, and an expandable ownership chain for quick drill-in.' },
+      { type: 'improved', text: 'Timeline picked logic now includes historical handlers, not just the current assignee, so tickets a selected technician picked and later rejected or handed off still appear in their timeline.' },
+      { type: 'improved', text: 'Added a Handoffs Shown toggle to keep the dense ticket-arrival view clean when ownership event rows are not needed.' },
+      { type: 'security', text: 'Demo Mode scrubber now covers timeline handoff actor names and avatar URLs, including from/to tech fields and rejection actors.' },
+    ],
+  },
   {
     version: '2.02-preview',
     date: 'April 23, 2026',

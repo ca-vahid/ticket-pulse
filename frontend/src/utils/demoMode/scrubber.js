@@ -41,7 +41,8 @@ const NAME_KEYS = new Set([
   'assignedTechName', '_techName', 'currentHolderName', 'holderName',
   'pickerName', 'lastHolderName', 'previousHolderName',
   // Bounce / handoff history
-  'fromTechName', 'toTechName', 'rejectedByName',
+  'fromTechName', 'toTechName', 'rejectedByName', 'lastRejectedByName',
+  'startAssignedByName', 'endActorName', 'performedBy', 'by',
 ]);
 
 // Keys whose VALUE is an email address.
@@ -66,7 +67,8 @@ const FREE_TEXT_KEYS = new Set([
 // Keys whose VALUE is a photo / avatar URL.
 const PHOTO_KEYS = new Set([
   'photoUrl', 'avatarUrl', 'avatar', 'picture', 'pictureUrl',
-  '_techPhotoUrl', 'profilePhoto', 'profilePicture',
+  '_techPhotoUrl', 'techPhotoUrl', 'fromTechPhotoUrl', 'toTechPhotoUrl',
+  'profilePhoto', 'profilePicture',
 ]);
 
 // Keys whose VALUE is an IANA timezone string (e.g. 'America/Toronto'). The

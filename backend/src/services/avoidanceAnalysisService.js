@@ -84,6 +84,7 @@ function slimTicket(t) {
     firstAssignedAt: t.firstAssignedAt,
     isSelfPicked: t.isSelfPicked,
     assignedBy: t.assignedBy,
+    rejectionCount: t.rejectionCount || 0,
     requesterName: t.requester?.name || null,
   };
 }
@@ -106,6 +107,7 @@ async function loadTicketsFull(start, end, workspaceId = null, { excludeNoise = 
       firstAssignedAt: true,
       isSelfPicked: true,
       assignedBy: true,
+      rejectionCount: true,
       requester: { select: { name: true } },
       assignedTech: { select: { id: true, name: true } },
     },
