@@ -9,6 +9,7 @@ import freshServiceActionService from '../services/freshServiceActionService.js'
 import competencyFeedbackService from '../services/competencyFeedbackService.js';
 import calibrationService from '../services/calibrationService.js';
 import assignmentDailyReviewService from '../services/assignmentDailyReviewService.js';
+import assignmentDailyReviewConsolidationService from '../services/assignmentDailyReviewConsolidationService.js';
 import syncService from '../services/syncService.js';
 import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
@@ -1381,21 +1382,13 @@ router.get('/daily-review/runs/:id', requireAdmin, asyncHandler(async (req, res)
   res.json({ success: true, data: run });
 }));
 
-router.get('/daily-review/recommendations/weekly-rollup', requireAdmin, asyncHandler(async (req, res) => {
-  const result = await assignmentDailyReviewService.getWeeklyRecommendationRollup(req.workspaceId, {
-    weekStart: req.query.weekStart,
-    status: req.query.status || 'approved',
-    kind: req.query.kind || 'all',
-  });
-  res.json({ success: true, data: result });
-}));
-
 router.get('/daily-review/recommendations', requireAdmin, asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 100;
   const offset = parseInt(req.query.offset, 10) || 0;
   const result = await assignmentDailyReviewService.listRecommendations(req.workspaceId, {
     status: req.query.status,
     kind: req.query.kind,
+    severity: req.query.severity,
     startDate: req.query.startDate,
     endDate: req.query.endDate,
     runId: req.query.runId,
@@ -1427,6 +1420,72 @@ router.post('/daily-review/recommendations/:id/status', requireAdmin, asyncHandl
   if (!result) {
     return res.status(404).json({ success: false, message: 'Daily review recommendation not found' });
   }
+  res.json({ success: true, data: result });
+}));
+
+router.post('/daily-review/consolidations', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await assignmentDailyReviewConsolidationService.kickOff(
+    req.workspaceId,
+    req.session?.user?.email || 'admin',
+  );
+  res.status(202).json({ success: true, data: result });
+}));
+
+router.get('/daily-review/consolidations/active', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await assignmentDailyReviewConsolidationService.getActive(req.workspaceId);
+  res.json({ success: true, data: result });
+}));
+
+router.get('/daily-review/consolidations/runs', requireAdmin, asyncHandler(async (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 10;
+  const offset = parseInt(req.query.offset, 10) || 0;
+  const result = await assignmentDailyReviewConsolidationService.getRuns(req.workspaceId, { limit, offset });
+  res.json({ success: true, ...result });
+}));
+
+router.get('/daily-review/consolidations/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await assignmentDailyReviewConsolidationService.getRun(parseInt(req.params.id, 10), req.workspaceId);
+  if (!result) return res.status(404).json({ success: false, message: 'Daily review consolidation run not found' });
+  res.json({ success: true, data: result });
+}));
+
+router.post('/daily-review/consolidations/runs/:id/cancel', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await assignmentDailyReviewConsolidationService.cancel(
+    parseInt(req.params.id, 10),
+    req.workspaceId,
+    req.session?.user?.email || 'admin',
+  );
+  if (!result) return res.status(404).json({ success: false, message: 'Daily review consolidation run not found' });
+  res.json({ success: true, data: result });
+}));
+
+router.delete('/daily-review/consolidations/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await assignmentDailyReviewConsolidationService.deleteRun(parseInt(req.params.id, 10), req.workspaceId);
+  if (!result) return res.status(404).json({ success: false, message: 'Daily review consolidation run not found' });
+  res.json({ success: true, data: result });
+}));
+
+router.put('/daily-review/consolidations/items/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await assignmentDailyReviewConsolidationService.updateItem(
+    parseInt(req.params.id, 10),
+    req.workspaceId,
+    req.body || {},
+  );
+  if (!result) return res.status(404).json({ success: false, message: 'Daily review consolidation item not found' });
+  res.json({ success: true, data: result });
+}));
+
+router.post('/daily-review/consolidations/runs/:id/apply', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await assignmentDailyReviewConsolidationService.apply(
+    parseInt(req.params.id, 10),
+    req.workspaceId,
+    {
+      applyPrompt: req.body?.applyPrompt,
+      applySkills: req.body?.applySkills,
+      applyTechnicianCompetencies: req.body?.applyTechnicianCompetencies,
+      actorEmail: req.session?.user?.email || 'admin',
+    },
+  );
   res.json({ success: true, data: result });
 }));
 

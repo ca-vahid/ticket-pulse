@@ -63,15 +63,56 @@ export default function AppHeader({
     navigate('/login');
   };
 
-  const assignmentButtonClass = activePage === 'assignments'
-    ? 'border-purple-300 bg-purple-100 text-purple-800 shadow-sm'
-    : 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300 hover:shadow-sm';
+  const primaryNavItems = [
+    {
+      id: 'dashboard',
+      label: 'Dashboard',
+      path: '/dashboard',
+      Icon: LayoutDashboard,
+      inactiveClass: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:border-blue-300',
+    },
+    {
+      id: 'timeline',
+      label: 'Timeline',
+      path: '/timeline',
+      Icon: Clock,
+      inactiveClass: 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300',
+    },
+    ...(canReview || activePage === 'assignments' ? [{
+      id: 'assignments',
+      label: 'Assignment',
+      path: '/assignments',
+      Icon: Sparkles,
+      inactiveClass: 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300',
+    }] : []),
+  ];
 
-  const timelineButtonClass = activePage === 'timeline'
-    ? 'border-indigo-300 bg-indigo-100 text-indigo-800 shadow-sm'
-    : 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300 hover:shadow-sm';
-
-  const dashboardButtonClass = 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:border-blue-300 hover:shadow-sm';
+  const renderPrimaryNav = (compact = false) => (
+    <div className={`inline-flex flex-none items-center ${compact ? 'gap-1' : 'gap-1.5'}`} aria-label="Primary navigation">
+      {primaryNavItems.map(({ id, label, path, Icon, inactiveClass }) => {
+        const isActive = activePage === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => {
+              if (!isActive) navigate(path);
+            }}
+            aria-current={isActive ? 'page' : undefined}
+            aria-disabled={isActive ? 'true' : undefined}
+            className={`${compact ? 'h-9 w-9 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-none items-center justify-center border transition-colors ${
+              isActive
+                ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400'
+                : `${inactiveClass} hover:shadow-sm`
+            }`}
+            title={isActive ? `${label} (current page)` : label}
+          >
+            <Icon className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
+          </button>
+        );
+      })}
+    </div>
+  );
 
   const renderWorkspaceControl = (compact = false) => {
     if (!currentWorkspace) return null;
@@ -145,19 +186,7 @@ export default function AppHeader({
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                 </button>
               )}
-              {activePage !== 'dashboard' && (
-                <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 px-2.5 py-2 rounded-full text-xs font-semibold border border-blue-200 bg-blue-50 text-blue-700 touch-manipulation" title="Dashboard">
-                  <LayoutDashboard className="w-4 h-4" /> <span className="hidden xs:inline">Dash</span>
-                </button>
-              )}
-              {canReview && activePage !== 'assignments' && (
-                <button onClick={() => navigate('/assignments')} className="flex items-center gap-1 px-2.5 py-2 rounded-full text-xs font-semibold border border-purple-200 bg-purple-50 text-purple-700 touch-manipulation" title="Assignment">
-                  <Sparkles className="w-4 h-4" /> <span className="hidden xs:inline">Assign</span>
-                </button>
-              )}
-              {activePage !== 'timeline' && (
-                <button onClick={() => navigate('/timeline')} className="p-2 hover:bg-gray-100 rounded-lg touch-manipulation" title="Timeline"><Clock className="w-4 h-4 text-indigo-600" /></button>
-              )}
+              {renderPrimaryNav(true)}
               <button onClick={() => navigate('/settings')} className="p-2 hover:bg-gray-100 rounded-lg touch-manipulation" title="Settings"><Settings className="w-4 h-4" /></button>
               <button
                 onClick={handleLogout}
@@ -302,44 +331,7 @@ export default function AppHeader({
 
               {extraActions}
 
-              {activePage !== 'dashboard' && (
-                <button
-                  onClick={() => navigate('/dashboard')}
-                  className={`group flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border whitespace-nowrap ${dashboardButtonClass}`}
-                  title="Dashboard"
-                >
-                  <span className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center group-hover:bg-blue-700 transition-colors">
-                    <LayoutDashboard className="w-3 h-3 text-white" />
-                  </span>
-                  Dashboard
-                </button>
-              )}
-
-              {activePage !== 'timeline' && (
-                <button
-                  onClick={() => navigate('/timeline')}
-                  className={`group flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border whitespace-nowrap ${timelineButtonClass}`}
-                  title="Timeline"
-                >
-                  <span className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center group-hover:bg-indigo-700 transition-colors">
-                    <Clock className="w-3 h-3 text-white" />
-                  </span>
-                  Timeline
-                </button>
-              )}
-
-              {canReview && activePage !== 'assignments' && (
-                <button
-                  onClick={() => navigate('/assignments')}
-                  className={`group flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border whitespace-nowrap ${assignmentButtonClass}`}
-                  title="AI Ticket Assignment"
-                >
-                  <span className="w-5 h-5 rounded-full bg-purple-600 flex items-center justify-center group-hover:bg-purple-700 transition-colors">
-                    <Sparkles className="w-3 h-3 text-white" />
-                  </span>
-                  Assignment
-                </button>
-              )}
+              {renderPrimaryNav(false)}
 
               <button
                 onClick={() => navigate('/visuals')}

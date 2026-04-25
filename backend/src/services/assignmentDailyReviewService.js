@@ -106,12 +106,6 @@ function toArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function addDaysUtc(date, days) {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
-
 class AssignmentDailyReviewService {
   constructor() {
     this.activeRunControllers = new Map();
@@ -2096,6 +2090,7 @@ Rules:
   async listRecommendations(workspaceId, {
     status,
     kind,
+    severity,
     startDate,
     endDate,
     runId,
@@ -2110,6 +2105,7 @@ Rules:
     const where = { workspaceId };
     if (status && status !== 'all') where.status = status;
     if (kind && kind !== 'all') where.kind = kind;
+    if (severity && severity !== 'all') where.severity = String(severity).toLowerCase();
     if (startDate || endDate) {
       where.reviewDate = {};
       if (startDate) where.reviewDate.gte = reviewDateKey(startDate);
@@ -2144,60 +2140,6 @@ Rules:
     return {
       items: items.map((item) => this._toRecommendationDto(item)),
       total,
-    };
-  }
-
-  async getWeeklyRecommendationRollup(workspaceId, {
-    weekStart,
-    status = 'approved',
-    kind = 'all',
-  } = {}) {
-    this._validateRecommendationKind(kind);
-    const normalizedWeekStart = weekStart || formatInTimeZone(new Date(), 'UTC', 'yyyy-MM-dd');
-    const start = reviewDateKey(normalizedWeekStart);
-    const end = addDaysUtc(start, 6);
-    const normalizedWeekEnd = end.toISOString().slice(0, 10);
-    const { items } = await this.listRecommendations(workspaceId, {
-      status,
-      kind,
-      startDate: normalizedWeekStart,
-      endDate: normalizedWeekEnd,
-      limit: 500,
-      offset: 0,
-    });
-
-    const days = new Map();
-    const countsByKind = { prompt: 0, process: 0, skill: 0 };
-
-    for (const item of items) {
-      const reviewDate = item.reviewDate instanceof Date
-        ? item.reviewDate.toISOString().slice(0, 10)
-        : String(item.reviewDate).slice(0, 10);
-      if (!days.has(reviewDate)) {
-        days.set(reviewDate, {
-          reviewDate,
-          promptRecommendations: [],
-          processRecommendations: [],
-          skillRecommendations: [],
-          total: 0,
-        });
-      }
-      const day = days.get(reviewDate);
-      day.total += 1;
-      if (item.kind === 'prompt') day.promptRecommendations.push(item);
-      if (item.kind === 'process') day.processRecommendations.push(item);
-      if (item.kind === 'skill') day.skillRecommendations.push(item);
-      countsByKind[item.kind] += 1;
-    }
-
-    return {
-      weekStart: normalizedWeekStart,
-      weekEnd: normalizedWeekEnd,
-      status,
-      kind,
-      total: items.length,
-      countsByKind,
-      days: Array.from(days.values()).sort((a, b) => a.reviewDate.localeCompare(b.reviewDate)),
     };
   }
 

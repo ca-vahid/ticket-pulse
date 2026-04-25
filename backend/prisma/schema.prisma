@@ -47,6 +47,7 @@ model Workspace {
   calibrationRuns        CalibrationRun[]
   dailyReviewRuns        AssignmentDailyReviewRun[]
   dailyReviewRecommendations AssignmentDailyReviewRecommendation[]
+  dailyReviewConsolidationRuns AssignmentDailyReviewConsolidationRun[]
   assignmentEpisodes     TicketAssignmentEpisode[]
   backfillRuns           BackfillRun[]
   ticketThreadEntries    TicketThreadEntry[]
@@ -959,6 +960,78 @@ model AssignmentDailyReviewRecommendation {
   @@index([workspaceId, status])
   @@index([workspaceId, reviewDate])
   @@index([workspaceId, kind])
+}
+
+model AssignmentDailyReviewConsolidationRun {
+  id                       Int       @id @default(autoincrement())
+  workspaceId              Int       @map("workspace_id")
+  workspace                Workspace @relation(fields: [workspaceId], references: [id])
+  status                   String    @default("collecting") @db.VarChar(30)
+  phase                    String?   @db.VarChar(40)
+  triggeredBy              String?   @db.VarChar(255) @map("triggered_by")
+  llmModel                 String?   @db.VarChar(100) @map("llm_model")
+  sourceRecommendationIds  Json?     @map("source_recommendation_ids")
+  sourceCounts             Json?     @map("source_counts")
+  contextSnapshot          Json?     @map("context_snapshot")
+  rawResult                Json?     @map("raw_result")
+  sectionSelection         Json?     @map("section_selection")
+  promptDraftId            Int?      @map("prompt_draft_id")
+  totalTokensUsed          Int?      @map("total_tokens_used")
+  totalDurationMs          Int?      @map("total_duration_ms")
+  errorMessage             String?   @db.Text @map("error_message")
+  progress                 Json?
+  completedAt              DateTime? @map("completed_at")
+  appliedBy                String?   @db.VarChar(255) @map("applied_by")
+  appliedAt                DateTime? @map("applied_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  items                    AssignmentDailyReviewConsolidationItem[]
+  events                   AssignmentDailyReviewConsolidationEvent[]
+
+  @@map("assignment_daily_review_consolidation_runs")
+  @@index([workspaceId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AssignmentDailyReviewConsolidationItem {
+  id                 Int       @id @default(autoincrement())
+  runId              Int       @map("run_id")
+  run                AssignmentDailyReviewConsolidationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  workspaceId         Int      @map("workspace_id")
+  section             String   @db.VarChar(40)
+  actionType          String?  @db.VarChar(40) @map("action_type")
+  title               String   @db.VarChar(255)
+  rationale           String?  @db.Text
+  payload             Json?
+  editedPayload       Json?    @map("edited_payload")
+  sourceRecommendationIds Json? @map("source_recommendation_ids")
+  includeInApply      Boolean  @default(true) @map("include_in_apply")
+  status              String   @default("pending") @db.VarChar(30)
+  applyResult         Json?    @map("apply_result")
+  appliedAt           DateTime? @map("applied_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("assignment_daily_review_consolidation_items")
+  @@index([runId])
+  @@index([workspaceId, section])
+  @@index([status])
+}
+
+model AssignmentDailyReviewConsolidationEvent {
+  id        Int      @id @default(autoincrement())
+  runId     Int      @map("run_id")
+  run       AssignmentDailyReviewConsolidationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  type      String   @db.VarChar(40)
+  message   String?  @db.Text
+  payload   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("assignment_daily_review_consolidation_events")
+  @@index([runId])
+  @@index([createdAt])
 }
 
 model CompetencyAnalysisStep {

@@ -582,7 +582,6 @@ export const assignmentAPI = {
   getDailyReviewRuns: (params) => api.get('/assignment/daily-review/runs', { params }),
   getDailyReviewRun: (id) => api.get(`/assignment/daily-review/runs/${id}`),
   getDailyReviewRecommendations: (params) => api.get('/assignment/daily-review/recommendations', { params }),
-  getDailyReviewWeeklyRollup: (params) => api.get('/assignment/daily-review/recommendations/weekly-rollup', { params }),
   updateDailyReviewRecommendationStatus: (id, data) => api.post(`/assignment/daily-review/recommendations/${id}/status`, data),
   bulkUpdateDailyReviewRecommendationStatus: (data) => api.post('/assignment/daily-review/recommendations/bulk-status', data),
   cancelDailyReviewRun: (id) => api.post(`/assignment/daily-review/runs/${id}/cancel`),
@@ -590,6 +589,14 @@ export const assignmentAPI = {
   generateDailyReviewBriefing: (id, data = {}) => apiLongTimeout.post(`/assignment/daily-review/runs/${id}/meeting-briefing`, data),
   runDailyReview: (data) => api.post('/assignment/daily-review', data),
   getDailyReviewRunProgress: (id) => api.get(`/assignment/daily-review/runs/${id}/progress`),
+  startDailyReviewConsolidation: () => api.post('/assignment/daily-review/consolidations'),
+  getDailyReviewConsolidationActive: () => api.get('/assignment/daily-review/consolidations/active'),
+  getDailyReviewConsolidationRun: (id) => api.get(`/assignment/daily-review/consolidations/runs/${id}`),
+  getDailyReviewConsolidationRuns: (params) => api.get('/assignment/daily-review/consolidations/runs', { params }),
+  cancelDailyReviewConsolidation: (id) => api.post(`/assignment/daily-review/consolidations/runs/${id}/cancel`),
+  deleteDailyReviewConsolidation: (id) => api.delete(`/assignment/daily-review/consolidations/runs/${id}`),
+  updateDailyReviewConsolidationItem: (id, data) => api.put(`/assignment/daily-review/consolidations/items/${id}`, data),
+  applyDailyReviewConsolidation: (id, data) => api.post(`/assignment/daily-review/consolidations/runs/${id}/apply`, data),
 };
 
 /**

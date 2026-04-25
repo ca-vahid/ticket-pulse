@@ -6,7 +6,7 @@ import {
   Loader2, Brain, CheckCircle, XCircle, History, RefreshCw, Play,
   CalendarDays, FileText, Settings2, Award, ChevronRight, StopCircle,
   ArrowLeft, ExternalLink, Sparkles, Copy, ThumbsUp, AlertTriangle,
-  Eye, MessageCircle, TrendingUp,
+  Eye, MessageCircle, TrendingUp, ChevronUp, ChevronDown, Undo2,
 } from 'lucide-react';
 
 function StatusBadge({ status }) {
@@ -14,7 +14,10 @@ function StatusBadge({ status }) {
     running: 'bg-blue-100 text-blue-800',
     collecting: 'bg-blue-100 text-blue-800',
     analyzing: 'bg-purple-100 text-purple-800',
+    saving: 'bg-purple-100 text-purple-800',
     completed: 'bg-green-100 text-green-800',
+    applied: 'bg-blue-100 text-blue-800',
+    partially_applied: 'bg-amber-100 text-amber-800',
     failed: 'bg-red-100 text-red-800',
     cancelled: 'bg-slate-100 text-slate-700',
   };
@@ -48,6 +51,8 @@ const RECOMMENDATION_STATUS_STYLES = {
   approved: 'bg-green-100 text-green-700 border-green-200',
   rejected: 'bg-red-100 text-red-700 border-red-200',
   applied: 'bg-blue-100 text-blue-700 border-blue-200',
+  skipped: 'bg-amber-100 text-amber-700 border-amber-200',
+  documented: 'bg-purple-100 text-purple-700 border-purple-200',
 };
 
 function RecommendationStatusBadge({ status }) {
@@ -56,15 +61,6 @@ function RecommendationStatusBadge({ status }) {
       {status || 'pending'}
     </span>
   );
-}
-
-function startOfWeekMondayLocal(date = new Date()) {
-  const copy = new Date(date);
-  copy.setHours(0, 0, 0, 0);
-  const day = copy.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  copy.setDate(copy.getDate() + diff);
-  return copy;
 }
 
 function RecommendationCard({
@@ -237,6 +233,1010 @@ function RecommendationSection({
         </div>
       ) : (
         <div className="text-sm text-slate-400">{emptyText}</div>
+      )}
+    </div>
+  );
+}
+
+function getSupportingTicketIds(item) {
+  return Array.isArray(item.supportingFreshserviceTicketIds) && item.supportingFreshserviceTicketIds.length > 0
+    ? item.supportingFreshserviceTicketIds
+    : item.supportingTicketIds;
+}
+
+function RecommendationMeta({ item, workspaceTimezone }) {
+  const supportTicketIds = getSupportingTicketIds(item);
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+      <span>{formatDateOnlyInTimezone(item.reviewDate, workspaceTimezone)}</span>
+      <span className="text-slate-300">•</span>
+      <span>Run #{item.runId}</span>
+      <span className="text-slate-300">•</span>
+      <span className="capitalize">{item.kind}</span>
+      {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
+        <>
+          <span className="text-slate-300">•</span>
+          <span>{supportTicketIds.length} ticket{supportTicketIds.length === 1 ? '' : 's'}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BacklogRecommendationRow({
+  item,
+  workspaceTimezone,
+  onRecommendationAction,
+  savingRecommendationId,
+  mode = 'pending',
+  hideTitle = false,
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [notes, setNotes] = useState(item.reviewNotes || '');
+  const isSaving = savingRecommendationId === item.id;
+  const supportTicketIds = getSupportingTicketIds(item);
+
+  useEffect(() => {
+    setNotes(item.reviewNotes || '');
+  }, [item.id, item.reviewNotes]);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+          title={expanded ? 'Collapse details' : 'Expand details'}
+        >
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {!hideTitle && <div className="truncate text-sm font-semibold text-slate-800">{item.title}</div>}
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              item.severity === 'high'
+                ? 'bg-red-100 text-red-700'
+                : item.severity === 'medium'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-blue-100 text-blue-700'
+            }`}>
+              {item.severity || 'low'}
+            </span>
+          </div>
+          <RecommendationMeta item={item} workspaceTimezone={workspaceTimezone} />
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {mode === 'pending' && (
+            <>
+              <button
+                onClick={() => onRecommendationAction?.(item.id, 'approved', notes)}
+                disabled={isSaving}
+                className="rounded-lg border border-green-200 bg-green-50 p-1.5 text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                title="Approve"
+              >
+                <CheckCircle className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => onRecommendationAction?.(item.id, 'rejected', notes)}
+                disabled={isSaving}
+                className="rounded-lg border border-red-200 bg-red-50 p-1.5 text-red-600 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                title="Reject"
+              >
+                <XCircle className="h-4 w-4" />
+              </button>
+            </>
+          )}
+          {mode === 'approved' && (
+            <button
+              onClick={() => onRecommendationAction?.(item.id, 'applied', notes)}
+              disabled={isSaving}
+              className="rounded-lg border border-blue-200 bg-blue-50 p-1.5 text-blue-600 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+              title="Mark applied"
+            >
+              <CheckCircle className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+      {expanded && (
+        <div className="border-t border-slate-100 bg-slate-50 px-3 py-3">
+          <div className="space-y-2 text-xs text-slate-600">
+            <p>{item.rationale}</p>
+            {item.suggestedAction && (
+              <p>
+                <span className="font-semibold text-slate-700">Suggested action:</span> {item.suggestedAction}
+              </p>
+            )}
+            {Array.isArray(item.skillsAffected) && item.skillsAffected.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {item.skillsAffected.map((skill) => (
+                  <span key={skill} className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                    {skill}
+                  </span>
+                ))}
+              </div>
+            )}
+            {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
+              <div className="text-[11px] text-slate-500">
+                <span className="font-medium">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
+              </div>
+            )}
+          </div>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Optional review notes"
+            className="mt-3 min-h-[64px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function groupRecommendationsByTitle(items = []) {
+  const map = new Map();
+  for (const item of items) {
+    const key = item.title || 'Untitled recommendation';
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(item);
+  }
+  return Array.from(map.entries()).map(([title, rows]) => ({ title, rows }));
+}
+
+function ApprovedBacklogGroup({
+  group,
+  workspaceTimezone,
+  onRecommendationAction,
+  savingRecommendationId,
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const runs = [...new Set(group.rows.map((item) => item.runId).filter(Boolean))].sort((a, b) => b - a);
+  const kinds = [...new Set(group.rows.map((item) => item.kind).filter(Boolean))];
+  const ticketCount = group.rows.reduce((sum, item) => sum + (getSupportingTicketIds(item)?.length || 0), 0);
+  const hasHigh = group.rows.some((item) => item.severity === 'high');
+  const [notesById, setNotesById] = useState({});
+
+  useEffect(() => {
+    setNotesById((prev) => {
+      const next = { ...prev };
+      group.rows.forEach((item) => {
+        if (next[item.id] === undefined) next[item.id] = item.reviewNotes || '';
+      });
+      return next;
+    });
+  }, [group.rows]);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-emerald-200 bg-white">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-emerald-50/50"
+      >
+        {expanded ? <ChevronDown className="h-4 w-4 shrink-0 text-emerald-600" /> : <ChevronRight className="h-4 w-4 shrink-0 text-emerald-600" />}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-slate-800">{group.title}</div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+            <span>{group.rows.length} approved</span>
+            {kinds.length > 0 && <span>{kinds.join(', ')}</span>}
+            {runs.length > 0 && <span>Run {runs.map((runId) => `#${runId}`).join(', ')}</span>}
+            {ticketCount > 0 && <span>{ticketCount} ticket{ticketCount === 1 ? '' : 's'}</span>}
+          </div>
+        </div>
+        {hasHigh && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-700">High</span>}
+      </button>
+      {expanded && (
+        <div className="space-y-3 border-t border-emerald-100 bg-slate-50 p-3">
+          {group.rows.map((item) => {
+            const supportTicketIds = getSupportingTicketIds(item);
+            const isSaving = savingRecommendationId === item.id;
+            return (
+              <div key={item.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                {group.rows.length > 1 && (
+                  <div className="mb-2 text-sm font-semibold text-slate-800">{item.title}</div>
+                )}
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="mb-1 flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                        item.severity === 'high'
+                          ? 'bg-red-100 text-red-700'
+                          : item.severity === 'medium'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-blue-100 text-blue-700'
+                      }`}>
+                        {item.severity || 'low'}
+                      </span>
+                    </div>
+                    <RecommendationMeta item={item} workspaceTimezone={workspaceTimezone} />
+                  </div>
+                  <button
+                    onClick={() => onRecommendationAction?.(item.id, 'applied', notesById[item.id] || '')}
+                    disabled={isSaving}
+                    className="rounded-lg border border-blue-200 bg-blue-50 p-1.5 text-blue-600 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    title="Mark applied"
+                  >
+                    <CheckCircle className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="space-y-2 text-xs leading-relaxed text-slate-600">
+                  <p>{item.rationale}</p>
+                  {item.suggestedAction && (
+                    <p>
+                      <span className="font-semibold text-slate-700">Suggested action:</span> {item.suggestedAction}
+                    </p>
+                  )}
+                  {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
+                    <div className="text-[11px] text-slate-500">
+                      <span className="font-medium">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
+                    </div>
+                  )}
+                </div>
+                <textarea
+                  value={notesById[item.id] || ''}
+                  onChange={(e) => setNotesById((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                  placeholder="Optional review notes"
+                  className="mt-3 min-h-[64px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CONSOLIDATION_ACTIVE_STATUSES = ['collecting', 'analyzing', 'saving'];
+
+function getItemPayload(item) {
+  return item.editedPayload || item.payload || {};
+}
+
+function buildLineDiff(before = '', after = '') {
+  const a = String(before || '').split('\n');
+  const b = String(after || '').split('\n');
+  const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const rows = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      rows.push({ type: 'same', before: a[i], after: b[j], beforeLine: i + 1, afterLine: j + 1 });
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      rows.push({ type: 'removed', before: a[i], after: '', beforeLine: i + 1, afterLine: null });
+      i += 1;
+    } else {
+      rows.push({ type: 'added', before: '', after: b[j], beforeLine: null, afterLine: j + 1 });
+      j += 1;
+    }
+  }
+  while (i < a.length) {
+    rows.push({ type: 'removed', before: a[i], after: '', beforeLine: i + 1, afterLine: null });
+    i += 1;
+  }
+  while (j < b.length) {
+    rows.push({ type: 'added', before: '', after: b[j], beforeLine: null, afterLine: j + 1 });
+    j += 1;
+  }
+  return rows;
+}
+
+function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) {
+  const payload = getItemPayload(item);
+  const [draftPrompt, setDraftPrompt] = useState(payload.updatedPrompt || '');
+  const [draftHistory, setDraftHistory] = useState([]);
+  const [activeDiffIndex, setActiveDiffIndex] = useState(-1);
+  const beforePaneRef = useRef(null);
+  const afterPaneRef = useRef(null);
+  const rows = buildLineDiff(currentPrompt || '', draftPrompt);
+  const changedCount = rows.filter((row) => row.type !== 'same').length;
+  const diffRowIndexes = rows.map((row, index) => (row.type !== 'same' ? index : null)).filter((index) => index !== null);
+
+  useEffect(() => {
+    if (!diffRowIndexes.length && activeDiffIndex !== -1) {
+      setActiveDiffIndex(-1);
+      return;
+    }
+    if (activeDiffIndex > diffRowIndexes.length - 1) {
+      setActiveDiffIndex(diffRowIndexes.length - 1);
+    }
+  }, [activeDiffIndex, diffRowIndexes.length]);
+
+  const scrollToDiff = (direction) => {
+    if (!diffRowIndexes.length) return;
+    const nextIndex = direction === 'previous'
+      ? Math.max(activeDiffIndex - 1, 0)
+      : Math.min(activeDiffIndex + 1, diffRowIndexes.length - 1);
+    const rowIndex = diffRowIndexes[nextIndex];
+    setActiveDiffIndex(nextIndex);
+    [beforePaneRef.current, afterPaneRef.current].forEach((pane) => {
+      const target = pane?.querySelector(`[data-diff-row="${rowIndex}"]`);
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  };
+
+  const diffNavControls = (
+    <div className="flex items-center gap-1 normal-case tracking-normal">
+      <span className="mr-1 text-[10px] font-medium text-slate-400">
+        {diffRowIndexes.length ? `${Math.max(activeDiffIndex + 1, 0)}/${diffRowIndexes.length}` : '0/0'}
+      </span>
+      <button
+        type="button"
+        onClick={() => scrollToDiff('previous')}
+        disabled={!diffRowIndexes.length || activeDiffIndex <= 0}
+        className="rounded border border-slate-200 bg-white p-0.5 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        title="Previous diff"
+      >
+        <ChevronUp className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => scrollToDiff('next')}
+        disabled={!diffRowIndexes.length || activeDiffIndex >= diffRowIndexes.length - 1}
+        className="rounded border border-slate-200 bg-white p-0.5 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        title="Next diff"
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+
+  const commitDraftPrompt = (nextPrompt) => {
+    if (nextPrompt === draftPrompt) return;
+    setDraftHistory((prev) => [...prev.slice(-19), draftPrompt]);
+    setDraftPrompt(nextPrompt);
+  };
+
+  const undoDraftChange = () => {
+    setDraftHistory((prev) => {
+      if (!prev.length) return prev;
+      const nextHistory = prev.slice(0, -1);
+      setDraftPrompt(prev[prev.length - 1]);
+      return nextHistory;
+    });
+  };
+
+  const updateDraftLine = (lineNumber, value) => {
+    if (!lineNumber) return;
+    const lines = draftPrompt.split('\n');
+    lines[lineNumber - 1] = value;
+    commitDraftPrompt(lines.join('\n'));
+  };
+  const insertDraftLineAfter = (lineNumber) => {
+    const lines = draftPrompt.split('\n');
+    const insertAt = lineNumber ? lineNumber : lines.length;
+    lines.splice(insertAt, 0, '');
+    commitDraftPrompt(lines.join('\n'));
+  };
+  const removeAddedBlock = (lineNumber) => {
+    if (!lineNumber) return;
+    const targetIndex = rows.findIndex((row) => row.afterLine === lineNumber);
+    if (targetIndex < 0) return;
+    let start = targetIndex;
+    let end = targetIndex;
+    while (start > 0 && rows[start - 1].type === 'added' && rows[start - 1].afterLine) start -= 1;
+    while (end + 1 < rows.length && rows[end + 1].type === 'added' && rows[end + 1].afterLine) end += 1;
+    const removeLines = new Set(rows.slice(start, end + 1).map((row) => row.afterLine).filter(Boolean));
+    const lines = draftPrompt.split('\n').filter((_, index) => !removeLines.has(index + 1));
+    commitDraftPrompt(lines.join('\n'));
+  };
+  const restoreRemovedBlock = (lineNumber) => {
+    if (!lineNumber) return;
+    const targetIndex = rows.findIndex((row) => row.beforeLine === lineNumber);
+    if (targetIndex < 0) return;
+    let start = targetIndex;
+    let end = targetIndex;
+    while (start > 0 && rows[start - 1].type === 'removed' && rows[start - 1].beforeLine) start -= 1;
+    while (end + 1 < rows.length && rows[end + 1].type === 'removed' && rows[end + 1].beforeLine) end += 1;
+
+    const restoredLines = rows.slice(start, end + 1).map((row) => row.before);
+    const nextAnchor = rows.slice(end + 1).find((row) => row.afterLine);
+    const insertAt = nextAnchor?.afterLine ? nextAnchor.afterLine - 1 : draftPrompt.split('\n').length;
+    const lines = draftPrompt.split('\n');
+    lines.splice(insertAt, 0, ...restoredLines);
+    commitDraftPrompt(lines.join('\n'));
+  };
+  const saveDraft = async () => {
+    await onSaveDraft?.(item.id, {
+      editedPayload: { ...payload, updatedPrompt: draftPrompt },
+      includeInApply: true,
+    });
+    onClose?.();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 animate-fadeIn">
+      <div className="flex max-h-[88vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Prompt Diff</h3>
+            <p className="text-xs text-slate-500">
+              {item.title} · {changedCount} changed line{changedCount === 1 ? '' : 's'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={undoDraftChange}
+              disabled={!draftHistory.length}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              title="Undo last prompt edit"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+              Undo
+            </button>
+            <button
+              onClick={saveDraft}
+              disabled={saving}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              {saving ? 'Saving...' : 'Save Draft'}
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-2 overflow-hidden">
+          <div className="border-r border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span>Current Prompt</span>
+              {diffNavControls}
+            </div>
+            <div ref={beforePaneRef} className="h-[70vh] overflow-auto bg-white font-mono text-xs leading-relaxed">
+              {rows.map((row, index) => {
+                const isFirstRemovedBlock = row.type === 'removed' && rows[index - 1]?.type !== 'removed';
+                return (
+                  <div
+                    key={`before-${index}`}
+                    data-diff-row={index}
+                    className={`grid grid-cols-[48px,1fr,96px] border-b border-slate-100 px-2 py-1 ${
+                      row.type === 'removed' ? 'bg-red-50 text-red-900' : row.type === 'added' ? 'bg-slate-50 text-slate-300' : 'text-slate-700'
+                    }`}
+                  >
+                    <span className="select-none text-right text-slate-400">{row.beforeLine || ''}</span>
+                    <span className="whitespace-pre-wrap pl-3">{row.before || ' '}</span>
+                    <span className="pl-2 text-right">
+                      {isFirstRemovedBlock && (
+                        <button
+                          onClick={() => restoreRemovedBlock(row.beforeLine)}
+                          className="rounded border border-red-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-red-600 hover:bg-red-50"
+                          title="Restore this deleted prompt block"
+                        >
+                          Restore
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between border-b border-slate-200 bg-blue-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+              <span>Recommended Prompt · Editable</span>
+              <div className="flex items-center gap-2">
+                {diffNavControls}
+                <button
+                  onClick={() => insertDraftLineAfter(draftPrompt.split('\n').length)}
+                  className="rounded border border-blue-200 bg-white px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-blue-600 hover:bg-blue-50"
+                >
+                  Add line at end
+                </button>
+              </div>
+            </div>
+            <div ref={afterPaneRef} className="h-[70vh] overflow-auto bg-white font-mono text-xs leading-relaxed">
+              {rows.map((row, index) => {
+                const isFirstAddedBlock = row.type === 'added' && rows[index - 1]?.type !== 'added';
+                return (
+                  <div
+                    key={`after-${index}`}
+                    data-diff-row={index}
+                    className={`grid grid-cols-[48px,1fr,112px] border-b border-slate-100 px-2 py-1 ${
+                      row.type === 'added' ? 'bg-emerald-50 text-emerald-900' : row.type === 'removed' ? 'bg-slate-50 text-slate-300' : 'text-slate-700'
+                    }`}
+                  >
+                    <span className="select-none text-right text-slate-400">{row.afterLine || ''}</span>
+                    {row.afterLine ? (
+                      <span
+                        className="min-h-[1.45rem] whitespace-pre-wrap rounded border border-transparent px-3 py-0.5 outline-none transition-colors focus:border-blue-200 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                        contentEditable
+                        suppressContentEditableWarning
+                        onBlur={(e) => updateDraftLine(row.afterLine, e.currentTarget.innerText.replace(/\n$/u, ''))}
+                      >
+                        {row.after || ' '}
+                      </span>
+                    ) : (
+                      <span className="whitespace-pre-wrap px-3 py-0.5">{' '}</span>
+                    )}
+                    <span className="pl-2 text-right">
+                      {isFirstAddedBlock && (
+                        <button
+                          onClick={() => removeAddedBlock(row.afterLine)}
+                          className="rounded border border-red-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-red-600 hover:bg-red-50"
+                          title="Remove this full added recommendation block"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteRunConfirmModal({ run, deleting, onCancel, onConfirm }) {
+  if (!run) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 animate-fadeIn">
+      <div className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 rounded-full bg-red-50 p-2 text-red-600">
+              <AlertTriangle className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-slate-900">Delete consolidation run?</h3>
+              <p className="mt-1 text-sm leading-relaxed text-slate-500">
+                This will delete Run #{run.id} and its saved consolidation recommendations. This cannot be undone.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 bg-slate-50 px-4 py-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={deleting}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={deleting}
+            className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+          >
+            {deleting ? 'Deleting...' : 'Delete Run'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenPromptDiff }) {
+  const [payload, setPayload] = useState(getItemPayload(item));
+  const [includeInApply, setIncludeInApply] = useState(item.includeInApply !== false);
+  const isApplied = item.status === 'applied';
+  const isProcess = item.section === 'process';
+
+  useEffect(() => {
+    setPayload(getItemPayload(item));
+    setIncludeInApply(item.includeInApply !== false);
+  }, [item.id, item.editedPayload, item.payload, item.includeInApply]);
+
+  const updateField = (field, value) => setPayload((prev) => ({ ...prev, [field]: value }));
+  const save = () => onSave?.(item.id, {
+    editedPayload: payload,
+    includeInApply: item.section === 'prompt' ? true : includeInApply,
+  });
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 animate-[fadeIn_200ms_ease-out] transition-all duration-300 ease-out">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-sm font-semibold text-slate-800">{item.title}</div>
+            <RecommendationStatusBadge status={item.status} />
+            {item.actionType && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-500">{item.actionType}</span>}
+          </div>
+          {item.section !== 'prompt' && item.rationale && <div className="mt-1 text-xs text-slate-500">{item.rationale}</div>}
+        </div>
+        {!isProcess && (
+          <div className="flex shrink-0 items-center gap-2">
+            {item.section === 'prompt' && (
+              <button
+                onClick={() => onOpenPromptDiff?.(item)}
+                type="button"
+                className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!currentPrompt || !payload.updatedPrompt}
+              >
+                Compare Prompt
+              </button>
+            )}
+            {item.section !== 'prompt' && (
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={includeInApply}
+                  disabled={isApplied}
+                  onChange={(e) => setIncludeInApply(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                Include
+              </label>
+            )}
+          </div>
+        )}
+      </div>
+
+      {item.section === 'prompt' && (
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">
+          <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recommendation</div>
+            <div className="mt-2 text-sm leading-relaxed text-slate-600">
+              {item.rationale || 'No recommendation rationale provided.'}
+            </div>
+          </div>
+          <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Change Summary</div>
+            <div className="mt-2 text-sm leading-relaxed text-slate-700">
+              {payload.changeSummary || 'No change summary provided.'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {item.section === 'skills' && (
+        <div className="grid gap-2 md:grid-cols-2">
+          <div>
+            <label className="block text-xs font-medium text-slate-600">Action</label>
+            <select value={payload.action || 'update'} onChange={(e) => updateField('action', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+              <option value="add">Add</option>
+              <option value="rename">Rename</option>
+              <option value="update">Update</option>
+              <option value="merge">Merge</option>
+              <option value="deprecate">Deprecate</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600">Skill / Category</label>
+            <input value={payload.categoryName || ''} onChange={(e) => updateField('categoryName', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600">New Name</label>
+            <input value={payload.newName || ''} onChange={(e) => updateField('newName', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600">Description</label>
+            <input value={payload.description || ''} onChange={(e) => updateField('description', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+        </div>
+      )}
+
+      {item.section === 'technician_competencies' && (
+        <div className="grid gap-2 md:grid-cols-2">
+          <div>
+            <label className="block text-xs font-medium text-slate-600">Technician</label>
+            <input value={payload.technicianName || ''} onChange={(e) => updateField('technicianName', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600">Skill / Category</label>
+            <input value={payload.categoryName || ''} onChange={(e) => updateField('categoryName', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600">Level</label>
+            <select value={payload.proficiencyLevel || 'intermediate'} onChange={(e) => updateField('proficiencyLevel', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+              <option value="basic">Basic</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="expert">Expert</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600">Notes</label>
+            <input value={payload.notes || ''} onChange={(e) => updateField('notes', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+        </div>
+      )}
+
+      {item.section === 'process' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <div className="font-semibold">{payload.changeType || 'dev_required'}</div>
+          <div className="mt-1 text-xs">{payload.suggestedAction || item.rationale}</div>
+        </div>
+      )}
+
+      {!isProcess && item.section !== 'prompt' && !isApplied && (
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
+          >
+            {saving ? 'Saving...' : 'Save Item'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConsolidationPanel({
+  run,
+  loading,
+  starting,
+  applying,
+  savingItemId,
+  sectionApply,
+  onSectionApplyChange,
+  onStart,
+  onRefresh,
+  onSaveItem,
+  onApply,
+  onCancel,
+  onDelete,
+}) {
+  const [promptDiffItem, setPromptDiffItem] = useState(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingRun, setDeletingRun] = useState(false);
+  const events = run?.events || [];
+  const thinking = events.filter((event) => event.type === 'thinking').map((event) => event.message).join('');
+  const visibleText = events.filter((event) => event.type === 'text').map((event) => event.message).join('');
+  const latestToolJson = [...events].reverse().find((event) => event.type === 'tool_json');
+  const latestHeartbeat = [...events].reverse().find((event) => event.type === 'heartbeat');
+  const latestByType = events
+    .filter((event) => !['thinking', 'text', 'stream_delta'].includes(event.type))
+    .reduce((acc, event) => ({ ...acc, [event.type]: event }), {});
+  const progressEvents = Object.values(latestByType).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  const thinkingKb = Math.max(parseFloat((thinking.length / 1024).toFixed(1)), latestHeartbeat?.payload?.thinkingKb || 0).toFixed(1);
+  const visibleTextKb = Math.max(parseFloat((visibleText.length / 1024).toFixed(1)), latestHeartbeat?.payload?.textKb || 0).toFixed(1);
+  const structuredPlanKb = Math.max(latestToolJson?.payload?.kb || 0, latestHeartbeat?.payload?.structuredPlanKb || 0).toFixed(1);
+  const grouped = run?.groupedItems || {};
+  const isActive = run && CONSOLIDATION_ACTIVE_STATUSES.includes(run.status);
+  const hasRun = !!run;
+  const currentPrompt = run?.contextSnapshot?.prompt?.systemPrompt || '';
+
+  const sections = [
+    { key: 'prompt', label: 'Prompt Edits', icon: FileText, applyable: true },
+    { key: 'skills', label: 'Skill List Changes', icon: Award, applyable: true },
+    { key: 'technician_competencies', label: 'Technician Skill Changes', icon: Brain, applyable: true },
+    { key: 'process', label: 'Process Changes', icon: Settings2, applyable: false },
+  ];
+
+  const confirmDeleteRun = async () => {
+    if (!run?.id) return;
+    setDeletingRun(true);
+    try {
+      await onDelete?.();
+      setDeleteConfirmOpen(false);
+    } finally {
+      setDeletingRun(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-indigo-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
+            <Sparkles className="h-4 w-4 text-indigo-600" />
+            Approved Recommendation Consolidation
+          </h3>
+          <p className="text-sm text-slate-500">
+            Converts approved, unapplied Daily Review findings into editable prompt, skill, competency, and process recommendations.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onRefresh} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+            Refresh
+          </button>
+          {hasRun && isActive && (
+            <button
+              onClick={onCancel}
+              className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50"
+            >
+              Cancel
+            </button>
+          )}
+          {hasRun && !isActive && (
+            <button
+              onClick={() => setDeleteConfirmOpen(true)}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Delete Run
+            </button>
+          )}
+          <button
+            onClick={onStart}
+            disabled={starting || isActive}
+            className={`relative overflow-hidden rounded-lg px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed ${
+              isActive ? 'bg-indigo-600 disabled:opacity-100' : 'bg-indigo-600 disabled:opacity-60'
+            }`}
+          >
+            {isActive && (
+              <span
+                className="absolute inset-y-0 left-0 bg-white/20 transition-all duration-500 ease-out"
+                style={{ width: `${Math.min(Math.max(run?.progress?.percent || 0, 8), 100)}%` }}
+              />
+            )}
+            <span className="relative inline-flex items-center gap-1.5">
+              {(starting || isActive) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {starting
+                ? 'Starting...'
+                : isActive
+                  ? `Running ${run?.progress?.percent || 0}%`
+                  : 'Consolidate Approved'}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8 text-sm text-slate-400">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading consolidation...
+        </div>
+      ) : !hasRun ? (
+        <div className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+          No consolidation run yet.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm">
+            <StatusBadge status={run.status} />
+            <span className="text-slate-500">Run #{run.id}</span>
+            <span className="text-slate-500">{run.sourceCounts?.total || 0} source recommendation(s)</span>
+            {run.progress?.message && <span className="font-medium text-slate-700">{run.progress.message}</span>}
+          </div>
+
+          {(isActive || thinking || visibleText || progressEvents.length > 0) && (
+            <div className="grid gap-3 xl:grid-cols-3 transition-all duration-300 ease-out">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 transition-all duration-300 ease-out">
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <span>Progress</span>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                    Plan {structuredPlanKb} KB
+                  </span>
+                </div>
+                <div className="h-40 overflow-auto space-y-1 text-xs text-slate-600 transition-all duration-300 ease-out">
+                  {progressEvents.map((event) => (
+                    <div key={event.id} className="flex gap-2 animate-fadeIn transition-colors duration-200">
+                      <span className="w-20 shrink-0 font-semibold text-slate-400">{event.type}</span>
+                      <span>{event.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 transition-all duration-300 ease-out">
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-purple-700">
+                  <span className="flex items-center gap-2">
+                    <Brain className="h-3.5 w-3.5" />
+                    Thinking / Plan Stream
+                  </span>
+                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-purple-700">
+                    Thinking {thinkingKb} KB · Plan {structuredPlanKb} KB
+                  </span>
+                </div>
+                <div className="h-40 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-purple-900 transition-all duration-300 ease-out">
+                  {thinking && <div className="animate-fadeIn">{thinking}</div>}
+                  {latestToolJson && (
+                    <div className={`${thinking ? 'mt-3 border-t border-purple-200 pt-2' : ''} animate-fadeIn`}>
+                      Structured plan JSON: {latestToolJson.payload?.kb || 0} KB generated.
+                    </div>
+                  )}
+                  {!thinking && !latestToolJson && (
+                    <div>{isActive ? 'Connected. Waiting for thinking or structured plan output...' : 'No thinking or structured plan stream was emitted for this run.'}</div>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 transition-all duration-300 ease-out">
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  <span className="flex items-center gap-2">
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    Visible Text Stream
+                  </span>
+                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                    Text {visibleTextKb} KB
+                  </span>
+                </div>
+                <div className="h-40 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-blue-900 transition-all duration-300 ease-out">
+                  {visibleText ? <div className="animate-fadeIn">{visibleText}</div> : (
+                    latestHeartbeat?.payload
+                      ? `No visible text yet. Last output channel: ${latestHeartbeat.payload.lastOutputType || 'unknown'}; structured plan: ${latestHeartbeat.payload.structuredPlanKb || 0} KB.`
+                      : (isActive ? 'Waiting for visible text output...' : 'No visible text was emitted for this run.')
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {sections.map(({ key, label, icon: Icon, applyable }) => {
+            const items = grouped[key] || [];
+            return (
+              <div key={key} className="rounded-xl border border-slate-200 bg-slate-50 p-3 transition-all duration-300 ease-out">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-4 w-4 text-slate-500" />
+                    <h4 className="text-sm font-semibold text-slate-800">{label}</h4>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-500">{items.length}</span>
+                  </div>
+                  {applyable && (
+                    <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={sectionApply[key] !== false}
+                        onChange={(e) => onSectionApplyChange(key, e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      Apply this section
+                    </label>
+                  )}
+                  {!applyable && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Dev work only</span>}
+                </div>
+                {items.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-5 text-center text-sm text-slate-400">
+                    No {label.toLowerCase()} proposed.
+                  </div>
+                ) : (
+                  <div className="space-y-3 transition-all duration-300 ease-out">
+                    {items.map((item) => (
+                      <ConsolidationItemCard
+                        key={item.id}
+                        item={item}
+                        saving={savingItemId === item.id}
+                        onSave={onSaveItem}
+                        currentPrompt={currentPrompt}
+                        onOpenPromptDiff={setPromptDiffItem}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {['completed', 'partially_applied'].includes(run.status) && (
+            <div className="flex justify-end">
+              <button
+                onClick={onApply}
+                disabled={applying}
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60"
+              >
+                {applying ? 'Applying...' : 'Apply Selected Sections'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {promptDiffItem && (
+        <PromptDiffModal
+          item={promptDiffItem}
+          currentPrompt={currentPrompt}
+          onSaveDraft={onSaveItem}
+          saving={savingItemId === promptDiffItem.id}
+          onClose={() => setPromptDiffItem(null)}
+        />
+      )}
+      {deleteConfirmOpen && (
+        <DeleteRunConfirmModal
+          run={run}
+          deleting={deletingRun}
+          onCancel={() => setDeleteConfirmOpen(false)}
+          onConfirm={confirmDeleteRun}
+        />
       )}
     </div>
   );
@@ -1230,19 +2230,28 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [savingRecommendationId, setSavingRecommendationId] = useState(null);
   const [backlogItems, setBacklogItems] = useState([]);
+  const [pendingBacklogItems, setPendingBacklogItems] = useState([]);
+  const [approvedBacklogItems, setApprovedBacklogItems] = useState([]);
   const [backlogTotal, setBacklogTotal] = useState(0);
+  const [pendingBacklogTotal, setPendingBacklogTotal] = useState(0);
+  const [approvedBacklogTotal, setApprovedBacklogTotal] = useState(0);
   const [loadingBacklog, setLoadingBacklog] = useState(false);
   const [backlogStatus, setBacklogStatus] = useState('pending');
   const [backlogKind, setBacklogKind] = useState('all');
+  const [backlogSeverity, setBacklogSeverity] = useState('all');
   const [backlogStartDate, setBacklogStartDate] = useState('');
   const [backlogEndDate, setBacklogEndDate] = useState('');
   const [backlogRunFilter, setBacklogRunFilter] = useState('');
-  const [weeklyWeekStart, setWeeklyWeekStart] = useState(formatDateLocal(startOfWeekMondayLocal(new Date())));
-  const [weeklyKind, setWeeklyKind] = useState('all');
-  const [weeklyRollup, setWeeklyRollup] = useState(null);
-  const [loadingWeeklyRollup, setLoadingWeeklyRollup] = useState(false);
-  const [selectedWeeklyIds, setSelectedWeeklyIds] = useState([]);
-  const [bulkApplying, setBulkApplying] = useState(false);
+  const [consolidationRun, setConsolidationRun] = useState(null);
+  const [loadingConsolidation, setLoadingConsolidation] = useState(false);
+  const [startingConsolidation, setStartingConsolidation] = useState(false);
+  const [applyingConsolidation, setApplyingConsolidation] = useState(false);
+  const [savingConsolidationItemId, setSavingConsolidationItemId] = useState(null);
+  const [consolidationSectionApply, setConsolidationSectionApply] = useState({
+    prompt: true,
+    skills: true,
+    technician_competencies: true,
+  });
   const navigate = useNavigate();
 
   const loadRuns = useCallback(async () => {
@@ -1283,53 +2292,70 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         const leadingMatch = trimmed.match(/(\d+)/);
         runIdParam = hashMatch ? hashMatch[1] : leadingMatch ? leadingMatch[1] : '';
       }
-      const res = await assignmentAPI.getDailyReviewRecommendations({
+      const baseParams = {
         limit: 100,
-        status: backlogStatus,
         kind: backlogKind,
+        severity: backlogSeverity,
         ...(backlogStartDate ? { startDate: backlogStartDate } : {}),
         ...(backlogEndDate ? { endDate: backlogEndDate } : {}),
         ...(runIdParam ? { runId: runIdParam } : {}),
+      };
+      if (backlogStatus === 'pending') {
+        const [pendingRes, approvedRes] = await Promise.all([
+          assignmentAPI.getDailyReviewRecommendations({ ...baseParams, status: 'pending' }),
+          assignmentAPI.getDailyReviewRecommendations({ ...baseParams, status: 'approved' }),
+        ]);
+        setPendingBacklogItems(pendingRes?.items || []);
+        setPendingBacklogTotal(pendingRes?.total || 0);
+        setApprovedBacklogItems(approvedRes?.items || []);
+        setApprovedBacklogTotal(approvedRes?.total || 0);
+        setBacklogItems(pendingRes?.items || []);
+        setBacklogTotal((pendingRes?.total || 0) + (approvedRes?.total || 0));
+        return;
+      }
+
+      const res = await assignmentAPI.getDailyReviewRecommendations({
+        ...baseParams,
+        status: backlogStatus,
       });
       setBacklogItems(res?.items || []);
       setBacklogTotal(res?.total || 0);
+      setPendingBacklogItems([]);
+      setPendingBacklogTotal(0);
+      setApprovedBacklogItems(backlogStatus === 'approved' ? (res?.items || []) : []);
+      setApprovedBacklogTotal(backlogStatus === 'approved' ? (res?.total || 0) : 0);
     } catch {
       setBacklogItems([]);
+      setPendingBacklogItems([]);
+      setApprovedBacklogItems([]);
       setBacklogTotal(0);
+      setPendingBacklogTotal(0);
+      setApprovedBacklogTotal(0);
     } finally {
       setLoadingBacklog(false);
     }
-  }, [backlogEndDate, backlogKind, backlogRunFilter, backlogStartDate, backlogStatus]);
+  }, [backlogEndDate, backlogKind, backlogRunFilter, backlogSeverity, backlogStartDate, backlogStatus]);
 
-  const loadWeeklyRollup = useCallback(async () => {
-    setLoadingWeeklyRollup(true);
+  const loadConsolidation = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoadingConsolidation(true);
     try {
-      const res = await assignmentAPI.getDailyReviewWeeklyRollup({
-        weekStart: weeklyWeekStart,
-        status: 'approved',
-        kind: weeklyKind,
-      });
-      setWeeklyRollup(res?.data || null);
+      const res = await assignmentAPI.getDailyReviewConsolidationActive();
+      setConsolidationRun(res?.data || null);
     } catch {
-      setWeeklyRollup(null);
+      setConsolidationRun(null);
     } finally {
-      setLoadingWeeklyRollup(false);
+      if (!quiet) setLoadingConsolidation(false);
     }
-  }, [weeklyKind, weeklyWeekStart]);
+  }, []);
 
   useEffect(() => { loadBacklog(); }, [loadBacklog]);
-  useEffect(() => { loadWeeklyRollup(); }, [loadWeeklyRollup]);
+  useEffect(() => { loadConsolidation(); }, [loadConsolidation]);
 
   useEffect(() => {
-    const validIds = new Set(
-      (weeklyRollup?.days || []).flatMap((day) => [
-        ...(day.promptRecommendations || []).map((item) => item.id),
-        ...(day.processRecommendations || []).map((item) => item.id),
-        ...(day.skillRecommendations || []).map((item) => item.id),
-      ]),
-    );
-    setSelectedWeeklyIds((prev) => prev.filter((id) => validIds.has(id)));
-  }, [weeklyRollup]);
+    if (!consolidationRun || !CONSOLIDATION_ACTIVE_STATUSES.includes(consolidationRun.status)) return undefined;
+    const timer = setInterval(() => loadConsolidation({ quiet: true }), 1800);
+    return () => clearInterval(timer);
+  }, [consolidationRun, loadConsolidation]);
 
   const loadRunDetail = async (id, { openView = true } = {}) => {
     setLoadingDetail(true);
@@ -1348,7 +2374,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     setSavingRecommendationId(recommendationId);
     try {
       await assignmentAPI.updateDailyReviewRecommendationStatus(recommendationId, { status, reviewNotes });
-      await Promise.all([loadRuns(), loadBacklog(), loadWeeklyRollup()]);
+      await Promise.all([loadRuns(), loadBacklog(), loadConsolidation({ quiet: true })]);
       if (selectedRun?.id && view === 'detail') {
         await loadRunDetail(selectedRun.id, { openView: false });
       }
@@ -1359,30 +2385,75 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     }
   };
 
-  const handleBulkApply = async () => {
-    if (selectedWeeklyIds.length === 0) return;
-    setBulkApplying(true);
+  const handleStartConsolidation = async () => {
+    setStartingConsolidation(true);
     try {
-      await assignmentAPI.bulkUpdateDailyReviewRecommendationStatus({
-        ids: selectedWeeklyIds,
-        status: 'applied',
-      });
-      setSelectedWeeklyIds([]);
-      await Promise.all([loadRuns(), loadBacklog(), loadWeeklyRollup()]);
-      if (selectedRun?.id && view === 'detail') {
-        await loadRunDetail(selectedRun.id, { openView: false });
+      const res = await assignmentAPI.startDailyReviewConsolidation();
+      setConsolidationRun(res?.data || null);
+      await loadConsolidation({ quiet: true });
+    } catch {
+      /* ignore */
+    } finally {
+      setStartingConsolidation(false);
+    }
+  };
+
+  const handleSaveConsolidationItem = async (itemId, data) => {
+    setSavingConsolidationItemId(itemId);
+    try {
+      await assignmentAPI.updateDailyReviewConsolidationItem(itemId, data);
+      const runId = consolidationRun?.id;
+      if (runId) {
+        const res = await assignmentAPI.getDailyReviewConsolidationRun(runId);
+        setConsolidationRun(res?.data || null);
       }
     } catch {
       /* ignore */
     } finally {
-      setBulkApplying(false);
+      setSavingConsolidationItemId(null);
     }
   };
 
-  const toggleWeeklySelection = (id) => {
-    setSelectedWeeklyIds((prev) => (
-      prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]
-    ));
+  const handleApplyConsolidation = async () => {
+    if (!consolidationRun?.id) return;
+    setApplyingConsolidation(true);
+    try {
+      const res = await assignmentAPI.applyDailyReviewConsolidation(consolidationRun.id, {
+        applyPrompt: consolidationSectionApply.prompt !== false,
+        applySkills: consolidationSectionApply.skills !== false,
+        applyTechnicianCompetencies: consolidationSectionApply.technician_competencies !== false,
+      });
+      setConsolidationRun(res?.data || null);
+      await Promise.all([loadBacklog(), loadRuns()]);
+    } catch {
+      /* ignore */
+    } finally {
+      setApplyingConsolidation(false);
+    }
+  };
+
+  const handleConsolidationSectionApplyChange = (section, checked) => {
+    setConsolidationSectionApply((prev) => ({ ...prev, [section]: checked }));
+  };
+
+  const handleCancelConsolidation = async () => {
+    if (!consolidationRun?.id) return;
+    try {
+      const res = await assignmentAPI.cancelDailyReviewConsolidation(consolidationRun.id);
+      setConsolidationRun(res?.data || null);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleDeleteConsolidation = async () => {
+    if (!consolidationRun?.id) return;
+    try {
+      await assignmentAPI.deleteDailyReviewConsolidation(consolidationRun.id);
+      await loadConsolidation({ quiet: true });
+    } catch {
+      /* ignore */
+    }
   };
 
   const cancelRun = async (e, id) => {
@@ -1519,6 +2590,22 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         </div>
       </div>
 
+      <ConsolidationPanel
+        run={consolidationRun}
+        loading={loadingConsolidation}
+        starting={startingConsolidation}
+        applying={applyingConsolidation}
+        savingItemId={savingConsolidationItemId}
+        sectionApply={consolidationSectionApply}
+        onSectionApplyChange={handleConsolidationSectionApplyChange}
+        onStart={handleStartConsolidation}
+        onRefresh={() => loadConsolidation()}
+        onSaveItem={handleSaveConsolidationItem}
+        onApply={handleApplyConsolidation}
+        onCancel={handleCancelConsolidation}
+        onDelete={handleDeleteConsolidation}
+      />
+
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-base font-semibold text-slate-800 flex items-center gap-2">
@@ -1539,43 +2626,71 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             No daily review runs yet. Start one above.
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
             {runs.map((run) => {
               const totals = run.summaryMetrics?.totals || {};
+              const isActiveStatus = ACTIVE_STATUSES.includes(run.status);
               return (
                 <button
                   key={run.id}
                   onClick={() => loadRunDetail(run.id)}
                   disabled={loadingDetail}
-                  className="w-full text-left bg-white border border-slate-200 rounded-lg px-4 py-3 hover:border-indigo-300 hover:shadow-sm transition-all group"
+                  className="group flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-indigo-50/40 disabled:cursor-wait"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <div className="text-sm font-semibold text-slate-800">Run #{run.id}</div>
-                      <StatusBadge status={run.status} />
-                      <span className="text-xs text-slate-500">
-                        {formatDateOnlyInTimezone(run.reviewDate, workspaceTimezone)}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                      <span className="font-semibold text-slate-900">Run #{run.id}</span>
+                      <span className={`h-1.5 w-1.5 rounded-full ${
+                        run.status === 'completed'
+                          ? 'bg-emerald-500'
+                          : isActiveStatus
+                            ? 'bg-indigo-500'
+                            : run.status === 'failed'
+                              ? 'bg-red-500'
+                              : 'bg-slate-300'
+                      }`} />
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                        run.status === 'completed'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : isActiveStatus
+                            ? 'bg-indigo-50 text-indigo-700'
+                            : run.status === 'failed'
+                              ? 'bg-red-50 text-red-700'
+                              : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {run.status?.replace(/_/g, ' ')}
                       </span>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-slate-400">
-                      {totals.totalTicketsReviewed != null && <span>{totals.totalTicketsReviewed} tickets</span>}
-                      {totals.success != null && <span className="text-green-600">{totals.success} success</span>}
-                      {totals.failure != null && <span className="text-red-600">{totals.failure} failure</span>}
-                      {ACTIVE_STATUSES.includes(run.status) && (
-                        <button
-                          onClick={(e) => cancelRun(e, run.id)}
-                          className="flex items-center gap-1 px-2 py-1 text-red-600 hover:bg-red-50 rounded transition-colors"
-                          title="Cancel this run"
-                        >
-                          <StopCircle className="w-3.5 h-3.5" /> Cancel
-                        </button>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-slate-500">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}</span>
+                      {run.triggeredBy && (
+                        <>
+                          <span className="text-slate-300">•</span>
+                          <span className="max-w-[220px] truncate text-slate-500">{run.triggeredBy}</span>
+                        </>
                       )}
-                      <ChevronRight className="w-4 h-4 group-hover:text-indigo-500 transition-colors" />
                     </div>
                   </div>
-                  <div className="text-xs text-slate-400 mt-1">
-                    {formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}
-                    {run.triggeredBy ? ` by ${run.triggeredBy}` : ''}
+
+                  <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
+                    {totals.totalTicketsReviewed != null && <span className="tabular-nums">{totals.totalTicketsReviewed}</span>}
+                    {totals.totalTicketsReviewed != null && <span className="text-slate-300">tickets</span>}
+                    {totals.success != null && <span className="font-medium tabular-nums text-emerald-600">{totals.success} ✓</span>}
+                    {totals.failure != null && <span className="font-medium tabular-nums text-red-600">{totals.failure} ✕</span>}
+                    {isActiveStatus && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => cancelRun(e, run.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') cancelRun(e, run.id);
+                        }}
+                        className="rounded px-2 py-1 text-red-600 hover:bg-red-50"
+                        title="Cancel this run"
+                      >
+                        <StopCircle className="h-3.5 w-3.5" />
+                      </span>
+                    )}
+                    <ChevronRight className="h-4 w-4 text-slate-300 transition-colors group-hover:text-indigo-500" />
                   </div>
                 </button>
               );
@@ -1584,8 +2699,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         )}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr,0.9fr]">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-semibold text-slate-800">Recommendation Backlog</h3>
@@ -1624,6 +2738,19 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 <option value="prompt">Prompt</option>
                 <option value="process">Process</option>
                 <option value="skill">Skill</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Priority</label>
+              <select
+                value={backlogSeverity}
+                onChange={(e) => setBacklogSeverity(e.target.value)}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="all">All</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
               </select>
             </div>
             <div>
@@ -1680,12 +2807,91 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
           </div>
 
-          <div className="mb-3 text-xs text-slate-500">{backlogTotal} item(s) matched the current filters.</div>
+          <div className="mb-3 text-xs text-slate-500">
+            {backlogStatus === 'pending'
+              ? `${pendingBacklogTotal} pending item(s) and ${approvedBacklogTotal} approved item(s) matched the current filters.`
+              : `${backlogTotal} item(s) matched the current filters.`}
+          </div>
 
           {loadingBacklog ? (
             <div className="flex items-center justify-center py-8 text-gray-400">
               <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading backlog...
             </div>
+          ) : backlogStatus === 'pending' ? (
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.12fr),minmax(360px,0.88fr)]">
+              <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-800">Pending Review Queue</h4>
+                    <p className="text-xs text-slate-500">Collapsed by default. Approve or reject directly from each row.</p>
+                  </div>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-500">{pendingBacklogTotal}</span>
+                </div>
+                {pendingBacklogItems.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
+                    No pending recommendations matched the current filters.
+                  </div>
+                ) : (
+                  <div className="max-h-[680px] space-y-2 overflow-auto pr-1">
+                    {pendingBacklogItems.map((item) => (
+                      <BacklogRecommendationRow
+                        key={item.id}
+                        item={item}
+                        workspaceTimezone={workspaceTimezone}
+                        onRecommendationAction={handleRecommendationAction}
+                        savingRecommendationId={savingRecommendationId}
+                        mode="pending"
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-800">Approved for Consolidation</h4>
+                    <p className="text-xs text-slate-500">Grouped by title. Expand to inspect items or mark them applied.</p>
+                  </div>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-emerald-700">{approvedBacklogTotal}</span>
+                </div>
+                {approvedBacklogItems.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-emerald-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
+                    No approved recommendations are waiting under these filters.
+                  </div>
+                ) : (
+                  <div className="max-h-[680px] space-y-2 overflow-auto pr-1">
+                    {groupRecommendationsByTitle(approvedBacklogItems).map((group) => (
+                      <ApprovedBacklogGroup
+                        key={group.title}
+                        group={group}
+                        workspaceTimezone={workspaceTimezone}
+                        onRecommendationAction={handleRecommendationAction}
+                        savingRecommendationId={savingRecommendationId}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : backlogStatus === 'approved' ? (
+            approvedBacklogItems.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+                No approved recommendation items matched the current backlog filters.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {groupRecommendationsByTitle(approvedBacklogItems).map((group) => (
+                  <ApprovedBacklogGroup
+                    key={group.title}
+                    group={group}
+                    workspaceTimezone={workspaceTimezone}
+                    onRecommendationAction={handleRecommendationAction}
+                    savingRecommendationId={savingRecommendationId}
+                  />
+                ))}
+              </div>
+            )
           ) : backlogItems.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
               No recommendation items matched the current backlog filters.
@@ -1705,134 +2911,6 @@ export default function DailyReviewManager({ workspaceTimezone }) {
               ))}
             </div>
           )}
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-slate-800">Weekly Approved Rollup</h3>
-              <p className="text-sm text-slate-500">
-                Group approved items by week so prompt, process, and skill updates can be reviewed together and then marked applied.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleBulkApply}
-                disabled={selectedWeeklyIds.length === 0 || bulkApplying}
-                className="rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {bulkApplying ? 'Applying...' : `Mark Selected Applied (${selectedWeeklyIds.length})`}
-              </button>
-              <button onClick={loadWeeklyRollup} className="text-xs text-blue-600 hover:text-blue-800">
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          <div className="mb-4 flex flex-wrap items-end gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Week Start</label>
-              <input
-                type="date"
-                value={weeklyWeekStart}
-                onChange={(e) => setWeeklyWeekStart(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Kind</label>
-              <select
-                value={weeklyKind}
-                onChange={(e) => setWeeklyKind(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              >
-                <option value="all">All</option>
-                <option value="prompt">Prompt</option>
-                <option value="process">Process</option>
-                <option value="skill">Skill</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="mb-4 grid grid-cols-3 gap-3">
-            <MetricCard label="Prompt" value={weeklyRollup?.countsByKind?.prompt || 0} tone="blue" />
-            <MetricCard label="Process" value={weeklyRollup?.countsByKind?.process || 0} tone="amber" />
-            <MetricCard label="Skill" value={weeklyRollup?.countsByKind?.skill || 0} tone="green" />
-          </div>
-
-          {loadingWeeklyRollup ? (
-            <div className="flex items-center justify-center py-8 text-gray-400">
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading weekly rollup...
-            </div>
-          ) : !weeklyRollup?.days?.length ? (
-            <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
-              No approved recommendations for this week yet.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {weeklyRollup.days.map((day) => {
-                const selectableIds = [
-                  ...(day.promptRecommendations || []).filter((item) => item.status === 'approved').map((item) => item.id),
-                  ...(day.processRecommendations || []).filter((item) => item.status === 'approved').map((item) => item.id),
-                  ...(day.skillRecommendations || []).filter((item) => item.status === 'approved').map((item) => item.id),
-                ];
-                return (
-                  <div key={day.reviewDate} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-slate-800">
-                          {formatDateOnlyInTimezone(day.reviewDate, workspaceTimezone)}
-                        </div>
-                        <div className="text-xs text-slate-500">{day.total} approved item(s)</div>
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      <RecommendationSection
-                        title="Prompt"
-                        items={day.promptRecommendations}
-                        icon={FileText}
-                        emptyText="No prompt items approved for this day."
-                        workspaceTimezone={workspaceTimezone}
-                        onRecommendationAction={handleRecommendationAction}
-                        savingRecommendationId={savingRecommendationId}
-                        showRunMeta
-                        selectableIds={selectableIds}
-                        selectedIds={selectedWeeklyIds}
-                        onToggleSelected={toggleWeeklySelection}
-                      />
-                      <RecommendationSection
-                        title="Process"
-                        items={day.processRecommendations}
-                        icon={Settings2}
-                        emptyText="No process items approved for this day."
-                        workspaceTimezone={workspaceTimezone}
-                        onRecommendationAction={handleRecommendationAction}
-                        savingRecommendationId={savingRecommendationId}
-                        showRunMeta
-                        selectableIds={selectableIds}
-                        selectedIds={selectedWeeklyIds}
-                        onToggleSelected={toggleWeeklySelection}
-                      />
-                      <RecommendationSection
-                        title="Skill"
-                        items={day.skillRecommendations}
-                        icon={Award}
-                        emptyText="No skill items approved for this day."
-                        workspaceTimezone={workspaceTimezone}
-                        onRecommendationAction={handleRecommendationAction}
-                        savingRecommendationId={savingRecommendationId}
-                        showRunMeta
-                        selectableIds={selectableIds}
-                        selectedIds={selectedWeeklyIds}
-                        onToggleSelected={toggleWeeklySelection}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

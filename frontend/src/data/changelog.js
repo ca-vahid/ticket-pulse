@@ -1,6 +1,18 @@
-export const APP_VERSION = '2.04';
+export const APP_VERSION = '2.05';
 
 export const changelog = [
+  {
+    version: '2.05',
+    date: 'April 25, 2026',
+    entries: [
+      { type: 'new', text: 'Approved Recommendation Consolidation turns approved, unapplied Daily Review findings into resumable prompt, skill, technician competency, and process recommendations. Runs support live progress, thinking/visible-text streams, KB counters, cancel/delete controls, and section-level apply selection.' },
+      { type: 'new', text: 'Prompt consolidation now opens a side-by-side diff review where the recommended prompt can be edited before apply. Added one-click removal of added blocks, restore controls for removed blocks, previous/next diff navigation, and up to 20 undo steps.' },
+      { type: 'improved', text: 'Recommendation Backlog was redesigned into a denser two-column workflow: pending recommendations stay collapsed with icon-only approve/reject actions, approved items are grouped by title for consolidation, and filters now include priority.' },
+      { type: 'improved', text: 'Prompt edit cards now show recommendation rationale and change summary side by side, with Compare Prompt in the item action area. The old per-prompt Include checkbox was removed; prompt edits are skipped through the Prompt Edits section toggle instead.' },
+      { type: 'fixed', text: 'Consolidation streaming no longer appears stalled during long Opus responses. Progress heartbeats update in place, stream output counters refresh while the run is active, and repeated heartbeat lines no longer grow the progress box indefinitely.' },
+      { type: 'database', text: 'New migration 20260425000000_add_daily_review_consolidation adds consolidation run, item, and event tables for resumable Daily Review consolidation history and apply tracking.' },
+    ],
+  },
   {
     version: '2.04',
     date: 'April 24, 2026',
