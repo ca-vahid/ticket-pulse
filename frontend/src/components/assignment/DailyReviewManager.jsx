@@ -268,10 +268,34 @@ function getSupportingTicketIds(item) {
     : item.supportingTicketIds;
 }
 
+function CompactSeverity({ severity }) {
+  const normalized = severity || 'low';
+  const styles = {
+    high: 'bg-red-100 text-red-700',
+    medium: 'bg-amber-100 text-amber-700',
+    low: 'bg-blue-100 text-blue-700',
+  };
+  const labels = {
+    high: 'H',
+    medium: 'M',
+    low: 'L',
+  };
+
+  return (
+    <span
+      className={`inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[9px] font-bold uppercase leading-none ${styles[normalized] || styles.low}`}
+      title={`${normalized} priority`}
+    >
+      {labels[normalized] || 'L'}
+    </span>
+  );
+}
+
 function RecommendationMeta({ item, workspaceTimezone }) {
   const supportTicketIds = getSupportingTicketIds(item);
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+      <CompactSeverity severity={item.severity} />
       <span>{formatDateOnlyInTimezone(item.reviewDate, workspaceTimezone)}</span>
       <span className="text-slate-300">•</span>
       <span>Run #{item.runId}</span>
@@ -307,31 +331,24 @@ function BacklogRecommendationRow({
 
   return (
     <div className={`overflow-hidden rounded-lg border border-slate-200 bg-white transition-all duration-300 ease-out ${getRecommendationMotionClass(motionState)}`}>
-      <div className="flex items-center gap-2 px-3 py-2">
+      <div className="flex items-start gap-2 px-3 py-2.5">
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
-          className="rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+          className="mt-0.5 rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
           title={expanded ? 'Collapse details' : 'Expand details'}
         >
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {!hideTitle && <div className="truncate text-sm font-semibold text-slate-800">{item.title}</div>}
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-              item.severity === 'high'
-                ? 'bg-red-100 text-red-700'
-                : item.severity === 'medium'
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'bg-blue-100 text-blue-700'
-            }`}>
-              {item.severity || 'low'}
-            </span>
-          </div>
+          {!hideTitle && (
+            <div className="whitespace-normal break-words text-sm font-semibold leading-snug text-slate-800">
+              {item.title}
+            </div>
+          )}
           <RecommendationMeta item={item} workspaceTimezone={workspaceTimezone} />
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="mt-0.5 flex shrink-0 items-center gap-1">
           {mode === 'pending' && (
             <>
               <button
@@ -353,14 +370,24 @@ function BacklogRecommendationRow({
             </>
           )}
           {mode === 'approved' && (
-            <button
-              onClick={() => onRecommendationAction?.(item.id, 'applied', notes)}
-              disabled={isSaving}
-              className="rounded-lg border border-blue-200 bg-blue-50 p-1.5 text-blue-600 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-              title="Mark applied"
-            >
-              <CheckCircle className="h-4 w-4" />
-            </button>
+            <>
+              <button
+                onClick={() => onRecommendationAction?.(item.id, 'pending', notes)}
+                disabled={isSaving}
+                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                title="Move back to pending"
+              >
+                <Undo2 className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => onRecommendationAction?.(item.id, 'applied', notes)}
+                disabled={isSaving}
+                className="rounded-lg border border-blue-200 bg-blue-50 p-1.5 text-blue-600 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                title="Mark applied"
+              >
+                <CheckCircle className="h-4 w-4" />
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -422,7 +449,13 @@ function ApprovedBacklogGroup({
   const kinds = [...new Set(group.rows.map((item) => item.kind).filter(Boolean))];
   const ticketCount = group.rows.reduce((sum, item) => sum + (getSupportingTicketIds(item)?.length || 0), 0);
   const hasHigh = group.rows.some((item) => item.severity === 'high');
+  const strongestSeverity = hasHigh
+    ? 'high'
+    : group.rows.some((item) => item.severity === 'medium')
+      ? 'medium'
+      : 'low';
   const [notesById, setNotesById] = useState({});
+  const isGroupSaving = group.rows.some((item) => savingRecommendationId === item.id);
 
   useEffect(() => {
     setNotesById((prev) => {
@@ -434,27 +467,49 @@ function ApprovedBacklogGroup({
     });
   }, [group.rows]);
 
+  const moveGroupToPending = async () => {
+    for (const item of group.rows) {
+      await onRecommendationAction?.(item.id, 'pending', notesById[item.id] || '');
+    }
+  };
+
   return (
     <div className={`overflow-hidden rounded-lg border border-emerald-200 bg-white transition-all duration-300 ease-out ${
       group.rows.some((item) => motionById[item.id] === 'entering') ? 'ring-2 ring-emerald-200' : ''
     }`}>
-      <button
-        type="button"
-        onClick={() => setExpanded((prev) => !prev)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-emerald-50/50"
-      >
-        {expanded ? <ChevronDown className="h-4 w-4 shrink-0 text-emerald-600" /> : <ChevronRight className="h-4 w-4 shrink-0 text-emerald-600" />}
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-slate-800">{group.title}</div>
+      <div className="flex w-full items-start gap-2 px-3 py-2.5 hover:bg-emerald-50/50">
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="mt-0.5 rounded p-1 text-emerald-600 hover:bg-emerald-50"
+          title={expanded ? 'Collapse details' : 'Expand details'}
+        >
+          {expanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="min-w-0 flex-1 text-left"
+        >
+          <div className="whitespace-normal break-words text-sm font-semibold leading-snug text-slate-800">{group.title}</div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+            <CompactSeverity severity={strongestSeverity} />
             <span>{group.rows.length} approved</span>
             {kinds.length > 0 && <span>{kinds.join(', ')}</span>}
             {runs.length > 0 && <span>Run {runs.map((runId) => `#${runId}`).join(', ')}</span>}
             {ticketCount > 0 && <span>{ticketCount} ticket{ticketCount === 1 ? '' : 's'}</span>}
           </div>
-        </div>
-        {hasHigh && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-700">High</span>}
-      </button>
+        </button>
+        <button
+          type="button"
+          onClick={moveGroupToPending}
+          disabled={isGroupSaving}
+          className="mt-0.5 rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+          title={group.rows.length === 1 ? 'Move back to pending' : 'Move group back to pending'}
+        >
+          <Undo2 className="h-4 w-4" />
+        </button>
+      </div>
       <SmoothCollapse open={expanded}>
         <div className="space-y-3 border-t border-emerald-100 bg-slate-50 p-3">
           {group.rows.map((item) => {
@@ -463,31 +518,30 @@ function ApprovedBacklogGroup({
             return (
               <div key={item.id} className={`rounded-lg border border-slate-200 bg-white p-3 transition-all duration-300 ease-out ${getRecommendationMotionClass(motionById[item.id])}`}>
                 {group.rows.length > 1 && (
-                  <div className="mb-2 text-sm font-semibold text-slate-800">{item.title}</div>
+                  <div className="mb-2 whitespace-normal break-words text-sm font-semibold leading-snug text-slate-800">{item.title}</div>
                 )}
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="mb-1 flex flex-wrap items-center gap-2">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                        item.severity === 'high'
-                          ? 'bg-red-100 text-red-700'
-                          : item.severity === 'medium'
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        {item.severity || 'low'}
-                      </span>
-                    </div>
                     <RecommendationMeta item={item} workspaceTimezone={workspaceTimezone} />
                   </div>
-                  <button
-                    onClick={() => onRecommendationAction?.(item.id, 'applied', notesById[item.id] || '')}
-                    disabled={isSaving}
-                    className="rounded-lg border border-blue-200 bg-blue-50 p-1.5 text-blue-600 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    title="Mark applied"
-                  >
-                    <CheckCircle className="h-4 w-4" />
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      onClick={() => onRecommendationAction?.(item.id, 'pending', notesById[item.id] || '')}
+                      disabled={isSaving}
+                      className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      title="Move back to pending"
+                    >
+                      <Undo2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => onRecommendationAction?.(item.id, 'applied', notesById[item.id] || '')}
+                      disabled={isSaving}
+                      className="rounded-lg border border-blue-200 bg-blue-50 p-1.5 text-blue-600 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      title="Mark applied"
+                    >
+                      <CheckCircle className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
                 <div className="space-y-2 text-xs leading-relaxed text-slate-600">
                   <p>{item.rationale}</p>
@@ -2627,6 +2681,13 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     } else if (updatedItem.status === 'rejected') {
       setPendingBacklogItems((prev) => removeById(prev));
       if (wasPending) setPendingBacklogTotal((prev) => Math.max(0, prev - 1));
+    } else if (updatedItem.status === 'pending') {
+      setApprovedBacklogItems((prev) => removeById(prev));
+      setPendingBacklogItems((prev) => (containsId(prev) ? replaceById(prev) : [updatedItem, ...prev]));
+      if (wasApproved) {
+        setApprovedBacklogTotal((prev) => Math.max(0, prev - 1));
+        setPendingBacklogTotal((prev) => prev + 1);
+      }
     }
 
     if (backlogStatus === 'pending') {
