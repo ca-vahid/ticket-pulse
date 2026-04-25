@@ -24,6 +24,68 @@ function getSharedRateLimiter() {
   return SHARED_RATE_LIMITER;
 }
 
+function getFreshServiceStatus(error) {
+  return error.response?.status
+    || error.statusCode
+    || error.freshserviceStatus
+    || error.originalError?.response?.status;
+}
+
+function getFreshServiceDetail(error) {
+  return error.response?.data
+    || error.freshserviceDetail
+    || error.originalError?.response?.data
+    || null;
+}
+
+function getValidationFields(detail) {
+  const errors = Array.isArray(detail?.errors) ? detail.errors : [];
+  return errors.map((item) => item.field).filter(Boolean);
+}
+
+function compactObject(value) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== ''),
+  );
+}
+
+function findDepartmentByName(departments, name) {
+  const target = String(name || '').toLowerCase();
+  return departments.find((dept) => String(dept.name || '').toLowerCase() === target);
+}
+
+function inferDepartmentId(ticket, departments = []) {
+  if (ticket?.department_id) return ticket.department_id;
+
+  const haystack = [
+    ticket?.subject,
+    ticket?.description_text,
+    ticket?.description,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  const officeSignals = [
+    { tokens: ['toronto', 'bgc-tor', ' tor-', '-tor-', 'tor-'], department: 'Toronto' },
+    { tokens: ['vancouver', 'bgc-van', ' van-', '-van-', 'van-'], department: 'Vancouver' },
+    { tokens: ['calgary', 'bgc-cgy', ' cgy-', '-cgy-', 'cgy-', 'bgc-cal'], department: 'Calgary' },
+    { tokens: ['edmonton', 'bgc-edm', ' edm-', '-edm-', 'edm-'], department: 'Edmonton' },
+    { tokens: ['ottawa', 'bgc-ott', ' ott-', '-ott-', 'ott-'], department: 'Ottawa' },
+    { tokens: ['kamloops', 'bgc-kam', ' kam-', '-kam-', 'kam-'], department: 'Kamloops' },
+    { tokens: ['halifax', 'bgc-hal', ' hal-', '-hal-', 'hal-'], department: 'Halifax' },
+    { tokens: ['victoria', 'bgc-vic', ' vic-', '-vic-', 'vic-'], department: 'Victoria' },
+    { tokens: ['brisbane', 'bgc-bne', ' bne-', '-bne-', 'bne-'], department: 'Brisbane' },
+    { tokens: ['santiago', 'bgc-scl', ' scl-', '-scl-', 'scl-'], department: 'Santiago' },
+  ];
+
+  for (const signal of officeSignals) {
+    if (signal.tokens.some((token) => haystack.includes(token))) {
+      const dept = findDepartmentByName(departments, signal.department);
+      if (dept?.id) return dept.id;
+    }
+  }
+
+  return findDepartmentByName(departments, 'Non-BGC Email')?.id || departments[0]?.id || null;
+}
+
 /**
  * FreshService API Client
  * Handles all interactions with the FreshService API
@@ -97,11 +159,14 @@ class FreshServiceClient {
           message: error.response?.data?.description || error.message,
         });
 
-        throw new ExternalAPIError(
+        const wrapped = new ExternalAPIError(
           'FreshService',
           error.response?.data?.description || error.message,
           error,
         );
+        wrapped.freshserviceStatus = status;
+        wrapped.freshserviceDetail = error.response?.data || null;
+        throw wrapped;
       },
     );
   }
@@ -211,6 +276,7 @@ class FreshServiceClient {
     if (endpoint.includes('/requesters')) return data.requesters || [];
     if (endpoint.includes('/workspaces')) return data.workspaces || [];
     if (endpoint.includes('/groups')) return data.groups || [];
+    if (endpoint.includes('/departments')) return data.departments || [];
     return data;
   }
 
@@ -511,10 +577,14 @@ class FreshServiceClient {
 
   async getTicket(ticketId) {
     try {
-      const response = await this._get(`/tickets/${ticketId}?include=stats`);
+      const response = await this._fetchWithRetry(`/tickets/${ticketId}?include=stats`);
       return response.data.ticket;
     } catch (error) {
-      logger.error(`Error fetching ticket ${ticketId}:`, error);
+      logger.error(`Error fetching ticket ${ticketId}:`, {
+        status: getFreshServiceStatus(error),
+        detail: getFreshServiceDetail(error),
+        message: error.message,
+      });
       throw error;
     }
   }
@@ -557,22 +627,75 @@ class FreshServiceClient {
     }
   }
 
+  async listDepartments() {
+    try {
+      return await this.fetchAllPages('/departments');
+    } catch (error) {
+      logger.error('Error listing departments:', error);
+      return [];
+    }
+  }
+
+  async _buildClosureRetryPayload(ticketId, status, validationDetail = null) {
+    const ticket = await this.getTicket(ticketId).catch((error) => {
+      logger.warn(`Could not fetch ticket ${ticketId} before closure retry`, { error: error.message });
+      return null;
+    });
+    const departments = await this.listDepartments();
+    const validationFields = getValidationFields(validationDetail);
+    const needsDepartment = validationFields.length === 0
+      || validationFields.includes('department_id')
+      || validationFields.includes('department');
+
+    const payload = compactObject({
+      status,
+      source: ticket?.source || 1,
+      priority: ticket?.priority || 2,
+      group_id: ticket?.group_id,
+      category: ticket?.category || 'Other',
+      sub_category: ticket?.sub_category,
+      item_category: ticket?.item_category,
+      department_id: needsDepartment ? inferDepartmentId(ticket, departments) : ticket?.department_id,
+      resolution_notes: 'This automated notification did not require helpdesk follow-up.',
+    });
+
+    const customFields = compactObject(ticket?.custom_fields || {});
+    if (Object.keys(customFields).length > 0) {
+      payload.custom_fields = customFields;
+    }
+
+    return payload;
+  }
+
   async closeTicket(ticketId, status = 4) {
     try {
       const response = await this._put(`/tickets/${ticketId}`, { ticket: { status } });
       return response.data.ticket;
     } catch (error) {
-      const httpStatus = error.response?.status || error.statusCode;
+      const httpStatus = getFreshServiceStatus(error);
+      const detail = getFreshServiceDetail(error);
       if (httpStatus === 400 || httpStatus === 422) {
-        logger.warn(`Ticket ${ticketId} close requires additional fields, retrying with defaults`);
+        logger.warn(`Ticket ${ticketId} close requires additional fields, retrying with hydrated closure payload`, {
+          status: httpStatus,
+          detail,
+        });
         try {
+          const retryPayload = await this._buildClosureRetryPayload(ticketId, status, detail);
           const response = await this._put(`/tickets/${ticketId}`, {
-            ticket: { status, category: 'Other' },
+            ticket: retryPayload,
           });
           return response.data.ticket;
         } catch (retryError) {
-          logger.error(`Error closing ticket ${ticketId} (retry with defaults):`, retryError);
-          throw retryError;
+          const retryDetail = getFreshServiceDetail(retryError);
+          const wrapped = new Error(getFreshServiceDetail(retryError)?.description || retryError.message);
+          wrapped.freshserviceStatus = getFreshServiceStatus(retryError);
+          wrapped.freshserviceDetail = retryDetail;
+          logger.error(`Error closing ticket ${ticketId} (retry with hydrated closure payload):`, {
+            status: wrapped.freshserviceStatus,
+            detail: retryDetail,
+            message: retryError.message,
+          });
+          throw wrapped;
         }
       }
       if (httpStatus === 404 || httpStatus === 405) {

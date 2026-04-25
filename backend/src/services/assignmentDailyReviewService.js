@@ -83,6 +83,33 @@ function stripHtml(text) {
     .trim();
 }
 
+function sanitizeJsonForPostgres(value) {
+  if (typeof value === 'string') {
+    return value
+      .replace(/\\x/g, '\\\\x')
+      .split('')
+      .map((char) => {
+        const code = char.charCodeAt(0);
+        if (code === 0) return '';
+        if (code < 32 && code !== 9 && code !== 10 && code !== 13) return ' ';
+        return char;
+      })
+      .join('');
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeJsonForPostgres(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, sanitizeJsonForPostgres(item)]),
+    );
+  }
+
+  return value;
+}
+
 function toPct(part, whole) {
   if (!whole) return 0;
   return Math.round((part / whole) * 100);
@@ -1898,13 +1925,13 @@ Rules:
           status: 'analyzing',
           rangeStart: dataset.range.start,
           rangeEnd: dataset.range.end,
-          summaryMetrics: {
+          summaryMetrics: sanitizeJsonForPostgres({
             ...dataset.summaryMetrics,
             collectionDiagnostics: dataset.collectionDiagnostics,
-          },
+          }),
           analyzedTicketIds: dataset.analyzedTicketIds,
-          evidenceCases: dataset.cases,
-          warnings: dataset.warnings,
+          evidenceCases: sanitizeJsonForPostgres(dataset.cases),
+          warnings: sanitizeJsonForPostgres(dataset.warnings),
         },
       });
 
@@ -1934,18 +1961,18 @@ Rules:
           where: { id: run.id },
           data: {
             status: 'completed',
-            summaryMetrics: {
+            summaryMetrics: sanitizeJsonForPostgres({
               ...dataset.summaryMetrics,
               executiveSummary: analysis.executiveSummary,
               collectionDiagnostics: dataset.collectionDiagnostics,
-            },
+            }),
             analyzedTicketIds: dataset.analyzedTicketIds,
-            evidenceCases: dataset.cases,
-            promptRecommendations: analysis.promptRecommendations,
-            processRecommendations: analysis.processRecommendations,
-            skillRecommendations: analysis.skillRecommendations,
-            warnings: mergedWarnings,
-            fullTranscript: analysis.transcript || null,
+            evidenceCases: sanitizeJsonForPostgres(dataset.cases),
+            promptRecommendations: sanitizeJsonForPostgres(analysis.promptRecommendations),
+            processRecommendations: sanitizeJsonForPostgres(analysis.processRecommendations),
+            skillRecommendations: sanitizeJsonForPostgres(analysis.skillRecommendations),
+            warnings: sanitizeJsonForPostgres(mergedWarnings),
+            fullTranscript: sanitizeJsonForPostgres(analysis.transcript || null),
             totalTokensUsed: analysis.totalTokensUsed || 0,
             totalDurationMs: Date.now() - startedAt,
             completedAt: new Date(),
@@ -2505,6 +2532,25 @@ Hard rules:
     });
   }
 
+  async deleteRun(id, workspaceId) {
+    const run = await prisma.assignmentDailyReviewRun.findUnique({
+      where: { id },
+      select: { id: true, workspaceId: true, status: true },
+    });
+    if (!run) return null;
+    if (run.workspaceId !== workspaceId) {
+      throw new Error('Run belongs to a different workspace');
+    }
+    if (ACTIVE_STATUSES.includes(run.status)) {
+      throw new Error('Cancel this run before deleting it');
+    }
+
+    return prisma.$transaction(async (tx) => {
+      await tx.assignmentDailyReviewRecommendation.deleteMany({ where: { runId: id } });
+      return tx.assignmentDailyReviewRun.delete({ where: { id } });
+    });
+  }
+
   async maybeRunScheduledReview(workspace) {
     const { config, timezone } = await this._getWorkspaceContext(workspace.id);
     if (!config?.dailyReviewEnabled) return { triggered: false, reason: 'disabled' };
@@ -2540,8 +2586,16 @@ Hard rules:
       orderBy: { createdAt: 'desc' },
     });
 
-    if (existing && ['completed', 'running', 'collecting', 'analyzing'].includes(existing.status)) {
-      return { triggered: false, reason: 'already_exists' };
+    if (existing) {
+      if (existing.status === 'completed' || ACTIVE_STATUSES.includes(existing.status)) {
+        return { triggered: false, reason: 'already_exists' };
+      }
+      if (existing.status === 'failed') {
+        return { triggered: false, reason: 'already_failed_today' };
+      }
+      if (existing.status === 'cancelled') {
+        return { triggered: false, reason: 'already_cancelled_today' };
+      }
     }
 
     await this.runReview(workspace.id, reviewDate, 'scheduled_daily_review', {

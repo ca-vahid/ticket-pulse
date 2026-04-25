@@ -1495,6 +1495,13 @@ router.post('/daily-review/runs/:id/cancel', requireAdmin, asyncHandler(async (r
   res.json({ success: true, data: result });
 }));
 
+router.delete('/daily-review/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const runId = parseInt(req.params.id, 10);
+  const result = await assignmentDailyReviewService.deleteRun(runId, req.workspaceId);
+  if (!result) return res.status(404).json({ success: false, message: 'Daily review run not found' });
+  res.json({ success: true, data: result });
+}));
+
 router.post('/daily-review/runs/:id/meeting-briefing', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id, 10);
   try {

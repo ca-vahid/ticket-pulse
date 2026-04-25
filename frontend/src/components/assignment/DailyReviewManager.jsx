@@ -6,7 +6,7 @@ import {
   Loader2, Brain, CheckCircle, XCircle, History, RefreshCw, Play,
   CalendarDays, FileText, Settings2, Award, ChevronRight, StopCircle,
   ArrowLeft, ExternalLink, Sparkles, Copy, ThumbsUp, AlertTriangle,
-  Eye, MessageCircle, TrendingUp, ChevronUp, ChevronDown, Undo2,
+  Eye, MessageCircle, TrendingUp, ChevronUp, ChevronDown, Undo2, Trash2,
 } from 'lucide-react';
 
 function StatusBadge({ status }) {
@@ -54,6 +54,30 @@ const RECOMMENDATION_STATUS_STYLES = {
   skipped: 'bg-amber-100 text-amber-700 border-amber-200',
   documented: 'bg-purple-100 text-purple-700 border-purple-200',
 };
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function SmoothCollapse({ open, children, className = '' }) {
+  return (
+    <div
+      className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+        open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+      } ${className}`}
+    >
+      <div className="overflow-hidden">{children}</div>
+    </div>
+  );
+}
+
+function getRecommendationMotionClass(state) {
+  if (state === 'leaving') {
+    return 'pointer-events-none -translate-x-2 scale-[0.985] opacity-0';
+  }
+  if (state === 'entering') {
+    return 'translate-x-0 scale-100 opacity-100 ring-2 ring-emerald-200';
+  }
+  return 'translate-x-0 scale-100 opacity-100';
+}
 
 function RecommendationStatusBadge({ status }) {
   return (
@@ -270,6 +294,7 @@ function BacklogRecommendationRow({
   savingRecommendationId,
   mode = 'pending',
   hideTitle = false,
+  motionState = null,
 }) {
   const [expanded, setExpanded] = useState(false);
   const [notes, setNotes] = useState(item.reviewNotes || '');
@@ -281,7 +306,7 @@ function BacklogRecommendationRow({
   }, [item.id, item.reviewNotes]);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <div className={`overflow-hidden rounded-lg border border-slate-200 bg-white transition-all duration-300 ease-out ${getRecommendationMotionClass(motionState)}`}>
       <div className="flex items-center gap-2 px-3 py-2">
         <button
           type="button"
@@ -339,7 +364,7 @@ function BacklogRecommendationRow({
           )}
         </div>
       </div>
-      {expanded && (
+      <SmoothCollapse open={expanded}>
         <div className="border-t border-slate-100 bg-slate-50 px-3 py-3">
           <div className="space-y-2 text-xs text-slate-600">
             <p>{item.rationale}</p>
@@ -370,7 +395,7 @@ function BacklogRecommendationRow({
             className="mt-3 min-h-[64px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
           />
         </div>
-      )}
+      </SmoothCollapse>
     </div>
   );
 }
@@ -390,6 +415,7 @@ function ApprovedBacklogGroup({
   workspaceTimezone,
   onRecommendationAction,
   savingRecommendationId,
+  motionById = {},
 }) {
   const [expanded, setExpanded] = useState(false);
   const runs = [...new Set(group.rows.map((item) => item.runId).filter(Boolean))].sort((a, b) => b - a);
@@ -409,7 +435,9 @@ function ApprovedBacklogGroup({
   }, [group.rows]);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-emerald-200 bg-white">
+    <div className={`overflow-hidden rounded-lg border border-emerald-200 bg-white transition-all duration-300 ease-out ${
+      group.rows.some((item) => motionById[item.id] === 'entering') ? 'ring-2 ring-emerald-200' : ''
+    }`}>
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
@@ -427,13 +455,13 @@ function ApprovedBacklogGroup({
         </div>
         {hasHigh && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-700">High</span>}
       </button>
-      {expanded && (
+      <SmoothCollapse open={expanded}>
         <div className="space-y-3 border-t border-emerald-100 bg-slate-50 p-3">
           {group.rows.map((item) => {
             const supportTicketIds = getSupportingTicketIds(item);
             const isSaving = savingRecommendationId === item.id;
             return (
-              <div key={item.id} className="rounded-lg border border-slate-200 bg-white p-3">
+              <div key={item.id} className={`rounded-lg border border-slate-200 bg-white p-3 transition-all duration-300 ease-out ${getRecommendationMotionClass(motionById[item.id])}`}>
                 {group.rows.length > 1 && (
                   <div className="mb-2 text-sm font-semibold text-slate-800">{item.title}</div>
                 )}
@@ -484,7 +512,7 @@ function ApprovedBacklogGroup({
             );
           })}
         </div>
-      )}
+      </SmoothCollapse>
     </div>
   );
 }
@@ -786,8 +814,16 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
   );
 }
 
-function DeleteRunConfirmModal({ run, deleting, onCancel, onConfirm }) {
+function DeleteRunConfirmModal({
+  run,
+  deleting,
+  onCancel,
+  onConfirm,
+  title = 'Delete consolidation run?',
+  message,
+}) {
   if (!run) return null;
+  const body = message || `This will delete Run #${run.id} and its saved consolidation recommendations. This cannot be undone.`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 animate-fadeIn">
@@ -798,9 +834,9 @@ function DeleteRunConfirmModal({ run, deleting, onCancel, onConfirm }) {
               <AlertTriangle className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-slate-900">Delete consolidation run?</h3>
+              <h3 className="text-base font-semibold text-slate-900">{title}</h3>
               <p className="mt-1 text-sm leading-relaxed text-slate-500">
-                This will delete Run #{run.id} and its saved consolidation recommendations. This cannot be undone.
+                {body}
               </p>
             </div>
           </div>
@@ -2218,12 +2254,180 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
 }
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
+const RUN_HISTORY_TIME_OPTIONS = { timeZoneName: 'short' };
+
+function DailyReviewHistoryPanel({
+  open,
+  onToggle,
+  runs,
+  loadingRuns,
+  loadingDetail,
+  workspaceTimezone,
+  onRefresh,
+  onOpenRun,
+  onCancelRun,
+  onRequestDeleteRun,
+}) {
+  const latestRun = runs[0];
+  const latestTotals = latestRun?.summaryMetrics?.totals || {};
+  const latestActive = latestRun ? ACTIVE_STATUSES.includes(latestRun.status) : false;
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-lg border border-indigo-100 bg-white/80 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          {open ? <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" /> : <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />}
+          <History className="h-4 w-4 shrink-0 text-indigo-600" />
+          <span className="shrink-0 text-sm font-semibold text-slate-800">Review History</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">{runs.length}</span>
+          {!open && latestRun && (
+            <span className="min-w-0 truncate text-xs text-slate-500">
+              Latest: Run #{latestRun.id} · {latestRun.status?.replace(/_/g, ' ')} · {formatDateTimeInTimezone(latestRun.createdAt, workspaceTimezone, RUN_HISTORY_TIME_OPTIONS)}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          Refresh
+        </button>
+      </div>
+
+      {!open && latestRun && (
+        <div className="border-t border-indigo-50 px-3 py-2 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`h-1.5 w-1.5 rounded-full ${
+              latestRun.status === 'completed'
+                ? 'bg-emerald-500'
+                : latestActive
+                  ? 'bg-indigo-500'
+                  : latestRun.status === 'failed'
+                    ? 'bg-red-500'
+                    : 'bg-slate-300'
+            }`} />
+            {latestTotals.totalTicketsReviewed != null && <span>{latestTotals.totalTicketsReviewed} tickets</span>}
+            {latestTotals.success != null && <span className="font-medium text-emerald-600">{latestTotals.success} ✓</span>}
+            {latestTotals.failure != null && <span className="font-medium text-red-600">{latestTotals.failure} ✕</span>}
+            {latestRun.triggeredBy && <span className="truncate">{latestRun.triggeredBy}</span>}
+          </div>
+        </div>
+      )}
+
+      <SmoothCollapse open={open}>
+        <div className="border-t border-indigo-100 bg-white">
+          {loadingRuns ? (
+            <div className="flex items-center justify-center py-6 text-sm text-gray-400">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading history...
+            </div>
+          ) : runs.length === 0 ? (
+            <div className="py-6 text-center text-sm text-gray-400">
+              No daily review runs yet. Start one above.
+            </div>
+          ) : (
+            <div className="max-h-[280px] overflow-auto">
+              {runs.map((run) => {
+                const totals = run.summaryMetrics?.totals || {};
+                const isActiveStatus = ACTIVE_STATUSES.includes(run.status);
+                return (
+                  <div
+                    key={run.id}
+                    className="group flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-indigo-50/40"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenRun(run.id)}
+                      disabled={loadingDetail}
+                      className="min-w-0 flex-1 text-left disabled:cursor-wait"
+                    >
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                        <span className="font-semibold text-slate-900">Run #{run.id}</span>
+                        <span className={`h-1.5 w-1.5 rounded-full ${
+                          run.status === 'completed'
+                            ? 'bg-emerald-500'
+                            : isActiveStatus
+                              ? 'bg-indigo-500'
+                              : run.status === 'failed'
+                                ? 'bg-red-500'
+                                : 'bg-slate-300'
+                        }`} />
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                          run.status === 'completed'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : isActiveStatus
+                              ? 'bg-indigo-50 text-indigo-700'
+                              : run.status === 'failed'
+                                ? 'bg-red-50 text-red-700'
+                                : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {run.status?.replace(/_/g, ' ')}
+                        </span>
+                        <span className="text-slate-300">•</span>
+                        <span className="text-slate-500">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone, RUN_HISTORY_TIME_OPTIONS)}</span>
+                        {run.triggeredBy && (
+                          <>
+                            <span className="text-slate-300">•</span>
+                            <span className="max-w-[220px] truncate text-slate-500">{run.triggeredBy}</span>
+                          </>
+                        )}
+                      </div>
+                    </button>
+
+                    <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
+                      {totals.totalTicketsReviewed != null && <span className="tabular-nums">{totals.totalTicketsReviewed}</span>}
+                      {totals.totalTicketsReviewed != null && <span className="text-slate-300">tickets</span>}
+                      {totals.success != null && <span className="font-medium tabular-nums text-emerald-600">{totals.success} ✓</span>}
+                      {totals.failure != null && <span className="font-medium tabular-nums text-red-600">{totals.failure} ✕</span>}
+                      {isActiveStatus && (
+                        <button
+                          type="button"
+                          onClick={(e) => onCancelRun(e, run.id)}
+                          className="rounded px-2 py-1 text-red-600 hover:bg-red-50"
+                          title="Cancel this run"
+                        >
+                          <StopCircle className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {!isActiveStatus && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRequestDeleteRun(run);
+                          }}
+                          className="rounded px-2 py-1 text-red-500 opacity-70 hover:bg-red-50 hover:opacity-100"
+                          title="Delete this review run"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      <ChevronRight className="h-4 w-4 text-slate-300 transition-colors group-hover:text-indigo-500" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </SmoothCollapse>
+    </div>
+  );
+}
 
 export default function DailyReviewManager({ workspaceTimezone }) {
   const [view, setView] = useState('trigger');
   const [reviewDate, setReviewDate] = useState(formatDateLocal(new Date()));
   const [forceRefreshThreads, setForceRefreshThreads] = useState(false);
   const [runs, setRuns] = useState([]);
+  const [reviewHistoryOpen, setReviewHistoryOpen] = useState(false);
+  const [runDeleteConfirm, setRunDeleteConfirm] = useState(null);
+  const [deletingDailyReviewRun, setDeletingDailyReviewRun] = useState(false);
   const [activeRun, setActiveRun] = useState(null);
   const [selectedRun, setSelectedRun] = useState(null);
   const [loadingRuns, setLoadingRuns] = useState(false);
@@ -2232,10 +2436,12 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   const [backlogItems, setBacklogItems] = useState([]);
   const [pendingBacklogItems, setPendingBacklogItems] = useState([]);
   const [approvedBacklogItems, setApprovedBacklogItems] = useState([]);
+  const [backlogMotionById, setBacklogMotionById] = useState({});
   const [backlogTotal, setBacklogTotal] = useState(0);
   const [pendingBacklogTotal, setPendingBacklogTotal] = useState(0);
   const [approvedBacklogTotal, setApprovedBacklogTotal] = useState(0);
   const [loadingBacklog, setLoadingBacklog] = useState(false);
+  const [refreshingBacklog, setRefreshingBacklog] = useState(false);
   const [backlogStatus, setBacklogStatus] = useState('pending');
   const [backlogKind, setBacklogKind] = useState('all');
   const [backlogSeverity, setBacklogSeverity] = useState('all');
@@ -2252,6 +2458,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     skills: true,
     technician_competencies: true,
   });
+  const backlogHasLoadedRef = useRef(false);
   const navigate = useNavigate();
 
   const loadRuns = useCallback(async () => {
@@ -2278,7 +2485,11 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   }, [activeRun, view, loadRuns]);
 
   const loadBacklog = useCallback(async () => {
-    setLoadingBacklog(true);
+    if (backlogHasLoadedRef.current) {
+      setRefreshingBacklog(true);
+    } else {
+      setLoadingBacklog(true);
+    }
     try {
       // Accept the dropdown label "Run #12 — Apr 21, 2026", a bare "Run #12",
       // "#12", "run 12", or just "12". We pull the id from the `#N` token
@@ -2332,9 +2543,18 @@ export default function DailyReviewManager({ workspaceTimezone }) {
       setPendingBacklogTotal(0);
       setApprovedBacklogTotal(0);
     } finally {
+      backlogHasLoadedRef.current = true;
       setLoadingBacklog(false);
+      setRefreshingBacklog(false);
     }
-  }, [backlogEndDate, backlogKind, backlogRunFilter, backlogSeverity, backlogStartDate, backlogStatus]);
+  }, [
+    backlogEndDate,
+    backlogKind,
+    backlogRunFilter,
+    backlogSeverity,
+    backlogStartDate,
+    backlogStatus,
+  ]);
 
   const loadConsolidation = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoadingConsolidation(true);
@@ -2370,14 +2590,79 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     }
   };
 
+  const updateRecommendationInSelectedRun = useCallback((updatedItem) => {
+    if (!updatedItem?.id) return;
+    const updateList = (items = []) => items.map((item) => (item.id === updatedItem.id ? updatedItem : item));
+    setSelectedRun((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        promptRecommendations: updateList(prev.promptRecommendations),
+        processRecommendations: updateList(prev.processRecommendations),
+        skillRecommendations: updateList(prev.skillRecommendations),
+      };
+    });
+  }, []);
+
+  const updateRecommendationLists = useCallback((updatedItem) => {
+    if (!updatedItem?.id) return;
+    const id = updatedItem.id;
+    const removeById = (items = []) => items.filter((item) => item.id !== id);
+    const replaceById = (items = []) => items.map((item) => (item.id === id ? updatedItem : item));
+    const containsId = (items = []) => items.some((item) => item.id === id);
+    const wasPending = containsId(pendingBacklogItems);
+    const wasApproved = containsId(approvedBacklogItems);
+    const wasInGenericList = containsId(backlogItems);
+
+    if (updatedItem.status === 'approved') {
+      setPendingBacklogItems((prev) => removeById(prev));
+      setApprovedBacklogItems((prev) => (containsId(prev) ? replaceById(prev) : [updatedItem, ...prev]));
+      if (wasPending) {
+        setPendingBacklogTotal((prev) => Math.max(0, prev - 1));
+        setApprovedBacklogTotal((prev) => prev + 1);
+      }
+    } else if (updatedItem.status === 'applied') {
+      setApprovedBacklogItems((prev) => removeById(prev));
+      if (wasApproved) setApprovedBacklogTotal((prev) => Math.max(0, prev - 1));
+    } else if (updatedItem.status === 'rejected') {
+      setPendingBacklogItems((prev) => removeById(prev));
+      if (wasPending) setPendingBacklogTotal((prev) => Math.max(0, prev - 1));
+    }
+
+    if (backlogStatus === 'pending') {
+      setBacklogTotal((prev) => {
+        if (wasPending && updatedItem.status === 'rejected') return Math.max(0, prev - 1);
+        if (wasApproved && updatedItem.status === 'applied') return Math.max(0, prev - 1);
+        return prev;
+      });
+    } else if (backlogStatus === 'all') {
+      setBacklogItems((prev) => (containsId(prev) ? replaceById(prev) : prev));
+    } else if (backlogStatus === updatedItem.status) {
+      setBacklogItems((prev) => (containsId(prev) ? replaceById(prev) : [updatedItem, ...prev]));
+    } else {
+      setBacklogItems((prev) => removeById(prev));
+      if (wasInGenericList) setBacklogTotal((prev) => Math.max(0, prev - 1));
+    }
+  }, [approvedBacklogItems, backlogItems, backlogStatus, pendingBacklogItems]);
+
   const handleRecommendationAction = async (recommendationId, status, reviewNotes) => {
     setSavingRecommendationId(recommendationId);
     try {
-      await assignmentAPI.updateDailyReviewRecommendationStatus(recommendationId, { status, reviewNotes });
-      await Promise.all([loadRuns(), loadBacklog(), loadConsolidation({ quiet: true })]);
-      if (selectedRun?.id && view === 'detail') {
-        await loadRunDetail(selectedRun.id, { openView: false });
-      }
+      const res = await assignmentAPI.updateDailyReviewRecommendationStatus(recommendationId, { status, reviewNotes });
+      const updatedItem = res?.data;
+      setBacklogMotionById((prev) => ({ ...prev, [recommendationId]: 'leaving' }));
+      await wait(180);
+      updateRecommendationLists(updatedItem);
+      updateRecommendationInSelectedRun(updatedItem);
+      setBacklogMotionById((prev) => ({ ...prev, [recommendationId]: 'entering' }));
+      setTimeout(() => {
+        setBacklogMotionById((prev) => {
+          const next = { ...prev };
+          delete next[recommendationId];
+          return next;
+        });
+      }, 650);
+      loadConsolidation({ quiet: true });
     } catch {
       /* ignore */
     } finally {
@@ -2463,6 +2748,24 @@ export default function DailyReviewManager({ workspaceTimezone }) {
       loadRuns();
     } catch {
       /* ignore */
+    }
+  };
+
+  const handleDeleteDailyReviewRun = async () => {
+    if (!runDeleteConfirm?.id) return;
+    setDeletingDailyReviewRun(true);
+    try {
+      await assignmentAPI.deleteDailyReviewRun(runDeleteConfirm.id);
+      if (selectedRun?.id === runDeleteConfirm.id) {
+        setSelectedRun(null);
+        setView('trigger');
+      }
+      setRunDeleteConfirm(null);
+      await Promise.all([loadRuns(), loadBacklog(), loadConsolidation({ quiet: true })]);
+    } catch {
+      /* ignore */
+    } finally {
+      setDeletingDailyReviewRun(false);
     }
   };
 
@@ -2556,6 +2859,14 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             >
               Today
             </button>
+            <button
+              onClick={() => setView('live')}
+              disabled={!reviewDate}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:from-indigo-700 hover:to-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Play className="h-3.5 w-3.5" />
+              Run Daily Review
+            </button>
             <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-700">
               <input
                 type="checkbox"
@@ -2570,23 +2881,18 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </label>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setView('live')}
-              disabled={!reviewDate}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg text-sm font-semibold hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
-            >
-              <Play className="w-4 h-4" />
-              Run Daily Review
-            </button>
-            <button
-              onClick={loadRuns}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 shadow-sm transition-all"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Refresh History
-            </button>
-          </div>
+          <DailyReviewHistoryPanel
+            open={reviewHistoryOpen}
+            onToggle={() => setReviewHistoryOpen((prev) => !prev)}
+            runs={runs}
+            loadingRuns={loadingRuns}
+            loadingDetail={loadingDetail}
+            workspaceTimezone={workspaceTimezone}
+            onRefresh={loadRuns}
+            onOpenRun={loadRunDetail}
+            onCancelRun={cancelRun}
+            onRequestDeleteRun={setRunDeleteConfirm}
+          />
         </div>
       </div>
 
@@ -2606,98 +2912,16 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         onDelete={handleDeleteConsolidation}
       />
 
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-base font-semibold text-slate-800 flex items-center gap-2">
-            <History className="w-4 h-4 text-slate-500" />
-            Review History
-          </h3>
-          <button onClick={loadRuns} className="text-xs text-blue-600 hover:text-blue-800">
-            Refresh
-          </button>
-        </div>
-
-        {loadingRuns ? (
-          <div className="flex items-center justify-center py-8 text-gray-400">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
-          </div>
-        ) : runs.length === 0 ? (
-          <div className="text-center py-8 text-gray-400 text-sm">
-            No daily review runs yet. Start one above.
-          </div>
-        ) : (
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-            {runs.map((run) => {
-              const totals = run.summaryMetrics?.totals || {};
-              const isActiveStatus = ACTIVE_STATUSES.includes(run.status);
-              return (
-                <button
-                  key={run.id}
-                  onClick={() => loadRunDetail(run.id)}
-                  disabled={loadingDetail}
-                  className="group flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-indigo-50/40 disabled:cursor-wait"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                      <span className="font-semibold text-slate-900">Run #{run.id}</span>
-                      <span className={`h-1.5 w-1.5 rounded-full ${
-                        run.status === 'completed'
-                          ? 'bg-emerald-500'
-                          : isActiveStatus
-                            ? 'bg-indigo-500'
-                            : run.status === 'failed'
-                              ? 'bg-red-500'
-                              : 'bg-slate-300'
-                      }`} />
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                        run.status === 'completed'
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : isActiveStatus
-                            ? 'bg-indigo-50 text-indigo-700'
-                            : run.status === 'failed'
-                              ? 'bg-red-50 text-red-700'
-                              : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {run.status?.replace(/_/g, ' ')}
-                      </span>
-                      <span className="text-slate-300">•</span>
-                      <span className="text-slate-500">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}</span>
-                      {run.triggeredBy && (
-                        <>
-                          <span className="text-slate-300">•</span>
-                          <span className="max-w-[220px] truncate text-slate-500">{run.triggeredBy}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
-                    {totals.totalTicketsReviewed != null && <span className="tabular-nums">{totals.totalTicketsReviewed}</span>}
-                    {totals.totalTicketsReviewed != null && <span className="text-slate-300">tickets</span>}
-                    {totals.success != null && <span className="font-medium tabular-nums text-emerald-600">{totals.success} ✓</span>}
-                    {totals.failure != null && <span className="font-medium tabular-nums text-red-600">{totals.failure} ✕</span>}
-                    {isActiveStatus && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => cancelRun(e, run.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') cancelRun(e, run.id);
-                        }}
-                        className="rounded px-2 py-1 text-red-600 hover:bg-red-50"
-                        title="Cancel this run"
-                      >
-                        <StopCircle className="h-3.5 w-3.5" />
-                      </span>
-                    )}
-                    <ChevronRight className="h-4 w-4 text-slate-300 transition-colors group-hover:text-indigo-500" />
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {runDeleteConfirm && (
+        <DeleteRunConfirmModal
+          run={runDeleteConfirm}
+          deleting={deletingDailyReviewRun}
+          title="Delete daily review run?"
+          message={`This will delete Run #${runDeleteConfirm.id}, its analysis output, and its saved recommendation backlog items. This cannot be undone.`}
+          onCancel={() => setRunDeleteConfirm(null)}
+          onConfirm={handleDeleteDailyReviewRun}
+        />
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -2707,9 +2931,17 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 Review persisted recommendation items across runs and move them through pending, approved, rejected, and applied.
               </p>
             </div>
-            <button onClick={loadBacklog} className="text-xs text-blue-600 hover:text-blue-800">
-              Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              {refreshingBacklog && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-600">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Updating
+                </span>
+              )}
+              <button onClick={loadBacklog} className="text-xs text-blue-600 hover:text-blue-800">
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -2817,7 +3049,9 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             <div className="flex items-center justify-center py-8 text-gray-400">
               <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading backlog...
             </div>
-          ) : backlogStatus === 'pending' ? (
+          ) : (
+            <div className={`transition-opacity duration-200 ease-out ${refreshingBacklog ? 'opacity-70' : 'opacity-100'}`}>
+              {backlogStatus === 'pending' ? (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.12fr),minmax(360px,0.88fr)]">
               <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
@@ -2841,6 +3075,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                         onRecommendationAction={handleRecommendationAction}
                         savingRecommendationId={savingRecommendationId}
                         mode="pending"
+                        motionState={backlogMotionById[item.id]}
                       />
                     ))}
                   </div>
@@ -2868,13 +3103,14 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                         workspaceTimezone={workspaceTimezone}
                         onRecommendationAction={handleRecommendationAction}
                         savingRecommendationId={savingRecommendationId}
+                        motionById={backlogMotionById}
                       />
                     ))}
                   </div>
                 )}
               </div>
             </div>
-          ) : backlogStatus === 'approved' ? (
+              ) : backlogStatus === 'approved' ? (
             approvedBacklogItems.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
                 No approved recommendation items matched the current backlog filters.
@@ -2888,15 +3124,16 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                     workspaceTimezone={workspaceTimezone}
                     onRecommendationAction={handleRecommendationAction}
                     savingRecommendationId={savingRecommendationId}
+                    motionById={backlogMotionById}
                   />
                 ))}
               </div>
             )
-          ) : backlogItems.length === 0 ? (
+              ) : backlogItems.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
               No recommendation items matched the current backlog filters.
             </div>
-          ) : (
+              ) : (
             <div className="space-y-3">
               {backlogItems.map((item) => (
                 <RecommendationCard
@@ -2909,6 +3146,8 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   showRunMeta
                 />
               ))}
+            </div>
+              )}
             </div>
           )}
       </div>
