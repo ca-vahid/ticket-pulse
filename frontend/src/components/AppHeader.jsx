@@ -155,7 +155,7 @@ export default function AppHeader({
           <div className="flex items-center justify-between gap-2 md:hidden">
             <div className="flex-1 min-w-0">
               <div className="flex min-w-0 items-center gap-1.5">
-                <div className="h-9 w-[125px] overflow-hidden flex items-center justify-start flex-shrink-0">
+                <div className="relative h-9 w-[125px] overflow-hidden flex items-center justify-start flex-shrink-0">
                   <button type="button" onClick={() => navigate('/dashboard')} title="Dashboard">
                     <img
                       src="/brand/logo-wordmark.png"
@@ -163,14 +163,15 @@ export default function AppHeader({
                       className="h-24 w-auto"
                     />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowChangelog(true)}
+                    className="absolute bottom-0 right-0 rounded border border-blue-200 bg-white/95 px-1 py-px text-[8px] font-semibold leading-none text-blue-600 shadow-sm"
+                    title="View changelog"
+                  >
+                    v{APP_VERSION}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowChangelog(true)}
-                  className="text-[9px] font-semibold text-blue-600 bg-blue-50 px-1 py-0.5 rounded border border-blue-200 flex-shrink-0"
-                >
-                  v{APP_VERSION}
-                </button>
                 {renderWorkspaceControl(true)}
               </div>
             </div>
