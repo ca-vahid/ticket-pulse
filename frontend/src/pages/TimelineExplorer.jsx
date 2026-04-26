@@ -135,7 +135,7 @@ function mergeMultiTechData(techDataArray, accentMap) {
 
 function TechSelector({
   techList, selectedIds, onChange, accentMap, perTech, isOpen,
-  hiddenIds, onToggleHidden,
+  hiddenIds, onToggleHidden, maxListHeight = 'calc(100vh - 280px)',
 }) {
   const [search, setSearch] = useState('');
   const [showHidden, setShowHidden] = useState(false);
@@ -284,7 +284,7 @@ function TechSelector({
       </div>
 
       {/* Visible techs */}
-      <div className="overflow-y-auto divide-y divide-slate-50" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+      <div className="overflow-y-auto divide-y divide-slate-50" style={{ maxHeight: maxListHeight }}>
         {filtered.map((tech) => renderRow(tech))}
         {filtered.length === 0 && (
           <p className="text-xs text-slate-400 text-center py-4">No techs match</p>
@@ -360,6 +360,7 @@ export default function TimelineExplorer() {
 
   // ── Sidebar ──
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileTechPanelOpen, setMobileTechPanelOpen] = useState(false);
 
   // ── Filter state ──
   const [excludeCats, setExcludeCats] = useState(new Set());
@@ -625,6 +626,16 @@ export default function TimelineExplorer() {
   }, [excludeNoise, fetchTimeline]);
 
   const isMultiDay = days.length > 1;
+  const selectedTechs = techList
+    .filter((tech) => selectedTechIds.has(tech.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const activeFilterCount = excludeCats.size
+    + includeCats.size
+    + (excludeText ? 1 : 0)
+    + (includeText ? 1 : 0)
+    + (excludeNoise ? 1 : 0)
+    + (hideNonPicked ? 1 : 0)
+    + (!showHandoffEvents ? 1 : 0);
   const timelineHeaderActions = (
     <>
       {totals && (
@@ -657,7 +668,7 @@ export default function TimelineExplorer() {
   return (
     <AppShell
       activePage="timeline"
-      className="overflow-hidden"
+      className="lg:overflow-hidden"
       contentClassName="max-w-7xl mx-auto w-full px-2 sm:px-4 py-3 flex min-h-[calc(100vh-64px)] flex-col"
       headerProps={{ extraActions: timelineHeaderActions }}
     >
@@ -690,7 +701,7 @@ export default function TimelineExplorer() {
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-2 sm:px-3 py-2 flex flex-col gap-2 text-white lg:flex-row lg:items-center lg:gap-3">
 
           {/* LEFT: Date navigation */}
-          <div className="flex min-w-0 items-center gap-1.5 flex-shrink-0 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex w-full min-w-0 items-center gap-1.5 flex-shrink-0 lg:w-auto">
             <button
               onClick={handlePrevious}
               className="p-1.5 hover:bg-white hover:bg-opacity-20 rounded transition-colors"
@@ -699,9 +710,9 @@ export default function TimelineExplorer() {
               <ChevronLeft className="w-4 h-4" />
             </button>
 
-            <div className="flex w-44 flex-shrink-0 items-center justify-center sm:w-52">
+            <div className="flex min-w-0 flex-1 items-center justify-center lg:w-52 lg:flex-none">
               {viewMode === 'weekly' ? (
-                <span className="text-sm font-medium text-center w-full opacity-95">{periodLabel}</span>
+                <span className="w-full truncate text-center text-sm font-medium opacity-95">{periodLabel}</span>
               ) : viewMode === 'monthly' ? (
                 <input
                   type="month"
@@ -745,11 +756,11 @@ export default function TimelineExplorer() {
           <div className="hidden flex-1 lg:block" />
 
           {/* RIGHT: Rolling/Combined + Daily/Weekly/Monthly */}
-          <div className="flex items-center gap-2 overflow-x-auto flex-shrink-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex w-full flex-wrap items-center gap-2 flex-shrink-0 lg:w-auto lg:flex-nowrap lg:justify-end">
             {/* Rolling/Combined toggle (only when multi-day) */}
             {isMultiDay && (
               <>
-                <div className="inline-flex items-center gap-0.5 bg-white bg-opacity-20 rounded-lg p-0.5">
+                <div className="grid flex-1 grid-cols-2 items-center gap-0.5 rounded-lg bg-white bg-opacity-20 p-0.5 sm:flex-none">
                   {['rolling', 'combined'].map((m) => (
                     <button
                       key={m}
@@ -762,12 +773,12 @@ export default function TimelineExplorer() {
                     </button>
                   ))}
                 </div>
-                <div className="w-px h-6 bg-white bg-opacity-20 flex-none" />
+                <div className="hidden h-6 w-px flex-none bg-white bg-opacity-20 sm:block" />
               </>
             )}
 
             {/* Period toggle — far right, matching Dashboard position */}
-            <div className="inline-flex items-center gap-0.5 bg-white bg-opacity-20 rounded-lg p-0.5">
+            <div className="grid flex-1 grid-cols-3 items-center gap-0.5 rounded-lg bg-white bg-opacity-20 p-0.5 sm:flex-none">
               {['daily', 'weekly', 'monthly'].map((m) => (
                 <button
                   key={m}
@@ -784,11 +795,65 @@ export default function TimelineExplorer() {
         </div>
       </div>
 
+      {/* Mobile technician picker */}
+      <div className="mb-3 rounded-xl border border-slate-200 bg-white/95 shadow-sm lg:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileTechPanelOpen((open) => !open)}
+          className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
+        >
+          <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+            <Users className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-slate-900">Technicians</span>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                {selectedTechIds.size || 0} selected
+              </span>
+            </div>
+            <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
+              {selectedTechs.length > 0 ? selectedTechs.slice(0, 5).map((tech) => {
+                const accent = accentMap.get(tech.id);
+                return tech.photoUrl ? (
+                  <img key={tech.id} src={tech.photoUrl} alt="" className="h-6 w-6 flex-none rounded-full border border-slate-200 object-cover" />
+                ) : (
+                  <span key={tech.id} className={`flex h-6 w-6 flex-none items-center justify-center rounded-full text-[9px] font-bold text-white ${accent?.bg || 'bg-slate-400'}`}>
+                    {getInitials(tech.name)}
+                  </span>
+                );
+              }) : (
+                <span className="truncate text-xs text-slate-400">Choose one or more agents to populate the timeline</span>
+              )}
+              {selectedTechs.length > 5 && (
+                <span className="text-[10px] font-semibold text-slate-400">+{selectedTechs.length - 5}</span>
+              )}
+            </div>
+          </div>
+          <ChevronDown className={`h-4 w-4 flex-none text-slate-400 transition-transform ${mobileTechPanelOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {mobileTechPanelOpen && (
+          <div className="border-t border-slate-100 p-2">
+            <TechSelector
+              techList={techList}
+              selectedIds={selectedTechIds}
+              onChange={setSelectedTechIds}
+              accentMap={accentMap}
+              perTech={totals?.perTech}
+              isOpen
+              hiddenIds={hiddenTechIds}
+              onToggleHidden={toggleHidden}
+              maxListHeight="min(52vh, 24rem)"
+            />
+          </div>
+        )}
+      </div>
+
       {/* ── Body ── */}
-      <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white/80 shadow-sm lg:flex-row">
+      <div className="flex flex-1 flex-col overflow-visible rounded-xl border border-slate-200 bg-white/80 shadow-sm lg:min-h-0 lg:overflow-hidden lg:flex-row">
         {/* Left sidebar — animated collapse */}
         <div
-          className={`flex-shrink-0 border-b border-slate-200 bg-white transition-all duration-300 ease-in-out flex flex-col lg:border-b-0 lg:border-r ${
+          className={`hidden flex-shrink-0 border-b border-slate-200 bg-white transition-all duration-300 ease-in-out lg:flex lg:flex-col lg:border-b-0 lg:border-r ${
             sidebarOpen ? 'max-h-[38vh] lg:max-h-none lg:w-64' : 'max-h-14 lg:max-h-none lg:w-12'
           }`}
         >
@@ -818,9 +883,17 @@ export default function TimelineExplorer() {
         </div>
 
         {/* Right: filter bar + timeline */}
-        <div className="flex-1 flex min-w-0 flex-col gap-3 overflow-hidden px-2 py-3 sm:px-4 sm:py-4 lg:pl-0">
+        <div className="flex-1 flex min-w-0 flex-col gap-3 overflow-visible px-2 py-3 sm:px-4 sm:py-4 lg:overflow-hidden lg:pl-0">
           {/* Filter bar */}
           <div className="bg-white border border-slate-200 rounded-xl px-3 sm:px-4 py-2.5 flex-shrink-0 flex flex-wrap items-center gap-2 sm:gap-3">
+            <div className="flex w-full items-center justify-between sm:hidden">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filters</span>
+              {activeFilterCount > 0 && (
+                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                  {activeFilterCount} active
+                </span>
+              )}
+            </div>
             <FilterBar
               allCategories={allCategories}
               excludeCats={excludeCats}
@@ -834,7 +907,7 @@ export default function TimelineExplorer() {
             />
             <button
               onClick={handleToggleNoise}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+              className={`flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap sm:flex-none ${
                 excludeNoise
                   ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
                   : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
@@ -846,7 +919,7 @@ export default function TimelineExplorer() {
             </button>
             <button
               onClick={() => setHideNonPicked(v => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+              className={`flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap sm:flex-none ${
                 hideNonPicked
                   ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 ring-1 ring-emerald-300'
                   : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
@@ -858,7 +931,7 @@ export default function TimelineExplorer() {
             </button>
             <button
               onClick={() => setShowHandoffEvents(v => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+              className={`flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap sm:flex-none ${
                 showHandoffEvents
                   ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
                   : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
@@ -871,7 +944,7 @@ export default function TimelineExplorer() {
           </div>
 
           {/* Timeline */}
-          <div className="bg-white border border-slate-200 rounded-xl flex flex-col flex-1 overflow-hidden">
+          <div className="bg-white border border-slate-200 rounded-xl flex min-h-[60vh] flex-col overflow-hidden lg:min-h-0 lg:flex-1">
             {error && (
               <div className="p-6 text-center">
                 <p className="text-red-500 text-sm">{error}</p>
@@ -880,11 +953,11 @@ export default function TimelineExplorer() {
             )}
 
             {!error && !isLoading && selectedTechIds.size === 0 && (
-              <div className="flex-1 flex items-center justify-center">
+              <div className="flex min-h-[18rem] flex-1 items-center justify-center px-6">
                 <div className="text-center">
                   <Layers className="w-10 h-10 text-slate-200 mx-auto mb-3" />
                   <p className="text-slate-400 text-sm font-medium">Select technicians to view their timeline</p>
-                  <p className="text-slate-300 text-xs mt-1">Pick one or more from the panel on the left</p>
+                  <p className="text-slate-300 text-xs mt-1">Use the technician picker above to choose one or more agents</p>
                 </div>
               </div>
             )}
@@ -894,7 +967,7 @@ export default function TimelineExplorer() {
                 timelineItems={timelineItems}
                 defaultFirstName={techConfigs[0]?.firstName}
                 onExcludeCategory={addExcludeCat}
-                className="flex-1 overflow-y-auto px-3 py-3 sm:px-5"
+                className="px-2 py-2 sm:px-5 lg:flex-1 lg:overflow-y-auto"
                 emptyMessage="No tickets match the current filters."
                 showFullDate={viewMode !== 'daily'}
               />

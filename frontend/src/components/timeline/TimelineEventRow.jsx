@@ -68,9 +68,9 @@ export default function TimelineEventRow({ event, showFullDate }) {
     }`}>
       <div className="flex items-stretch">
         <div className={`w-1.5 flex-shrink-0 ${isRejected ? 'bg-red-500' : 'bg-amber-500'}`} />
-        <div className="flex-1 px-2 py-1.5 flex items-center gap-1.5 min-w-0">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 px-2 py-2 sm:py-1.5">
           <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isRejected ? 'text-red-600' : 'text-amber-700'}`} />
-          <span className={`text-slate-500 text-[10px] flex-shrink-0 whitespace-nowrap ${showFullDate ? 'w-[105px]' : 'w-[68px]'}`}>
+          <span className={`text-slate-500 text-[10px] flex-shrink-0 whitespace-nowrap ${showFullDate ? 'sm:w-[105px]' : 'sm:w-[68px]'}`}>
             {formatEventTime(event.createdAt, showFullDate)}
           </span>
           {event.freshserviceTicketId && (
@@ -90,17 +90,17 @@ export default function TimelineEventRow({ event, showFullDate }) {
           }`}>
             {isRejected ? 'Rejected' : 'Handoff'}
           </span>
-          <span className="font-medium text-xs text-slate-900 truncate min-w-0">
+          <span className="order-first min-w-0 w-full font-medium text-sm text-slate-900 sm:order-none sm:w-auto sm:text-xs">
             {event.subject}
           </span>
-          <div className="flex items-center gap-1.5 flex-shrink-0 min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 flex-shrink-0">
             <EventAvatar name={fromName} photoUrl={event.fromTechPhotoUrl} />
-            <span className="text-[11px] font-semibold text-slate-700 truncate max-w-[120px]" title={fromName}>
+            <span className="max-w-[90px] truncate text-[11px] font-semibold text-slate-700 sm:max-w-[120px]" title={fromName}>
               {fromName}
             </span>
             <ArrowRight className={`w-3.5 h-3.5 flex-shrink-0 ${isRejected ? 'text-red-500' : 'text-amber-600'}`} />
             <EventAvatar name={toName} photoUrl={event.toTechPhotoUrl} tone={isRejected ? 'queue' : undefined} />
-            <span className="text-[11px] font-semibold text-slate-700 truncate max-w-[120px]" title={toName}>
+            <span className="max-w-[90px] truncate text-[11px] font-semibold text-slate-700 sm:max-w-[120px]" title={toName}>
               {toName}
             </span>
           </div>

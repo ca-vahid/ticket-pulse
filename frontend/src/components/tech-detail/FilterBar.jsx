@@ -120,7 +120,7 @@ function CategoryDropdown({ mode, categories, selected, onToggle, onClear }) {
 
       {open && (
         <div
-          className={`absolute top-full mt-1 z-[60] bg-white border border-slate-200 rounded-xl shadow-xl p-2 w-64 ${
+          className={`absolute top-full mt-1 z-[60] w-[min(16rem,calc(100vw-2rem))] bg-white border border-slate-200 rounded-xl shadow-xl p-2 ${
             isExclude ? 'left-0' : 'right-0'
           }`}
         >
@@ -204,7 +204,7 @@ export default function FilterBar({
   const hasAny = excludeCats.size > 0 || excludeText || includeCats.size > 0 || includeText;
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex w-full flex-wrap items-center gap-2">
       {/* Exclude side */}
       <CategoryDropdown
         mode="exclude"
@@ -213,7 +213,7 @@ export default function FilterBar({
         onToggle={toggle(setExcludeCats)}
         onClear={() => setExcludeCats(new Set())}
       />
-      <div className="relative flex-1">
+      <div className="relative min-w-[12rem] flex-1">
         <input
           type="text"
           value={excInput.localValue}
@@ -231,10 +231,10 @@ export default function FilterBar({
         )}
       </div>
 
-      <div className="w-px h-5 bg-slate-200 flex-shrink-0" />
+      <div className="hidden h-5 w-px flex-shrink-0 bg-slate-200 sm:block" />
 
       {/* Include side */}
-      <div className="relative flex-1">
+      <div className="relative min-w-[12rem] flex-1">
         <input
           type="text"
           value={incInput.localValue}

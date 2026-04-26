@@ -85,7 +85,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
         {/* Picked/not-picked indicator strip */}
         <div className={`w-1 flex-shrink-0 ${picked ? pickedStripClass : 'bg-slate-400'}`} />
 
-        <div className="flex-1 px-2 py-1.5 flex items-center gap-1.5 min-w-0">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 px-2 py-2 sm:py-1.5">
           {hasHandoffHistory && (
             <button
               onClick={() => setExpanded((value) => !value)}
@@ -102,7 +102,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
             : <Sunrise className="w-3 h-3 text-amber-500 flex-shrink-0" />}
 
           {/* Date-time (PT) */}
-          <span className={`text-slate-400 text-[10px] flex-shrink-0 whitespace-nowrap ${showFullDate ? 'w-[105px]' : 'w-[68px]'}`}>
+          <span className={`text-slate-400 text-[10px] flex-shrink-0 whitespace-nowrap ${showFullDate ? 'sm:w-[105px]' : 'sm:w-[68px]'}`}>
             {(() => {
               const d = new Date(ticket.createdAt);
               const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' });
@@ -142,7 +142,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
           ) : null}
 
           {/* Subject */}
-          <span className={`font-medium text-xs truncate min-w-0 flex-1 ${picked ? 'text-slate-900' : 'text-slate-500'}`}>
+          <span className={`order-first min-w-0 w-full font-medium text-sm sm:order-none sm:w-auto sm:flex-1 sm:text-xs ${picked ? 'text-slate-900' : 'text-slate-500'}`}>
             {ticket.subject}
           </span>
 
@@ -183,7 +183,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
           {ticket.ticketCategory && (
             <button
               onClick={() => onExcludeCategory?.(ticket.ticketCategory)}
-              className="px-1.5 py-0.5 rounded text-[10px] flex-shrink-0 truncate max-w-[100px] bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600 hover:line-through cursor-pointer"
+              className="max-w-[150px] truncate rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-red-50 hover:text-red-600 hover:line-through cursor-pointer sm:max-w-[100px] flex-shrink-0"
               title={`Click to hide "${ticket.ticketCategory}"`}
             >
               {ticket.ticketCategory}
@@ -222,9 +222,9 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
               const isActive = episode.endMethod === 'still_active' || !episode.endedAt;
               const methodLabel = episode.startMethod === 'self_picked' ? 'self' : 'assigned';
               return (
-                <div key={episode.id || `${episode.techId}-${episode.startedAt}`} className="flex items-center gap-1.5">
+                <div key={episode.id || `${episode.techId}-${episode.startedAt}`} className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <div
-                    className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${
+                    className={`flex min-w-0 flex-wrap items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${
                       isActive
                         ? 'bg-green-50 border-green-200 text-green-800'
                         : isRejected
@@ -239,7 +239,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
                       episode.endActorName ? `Ended by ${episode.endActorName}` : null,
                     ].filter(Boolean).join('\n')}
                   >
-                    <span className="font-semibold whitespace-nowrap">{episode.techName || 'Unknown'}</span>
+                    <span className="max-w-[11rem] truncate font-semibold sm:max-w-none">{episode.techName || 'Unknown'}</span>
                     <span className="rounded bg-white/70 px-1 font-medium">{methodLabel}</span>
                     <span className="text-slate-400">{formatPTTime(episode.startedAt)}</span>
                     {isRejected && <RotateCcw className="w-3 h-3" />}
