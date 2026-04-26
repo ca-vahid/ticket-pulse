@@ -78,7 +78,10 @@ app.use(
 // Request logging middleware (exclude polling endpoints to reduce log spam)
 app.use((req, res, next) => {
   // Skip logging for frequent polling endpoints
-  if (req.path !== '/api/sync/status') {
+  if (
+    req.path !== '/api/sync/status'
+    && !/^\/api\/assignment\/daily-review\/runs\/\d+\/progress$/.test(req.path)
+  ) {
     logger.http(`${req.method} ${req.path}`, {
       ip: req.ip,
       userAgent: req.get('user-agent'),
@@ -274,4 +277,3 @@ process.on('SIGINT', () => {
 });
 
 export default app;
-

@@ -7,7 +7,6 @@ import competencyAnalysisService from '../services/competencyAnalysisService.js'
 import competencyPromptRepository from '../services/competencyPromptRepository.js';
 import freshServiceActionService from '../services/freshServiceActionService.js';
 import competencyFeedbackService from '../services/competencyFeedbackService.js';
-import calibrationService from '../services/calibrationService.js';
 import assignmentDailyReviewService from '../services/assignmentDailyReviewService.js';
 import assignmentDailyReviewConsolidationService from '../services/assignmentDailyReviewConsolidationService.js';
 import syncService from '../services/syncService.js';
@@ -791,7 +790,17 @@ router.get('/ticket/:ticketId/latest-run', requireReviewer, asyncHandler(async (
       ticket: {
         select: {
           id: true, freshserviceTicketId: true, subject: true, status: true, priority: true,
-          category: true, ticketCategory: true, assignedTechId: true, createdAt: true,
+          category: true, ticketCategory: true,
+          internalCategory: { select: { id: true, name: true } },
+          internalSubcategory: { select: { id: true, name: true, parentId: true } },
+          internalCategoryConfidence: true,
+          internalCategoryRationale: true,
+          internalCategoryFit: true,
+          internalSubcategoryFit: true,
+          taxonomyReviewNeeded: true,
+          suggestedInternalCategoryName: true,
+          suggestedInternalSubcategoryName: true,
+          assignedTechId: true, createdAt: true,
           requester: { select: { name: true, email: true, department: true } },
         },
       },
@@ -906,6 +915,16 @@ router.get('/recent-tickets', requireAdmin, asyncHandler(async (req, res) => {
       status: true,
       priority: true,
       category: true,
+      ticketCategory: true,
+      internalCategory: { select: { id: true, name: true } },
+      internalSubcategory: { select: { id: true, name: true, parentId: true } },
+      internalCategoryConfidence: true,
+      internalCategoryRationale: true,
+      internalCategoryFit: true,
+      internalSubcategoryFit: true,
+      taxonomyReviewNeeded: true,
+      suggestedInternalCategoryName: true,
+      suggestedInternalSubcategoryName: true,
       assignedTechId: true,
       createdAt: true,
       requester: { select: { name: true, email: true } },
@@ -1035,16 +1054,25 @@ router.post('/competencies/merge', requireAdmin, asyncHandler(async (req, res) =
 
 router.get('/competencies', requireAdmin, asyncHandler(async (req, res) => {
   const categories = await competencyRepository.getCategories(req.workspaceId);
+  const categoryTree = competencyRepository.buildCategoryTree(categories);
   const mappings = await competencyRepository.getAllCompetenciesForWorkspace(req.workspaceId);
-  res.json({ success: true, data: { categories, mappings } });
+  res.json({ success: true, data: { categories, categoryTree, mappings } });
 }));
 
 router.post('/competencies/categories', requireAdmin, asyncHandler(async (req, res) => {
-  const { name, description } = req.body;
+  const { name, description, parentId, isActive, sortOrder } = req.body;
   if (!name?.trim()) {
     return res.status(400).json({ success: false, message: 'Category name is required' });
   }
-  const category = await competencyRepository.createCategory(req.workspaceId, { name: name.trim(), description });
+  const category = await competencyRepository.createCategory(req.workspaceId, {
+    name: name.trim(),
+    description,
+    parentId,
+    isActive,
+    sortOrder,
+    source: req.body.source || 'manual',
+    isSystemSuggested: Boolean(req.body.isSystemSuggested),
+  });
   res.status(201).json({ success: true, data: category });
 }));
 
@@ -1230,7 +1258,7 @@ router.get('/competencies/technicians', requireReviewer, asyncHandler(async (req
     select: {
       id: true, name: true, email: true, location: true, photoUrl: true,
       competencies: {
-        include: { competencyCategory: { select: { id: true, name: true } } },
+        include: { competencyCategory: { select: { id: true, name: true, parentId: true } } },
       },
       competencyRuns: {
         select: { id: true, status: true, decision: true, createdAt: true },
@@ -1243,81 +1271,6 @@ router.get('/competencies/technicians', requireReviewer, asyncHandler(async (req
   res.json({ success: true, data: technicians });
 }));
 
-// ─── Calibration ────────────────────────────────────────────────────────
-
-router.post('/calibration', requireAdmin, asyncHandler(async (req, res) => {
-  const { periodStart, periodEnd, mode } = req.body;
-  if (!periodStart || !periodEnd) {
-    return res.status(400).json({ success: false, message: 'periodStart and periodEnd are required' });
-  }
-  const calibrationMode = mode === 'prompt_only' ? 'prompt_only' : 'full';
-
-  const stream = req.query.stream === 'true';
-  const triggeredBy = req.session?.user?.email || 'admin';
-
-  if (!stream) {
-    const result = await calibrationService.runCalibration(req.workspaceId, periodStart, periodEnd, triggeredBy, null, { mode: calibrationMode });
-    return res.json({ success: true, data: result });
-  }
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders?.();
-
-  let clientDisconnected = false;
-  req.on('close', () => { clientDisconnected = true; clearInterval(heartbeat); });
-
-  const heartbeat = setInterval(() => {
-    if (clientDisconnected) return;
-    try { res.write(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`); } catch { /* client gone */ }
-  }, 15000);
-
-  await calibrationService.runCalibration(req.workspaceId, periodStart, periodEnd, triggeredBy, (event) => {
-    if (clientDisconnected) return;
-    try {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
-    } catch { /* client gone */ }
-  }, { mode: calibrationMode });
-
-  clearInterval(heartbeat);
-  if (!clientDisconnected) {
-    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-    res.end();
-  }
-}));
-
-router.get('/calibration/runs', requireAdmin, asyncHandler(async (req, res) => {
-  const limit = parseInt(req.query.limit) || 20;
-  const offset = parseInt(req.query.offset) || 0;
-  const result = await calibrationService.getRuns(req.workspaceId, { limit, offset });
-  res.json({ success: true, ...result });
-}));
-
-router.post('/calibration/runs/:id/cancel', requireAdmin, asyncHandler(async (req, res) => {
-  const runId = parseInt(req.params.id);
-  const run = await prisma.calibrationRun.findUnique({ where: { id: runId }, select: { status: true, workspaceId: true } });
-  if (!run) return res.status(404).json({ success: false, message: 'Calibration run not found' });
-  if (run.workspaceId !== req.workspaceId) return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
-  const activeStatuses = ['running', 'collecting', 'analyzing_prompt', 'analyzing_competencies'];
-  if (!activeStatuses.includes(run.status)) {
-    return res.status(400).json({ success: false, message: `Run is not active (status: ${run.status})` });
-  }
-  await prisma.calibrationRun.update({ where: { id: runId }, data: { status: 'failed', errorMessage: 'Manually cancelled by admin' } });
-  logger.info('Calibration run manually cancelled', { runId });
-  res.json({ success: true, message: 'Calibration run cancelled' });
-}));
-
-router.get('/calibration/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
-  const run = await calibrationService._getRun(parseInt(req.params.id));
-  if (!run) return res.status(404).json({ success: false, message: 'Calibration run not found' });
-  if (run.workspaceId !== req.workspaceId) {
-    return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
-  }
-  res.json({ success: true, data: run });
-}));
-
 // ─── Daily Review ────────────────────────────────────────────────────────
 
 // POST /daily-review now ALWAYS kicks off the run in the background and
@@ -1328,11 +1281,13 @@ router.get('/calibration/runs/:id', requireAdmin, asyncHandler(async (req, res) 
 // long-lived SSE connections mid-collection (502 Bad Gateway in the
 // browser even though the work itself was healthy).
 router.post('/daily-review', requireAdmin, asyncHandler(async (req, res) => {
-  const { reviewDate, force, forceRefreshThreads } = req.body;
+  const { reviewDate, startDate, endDate, reviewStartDate, reviewEndDate, force, forceRefreshThreads } = req.body;
   const triggeredBy = req.session?.user?.email || 'admin';
 
   const result = await assignmentDailyReviewService.kickOffReview(req.workspaceId, reviewDate, triggeredBy, {
     triggerSource: 'manual',
+    reviewStartDate: reviewStartDate || startDate,
+    reviewEndDate: reviewEndDate || endDate,
     force: !!force,
     forceRefreshThreads: !!forceRefreshThreads,
   });
@@ -1526,11 +1481,13 @@ router.post('/daily-review/runs/:id/rerun', requireAdmin, asyncHandler(async (re
   const reviewDate = existing.reviewDate instanceof Date
     ? existing.reviewDate.toISOString().slice(0, 10)
     : String(existing.reviewDate).slice(0, 10);
+  const reviewStartDate = existing.summaryMetrics?.reviewStartDate || existing.summaryMetrics?.reviewWindow?.localDate || reviewDate;
+  const reviewEndDate = existing.summaryMetrics?.reviewEndDate || existing.summaryMetrics?.reviewWindow?.endLocalDate || reviewStartDate;
   const result = await assignmentDailyReviewService.runReview(
     req.workspaceId,
     reviewDate,
     req.session?.user?.email || 'admin',
-    { triggerSource: 'rerun', force: true },
+    { triggerSource: 'rerun', force: true, reviewStartDate, reviewEndDate },
   );
 
   res.json({ success: true, data: result });

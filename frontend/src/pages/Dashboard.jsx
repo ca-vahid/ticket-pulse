@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
@@ -65,7 +65,6 @@ export default function Dashboard() {
     forceRefreshNoCache,
   } = useDashboard();
   const { currentWorkspace } = useWorkspace();
-  const navigate = useNavigate();
   const location = useLocation();
 
   const [refreshing, setRefreshing] = useState(false);

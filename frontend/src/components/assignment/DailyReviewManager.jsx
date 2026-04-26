@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { assignmentAPI } from '../../services/api';
 import { formatDateLocal, formatDateOnlyInTimezone, formatDateTimeInTimezone } from '../../utils/dateHelpers';
 import {
@@ -55,7 +55,29 @@ const RECOMMENDATION_STATUS_STYLES = {
   documented: 'bg-purple-100 text-purple-700 border-purple-200',
 };
 
+const PROFICIENCY_LEVELS = [
+  { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
+  { value: 'intermediate', label: 'Intermediate', num: '2', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+  { value: 'expert', label: 'Expert', num: '3', color: 'bg-green-100 text-green-800 border-green-200' },
+];
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function formatReviewRunDateLabel(run, workspaceTimezone) {
+  if (!run) return '';
+  const summaryWindow = run.summaryMetrics?.reviewWindow;
+  const startDate = run.summaryMetrics?.reviewStartDate
+    || summaryWindow?.localDate
+    || run.reviewDate;
+  const endDate = run.summaryMetrics?.reviewEndDate
+    || summaryWindow?.endLocalDate
+    || null;
+  const startLabel = formatDateOnlyInTimezone(startDate, workspaceTimezone);
+  if (!endDate || String(endDate).slice(0, 10) === String(startDate).slice(0, 10)) {
+    return startLabel;
+  }
+  return `${startLabel} - ${formatDateOnlyInTimezone(endDate, workspaceTimezone)}`;
+}
 
 function SmoothCollapse({ open, children, className = '' }) {
   return (
@@ -87,6 +109,20 @@ function RecommendationStatusBadge({ status }) {
   );
 }
 
+function isDevBacklogItem(item) {
+  if (item?.kind !== 'process') return false;
+  const text = [
+    item.title,
+    item.rationale,
+    item.suggestedAction,
+    ...(Array.isArray(item.skillsAffected) ? item.skillsAffected : []),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /\b(dev|developer|engineering|implementation|implement|code|backend|frontend|schema|database|api|ui|ux|bug|pipeline|tooling|telemetry|integration|automation)\b/.test(text)
+    || text.includes('dev_required')
+    || text.includes('app-side')
+    || text.includes('requires dev');
+}
+
 function RecommendationCard({
   item,
   workspaceTimezone,
@@ -97,6 +133,7 @@ function RecommendationCard({
   selectable = false,
   selected = false,
   onToggleSelected,
+  readOnly = false,
 }) {
   const [notes, setNotes] = useState(item.reviewNotes || '');
   const isSaving = savingRecommendationId === item.id;
@@ -134,6 +171,11 @@ function RecommendationCard({
                 {item.severity || 'low'}
               </span>
               <RecommendationStatusBadge status={item.status} />
+              {readOnly && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                  visibility only
+                </span>
+              )}
             </div>
             {(showDate || showRunMeta) && (
               <div className="text-[11px] text-slate-500 mb-1">
@@ -179,41 +221,45 @@ function RecommendationCard({
           )}
         </div>
       )}
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        placeholder="Optional review notes"
-        className="mb-3 min-h-[72px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
-      />
-      <div className="flex flex-wrap items-center gap-2">
-        {item.status !== 'approved' && item.status !== 'applied' && (
-          <button
-            onClick={() => onRecommendationAction?.(item.id, 'approved', notes)}
-            disabled={isSaving}
-            className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Approve
-          </button>
-        )}
-        {item.status !== 'rejected' && item.status !== 'applied' && (
-          <button
-            onClick={() => onRecommendationAction?.(item.id, 'rejected', notes)}
-            disabled={isSaving}
-            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Reject
-          </button>
-        )}
-        {item.status === 'approved' && (
-          <button
-            onClick={() => onRecommendationAction?.(item.id, 'applied', notes)}
-            disabled={isSaving}
-            className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Mark Applied
-          </button>
-        )}
-      </div>
+      {!readOnly && (
+        <>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Optional review notes"
+            className="mb-3 min-h-[72px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            {item.status !== 'approved' && item.status !== 'applied' && (
+              <button
+                onClick={() => onRecommendationAction?.(item.id, 'approved', notes)}
+                disabled={isSaving}
+                className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Approve
+              </button>
+            )}
+            {item.status !== 'rejected' && item.status !== 'applied' && (
+              <button
+                onClick={() => onRecommendationAction?.(item.id, 'rejected', notes)}
+                disabled={isSaving}
+                className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Reject
+              </button>
+            )}
+            {item.status === 'approved' && (
+              <button
+                onClick={() => onRecommendationAction?.(item.id, 'applied', notes)}
+                disabled={isSaving}
+                className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Mark Applied
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -291,6 +337,22 @@ function CompactSeverity({ severity }) {
   );
 }
 
+function ProficiencyBadge({ level, muted = false }) {
+  const info = PROFICIENCY_LEVELS.find((item) => item.value === level);
+  if (!info) {
+    return (
+      <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-400">
+        -
+      </span>
+    );
+  }
+  return (
+    <span className={`inline-flex h-7 min-w-7 items-center justify-center rounded-lg border px-2 text-xs font-bold ${muted ? 'bg-slate-50 text-slate-500 border-slate-200' : info.color}`}>
+      {info.num}
+    </span>
+  );
+}
+
 function RecommendationMeta({ item, workspaceTimezone }) {
   const supportTicketIds = getSupportingTicketIds(item);
   return (
@@ -319,6 +381,7 @@ function BacklogRecommendationRow({
   mode = 'pending',
   hideTitle = false,
   motionState = null,
+  readOnly = false,
 }) {
   const [expanded, setExpanded] = useState(false);
   const [notes, setNotes] = useState(item.reviewNotes || '');
@@ -349,7 +412,12 @@ function BacklogRecommendationRow({
           <RecommendationMeta item={item} workspaceTimezone={workspaceTimezone} />
         </div>
         <div className="mt-0.5 flex shrink-0 items-center gap-1">
-          {mode === 'pending' && (
+          {readOnly && (
+            <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+              visibility
+            </span>
+          )}
+          {!readOnly && mode === 'pending' && (
             <>
               <button
                 onClick={() => onRecommendationAction?.(item.id, 'approved', notes)}
@@ -369,7 +437,7 @@ function BacklogRecommendationRow({
               </button>
             </>
           )}
-          {mode === 'approved' && (
+          {!readOnly && mode === 'approved' && (
             <>
               <button
                 onClick={() => onRecommendationAction?.(item.id, 'pending', notes)}
@@ -415,12 +483,14 @@ function BacklogRecommendationRow({
               </div>
             )}
           </div>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Optional review notes"
-            className="mt-3 min-h-[64px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
-          />
+          {!readOnly && (
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional review notes"
+              className="mt-3 min-h-[64px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+            />
+          )}
         </div>
       </SmoothCollapse>
     </div>
@@ -918,7 +988,385 @@ function DeleteRunConfirmModal({
   );
 }
 
-function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenPromptDiff }) {
+function TechnicianCompetencyCompactEditor({
+  payload,
+  isApplied,
+  onFieldChange,
+  competencyOptions,
+  onSave,
+  saving,
+}) {
+  const technicians = competencyOptions?.technicians || [];
+  const categories = competencyOptions?.categories || [];
+  const mappings = competencyOptions?.mappings || [];
+  const selectedTech = technicians.find((tech) => (
+    String(tech.id) === String(payload.technicianId || '')
+    || tech.name?.toLowerCase() === String(payload.technicianName || '').toLowerCase()
+  ));
+  const selectedCategory = categories.find((cat) => (
+    String(cat.id) === String(payload.categoryId || '')
+    || cat.name?.toLowerCase() === String(payload.categoryName || '').toLowerCase()
+  ));
+  const currentMapping = mappings.find((mapping) => (
+    Number(mapping.technicianId) === Number(selectedTech?.id)
+    && Number(mapping.competencyCategoryId) === Number(selectedCategory?.id)
+  ));
+  const currentLevel = currentMapping?.proficiencyLevel || '';
+  const proposedLevel = payload.proficiencyLevel || 'intermediate';
+
+  const handleTechnicianChange = (value) => {
+    const tech = technicians.find((row) => String(row.id) === value);
+    onFieldChange('technicianId', tech?.id || null);
+    onFieldChange('technicianName', tech?.name || '');
+  };
+
+  const handleCategoryChange = (value) => {
+    const category = categories.find((row) => String(row.id) === value);
+    onFieldChange('categoryId', category?.id || null);
+    onFieldChange('categoryName', category?.name || '');
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+      <div className="grid items-center gap-2 xl:grid-cols-[minmax(180px,0.9fr)_minmax(220px,1fr)_auto_minmax(160px,auto)_minmax(220px,1fr)_auto]">
+        <select
+          value={selectedTech?.id || ''}
+          onChange={(e) => handleTechnicianChange(e.target.value)}
+          disabled={isApplied}
+          className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm font-semibold text-slate-800 disabled:opacity-60"
+          title="Technician"
+        >
+          <option value="">{payload.technicianName || 'Select technician'}</option>
+          {technicians.map((tech) => (
+            <option key={tech.id} value={tech.id}>{tech.name}</option>
+          ))}
+        </select>
+
+        <select
+          value={selectedCategory?.id || ''}
+          onChange={(e) => handleCategoryChange(e.target.value)}
+          disabled={isApplied}
+          className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-700 disabled:opacity-60"
+          title="Skill / Category"
+        >
+          <option value="">{payload.categoryName || 'Select skill'}</option>
+          {categories.map((category) => (
+            <option key={category.id} value={category.id}>{category.name}</option>
+          ))}
+        </select>
+
+        <div className="flex items-center justify-center gap-1 text-xs text-slate-500">
+          <ProficiencyBadge level={currentLevel} muted />
+          <span>to</span>
+        </div>
+
+        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+          {PROFICIENCY_LEVELS.map((level) => {
+            const active = proposedLevel === level.value;
+            return (
+              <button
+                key={level.value}
+                type="button"
+                onClick={() => onFieldChange('proficiencyLevel', level.value)}
+                disabled={isApplied}
+                className={`h-7 min-w-8 rounded-md border px-2 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  active ? level.color : 'border-transparent text-slate-400 hover:bg-slate-50'
+                }`}
+                title={level.label}
+              >
+                {level.num}
+              </button>
+            );
+          })}
+        </div>
+
+        <input
+          value={payload.notes || ''}
+          onChange={(e) => onFieldChange('notes', e.target.value)}
+          disabled={isApplied}
+          placeholder="Optional note"
+          className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-700 disabled:opacity-60"
+        />
+        {!isApplied && (
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        )}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+        <span>1 Basic</span>
+        <span className="text-slate-300">•</span>
+        <span>2 Intermediate</span>
+        <span className="text-slate-300">•</span>
+        <span>3 Expert</span>
+        {currentLevel && (
+          <>
+            <span className="text-slate-300">•</span>
+            <span>Current matrix: {currentLevel}</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SkillListCompactEditor({
+  payload,
+  isApplied,
+  onFieldChange,
+  competencyOptions,
+  onSave,
+  saving,
+}) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const categories = competencyOptions?.categories || [];
+  const topLevelCategories = categories.filter((cat) => !cat.parentId);
+  const normalizeName = (value) => String(value || '').trim().toLowerCase();
+  const categoryLabel = (category) => {
+    if (!category?.parentId) return category?.name || '';
+    const parent = categories.find((row) => row.id === category.parentId);
+    return parent ? `${parent.name} > ${category.name}` : category.name;
+  };
+  const action = payload.action || 'update';
+  const selectedCategory = categories.find((cat) => (
+    String(cat.id) === String(payload.categoryId || '')
+    || normalizeName(cat.name) === normalizeName(payload.categoryName)
+  ));
+  const isAdd = action === 'add';
+  const isRename = action === 'rename';
+  const isMove = action === 'move';
+  const isMerge = action === 'merge';
+  const isDeprecate = action === 'deprecate';
+  const needsTarget = !isAdd;
+  const needsNewName = isAdd || isRename;
+  const needsParent = isAdd || isMove;
+  const targetLabel = isMerge ? 'Source skill' : 'Target skill';
+  const parentPayloadId = payload.parentCategoryId ?? payload.parentId;
+  const selectedParent = topLevelCategories.find((cat) => (
+    String(cat.id) === String(parentPayloadId || '')
+    || normalizeName(cat.name) === normalizeName(payload.parentCategoryName)
+  ));
+  const selectedParentId = selectedParent ? String(selectedParent.id) : 'top';
+  const newSkillName = isAdd ? (payload.newName || payload.categoryName || '') : (payload.newName || '');
+  const notesFieldId = `skill-note-${String(payload.categoryId || payload.categoryName || payload.newName || action)
+    .replace(/[^a-z0-9_-]/gi, '-')}`;
+  const actionCopy = {
+    add: 'Create category or subcategory',
+    rename: 'Rename an existing skill',
+    update: 'Update description or guidance',
+    move: 'Move under a different parent',
+    merge: 'Record merge guidance',
+    deprecate: 'Deactivate a stale skill',
+  };
+
+  const handleCategoryChange = (value) => {
+    const category = categories.find((row) => String(row.id) === value);
+    onFieldChange('categoryId', category?.id || null);
+    onFieldChange('categoryName', category?.name || '');
+  };
+
+  const handleParentChange = (value) => {
+    if (value === 'top') {
+      onFieldChange('parentCategoryId', null);
+      onFieldChange('parentCategoryName', null);
+      onFieldChange('parentId', null);
+      return;
+    }
+    const parent = topLevelCategories.find((row) => String(row.id) === value);
+    onFieldChange('parentCategoryId', parent?.id || null);
+    onFieldChange('parentCategoryName', parent?.name || null);
+    onFieldChange('parentId', parent?.id || null);
+  };
+
+  const handleNewNameChange = (value) => {
+    onFieldChange('newName', value);
+    if (isAdd) {
+      onFieldChange('categoryName', value);
+      onFieldChange('categoryId', null);
+    }
+  };
+
+  const handleSave = () => {
+    const normalized = { ...payload };
+    if (normalized.action === 'add') {
+      const createName = String(normalized.newName || normalized.categoryName || '').trim();
+      normalized.newName = createName || null;
+      normalized.categoryName = createName;
+      normalized.categoryId = null;
+    }
+    if (normalized.parentCategoryId === 'top') {
+      normalized.parentCategoryId = null;
+      normalized.parentCategoryName = null;
+      normalized.parentId = null;
+    }
+    onSave?.(normalized);
+  };
+
+  const renderTargetSelect = () => (
+    <div className="min-w-[220px] flex-1">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{targetLabel}</div>
+      <select
+        value={selectedCategory?.id || ''}
+        onChange={(e) => handleCategoryChange(e.target.value)}
+        disabled={isApplied}
+        className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-60"
+        title={targetLabel}
+      >
+        <option value="">{payload.categoryName || `Select ${targetLabel.toLowerCase()}`}</option>
+        {categories.map((category) => (
+          <option key={category.id} value={category.id}>{categoryLabel(category)}</option>
+        ))}
+      </select>
+    </div>
+  );
+
+  const renderParentSelect = () => (
+    <div className="min-w-[220px] flex-1">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        {isMove ? 'Move to' : 'Parent'}
+      </div>
+      <select
+        value={selectedParentId}
+        onChange={(e) => handleParentChange(e.target.value)}
+        disabled={isApplied}
+        className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-60"
+        title="Parent category"
+      >
+        <option value="top">Top-level category</option>
+        {topLevelCategories.map((category) => (
+          <option key={category.id} value={category.id}>Under {category.name}</option>
+        ))}
+      </select>
+    </div>
+  );
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 px-3 py-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
+        <div className="min-w-[140px]">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Action</div>
+          <select
+            value={action}
+            onChange={(e) => onFieldChange('action', e.target.value)}
+            disabled={isApplied}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold capitalize text-slate-800 disabled:opacity-60"
+            title="Action"
+          >
+            <option value="add">Add</option>
+            <option value="rename">Rename</option>
+            <option value="update">Update</option>
+            <option value="move">Move</option>
+            <option value="merge">Merge</option>
+            <option value="deprecate">Deprecate</option>
+          </select>
+        </div>
+
+        {needsTarget && renderTargetSelect()}
+
+        {needsNewName && (
+          <div className="min-w-[220px] flex-1">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              {isAdd ? 'New skill' : 'New name'}
+            </div>
+            <input
+              value={newSkillName}
+              onChange={(e) => handleNewNameChange(e.target.value)}
+              disabled={isApplied}
+              placeholder={isAdd ? 'Skill or subcategory name' : 'Rename to...'}
+              className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-60"
+            />
+          </div>
+        )}
+
+        {needsParent && renderParentSelect()}
+
+        {(isMerge || isDeprecate) && (
+          <div className="min-w-[210px] flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+            {isMerge ? 'Manual merge note is recorded; no automatic merge is applied.' : 'Deprecates this skill after approval.'}
+          </div>
+        )}
+
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setDetailsOpen((prev) => !prev)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            title={detailsOpen ? 'Hide notes' : 'Edit notes'}
+          >
+            <span className="inline-flex items-center gap-1">
+              {detailsOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              Notes
+            </span>
+          </button>
+
+          {!isApplied && (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+        <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600 ring-1 ring-slate-200">
+          {actionCopy[action] || 'Skill change'}
+        </span>
+        {needsTarget && (
+          <>
+            <span className="text-slate-300">•</span>
+            <span>{targetLabel}: {selectedCategory ? categoryLabel(selectedCategory) : payload.categoryName || 'unresolved'}</span>
+          </>
+        )}
+        {isAdd && newSkillName && (
+          <>
+            <span className="text-slate-300">•</span>
+            <span>Creates: {newSkillName}</span>
+          </>
+        )}
+        {needsParent && (
+          <>
+            <span className="text-slate-300">•</span>
+            <span>{selectedParent ? `Under ${selectedParent.name}` : 'Top-level category'}</span>
+          </>
+        )}
+      </div>
+
+      <SmoothCollapse open={detailsOpen}>
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-600">
+          <label className="font-semibold uppercase tracking-wide text-slate-400" htmlFor={notesFieldId}>
+            Description / Review Notes
+          </label>
+          <textarea
+            id={notesFieldId}
+            value={payload.description || ''}
+            onChange={(e) => onFieldChange('description', e.target.value)}
+            disabled={isApplied}
+            rows={3}
+            placeholder="Describe what changes and why this taxonomy update is justified."
+            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-700 disabled:opacity-60"
+          />
+          {needsParent && selectedParent && (
+            <div className="mt-2 text-slate-500">
+              This will be applied as an internal subcategory under {selectedParent.name}.
+            </div>
+          )}
+        </div>
+      </SmoothCollapse>
+    </div>
+  );
+}
+
+function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenPromptDiff, competencyOptions }) {
   const [payload, setPayload] = useState(getItemPayload(item));
   const [includeInApply, setIncludeInApply] = useState(item.includeInApply !== false);
   const isApplied = item.status === 'applied';
@@ -934,6 +1382,14 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
     editedPayload: payload,
     includeInApply: item.section === 'prompt' ? true : includeInApply,
   });
+  const toggleIncludeInApply = () => {
+    const nextValue = !includeInApply;
+    setIncludeInApply(nextValue);
+    onSave?.(item.id, {
+      editedPayload: payload,
+      includeInApply: nextValue,
+    });
+  };
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 animate-[fadeIn_200ms_ease-out] transition-all duration-300 ease-out">
@@ -959,16 +1415,20 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
               </button>
             )}
             {item.section !== 'prompt' && (
-              <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={includeInApply}
-                  disabled={isApplied}
-                  onChange={(e) => setIncludeInApply(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                Include
-              </label>
+              <button
+                type="button"
+                onClick={toggleIncludeInApply}
+                disabled={isApplied || saving}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  includeInApply
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                    : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100'
+                }`}
+                title={includeInApply ? 'This item will be applied. Click to skip it.' : 'This item is skipped. Click to apply it.'}
+              >
+                {includeInApply ? <CheckCircle className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                {includeInApply ? 'Apply' : 'Skip'}
+              </button>
             )}
           </div>
         )}
@@ -992,55 +1452,28 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
       )}
 
       {item.section === 'skills' && (
-        <div className="grid gap-2 md:grid-cols-2">
-          <div>
-            <label className="block text-xs font-medium text-slate-600">Action</label>
-            <select value={payload.action || 'update'} onChange={(e) => updateField('action', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-              <option value="add">Add</option>
-              <option value="rename">Rename</option>
-              <option value="update">Update</option>
-              <option value="merge">Merge</option>
-              <option value="deprecate">Deprecate</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600">Skill / Category</label>
-            <input value={payload.categoryName || ''} onChange={(e) => updateField('categoryName', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600">New Name</label>
-            <input value={payload.newName || ''} onChange={(e) => updateField('newName', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600">Description</label>
-            <input value={payload.description || ''} onChange={(e) => updateField('description', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-        </div>
+        <SkillListCompactEditor
+          payload={payload}
+          isApplied={isApplied}
+          onFieldChange={updateField}
+          competencyOptions={competencyOptions}
+          onSave={(normalizedPayload) => onSave?.(item.id, {
+            editedPayload: normalizedPayload,
+            includeInApply,
+          })}
+          saving={saving}
+        />
       )}
 
       {item.section === 'technician_competencies' && (
-        <div className="grid gap-2 md:grid-cols-2">
-          <div>
-            <label className="block text-xs font-medium text-slate-600">Technician</label>
-            <input value={payload.technicianName || ''} onChange={(e) => updateField('technicianName', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600">Skill / Category</label>
-            <input value={payload.categoryName || ''} onChange={(e) => updateField('categoryName', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600">Level</label>
-            <select value={payload.proficiencyLevel || 'intermediate'} onChange={(e) => updateField('proficiencyLevel', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-              <option value="basic">Basic</option>
-              <option value="intermediate">Intermediate</option>
-              <option value="expert">Expert</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600">Notes</label>
-            <input value={payload.notes || ''} onChange={(e) => updateField('notes', e.target.value)} disabled={isApplied} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-        </div>
+        <TechnicianCompetencyCompactEditor
+          payload={payload}
+          isApplied={isApplied}
+          onFieldChange={updateField}
+          competencyOptions={competencyOptions}
+          onSave={save}
+          saving={saving}
+        />
       )}
 
       {item.section === 'process' && (
@@ -1050,7 +1483,7 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
         </div>
       )}
 
-      {!isProcess && item.section !== 'prompt' && !isApplied && (
+      {!isProcess && item.section !== 'prompt' && item.section !== 'technician_competencies' && item.section !== 'skills' && !isApplied && (
         <div className="mt-3 flex justify-end">
           <button
             onClick={save}
@@ -1068,6 +1501,9 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
 function ConsolidationPanel({
   run,
   loading,
+  applyNotice,
+  queueSummary,
+  queueLoading,
   starting,
   applying,
   savingItemId,
@@ -1079,10 +1515,13 @@ function ConsolidationPanel({
   onApply,
   onCancel,
   onDelete,
+  onDismissApplyNotice,
 }) {
   const [promptDiffItem, setPromptDiffItem] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingRun, setDeletingRun] = useState(false);
+  const [competencyOptions, setCompetencyOptions] = useState({ technicians: [], categories: [], mappings: [] });
+  const [loadingCompetencyOptions, setLoadingCompetencyOptions] = useState(false);
   const events = run?.events || [];
   const thinking = events.filter((event) => event.type === 'thinking').map((event) => event.message).join('');
   const visibleText = events.filter((event) => event.type === 'text').map((event) => event.message).join('');
@@ -1099,6 +1538,35 @@ function ConsolidationPanel({
   const isActive = run && CONSOLIDATION_ACTIVE_STATUSES.includes(run.status);
   const hasRun = !!run;
   const currentPrompt = run?.contextSnapshot?.prompt?.systemPrompt || '';
+  const queueByKind = queueSummary?.byKind || {};
+  const queueItems = queueSummary?.items || [];
+  const queueTotal = queueSummary?.total || 0;
+  const queuePreviewItems = queueItems.slice(0, 5);
+  const queueMoreCount = Math.max(0, queueTotal - queuePreviewItems.length);
+
+  useEffect(() => {
+    const needsCompetencyOptions = (grouped.technician_competencies || []).length > 0 || (grouped.skills || []).length > 0;
+    if (!needsCompetencyOptions) return undefined;
+    let cancelled = false;
+    setLoadingCompetencyOptions(true);
+    Promise.all([
+      assignmentAPI.getCompetencyTechnicians(),
+      assignmentAPI.getCompetencies(),
+    ]).then(([techRes, compRes]) => {
+      if (cancelled) return;
+      const competencyData = compRes?.data || {};
+      setCompetencyOptions({
+        technicians: techRes?.data || [],
+        categories: competencyData.categories || [],
+        mappings: competencyData.mappings || [],
+      });
+    }).catch(() => {
+      if (!cancelled) setCompetencyOptions({ technicians: [], categories: [], mappings: [] });
+    }).finally(() => {
+      if (!cancelled) setLoadingCompetencyOptions(false);
+    });
+    return () => { cancelled = true; };
+  }, [grouped.skills, grouped.technician_competencies]);
 
   const sections = [
     { key: 'prompt', label: 'Prompt Edits', icon: FileText, applyable: true },
@@ -1127,7 +1595,7 @@ function ConsolidationPanel({
             Approved Recommendation Consolidation
           </h3>
           <p className="text-sm text-slate-500">
-            Converts approved, unapplied Daily Review findings into editable prompt, skill, competency, and process recommendations.
+            Converts approved, unapplied Review findings into editable prompt, skill, competency, and process recommendations.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1150,6 +1618,16 @@ function ConsolidationPanel({
               Delete Run
             </button>
           )}
+          {hasRun && ['completed', 'partially_applied'].includes(run.status) && (
+            <button
+              onClick={onApply}
+              disabled={applying}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {applying && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {applying ? 'Applying...' : 'Apply Selected Sections'}
+            </button>
+          )}
           <button
             onClick={onStart}
             disabled={starting || isActive}
@@ -1169,7 +1647,7 @@ function ConsolidationPanel({
                 ? 'Starting...'
                 : isActive
                   ? `Running ${run?.progress?.percent || 0}%`
-                  : 'Consolidate Approved'}
+                  : 'Run Opus Consolidation'}
             </span>
           </button>
         </div>
@@ -1180,11 +1658,93 @@ function ConsolidationPanel({
           <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading consolidation...
         </div>
       ) : !hasRun ? (
-        <div className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
-          No consolidation run yet.
+        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/40 p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-semibold text-slate-800">Approved queue waiting for Opus</div>
+              <div className="text-xs text-slate-500">
+                {queueLoading ? 'Loading approved recommendations...' : `${queueTotal} approved item${queueTotal === 1 ? '' : 's'} ready to consolidate.`}
+              </div>
+            </div>
+            {queueLoading && <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />}
+          </div>
+
+          <div className="mb-3 grid gap-2 sm:grid-cols-3">
+            {[
+              { key: 'prompt', label: 'Prompt', tone: 'blue' },
+              { key: 'skill', label: 'Skill', tone: 'emerald' },
+              { key: 'process', label: 'Process', tone: 'amber' },
+            ].map((item) => (
+              <div
+                key={item.key}
+                className={`rounded-lg border bg-white px-3 py-2 ${
+                  item.tone === 'blue'
+                    ? 'border-blue-100'
+                    : item.tone === 'emerald'
+                      ? 'border-emerald-100'
+                      : 'border-amber-100'
+                }`}
+              >
+                <div className={`text-xl font-bold ${
+                  item.tone === 'blue'
+                    ? 'text-blue-700'
+                    : item.tone === 'emerald'
+                      ? 'text-emerald-700'
+                      : 'text-amber-700'
+                }`}>
+                  {queueByKind[item.key]?.total || 0}
+                </div>
+                <div className="text-xs font-medium text-slate-500">{item.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {queuePreviewItems.length > 0 ? (
+            <div className="space-y-1.5">
+              {queuePreviewItems.map((item) => (
+                <div key={item.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs">
+                  <CompactSeverity severity={item.severity} />
+                  <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">{item.title}</span>
+                  <span className="shrink-0 capitalize text-slate-400">{item.kind}</span>
+                  <span className="shrink-0 text-slate-400">Run #{item.runId}</span>
+                </div>
+              ))}
+              {queueMoreCount > 0 && (
+                <div className="px-1 text-xs text-slate-400">
+                  +{queueMoreCount} more approved item{queueMoreCount === 1 ? '' : 's'}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-slate-100 bg-white px-4 py-5 text-center text-sm text-slate-400">
+              No approved recommendations are waiting.
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
+          {applyNotice && (
+            <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              <div className="flex min-w-0 gap-2">
+                <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <div>
+                  <div className="font-semibold">
+                    Applied {applyNotice.total} consolidation item{applyNotice.total === 1 ? '' : 's'} from Run #{applyNotice.runId}.
+                  </div>
+                  <div className="mt-0.5 text-xs text-emerald-700">
+                    {applyNotice.summary || 'The selected sections were applied and the approved backlog was refreshed.'}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onDismissApplyNotice}
+                className="rounded-md px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm">
             <StatusBadge status={run.status} />
             <span className="text-slate-500">Run #{run.id}</span>
@@ -1256,59 +1816,58 @@ function ConsolidationPanel({
           {sections.map(({ key, label, icon: Icon, applyable }) => {
             const items = grouped[key] || [];
             return (
-              <div key={key} className="rounded-xl border border-slate-200 bg-slate-50 p-3 transition-all duration-300 ease-out">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Icon className="h-4 w-4 text-slate-500" />
-                    <h4 className="text-sm font-semibold text-slate-800">{label}</h4>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-500">{items.length}</span>
-                  </div>
-                  {applyable && (
-                    <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+              <div key={key} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 transition-all duration-300 ease-out">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    {applyable && (
                       <input
                         type="checkbox"
                         checked={sectionApply[key] !== false}
                         onChange={(e) => onSectionApplyChange(key, e.target.checked)}
-                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        className="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        title={`${sectionApply[key] !== false ? 'Apply' : 'Skip'} ${label}`}
+                        aria-label={`${sectionApply[key] !== false ? 'Apply' : 'Skip'} ${label}`}
                       />
-                      Apply this section
-                    </label>
-                  )}
+                    )}
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 ring-1 ring-slate-200">
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <h4 className="text-lg font-semibold text-slate-900">{label}</h4>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-600">{items.length}</span>
+                  </div>
                   {!applyable && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Dev work only</span>}
                 </div>
-                {items.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-5 text-center text-sm text-slate-400">
-                    No {label.toLowerCase()} proposed.
-                  </div>
-                ) : (
-                  <div className="space-y-3 transition-all duration-300 ease-out">
-                    {items.map((item) => (
-                      <ConsolidationItemCard
-                        key={item.id}
-                        item={item}
-                        saving={savingItemId === item.id}
-                        onSave={onSaveItem}
-                        currentPrompt={currentPrompt}
-                        onOpenPromptDiff={setPromptDiffItem}
-                      />
-                    ))}
-                  </div>
-                )}
+                <div className="p-3">
+                  {items.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-5 text-center text-sm text-slate-400">
+                      No {label.toLowerCase()} proposed.
+                    </div>
+                  ) : (
+                    <div className="space-y-3 transition-all duration-300 ease-out">
+                      {(key === 'technician_competencies' || key === 'skills') && loadingCompetencyOptions && (
+                        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">
+                          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                          Loading skill matrix options...
+                        </div>
+                      )}
+                      {items.map((item) => (
+                        <ConsolidationItemCard
+                          key={item.id}
+                          item={item}
+                          saving={savingItemId === item.id}
+                          onSave={onSaveItem}
+                          currentPrompt={currentPrompt}
+                          onOpenPromptDiff={setPromptDiffItem}
+                          competencyOptions={competencyOptions}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
 
-          {['completed', 'partially_applied'].includes(run.status) && (
-            <div className="flex justify-end">
-              <button
-                onClick={onApply}
-                disabled={applying}
-                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60"
-              >
-                {applying ? 'Applying...' : 'Apply Selected Sections'}
-              </button>
-            </div>
-          )}
         </div>
       )}
       {promptDiffItem && (
@@ -1437,7 +1996,7 @@ function toneOf(value) {
 function briefingToMarkdown(briefing, run, workspaceTimezone) {
   if (!briefing) return '';
   const lines = [];
-  const dateLabel = formatDateOnlyInTimezone(run.reviewDate, workspaceTimezone);
+  const dateLabel = formatReviewRunDateLabel(run, workspaceTimezone);
   lines.push(`# Daily Briefing — ${run.summaryMetrics?.workspaceName || 'Workspace'} · ${dateLabel}`);
   if (briefing.headline) {
     lines.push('');
@@ -1583,7 +2142,7 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
 
       {!isCompleted && !localBriefing && (
         <div className="rounded-lg border border-dashed border-purple-200 bg-white/50 px-4 py-8 text-center text-sm text-purple-700">
-          The meeting briefing can be generated once the daily review reaches the <strong>completed</strong> status.
+          The meeting briefing can be generated once the review reaches the <strong>completed</strong> status.
         </div>
       )}
 
@@ -1800,7 +2359,7 @@ function CollectionDiagnosticsSection({ summary }) {
 
       {ticketsWithoutContext > 0 && (
         <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-          {ticketsWithoutContext} ticket(s) reached the LLM with no thread context (no activities and no conversations). The model had only metadata for these. Try the <strong>Force refresh from FreshService</strong> option on a rerun.
+          {ticketsWithoutContext} ticket(s) reached the LLM with no thread context (no activities and no conversations). The model had only metadata for these. Try <strong>Force Refresh Tickets</strong> on a rerun.
         </div>
       )}
     </div>
@@ -1824,11 +2383,11 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h2 className="text-lg font-semibold text-slate-800">Daily Review #{run.id}</h2>
+              <h2 className="text-lg font-semibold text-slate-800">Review #{run.id}</h2>
               <StatusBadge status={run.status} />
             </div>
             <div className="text-sm text-slate-500">
-              {summary.workspaceName || 'Workspace'} · {formatDateOnlyInTimezone(run.reviewDate, workspaceTimezone)} · {summary.reviewWindow?.startTime || '00:00'}-{summary.reviewWindow?.endTime || '23:59'}
+              {summary.workspaceName || 'Workspace'} · {formatReviewRunDateLabel(run, workspaceTimezone)} · {summary.reviewWindow?.startTime || '00:00'}-{summary.reviewWindow?.endTime || '23:59'}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1962,7 +2521,7 @@ const LIVE_STAT_LABELS = {
   unresolved: 'Unresolved',
 };
 
-function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComplete }) {
+function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, forceRefreshThreads = false, onComplete, onFinished }) {
   const [phase, setPhase] = useState(null);
   const [phaseMessage, setPhaseMessage] = useState('');
   const [runId, setRunId] = useState(null);
@@ -1982,6 +2541,7 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
   const pollTimerRef = useRef(null);
   const stoppedRef = useRef(false);
   const lastMessageRef = useRef(null);
+  const completionNotifiedRef = useRef(false);
 
   const appendActivity = useCallback((message, eventPhase = 'update') => {
     if (!message) return;
@@ -2017,13 +2577,14 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
   useEffect(() => {
     let cancelled = false;
     stoppedRef.current = false;
+    completionNotifiedRef.current = false;
     startedAtRef.current = Date.now();
     setStatus('starting');
     setElapsedSec(0);
     setError(null);
     setRunId(null);
     setPhase(null);
-    setPhaseMessage('Queuing daily review on the server...');
+    setPhaseMessage('Queuing review on the server...');
     setProgressPct(2);
     setLiveStats({});
     setActivityLog([]);
@@ -2060,7 +2621,7 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
         stopPolling();
       } else if (row.status === 'failed') {
         setStatus('error');
-        setError(row.errorMessage || 'Daily review failed');
+        setError(row.errorMessage || 'Review failed');
         stopPolling();
       } else if (row.status === 'cancelled') {
         setStatus('cancelled');
@@ -2107,6 +2668,8 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
       try {
         const res = await assignmentAPI.runDailyReview({
           reviewDate,
+          reviewStartDate,
+          reviewEndDate,
           force: true,
           forceRefreshThreads,
         });
@@ -2115,7 +2678,7 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
         const id = row?.id;
         if (!id) throw new Error('Server did not return a run id');
         setRunId(id);
-        appendActivity(`Started daily review run #${id}.`, 'started');
+        appendActivity(`Started review run #${id}.`, 'started');
         applyProgress(row);
         // If kickoff returned an already-completed row (force=false, cached),
         // skip polling and pull final details immediately.
@@ -2127,8 +2690,8 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
       } catch (err) {
         if (cancelled) return;
         setStatus('error');
-        setError(err?.message || 'Failed to start daily review');
-        appendActivity(err?.message || 'Failed to start daily review', 'error');
+        setError(err?.message || 'Failed to start review');
+        appendActivity(err?.message || 'Failed to start review', 'error');
       }
     })();
 
@@ -2137,7 +2700,7 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewDate, forceRefreshThreads]);
+  }, [reviewDate, reviewStartDate, reviewEndDate, forceRefreshThreads]);
 
   // When status flips to completed, fetch the full run detail to populate
   // summary / counts / executiveSummary. Polling endpoint is intentionally
@@ -2154,9 +2717,13 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
           skill: (row.skillRecommendations || []).length,
         });
         setExecutiveSummary(row.summaryMetrics?.executiveSummary || '');
+        if (!completionNotifiedRef.current) {
+          completionNotifiedRef.current = true;
+          onFinished?.(runId, row);
+        }
       }).catch(() => { /* non-fatal */ });
     }
-  }, [status, runId]);
+  }, [status, runId, onFinished]);
 
   const visibleLiveStats = Object.entries(LIVE_STAT_LABELS)
     .filter(([key]) => liveStats[key] != null)
@@ -2172,7 +2739,7 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
       await assignmentAPI.cancelDailyReviewRun(runId);
     } catch (cancelError) {
       setIsCancelling(false);
-      const message = cancelError?.message || 'Failed to cancel daily review run.';
+      const message = cancelError?.message || 'Failed to cancel review run.';
       setPhaseMessage(message);
       appendActivity(message, 'error');
     }
@@ -2201,12 +2768,12 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
                   : 'text-purple-700'
           }`}>
             {status === 'running' || status === 'starting'
-              ? `Running daily review... (${elapsedSec}s)`
+              ? `Running review... (${elapsedSec}s)`
               : status === 'cancelled'
-                ? `Daily review cancelled (${elapsedSec}s)`
+                ? `Review cancelled (${elapsedSec}s)`
                 : status === 'completed'
-                  ? `Daily review complete (${elapsedSec}s)`
-                  : 'Daily review failed'}
+                  ? `Review complete (${elapsedSec}s)`
+                  : 'Review failed'}
           </span>
           {runId && <span className="text-xs text-slate-400">Run #{runId}</span>}
         </div>
@@ -2300,7 +2867,7 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
 
       {(error || status === 'error') && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error || 'Daily review failed'}
+          {error || 'Review failed'}
         </div>
       )}
     </div>
@@ -2309,11 +2876,24 @@ function LiveDailyReviewView({ reviewDate, forceRefreshThreads = false, onComple
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const RUN_HISTORY_TIME_OPTIONS = { timeZoneName: 'short' };
+const RUN_HISTORY_PAGE_SIZE = 8;
+const REVIEW_PAGE_TABS = [
+  { key: 'review', label: 'Review', icon: CalendarDays },
+  { key: 'backlog', label: 'Backlog', icon: History },
+  { key: 'consolidation', label: 'Consolidation', icon: Sparkles },
+];
+const BACKLOG_KIND_TABS = [
+  { key: 'prompt', label: 'Prompt', icon: FileText },
+  { key: 'process', label: 'Process', icon: Settings2 },
+  { key: 'skill', label: 'Skill', icon: Award },
+  { key: 'dev', label: 'Dev', icon: AlertTriangle, visibilityOnly: true },
+];
 
 function DailyReviewHistoryPanel({
-  open,
-  onToggle,
   runs,
+  total,
+  page,
+  pageSize,
   loadingRuns,
   loadingDetail,
   workspaceTimezone,
@@ -2321,29 +2901,21 @@ function DailyReviewHistoryPanel({
   onOpenRun,
   onCancelRun,
   onRequestDeleteRun,
+  onPageChange,
 }) {
-  const latestRun = runs[0];
-  const latestTotals = latestRun?.summaryMetrics?.totals || {};
-  const latestActive = latestRun ? ACTIVE_STATUSES.includes(latestRun.status) : false;
+  const totalPages = Math.max(1, Math.ceil((total || 0) / pageSize));
+  const start = total > 0 ? page * pageSize + 1 : 0;
+  const end = Math.min(total || 0, (page + 1) * pageSize);
 
   return (
-    <div className="mt-4 overflow-hidden rounded-lg border border-indigo-100 bg-white/80 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-        >
-          {open ? <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" /> : <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />}
+    <div className="mt-4 overflow-hidden rounded-lg border border-indigo-100 bg-white/90 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-50 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
           <History className="h-4 w-4 shrink-0 text-indigo-600" />
-          <span className="shrink-0 text-sm font-semibold text-slate-800">Review History</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">{runs.length}</span>
-          {!open && latestRun && (
-            <span className="min-w-0 truncate text-xs text-slate-500">
-              Latest: Run #{latestRun.id} · {latestRun.status?.replace(/_/g, ' ')} · {formatDateTimeInTimezone(latestRun.createdAt, workspaceTimezone, RUN_HISTORY_TIME_OPTIONS)}
-            </span>
-          )}
-        </button>
+          <span className="text-sm font-semibold text-slate-800">Review History</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">{total || 0}</span>
+          <span className="text-xs text-slate-400">Collapsed list</span>
+        </div>
         <button
           type="button"
           onClick={onRefresh}
@@ -2354,122 +2926,131 @@ function DailyReviewHistoryPanel({
         </button>
       </div>
 
-      {!open && latestRun && (
-        <div className="border-t border-indigo-50 px-3 py-2 text-xs text-slate-500">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`h-1.5 w-1.5 rounded-full ${
-              latestRun.status === 'completed'
-                ? 'bg-emerald-500'
-                : latestActive
-                  ? 'bg-indigo-500'
-                  : latestRun.status === 'failed'
-                    ? 'bg-red-500'
-                    : 'bg-slate-300'
-            }`} />
-            {latestTotals.totalTicketsReviewed != null && <span>{latestTotals.totalTicketsReviewed} tickets</span>}
-            {latestTotals.success != null && <span className="font-medium text-emerald-600">{latestTotals.success} ✓</span>}
-            {latestTotals.failure != null && <span className="font-medium text-red-600">{latestTotals.failure} ✕</span>}
-            {latestRun.triggeredBy && <span className="truncate">{latestRun.triggeredBy}</span>}
+      <div className="bg-white">
+        {loadingRuns ? (
+          <div className="flex items-center justify-center py-6 text-sm text-gray-400">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading history...
+          </div>
+        ) : runs.length === 0 ? (
+          <div className="py-6 text-center text-sm text-gray-400">
+            No review runs yet. Start one above.
+          </div>
+        ) : (
+          <div>
+            {runs.map((run) => {
+              const totals = run.summaryMetrics?.totals || {};
+              const isActiveStatus = ACTIVE_STATUSES.includes(run.status);
+              return (
+                <div
+                  key={run.id}
+                  className="group flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-indigo-50/40"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onOpenRun(run.id)}
+                    disabled={loadingDetail}
+                    className="min-w-0 flex-1 text-left disabled:cursor-wait"
+                  >
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                      <span className="font-semibold text-slate-900">Run #{run.id}</span>
+                      <span className={`h-1.5 w-1.5 rounded-full ${
+                        run.status === 'completed'
+                          ? 'bg-emerald-500'
+                          : isActiveStatus
+                            ? 'bg-indigo-500'
+                            : run.status === 'failed'
+                              ? 'bg-red-500'
+                              : 'bg-slate-300'
+                      }`} />
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                        run.status === 'completed'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : isActiveStatus
+                            ? 'bg-indigo-50 text-indigo-700'
+                            : run.status === 'failed'
+                              ? 'bg-red-50 text-red-700'
+                              : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {run.status?.replace(/_/g, ' ')}
+                      </span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-slate-500">{formatReviewRunDateLabel(run, workspaceTimezone)}</span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-slate-500">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone, RUN_HISTORY_TIME_OPTIONS)}</span>
+                      {run.triggeredBy && (
+                        <>
+                          <span className="text-slate-300">•</span>
+                          <span className="max-w-[220px] truncate text-slate-500">{run.triggeredBy}</span>
+                        </>
+                      )}
+                    </div>
+                  </button>
+
+                  <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
+                    {totals.totalTicketsReviewed != null && <span className="tabular-nums">{totals.totalTicketsReviewed}</span>}
+                    {totals.totalTicketsReviewed != null && <span className="text-slate-300">tickets</span>}
+                    {totals.success != null && <span className="font-medium tabular-nums text-emerald-600">{totals.success} ✓</span>}
+                    {totals.failure != null && <span className="font-medium tabular-nums text-red-600">{totals.failure} ✕</span>}
+                    {isActiveStatus && (
+                      <button
+                        type="button"
+                        onClick={(e) => onCancelRun(e, run.id)}
+                        className="rounded px-2 py-1 text-red-600 hover:bg-red-50"
+                        title="Cancel this run"
+                      >
+                        <StopCircle className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {!isActiveStatus && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRequestDeleteRun(run);
+                        }}
+                        className="rounded px-2 py-1 text-red-500 opacity-70 hover:bg-red-50 hover:opacity-100"
+                        title="Delete this review run"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <ChevronRight className="h-4 w-4 text-slate-300 transition-colors group-hover:text-indigo-500" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          <span>
+            Showing {start}-{end} of {total}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onPageChange(Math.max(0, page - 1))}
+              disabled={page === 0 || loadingRuns}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="font-semibold text-slate-600">
+              Page {page + 1} of {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+              disabled={page >= totalPages - 1 || loadingRuns}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
           </div>
         </div>
       )}
-
-      <SmoothCollapse open={open}>
-        <div className="border-t border-indigo-100 bg-white">
-          {loadingRuns ? (
-            <div className="flex items-center justify-center py-6 text-sm text-gray-400">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading history...
-            </div>
-          ) : runs.length === 0 ? (
-            <div className="py-6 text-center text-sm text-gray-400">
-              No daily review runs yet. Start one above.
-            </div>
-          ) : (
-            <div className="max-h-[280px] overflow-auto">
-              {runs.map((run) => {
-                const totals = run.summaryMetrics?.totals || {};
-                const isActiveStatus = ACTIVE_STATUSES.includes(run.status);
-                return (
-                  <div
-                    key={run.id}
-                    className="group flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-indigo-50/40"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onOpenRun(run.id)}
-                      disabled={loadingDetail}
-                      className="min-w-0 flex-1 text-left disabled:cursor-wait"
-                    >
-                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                        <span className="font-semibold text-slate-900">Run #{run.id}</span>
-                        <span className={`h-1.5 w-1.5 rounded-full ${
-                          run.status === 'completed'
-                            ? 'bg-emerald-500'
-                            : isActiveStatus
-                              ? 'bg-indigo-500'
-                              : run.status === 'failed'
-                                ? 'bg-red-500'
-                                : 'bg-slate-300'
-                        }`} />
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                          run.status === 'completed'
-                            ? 'bg-emerald-50 text-emerald-700'
-                            : isActiveStatus
-                              ? 'bg-indigo-50 text-indigo-700'
-                              : run.status === 'failed'
-                                ? 'bg-red-50 text-red-700'
-                                : 'bg-slate-100 text-slate-600'
-                        }`}>
-                          {run.status?.replace(/_/g, ' ')}
-                        </span>
-                        <span className="text-slate-300">•</span>
-                        <span className="text-slate-500">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone, RUN_HISTORY_TIME_OPTIONS)}</span>
-                        {run.triggeredBy && (
-                          <>
-                            <span className="text-slate-300">•</span>
-                            <span className="max-w-[220px] truncate text-slate-500">{run.triggeredBy}</span>
-                          </>
-                        )}
-                      </div>
-                    </button>
-
-                    <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
-                      {totals.totalTicketsReviewed != null && <span className="tabular-nums">{totals.totalTicketsReviewed}</span>}
-                      {totals.totalTicketsReviewed != null && <span className="text-slate-300">tickets</span>}
-                      {totals.success != null && <span className="font-medium tabular-nums text-emerald-600">{totals.success} ✓</span>}
-                      {totals.failure != null && <span className="font-medium tabular-nums text-red-600">{totals.failure} ✕</span>}
-                      {isActiveStatus && (
-                        <button
-                          type="button"
-                          onClick={(e) => onCancelRun(e, run.id)}
-                          className="rounded px-2 py-1 text-red-600 hover:bg-red-50"
-                          title="Cancel this run"
-                        >
-                          <StopCircle className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                      {!isActiveStatus && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRequestDeleteRun(run);
-                          }}
-                          className="rounded px-2 py-1 text-red-500 opacity-70 hover:bg-red-50 hover:opacity-100"
-                          title="Delete this review run"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                      <ChevronRight className="h-4 w-4 text-slate-300 transition-colors group-hover:text-indigo-500" />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </SmoothCollapse>
     </div>
   );
 }
@@ -2477,9 +3058,12 @@ function DailyReviewHistoryPanel({
 export default function DailyReviewManager({ workspaceTimezone }) {
   const [view, setView] = useState('trigger');
   const [reviewDate, setReviewDate] = useState(formatDateLocal(new Date()));
+  const [reviewMode, setReviewMode] = useState('single');
+  const [reviewEndDate, setReviewEndDate] = useState(formatDateLocal(new Date()));
   const [forceRefreshThreads, setForceRefreshThreads] = useState(false);
   const [runs, setRuns] = useState([]);
-  const [reviewHistoryOpen, setReviewHistoryOpen] = useState(false);
+  const [runsTotal, setRunsTotal] = useState(0);
+  const [runHistoryPage, setRunHistoryPage] = useState(0);
   const [runDeleteConfirm, setRunDeleteConfirm] = useState(null);
   const [deletingDailyReviewRun, setDeletingDailyReviewRun] = useState(false);
   const [activeRun, setActiveRun] = useState(null);
@@ -2497,15 +3081,22 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   const [loadingBacklog, setLoadingBacklog] = useState(false);
   const [refreshingBacklog, setRefreshingBacklog] = useState(false);
   const [backlogStatus, setBacklogStatus] = useState('pending');
-  const [backlogKind, setBacklogKind] = useState('all');
+  const [backlogKind, setBacklogKind] = useState('prompt');
   const [backlogSeverity, setBacklogSeverity] = useState('all');
   const [backlogStartDate, setBacklogStartDate] = useState('');
   const [backlogEndDate, setBacklogEndDate] = useState('');
   const [backlogRunFilter, setBacklogRunFilter] = useState('');
   const [consolidationRun, setConsolidationRun] = useState(null);
   const [loadingConsolidation, setLoadingConsolidation] = useState(false);
+  const [loadingConsolidationQueue, setLoadingConsolidationQueue] = useState(false);
+  const [consolidationQueueSummary, setConsolidationQueueSummary] = useState({
+    total: 0,
+    byKind: {},
+    items: [],
+  });
   const [startingConsolidation, setStartingConsolidation] = useState(false);
   const [applyingConsolidation, setApplyingConsolidation] = useState(false);
+  const [consolidationApplyNotice, setConsolidationApplyNotice] = useState(null);
   const [savingConsolidationItemId, setSavingConsolidationItemId] = useState(null);
   const [consolidationSectionApply, setConsolidationSectionApply] = useState({
     prompt: true,
@@ -2514,21 +3105,36 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   });
   const backlogHasLoadedRef = useRef(false);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get('tab');
+  const activeTab = REVIEW_PAGE_TABS.some((tab) => tab.key === requestedTab) ? requestedTab : 'review';
+  const effectiveReviewEndDate = reviewMode === 'range' ? reviewEndDate : reviewDate;
+
+  const setActiveTab = useCallback((tabKey) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('tab', tabKey);
+    setSearchParams(nextParams);
+  }, [searchParams, setSearchParams]);
 
   const loadRuns = useCallback(async () => {
     setLoadingRuns(true);
     try {
-      const res = await assignmentAPI.getDailyReviewRuns({ limit: 20 });
+      const res = await assignmentAPI.getDailyReviewRuns({
+        limit: RUN_HISTORY_PAGE_SIZE,
+        offset: runHistoryPage * RUN_HISTORY_PAGE_SIZE,
+      });
       const items = res?.items || [];
       setRuns(items);
+      setRunsTotal(res?.total || items.length);
       setActiveRun(items.find((item) => ACTIVE_STATUSES.includes(item.status)) || null);
     } catch {
       setRuns([]);
+      setRunsTotal(0);
       setActiveRun(null);
     } finally {
       setLoadingRuns(false);
     }
-  }, []);
+  }, [runHistoryPage]);
 
   useEffect(() => { loadRuns(); }, [loadRuns]);
 
@@ -2558,24 +3164,34 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         runIdParam = hashMatch ? hashMatch[1] : leadingMatch ? leadingMatch[1] : '';
       }
       const baseParams = {
-        limit: 100,
-        kind: backlogKind,
+        limit: ['process', 'dev'].includes(backlogKind) ? 250 : 100,
+        kind: backlogKind === 'dev' ? 'process' : backlogKind,
         severity: backlogSeverity,
         ...(backlogStartDate ? { startDate: backlogStartDate } : {}),
         ...(backlogEndDate ? { endDate: backlogEndDate } : {}),
         ...(runIdParam ? { runId: runIdParam } : {}),
       };
+      const filterForKindTab = (items = []) => {
+        if (backlogKind === 'dev') return items.filter(isDevBacklogItem);
+        if (backlogKind === 'process') return items.filter((item) => !isDevBacklogItem(item));
+        return items;
+      };
+      const usesClientFilteredTotals = ['process', 'dev'].includes(backlogKind);
       if (backlogStatus === 'pending') {
         const [pendingRes, approvedRes] = await Promise.all([
           assignmentAPI.getDailyReviewRecommendations({ ...baseParams, status: 'pending' }),
           assignmentAPI.getDailyReviewRecommendations({ ...baseParams, status: 'approved' }),
         ]);
-        setPendingBacklogItems(pendingRes?.items || []);
-        setPendingBacklogTotal(pendingRes?.total || 0);
-        setApprovedBacklogItems(approvedRes?.items || []);
-        setApprovedBacklogTotal(approvedRes?.total || 0);
-        setBacklogItems(pendingRes?.items || []);
-        setBacklogTotal((pendingRes?.total || 0) + (approvedRes?.total || 0));
+        const pendingItems = filterForKindTab(pendingRes?.items || []);
+        const approvedItems = filterForKindTab(approvedRes?.items || []);
+        setPendingBacklogItems(pendingItems);
+        setPendingBacklogTotal(usesClientFilteredTotals ? pendingItems.length : pendingRes?.total || 0);
+        setApprovedBacklogItems(approvedItems);
+        setApprovedBacklogTotal(usesClientFilteredTotals ? approvedItems.length : approvedRes?.total || 0);
+        setBacklogItems(backlogKind === 'dev' ? [...pendingItems, ...approvedItems] : pendingItems);
+        setBacklogTotal(usesClientFilteredTotals
+          ? pendingItems.length + approvedItems.length
+          : (pendingRes?.total || 0) + (approvedRes?.total || 0));
         return;
       }
 
@@ -2583,12 +3199,15 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         ...baseParams,
         status: backlogStatus,
       });
-      setBacklogItems(res?.items || []);
-      setBacklogTotal(res?.total || 0);
+      const filteredItems = filterForKindTab(res?.items || []);
+      setBacklogItems(filteredItems);
+      setBacklogTotal(usesClientFilteredTotals ? filteredItems.length : res?.total || 0);
       setPendingBacklogItems([]);
       setPendingBacklogTotal(0);
-      setApprovedBacklogItems(backlogStatus === 'approved' ? (res?.items || []) : []);
-      setApprovedBacklogTotal(backlogStatus === 'approved' ? (res?.total || 0) : 0);
+      setApprovedBacklogItems(backlogStatus === 'approved' ? filteredItems : []);
+      setApprovedBacklogTotal(backlogStatus === 'approved'
+        ? (usesClientFilteredTotals ? filteredItems.length : res?.total || 0)
+        : 0);
     } catch {
       setBacklogItems([]);
       setPendingBacklogItems([]);
@@ -2622,8 +3241,41 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     }
   }, []);
 
+  const loadConsolidationQueue = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoadingConsolidationQueue(true);
+    try {
+      const [promptRes, skillRes, processRes] = await Promise.all([
+        assignmentAPI.getDailyReviewRecommendations({ status: 'approved', kind: 'prompt', limit: 100 }),
+        assignmentAPI.getDailyReviewRecommendations({ status: 'approved', kind: 'skill', limit: 100 }),
+        assignmentAPI.getDailyReviewRecommendations({ status: 'approved', kind: 'process', limit: 100 }),
+      ]);
+      const byKind = {
+        prompt: { total: promptRes?.total || 0, items: promptRes?.items || [] },
+        skill: { total: skillRes?.total || 0, items: skillRes?.items || [] },
+        process: { total: processRes?.total || 0, items: processRes?.items || [] },
+      };
+      const items = [...byKind.prompt.items, ...byKind.skill.items, ...byKind.process.items]
+        .sort((a, b) => {
+          const aTime = new Date(a.reviewedAt || a.createdAt || a.reviewDate || 0).getTime();
+          const bTime = new Date(b.reviewedAt || b.createdAt || b.reviewDate || 0).getTime();
+          return bTime - aTime;
+        })
+        .slice(0, 8);
+      setConsolidationQueueSummary({
+        total: byKind.prompt.total + byKind.skill.total + byKind.process.total,
+        byKind,
+        items,
+      });
+    } catch {
+      setConsolidationQueueSummary({ total: 0, byKind: {}, items: [] });
+    } finally {
+      if (!quiet) setLoadingConsolidationQueue(false);
+    }
+  }, []);
+
   useEffect(() => { loadBacklog(); }, [loadBacklog]);
   useEffect(() => { loadConsolidation(); }, [loadConsolidation]);
+  useEffect(() => { loadConsolidationQueue(); }, [loadConsolidationQueue]);
 
   useEffect(() => {
     if (!consolidationRun || !CONSOLIDATION_ACTIVE_STATUSES.includes(consolidationRun.status)) return undefined;
@@ -2724,6 +3376,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         });
       }, 650);
       loadConsolidation({ quiet: true });
+      loadConsolidationQueue({ quiet: true });
     } catch {
       /* ignore */
     } finally {
@@ -2736,7 +3389,10 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     try {
       const res = await assignmentAPI.startDailyReviewConsolidation();
       setConsolidationRun(res?.data || null);
-      await loadConsolidation({ quiet: true });
+      await Promise.all([
+        loadConsolidation({ quiet: true }),
+        loadConsolidationQueue({ quiet: true }),
+      ]);
     } catch {
       /* ignore */
     } finally {
@@ -2762,15 +3418,51 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
   const handleApplyConsolidation = async () => {
     if (!consolidationRun?.id) return;
+    const selectedSections = {
+      prompt: consolidationSectionApply.prompt !== false,
+      skills: consolidationSectionApply.skills !== false,
+      technician_competencies: consolidationSectionApply.technician_competencies !== false,
+    };
+    const sectionLabels = {
+      prompt: 'prompt',
+      skills: 'skill',
+      technician_competencies: 'technician skill',
+    };
+    const itemsToApply = (consolidationRun.items || []).filter((item) => (
+      selectedSections[item.section]
+      && item.includeInApply
+      && item.status !== 'applied'
+      && ['prompt', 'skills', 'technician_competencies'].includes(item.section)
+    ));
+    const countsBySection = itemsToApply.reduce((acc, item) => {
+      acc[item.section] = (acc[item.section] || 0) + 1;
+      return acc;
+    }, {});
     setApplyingConsolidation(true);
     try {
-      const res = await assignmentAPI.applyDailyReviewConsolidation(consolidationRun.id, {
-        applyPrompt: consolidationSectionApply.prompt !== false,
-        applySkills: consolidationSectionApply.skills !== false,
-        applyTechnicianCompetencies: consolidationSectionApply.technician_competencies !== false,
+      const runId = consolidationRun.id;
+      await assignmentAPI.applyDailyReviewConsolidation(runId, {
+        applyPrompt: selectedSections.prompt,
+        applySkills: selectedSections.skills,
+        applyTechnicianCompetencies: selectedSections.technician_competencies,
       });
-      setConsolidationRun(res?.data || null);
-      await Promise.all([loadBacklog(), loadRuns()]);
+      const refreshedRun = await assignmentAPI.getDailyReviewConsolidationRun(runId);
+      setConsolidationRun(refreshedRun?.data || null);
+      const summary = Object.entries(countsBySection)
+        .filter(([, count]) => count > 0)
+        .map(([section, count]) => `${count} ${sectionLabels[section]}${count === 1 ? '' : 's'}`)
+        .join(' · ');
+      setConsolidationApplyNotice({
+        id: Date.now(),
+        runId,
+        total: itemsToApply.length,
+        summary: summary ? `${summary} applied. Approved backlog and queue counts were refreshed.` : 'No pending applyable items were selected.',
+      });
+      await Promise.all([
+        loadBacklog(),
+        loadRuns(),
+        loadConsolidationQueue({ quiet: true }),
+      ]);
     } catch {
       /* ignore */
     } finally {
@@ -2796,7 +3488,10 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     if (!consolidationRun?.id) return;
     try {
       await assignmentAPI.deleteDailyReviewConsolidation(consolidationRun.id);
-      await loadConsolidation({ quiet: true });
+      await Promise.all([
+        loadConsolidation({ quiet: true }),
+        loadConsolidationQueue({ quiet: true }),
+      ]);
     } catch {
       /* ignore */
     }
@@ -2822,7 +3517,12 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         setView('trigger');
       }
       setRunDeleteConfirm(null);
-      await Promise.all([loadRuns(), loadBacklog(), loadConsolidation({ quiet: true })]);
+      await Promise.all([
+        loadRuns(),
+        loadBacklog(),
+        loadConsolidation({ quiet: true }),
+        loadConsolidationQueue({ quiet: true }),
+      ]);
     } catch {
       /* ignore */
     } finally {
@@ -2833,13 +3533,25 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   if (view === 'live') {
     return (
       <div>
-        <button onClick={() => { setView('trigger'); loadRuns(); }} className="text-sm text-blue-600 hover:text-blue-800 mb-3 flex items-center gap-1">
-          <ArrowLeft className="w-4 h-4" /> Back to Daily Review
+        <button
+          onClick={() => { setView('trigger'); loadRuns(); }}
+          className="mb-3 flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to Review
         </button>
-        <LiveDailyReviewView reviewDate={reviewDate} forceRefreshThreads={forceRefreshThreads} onComplete={async (runId) => {
-          loadRuns();
-          if (runId) await loadRunDetail(runId);
-        }} />
+        <LiveDailyReviewView
+          reviewDate={reviewDate}
+          reviewStartDate={reviewDate}
+          reviewEndDate={effectiveReviewEndDate}
+          forceRefreshThreads={forceRefreshThreads}
+          onComplete={async (runId) => {
+            await loadRuns();
+            if (runId) await loadRunDetail(runId);
+          }}
+          onFinished={async () => {
+            await Promise.all([loadRuns(), loadBacklog(), loadConsolidationQueue({ quiet: true })]);
+          }}
+        />
       </div>
     );
   }
@@ -2847,15 +3559,18 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   if (view === 'detail' && selectedRun) {
     return (
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <button onClick={() => { setSelectedRun(null); setView('trigger'); }} className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1">
-            <ArrowLeft className="w-4 h-4" /> Back to Daily Review
+        <div className="mb-3 flex items-center justify-between">
+          <button
+            onClick={() => { setSelectedRun(null); setView('trigger'); }}
+            className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to Review
           </button>
           <button
             onClick={() => navigate('/assignments/history')}
-            className="text-sm text-slate-500 hover:text-slate-700 inline-flex items-center gap-1"
+            className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
           >
-            Review Assignment History <ExternalLink className="w-4 h-4" />
+            Assignment History <ExternalLink className="h-4 w-4" />
           </button>
         </div>
         <RunDetail
@@ -2870,121 +3585,211 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold text-slate-800 mb-1 flex items-center gap-2">
-          <CalendarDays className="w-5 h-5 text-indigo-600" />
-          Daily Review
-        </h3>
-        <p className="text-sm text-slate-500 mb-4">
-          Review one business day of assignment outcomes and generate prompt, process, and skill-matrix recommendations.
-        </p>
-
-        {activeRun && (
-          <div className="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Brain className="w-5 h-5 text-indigo-600 animate-spin" />
-              <div>
-                <div className="text-sm font-semibold text-indigo-800">
-                  Run #{activeRun.id} in progress
-                </div>
-                <div className="text-xs text-indigo-500">
-                  {formatDateOnlyInTimezone(activeRun.reviewDate, workspaceTimezone)} · {activeRun.status.replace(/_/g, ' ')}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => loadRunDetail(activeRun.id)} className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors">
-                View Progress
+      <div className="rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <div className="grid gap-1 md:grid-cols-3">
+          {REVIEW_PAGE_TABS.map(({ key, label, icon: Icon }) => {
+            const isActiveTab = activeTab === key;
+            const badge = key === 'backlog'
+              ? (backlogStatus === 'pending' ? pendingBacklogTotal + approvedBacklogTotal : backlogTotal)
+              : key === 'consolidation'
+                ? consolidationQueueSummary.total
+                : activeRun ? 1 : null;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActiveTab(key)}
+                className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all ${
+                  isActiveTab
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+                {badge != null && badge > 0 && (
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    isActiveTab ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                  }`}>
+                    {badge}
+                  </span>
+                )}
               </button>
-              <button onClick={(e) => cancelRun(e, activeRun.id)} className="text-xs px-3 py-1.5 text-red-600 border border-red-200 rounded-lg font-medium hover:bg-red-50 transition-colors">
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-4">
-          <div className="flex flex-wrap items-end gap-3 mb-3">
-            <div>
-              <label className="block text-xs text-slate-600 font-medium mb-1">Review Date</label>
-              <input
-                type="date"
-                value={reviewDate}
-                onChange={(e) => setReviewDate(e.target.value)}
-                className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-            <button
-              onClick={() => setReviewDate(formatDateLocal(new Date()))}
-              className="text-xs px-2.5 py-2 bg-white border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-100 transition-colors font-medium"
-            >
-              Today
-            </button>
-            <button
-              onClick={() => setView('live')}
-              disabled={!reviewDate}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:from-indigo-700 hover:to-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Play className="h-3.5 w-3.5" />
-              Run Daily Review
-            </button>
-            <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-700">
-              <input
-                type="checkbox"
-                checked={forceRefreshThreads}
-                onChange={(e) => setForceRefreshThreads(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-              />
-              <span>
-                <span className="font-medium text-slate-800">Force refresh from FreshService</span>
-                <span className="ml-1 text-slate-500">(bypass local cache; slower but pulls latest replies/notes)</span>
-              </span>
-            </label>
-          </div>
-
-          <DailyReviewHistoryPanel
-            open={reviewHistoryOpen}
-            onToggle={() => setReviewHistoryOpen((prev) => !prev)}
-            runs={runs}
-            loadingRuns={loadingRuns}
-            loadingDetail={loadingDetail}
-            workspaceTimezone={workspaceTimezone}
-            onRefresh={loadRuns}
-            onOpenRun={loadRunDetail}
-            onCancelRun={cancelRun}
-            onRequestDeleteRun={setRunDeleteConfirm}
-          />
+            );
+          })}
         </div>
       </div>
 
-      <ConsolidationPanel
-        run={consolidationRun}
-        loading={loadingConsolidation}
-        starting={startingConsolidation}
-        applying={applyingConsolidation}
-        savingItemId={savingConsolidationItemId}
-        sectionApply={consolidationSectionApply}
-        onSectionApplyChange={handleConsolidationSectionApplyChange}
-        onStart={handleStartConsolidation}
-        onRefresh={() => loadConsolidation()}
-        onSaveItem={handleSaveConsolidationItem}
-        onApply={handleApplyConsolidation}
-        onCancel={handleCancelConsolidation}
-        onDelete={handleDeleteConsolidation}
-      />
+      {activeTab === 'review' && (
+        <div>
+          <h3 className="text-lg font-semibold text-slate-800 mb-1 flex items-center gap-2">
+            <CalendarDays className="w-5 h-5 text-indigo-600" />
+          Review
+          </h3>
+          <p className="text-sm text-slate-500 mb-4">
+          Review assignment outcomes and generate prompt, process, and skill-matrix recommendations.
+          </p>
+
+          {activeRun && (
+            <div className="mb-4 flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+              <div className="flex items-center gap-3">
+                <Brain className="h-5 w-5 animate-spin text-indigo-600" />
+                <div>
+                  <div className="text-sm font-semibold text-indigo-800">Run #{activeRun.id} in progress</div>
+                  <div className="text-xs text-indigo-500">
+                    {formatReviewRunDateLabel(activeRun, workspaceTimezone)} · {activeRun.status.replace(/_/g, ' ')}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => loadRunDetail(activeRun.id)} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700">
+                View Progress
+                </button>
+                <button onClick={(e) => cancelRun(e, activeRun.id)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50">
+                Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50 p-4">
+            <div className="mb-3 flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs text-slate-600 font-medium mb-1">Mode</label>
+                <div className="inline-flex rounded-lg border border-indigo-200 bg-white p-1 text-xs font-semibold text-slate-600">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReviewMode('single');
+                      setReviewEndDate(reviewDate);
+                    }}
+                    className={`rounded-md px-3 py-1.5 transition-colors ${reviewMode === 'single' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50'}`}
+                  >
+                  One day
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReviewMode('range');
+                      setReviewEndDate((prev) => prev || reviewDate);
+                    }}
+                    className={`rounded-md px-3 py-1.5 transition-colors ${reviewMode === 'range' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50'}`}
+                  >
+                  Range
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-600 font-medium mb-1">{reviewMode === 'range' ? 'Start Date' : 'Review Date'}</label>
+                <input
+                  type="date"
+                  value={reviewDate}
+                  onChange={(e) => {
+                    setReviewDate(e.target.value);
+                    if (reviewMode === 'single') setReviewEndDate(e.target.value);
+                  }}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              {reviewMode === 'range' && (
+                <div>
+                  <label className="block text-xs text-slate-600 font-medium mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={reviewEndDate}
+                    onChange={(e) => setReviewEndDate(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+              )}
+              <button
+                onClick={() => {
+                  const today = formatDateLocal(new Date());
+                  setReviewDate(today);
+                  setReviewEndDate(today);
+                }}
+                className="text-xs px-2.5 py-2 bg-white border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-100 transition-colors font-medium"
+              >
+                  Today
+              </button>
+              <button
+                onClick={() => setView('live')}
+                disabled={!reviewDate || (reviewMode === 'range' && !reviewEndDate)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:from-indigo-700 hover:to-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Play className="h-3.5 w-3.5" />
+                  Run Review
+              </button>
+              <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={forceRefreshThreads}
+                  onChange={(e) => setForceRefreshThreads(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>
+                  <span className="font-medium text-slate-800">Force Refresh Tickets</span>
+                  <span className="ml-1 text-slate-500">(slower)</span>
+                </span>
+              </label>
+            </div>
+
+            <DailyReviewHistoryPanel
+              runs={runs}
+              total={runsTotal}
+              page={runHistoryPage}
+              pageSize={RUN_HISTORY_PAGE_SIZE}
+              loadingRuns={loadingRuns}
+              loadingDetail={loadingDetail}
+              workspaceTimezone={workspaceTimezone}
+              onRefresh={loadRuns}
+              onOpenRun={loadRunDetail}
+              onCancelRun={cancelRun}
+              onRequestDeleteRun={setRunDeleteConfirm}
+              onPageChange={setRunHistoryPage}
+            />
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'consolidation' && (
+        <ConsolidationPanel
+          run={consolidationRun}
+          loading={loadingConsolidation}
+          applyNotice={consolidationApplyNotice}
+          queueSummary={consolidationQueueSummary}
+          queueLoading={loadingConsolidationQueue}
+          starting={startingConsolidation}
+          applying={applyingConsolidation}
+          savingItemId={savingConsolidationItemId}
+          sectionApply={consolidationSectionApply}
+          onSectionApplyChange={handleConsolidationSectionApplyChange}
+          onStart={handleStartConsolidation}
+          onRefresh={() => {
+            loadConsolidation();
+            loadConsolidationQueue();
+          }}
+          onSaveItem={handleSaveConsolidationItem}
+          onApply={handleApplyConsolidation}
+          onCancel={handleCancelConsolidation}
+          onDelete={handleDeleteConsolidation}
+          onDismissApplyNotice={() => setConsolidationApplyNotice(null)}
+        />
+      )}
 
       {runDeleteConfirm && (
         <DeleteRunConfirmModal
           run={runDeleteConfirm}
           deleting={deletingDailyReviewRun}
-          title="Delete daily review run?"
+          title="Delete review run?"
           message={`This will delete Run #${runDeleteConfirm.id}, its analysis output, and its saved recommendation backlog items. This cannot be undone.`}
           onCancel={() => setRunDeleteConfirm(null)}
           onConfirm={handleDeleteDailyReviewRun}
         />
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
+      {activeTab === 'backlog' && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-semibold text-slate-800">Recommendation Backlog</h3>
@@ -3005,32 +3810,53 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
           </div>
 
+          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-1">
+            <div className="grid gap-1 sm:grid-cols-4">
+              {BACKLOG_KIND_TABS.map(({ key, label, icon: Icon, visibilityOnly }) => {
+                const selectedKind = backlogKind === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setBacklogKind(key);
+                      setBacklogStatus(key === 'dev' ? 'all' : 'pending');
+                    }}
+                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
+                      selectedKind
+                        ? visibilityOnly
+                          ? 'bg-amber-100 text-amber-800 shadow-sm ring-1 ring-amber-200'
+                          : 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                        : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                    {visibilityOnly && (
+                      <span className={`rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${
+                        selectedKind ? 'bg-white/70 text-amber-700' : 'bg-amber-50 text-amber-600'
+                      }`}>
+                        read
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="mb-4 flex flex-wrap items-end gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Status</label>
+              <label className="mb-1 block text-xs font-medium text-slate-600">View</label>
               <select
                 value={backlogStatus}
                 onChange={(e) => setBacklogStatus(e.target.value)}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
-                <option value="pending">Pending</option>
-                <option value="approved">Approved</option>
+                <option value="pending">Review queue</option>
                 <option value="rejected">Rejected</option>
                 <option value="applied">Applied</option>
                 <option value="all">All</option>
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Kind</label>
-              <select
-                value={backlogKind}
-                onChange={(e) => setBacklogKind(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              >
-                <option value="all">All</option>
-                <option value="prompt">Prompt</option>
-                <option value="process">Process</option>
-                <option value="skill">Skill</option>
               </select>
             </div>
             <div>
@@ -3077,7 +3903,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 />
                 <datalist id="daily-review-run-options">
                   {runs.map((run) => {
-                    const dateLabel = formatDateOnlyInTimezone(run.reviewDate, workspaceTimezone);
+                    const dateLabel = formatReviewRunDateLabel(run, workspaceTimezone);
                     return (
                       <option
                         key={run.id}
@@ -3101,9 +3927,11 @@ export default function DailyReviewManager({ workspaceTimezone }) {
           </div>
 
           <div className="mb-3 text-xs text-slate-500">
-            {backlogStatus === 'pending'
-              ? `${pendingBacklogTotal} pending item(s) and ${approvedBacklogTotal} approved item(s) matched the current filters.`
-              : `${backlogTotal} item(s) matched the current filters.`}
+            {backlogKind === 'dev'
+              ? `${backlogTotal} dev visibility item(s) matched the current filters. These are not approvable from backlog.`
+              : backlogStatus === 'pending'
+                ? `Review queue: ${pendingBacklogTotal} pending item(s) on the left, ${approvedBacklogTotal} approved item(s) staged on the right.`
+                : `${backlogTotal} item(s) matched the current filters.`}
           </div>
 
           {loadingBacklog ? (
@@ -3112,51 +3940,102 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
           ) : (
             <div className={`transition-opacity duration-200 ease-out ${refreshingBacklog ? 'opacity-70' : 'opacity-100'}`}>
-              {backlogStatus === 'pending' ? (
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.12fr),minmax(360px,0.88fr)]">
-              <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-800">Pending Review Queue</h4>
-                    <p className="text-xs text-slate-500">Collapsed by default. Approve or reject directly from each row.</p>
+              {backlogKind === 'dev' ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-800">Dev Visibility</h4>
+                      <p className="text-xs text-slate-500">Engineering or app-change recommendations. Visible here, not approved from backlog.</p>
+                    </div>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-700">{backlogTotal}</span>
                   </div>
-                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-500">{pendingBacklogTotal}</span>
+                  {backlogItems.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-amber-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
+                      No dev visibility recommendations matched the current filters.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {backlogItems.map((item) => (
+                        <RecommendationCard
+                          key={item.id}
+                          item={item}
+                          workspaceTimezone={workspaceTimezone}
+                          onRecommendationAction={handleRecommendationAction}
+                          savingRecommendationId={savingRecommendationId}
+                          showDate
+                          showRunMeta
+                          readOnly
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {pendingBacklogItems.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
+              ) : backlogStatus === 'pending' ? (
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.12fr),minmax(360px,0.88fr)]">
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-800">Pending Review Queue</h4>
+                        <p className="text-xs text-slate-500">Collapsed by default. Approve or reject directly from each row.</p>
+                      </div>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-500">{pendingBacklogTotal}</span>
+                    </div>
+                    {pendingBacklogItems.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
                     No pending recommendations matched the current filters.
+                      </div>
+                    ) : (
+                      <div className="max-h-[680px] space-y-2 overflow-auto pr-1">
+                        {pendingBacklogItems.map((item) => (
+                          <BacklogRecommendationRow
+                            key={item.id}
+                            item={item}
+                            workspaceTimezone={workspaceTimezone}
+                            onRecommendationAction={handleRecommendationAction}
+                            savingRecommendationId={savingRecommendationId}
+                            mode="pending"
+                            motionState={backlogMotionById[item.id]}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="max-h-[680px] space-y-2 overflow-auto pr-1">
-                    {pendingBacklogItems.map((item) => (
-                      <BacklogRecommendationRow
-                        key={item.id}
-                        item={item}
-                        workspaceTimezone={workspaceTimezone}
-                        onRecommendationAction={handleRecommendationAction}
-                        savingRecommendationId={savingRecommendationId}
-                        mode="pending"
-                        motionState={backlogMotionById[item.id]}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-800">Approved for Consolidation</h4>
-                    <p className="text-xs text-slate-500">Grouped by title. Expand to inspect items or mark them applied.</p>
-                  </div>
-                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-emerald-700">{approvedBacklogTotal}</span>
-                </div>
-                {approvedBacklogItems.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-emerald-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
+                  <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-800">Approved for Consolidation</h4>
+                        <p className="text-xs text-slate-500">Grouped by title. Expand to inspect items or mark them applied.</p>
+                      </div>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-emerald-700">{approvedBacklogTotal}</span>
+                    </div>
+                    {approvedBacklogItems.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-emerald-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
                     No approved recommendations are waiting under these filters.
+                      </div>
+                    ) : (
+                      <div className="max-h-[680px] space-y-2 overflow-auto pr-1">
+                        {groupRecommendationsByTitle(approvedBacklogItems).map((group) => (
+                          <ApprovedBacklogGroup
+                            key={group.title}
+                            group={group}
+                            workspaceTimezone={workspaceTimezone}
+                            onRecommendationAction={handleRecommendationAction}
+                            savingRecommendationId={savingRecommendationId}
+                            motionById={backlogMotionById}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : backlogStatus === 'approved' ? (
+                approvedBacklogItems.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+                No approved recommendation items matched the current backlog filters.
                   </div>
                 ) : (
-                  <div className="max-h-[680px] space-y-2 overflow-auto pr-1">
+                  <div className="space-y-2">
                     {groupRecommendationsByTitle(approvedBacklogItems).map((group) => (
                       <ApprovedBacklogGroup
                         key={group.title}
@@ -3168,50 +4047,30 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                       />
                     ))}
                   </div>
-                )}
-              </div>
-            </div>
-              ) : backlogStatus === 'approved' ? (
-            approvedBacklogItems.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
-                No approved recommendation items matched the current backlog filters.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {groupRecommendationsByTitle(approvedBacklogItems).map((group) => (
-                  <ApprovedBacklogGroup
-                    key={group.title}
-                    group={group}
-                    workspaceTimezone={workspaceTimezone}
-                    onRecommendationAction={handleRecommendationAction}
-                    savingRecommendationId={savingRecommendationId}
-                    motionById={backlogMotionById}
-                  />
-                ))}
-              </div>
-            )
+                )
               ) : backlogItems.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+                <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
               No recommendation items matched the current backlog filters.
-            </div>
+                </div>
               ) : (
-            <div className="space-y-3">
-              {backlogItems.map((item) => (
-                <RecommendationCard
-                  key={item.id}
-                  item={item}
-                  workspaceTimezone={workspaceTimezone}
-                  onRecommendationAction={handleRecommendationAction}
-                  savingRecommendationId={savingRecommendationId}
-                  showDate
-                  showRunMeta
-                />
-              ))}
-            </div>
+                <div className="space-y-3">
+                  {backlogItems.map((item) => (
+                    <RecommendationCard
+                      key={item.id}
+                      item={item}
+                      workspaceTimezone={workspaceTimezone}
+                      onRecommendationAction={handleRecommendationAction}
+                      savingRecommendationId={savingRecommendationId}
+                      showDate
+                      showRunMeta
+                    />
+                  ))}
+                </div>
               )}
             </div>
           )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

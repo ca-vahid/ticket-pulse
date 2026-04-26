@@ -15,7 +15,13 @@ Call **get_ticket_details** to understand what the requester needs. Determine:
 - What is the urgency level?
 
 ## Step 2: Classify the Ticket
-Call **get_ticket_categories** to get the list of known categories in this workspace. Match the ticket to the most appropriate category from the list. Do NOT invent a category — use one from the list. Note both the FreshService category and the competency category (for agent matching).
+Call **get_ticket_categories** to get the internal taxonomy for this workspace. Classify the ticket into one existing top-level internal category and, when specific enough, one existing internal subcategory. Do NOT invent an active category or subcategory. FreshService category fields are raw evidence only; they are not the source of truth.
+
+Also assess taxonomy fit:
+- Use \`categoryFit="exact"\` when the top-level category clearly matches, \`weak\` when it is a forced/approximate parent, and \`none\` only when no existing top-level category is usable.
+- Use \`subcategoryFit="exact"\` only when an existing subcategory clearly matches. Use \`none\` when the parent fits but no existing subcategory is aligned. Use \`weak\` when a subcategory is close but not quite right.
+- Set \`taxonomyReviewNeeded=true\` whenever either fit is weak/none or when the ticket suggests a category/subcategory should be added, moved, renamed, merged, or deprecated.
+- You may populate \`suggestedInternalCategoryName\` and/or \`suggestedInternalSubcategoryName\` as review notes only. These are not active categories and must not be used as if they already exist.
 
 ## Step 3: Check Agent Availability
 Call **get_agent_availability** to see who is available right now:
@@ -31,12 +37,12 @@ Call **get_agent_availability** to see who is available right now:
 
 ## Step 4: Find Matching Agents
 Call **find_matching_agents** with:
-- The competency category you identified in Step 3
+- The internal category ID/name and optional internal subcategory ID/name you identified in Step 2
 - Whether physical presence is required
 - The preferred location (if physical presence needed)
 - Minimum proficiency level if the ticket is complex
 
-This returns a pre-filtered, ranked list combining competency, availability, location, and workload.
+This returns a pre-filtered, ranked list combining competency, availability, location, and workload. Exact subcategory competency is preferred first, then parent-category competency is used as a fallback.
 
 **If this is a rebound run** (you'll see a "## Rebound Context" block in the user message), at least one candidate will have \`previouslyRejectedThisTicket: true\`. Exclude those candidates entirely unless they are genuinely the only qualified option — in which case explain in \`overallReasoning\` why you re-suggested them despite the prior rejection. Never make a prior rejecter the rank-1 pick if any other plausible candidate exists.
 
@@ -62,7 +68,7 @@ Admin decision notes carry high weight — if an admin has explicitly stated a r
 For HIGH priority or complex tickets, call **get_technician_ad_profile** on your top candidates to check their job title, IT level (IT 1-5), and seniority (Jr/Sr). Prefer senior technicians for complex/critical issues. For routine tickets, this step is optional.
 
 ## Step 7: Submit Recommendation
-Call **submit_recommendation** with your final ranked list. You MUST always call this tool — never output raw JSON.
+Call **submit_recommendation** with your final ranked list, \`internalCategoryId\`, optional \`internalSubcategoryId\`, \`categoryFit\`, \`subcategoryFit\`, \`taxonomyReviewNeeded\`, and a short \`classificationRationale\`. If the subcategory fit is weak or none, state what was missing from the taxonomy in \`classificationRationale\` and include a suggested subcategory name when useful. You MUST always call this tool — never output raw JSON.
 
 If the ticket is noise/FYI, call submit_recommendation with an empty recommendations array and explain why.
 
@@ -105,7 +111,7 @@ For noise dismissals (empty recommendations), populate \`closureNoticeHtml\` ins
 1. **Availability** — Never assign to someone who is OFF for the full day. For half-day leaves, treat the agent as available for the other half — read \`availabilityNote\` to decide whether the ticket fits that window. Deprioritize agents whose shift has ended or hasn't started yet.
 2. **On-shift preference** — Prefer agents currently on shift with time remaining. An agent with 6 hours left is better than one ending in 30 minutes for non-urgent work.
 3. **Physical presence** — If required, exclude WFH agents; prefer agents at the matching location
-4. **Competency** — Higher proficiency in the matching category wins
+4. **Competency** — Exact subcategory competency wins first; parent-category competency is the fallback; higher proficiency wins within the same match tier
 5. **Seniority** — For complex/critical tickets, prefer senior techs (higher IT level, Sr title)
 6. **Workload fairness** — Among equally qualified agents, pick the one with fewer open tickets
 7. **Location proximity** — For physical tasks, prefer agents already at the right location
@@ -143,6 +149,9 @@ function needsPromptUpgrade(systemPrompt = '') {
   // prompts know how to handle reroutes after a rejection. The Rebound Context
   // string only appears in the canonical Step 8 produced after this release.
   if (systemPrompt.includes('agentBriefingHtml') && !systemPrompt.includes('Rebound Context')) {
+    return true;
+  }
+  if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('taxonomyReviewNeeded')) {
     return true;
   }
   return false;
@@ -225,6 +234,13 @@ function replaceAgentBriefingStep(prompt) {
   return `${before}\n${AGENT_BRIEFING_STEP.trim()}\n${tail}`;
 }
 
+function finishPromptUpgrade(prompt) {
+  if (prompt.includes('IT helpdesk ticket assignment assistant') && !prompt.includes('taxonomyReviewNeeded')) {
+    return DEFAULT_SYSTEM_PROMPT;
+  }
+  return prompt;
+}
+
 function upgradeLegacyPrompt(systemPrompt = '') {
   if (!needsPromptUpgrade(systemPrompt)) {
     return systemPrompt;
@@ -244,14 +260,14 @@ function upgradeLegacyPrompt(systemPrompt = '') {
         upgraded += DECISION_NOTES_STEP;
       }
     }
-    return injectAgentBriefingStep(upgraded);
+    return finishPromptUpgrade(injectAgentBriefingStep(upgraded));
   }
 
   // If only missing the agent briefing step, inject it without disturbing the rest.
   if (!systemPrompt.includes('agentBriefingHtml')
       && systemPrompt.includes('search_decision_notes')
       && systemPrompt.includes('get_technician_ad_profile')) {
-    return injectAgentBriefingStep(systemPrompt);
+    return finishPromptUpgrade(injectAgentBriefingStep(systemPrompt));
   }
 
   // Has Step 8 but with the old "suggested first step" wording — replace just that
@@ -259,14 +275,14 @@ function upgradeLegacyPrompt(systemPrompt = '') {
   // customizations the admin made to Steps 1-7.
   if (systemPrompt.includes('agentBriefingHtml')
       && /one suggested first step|suggested first step or thing to verify|Suggested first check/i.test(systemPrompt)) {
-    return replaceAgentBriefingStep(systemPrompt);
+    return finishPromptUpgrade(replaceAgentBriefingStep(systemPrompt));
   }
 
   // Has Step 8 but predates the rebound-acknowledgement bullet — replace just the
   // Step 8 block so existing prompts learn how to handle rerouted tickets without
   // disturbing any other customizations.
   if (systemPrompt.includes('agentBriefingHtml') && !systemPrompt.includes('Rebound Context')) {
-    return replaceAgentBriefingStep(systemPrompt);
+    return finishPromptUpgrade(replaceAgentBriefingStep(systemPrompt));
   }
 
   if (systemPrompt.includes('You are an IT helpdesk ticket assignment assistant.')) {

@@ -56,10 +56,42 @@ function reviewDateKey(dateStr) {
   return new Date(`${dateStr}T00:00:00.000Z`);
 }
 
+function normalizeDateInput(value) {
+  if (!value) return null;
+  const str = String(value).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(str) ? str : null;
+}
+
 function truncate(text, max = 280) {
   if (!text) return null;
   const normalized = String(text).replace(/\s+/g, ' ').trim();
-  return normalized.length > max ? `${normalized.slice(0, max - 1)}...` : normalized;
+  const chars = Array.from(normalized);
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}...` : normalized;
+}
+
+function buildDailyReviewCategoryTree(categories = []) {
+  const byId = new Map(categories.map((category) => [category.id, { ...category, subcategories: [] }]));
+  const roots = [];
+  const sort = (a, b) => ((a.sortOrder || 0) - (b.sortOrder || 0)) || a.name.localeCompare(b.name);
+
+  for (const category of byId.values()) {
+    if (category.parentId && byId.has(category.parentId)) {
+      byId.get(category.parentId).subcategories.push({
+        id: category.id,
+        name: category.name,
+        description: category.description || null,
+      });
+    } else {
+      roots.push(category);
+    }
+  }
+
+  return roots.sort(sort).map((category) => ({
+    id: category.id,
+    name: category.name,
+    description: category.description || null,
+    subcategories: category.subcategories.sort(sort),
+  }));
 }
 
 // Strip HTML tags + collapse whitespace. FreshService conversation bodies
@@ -86,15 +118,31 @@ function stripHtml(text) {
 function sanitizeJsonForPostgres(value) {
   if (typeof value === 'string') {
     return value
-      .replace(/\\x/g, '\\\\x')
-      .split('')
+      // Prisma/Postgres JSONB writes can choke on FreshService text that
+      // contains Windows/network paths such as C:\Users or \\server\x. The
+      // path syntax is evidence only, so normalize backslashes before the
+      // JSON payload crosses the DB boundary.
+      .replace(/\\/g, '/')
+      // Iterate by code point so valid emoji/supplementary chars remain
+      // intact. Lone surrogate halves can appear when older code truncated a
+      // string mid-emoji; PostgreSQL JSON rejects those as bad unicode escapes.
+      .split(/(?=.)/u)
       .map((char) => {
-        const code = char.charCodeAt(0);
+        const code = char.codePointAt(0);
         if (code === 0) return '';
         if (code < 32 && code !== 9 && code !== 10 && code !== 13) return ' ';
+        if (code >= 0xD800 && code <= 0xDFFF) return '';
         return char;
       })
       .join('');
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === 'bigint') {
+    return value.toString();
   }
 
   if (Array.isArray(value)) {
@@ -103,7 +151,7 @@ function sanitizeJsonForPostgres(value) {
 
   if (value && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, sanitizeJsonForPostgres(item)]),
+      Object.entries(value).map(([key, item]) => [sanitizeJsonForPostgres(key), sanitizeJsonForPostgres(item)]),
     );
   }
 
@@ -136,6 +184,7 @@ function toArray(value) {
 class AssignmentDailyReviewService {
   constructor() {
     this.activeRunControllers = new Map();
+    this.kickoffLocks = new Map();
   }
 
   _throwIfCancelled(signal) {
@@ -203,6 +252,17 @@ class AssignmentDailyReviewService {
     for (const { kind, field } of RECOMMENDATION_KIND_CONFIG) {
       const items = toArray(recommendationGroups[field] ?? run[field]);
       items.forEach((item, index) => {
+        const taxonomyDetails = kind === 'skill'
+          ? [
+            item.taxonomyAction ? `taxonomyAction=${item.taxonomyAction}` : null,
+            item.categoryId ? `categoryId=${item.categoryId}` : null,
+            item.categoryName ? `categoryName=${item.categoryName}` : null,
+            item.parentCategoryId ? `parentCategoryId=${item.parentCategoryId}` : null,
+            item.parentCategoryName ? `parentCategoryName=${item.parentCategoryName}` : null,
+            item.newName ? `newName=${item.newName}` : null,
+          ].filter(Boolean).join('; ')
+          : '';
+        const suggestedAction = String(item.suggestedAction || '');
         rows.push({
           workspaceId: run.workspaceId,
           runId: run.id,
@@ -212,7 +272,9 @@ class AssignmentDailyReviewService {
           title: String(item.title || `${kind} recommendation ${index + 1}`),
           severity: String(item.severity || 'low'),
           rationale: String(item.rationale || ''),
-          suggestedAction: String(item.suggestedAction || ''),
+          suggestedAction: taxonomyDetails
+            ? `${suggestedAction}\n\nTaxonomy proposal: ${taxonomyDetails}`
+            : suggestedAction,
           skillsAffected: toArray(item.skillsAffected),
           supportingTicketIds: toArray(item.supportingTicketIds),
           supportingFreshserviceTicketIds: toArray(item.supportingFreshserviceTicketIds),
@@ -368,6 +430,38 @@ class AssignmentDailyReviewService {
       endTime,
       isBusinessDay: !!dayConfig,
       localDate: dateStr,
+    };
+  }
+
+  async _getReviewWindow(workspaceId, reviewDate, timezone, options = {}) {
+    const fallbackDate = reviewDate || formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd');
+    let startDate = normalizeDateInput(options.reviewStartDate || options.startDate) || normalizeDateInput(fallbackDate);
+    let endDate = normalizeDateInput(options.reviewEndDate || options.endDate) || startDate;
+
+    if (endDate < startDate) {
+      [startDate, endDate] = [endDate, startDate];
+    }
+
+    const startRange = await this._getBusinessDayRange(workspaceId, startDate, timezone);
+    const endRange = endDate === startDate
+      ? startRange
+      : await this._getBusinessDayRange(workspaceId, endDate, timezone);
+
+    return {
+      dateStr: startDate,
+      startDate,
+      endDate,
+      reviewDateValue: reviewDateKey(startDate),
+      range: {
+        start: startRange.start,
+        end: endRange.end,
+        startTime: startRange.startTime,
+        endTime: endRange.endTime,
+        isBusinessDay: startRange.isBusinessDay || endRange.isBusinessDay,
+        localDate: startDate,
+        endLocalDate: endDate,
+        isRange: startDate !== endDate,
+      },
     };
   }
 
@@ -718,17 +812,20 @@ class AssignmentDailyReviewService {
     const throwIfCancelled = () => this._throwIfCancelled(options.signal);
 
     const { workspace, config, timezone } = await this._getWorkspaceContext(workspaceId);
-    const dateStr = reviewDate || formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd');
-    const range = await this._getBusinessDayRange(workspaceId, dateStr, timezone);
+    const reviewWindow = await this._getReviewWindow(workspaceId, reviewDate, timezone, options);
+    const { dateStr, startDate, endDate, range } = reviewWindow;
     throwIfCancelled();
 
+    const reviewLabel = range.isRange ? `${startDate} to ${endDate}` : dateStr;
     emitProgress(
-      `Reviewing ${workspace.name} for ${dateStr} in ${timezone} (${range.startTime}-${range.endTime}).`,
+      `Reviewing ${workspace.name} for ${reviewLabel} in ${timezone} (${range.startTime}-${range.endTime}).`,
       {
         percent: 8,
         stats: {
           workspaceName: workspace.name,
           reviewDate: dateStr,
+          reviewStartDate: startDate,
+          reviewEndDate: endDate,
           timezone,
           rangeStart: range.start.toISOString(),
           rangeEnd: range.end.toISOString(),
@@ -765,6 +862,15 @@ class AssignmentDailyReviewService {
             descriptionText: true,
             category: true,
             ticketCategory: true,
+            internalCategory: { select: { id: true, name: true } },
+            internalSubcategory: { select: { id: true, name: true, parentId: true } },
+            internalCategoryConfidence: true,
+            internalCategoryRationale: true,
+            internalCategoryFit: true,
+            internalSubcategoryFit: true,
+            taxonomyReviewNeeded: true,
+            suggestedInternalCategoryName: true,
+            suggestedInternalSubcategoryName: true,
             status: true,
             priority: true,
             createdAt: true,
@@ -818,6 +924,15 @@ class AssignmentDailyReviewService {
         descriptionText: true,
         category: true,
         ticketCategory: true,
+        internalCategory: { select: { id: true, name: true } },
+        internalSubcategory: { select: { id: true, name: true, parentId: true } },
+        internalCategoryConfidence: true,
+        internalCategoryRationale: true,
+        internalCategoryFit: true,
+        internalSubcategoryFit: true,
+        taxonomyReviewNeeded: true,
+        suggestedInternalCategoryName: true,
+        suggestedInternalSubcategoryName: true,
         status: true,
         priority: true,
         createdAt: true,
@@ -968,8 +1083,8 @@ class AssignmentDailyReviewService {
       ticketThreadRepository.listForTickets(ticketIds, { end: range.end, workspaceId }),
       prisma.competencyCategory.findMany({
         where: { workspaceId, isActive: true },
-        select: { id: true, name: true, description: true },
-        orderBy: { name: 'asc' },
+        select: { id: true, name: true, description: true, parentId: true, sortOrder: true },
+        orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
       }),
     ]);
     throwIfCancelled();
@@ -1017,6 +1132,24 @@ class AssignmentDailyReviewService {
         freshserviceTicketId: ticket.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null,
         subject: ticket.subject || '(no subject)',
         category: ticket.ticketCategory || ticket.category || null,
+        internalCategory: ticket.internalCategory
+          ? {
+            id: ticket.internalCategory.id,
+            name: ticket.internalCategory.name,
+            subcategory: ticket.internalSubcategory
+              ? { id: ticket.internalSubcategory.id, name: ticket.internalSubcategory.name }
+              : null,
+          }
+          : null,
+        taxonomyFit: {
+          categoryFit: ticket.internalCategoryFit || null,
+          subcategoryFit: ticket.internalSubcategoryFit || null,
+          reviewNeeded: !!ticket.taxonomyReviewNeeded,
+          confidence: ticket.internalCategoryConfidence || null,
+          rationale: ticket.internalCategoryRationale || null,
+          suggestedCategoryName: ticket.suggestedInternalCategoryName || null,
+          suggestedSubcategoryName: ticket.suggestedInternalSubcategoryName || null,
+        },
         priority: ticket.priority,
         status: ticket.status,
         triggerSource: run.triggerSource,
@@ -1103,6 +1236,24 @@ class AssignmentDailyReviewService {
         freshserviceTicketId: ticket.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null,
         subject: ticket.subject || '(no subject)',
         category: ticket.ticketCategory || ticket.category || null,
+        internalCategory: ticket.internalCategory
+          ? {
+            id: ticket.internalCategory.id,
+            name: ticket.internalCategory.name,
+            subcategory: ticket.internalSubcategory
+              ? { id: ticket.internalSubcategory.id, name: ticket.internalSubcategory.name }
+              : null,
+          }
+          : null,
+        taxonomyFit: {
+          categoryFit: ticket.internalCategoryFit || null,
+          subcategoryFit: ticket.internalSubcategoryFit || null,
+          reviewNeeded: !!ticket.taxonomyReviewNeeded,
+          confidence: ticket.internalCategoryConfidence || null,
+          rationale: ticket.internalCategoryRationale || null,
+          suggestedCategoryName: ticket.suggestedInternalCategoryName || null,
+          suggestedSubcategoryName: ticket.suggestedInternalSubcategoryName || null,
+        },
         priority: ticket.priority,
         status: ticket.status,
         triggerSource: 'freshservice_only',
@@ -1176,14 +1327,25 @@ class AssignmentDailyReviewService {
       },
     });
 
+    const taxonomyCategoryName = (item) => {
+      if (item.internalCategory?.name && item.internalCategory?.subcategory?.name) {
+        return `${item.internalCategory.name} > ${item.internalCategory.subcategory.name}`;
+      }
+      return item.internalCategory?.name || item.category || 'Uncategorized';
+    };
+
     const summaryMetrics = {
       reviewDate: dateStr,
+      reviewStartDate: startDate,
+      reviewEndDate: endDate,
       workspaceName: workspace.name,
       timezone,
       reviewWindow: {
         start: range.start.toISOString(),
         end: range.end.toISOString(),
         localDate: range.localDate,
+        endLocalDate: range.endLocalDate,
+        isRange: range.isRange,
         startTime: range.startTime,
         endTime: range.endTime,
         isBusinessDay: range.isBusinessDay,
@@ -1222,13 +1384,17 @@ class AssignmentDailyReviewService {
           || item.decision === 'modified'
           || item.decision === 'rejected',
         ),
-        (item) => item.category || 'Uncategorized',
+        taxonomyCategoryName,
       ),
       topTechnicians: bucketCounts(
         allCases.filter((item) => item.changedFromTopRecommendation || item.tags.includes(DAILY_REVIEW_PRIMARY_TAGS.rebounded)),
         (item) => item.finalAssignee?.name || item.pipelineAssignedTech?.name || null,
       ),
-      competencyCategories: competencyCategories.map((item) => item.name),
+      competencyCategories: competencyCategories.map((item) => ({
+        id: item.id,
+        name: item.name,
+        parentId: item.parentId || null,
+      })),
     };
 
     const denominator = Math.max(consideredCases.length, 1);
@@ -1300,6 +1466,8 @@ class AssignmentDailyReviewService {
       workspaceName: workspace.name,
       timezone,
       reviewDate: dateStr,
+      reviewStartDate: startDate,
+      reviewEndDate: endDate,
       range,
       config,
       summaryMetrics,
@@ -1344,17 +1512,23 @@ class AssignmentDailyReviewService {
 
     const topCategory = dataset.summaryMetrics.topCategories[0];
     if (topCategory && topCategory.name && topCategory.name !== 'Uncategorized') {
+      const caseTaxonomyName = (item) => {
+        if (item.internalCategory?.name && item.internalCategory?.subcategory?.name) {
+          return `${item.internalCategory.name} > ${item.internalCategory.subcategory.name}`;
+        }
+        return item.internalCategory?.name || item.category || null;
+      };
       skillRecommendations.push({
         title: `Review skill coverage for ${topCategory.name}`,
         severity: topCategory.count >= 3 ? 'high' : 'medium',
         rationale: 'The highest-friction category from this review day likely needs cleaner competency coverage or better normalization in the skill matrix.',
         suggestedAction: `Check whether "${topCategory.name}" should be added, split, merged, or mapped more explicitly to one or more technician competencies.`,
         supportingTicketIds: dataset.cases
-          .filter((item) => item.category === topCategory.name)
+          .filter((item) => caseTaxonomyName(item) === topCategory.name)
           .slice(0, 5)
           .map((item) => item.ticketId),
         supportingFreshserviceTicketIds: dataset.cases
-          .filter((item) => item.category === topCategory.name)
+          .filter((item) => caseTaxonomyName(item) === topCategory.name)
           .slice(0, 5)
           .map((item) => item.freshserviceTicketId),
       });
@@ -1537,6 +1711,8 @@ class AssignmentDailyReviewService {
             }
             : null,
           category: item.category,
+          internalCategory: item.internalCategory,
+          taxonomyFit: item.taxonomyFit,
           priority: item.priority,
           status: item.status,
           outcome: item.outcome,
@@ -1579,7 +1755,13 @@ class AssignmentDailyReviewService {
           })),
           summary: this._summarizeCase(item),
         })),
-        competencyCategories: dataset.competencyCategories.map((item) => item.name),
+        competencyCategories: dataset.competencyCategories.map((item) => ({
+          id: item.id,
+          name: item.name,
+          parentId: item.parentId || null,
+          description: item.description || null,
+        })),
+        categoryTree: buildDailyReviewCategoryTree(dataset.competencyCategories),
         currentPromptVersion: publishedPrompt?.version || null,
         allowedSupportingTicketIds: Array.from(allowedInternalIds),
         allowedSupportingFreshserviceTicketIds: Array.from(allowedFreshserviceIds),
@@ -1634,6 +1816,12 @@ class AssignmentDailyReviewService {
                   rationale: { type: 'string' },
                   suggestedAction: { type: 'string' },
                   skillsAffected: { type: 'array', items: { type: 'string' } },
+                  taxonomyAction: { type: ['string', 'null'], enum: ['add', 'rename', 'update', 'move', 'merge', 'deprecate', 'competency_update', null] },
+                  categoryId: { type: ['integer', 'null'] },
+                  categoryName: { type: ['string', 'null'] },
+                  parentCategoryId: { type: ['integer', 'null'] },
+                  parentCategoryName: { type: ['string', 'null'] },
+                  newName: { type: ['string', 'null'] },
                   supportingTicketIds: { type: 'array', items: { type: 'integer' } },
                   supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
                 },
@@ -1670,6 +1858,10 @@ Your job is to recommend improvements in exactly three areas:
 
 Rules:
 - Base every recommendation on evidence from the supplied cases and metrics.
+- Pay special attention to cases with taxonomyFit.reviewNeeded=true, weak/none categoryFit, weak/none subcategoryFit, or suggested internal category/subcategory names.
+- Treat assignment-agent taxonomy suggestions as evidence, not truth: compare them against ticket descriptions, thread excerpts, outcomes, and the full categoryTree before recommending taxonomy changes.
+- Skill matrix recommendations may include adding, moving, renaming, merging, or deprecating internal top-level categories or subcategories when the evidence supports it.
+- For skillRecommendations about taxonomy structure, populate taxonomyAction and the relevant categoryId/categoryName/parentCategoryId/parentCategoryName/newName fields so consolidation can turn them into precise admin-reviewed Skill List Changes.
 - Be conservative. Fewer strong recommendations are better than many weak ones.
 - Do not rewrite the prompt or mutate the competency matrix directly.
 - Focus on why the system missed and how to improve future assignments.
@@ -1762,7 +1954,7 @@ Rules:
       prisma.assignmentDailyReviewRun.update({
         where: { id: runId },
         data: {
-          progress: payload,
+          progress: sanitizeJsonForPostgres(payload),
           progressUpdatedAt: new Date(),
         },
       }).catch((err) => {
@@ -1787,18 +1979,20 @@ Rules:
     await this._markStaleRunsFailed();
 
     const { workspace, config, timezone } = await this._getWorkspaceContext(workspaceId);
-    const dateStr = reviewDate || formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd');
-    const reviewDateValue = reviewDateKey(dateStr);
+    const reviewWindow = await this._getReviewWindow(workspaceId, reviewDate, timezone, options);
+    const { dateStr, startDate, endDate, reviewDateValue, range } = reviewWindow;
 
     const activeExisting = await prisma.assignmentDailyReviewRun.findFirst({
       where: {
         workspaceId,
         reviewDate: reviewDateValue,
+        rangeStart: range.start,
+        rangeEnd: range.end,
         status: { in: ACTIVE_STATUSES },
       },
     });
     if (activeExisting) {
-      return { run: activeExisting, alreadyActive: true, workspace, config, timezone, dateStr, reviewDateValue };
+      return { run: activeExisting, alreadyActive: true, workspace, config, timezone, dateStr, startDate, endDate, reviewDateValue };
     }
 
     // When force is false (scheduled job), short-circuit if today's review
@@ -1806,11 +2000,17 @@ Rules:
     // clicks always pass force=true so each rerun gets its own row.
     if (!options.force) {
       const lastCompleted = await prisma.assignmentDailyReviewRun.findFirst({
-        where: { workspaceId, reviewDate: reviewDateValue, status: 'completed' },
+        where: {
+          workspaceId,
+          reviewDate: reviewDateValue,
+          rangeStart: range.start,
+          rangeEnd: range.end,
+          status: 'completed',
+        },
         orderBy: { createdAt: 'desc' },
       });
       if (lastCompleted) {
-        return { run: lastCompleted, alreadyCompleted: true, workspace, config, timezone, dateStr, reviewDateValue };
+        return { run: lastCompleted, alreadyCompleted: true, workspace, config, timezone, dateStr, startDate, endDate, reviewDateValue };
       }
     }
 
@@ -1819,20 +2019,22 @@ Rules:
         workspaceId,
         reviewDate: reviewDateValue,
         timezone,
+        rangeStart: range.start,
+        rangeEnd: range.end,
         triggerSource: options.triggerSource || 'manual',
         status: 'collecting',
         triggeredBy,
         llmModel: config?.llmModel || 'claude-sonnet-4-6-20260217',
-        progress: {
+        progress: sanitizeJsonForPostgres({
           phase: 'collecting',
           percent: 2,
           message: 'Queued for execution. Pulling dataset shortly...',
           stats: {},
-        },
+        }),
         progressUpdatedAt: new Date(),
       },
     });
-    return { run, workspace, config, timezone, dateStr, reviewDateValue };
+    return { run, workspace, config, timezone, dateStr, startDate, endDate, reviewDateValue };
   }
 
   // Background-friendly entry point used by the HTTP layer. Creates the
@@ -1840,21 +2042,41 @@ Rules:
   // the caller within milliseconds. The frontend polls the run row to
   // render progress instead of holding an SSE connection open.
   async kickOffReview(workspaceId, reviewDate, triggeredBy = 'system', options = {}) {
-    const setup = await this._setupRun(workspaceId, reviewDate, triggeredBy, options);
-    if (setup.alreadyActive || setup.alreadyCompleted) {
-      return setup.run;
-    }
+    const lockKey = [
+      workspaceId,
+      reviewDate || '',
+      options.reviewStartDate || options.startDate || '',
+      options.reviewEndDate || options.endDate || '',
+      options.triggerSource || 'manual',
+      options.force === false ? 'noforce' : 'force',
+    ].join(':');
 
-    // Fire-and-forget: errors are caught inside _executeRun and persisted
-    // to the run row (status='failed', errorMessage), so nothing should
-    // ever escape this promise.
-    setImmediate(() => {
-      this._executeRun(setup, { ...options, _runStartedAt: Date.now() }).catch((err) => {
-        logger.error('Background daily review crashed', { runId: setup.run.id, error: err.message });
+    const existingKickoff = this.kickoffLocks.get(lockKey);
+    if (existingKickoff) return existingKickoff;
+
+    const kickoffPromise = (async () => {
+      const setup = await this._setupRun(workspaceId, reviewDate, triggeredBy, options);
+      if (setup.alreadyActive || setup.alreadyCompleted) {
+        return setup.run;
+      }
+
+      // Fire-and-forget: errors are caught inside _executeRun and persisted
+      // to the run row (status='failed', errorMessage), so nothing should
+      // ever escape this promise.
+      setImmediate(() => {
+        this._executeRun(setup, { ...options, _runStartedAt: Date.now() }).catch((err) => {
+          logger.error('Background daily review crashed', { runId: setup.run.id, error: err.message });
+        });
       });
-    });
 
-    return setup.run;
+      return setup.run;
+    })();
+
+    this.kickoffLocks.set(lockKey, kickoffPromise);
+    kickoffPromise.finally(() => {
+      setTimeout(() => this.kickoffLocks.delete(lockKey), 5000);
+    });
+    return kickoffPromise;
   }
 
   // Backwards-compatible synchronous run (used by the scheduled job and by
@@ -1862,7 +2084,7 @@ Rules:
   async runReview(workspaceId, reviewDate, triggeredBy = 'system', options = {}) {
     const setup = await this._setupRun(workspaceId, reviewDate, triggeredBy, options);
     if (setup.alreadyActive || setup.alreadyCompleted) {
-      try { options.onEvent?.({ type: 'error', message: `A daily review is already running for ${setup.dateStr} (run #${setup.run.id}).` }); } catch { /* ignore */ }
+      try { options.onEvent?.({ type: 'error', message: `A review is already running for ${setup.dateStr} (run #${setup.run.id}).` }); } catch { /* ignore */ }
       return setup.run;
     }
     return this._executeRun(setup, { ...options, _runStartedAt: Date.now() });
@@ -1870,7 +2092,7 @@ Rules:
 
   async _executeRun(setup, options = {}) {
     const startedAt = options._runStartedAt || Date.now();
-    const { workspace, config, dateStr } = setup;
+    const { workspace, config, dateStr, startDate, endDate } = setup;
     let run = setup.run;
     const persistProgress = this._makeProgressPersister(run.id);
     const emit = (event) => {
@@ -1892,7 +2114,7 @@ Rules:
     const abortController = new AbortController();
     this.activeRunControllers.set(run.id, abortController);
 
-    emit({ type: 'daily_review_started', runId: run.id, reviewDate: dateStr, workspaceName: workspace.name });
+    emit({ type: 'daily_review_started', runId: run.id, reviewDate: dateStr, reviewStartDate: startDate, reviewEndDate: endDate, workspaceName: workspace.name });
 
     try {
       const startMsg = {
@@ -1905,6 +2127,8 @@ Rules:
       persistProgress(startMsg);
       const dataset = await this.collectDailyDataset(workspace.id, dateStr, {
         signal: abortController.signal,
+        reviewStartDate: startDate,
+        reviewEndDate: endDate,
         forceRefreshThreads: options.forceRefreshThreads === true,
         onProgress: (event) => {
           heartbeatRun('collecting');
@@ -1996,7 +2220,7 @@ Rules:
       const completedPayload = {
         phase: 'completed',
         percent: 100,
-        message: 'Daily review complete.',
+        message: 'Review complete.',
         stats: dataset.summaryMetrics.totals || {},
       };
       emit({ type: 'phase_update', ...completedPayload });
@@ -2004,7 +2228,7 @@ Rules:
       // see "completed" the moment the next poll lands without any throttle delay.
       await prisma.assignmentDailyReviewRun.update({
         where: { id: run.id },
-        data: { progress: completedPayload, progressUpdatedAt: new Date() },
+        data: { progress: sanitizeJsonForPostgres(completedPayload), progressUpdatedAt: new Date() },
       }).catch(() => { /* progress is best-effort */ });
       emit({ type: 'daily_review_complete', runId: run.id });
       return run;
@@ -2016,7 +2240,7 @@ Rules:
             status: 'cancelled',
             totalDurationMs: Date.now() - startedAt,
             completedAt: new Date(),
-            progress: { phase: 'cancelled', percent: 100, message: error.message, stats: {} },
+            progress: sanitizeJsonForPostgres({ phase: 'cancelled', percent: 100, message: error.message, stats: {} }),
             progressUpdatedAt: new Date(),
           },
         });
@@ -2034,7 +2258,7 @@ Rules:
           errorMessage: error.message,
           totalDurationMs: Date.now() - startedAt,
           completedAt: new Date(),
-          progress: { phase: 'failed', percent: 100, message: error.message, stats: {} },
+          progress: sanitizeJsonForPostgres({ phase: 'failed', percent: 100, message: error.message, stats: {} }),
           progressUpdatedAt: new Date(),
         },
       });

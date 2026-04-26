@@ -19,6 +19,17 @@ import { isGroupExcluded, isPipelineFinalDecision } from './assignmentDecisionRu
 const MAX_TURNS = 20;
 const CLOSED_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
 
+function normalizeTaxonomyFit(value) {
+  const normalized = String(value || '').toLowerCase();
+  return ['exact', 'weak', 'none'].includes(normalized) ? normalized : null;
+}
+
+function truncateTaxonomySuggestion(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return null;
+  return normalized.slice(0, 120);
+}
+
 class AssignmentPipelineService {
   /**
    * Run the agentic assignment pipeline with streaming.
@@ -624,6 +635,10 @@ class AssignmentPipelineService {
         decision === 'auto_assigned'
         || (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise);
 
+      if (recommendation) {
+        await this._persistInternalClassification(ticketId, workspaceId, recommendation);
+      }
+
       await assignmentRepository.updatePipelineRun(runId, {
         status: finalStatus,
         decision,
@@ -681,6 +696,56 @@ class AssignmentPipelineService {
       emit({ type: 'error', message: error.message });
       emit({ type: 'complete', runId });
       return await assignmentRepository.getPipelineRun(runId);
+    }
+  }
+
+  async _persistInternalClassification(ticketId, workspaceId, recommendation) {
+    const rawCategoryId = Number(recommendation?.internalCategoryId);
+    const rawSubcategoryId = Number(recommendation?.internalSubcategoryId);
+    const categoryId = Number.isInteger(rawCategoryId) ? rawCategoryId : null;
+    const subcategoryId = Number.isInteger(rawSubcategoryId) ? rawSubcategoryId : null;
+
+    if (!categoryId && !subcategoryId && !recommendation?.classificationRationale) return;
+
+    try {
+      const selectedIds = [categoryId, subcategoryId].filter(Boolean);
+      const categories = selectedIds.length
+        ? await prisma.competencyCategory.findMany({
+          where: { workspaceId, id: { in: selectedIds }, isActive: true },
+          select: { id: true, parentId: true },
+        })
+        : [];
+      const byId = new Map(categories.map((category) => [category.id, category]));
+      const category = categoryId ? byId.get(categoryId) : null;
+      const subcategory = subcategoryId ? byId.get(subcategoryId) : null;
+
+      const normalizedSubcategory = subcategory?.parentId
+        ? subcategory
+        : (category?.parentId ? category : null);
+      const normalizedCategory = category?.parentId
+        ? byId.get(category.parentId)
+        : category;
+      const safeCategoryId = normalizedCategory?.id || normalizedSubcategory?.parentId || null;
+      const safeSubcategoryId = normalizedSubcategory?.id || null;
+
+      await prisma.ticket.update({
+        where: { id: ticketId },
+        data: {
+          internalCategoryId: safeCategoryId,
+          internalSubcategoryId: safeSubcategoryId || null,
+          internalCategoryConfidence: recommendation?.confidence || null,
+          internalCategoryRationale: recommendation?.classificationRationale || recommendation?.ticketClassification || null,
+          internalCategoryFit: normalizeTaxonomyFit(recommendation?.categoryFit),
+          internalSubcategoryFit: normalizeTaxonomyFit(recommendation?.subcategoryFit),
+          taxonomyReviewNeeded: Boolean(recommendation?.taxonomyReviewNeeded)
+            || ['weak', 'none'].includes(normalizeTaxonomyFit(recommendation?.categoryFit))
+            || ['weak', 'none'].includes(normalizeTaxonomyFit(recommendation?.subcategoryFit)),
+          suggestedInternalCategoryName: truncateTaxonomySuggestion(recommendation?.suggestedInternalCategoryName),
+          suggestedInternalSubcategoryName: truncateTaxonomySuggestion(recommendation?.suggestedInternalSubcategoryName),
+        },
+      });
+    } catch (err) {
+      logger.warn('Failed to persist internal ticket classification', { ticketId, workspaceId, error: err.message });
     }
   }
 

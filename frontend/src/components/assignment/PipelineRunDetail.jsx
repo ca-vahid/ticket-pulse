@@ -263,6 +263,13 @@ function TicketDetailsCard({ ticket }) {
   }, [useHtml, safeHtml]);
 
   if (!ticket) return null;
+  const taxonomyNeedsReview = ticket.taxonomyReviewNeeded
+    || ['weak', 'none'].includes(ticket.internalCategoryFit)
+    || ['weak', 'none'].includes(ticket.internalSubcategoryFit);
+  const taxonomyFitText = [
+    ticket.internalCategoryFit ? `Category ${ticket.internalCategoryFit}` : null,
+    ticket.internalSubcategoryFit ? `Subcategory ${ticket.internalSubcategoryFit}` : null,
+  ].filter(Boolean).join(' · ');
 
   return (
     <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
@@ -313,15 +320,36 @@ function TicketDetailsCard({ ticket }) {
               </div>
             </div>
           )}
-          {(ticket.category || ticket.ticketCategory) && (
+          {(ticket.internalCategory || ticket.category || ticket.ticketCategory) && (
             <div className="flex items-start gap-1.5">
               <Tag className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
               <div className="min-w-0">
                 <p className="text-[10px] text-slate-400 uppercase font-medium">Category</p>
                 <div className="flex items-center gap-1 flex-wrap">
+                  {ticket.internalCategory && (
+                    <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-semibold">
+                      {ticket.internalCategory.name}{ticket.internalSubcategory ? ` > ${ticket.internalSubcategory.name}` : ''}
+                    </span>
+                  )}
                   {ticket.category && <span className="text-xs text-slate-600">{ticket.category}</span>}
                   {ticket.ticketCategory && <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-medium">{ticket.ticketCategory}</span>}
+                  {ticket.internalCategoryConfidence && (
+                    <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">
+                      {ticket.internalCategoryConfidence}
+                    </span>
+                  )}
                 </div>
+                {(taxonomyFitText || taxonomyNeedsReview) && (
+                  <p className={`mt-1 text-[10px] ${taxonomyNeedsReview ? 'text-amber-700' : 'text-slate-500'}`}>
+                    {taxonomyFitText || 'Taxonomy review flagged'}
+                    {taxonomyNeedsReview ? ' · review suggested' : ''}
+                  </p>
+                )}
+                {(ticket.suggestedInternalCategoryName || ticket.suggestedInternalSubcategoryName) && (
+                  <p className="mt-0.5 text-[10px] text-slate-500">
+                    Suggested: {[ticket.suggestedInternalCategoryName, ticket.suggestedInternalSubcategoryName].filter(Boolean).join(' > ')}
+                  </p>
+                )}
               </div>
             </div>
           )}

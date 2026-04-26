@@ -15,8 +15,9 @@ describe('competency prompt default', () => {
     expect(DEFAULT_COMPETENCY_PROMPT).toContain('expert');
   });
 
-  test('instructs to reuse existing categories', () => {
-    expect(DEFAULT_COMPETENCY_PROMPT).toContain('reuse existing categories whenever they fit');
+  test('instructs to reuse existing taxonomy entries', () => {
+    expect(DEFAULT_COMPETENCY_PROMPT).toContain('Reuse existing category/subcategory IDs whenever they fit');
+    expect(DEFAULT_COMPETENCY_PROMPT).toContain('parent categories and subcategories');
   });
 
   test('does not reference removed tools', () => {

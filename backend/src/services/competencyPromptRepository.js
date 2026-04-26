@@ -2,7 +2,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
 
-const DEFAULT_COMPETENCY_PROMPT = `You are an IT technician competency analyst. Your job is to analyze a technician's ticket history and determine their skill categories and proficiency levels.
+const DEFAULT_COMPETENCY_PROMPT = `You are an IT technician competency analyst. Your job is to analyze a technician's ticket history and determine their internal category/subcategory competency levels.
 
 Follow this process EXACTLY in order.
 
@@ -10,14 +10,16 @@ Follow this process EXACTLY in order.
 Call **get_technician_profile** to see the technician's current info and any existing competency mappings.
 
 ## Step 2: Get Category Context
-Call **get_existing_competency_categories** to see what categories already exist in this workspace. You should reuse existing categories whenever they fit, and only propose new ones when necessary.
+Call **get_existing_competency_categories** to see the internal taxonomy tree for this workspace. It contains top-level categories and optional subcategories. Reuse existing category/subcategory IDs whenever they fit.
 
 ## Step 3: Analyze Ticket Distribution
-Call **get_technician_category_distribution** to get a deterministic breakdown of what ticket categories this technician handles, how many, and how recently. This is your primary evidence source.
+Call **get_technician_category_distribution** to get deterministic breakdowns of internal taxonomy matches and raw FreshService categories for this technician. Internal taxonomy distribution is the primary source; FreshService fields are evidence only.
 
 ## Step 4: Review Ticket Details
 Call **get_technician_ticket_history** with a large window (days=180, limit=100) to see as many tickets as possible. Look for:
 - Patterns in what types of issues they handle
+- Whether tickets are mapped to a top-level category only or a specific subcategory
+- Whether taxonomy fit was weak/none, which may indicate the matrix or taxonomy needs review
 - Complexity indicators (priority, resolution time)
 - Whether they self-pick certain categories (indicates confidence/preference)
 - Breadth vs depth of expertise
@@ -33,9 +35,11 @@ If helpful, call **get_comparable_technicians** to see how this technician's cat
 Call **submit_competency_assessment** with your final assessment. You MUST always call this tool.
 
 ## Thoroughness
-- **Aim for 10-15 competency categories per technician.** Most IT technicians handle a wide range of work. Do not stop at 5-8 categories.
-- Include every category where the technician has handled 5+ tickets, even if the volume is low — "basic" is a valid level.
-- For senior technicians (IT Level 3+), expect 12-18 categories since they handle more diverse work.
+- **Aim for 10-15 relevant competency mappings per technician across parent categories and subcategories.** Most IT technicians handle a wide range of work. Do not stop at 5-8 categories.
+- Use subcategory mappings for specific repeatable domains where the taxonomy has a matching subcategory.
+- Use parent-category mappings for broader/general ability when the evidence is not specific enough for a subcategory.
+- Include every category or subcategory where the technician has handled 5+ tickets, even if the volume is low — "basic" is a valid level.
+- For senior technicians (IT Level 3+), expect 12-18 mappings since they handle more diverse work.
 - Review the full category distribution AND individual tickets to catch categories that might be undercounted in the aggregate view.
 
 ## Proficiency Level Guidelines
@@ -45,16 +49,24 @@ Call **submit_competency_assessment** with your final assessment. You MUST alway
 
 ## Important Rules
 - Only assess categories where there is real evidence from ticket history
-- Do NOT invent competencies without supporting ticket data
-- **CRITICAL: Before proposing a new category, carefully check if an existing category covers the same domain under a slightly different name.** For example:
+- Do NOT invent active competencies without supporting ticket data
+- **CRITICAL: Before proposing a new category or subcategory, carefully check if an existing parent or subcategory covers the same domain under a slightly different name.** For example:
   - "VPN and Remote Access Client" tickets should use the existing "VPN and Remote Access" category
   - "Scripting" tickets should use the existing "Scripting & Automation" category
   - "Boardrooms" tickets should use the existing "Boardrooms and A/V" category
   - "Computer Setup (Hardware)" tickets should use "Workstation Setup" if it exists
-- Only use categoryAction "create_new" when NO existing category covers this work area at all
-- When proposing a new category, provide a clear description and strong evidence
+- Only use categoryAction "create_new" when NO existing category or subcategory covers this work area at all. New taxonomy entries are inactive suggestions until admin review.
+- When proposing a new subcategory, include parentCategoryId or parentCategoryName.
+- When reusing an existing category/subcategory, include categoryId whenever available.
+- When proposing a new category/subcategory, provide a clear description and strong evidence.
 - Be conservative with "expert" level — reserve it for clear specialization
 - If a technician is a generalist with no clear specialization, say so and assign "basic" or "intermediate" across relevant categories`;
+
+function needsCompetencyPromptUpgrade(systemPrompt = '') {
+  return !systemPrompt.includes('internal taxonomy tree')
+    || !systemPrompt.includes('parentCategoryId')
+    || !systemPrompt.includes('categoryId whenever available');
+}
 
 class CompetencyPromptRepository {
   async getVersions(workspaceId) {
@@ -99,6 +111,14 @@ class CompetencyPromptRepository {
           status: 'published',
           publishedAt: new Date(),
         });
+      } else if (needsCompetencyPromptUpgrade(published.systemPrompt)) {
+        const upgraded = await this.createVersion(workspaceId, {
+          systemPrompt: DEFAULT_COMPETENCY_PROMPT,
+          toolConfig: published.toolConfig,
+          notes: `Auto-upgraded from v${published.version} for internal category/subcategory taxonomy support`,
+          createdBy: 'system',
+        });
+        published = await this.publish(upgraded.id, 'system');
       }
 
       return published;

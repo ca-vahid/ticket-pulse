@@ -37,8 +37,8 @@ let config;
 try {
   config = envSchema.parse(process.env);
 } catch (error) {
-  console.error('❌ Invalid environment variables:');
-  console.error(error.errors);
+  process.stderr.write('Invalid environment variables:\n');
+  process.stderr.write(`${JSON.stringify(error.errors, null, 2)}\n`);
   process.exit(1);
 }
 

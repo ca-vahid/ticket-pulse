@@ -136,6 +136,12 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
           {data?.ticketClassification && (
             <p className="text-xs text-yellow-600 mt-2 text-center">Classification: {data.ticketClassification}</p>
           )}
+          {(data?.categoryFit || data?.subcategoryFit || data?.taxonomyReviewNeeded) && (
+            <p className={`text-xs mt-1 text-center ${data?.taxonomyReviewNeeded ? 'text-amber-700' : 'text-slate-500'}`}>
+              {[data?.categoryFit ? `Category ${data.categoryFit}` : null, data?.subcategoryFit ? `Subcategory ${data.subcategoryFit}` : null].filter(Boolean).join(' · ')}
+              {data?.taxonomyReviewNeeded ? ' · taxonomy review suggested' : ''}
+            </p>
+          )}
           <p className="text-xs text-gray-400 mt-2 text-center">No technician recommendations were produced for this run.</p>
         </div>
         {!hideAgentBriefing && <AgentBriefingPreview recommendation={data} decision={decision || 'noise_dismissed'} />}

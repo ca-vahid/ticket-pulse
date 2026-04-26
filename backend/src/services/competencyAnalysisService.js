@@ -9,8 +9,23 @@ import logger from '../utils/logger.js';
 
 const MAX_TURNS = 15;
 
+function resolveSuggestedParentId(comp, categories) {
+  if (comp.parentCategoryId) {
+    const parent = categories.find((category) => category.id === Number(comp.parentCategoryId) && !category.parentId);
+    if (parent) return parent.id;
+  }
+  if (comp.parentCategoryName) {
+    const parent = categories.find((category) => (
+      !category.parentId
+      && category.name.toLowerCase() === String(comp.parentCategoryName).trim().toLowerCase()
+    ));
+    if (parent) return parent.id;
+  }
+  return null;
+}
+
 class CompetencyAnalysisService {
-  async runAnalysis(technicianId, workspaceId, triggeredBy = 'admin', onEvent = null, calibrationContext = null) {
+  async runAnalysis(technicianId, workspaceId, triggeredBy = 'admin', onEvent = null) {
     const pipelineStart = Date.now();
     const emit = (event) => { try { onEvent?.(event); } catch { /* non-fatal */ } };
 
@@ -78,18 +93,14 @@ class CompetencyAnalysisService {
     let stepCounter = 0;
     let fullTranscript = '';
 
-    let userMsg = `Analyze the competencies of technician ID ${technicianId} (${tech.name}). Use the available tools to research their ticket history, then call submit_competency_assessment with your final assessment.`;
-
-    if (calibrationContext) {
-      userMsg += '\n\nIMPORTANT: This analysis was triggered by a calibration run. Call get_calibration_signals FIRST to see specific signals about this technician\'s assignment outcomes. Pay special attention to:\n- Tickets they handled OUTSIDE of AI recommendations (may indicate skills not yet captured in the matrix)\n- Tickets where they were recommended but NOT assigned (may indicate their competency level needs adjustment)\nUse these signals alongside their ticket history to produce a more accurate assessment.';
-    }
+    const userMsg = `Analyze the competencies of technician ID ${technicianId} (${tech.name}). Use the available tools to research their ticket history, then call submit_competency_assessment with your final assessment.`;
 
     const messages = [
       { role: 'user', content: userMsg },
     ];
 
     const tools = COMPETENCY_TOOL_SCHEMAS.map((t) => ({ ...t, eager_input_streaming: true }));
-    const context = { workspaceId, technicianId, calibrationContext };
+    const context = { workspaceId, technicianId };
 
     try {
       let continueLoop = true;
@@ -249,20 +260,31 @@ class CompetencyAnalysisService {
     const mappings = [];
 
     const allExisting = await prisma.competencyCategory.findMany({
-      where: { workspaceId },
-      select: { id: true, name: true },
+      where: { workspaceId, isActive: true },
+      select: { id: true, name: true, parentId: true, isActive: true },
     });
 
     for (const comp of competencies) {
       let category;
       const normalizedName = (comp.categoryName || '').trim().replace(/\s+/g, ' ');
+      if (!comp.categoryId && !normalizedName) {
+        logger.warn('Skipping competency assessment item without categoryId or categoryName', { technicianId, workspaceId });
+        continue;
+      }
 
-      // Step 1: Exact case-insensitive match
-      category = allExisting.find(
-        (c) => c.name.toLowerCase() === normalizedName.toLowerCase(),
-      );
+      // Step 1: Prefer explicit internal taxonomy IDs returned by the tool.
+      if (comp.categoryId) {
+        category = allExisting.find((c) => c.id === Number(comp.categoryId));
+      }
 
-      // Step 2: Fuzzy match if no exact match
+      // Step 2: Exact case-insensitive match
+      if (!category) {
+        category = allExisting.find(
+          (c) => c.name.toLowerCase() === normalizedName.toLowerCase(),
+        );
+      }
+
+      // Step 3: Fuzzy match if no exact match
       if (!category) {
         const { match, score, reason } = findBestCategoryMatch(normalizedName, allExisting);
         if (match) {
@@ -274,17 +296,25 @@ class CompetencyAnalysisService {
         }
       }
 
-      // Step 3: Create new only if no match at all
+      // Step 4: Create inactive suggested taxonomy entry only if no match at all.
       if (!category) {
-        const dbCategory = await prisma.competencyCategory.create({
-          data: { workspaceId, name: normalizedName, description: comp.categoryDescription || null },
+        const parentId = resolveSuggestedParentId(comp, allExisting);
+        await prisma.competencyCategory.create({
+          data: {
+            workspaceId,
+            name: normalizedName,
+            description: comp.categoryDescription || null,
+            parentId,
+            isActive: false,
+            isSystemSuggested: true,
+            source: 'technician_analysis',
+          },
         });
-        category = dbCategory;
-        allExisting.push({ id: dbCategory.id, name: dbCategory.name });
         newCategories++;
-        logger.info('Created new competency category (no fuzzy match found)', {
+        logger.info('Created inactive system-suggested competency category (admin approval required)', {
           workspaceId, categoryName: normalizedName, technicianId,
         });
+        continue;
       }
 
       // Deduplicate: if same category appears twice, keep the higher proficiency

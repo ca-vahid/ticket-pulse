@@ -7,7 +7,6 @@ import { useAuth } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
 import PipelineRunDetail from '../components/assignment/PipelineRunDetail';
 import CompetencyManager from '../components/assignment/CompetencyManager';
-import CalibrationManager from '../components/assignment/CalibrationManager';
 import DailyReviewManager from '../components/assignment/DailyReviewManager';
 import PromptManager from '../components/assignment/PromptManager';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
@@ -19,15 +18,14 @@ import {
   ArrowLeft, Inbox, History, Settings2, Award, RefreshCw, Loader2,
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
-  ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check, TrendingUp,
+  ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
   ShieldCheck, Users, Bot, Sparkles, Clock, X, CalendarDays,
 } from 'lucide-react';
 
 const ALL_TABS = [
   { id: 'queue', label: 'Review Queue', icon: Inbox, minRole: 'reviewer' },
   { id: 'history', label: 'History', icon: History, minRole: 'reviewer' },
-  { id: 'daily-review', label: 'Daily Review', icon: CalendarDays, minRole: 'admin' },
-  { id: 'calibration', label: 'Calibration', icon: TrendingUp, minRole: 'admin' },
+  { id: 'daily-review', label: 'Review', icon: CalendarDays, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'prompts', label: 'Prompts', icon: FileText, minRole: 'admin' },
   { id: 'config', label: 'Configuration', icon: Settings2, minRole: 'admin' },
@@ -3806,9 +3804,9 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       </ConfigSection>
 
       {/* Section 6: Advanced */}
-      <ConfigSection icon={CalendarDays} title="Daily Review Automation" defaultOpen={false}>
+      <ConfigSection icon={CalendarDays} title="Review Automation" defaultOpen={false}>
         <ConfigToggle
-          label="Enable Scheduled Daily Review"
+          label="Enable Scheduled Review"
           description="Automatically run the daily assignment review after business hours using the configured local time."
           checked={config.dailyReviewEnabled}
           onChange={() => setConfig({ ...config, dailyReviewEnabled: !config.dailyReviewEnabled })}
@@ -3855,7 +3853,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
           <ConfigToggle
             label="Preheat thread cache during regular sync"
             description={
-              'When enabled, every 5-minute sync proactively pulls FreshService activity + conversation data for tickets created or assigned today, so Daily Review runs against an already-warm cache and finishes in seconds instead of minutes. Costs ~60 extra FreshService API calls per sync cycle for this workspace. Leave off for workspaces that don\u2019t use Daily Review \u2014 they shouldn\u2019t pay the API budget tax for data they\u2019ll never read.'
+              'When enabled, every 5-minute sync proactively pulls FreshService activity + conversation data for tickets created or assigned today, so Review runs against an already-warm cache and finishes in seconds instead of minutes. Costs ~60 extra FreshService API calls per sync cycle for this workspace. Leave off for workspaces that don\u2019t use Review \u2014 they shouldn\u2019t pay the API budget tax for data they\u2019ll never read.'
             }
             checked={config.dailyReviewPreheatEnabled}
             onChange={() => setConfig({ ...config, dailyReviewPreheatEnabled: !config.dailyReviewPreheatEnabled })}
@@ -4073,7 +4071,6 @@ export default function AssignmentReview() {
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} onHeaderActionChange={setAssignmentHeaderAction} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
-            {activeTab === 'calibration' && <CalibrationManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'prompts' && <PromptManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'config' && <ConfigTab workspaceTimezone={workspaceTimezone} />}

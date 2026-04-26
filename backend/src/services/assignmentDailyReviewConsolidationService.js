@@ -455,13 +455,23 @@ class AssignmentDailyReviewConsolidationService {
           status: true,
           priority: true,
           category: true,
+          subCategory: true,
           ticketCategory: true,
+          internalCategory: { select: { id: true, name: true } },
+          internalSubcategory: { select: { id: true, name: true, parentId: true } },
+          internalCategoryFit: true,
+          internalSubcategoryFit: true,
+          taxonomyReviewNeeded: true,
+          internalCategoryRationale: true,
+          suggestedInternalCategoryName: true,
+          suggestedInternalSubcategoryName: true,
           assignedTech: { select: { id: true, name: true } },
         },
         take: 150,
       })
       : [];
 
+    const categoryTree = competencyRepository.buildCategoryTree(categories);
     const snapshot = {
       recommendations: sourceRecommendations.map((rec) => ({
         id: rec.id,
@@ -486,7 +496,19 @@ class AssignmentDailyReviewConsolidationService {
         id: cat.id,
         name: cat.name,
         description: cat.description,
+        parentId: cat.parentId,
         isActive: cat.isActive,
+        source: cat.source,
+      })),
+      categoryTree: categoryTree.map((cat) => ({
+        id: cat.id,
+        name: cat.name,
+        description: cat.description,
+        subcategories: toArray(cat.subcategories).map((sub) => ({
+          id: sub.id,
+          name: sub.name,
+          description: sub.description,
+        })),
       })),
       competencies: competencies.map((comp) => ({
         technicianId: comp.technicianId,
@@ -502,7 +524,26 @@ class AssignmentDailyReviewConsolidationService {
         subject: truncate(ticket.subject, 220),
         status: ticket.status,
         priority: ticket.priority,
-        category: ticket.ticketCategory || ticket.category,
+        freshserviceCategory: ticket.category,
+        freshserviceSubcategory: ticket.subCategory,
+        ticketCategory: ticket.ticketCategory,
+        internalCategory: ticket.internalCategory
+          ? {
+            id: ticket.internalCategory.id,
+            name: ticket.internalCategory.name,
+            subcategory: ticket.internalSubcategory
+              ? { id: ticket.internalSubcategory.id, name: ticket.internalSubcategory.name }
+              : null,
+          }
+          : null,
+        taxonomyFit: {
+          categoryFit: ticket.internalCategoryFit || null,
+          subcategoryFit: ticket.internalSubcategoryFit || null,
+          reviewNeeded: !!ticket.taxonomyReviewNeeded,
+          rationale: ticket.internalCategoryRationale || null,
+          suggestedCategoryName: ticket.suggestedInternalCategoryName || null,
+          suggestedSubcategoryName: ticket.suggestedInternalSubcategoryName || null,
+        },
         assignedTech: ticket.assignedTech?.name || null,
       })),
     };
@@ -526,11 +567,15 @@ You will receive approved Daily Review recommendations, the current assignment p
 
 Produce a consolidation plan with exactly four sections:
 1. Prompt edits: suggest a complete updated assignment prompt, but do not assume it will be applied automatically.
-2. Skill list changes: add, rename, merge, update, or deprecate skills/categories where evidence supports it.
+2. Skill list changes: add, rename, update, move, merge, or deprecate internal categories/subcategories where evidence supports it.
 3. Technician skill changes: suggest technician competency level updates or mappings where evidence supports it.
 4. Process changes: operational or engineering work. These are visible but not directly applyable in the app.
 
 Rules:
+- The app has a two-level internal taxonomy: top-level category plus optional subcategory. FreshService categories are evidence only.
+- Daily Review may propose new categories, subcategories, or moves, but they only become active after admin approval through Skill List Changes.
+- Pay close attention to taxonomyFit evidence from assignment runs. Treat weak/none fit and suggested category/subcategory names as leads, then validate them against ticket evidence and the current categoryTree before proposing changes.
+- Skill list changes may create top-level categories, create subcategories under a parent, move categories between top-level/subcategory positions, rename, update descriptions, merge duplicates, or deprecate stale entries.
 - Be conservative. Do not invent skills or competency changes without evidence from approved recommendations.
 - Preserve useful existing prompt content. Tighten only where findings justify it.
 - Prefer adding narrow guidance over broad rewrites.
@@ -706,10 +751,12 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
               type: 'object',
               properties: {
                 title: { type: 'string' },
-                action: { type: 'string', enum: ['add', 'rename', 'update', 'merge', 'deprecate'] },
+                action: { type: 'string', enum: ['add', 'rename', 'update', 'move', 'merge', 'deprecate'] },
                 categoryId: { type: ['number', 'null'] },
                 categoryName: { type: 'string' },
                 newName: { type: ['string', 'null'] },
+                parentCategoryId: { type: ['number', 'null'] },
+                parentCategoryName: { type: ['string', 'null'] },
                 description: { type: ['string', 'null'] },
                 rationale: { type: 'string' },
                 sourceRecommendationIds: { type: 'array', items: { type: 'number' } },
@@ -840,26 +887,46 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
       return categories.find((cat) => cat.name.toLowerCase() === String(payload.categoryName || '').toLowerCase());
     };
     const existing = findCategory();
+    const resolveParentId = () => {
+      if (payload.parentCategoryId) return Number(payload.parentCategoryId);
+      if (payload.parentCategoryName) {
+        const parent = categories.find((cat) => (
+          !cat.parentId
+          && cat.name.toLowerCase() === String(payload.parentCategoryName).toLowerCase()
+        ));
+        return parent?.id || null;
+      }
+      return payload.parentId === null ? null : undefined;
+    };
 
     if (action === 'add') {
+      const parentId = resolveParentId();
       if (existing) {
         const updated = await competencyRepository.updateCategory(existing.id, {
           description: payload.description ?? existing.description,
           isActive: true,
+          ...(parentId !== undefined && { parentId }),
         });
         return { action: 'updated_existing_skill', categoryId: updated.id };
       }
       const created = await competencyRepository.createCategory(workspaceId, {
         name: payload.newName || payload.categoryName,
         description: payload.description || null,
+        parentId,
+        source: 'daily_review_consolidation',
+        isSystemSuggested: false,
       });
       return { action: 'created_skill', categoryId: created.id };
     }
 
     if (!existing) {
+      const parentId = resolveParentId();
       const created = await competencyRepository.createCategory(workspaceId, {
         name: payload.newName || payload.categoryName,
         description: payload.description || null,
+        parentId,
+        source: 'daily_review_consolidation',
+        isSystemSuggested: false,
       });
       return { action: 'created_skill_fallback', categoryId: created.id };
     }
@@ -870,12 +937,21 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
     }
 
     if (action === 'rename' || action === 'update') {
+      const parentId = resolveParentId();
       const updated = await competencyRepository.updateCategory(existing.id, {
         name: payload.newName || existing.name,
         description: payload.description ?? existing.description,
         isActive: payload.isActive ?? existing.isActive,
+        ...(parentId !== undefined && { parentId }),
       });
       return { action: action === 'rename' ? 'renamed_skill' : 'updated_skill', categoryId: updated.id };
+    }
+
+    if (action === 'move') {
+      const parentId = resolveParentId();
+      if (parentId === undefined) throw new Error('Move skill changes require a parent category selection');
+      const updated = await competencyRepository.updateCategory(existing.id, { parentId });
+      return { action: 'moved_skill', categoryId: updated.id, parentId };
     }
 
     return { action: 'recorded_skill_change', categoryId: existing.id, note: 'Merge actions require manual review in the Skill Matrix.' };

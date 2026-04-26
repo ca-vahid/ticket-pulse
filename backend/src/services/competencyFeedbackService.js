@@ -20,24 +20,39 @@ class CompetencyFeedbackService {
         select: {
           feedbackApplied: true,
           recommendation: true,
-          ticket: { select: { ticketCategory: true, category: true } },
+          ticket: {
+            select: {
+              ticketCategory: true,
+              category: true,
+              internalCategoryId: true,
+              internalSubcategoryId: true,
+              internalCategory: { select: { id: true, name: true } },
+              internalSubcategory: { select: { id: true, name: true } },
+            },
+          },
         },
       });
 
       if (!run || run.feedbackApplied) return;
 
-      const ticketCategory = run.ticket?.ticketCategory || run.ticket?.category || run.recommendation?.ticketClassification;
-      if (!ticketCategory) {
+      const targetCategoryId = run.ticket?.internalSubcategoryId || run.ticket?.internalCategoryId || null;
+      const ticketCategory = run.ticket?.internalSubcategory?.name
+        || run.ticket?.internalCategory?.name
+        || run.ticket?.ticketCategory
+        || run.ticket?.category
+        || run.recommendation?.ticketClassification;
+      if (!targetCategoryId && !ticketCategory) {
         logger.debug('Competency feedback: no ticket category to match', { runId });
         return;
       }
 
       const existingCategories = await prisma.competencyCategory.findMany({
         where: { workspaceId },
-        select: { id: true, name: true },
+        select: { id: true, name: true, parentId: true },
       });
 
-      const { match } = findBestCategoryMatch(ticketCategory, existingCategories);
+      const directMatch = targetCategoryId ? existingCategories.find((category) => category.id === targetCategoryId) : null;
+      const { match } = directMatch ? { match: directMatch } : findBestCategoryMatch(ticketCategory, existingCategories);
       if (!match) {
         logger.debug('Competency feedback: no matching competency category', { runId, ticketCategory });
         return;
@@ -124,13 +139,30 @@ class CompetencyFeedbackService {
       },
       select: {
         recommendation: true,
-        ticket: { select: { ticketCategory: true, category: true } },
+        ticket: {
+          select: {
+            ticketCategory: true,
+            category: true,
+            internalCategoryId: true,
+            internalSubcategoryId: true,
+            internalCategory: { select: { id: true, name: true } },
+            internalSubcategory: { select: { id: true, name: true } },
+          },
+        },
       },
     });
 
     const catName = category.name.toLowerCase();
     return runs.filter((r) => {
-      const tc = (r.ticket?.ticketCategory || r.ticket?.category || r.recommendation?.ticketClassification || '').toLowerCase();
+      if (r.ticket?.internalSubcategoryId === categoryId || r.ticket?.internalCategoryId === categoryId) return true;
+      const tc = (
+        r.ticket?.internalSubcategory?.name
+        || r.ticket?.internalCategory?.name
+        || r.ticket?.ticketCategory
+        || r.ticket?.category
+        || r.recommendation?.ticketClassification
+        || ''
+      ).toLowerCase();
       return tc.includes(catName) || catName.includes(tc);
     }).length;
   }

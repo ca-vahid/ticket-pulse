@@ -165,6 +165,17 @@ model Ticket {
   category              String?   @db.VarChar(255)
   subCategory           String?   @db.VarChar(255) @map("sub_category")
   ticketCategory        String?   @db.VarChar(100) @map("ticket_category") // Custom field: security (e.g., BST, GIS, etc.)
+  internalCategoryId    Int?      @map("internal_category_id")
+  internalCategory      CompetencyCategory? @relation("TicketInternalCategory", fields: [internalCategoryId], references: [id], onDelete: SetNull)
+  internalSubcategoryId Int?      @map("internal_subcategory_id")
+  internalSubcategory   CompetencyCategory? @relation("TicketInternalSubcategory", fields: [internalSubcategoryId], references: [id], onDelete: SetNull)
+  internalCategoryConfidence String? @db.VarChar(20) @map("internal_category_confidence")
+  internalCategoryRationale  String? @db.Text @map("internal_category_rationale")
+  internalCategoryFit        String? @db.VarChar(30) @map("internal_category_fit")
+  internalSubcategoryFit     String? @db.VarChar(30) @map("internal_subcategory_fit")
+  taxonomyReviewNeeded       Boolean @default(false) @map("taxonomy_review_needed")
+  suggestedInternalCategoryName    String? @db.VarChar(120) @map("suggested_internal_category_name")
+  suggestedInternalSubcategoryName String? @db.VarChar(120) @map("suggested_internal_subcategory_name")
   department            String?   @db.VarChar(255)
   isEscalated           Boolean?  @default(false) @map("is_escalated")
 
@@ -218,6 +229,9 @@ model Ticket {
   @@index([firstPublicAgentReplyAt])
   @@index([firstAssignedAt])
   @@index([isNoise])
+  @@index([internalCategoryId])
+  @@index([internalSubcategoryId])
+  @@index([taxonomyReviewNeeded])
 }
 
 model NoiseRule {
@@ -658,20 +672,30 @@ model AssignmentConfig {
 }
 
 model CompetencyCategory {
-  id          Int       @id @default(autoincrement())
-  workspaceId Int       @map("workspace_id")
-  workspace   Workspace @relation(fields: [workspaceId], references: [id])
-  name        String    @db.VarChar(100)
-  description String?   @db.Text
-  isActive    Boolean   @default(true) @map("is_active")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id                Int       @id @default(autoincrement())
+  workspaceId       Int       @map("workspace_id")
+  workspace         Workspace @relation(fields: [workspaceId], references: [id])
+  parentId          Int?      @map("parent_id")
+  parent            CompetencyCategory? @relation("CompetencyCategoryChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  subcategories     CompetencyCategory[] @relation("CompetencyCategoryChildren")
+  name              String    @db.VarChar(100)
+  description       String?   @db.Text
+  isActive          Boolean   @default(true) @map("is_active")
+  isSystemSuggested Boolean   @default(false) @map("is_system_suggested")
+  source            String    @default("manual") @db.VarChar(30)
+  sortOrder         Int       @default(0) @map("sort_order")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   technicianCompetencies TechnicianCompetency[]
+  ticketsAsInternalCategory Ticket[] @relation("TicketInternalCategory")
+  ticketsAsInternalSubcategory Ticket[] @relation("TicketInternalSubcategory")
 
   @@unique([workspaceId, name])
   @@map("competency_categories")
   @@index([workspaceId])
+  @@index([workspaceId, parentId])
+  @@index([parentId])
 }
 
 model TechnicianCompetency {

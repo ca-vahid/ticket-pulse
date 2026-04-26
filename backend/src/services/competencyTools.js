@@ -1,6 +1,59 @@
 import prisma from './prisma.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 
+function buildCategoryTree(categories = []) {
+  const byId = new Map(categories.map((category) => [category.id, { ...category, subcategories: [] }]));
+  const roots = [];
+  const sort = (a, b) => ((a.sortOrder || 0) - (b.sortOrder || 0)) || a.name.localeCompare(b.name);
+
+  for (const category of byId.values()) {
+    if (category.parentId && byId.has(category.parentId)) {
+      byId.get(category.parentId).subcategories.push({
+        id: category.id,
+        name: category.name,
+        description: category.description,
+      });
+    } else {
+      roots.push(category);
+    }
+  }
+
+  return roots.sort(sort).map((category) => ({
+    id: category.id,
+    name: category.name,
+    description: category.description,
+    subcategories: category.subcategories.sort(sort),
+  }));
+}
+
+function summarizeInternalTaxonomyRows(rows = [], totalTickets = 0) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const category = row.internalCategory;
+    if (!category) continue;
+    const subcategory = row.internalSubcategory || null;
+    const key = `${category.id}:${subcategory?.id || 'parent'}`;
+    const existing = byKey.get(key) || {
+      categoryId: category.id,
+      categoryName: category.name,
+      subcategoryId: subcategory?.id || null,
+      subcategoryName: subcategory?.name || null,
+      count: 0,
+      lastSeen: null,
+    };
+    existing.count += 1;
+    const seen = row.createdAt?.toISOString()?.slice(0, 10) || null;
+    if (seen && (!existing.lastSeen || seen > existing.lastSeen)) existing.lastSeen = seen;
+    byKey.set(key, existing);
+  }
+  return Array.from(byKey.values())
+    .map((item) => ({
+      ...item,
+      percentage: totalTickets > 0 ? Math.round((item.count / totalTickets) * 100) : 0,
+    }))
+    .sort((a, b) => b.count - a.count || a.categoryName.localeCompare(b.categoryName));
+}
+
 export const COMPETENCY_TOOL_SCHEMAS = [
   {
     name: 'get_technician_profile',
@@ -9,7 +62,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'get_existing_competency_categories',
-    description: 'Get all competency categories currently defined in this workspace, with descriptions. Reuse existing categories when they fit before proposing new ones.',
+    description: 'Get the internal competency taxonomy tree currently defined in this workspace, with top-level categories and subcategories. Reuse existing category/subcategory IDs when they fit before proposing new ones.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -60,11 +113,6 @@ export const COMPETENCY_TOOL_SCHEMAS = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'get_calibration_signals',
-    description: 'Get calibration signals for this technician from an active calibration run. Shows tickets they handled outside of AI recommendations (suggesting uncaptured skills) and tickets where they were recommended but not assigned (suggesting possible overestimation). Only returns data when triggered from a calibration run.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
     name: 'submit_competency_assessment',
     description: 'Submit your final competency assessment for this technician. You MUST call this tool when done. Provide competency categories with proficiency levels and evidence.',
     input_schema: {
@@ -77,8 +125,11 @@ export const COMPETENCY_TOOL_SCHEMAS = [
             type: 'object',
             properties: {
               categoryName: { type: 'string', description: 'Category name (use existing name if it fits, otherwise propose a new one)' },
+              categoryId: { type: 'integer', description: 'Existing category or subcategory ID when reusing an internal taxonomy entry' },
+              parentCategoryName: { type: 'string', description: 'Parent top-level category name when proposing a new subcategory' },
+              parentCategoryId: { type: 'integer', description: 'Parent top-level category ID when proposing a new subcategory' },
               categoryDescription: { type: 'string', description: 'Brief description of what this category covers' },
-              categoryAction: { type: 'string', enum: ['reuse_existing', 'create_new'], description: 'Whether to use an existing category or propose a new one' },
+              categoryAction: { type: 'string', enum: ['reuse_existing', 'create_new'], description: 'Whether to use an existing category/subcategory or propose a new inactive taxonomy entry for admin review' },
               proficiencyLevel: { type: 'string', enum: ['basic', 'intermediate', 'expert'], description: 'Assessed proficiency level' },
               confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Confidence in this assessment' },
               evidenceSummary: { type: 'string', description: 'Brief summary of evidence supporting this assessment' },
@@ -96,7 +147,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
 ];
 
 export async function executeCompetencyTool(toolName, toolInput, context) {
-  const { workspaceId, technicianId, calibrationContext } = context;
+  const { workspaceId, technicianId } = context;
 
   switch (toolName) {
   case 'get_technician_profile':
@@ -113,38 +164,9 @@ export async function executeCompetencyTool(toolName, toolInput, context) {
     return await getComparableTechnicians(workspaceId, technicianId);
   case 'get_technician_ad_profile':
     return await getTechnicianAdProfile(workspaceId, technicianId);
-  case 'get_calibration_signals':
-    return getCalibrationSignals(calibrationContext);
   default:
     return { error: `Unknown tool: ${toolName}` };
   }
-}
-
-function getCalibrationSignals(calibrationContext) {
-  if (!calibrationContext) {
-    return { available: false, message: 'No active calibration data. This tool only returns data when competency analysis is triggered from a calibration run.' };
-  }
-
-  const { signals, reasons, periodStart, periodEnd } = calibrationContext;
-  return {
-    available: true,
-    period: { start: periodStart, end: periodEnd },
-    reasons,
-    assignedOutsideRecommendations: (signals?.assignedOutside || []).map(s => ({
-      ticketSubject: s.subject,
-      ticketCategory: s.category,
-      adminNote: s.note || null,
-      overrideReason: s.overrideReason || null,
-      interpretation: 'This technician was assigned a ticket that the AI did NOT recommend them for. This may indicate a competency the system has not captured.',
-    })),
-    recommendedButNotAssigned: (signals?.recommendedNotAssigned || []).map(s => ({
-      ticketSubject: s.subject,
-      ticketCategory: s.category,
-      actualAssignee: s.actualAssignee,
-      interpretation: 'This technician was recommended by the AI but someone else was assigned instead. Consider whether their competency level in this area is accurate.',
-    })),
-    instructions: 'Use these signals alongside ticket history to assess whether this technician\'s competency profile needs adjustment. Tickets they handled outside recommendations suggest skills not yet captured. Tickets where they were passed over may indicate overestimated skills or other factors.',
-  };
 }
 
 async function getTechnicianProfile(workspaceId, technicianId) {
@@ -154,7 +176,7 @@ async function getTechnicianProfile(workspaceId, technicianId) {
       id: true, name: true, email: true, location: true,
       workStartTime: true, workEndTime: true, isActive: true,
       competencies: {
-        include: { competencyCategory: { select: { name: true, description: true } } },
+        include: { competencyCategory: { select: { id: true, name: true, description: true, parentId: true } } },
       },
     },
   });
@@ -169,7 +191,10 @@ async function getTechnicianProfile(workspaceId, technicianId) {
     schedule: tech.workStartTime && tech.workEndTime ? `${tech.workStartTime}-${tech.workEndTime}` : 'Default hours',
     isActive: tech.isActive,
     currentCompetencies: tech.competencies.map((c) => ({
+      categoryId: c.competencyCategory.id,
       category: c.competencyCategory.name,
+      parentId: c.competencyCategory.parentId,
+      levelType: c.competencyCategory.parentId ? 'subcategory' : 'category',
       description: c.competencyCategory.description,
       level: c.proficiencyLevel,
     })),
@@ -179,14 +204,21 @@ async function getTechnicianProfile(workspaceId, technicianId) {
 async function getExistingCategories(workspaceId) {
   const categories = await prisma.competencyCategory.findMany({
     where: { workspaceId, isActive: true },
-    select: { id: true, name: true, description: true },
-    orderBy: { name: 'asc' },
+    select: { id: true, name: true, description: true, parentId: true, sortOrder: true },
+    orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
   });
 
   return {
     count: categories.length,
-    categories,
-    instruction: 'You MUST reuse an existing category if it covers the same domain, even if the name is not a perfect match. For example, if "VPN and Remote Access" exists and you see tickets about "VPN and Remote Access Client", use the existing category — do NOT create a new one. Similarly, "Scripting" and "Scripting & Automation" are the same domain. Only use categoryAction "create_new" if NO existing category covers this area at all. The system will also fuzzy-match your proposals, but you should get this right yourself.',
+    categories: categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      description: category.description,
+      parentId: category.parentId,
+      levelType: category.parentId ? 'subcategory' : 'category',
+    })),
+    categoryTree: buildCategoryTree(categories),
+    instruction: 'Reuse an existing internal category/subcategory ID whenever it fits. Prefer exact subcategory mappings for specific work domains; use parent-category mappings for broader/general competency. Only use categoryAction "create_new" when NO existing category or subcategory covers this work area; new entries are inactive suggestions until admin review.',
   };
 }
 
@@ -201,7 +233,13 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params) {
     select: {
       id: true, freshserviceTicketId: true, subject: true,
       status: true, priority: true, category: true, subCategory: true,
-      ticketCategory: true, createdAt: true, resolvedAt: true,
+      ticketCategory: true,
+      internalCategory: { select: { id: true, name: true } },
+      internalSubcategory: { select: { id: true, name: true, parentId: true } },
+      internalCategoryFit: true,
+      internalSubcategoryFit: true,
+      taxonomyReviewNeeded: true,
+      createdAt: true, resolvedAt: true,
       isSelfPicked: true, resolutionTimeSeconds: true,
     },
     orderBy: { createdAt: 'desc' },
@@ -226,6 +264,18 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params) {
       category: t.category,
       subCategory: t.subCategory,
       ticketCategory: t.ticketCategory,
+      internalCategory: t.internalCategory
+        ? {
+          id: t.internalCategory.id,
+          name: t.internalCategory.name,
+          subcategory: t.internalSubcategory ? { id: t.internalSubcategory.id, name: t.internalSubcategory.name } : null,
+        }
+        : null,
+      taxonomyFit: {
+        categoryFit: t.internalCategoryFit,
+        subcategoryFit: t.internalSubcategoryFit,
+        reviewNeeded: t.taxonomyReviewNeeded,
+      },
       createdAt: t.createdAt?.toISOString()?.slice(0, 10),
       resolvedAt: t.resolvedAt?.toISOString()?.slice(0, 10),
       selfPicked: t.isSelfPicked,
@@ -264,6 +314,20 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
     }),
   ]);
 
+  const internalRows = await prisma.ticket.findMany({
+    where: {
+      workspaceId,
+      assignedTechId: technicianId,
+      createdAt: { gte: since },
+      internalCategoryId: { not: null },
+    },
+    select: {
+      internalCategory: { select: { id: true, name: true } },
+      internalSubcategory: { select: { id: true, name: true, parentId: true } },
+      createdAt: true,
+    },
+  });
+
   // Pick whichever category field has more data
   const byCategory = byFsCategory.length >= byTicketCategory.length
     ? byFsCategory
@@ -297,6 +361,7 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
     technicianId,
     period: `Last ${days} days`,
     summary: { totalTickets: total, resolved, selfPicked, resolveRate: total > 0 ? Math.round((resolved / total) * 100) : 0 },
+    internalTaxonomyBreakdown: summarizeInternalTaxonomyRows(internalRows, total),
     categoryBreakdown: byCategory.map((c) => ({
       category: c.category,
       count: c._count,
@@ -327,6 +392,8 @@ async function searchWorkspaceTickets(workspaceId, params) {
     select: {
       id: true, freshserviceTicketId: true, subject: true,
       status: true, priority: true, category: true,
+      internalCategory: { select: { id: true, name: true } },
+      internalSubcategory: { select: { id: true, name: true, parentId: true } },
       createdAt: true, resolvedAt: true,
       assignedTech: { select: { id: true, name: true } },
     },
@@ -343,6 +410,13 @@ async function searchWorkspaceTickets(workspaceId, params) {
       status: t.status,
       priority: t.priority,
       category: t.category,
+      internalCategory: t.internalCategory
+        ? {
+          id: t.internalCategory.id,
+          name: t.internalCategory.name,
+          subcategory: t.internalSubcategory ? { id: t.internalSubcategory.id, name: t.internalSubcategory.name } : null,
+        }
+        : null,
       createdAt: t.createdAt?.toISOString()?.slice(0, 10),
       resolvedAt: t.resolvedAt?.toISOString()?.slice(0, 10),
       assignedTo: t.assignedTech?.name || 'Unassigned',

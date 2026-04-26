@@ -58,7 +58,7 @@ Format with simple HTML.`;
     expect(needsPromptUpgrade(v1_71)).toBe(true);
   });
 
-  test('does not flag a prompt that already contains Rebound Context', () => {
+  test('does not flag a prompt that already contains Rebound Context and taxonomy classification', () => {
     const upToDate = `You are an IT helpdesk ticket assignment assistant.
 
 ## Step 1: Read the Ticket
@@ -68,7 +68,9 @@ Call get_ticket_details and search_decision_notes.
 Call find_matching_agents. Use get_technician_ad_profile.
 
 ## Step 8: Write the Agent-Facing Briefing
-agentBriefingHtml — public note. If a Rebound Context block was present in the user message, include a brief acknowledgement.`;
+agentBriefingHtml — public note. If a Rebound Context block was present in the user message, include a brief acknowledgement.
+
+submit_recommendation includes taxonomyReviewNeeded when internal taxonomy fit is weak.`;
 
     // This passes ONLY because we explicitly added the marker — proves the
     // detector keys on the literal "Rebound Context" string, not on a regex

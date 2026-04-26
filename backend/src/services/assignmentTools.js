@@ -36,7 +36,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'get_ticket_categories',
-    description: 'Get the list of known ticket categories, subcategories, and competency skill categories used in this workspace. Use this to classify the ticket into a known category rather than inventing one. Returns FreshService categories (from historical tickets) and competency categories (configured by admins for skill matching).',
+    description: 'Get the internal category/subcategory taxonomy used for assignment matching. Use this to classify the ticket into an existing internal category and optional subcategory. FreshService category fields are returned only as raw evidence.',
     input_schema: {
       type: 'object',
       properties: {},
@@ -49,12 +49,16 @@ export const TOOL_SCHEMAS = [
     input_schema: {
       type: 'object',
       properties: {
-        category: { type: 'string', description: 'Ticket category to match against agent competencies (e.g., "Networking", "Hardware")' },
+        categoryId: { type: 'integer', description: 'Internal top-level category ID from get_ticket_categories' },
+        subcategoryId: { type: 'integer', description: 'Internal subcategory ID from get_ticket_categories, when a specific subcategory applies' },
+        categoryName: { type: 'string', description: 'Internal top-level category name from get_ticket_categories' },
+        subcategoryName: { type: 'string', description: 'Internal subcategory name from get_ticket_categories, when a specific subcategory applies' },
+        category: { type: 'string', description: 'Legacy/internal category name. Prefer categoryId/categoryName and subcategoryId/subcategoryName.' },
         requires_physical_presence: { type: 'boolean', description: 'If true, excludes WFH and remote agents' },
         preferred_location: { type: 'string', description: 'Preferred agent location for physical tasks (e.g., "Vancouver", "Calgary")' },
         min_proficiency: { type: 'string', enum: ['basic', 'intermediate', 'expert'], description: 'Minimum competency level required' },
       },
-      required: ['category'],
+      required: [],
     },
   },
   {
@@ -217,12 +221,37 @@ Allowed HTML tags only: <b> <i> <br> <p>. No links or lists needed.
 
 Length: under 300 characters.`,
         },
-        ticketClassification: { type: 'string', description: 'The matched category from get_ticket_categories (e.g., "Networking", "Hardware", "Account Access")' },
+        ticketClassification: { type: 'string', description: 'Human-readable internal classification from get_ticket_categories (e.g., "Software Support > OpenGround")' },
+        internalCategoryId: { type: 'integer', description: 'Selected internal top-level category ID from get_ticket_categories' },
+        internalSubcategoryId: { type: 'integer', description: 'Selected internal subcategory ID from get_ticket_categories, if applicable' },
+        classificationRationale: { type: 'string', description: 'Brief rationale for the selected internal category/subcategory. If the fit is weak, explain what is missing from the taxonomy.' },
+        categoryFit: {
+          type: 'string',
+          enum: ['exact', 'weak', 'none'],
+          description: 'How well the ticket fits the selected top-level internal category. Use exact when clearly aligned, weak when forced/approximate, none when no usable top-level category exists.',
+        },
+        subcategoryFit: {
+          type: 'string',
+          enum: ['exact', 'weak', 'none'],
+          description: 'How well the ticket fits the selected internal subcategory. Use none when only the parent category fits or no subcategory applies.',
+        },
+        taxonomyReviewNeeded: {
+          type: 'boolean',
+          description: 'True when categoryFit or subcategoryFit is weak/none, or when this ticket suggests a new/moved/renamed category or subcategory should be reviewed later.',
+        },
+        suggestedInternalCategoryName: {
+          type: 'string',
+          description: 'Optional suggested top-level category name for Daily Review to consider. Do not invent an active category; this is only a review note.',
+        },
+        suggestedInternalSubcategoryName: {
+          type: 'string',
+          description: 'Optional suggested subcategory name for Daily Review to consider. Do not invent an active subcategory; this is only a review note.',
+        },
         requiresPhysicalPresence: { type: 'boolean', description: 'Whether the ticket requires physical presence' },
         estimatedComplexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Estimated complexity of the ticket' },
         confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Overall confidence in the recommendation' },
       },
-      required: ['recommendations', 'overallReasoning', 'ticketClassification', 'confidence'],
+      required: ['recommendations', 'overallReasoning', 'ticketClassification', 'classificationRationale', 'categoryFit', 'subcategoryFit', 'taxonomyReviewNeeded', 'confidence'],
     },
   },
 ];
@@ -545,6 +574,101 @@ async function getAgentAvailability(workspaceId) {
   };
 }
 
+function buildInternalTaxonomy(categories = []) {
+  const byId = new Map(categories.map((category) => [category.id, { ...category, subcategories: [] }]));
+  const roots = [];
+  const sort = (a, b) => (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name);
+
+  for (const category of byId.values()) {
+    if (category.parentId && byId.has(category.parentId)) {
+      byId.get(category.parentId).subcategories.push({
+        id: category.id,
+        name: category.name,
+        description: category.description,
+        parentId: category.parentId,
+      });
+    } else {
+      roots.push(category);
+    }
+  }
+
+  roots.sort(sort);
+  return roots.map((category) => ({
+    id: category.id,
+    name: category.name,
+    description: category.description,
+    subcategories: category.subcategories.sort(sort),
+  }));
+}
+
+async function resolveInternalCategorySelection(workspaceId, selection = {}) {
+  const requestedCategoryId = Number(selection.categoryId);
+  const requestedSubcategoryId = Number(selection.subcategoryId);
+  const categoryName = selection.categoryName || selection.category;
+  const subcategoryName = selection.subcategoryName;
+
+  const categories = await prisma.competencyCategory.findMany({
+    where: { workspaceId, isActive: true },
+    select: { id: true, name: true, parentId: true },
+  });
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  const byName = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
+
+  let category = Number.isInteger(requestedCategoryId) ? byId.get(requestedCategoryId) : null;
+  let subcategory = Number.isInteger(requestedSubcategoryId) ? byId.get(requestedSubcategoryId) : null;
+
+  if (category?.parentId) {
+    subcategory = subcategory || category;
+    category = byId.get(category.parentId) || null;
+  }
+
+  if (!category && categoryName) {
+    const named = byName.get(String(categoryName).toLowerCase());
+    if (named?.parentId) {
+      subcategory = subcategory || named;
+      category = byId.get(named.parentId) || null;
+    } else {
+      category = named || null;
+    }
+  }
+
+  if (!subcategory && subcategoryName) {
+    const namedSubcategory = byName.get(String(subcategoryName).toLowerCase());
+    if (namedSubcategory?.parentId) {
+      subcategory = namedSubcategory;
+    }
+  }
+
+  if (subcategory?.parentId) {
+    category = byId.get(subcategory.parentId) || category;
+  }
+
+  return {
+    category: category || null,
+    subcategory: subcategory?.parentId ? subcategory : null,
+  };
+}
+
+function findBestCompetencyMatch(skills, selection) {
+  if (!selection?.category && !selection?.subcategory) return null;
+
+  const exactSubcategory = selection.subcategory
+    ? skills.find((skill) => skill.id === selection.subcategory.id)
+    : null;
+  if (exactSubcategory) {
+    return { ...exactSubcategory, matchType: 'subcategory_exact', matchPriority: 2 };
+  }
+
+  const parentCategory = selection.category
+    ? skills.find((skill) => skill.id === selection.category.id)
+    : null;
+  if (parentCategory) {
+    return { ...parentCategory, matchType: selection.subcategory ? 'parent_fallback' : 'category_exact', matchPriority: 1 };
+  }
+
+  return null;
+}
+
 async function getTicketCategories(workspaceId) {
   const [fsCategories, fsSubs, ticketCategories, competencyCategories] = await Promise.all([
     prisma.ticket.findMany({
@@ -567,8 +691,8 @@ async function getTicketCategories(workspaceId) {
     }),
     prisma.competencyCategory.findMany({
       where: { workspaceId, isActive: true },
-      select: { id: true, name: true, description: true },
-      orderBy: { name: 'asc' },
+      select: { id: true, name: true, description: true, parentId: true, sortOrder: true },
+      orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
     }),
   ]);
 
@@ -582,23 +706,49 @@ async function getTicketCategories(workspaceId) {
     }
   }
 
-  return {
-    freshserviceCategories: Object.entries(categoryTree).map(([name, subs]) => ({
-      category: name,
-      subCategories: subs,
-    })),
-    ticketCategories: ticketCategories.map((t) => t.ticketCategory),
-    competencyCategories: competencyCategories.map((c) => ({
+  const internalTaxonomy = buildInternalTaxonomy(competencyCategories);
+  const flatCategories = competencyCategories.map((c) => {
+    const parent = c.parentId ? competencyCategories.find((p) => p.id === c.parentId) : null;
+    return {
       id: c.id,
       name: c.name,
       description: c.description,
-    })),
-    instruction: 'Choose the best matching category from the lists above. FreshService categories and ticket categories (custom field) both represent ticket types. Use the competency category name for agent skill matching via find_matching_agents.',
+      parentId: c.parentId,
+      parentName: parent?.name || null,
+      level: c.parentId ? 'subcategory' : 'category',
+      displayName: parent ? `${parent.name} > ${c.name}` : c.name,
+    };
+  });
+  const freshserviceCategories = Object.entries(categoryTree).map(([name, subs]) => ({
+    category: name,
+    subCategories: subs,
+  }));
+
+  return {
+    internalTaxonomy,
+    freshserviceEvidence: {
+      freshserviceCategories,
+      ticketCategories: ticketCategories.map((t) => t.ticketCategory),
+    },
+    // Backward-compatible fields used by older prompts/UI.
+    freshserviceCategories,
+    ticketCategories: ticketCategories.map((t) => t.ticketCategory),
+    competencyCategories: flatCategories,
+    instruction: 'Classify into an existing internalTaxonomy category and optional subcategory. Do not invent active categories. FreshService values are raw evidence only. Call find_matching_agents with internal category/subcategory IDs when possible; subcategory experts are preferred and parent-category experts are the fallback.',
   };
 }
 
 async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
-  const { category, requires_physical_presence, preferred_location, min_proficiency } = criteria;
+  const {
+    category,
+    categoryId,
+    subcategoryId,
+    categoryName,
+    subcategoryName,
+    requires_physical_presence,
+    preferred_location,
+    min_proficiency,
+  } = criteria;
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
     select: { defaultTimezone: true },
@@ -609,6 +759,13 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
 
   const proficiencyOrder = { basic: 1, intermediate: 2, expert: 3 };
   const minLevel = proficiencyOrder[min_proficiency] || 0;
+  const categorySelection = await resolveInternalCategorySelection(workspaceId, {
+    category,
+    categoryId,
+    subcategoryId,
+    categoryName,
+    subcategoryName,
+  });
 
   const [techs, competencies, leaves, openTickets, todayTickets] = await Promise.all([
     prisma.technician.findMany({
@@ -617,7 +774,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     }),
     prisma.technicianCompetency.findMany({
       where: { workspaceId },
-      include: { competencyCategory: { select: { name: true } } },
+      include: { competencyCategory: { select: { id: true, name: true, parentId: true } } },
     }),
     prisma.technicianLeave.findMany({
       where: { workspaceId, leaveDate: { gte: dateStart, lte: dateEnd }, status: 'APPROVED' },
@@ -643,7 +800,9 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
   for (const c of competencies) {
     if (!compMap[c.technicianId]) compMap[c.technicianId] = [];
     compMap[c.technicianId].push({
+      id: c.competencyCategory.id,
       category: c.competencyCategory.name,
+      parentId: c.competencyCategory.parentId,
       level: c.proficiencyLevel,
       levelNum: proficiencyOrder[c.proficiencyLevel] || 0,
     });
@@ -672,9 +831,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
 
     // Check competency match
     const skills = compMap[t.id] || [];
-    const matchingSkill = skills.find((s) =>
-      s.category.toLowerCase() === category.toLowerCase(),
-    );
+    const matchingSkill = findBestCompetencyMatch(skills, categorySelection);
 
     // Filter by minimum proficiency if set
     if (matchingSkill && minLevel > 0 && matchingSkill.levelNum < minLevel) {
@@ -702,7 +859,13 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
       onShift: shift.onShift,
       shiftStatus: shift.shiftNote,
       availability: leaveCategory === 'WFH' ? 'WFH (remote only)' : 'In office',
-      competencyMatch: matchingSkill ? { category: matchingSkill.category, level: matchingSkill.level } : null,
+      competencyMatch: matchingSkill ? {
+        categoryId: matchingSkill.id,
+        category: matchingSkill.category,
+        level: matchingSkill.level,
+        matchType: matchingSkill.matchType,
+        matchPriority: matchingSkill.matchPriority,
+      } : null,
       locationMatch,
       openTickets: open,
       todayAssigned: today,
@@ -711,9 +874,9 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
 
   // Sort: competency match first, then by lowest workload
   results.sort((a, b) => {
-    const aHasComp = a.competencyMatch ? 1 : 0;
-    const bHasComp = b.competencyMatch ? 1 : 0;
-    if (bHasComp !== aHasComp) return bHasComp - aHasComp;
+    const aPriority = a.competencyMatch?.matchPriority || 0;
+    const bPriority = b.competencyMatch?.matchPriority || 0;
+    if (bPriority !== aPriority) return bPriority - aPriority;
 
     const aLevel = a.competencyMatch ? (proficiencyOrder[a.competencyMatch.level] || 0) : 0;
     const bLevel = b.competencyMatch ? (proficiencyOrder[b.competencyMatch.level] || 0) : 0;
@@ -743,14 +906,23 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
   }
 
   return {
-    criteria: { category, requires_physical_presence, preferred_location, min_proficiency },
+    criteria: {
+      category,
+      categoryId: categorySelection.category?.id || null,
+      categoryName: categorySelection.category?.name || categoryName || category || null,
+      subcategoryId: categorySelection.subcategory?.id || null,
+      subcategoryName: categorySelection.subcategory?.name || subcategoryName || null,
+      requires_physical_presence,
+      preferred_location,
+      min_proficiency,
+    },
     matchCount: results.length,
     matches: results,
     excludedCount: excluded.length,
     excluded,
     note: results.length === 0
       ? 'No agents match all criteria. Consider relaxing requirements (e.g., remove physical presence, lower proficiency, or broaden category).'
-      : `Found ${results.length} matching agent(s). Sorted by competency match, then by lowest workload.`,
+      : `Found ${results.length} matching agent(s). Sorted by exact subcategory competency, then parent-category fallback, then workload.`,
   };
 }
 
@@ -1108,13 +1280,13 @@ async function getCompetencies(workspaceId) {
   const [categories, mappings] = await Promise.all([
     prisma.competencyCategory.findMany({
       where: { workspaceId, isActive: true },
-      orderBy: { name: 'asc' },
+      orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
     }),
     prisma.technicianCompetency.findMany({
       where: { workspaceId },
       include: {
         technician: { select: { id: true, name: true } },
-        competencyCategory: { select: { name: true } },
+        competencyCategory: { select: { id: true, name: true, parentId: true } },
       },
     }),
   ]);
@@ -1129,13 +1301,22 @@ async function getCompetencies(workspaceId) {
       byTech[m.technicianId] = { techId: m.technician.id, techName: m.technician.name, skills: [] };
     }
     byTech[m.technicianId].skills.push({
+      categoryId: m.competencyCategory.id,
       category: m.competencyCategory.name,
+      parentId: m.competencyCategory.parentId,
+      levelType: m.competencyCategory.parentId ? 'subcategory' : 'category',
       level: m.proficiencyLevel,
     });
   }
 
   return {
-    categories: categories.map((c) => c.name),
+    categories: categories.map((c) => ({
+      id: c.id,
+      name: c.name,
+      parentId: c.parentId,
+      levelType: c.parentId ? 'subcategory' : 'category',
+    })),
+    categoryTree: buildInternalTaxonomy(categories),
     technicianSkills: Object.values(byTech),
   };
 }
