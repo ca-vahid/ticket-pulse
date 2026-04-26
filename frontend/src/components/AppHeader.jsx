@@ -87,32 +87,38 @@ export default function AppHeader({
     }] : []),
   ];
 
-  const renderPrimaryNav = (compact = false) => (
-    <div className={`inline-flex flex-none items-center ${compact ? 'gap-1' : 'gap-1.5'}`} aria-label="Primary navigation">
-      {primaryNavItems.map(({ id, label, path, Icon, inactiveClass }) => {
-        const isActive = activePage === id;
-        return (
-          <button
-            key={id}
-            type="button"
-            onClick={() => {
-              if (!isActive) navigate(path);
-            }}
-            aria-current={isActive ? 'page' : undefined}
-            aria-disabled={isActive ? 'true' : undefined}
-            className={`${compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-none items-center justify-center border transition-colors ${
-              isActive
-                ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400'
-                : `${inactiveClass} hover:shadow-sm`
-            }`}
-            title={isActive ? `${label} (current page)` : label}
-          >
-            <Icon className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
-          </button>
-        );
-      })}
-    </div>
-  );
+  const renderPrimaryNav = (compact = false, options = {}) => {
+    const visibleItems = options.hideActive
+      ? primaryNavItems.filter(({ id }) => activePage !== id)
+      : primaryNavItems;
+
+    return (
+      <div className={`inline-flex flex-none items-center ${compact ? 'gap-1' : 'gap-1.5'}`} aria-label="Primary navigation">
+        {visibleItems.map(({ id, label, path, Icon, inactiveClass }) => {
+          const isActive = activePage === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                if (!isActive) navigate(path);
+              }}
+              aria-current={isActive ? 'page' : undefined}
+              aria-disabled={isActive ? 'true' : undefined}
+              className={`${compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-none items-center justify-center border transition-colors ${
+                isActive
+                  ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400'
+                  : `${inactiveClass} hover:shadow-sm`
+              }`}
+              title={isActive ? `${label} (current page)` : label}
+            >
+              <Icon className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
 
   const renderWorkspaceControl = (compact = false) => {
     if (!currentWorkspace) return null;
@@ -176,7 +182,18 @@ export default function AppHeader({
               </div>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {renderPrimaryNav(true)}
+              {extraActions}
+              {backgroundSyncRunning && (
+                <button
+                  onClick={onKillSync}
+                  disabled={killingSync || !onKillSync}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700 touch-manipulation disabled:opacity-50"
+                  title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing... (tap to stop)'}
+                >
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                </button>
+              )}
+              {renderPrimaryNav(true, { hideActive: true })}
               <button onClick={() => navigate('/settings')} className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-gray-100 touch-manipulation" title="Settings"><Settings className="w-4 h-4" /></button>
               <button
                 onClick={handleLogout}
@@ -187,22 +204,6 @@ export default function AppHeader({
               </button>
             </div>
           </div>
-          {(extraActions || backgroundSyncRunning) && (
-            <div className="mt-2 flex items-center justify-end gap-1.5 md:hidden">
-              {extraActions}
-              {backgroundSyncRunning && (
-                <button
-                  onClick={onKillSync}
-                  disabled={killingSync || !onKillSync}
-                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 text-xs font-semibold text-blue-700 touch-manipulation disabled:opacity-50"
-                  title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing... (tap to stop)'}
-                >
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Syncing</span>
-                </button>
-              )}
-            </div>
-          )}
 
           <div className="hidden md:grid grid-cols-12 gap-4 items-center">
             <div className="col-span-4">
