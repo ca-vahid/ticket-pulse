@@ -134,8 +134,10 @@ function RecommendationCard({
   selected = false,
   onToggleSelected,
   readOnly = false,
+  compact = false,
 }) {
   const [notes, setNotes] = useState(item.reviewNotes || '');
+  const [expanded, setExpanded] = useState(!compact);
   const isSaving = savingRecommendationId === item.id;
 
   useEffect(() => {
@@ -146,19 +148,69 @@ function RecommendationCard({
     ? item.supportingFreshserviceTicketIds
     : item.supportingTicketIds;
 
+  const actionButtons = !readOnly && (
+    <div className="flex shrink-0 flex-wrap items-center gap-2">
+      {item.status !== 'approved' && item.status !== 'applied' && (
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            onRecommendationAction?.(item.id, 'approved', notes);
+          }}
+          disabled={isSaving}
+          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Approve
+        </button>
+      )}
+      {item.status !== 'rejected' && item.status !== 'applied' && (
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            onRecommendationAction?.(item.id, 'rejected', notes);
+          }}
+          disabled={isSaving}
+          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Reject
+        </button>
+      )}
+      {item.status === 'approved' && (
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            onRecommendationAction?.(item.id, 'applied', notes);
+          }}
+          disabled={isSaving}
+          className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Mark Applied
+        </button>
+      )}
+    </div>
+  );
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <div className="flex items-start gap-2">
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 transition-all hover:border-slate-300">
+      <div className="flex items-start justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+          aria-expanded={expanded}
+        >
+          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white hover:text-slate-700">
+            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </span>
           {selectable && (
             <input
               type="checkbox"
               checked={selected}
+              onClick={(event) => event.stopPropagation()}
               onChange={() => onToggleSelected?.(item.id)}
               className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
             />
           )}
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 mb-1">
               <div className="text-sm font-semibold text-slate-800">{item.title}</div>
               <span className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full ${
@@ -184,82 +236,127 @@ function RecommendationCard({
                 {showRunMeta && <span>Run #{item.runId}</span>}
               </div>
             )}
-          </div>
-        </div>
-      </div>
-      <div className="text-xs text-slate-600 mb-2">{item.rationale}</div>
-      <div className="text-xs text-slate-700 mb-2">
-        <span className="font-medium">Suggested action:</span> {item.suggestedAction}
-      </div>
-      {Array.isArray(item.skillsAffected) && item.skillsAffected.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-1">
-          {item.skillsAffected.map((skill) => (
-            <span key={skill} className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
-              {skill}
-            </span>
-          ))}
-        </div>
-      )}
-      {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
-        <div className="mb-2 text-[11px] text-slate-500">
-          <span className="font-medium">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
-        </div>
-      )}
-      {(item.reviewedBy || item.appliedBy) && (
-        <div className="mb-2 text-[11px] text-slate-500 space-y-1">
-          {item.reviewedBy && (
-            <div>
-              Reviewed by {item.reviewedBy}
-              {item.reviewedAt ? ` on ${formatDateTimeInTimezone(item.reviewedAt, workspaceTimezone)}` : ''}
-            </div>
-          )}
-          {item.appliedBy && (
-            <div>
-              Applied by {item.appliedBy}
-              {item.appliedAt ? ` on ${formatDateTimeInTimezone(item.appliedAt, workspaceTimezone)}` : ''}
-            </div>
-          )}
-        </div>
-      )}
-      {!readOnly && (
-        <>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Optional review notes"
-            className="mb-3 min-h-[72px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            {item.status !== 'approved' && item.status !== 'applied' && (
-              <button
-                onClick={() => onRecommendationAction?.(item.id, 'approved', notes)}
-                disabled={isSaving}
-                className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Approve
-              </button>
-            )}
-            {item.status !== 'rejected' && item.status !== 'applied' && (
-              <button
-                onClick={() => onRecommendationAction?.(item.id, 'rejected', notes)}
-                disabled={isSaving}
-                className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Reject
-              </button>
-            )}
-            {item.status === 'approved' && (
-              <button
-                onClick={() => onRecommendationAction?.(item.id, 'applied', notes)}
-                disabled={isSaving}
-                className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Mark Applied
-              </button>
+            {!expanded && item.suggestedAction && (
+              <div className="mt-1 text-xs text-slate-500">
+                {item.suggestedAction.length > 140 ? `${item.suggestedAction.slice(0, 140)}...` : item.suggestedAction}
+              </div>
             )}
           </div>
-        </>
-      )}
+        </button>
+        {actionButtons}
+      </div>
+      <SmoothCollapse open={expanded}>
+        <div className="mt-3 border-t border-slate-200 pt-3">
+          <div className="text-xs text-slate-600 mb-2">{item.rationale}</div>
+          <div className="text-xs text-slate-700 mb-2">
+            <span className="font-medium">Suggested action:</span> {item.suggestedAction}
+          </div>
+          {Array.isArray(item.skillsAffected) && item.skillsAffected.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              {item.skillsAffected.map((skill) => (
+                <span key={skill} className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                  {skill}
+                </span>
+              ))}
+            </div>
+          )}
+          {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
+            <div className="mb-2 text-[11px] text-slate-500">
+              <span className="font-medium">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
+            </div>
+          )}
+          {(item.reviewedBy || item.appliedBy) && (
+            <div className="mb-2 text-[11px] text-slate-500 space-y-1">
+              {item.reviewedBy && (
+                <div>
+                  Reviewed by {item.reviewedBy}
+                  {item.reviewedAt ? ` on ${formatDateTimeInTimezone(item.reviewedAt, workspaceTimezone)}` : ''}
+                </div>
+              )}
+              {item.appliedBy && (
+                <div>
+                  Applied by {item.appliedBy}
+                  {item.appliedAt ? ` on ${formatDateTimeInTimezone(item.appliedAt, workspaceTimezone)}` : ''}
+                </div>
+              )}
+            </div>
+          )}
+          {!readOnly && (
+            <>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Optional review notes"
+                className="mb-3 min-h-[72px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+              />
+            </>
+          )}
+        </div>
+      </SmoothCollapse>
+    </div>
+  );
+}
+
+function RunSignalCard({ label, value, detail, tone = 'slate', icon: Icon }) {
+  const tones = {
+    slate: 'border-slate-200 bg-white text-slate-800',
+    green: 'border-green-200 bg-green-50 text-green-800',
+    amber: 'border-amber-200 bg-amber-50 text-amber-800',
+    red: 'border-red-200 bg-red-50 text-red-800',
+    blue: 'border-blue-200 bg-blue-50 text-blue-800',
+    purple: 'border-purple-200 bg-purple-50 text-purple-800',
+  };
+
+  return (
+    <div className={`rounded-xl border p-3 ${tones[tone] || tones.slate}`}>
+      <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide opacity-75">
+        {Icon && <Icon className="h-3.5 w-3.5" />}
+        {label}
+      </div>
+      <div className="text-xl font-bold leading-tight">{value}</div>
+      {detail && <div className="mt-1 text-xs opacity-80">{detail}</div>}
+    </div>
+  );
+}
+
+function ReviewHighlights({ summary, warnings, promptRecommendations, processRecommendations, skillRecommendations }) {
+  const totals = summary.totals || {};
+  const totalReviewed = totals.totalTicketsReviewed || 0;
+  const resolvedOutcomes = (totals.success || 0) + (totals.partialSuccess || 0) + (totals.failure || 0);
+  const recommendationTotal = promptRecommendations.length + processRecommendations.length + skillRecommendations.length;
+  const noEvidence = totalReviewed <= 1 || resolvedOutcomes === 0;
+  const threadGaps = summary.collectionDiagnostics?.ticketsWithNoThreadContext || 0;
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <RunSignalCard
+        label="Outcome"
+        value={`${totalReviewed} reviewed`}
+        detail={`${totals.success || 0} success · ${totals.failure || 0} failure · ${totals.unresolved || 0} unresolved`}
+        tone={(totals.failure || 0) > 0 ? 'red' : (totals.unresolved || 0) > 0 ? 'amber' : 'green'}
+        icon={TrendingUp}
+      />
+      <RunSignalCard
+        label="Recommendations"
+        value={recommendationTotal}
+        detail={`${promptRecommendations.length} prompt · ${processRecommendations.length} process · ${skillRecommendations.length} skill`}
+        tone={recommendationTotal > 0 ? 'purple' : 'slate'}
+        icon={Sparkles}
+      />
+      <RunSignalCard
+        label="Attention"
+        value={warnings.length ? `${warnings.length} warning${warnings.length === 1 ? '' : 's'}` : 'No warnings'}
+        detail={warnings[0] ? warnings[0].slice(0, 96) : 'No review warnings were reported.'}
+        tone={warnings.length ? 'amber' : 'green'}
+        icon={AlertTriangle}
+      />
+      <RunSignalCard
+        label="Evidence"
+        value={noEvidence ? 'Low signal' : 'Usable sample'}
+        detail={threadGaps ? `${threadGaps} ticket(s) missing thread context` : `${resolvedOutcomes} resolved outcome(s) available`}
+        tone={noEvidence || threadGaps ? 'amber' : 'blue'}
+        icon={Eye}
+      />
     </div>
   );
 }
@@ -277,6 +374,7 @@ function RecommendationSection({
   selectableIds = null,
   selectedIds = [],
   onToggleSelected,
+  compactCards = false,
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -298,6 +396,7 @@ function RecommendationSection({
               selectable={Array.isArray(selectableIds) ? selectableIds.includes(item.id) : false}
               selected={selectedIds.includes(item.id)}
               onToggleSelected={onToggleSelected}
+              compact={compactCards}
             />
           ))}
         </div>
@@ -2367,6 +2466,7 @@ function CollectionDiagnosticsSection({ summary }) {
 }
 
 function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecommendationId }) {
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const summary = run.summaryMetrics || {};
   const totals = summary.totals || {};
   const rates = summary.rates || {};
@@ -2376,6 +2476,9 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
   const warnings = run.warnings || [];
   const cases = run.evidenceCases || [];
   const navigate = useNavigate();
+  const executiveSummary = summary.executiveSummary || '';
+  const summaryIsLong = executiveSummary.length > 320;
+  const visibleWarnings = warnings.slice(0, 4);
 
   return (
     <div className="space-y-4">
@@ -2399,18 +2502,58 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
             </button>
           </div>
         </div>
-        {summary.executiveSummary && (
-          <div className="mt-4 rounded-lg bg-indigo-50 border border-indigo-200 p-3 text-sm text-indigo-900">
-            {summary.executiveSummary}
+        <div className="mt-4">
+          <ReviewHighlights
+            summary={summary}
+            warnings={warnings}
+            promptRecommendations={promptRecommendations}
+            processRecommendations={processRecommendations}
+            skillRecommendations={skillRecommendations}
+          />
+        </div>
+        {executiveSummary && (
+          <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-indigo-500">Executive summary</div>
+              {summaryIsLong && (
+                <button
+                  type="button"
+                  onClick={() => setSummaryExpanded((value) => !value)}
+                  className="text-xs font-semibold text-indigo-700 hover:text-indigo-900"
+                >
+                  {summaryExpanded ? 'Show less' : 'Show more'}
+                </button>
+              )}
+            </div>
+            <div className={`${summaryIsLong && !summaryExpanded ? 'max-h-24 overflow-hidden' : ''}`}>
+              {executiveSummary}
+            </div>
           </div>
         )}
         {warnings.length > 0 && (
-          <div className="mt-3 space-y-1">
-            {warnings.map((warning, index) => (
-              <div key={index} className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                {warning}
-              </div>
-            ))}
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+              <AlertTriangle className="h-4 w-4" />
+              Needs attention
+            </div>
+            <div className="space-y-1">
+              {visibleWarnings.map((warning, index) => (
+                <div key={index} className="text-xs text-amber-800">
+                  {warning}
+                </div>
+              ))}
+              {warnings.length > visibleWarnings.length && (
+                <div className="text-xs font-medium text-amber-700">
+                  +{warnings.length - visibleWarnings.length} more warning{warnings.length - visibleWarnings.length === 1 ? '' : 's'}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {run.errorMessage && (
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+            <div className="mb-1 font-semibold uppercase tracking-wide">Run error</div>
+            {run.errorMessage}
           </div>
         )}
       </div>
@@ -2444,6 +2587,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
           workspaceTimezone={workspaceTimezone}
           onRecommendationAction={onRecommendationAction}
           savingRecommendationId={savingRecommendationId}
+          compactCards
         />
         <RecommendationSection
           title="Process Recommendations"
@@ -2453,6 +2597,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
           workspaceTimezone={workspaceTimezone}
           onRecommendationAction={onRecommendationAction}
           savingRecommendationId={savingRecommendationId}
+          compactCards
         />
         <RecommendationSection
           title="Skill Matrix Recommendations"
@@ -2462,6 +2607,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
           workspaceTimezone={workspaceTimezone}
           onRecommendationAction={onRecommendationAction}
           savingRecommendationId={savingRecommendationId}
+          compactCards
         />
       </div>
 
@@ -3107,12 +3253,25 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
+  const requestedRunId = searchParams.get('run');
   const activeTab = REVIEW_PAGE_TABS.some((tab) => tab.key === requestedTab) ? requestedTab : 'review';
   const effectiveReviewEndDate = reviewMode === 'range' ? reviewEndDate : reviewDate;
 
   const setActiveTab = useCallback((tabKey) => {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set('tab', tabKey);
+    if (tabKey !== 'review') nextParams.delete('run');
+    setSearchParams(nextParams);
+  }, [searchParams, setSearchParams]);
+
+  const setSelectedRunUrl = useCallback((id) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('tab', 'review');
+    if (id) {
+      nextParams.set('run', String(id));
+    } else {
+      nextParams.delete('run');
+    }
     setSearchParams(nextParams);
   }, [searchParams, setSearchParams]);
 
@@ -3283,18 +3442,31 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     return () => clearInterval(timer);
   }, [consolidationRun, loadConsolidation]);
 
-  const loadRunDetail = async (id, { openView = true } = {}) => {
+  const loadRunDetail = useCallback(async (id, { openView = true } = {}) => {
     setLoadingDetail(true);
     try {
       const res = await assignmentAPI.getDailyReviewRun(id);
       setSelectedRun(res?.data || null);
-      if (openView) setView('detail');
+      if (openView) {
+        setView('detail');
+        setSelectedRunUrl(id);
+      }
     } catch {
       setSelectedRun(null);
     } finally {
       setLoadingDetail(false);
     }
-  };
+  }, [setSelectedRunUrl]);
+
+  useEffect(() => {
+    if (activeTab !== 'review' || !requestedRunId) return;
+    const runId = Number.parseInt(requestedRunId, 10);
+    if (!Number.isFinite(runId)) return;
+    if (loadingDetail) return;
+    if (selectedRun?.id === runId && view === 'detail') return;
+    loadRunDetail(runId, { openView: false });
+    setView('detail');
+  }, [activeTab, loadRunDetail, loadingDetail, requestedRunId, selectedRun?.id, view]);
 
   const updateRecommendationInSelectedRun = useCallback((updatedItem) => {
     if (!updatedItem?.id) return;
@@ -3515,6 +3687,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
       if (selectedRun?.id === runDeleteConfirm.id) {
         setSelectedRun(null);
         setView('trigger');
+        setSelectedRunUrl(null);
       }
       setRunDeleteConfirm(null);
       await Promise.all([
@@ -3556,12 +3729,21 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     );
   }
 
+  if (view === 'detail' && loadingDetail && !selectedRun) {
+    return (
+      <div className="flex min-h-[240px] items-center justify-center rounded-xl border border-slate-200 bg-white text-sm text-slate-500">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        Loading review...
+      </div>
+    );
+  }
+
   if (view === 'detail' && selectedRun) {
     return (
       <div>
         <div className="mb-3 flex items-center justify-between">
           <button
-            onClick={() => { setSelectedRun(null); setView('trigger'); }}
+            onClick={() => { setSelectedRun(null); setView('trigger'); setSelectedRunUrl(null); }}
             className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
           >
             <ArrowLeft className="h-4 w-4" /> Back to Review

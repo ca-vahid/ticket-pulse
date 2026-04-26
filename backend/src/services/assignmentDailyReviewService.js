@@ -2274,7 +2274,10 @@ Rules:
     const [items, total] = await Promise.all([
       prisma.assignmentDailyReviewRun.findMany({
         where: { workspaceId },
-        orderBy: [{ reviewDate: 'desc' }, { createdAt: 'desc' }],
+        // History is an execution log. Sort by when a run was created, not
+        // the reviewed business date, so manual backfills/range reviews do not
+        // disappear behind newer scheduled failures for a later review date.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         skip: offset,
       }),
