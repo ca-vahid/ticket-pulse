@@ -149,7 +149,7 @@ function RecommendationCard({
     : item.supportingTicketIds;
 
   const actionButtons = !readOnly && (
-    <div className="flex shrink-0 flex-wrap items-center gap-2">
+    <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
       {item.status !== 'approved' && item.status !== 'applied' && (
         <button
           onClick={(event) => {
@@ -157,7 +157,7 @@ function RecommendationCard({
             onRecommendationAction?.(item.id, 'approved', notes);
           }}
           disabled={isSaving}
-          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
         >
           Approve
         </button>
@@ -169,7 +169,7 @@ function RecommendationCard({
             onRecommendationAction?.(item.id, 'rejected', notes);
           }}
           disabled={isSaving}
-          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
         >
           Reject
         </button>
@@ -181,7 +181,7 @@ function RecommendationCard({
             onRecommendationAction?.(item.id, 'applied', notes);
           }}
           disabled={isSaving}
-          className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
         >
           Mark Applied
         </button>
@@ -191,58 +191,65 @@ function RecommendationCard({
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 transition-all hover:border-slate-300">
-      <div className="flex items-start justify-between gap-3">
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="flex min-w-0 flex-1 items-start gap-2 text-left"
-          aria-expanded={expanded}
-        >
-          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white hover:text-slate-700">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+            aria-expanded={expanded}
+            aria-label={expanded ? 'Collapse recommendation' : 'Expand recommendation'}
+          >
             {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          </span>
+          </button>
           {selectable && (
             <input
               type="checkbox"
               checked={selected}
-              onClick={(event) => event.stopPropagation()}
               onChange={() => onToggleSelected?.(item.id)}
               className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
             />
           )}
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <div className="text-sm font-semibold text-slate-800">{item.title}</div>
-              <span className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full ${
-                item.severity === 'high'
-                  ? 'bg-red-100 text-red-700'
-                  : item.severity === 'medium'
-                    ? 'bg-amber-100 text-amber-700'
-                    : 'bg-blue-100 text-blue-700'
-              }`}>
-                {item.severity || 'low'}
-              </span>
-              <RecommendationStatusBadge status={item.status} />
-              {readOnly && (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
-                  visibility only
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="min-w-0 flex-1 text-left"
+            aria-expanded={expanded}
+          >
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <div className="text-sm font-semibold text-slate-800">{item.title}</div>
+                <span className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full ${
+                  item.severity === 'high'
+                    ? 'bg-red-100 text-red-700'
+                    : item.severity === 'medium'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-blue-100 text-blue-700'
+                }`}>
+                  {item.severity || 'low'}
                 </span>
+                <RecommendationStatusBadge status={item.status} />
+                {readOnly && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                  visibility only
+                  </span>
+                )}
+              </div>
+              {(showDate || showRunMeta) && (
+                <div className="text-[11px] text-slate-500 mb-1">
+                  {showDate && <span>{formatDateOnlyInTimezone(item.reviewDate, workspaceTimezone)}</span>}
+                  {showDate && showRunMeta && <span> · </span>}
+                  {showRunMeta && <span>Run #{item.runId}</span>}
+                </div>
+              )}
+              {!expanded && item.suggestedAction && (
+                <div className="mt-1 text-xs text-slate-500">
+                  {item.suggestedAction.length > 140 ? `${item.suggestedAction.slice(0, 140)}...` : item.suggestedAction}
+                </div>
               )}
             </div>
-            {(showDate || showRunMeta) && (
-              <div className="text-[11px] text-slate-500 mb-1">
-                {showDate && <span>{formatDateOnlyInTimezone(item.reviewDate, workspaceTimezone)}</span>}
-                {showDate && showRunMeta && <span> · </span>}
-                {showRunMeta && <span>Run #{item.runId}</span>}
-              </div>
-            )}
-            {!expanded && item.suggestedAction && (
-              <div className="mt-1 text-xs text-slate-500">
-                {item.suggestedAction.length > 140 ? `${item.suggestedAction.slice(0, 140)}...` : item.suggestedAction}
-              </div>
-            )}
-          </div>
-        </button>
+          </button>
+        </div>
         {actionButtons}
       </div>
       <SmoothCollapse open={expanded}>
@@ -328,7 +335,7 @@ function ReviewHighlights({ summary, warnings, promptRecommendations, processRec
   const threadGaps = summary.collectionDiagnostics?.ticketsWithNoThreadContext || 0;
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <RunSignalCard
         label="Outcome"
         value={`${totalReviewed} reviewed`}
@@ -377,7 +384,7 @@ function RecommendationSection({
   compactCards = false,
 }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
       <div className="flex items-center gap-2 mb-3">
         <Icon className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
@@ -493,11 +500,11 @@ function BacklogRecommendationRow({
 
   return (
     <div className={`overflow-hidden rounded-lg border border-slate-200 bg-white transition-all duration-300 ease-out ${getRecommendationMotionClass(motionState)}`}>
-      <div className="flex items-start gap-2 px-3 py-2.5">
+      <div className="grid grid-cols-[auto,1fr] gap-x-2 gap-y-2 px-3 py-2.5 sm:flex sm:items-start">
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
-          className="mt-0.5 rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+          className="mt-0.5 self-start rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
           title={expanded ? 'Collapse details' : 'Expand details'}
         >
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -510,7 +517,7 @@ function BacklogRecommendationRow({
           )}
           <RecommendationMeta item={item} workspaceTimezone={workspaceTimezone} />
         </div>
-        <div className="mt-0.5 flex shrink-0 items-center gap-1">
+        <div className="col-span-2 mt-0.5 flex shrink-0 items-center justify-end gap-1 sm:col-span-1 sm:justify-start">
           {readOnly && (
             <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
               visibility
@@ -646,11 +653,11 @@ function ApprovedBacklogGroup({
     <div className={`overflow-hidden rounded-lg border border-emerald-200 bg-white transition-all duration-300 ease-out ${
       group.rows.some((item) => motionById[item.id] === 'entering') ? 'ring-2 ring-emerald-200' : ''
     }`}>
-      <div className="flex w-full items-start gap-2 px-3 py-2.5 hover:bg-emerald-50/50">
+      <div className="grid w-full grid-cols-[auto,1fr] gap-x-2 gap-y-2 px-3 py-2.5 hover:bg-emerald-50/50 sm:flex sm:items-start">
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
-          className="mt-0.5 rounded p-1 text-emerald-600 hover:bg-emerald-50"
+          className="mt-0.5 self-start rounded p-1 text-emerald-600 hover:bg-emerald-50"
           title={expanded ? 'Collapse details' : 'Expand details'}
         >
           {expanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
@@ -673,7 +680,7 @@ function ApprovedBacklogGroup({
           type="button"
           onClick={moveGroupToPending}
           disabled={isGroupSaving}
-          className="mt-0.5 rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="col-span-2 mt-0.5 justify-self-end rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-1 sm:self-start"
           title={group.rows.length === 1 ? 'Move back to pending' : 'Move group back to pending'}
         >
           <Undo2 className="h-4 w-4" />
@@ -689,11 +696,11 @@ function ApprovedBacklogGroup({
                 {group.rows.length > 1 && (
                   <div className="mb-2 whitespace-normal break-words text-sm font-semibold leading-snug text-slate-800">{item.title}</div>
                 )}
-                <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <RecommendationMeta item={item} workspaceTimezone={workspaceTimezone} />
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 items-center justify-end gap-1 sm:justify-start">
                     <button
                       onClick={() => onRecommendationAction?.(item.id, 'pending', notesById[item.id] || '')}
                       disabled={isSaving}
@@ -907,20 +914,20 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 animate-fadeIn">
-      <div className="flex max-h-[88vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-2 animate-fadeIn sm:p-4">
+      <div className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:max-h-[88vh]">
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+          <div className="min-w-0">
             <h3 className="text-base font-semibold text-slate-900">Prompt Diff</h3>
-            <p className="text-xs text-slate-500">
+            <p className="break-words text-xs text-slate-500">
               {item.title} · {changedCount} changed line{changedCount === 1 ? '' : 's'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
             <button
               onClick={undoDraftChange}
               disabled={!draftHistory.length}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
               title="Undo last prompt edit"
             >
               <Undo2 className="h-3.5 w-3.5" />
@@ -942,20 +949,20 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-2 overflow-hidden">
-          <div className="border-r border-slate-200">
+        <div className="grid min-h-0 flex-1 overflow-hidden md:grid-cols-2">
+          <div className="min-h-0 border-b border-slate-200 md:border-b-0 md:border-r">
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <span>Current Prompt</span>
               {diffNavControls}
             </div>
-            <div ref={beforePaneRef} className="h-[70vh] overflow-auto bg-white font-mono text-xs leading-relaxed">
+            <div ref={beforePaneRef} className="h-[36vh] overflow-auto bg-white font-mono text-xs leading-relaxed md:h-[70vh]">
               {rows.map((row, index) => {
                 const isFirstRemovedBlock = row.type === 'removed' && rows[index - 1]?.type !== 'removed';
                 return (
                   <div
                     key={`before-${index}`}
                     data-diff-row={index}
-                    className={`grid grid-cols-[48px,1fr,96px] border-b border-slate-100 px-2 py-1 ${
+                    className={`grid grid-cols-[36px,1fr,76px] border-b border-slate-100 px-2 py-1 sm:grid-cols-[48px,1fr,96px] ${
                       row.type === 'removed' ? 'bg-red-50 text-red-900' : row.type === 'added' ? 'bg-slate-50 text-slate-300' : 'text-slate-700'
                     }`}
                   >
@@ -991,14 +998,14 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
                 </button>
               </div>
             </div>
-            <div ref={afterPaneRef} className="h-[70vh] overflow-auto bg-white font-mono text-xs leading-relaxed">
+            <div ref={afterPaneRef} className="h-[42vh] overflow-auto bg-white font-mono text-xs leading-relaxed md:h-[70vh]">
               {rows.map((row, index) => {
                 const isFirstAddedBlock = row.type === 'added' && rows[index - 1]?.type !== 'added';
                 return (
                   <div
                     key={`after-${index}`}
                     data-diff-row={index}
-                    className={`grid grid-cols-[48px,1fr,112px] border-b border-slate-100 px-2 py-1 ${
+                    className={`grid grid-cols-[36px,1fr,76px] border-b border-slate-100 px-2 py-1 sm:grid-cols-[48px,1fr,112px] ${
                       row.type === 'added' ? 'bg-emerald-50 text-emerald-900' : row.type === 'removed' ? 'bg-slate-50 text-slate-300' : 'text-slate-700'
                     }`}
                   >
@@ -1132,7 +1139,7 @@ function TechnicianCompetencyCompactEditor({
           value={selectedTech?.id || ''}
           onChange={(e) => handleTechnicianChange(e.target.value)}
           disabled={isApplied}
-          className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm font-semibold text-slate-800 disabled:opacity-60"
+          className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm font-semibold text-slate-800 disabled:opacity-60"
           title="Technician"
         >
           <option value="">{payload.technicianName || 'Select technician'}</option>
@@ -1145,7 +1152,7 @@ function TechnicianCompetencyCompactEditor({
           value={selectedCategory?.id || ''}
           onChange={(e) => handleCategoryChange(e.target.value)}
           disabled={isApplied}
-          className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-700 disabled:opacity-60"
+          className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-700 disabled:opacity-60"
           title="Skill / Category"
         >
           <option value="">{payload.categoryName || 'Select skill'}</option>
@@ -1159,7 +1166,7 @@ function TechnicianCompetencyCompactEditor({
           <span>to</span>
         </div>
 
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+        <div className="flex w-full items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white p-1 xl:w-auto">
           {PROFICIENCY_LEVELS.map((level) => {
             const active = proposedLevel === level.value;
             return (
@@ -1184,14 +1191,14 @@ function TechnicianCompetencyCompactEditor({
           onChange={(e) => onFieldChange('notes', e.target.value)}
           disabled={isApplied}
           placeholder="Optional note"
-          className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-700 disabled:opacity-60"
+          className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-700 disabled:opacity-60"
         />
         {!isApplied && (
           <button
             type="button"
             onClick={onSave}
             disabled={saving}
-            className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
+            className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60 xl:w-auto"
           >
             {saving ? 'Saving...' : 'Save'}
           </button>
@@ -1307,7 +1314,7 @@ function SkillListCompactEditor({
   };
 
   const renderTargetSelect = () => (
-    <div className="min-w-[220px] flex-1">
+    <div className="min-w-0 flex-1 xl:min-w-[220px]">
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{targetLabel}</div>
       <select
         value={selectedCategory?.id || ''}
@@ -1325,7 +1332,7 @@ function SkillListCompactEditor({
   );
 
   const renderParentSelect = () => (
-    <div className="min-w-[220px] flex-1">
+    <div className="min-w-0 flex-1 xl:min-w-[220px]">
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
         {isMove ? 'Move to' : 'Parent'}
       </div>
@@ -1347,7 +1354,7 @@ function SkillListCompactEditor({
   return (
     <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 px-3 py-3">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
-        <div className="min-w-[140px]">
+        <div className="min-w-0 xl:min-w-[140px]">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Action</div>
           <select
             value={action}
@@ -1368,7 +1375,7 @@ function SkillListCompactEditor({
         {needsTarget && renderTargetSelect()}
 
         {needsNewName && (
-          <div className="min-w-[220px] flex-1">
+          <div className="min-w-0 flex-1 xl:min-w-[220px]">
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
               {isAdd ? 'New skill' : 'New name'}
             </div>
@@ -1385,16 +1392,16 @@ function SkillListCompactEditor({
         {needsParent && renderParentSelect()}
 
         {(isMerge || isDeprecate) && (
-          <div className="min-w-[210px] flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+          <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 xl:min-w-[210px]">
             {isMerge ? 'Manual merge note is recorded; no automatic merge is applied.' : 'Deprecates this skill after approval.'}
           </div>
         )}
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
           <button
             type="button"
             onClick={() => setDetailsOpen((prev) => !prev)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 sm:w-auto"
             title={detailsOpen ? 'Hide notes' : 'Edit notes'}
           >
             <span className="inline-flex items-center gap-1">
@@ -1408,7 +1415,7 @@ function SkillListCompactEditor({
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
+              className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60 sm:w-auto"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>
@@ -1492,7 +1499,7 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 animate-[fadeIn_200ms_ease-out] transition-all duration-300 ease-out">
-      <div className="mb-3 flex items-start justify-between gap-3">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-sm font-semibold text-slate-800">{item.title}</div>
@@ -1502,12 +1509,12 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
           {item.section !== 'prompt' && item.rationale && <div className="mt-1 text-xs text-slate-500">{item.rationale}</div>}
         </div>
         {!isProcess && (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
             {item.section === 'prompt' && (
               <button
                 onClick={() => onOpenPromptDiff?.(item)}
                 type="button"
-                className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                 disabled={!currentPrompt || !payload.updatedPrompt}
               >
                 Compare Prompt
@@ -1534,7 +1541,7 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
       </div>
 
       {item.section === 'prompt' && (
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.85fr)]">
           <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recommendation</div>
             <div className="mt-2 text-sm leading-relaxed text-slate-600">
@@ -1686,8 +1693,8 @@ function ConsolidationPanel({
   };
 
   return (
-    <div className="rounded-xl border border-indigo-200 bg-white p-4 shadow-sm">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <div className="rounded-xl border border-indigo-200 bg-white p-3 shadow-sm sm:p-4">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
             <Sparkles className="h-4 w-4 text-indigo-600" />
@@ -1697,7 +1704,7 @@ function ConsolidationPanel({
             Converts approved, unapplied Review findings into editable prompt, skill, competency, and process recommendations.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
           <button onClick={onRefresh} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
             Refresh
           </button>
@@ -1721,7 +1728,7 @@ function ConsolidationPanel({
             <button
               onClick={onApply}
               disabled={applying}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60 sm:justify-start"
             >
               {applying && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               {applying ? 'Applying...' : 'Apply Selected Sections'}
@@ -1740,7 +1747,7 @@ function ConsolidationPanel({
                 style={{ width: `${Math.min(Math.max(run?.progress?.percent || 0, 8), 100)}%` }}
               />
             )}
-            <span className="relative inline-flex items-center gap-1.5">
+            <span className="relative inline-flex items-center justify-center gap-1.5">
               {(starting || isActive) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               {starting
                 ? 'Starting...'
@@ -1994,7 +2001,7 @@ function CasesTable({ cases = [], workspaceTimezone }) {
   const displayCases = cases.slice(0, 20);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
       <h3 className="text-sm font-semibold text-slate-800 mb-3">Key Cases</h3>
       {displayCases.length === 0 ? (
         <div className="text-sm text-slate-400">No cases available.</div>
@@ -2002,9 +2009,9 @@ function CasesTable({ cases = [], workspaceTimezone }) {
         <div className="space-y-3">
           {displayCases.map((item) => (
             <div key={`${item.type}-${item.runId || item.ticketId}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-wrap items-center gap-2 mb-1">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold text-slate-800">#{item.freshserviceTicketId}</span>
-                <span className="text-sm text-slate-700">{item.subject}</span>
+                <span className="min-w-0 break-words text-sm text-slate-700">{item.subject}</span>
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                   item.outcome === 'success'
                     ? 'bg-green-100 text-green-700'
@@ -2193,8 +2200,8 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
   const isCompleted = run.status === 'completed';
 
   return (
-    <div className="rounded-xl border border-purple-200 bg-gradient-to-br from-purple-50 to-indigo-50 p-4 shadow-sm">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <div className="rounded-xl border border-purple-200 bg-gradient-to-br from-purple-50 to-indigo-50 p-3 shadow-sm sm:p-4">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-purple-600" />
           <h3 className="text-base font-semibold text-purple-900">Meeting Briefing</h3>
@@ -2204,12 +2211,12 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
             </span>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
           {localBriefing && (
             <button
               type="button"
               onClick={copyAsMarkdown}
-              className="inline-flex items-center gap-1 rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50"
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50"
             >
               <Copy className="h-3.5 w-3.5" /> {copied ? 'Copied!' : 'Copy as Markdown'}
             </button>
@@ -2218,7 +2225,7 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
             type="button"
             onClick={generate}
             disabled={!isCompleted || generating}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:from-purple-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:from-purple-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {generating
               ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating...</>
@@ -2401,13 +2408,13 @@ function CollectionDiagnosticsSection({ summary }) {
   const activityTone = activityCoverage >= 80 ? 'green' : 'amber';
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-800">Collection Diagnostics</h3>
         <div className="text-xs text-slate-500">What the LLM actually had to read</div>
       </div>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
         <MetricCard label="Candidate Tickets" value={totalCandidates} />
         <MetricCard label="With Conversations" value={`${diag.ticketsWithConversations || 0} (${conversationCoverage}%)`} tone={conversationTone} />
         <MetricCard label="With Activity Log" value={`${diag.ticketsWithActivities || 0} (${activityCoverage}%)`} tone={activityTone} />
@@ -2437,7 +2444,7 @@ function CollectionDiagnosticsSection({ summary }) {
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-600 md:grid-cols-4">
+      <div className="mt-3 grid gap-3 text-xs text-slate-600 sm:grid-cols-2 md:grid-cols-4">
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div className="text-[11px] font-medium text-slate-500">Total thread entries</div>
           <div className="text-lg font-semibold text-slate-800">{diag.threadEntriesAvailable || 0}</div>
@@ -2482,8 +2489,8 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
 
   return (
     <div className="space-y-4">
-      <div className="bg-white border border-slate-200 rounded-xl p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <h2 className="text-lg font-semibold text-slate-800">Review #{run.id}</h2>
@@ -2493,11 +2500,11 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
               {summary.workspaceName || 'Workspace'} · {formatReviewRunDateLabel(run, workspaceTimezone)} · {summary.reviewWindow?.startTime || '00:00'}-{summary.reviewWindow?.endTime || '23:59'}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => navigate('/assignments/prompts')} className="inline-flex items-center gap-1 px-3 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">
+          <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+            <button onClick={() => navigate('/assignments/prompts')} className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50">
               <FileText className="w-4 h-4" /> Open Prompts
             </button>
-            <button onClick={() => navigate('/assignments/competencies')} className="inline-flex items-center gap-1 px-3 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">
+            <button onClick={() => navigate('/assignments/competencies')} className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50">
               <Award className="w-4 h-4" /> Open Competencies
             </button>
           </div>
@@ -2558,7 +2565,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
         )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
         <MetricCard label="Tickets Reviewed" value={totals.totalTicketsReviewed} />
         <MetricCard label="Success" value={`${totals.success || 0} (${rates.successRate || 0}%)`} tone="green" />
         <MetricCard label="Partial Success" value={`${totals.partialSuccess || 0} (${rates.partialSuccessRate || 0}%)`} tone="blue" />
@@ -2578,7 +2585,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
 
       <MeetingBriefingSection run={run} workspaceTimezone={workspaceTimezone} />
 
-      <div className="grid lg:grid-cols-3 gap-4">
+      <div className="grid gap-4 lg:grid-cols-3">
         <RecommendationSection
           title="Prompt Recommendations"
           items={promptRecommendations}
@@ -2611,7 +2618,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
         />
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
+      <div className="grid gap-4 lg:grid-cols-2">
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <h3 className="text-sm font-semibold text-slate-800 mb-3">Top Categories</h3>
           {summary.topCategories?.length ? (
@@ -2893,8 +2900,8 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {(status === 'running' || status === 'starting') ? (
             <Brain className="w-5 h-5 text-purple-600 animate-spin" />
           ) : status === 'cancelled' ? (
@@ -2923,26 +2930,26 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
           </span>
           {runId && <span className="text-xs text-slate-400">Run #{runId}</span>}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           {(status === 'running' || status === 'starting') && runId && (
             <button
               onClick={cancelRun}
               disabled={isCancelling}
-              className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               <StopCircle className="w-4 h-4" />
               {isCancelling ? 'Cancelling...' : 'Cancel Run'}
             </button>
           )}
           {status === 'completed' && (
-            <button onClick={() => onComplete(runId)} className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+            <button onClick={() => onComplete(runId)} className="w-full rounded-lg border border-blue-100 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-800 sm:w-auto sm:border-0 sm:px-0 sm:py-0">
               View Results
             </button>
           )}
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
         <div className="flex items-center justify-between gap-3 mb-2">
           <div className="text-sm font-semibold text-slate-800">{phase ? phase.replace(/_/g, ' ') : 'Starting'}</div>
           <div className="text-xs font-medium text-slate-500">{Math.max(progressPct || 0, 2)}%</div>
@@ -2962,7 +2969,7 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
       </div>
 
       {visibleLiveStats.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
           {visibleLiveStats.map((item) => (
             <MetricCard key={item.key} label={item.label} value={item.value} tone="slate" />
           ))}
@@ -2970,7 +2977,7 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
       )}
 
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
           <MetricCard label="Tickets Reviewed" value={summary.totalTicketsReviewed || 0} />
           <MetricCard label="Success" value={summary.success || 0} tone="green" />
           <MetricCard label="Failure" value={summary.failure || 0} tone="red" />
@@ -2979,26 +2986,26 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
       )}
 
       {(counts.prompt > 0 || counts.process > 0 || counts.skill > 0) && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           <MetricCard label="Prompt Recs" value={counts.prompt} tone="blue" />
           <MetricCard label="Process Recs" value={counts.process} tone="amber" />
           <MetricCard label="Skill Recs" value={counts.skill} tone="green" />
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
         <div className="text-sm font-semibold text-slate-800 mb-3">Live Activity</div>
         {activityLog.length === 0 ? (
           <div className="text-sm text-slate-400">Waiting for the first progress update...</div>
         ) : (
           <div className="space-y-2">
             {activityLog.map((item) => (
-              <div key={item.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+              <div key={item.id} className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                 <div>
                   <div className="text-xs font-medium text-slate-700">{item.phase.replace(/_/g, ' ')}</div>
                   <div className="text-sm text-slate-600">{item.message}</div>
                 </div>
-                <div className="text-[11px] text-slate-400 whitespace-nowrap">{item.timeLabel}</div>
+                <div className="whitespace-nowrap text-[11px] text-slate-400">{item.timeLabel}</div>
               </div>
             ))}
           </div>
@@ -3006,7 +3013,7 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
       </div>
 
       {executiveSummary && (
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900 sm:p-4">
           {executiveSummary}
         </div>
       )}
@@ -3055,7 +3062,7 @@ function DailyReviewHistoryPanel({
 
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-indigo-100 bg-white/90 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-50 px-3 py-2">
+      <div className="flex flex-col gap-3 border-b border-indigo-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
           <History className="h-4 w-4 shrink-0 text-indigo-600" />
           <span className="text-sm font-semibold text-slate-800">Review History</span>
@@ -3065,7 +3072,7 @@ function DailyReviewHistoryPanel({
         <button
           type="button"
           onClick={onRefresh}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 sm:w-auto"
         >
           <RefreshCw className="h-3.5 w-3.5" />
           Refresh
@@ -3089,7 +3096,7 @@ function DailyReviewHistoryPanel({
               return (
                 <div
                   key={run.id}
-                  className="group flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-indigo-50/40"
+                  className="group flex w-full flex-col gap-2 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-indigo-50/40 sm:flex-row sm:items-center sm:gap-3"
                 >
                   <button
                     type="button"
@@ -3132,7 +3139,7 @@ function DailyReviewHistoryPanel({
                     </div>
                   </button>
 
-                  <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
+                  <div className="ml-0 flex w-full shrink-0 items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs text-slate-500 sm:ml-auto sm:w-auto sm:justify-end sm:border-t-0 sm:pt-0">
                     {totals.totalTicketsReviewed != null && <span className="tabular-nums">{totals.totalTicketsReviewed}</span>}
                     {totals.totalTicketsReviewed != null && <span className="text-slate-300">tickets</span>}
                     {totals.success != null && <span className="font-medium tabular-nums text-emerald-600">{totals.success} ✓</span>}
@@ -3170,11 +3177,11 @@ function DailyReviewHistoryPanel({
       </div>
 
       {totalPages > 1 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+        <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
           <span>
             Showing {start}-{end} of {total}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
             <button
               type="button"
               onClick={() => onPageChange(Math.max(0, page - 1))}
@@ -3183,7 +3190,7 @@ function DailyReviewHistoryPanel({
             >
               Previous
             </button>
-            <span className="font-semibold text-slate-600">
+            <span className="col-span-2 text-center font-semibold text-slate-600 sm:col-span-1">
               Page {page + 1} of {totalPages}
             </span>
             <button
@@ -3741,7 +3748,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   if (view === 'detail' && selectedRun) {
     return (
       <div>
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <button
             onClick={() => { setSelectedRun(null); setView('trigger'); setSelectedRunUrl(null); }}
             className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
@@ -3767,8 +3774,8 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-        <div className="grid gap-1 md:grid-cols-3">
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <div className="grid min-w-[520px] grid-cols-3 gap-1 sm:min-w-0">
           {REVIEW_PAGE_TABS.map(({ key, label, icon: Icon }) => {
             const isActiveTab = activeTab === key;
             const badge = key === 'backlog'
@@ -3781,7 +3788,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 key={key}
                 type="button"
                 onClick={() => setActiveTab(key)}
-                className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all ${
+                className={`flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-semibold transition-all ${
                   isActiveTab
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -3813,7 +3820,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
           </p>
 
           {activeRun && (
-            <div className="mb-4 flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <div className="mb-4 flex flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
               <div className="flex items-center gap-3">
                 <Brain className="h-5 w-5 animate-spin text-indigo-600" />
                 <div>
@@ -3823,7 +3830,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
                 <button onClick={() => loadRunDetail(activeRun.id)} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700">
                 View Progress
                 </button>
@@ -3834,18 +3841,18 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
           )}
 
-          <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50 p-4">
-            <div className="mb-3 flex flex-wrap items-end gap-3">
-              <div>
+          <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50 p-3 sm:p-4">
+            <div className="mb-3 grid gap-3 sm:grid-cols-2 xl:flex xl:items-end">
+              <div className="w-full xl:w-auto">
                 <label className="block text-xs text-slate-600 font-medium mb-1">Mode</label>
-                <div className="inline-flex rounded-lg border border-indigo-200 bg-white p-1 text-xs font-semibold text-slate-600">
+                <div className="flex w-full rounded-lg border border-indigo-200 bg-white p-1 text-xs font-semibold text-slate-600 xl:inline-flex xl:w-auto">
                   <button
                     type="button"
                     onClick={() => {
                       setReviewMode('single');
                       setReviewEndDate(reviewDate);
                     }}
-                    className={`rounded-md px-3 py-1.5 transition-colors ${reviewMode === 'single' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50'}`}
+                    className={`flex-1 rounded-md px-3 py-1.5 transition-colors xl:flex-none ${reviewMode === 'single' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50'}`}
                   >
                   One day
                   </button>
@@ -3855,13 +3862,13 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                       setReviewMode('range');
                       setReviewEndDate((prev) => prev || reviewDate);
                     }}
-                    className={`rounded-md px-3 py-1.5 transition-colors ${reviewMode === 'range' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50'}`}
+                    className={`flex-1 rounded-md px-3 py-1.5 transition-colors xl:flex-none ${reviewMode === 'range' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50'}`}
                   >
                   Range
                   </button>
                 </div>
               </div>
-              <div>
+              <div className="w-full xl:w-auto">
                 <label className="block text-xs text-slate-600 font-medium mb-1">{reviewMode === 'range' ? 'Start Date' : 'Review Date'}</label>
                 <input
                   type="date"
@@ -3870,17 +3877,17 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                     setReviewDate(e.target.value);
                     if (reviewMode === 'single') setReviewEndDate(e.target.value);
                   }}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
               </div>
               {reviewMode === 'range' && (
-                <div>
+                <div className="w-full xl:w-auto">
                   <label className="block text-xs text-slate-600 font-medium mb-1">End Date</label>
                   <input
                     type="date"
                     value={reviewEndDate}
                     onChange={(e) => setReviewEndDate(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </div>
               )}
@@ -3890,19 +3897,19 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   setReviewDate(today);
                   setReviewEndDate(today);
                 }}
-                className="text-xs px-2.5 py-2 bg-white border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-100 transition-colors font-medium"
+                className="w-full rounded-lg border border-indigo-200 bg-white px-2.5 py-2 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 sm:w-auto"
               >
                   Today
               </button>
               <button
                 onClick={() => setView('live')}
                 disabled={!reviewDate || (reviewMode === 'range' && !reviewEndDate)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:from-indigo-700 hover:to-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:from-indigo-700 hover:to-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               >
                 <Play className="h-3.5 w-3.5" />
                   Run Review
               </button>
-              <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <label className="inline-flex w-full cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-700 sm:col-span-2 xl:ml-auto xl:w-auto">
                 <input
                   type="checkbox"
                   checked={forceRefreshThreads}
@@ -3971,8 +3978,8 @@ export default function DailyReviewManager({ workspaceTimezone }) {
       )}
 
       {activeTab === 'backlog' && (
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div>
               <h3 className="text-base font-semibold text-slate-800">Recommendation Backlog</h3>
               <p className="text-sm text-slate-500">
@@ -3992,8 +3999,8 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
           </div>
 
-          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-1">
-            <div className="grid gap-1 sm:grid-cols-4">
+          <div className="mb-4 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1">
+            <div className="grid min-w-[560px] grid-cols-4 gap-1 sm:min-w-0">
               {BACKLOG_KIND_TABS.map(({ key, label, icon: Icon, visibilityOnly }) => {
                 const selectedKind = backlogKind === key;
                 return (
@@ -4004,7 +4011,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                       setBacklogKind(key);
                       setBacklogStatus(key === 'dev' ? 'all' : 'pending');
                     }}
-                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
+                    className={`flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                       selectedKind
                         ? visibilityOnly
                           ? 'bg-amber-100 text-amber-800 shadow-sm ring-1 ring-amber-200'
@@ -4027,13 +4034,13 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
           </div>
 
-          <div className="mb-4 flex flex-wrap items-end gap-3">
-            <div>
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:flex xl:items-end">
+            <div className="w-full xl:w-auto">
               <label className="mb-1 block text-xs font-medium text-slate-600">View</label>
               <select
                 value={backlogStatus}
                 onChange={(e) => setBacklogStatus(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
                 <option value="pending">Review queue</option>
                 <option value="rejected">Rejected</option>
@@ -4041,12 +4048,12 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 <option value="all">All</option>
               </select>
             </div>
-            <div>
+            <div className="w-full xl:w-auto">
               <label className="mb-1 block text-xs font-medium text-slate-600">Priority</label>
               <select
                 value={backlogSeverity}
                 onChange={(e) => setBacklogSeverity(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
                 <option value="all">All</option>
                 <option value="high">High</option>
@@ -4054,34 +4061,34 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 <option value="low">Low</option>
               </select>
             </div>
-            <div>
+            <div className="w-full xl:w-auto">
               <label className="mb-1 block text-xs font-medium text-slate-600">Start Date</label>
               <input
                 type="date"
                 value={backlogStartDate}
                 onChange={(e) => setBacklogStartDate(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
-            <div>
+            <div className="w-full xl:w-auto">
               <label className="mb-1 block text-xs font-medium text-slate-600">End Date</label>
               <input
                 type="date"
                 value={backlogEndDate}
                 onChange={(e) => setBacklogEndDate(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
-            <div>
+            <div className="w-full sm:col-span-2 xl:w-auto">
               <label className="mb-1 block text-xs font-medium text-slate-600">Run</label>
-              <div className="flex items-center gap-1">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-1">
                 <input
                   type="text"
                   list="daily-review-run-options"
                   value={backlogRunFilter}
                   onChange={(e) => setBacklogRunFilter(e.target.value)}
                   placeholder="All runs"
-                  className="w-56 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm sm:w-56"
                 />
                 <datalist id="daily-review-run-options">
                   {runs.map((run) => {
@@ -4155,7 +4162,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
               ) : backlogStatus === 'pending' ? (
                 <div className="grid gap-4 xl:grid-cols-[minmax(0,1.12fr),minmax(360px,0.88fr)]">
                   <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <h4 className="text-sm font-semibold text-slate-800">Pending Review Queue</h4>
                         <p className="text-xs text-slate-500">Collapsed by default. Approve or reject directly from each row.</p>
@@ -4184,7 +4191,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   </div>
 
                   <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
-                    <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <h4 className="text-sm font-semibold text-slate-800">Approved for Consolidation</h4>
                         <p className="text-xs text-slate-500">Grouped by title. Expand to inspect items or mark them applied.</p>
