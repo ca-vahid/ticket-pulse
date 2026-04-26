@@ -1136,6 +1136,15 @@ export default function Dashboard() {
   const selfPickPercentage = totalTicketsToday > 0
     ? Math.round((selfPickedToday / totalTicketsToday) * 100)
     : 0;
+  const useDenseStatsBar = appAssignedTotal > 0 && (viewMode === 'daily' || viewMode === 'weekly');
+  const statCardClass = `bg-white bg-opacity-10 backdrop-blur-sm rounded-lg flex items-center hover:bg-opacity-20 transition-all ${
+    useDenseStatsBar ? 'px-2 py-1 gap-1' : 'px-2.5 py-1.5 gap-1.5'
+  }`;
+  const statIconBoxClass = (colorClass) => `flex items-center justify-center ${useDenseStatsBar ? 'w-6 h-6 rounded-md' : 'w-7 h-7 rounded-lg'} ${colorClass} bg-opacity-30 flex-none`;
+  const statIconClass = useDenseStatsBar ? 'w-3 h-3 text-white' : 'w-3.5 h-3.5 text-white';
+  const statValueClass = `${useDenseStatsBar ? 'text-sm' : 'text-base'} font-bold leading-tight`;
+  const statLabelClass = 'text-[9px] text-blue-100 uppercase font-medium leading-tight';
+  const viewToggleButtonClass = `${useDenseStatsBar ? 'px-2.5' : 'px-3'} py-1 rounded text-xs font-medium transition-colors`;
 
   return (
     <AppShell
@@ -1500,17 +1509,17 @@ export default function Dashboard() {
               {/* Stats Cards — also wrap among themselves so individual cards
                   don't get pushed into the day grid when 6 cards are visible
                   (Total / Open / Pending / Closed / Self / App in weekly mode). */}
-              <div className="flex flex-wrap items-center gap-1.5 justify-end">
+              <div className={`flex flex-wrap items-center justify-end ${useDenseStatsBar ? 'gap-1' : 'gap-1.5'}`}>
                 {/* Total */}
-                <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
-                  <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-400 bg-opacity-30 flex-none">
-                    <Inbox className="w-3.5 h-3.5 text-white" />
+                <div className={statCardClass}>
+                  <div className={statIconBoxClass('bg-blue-400')}>
+                    <Inbox className={statIconClass} />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-base font-bold leading-tight">
+                    <div className={statValueClass}>
                       {viewMode === 'monthly' ? (displayStats.monthTotalCreated || 0) : viewMode === 'weekly' ? (displayStats.weeklyTotalCreated || 0) : (displayStats.totalTicketsToday || 0)}
                     </div>
-                    <div className="text-[9px] text-blue-100 uppercase font-medium leading-tight">
+                    <div className={statLabelClass}>
                       <div className="flex items-baseline gap-1">
                         <span>Total</span>
                         <span className="text-[8px] opacity-70 normal-case truncate max-w-[110px]">
@@ -1537,69 +1546,69 @@ export default function Dashboard() {
 
                 {/* Open - Daily and Weekly */}
                 {(viewMode === 'daily' || viewMode === 'weekly') && (
-                  <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
-                    <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-yellow-500 bg-opacity-30 flex-none">
-                      <FolderOpen className="w-3.5 h-3.5 text-white" />
+                  <div className={statCardClass}>
+                    <div className={statIconBoxClass('bg-yellow-500')}>
+                      <FolderOpen className={statIconClass} />
                     </div>
                     <div>
-                      <div className="text-base font-bold leading-tight">
+                      <div className={statValueClass}>
                         {viewMode === 'weekly' ? (displayStats.weeklyOpenOnly || 0) : (displayStats.openOnlyCount || 0)}
                       </div>
-                      <div className="text-[9px] text-blue-100 uppercase font-medium">Open</div>
+                      <div className={statLabelClass}>Open</div>
                     </div>
                   </div>
                 )}
 
                 {/* Pending - Daily and Weekly */}
                 {(viewMode === 'daily' || viewMode === 'weekly') && (
-                  <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
-                    <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-orange-500 bg-opacity-30 flex-none">
-                      <Clock className="w-3.5 h-3.5 text-white" />
+                  <div className={statCardClass}>
+                    <div className={statIconBoxClass('bg-orange-500')}>
+                      <Clock className={statIconClass} />
                     </div>
                     <div>
-                      <div className="text-base font-bold leading-tight">
+                      <div className={statValueClass}>
                         {viewMode === 'weekly' ? (displayStats.weeklyPending || 0) : (displayStats.pendingCount || 0)}
                       </div>
-                      <div className="text-[9px] text-blue-100 uppercase font-medium">Pending</div>
+                      <div className={statLabelClass}>Pending</div>
                     </div>
                   </div>
                 )}
 
                 {/* Closed */}
-                <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
-                  <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-green-500 bg-opacity-30 flex-none">
-                    <CheckSquare className="w-3.5 h-3.5 text-white" />
+                <div className={statCardClass}>
+                  <div className={statIconBoxClass('bg-green-500')}>
+                    <CheckSquare className={statIconClass} />
                   </div>
                   <div>
-                    <div className="text-base font-bold leading-tight">
+                    <div className={statValueClass}>
                       {viewMode === 'monthly' ? (displayStats.monthClosed || 0) : viewMode === 'weekly' ? (displayStats.weeklyClosed || 0) : (displayStats.closedTicketsToday || 0)}
                     </div>
-                    <div className="text-[9px] text-blue-100 uppercase font-medium">Closed</div>
+                    <div className={statLabelClass}>Closed</div>
                   </div>
                 </div>
 
                 {/* Self */}
-                <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
-                  <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-purple-500 bg-opacity-30 flex-none">
-                    <Hand className="w-3.5 h-3.5 text-white" />
+                <div className={statCardClass}>
+                  <div className={statIconBoxClass('bg-purple-500')}>
+                    <Hand className={statIconClass} />
                   </div>
                   <div>
-                    <div className="text-base font-bold leading-tight">
+                    <div className={statValueClass}>
                       {viewMode === 'monthly' ? (displayStats.monthSelfPicked || 0) : viewMode === 'weekly' ? (displayStats.weeklySelfPicked || 0) : (displayStats.selfPickedToday || 0)}
                     </div>
-                    <div className="text-[9px] text-blue-100 uppercase font-medium">Self</div>
+                    <div className={statLabelClass}>Self</div>
                   </div>
                 </div>
 
                 {/* App Assigned - Only show when there are app assignments */}
                 {appAssignedTotal > 0 && (
-                  <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-opacity-20 transition-all">
-                    <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-sky-400 bg-opacity-30 flex-none">
-                      <Bot className="w-3.5 h-3.5 text-white" />
+                  <div className={statCardClass}>
+                    <div className={statIconBoxClass('bg-sky-400')}>
+                      <Bot className={statIconClass} />
                     </div>
                     <div>
-                      <div className="text-base font-bold leading-tight">{appAssignedTotal}</div>
-                      <div className="text-[9px] text-blue-100 uppercase font-medium">App</div>
+                      <div className={statValueClass}>{appAssignedTotal}</div>
+                      <div className={statLabelClass}>App</div>
                     </div>
                   </div>
                 )}
@@ -1610,7 +1619,7 @@ export default function Dashboard() {
               <div className="hidden xl:block w-px h-10 bg-white bg-opacity-20 flex-none" />
 
               {/* Self-Pick Progress */}
-              <div className="flex-none w-40">
+              <div className={`flex-none ${useDenseStatsBar ? 'w-36' : 'w-40'}`}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-semibold">Team Self-Pick</span>
                   <span className="text-xs font-bold">{selfPickPercentage}%</span>
@@ -1644,10 +1653,10 @@ export default function Dashboard() {
               <div className="hidden xl:block w-px h-10 bg-white bg-opacity-20 flex-none" />
 
               {/* View Toggle - far right */}
-              <div className="flex-none inline-flex items-center gap-1 bg-white bg-opacity-20 rounded-lg p-1">
+              <div className={`flex-none inline-flex items-center bg-white bg-opacity-20 rounded-lg ${useDenseStatsBar ? 'gap-0.5 p-0.5' : 'gap-1 p-1'}`}>
                 <button
                   onClick={handleSwitchToDaily}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  className={`${viewToggleButtonClass} ${
                     viewMode === 'daily'
                       ? 'bg-white text-blue-600 shadow-sm'
                       : 'text-white hover:bg-white hover:bg-opacity-10'
@@ -1657,7 +1666,7 @@ export default function Dashboard() {
                 </button>
                 <button
                   onClick={handleSwitchToWeekly}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  className={`${viewToggleButtonClass} ${
                     viewMode === 'weekly'
                       ? 'bg-white text-blue-600 shadow-sm'
                       : 'text-white hover:bg-white hover:bg-opacity-10'
@@ -1667,7 +1676,7 @@ export default function Dashboard() {
                 </button>
                 <button
                   onClick={handleSwitchToMonthly}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  className={`${viewToggleButtonClass} ${
                     viewMode === 'monthly'
                       ? 'bg-white text-blue-600 shadow-sm'
                       : 'text-white hover:bg-white hover:bg-opacity-10'

@@ -9,7 +9,7 @@ import { getCompactColumns, getCompactGridTemplate } from './compactLayout';
  *
  * Sticky offset:
  *   - Mobile: top-[52px] — just below the mobile page <header> (banner not sticky).
- *   - Desktop (md+): top-[88px] — just below the white app <header>. The purple
+ *   - Desktop (md+): top-[57px] — just below the white app <header>. The purple
  *     stats banner used to be sticky too (and we'd dock under it at top-[196px]),
  *     but the banner now scrolls away with the page, so we only need to clear
  *     the app header.
@@ -34,7 +34,7 @@ export default function TechCompactHeader({ viewMode, sortField, sortDirection, 
   };
 
   return (
-    <div className="sticky top-[52px] md:top-[88px] z-30 mb-2 -mx-1 px-1">
+    <div className="sticky top-[52px] md:top-[57px] z-30 mb-2 -mx-1 px-1">
       <div
         className="grid items-center gap-3 px-3 py-2 bg-white/95 backdrop-blur-md border border-gray-200 rounded-lg shadow-md"
         style={{ gridTemplateColumns: gridTemplate }}
