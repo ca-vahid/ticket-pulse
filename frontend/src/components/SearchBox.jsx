@@ -20,9 +20,9 @@ export default function SearchBox({
   };
 
   return (
-    <div className={`flex items-center gap-3 ${className}`}>
+    <div className={`flex flex-wrap items-center gap-2 sm:gap-3 ${className}`}>
       {/* Search Input */}
-      <div className="flex-1 relative">
+      <div className="relative min-w-0 flex-1">
         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
           <Search className="w-4 h-4 text-gray-400" />
         </div>
@@ -46,7 +46,7 @@ export default function SearchBox({
 
       {/* Results Count */}
       {resultsCount !== null && value && (
-        <div className="text-sm text-gray-600 whitespace-nowrap">
+        <div className="text-xs text-gray-600 whitespace-nowrap sm:text-sm">
           {resultsCount === 0 ? (
             <span className="text-red-600 font-medium">No results</span>
           ) : (

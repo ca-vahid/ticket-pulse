@@ -238,9 +238,60 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
   const sidebarWidthClass = isSidebarCollapsed ? 'w-16' : 'w-64';
 
   return (
-    <div className="relative flex gap-4">
+    <div className="relative flex flex-col gap-3 lg:flex-row lg:gap-4">
+      <div className="lg:hidden rounded-xl bg-white p-3 shadow">
+        <div className="mb-2 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-800">Technicians</h3>
+            <p className="text-[11px] text-gray-500">{monthName}</p>
+          </div>
+          {selectedTechnicianIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedTechnicianIds([])}
+              className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {sortedTechnicians.length === 0 ? (
+            <span className="text-xs text-gray-500">No activity this month</span>
+          ) : sortedTechnicians.map((tech) => {
+            const isSelected = selectedSet.has(tech.id);
+            return (
+              <button
+                key={tech.id}
+                type="button"
+                onClick={() =>
+                  setSelectedTechnicianIds((prev) =>
+                    isSelected ? prev.filter((id) => id !== tech.id) : [...prev, tech.id],
+                  )
+                }
+                className={`flex min-w-[76px] flex-col items-center rounded-lg border px-2 py-2 text-center transition-colors ${
+                  isSelected
+                    ? 'border-blue-300 bg-blue-50 text-blue-800'
+                    : 'border-gray-200 bg-gray-50 text-gray-700'
+                }`}
+                title={`${tech.name} • ${tech.monthlyTotal} tickets`}
+              >
+                {tech.photoUrl ? (
+                  <img src={tech.photoUrl} alt={tech.name} className="h-8 w-8 rounded-full object-cover" />
+                ) : (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-[11px] font-semibold text-gray-600">
+                    {tech.name.charAt(0)}
+                  </div>
+                )}
+                <span className="mt-1 w-full truncate text-[10px] font-semibold">{tech.name}</span>
+                <span className="text-[11px] font-bold tabular-nums">{tech.monthlyTotal}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       {/* Technician Sidebar */}
-      <div className={`${sidebarWidthClass} flex-shrink-0 transition-all duration-300`}>
+      <div className={`${sidebarWidthClass} hidden flex-shrink-0 transition-all duration-300 lg:block`}>
         <div className="bg-white rounded-2xl shadow h-full flex flex-col">
           <div className="p-4 border-b border-gray-200 flex items-center justify-between">
             {!isSidebarCollapsed && (
@@ -396,8 +447,8 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
       </div>
 
       {/* Calendar Section */}
-      <div className="flex-1 bg-white rounded-2xl shadow p-4 flex flex-col">
-        <div className="flex items-center justify-between px-2 pb-2">
+      <div className="flex-1 bg-white rounded-xl shadow p-2 flex flex-col sm:rounded-2xl sm:p-4">
+        <div className="flex items-center justify-between px-0 pb-2 sm:px-2">
           <button
             type="button"
             onClick={handlePrevMonth}
@@ -406,7 +457,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
           >
             <ChevronLeft className="w-5 h-5 text-gray-600" />
           </button>
-          <h2 className="text-2xl font-semibold text-gray-800">{monthName}</h2>
+          <h2 className="text-lg font-semibold text-gray-800 sm:text-2xl">{monthName}</h2>
           <button
             type="button"
             onClick={handleNextMonth}
@@ -417,7 +468,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
           </button>
         </div>
 
-        <div className="grid grid-cols-7 gap-3 text-[10px] font-medium px-2 pb-2 tracking-wider">
+        <div className="grid grid-cols-7 gap-1 px-0 pb-2 text-[9px] font-medium tracking-wider sm:gap-3 sm:px-2 sm:text-[10px]">
           {weekDays.map((day, index) => {
             const isWeekendHeader = index === 5 || index === 6; // Sat = 5, Sun = 6
             return (
@@ -431,12 +482,12 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
           })}
         </div>
 
-        <div className="flex-1 space-y-3">
+        <div className="flex-1 space-y-1 sm:space-y-3">
           {weeks.map((week, weekIdx) => (
-            <div key={weekIdx} className="grid grid-cols-7 gap-3">
+            <div key={weekIdx} className="grid grid-cols-7 gap-1 sm:gap-3">
               {week.map((day, dayIdx) => {
                 if (!day) {
-                  return <div key={dayIdx} className="rounded-3xl border border-dashed border-gray-200 h-40" />;
+                  return <div key={dayIdx} className="h-20 rounded-xl border border-dashed border-gray-200 sm:h-40 sm:rounded-3xl" />;
                 }
 
                 const isToday = day.date === formatDateLocal(new Date());
@@ -509,7 +560,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                 };
 
                 return (
-                  <div key={dayIdx} className="relative h-40 w-full" style={{ overflow: 'visible', zIndex: isHovered ? 50 : 1 }}>
+                  <div key={dayIdx} className="relative h-20 w-full sm:h-40" style={{ overflow: 'visible', zIndex: isHovered ? 50 : 1 }}>
                     <button
                       type="button"
                       onMouseEnter={() => hasTickets && scheduleHover(day.date)}
@@ -521,12 +572,12 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                         if (hasTickets) setClickedDayDate(day.date);
                       }}
                       title={holidayTooltip || undefined}
-                      className={`absolute rounded-3xl border text-left transition-all duration-300 flex flex-col ${
+                      className={`absolute rounded-xl border text-left transition-all duration-300 flex flex-col sm:rounded-3xl ${
                         isHovered
                           ? `${getBorderClass()} shadow-2xl shadow-blue-200/50 z-50 ${getBackgroundClass()} ${hasFilter && dayTechnicians.length > 0 ? 'overflow-hidden' : 'overflow-y-auto'}`
                           : hasTickets
-                            ? `${getBorderClass()} hover:shadow-lg z-0 inset-0 overflow-hidden ${hasFilter ? 'pb-8 px-4 pt-4' : 'p-4'}`
-                            : `${getBorderClass()} text-gray-400 z-0 p-4 inset-0 overflow-hidden`
+                            ? `${getBorderClass()} hover:shadow-lg z-0 inset-0 overflow-hidden ${hasFilter ? 'px-1.5 pb-6 pt-2 sm:px-4 sm:pb-8 sm:pt-4' : 'p-1.5 sm:p-4'}`
+                            : `${getBorderClass()} text-gray-400 z-0 p-1.5 inset-0 overflow-hidden sm:p-4`
                       } ${getBackgroundClass()}`}
                       style={isHovered ? { 
                         transform: 'translate(-50%, -50%) scale(1.5)',
@@ -579,8 +630,8 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                         </div>
                       </div>
 
-                      <div className={`flex items-baseline gap-2 ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'mt-1' : 'mt-2') : 'mt-1'}`}>
-                        <span className={`font-semibold tabular-nums ${hasTickets ? 'text-gray-800' : 'text-gray-300'} ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'text-3xl' : 'text-4xl') : 'text-3xl'}`}>{stats.total}</span>
+                      <div className={`flex items-baseline gap-1 sm:gap-2 ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'mt-1' : 'mt-2') : 'mt-1'}`}>
+                        <span className={`font-semibold tabular-nums ${hasTickets ? 'text-gray-800' : 'text-gray-300'} ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'text-3xl' : 'text-4xl') : 'text-xl sm:text-3xl'}`}>{stats.total}</span>
                         {/* Show "tickets" label only when hovered (cell is enlarged); the un-hovered grid stays scannable. */}
                         {isHovered && stats.total > 0 && (
                           <span className={`text-gray-500 ${hasFilter && dayTechnicians.length > 0 ? 'text-xs' : 'text-sm'}`}>tickets</span>
@@ -1020,4 +1071,3 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
     </div>
   );
 }
-

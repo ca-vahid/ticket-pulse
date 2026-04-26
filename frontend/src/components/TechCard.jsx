@@ -217,23 +217,23 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
       </button>
 
       {/* Card Content */}
-      <div className="p-4">
+      <div className="p-3 sm:p-4">
         {/* Header: Photo + Name + Badges */}
-        <div className="flex items-start gap-3 mb-4">
+        <div className="flex items-start gap-3 mb-3 sm:mb-4">
           {/* Profile Photo or Initials Circle */}
           {technician.photoUrl ? (
             <img
               src={technician.photoUrl}
               alt={technician.name}
-              className="w-20 h-20 rounded-full object-cover shadow-lg border-2 border-gray-300 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer"
+              className="w-14 h-14 sm:w-20 sm:h-20 rounded-full object-cover shadow-lg border-2 border-gray-300 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer"
               onError={(e) => {
                 // Hide broken images so alt text doesn't leak the real name.
                 e.currentTarget.style.display = 'none';
               }}
             />
           ) : (
-            <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-20 h-20 shadow-lg border-2 border-blue-400 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer">
-              <span className="text-xl font-bold text-white">
+            <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-14 h-14 sm:w-20 sm:h-20 shadow-lg border-2 border-blue-400 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer">
+              <span className="text-base sm:text-xl font-bold text-white">
                 {getInitials(technician.name)}
               </span>
             </div>
@@ -257,7 +257,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               )}
 
               {/* Name */}
-              <h3 className="font-semibold text-lg text-gray-900 truncate">
+              <h3 className="font-semibold text-base sm:text-lg text-gray-900 truncate">
                 {technician.name}
               </h3>
 
@@ -297,7 +297,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
         {/* Weekly Breakdown Mini-Calendar - Only show in weekly view */}
         {viewMode === 'weekly' && technician.dailyBreakdown && (
           <div className="mb-3 pb-3 border-b border-gray-200">
-            <div className="flex items-center justify-center gap-1">
+            <div className="grid grid-cols-7 gap-1">
               {technician.dailyBreakdown.map((day, index) => {
                 const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
                 const colorClass = getTicketColor(day.total, maxDailyCount);
@@ -393,7 +393,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                 return (
                   <div
                     key={day.date}
-                    className={`flex flex-col items-center cursor-pointer w-[38px] ${containerClass}`}
+                    className={`flex min-w-0 flex-col items-center cursor-pointer ${containerClass}`}
                     title={fullTooltip}
                     onClick={handleDayBoxClick}
                   >
@@ -409,7 +409,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                         <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
                       </div>
                     </div>
-                    <div className={`relative w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
+                    <div className={`relative h-8 w-full max-w-9 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-110 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
                       {/* Half-day overlay: gradient fades from the leave colour
                           at the AM/PM edge into transparent at the midline,
                           so there is no hard 50/50 split. */}
@@ -427,19 +427,19 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
 
         {/* Ticket Status Display */}
         <div className="mb-3 py-3 border-b border-gray-200">
-          <div className="flex items-center justify-center gap-6">
+          <div className="flex items-center justify-center gap-4 sm:gap-6">
             {/* Open Count - Only show in daily view */}
             {viewMode === 'daily' && (
-              <div className="text-center flex items-center gap-3">
+              <div className="text-center flex items-center gap-2 sm:gap-3">
                 <img
                   src="/brand/icon-workload.png"
                   alt=""
                   aria-hidden="true"
                   title={`Workload: ${openOnlyCount} open ticket${openOnlyCount === 1 ? '' : 's'}`}
-                  className="w-9 h-9 flex-shrink-0 opacity-90"
+                  className="w-7 h-7 sm:w-9 sm:h-9 flex-shrink-0 opacity-90"
                 />
                 <div>
-                  <div className="text-5xl font-bold text-gray-900 leading-none">{openOnlyCount}</div>
+                  <div className="text-4xl sm:text-5xl font-bold text-gray-900 leading-none">{openOnlyCount}</div>
                   <div className="text-xs text-gray-700 uppercase font-bold mt-1">Open</div>
                   {pendingCount > 0 && (
                     <div className="text-xs text-gray-500 font-medium mt-0.5">
@@ -463,7 +463,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
         {/* Metrics Grid - Icons + Numbers */}
         {/* Fixed 6-column layout so all techs align vertically. Optional metrics
             (App, Rej, CSAT) render as muted placeholders when count is 0. */}
-        <div className="grid grid-cols-6 gap-2 mb-2">
+        <div className="grid grid-cols-3 gap-2 mb-2 sm:grid-cols-6">
 
           {/* Self - always primary */}
           <div className="flex flex-col items-center p-2 bg-purple-100 rounded-lg shadow-sm border border-purple-200">

@@ -64,11 +64,11 @@ export default function CategoryFilter({
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       {/* Pill-style trigger with circular icon badge — matches Timeline / Assignment buttons */}
-      <div className="relative" ref={dropdownRef}>
+      <div className="relative w-full sm:w-auto" ref={dropdownRef}>
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className={`group flex items-center gap-1.5 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border whitespace-nowrap ${
+          className={`group flex w-full items-center justify-center gap-1.5 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border whitespace-nowrap sm:w-auto ${
             hasSelection
               ? 'border-blue-300 bg-blue-100 text-blue-800 hover:bg-blue-200 hover:border-blue-400 hover:shadow-sm'
               : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:border-blue-300 hover:shadow-sm'
@@ -89,7 +89,7 @@ export default function CategoryFilter({
 
         {/* Dropdown Menu */}
         {isOpen && (
-          <div className="absolute top-full right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 min-w-[220px] max-h-[320px] overflow-auto">
+          <div className="absolute top-full right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 w-[min(20rem,calc(100vw-2rem))] max-h-[320px] overflow-auto sm:min-w-[220px]">
             {hasSelection && (
               <div className="border-b border-gray-200 p-2 sticky top-0 bg-white">
                 <button

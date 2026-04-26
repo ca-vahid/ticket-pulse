@@ -1145,6 +1145,52 @@ export default function Dashboard() {
   const statValueClass = `${useDenseStatsBar ? 'text-sm' : 'text-base'} font-bold leading-tight`;
   const statLabelClass = 'text-[9px] text-blue-100 uppercase font-medium leading-tight';
   const viewToggleButtonClass = `${useDenseStatsBar ? 'px-2.5' : 'px-3'} py-1 rounded text-xs font-medium transition-colors`;
+  const mobileStats = [
+    {
+      key: 'total',
+      label: viewMode === 'daily' ? 'Today' : 'Total',
+      value: totalTicketsToday,
+      Icon: Inbox,
+      iconClass: 'bg-blue-400/30',
+    },
+    ...(viewMode === 'daily' || viewMode === 'weekly' ? [
+      {
+        key: 'open',
+        label: 'Open',
+        value: viewMode === 'weekly' ? (displayStats.weeklyOpenOnly || 0) : (displayStats.openOnlyCount || 0),
+        Icon: FolderOpen,
+        iconClass: 'bg-yellow-500/30',
+      },
+      {
+        key: 'pending',
+        label: 'Pending',
+        value: viewMode === 'weekly' ? (displayStats.weeklyPending || 0) : (displayStats.pendingCount || 0),
+        Icon: Clock,
+        iconClass: 'bg-orange-500/30',
+      },
+    ] : []),
+    {
+      key: 'closed',
+      label: 'Closed',
+      value: viewMode === 'monthly' ? (displayStats.monthClosed || 0) : viewMode === 'weekly' ? (displayStats.weeklyClosed || 0) : (displayStats.closedTicketsToday || 0),
+      Icon: CheckSquare,
+      iconClass: 'bg-green-500/30',
+    },
+    {
+      key: 'self',
+      label: 'Self',
+      value: selfPickedToday,
+      Icon: Hand,
+      iconClass: 'bg-purple-500/30',
+    },
+    ...(appAssignedTotal > 0 ? [{
+      key: 'app',
+      label: 'App',
+      value: appAssignedTotal,
+      Icon: Bot,
+      iconClass: 'bg-sky-400/30',
+    }] : []),
+  ];
 
   return (
     <AppShell
@@ -1485,15 +1531,99 @@ export default function Dashboard() {
                   );
                 })}
               </div>
+              <div className="grid grid-cols-7 gap-1 sm:hidden">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
+                  const currentDay = (selectedDate.getDay() + 6) % 7;
+                  const dayStats = weeklyStats?.[index];
+                  const ticketCount = dayStats?.count ?? 0;
+
+                  let dayDate;
+                  if (viewMode === 'weekly' && selectedWeek) {
+                    dayDate = new Date(selectedWeek);
+                    dayDate.setDate(selectedWeek.getDate() + index);
+                  } else {
+                    const dayDifference = index - currentDay;
+                    dayDate = new Date(selectedDate);
+                    dayDate.setDate(dayDate.getDate() + dayDifference);
+                  }
+                  const dayDateStr = formatDateLocal(dayDate);
+                  const todayStr = formatDateLocal(new Date());
+                  const isActualToday = dayDateStr === todayStr;
+                  const isSelectedDay = viewMode === 'daily'
+                    ? index === currentDay
+                    : isActualToday;
+                  const holidayInfo = getHolidayInfo(dayDateStr);
+                  const isWeekendDay = index === 5 || index === 6;
+
+                  const handleDayClick = () => {
+                    if (viewMode === 'weekly') {
+                      setSelectedDate(new Date(dayDate));
+                      setViewMode('daily');
+                      return;
+                    }
+                    setSelectedDate(new Date(dayDate));
+                  };
+
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={handleDayClick}
+                      className={`relative flex min-h-[48px] flex-col items-center justify-center rounded-md border text-[10px] font-semibold transition-colors touch-manipulation ${
+                        isSelectedDay
+                          ? 'border-white bg-white text-blue-600 shadow-sm'
+                          : isWeekendDay
+                            ? 'border-white/10 bg-white/10 text-slate-100'
+                            : 'border-white/10 bg-white/10 text-white'
+                      }`}
+                      title={`${day} ${dayDate.getDate()} - ${ticketCount} tickets`}
+                    >
+                      {holidayInfo.isHoliday && (
+                        <span className={`absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${holidayInfo.isCanadian ? 'bg-rose-300' : 'bg-indigo-200'}`} />
+                      )}
+                      <span>{day}</span>
+                      <span className="text-[8px] opacity-70">{dayDate.getDate()}</span>
+                      <span className="text-[11px] font-bold leading-tight">{ticketCount}</span>
+                    </button>
+                  );
+                })}
+              </div>
               {/* Mobile view toggle */}
-              <div className="flex md:hidden items-center justify-between mt-2">
-                <div className="inline-flex items-center gap-0.5 bg-white bg-opacity-20 rounded-lg p-0.5">
+              <div className="mt-2 space-y-2 md:hidden">
+                <div className="grid grid-cols-3 gap-0.5 bg-white bg-opacity-20 rounded-lg p-0.5">
                   <button onClick={handleSwitchToDaily} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors touch-manipulation ${viewMode === 'daily' ? 'bg-white text-blue-600 shadow-sm' : 'text-white'}`}>Daily</button>
                   <button onClick={handleSwitchToWeekly} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors touch-manipulation ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white'}`}>Weekly</button>
                   <button onClick={handleSwitchToMonthly} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors touch-manipulation ${viewMode === 'monthly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white'}`}>Monthly</button>
                 </div>
-                <div className="text-xs text-blue-100 font-medium">
-                  {viewMode === 'daily' ? (displayStats.totalTicketsToday || 0) : viewMode === 'weekly' ? (displayStats.weeklyTotalCreated || 0) : (displayStats.monthTotalCreated || 0)} tickets
+                <div className="grid grid-cols-2 gap-1.5">
+                  {mobileStats.map(({ key, label, value, Icon, iconClass }) => (
+                    <div key={key} className="flex items-center gap-2 rounded-lg bg-white/10 px-2 py-2">
+                      <div className={`flex h-7 w-7 flex-none items-center justify-center rounded-lg ${iconClass}`}>
+                        <Icon className="h-3.5 w-3.5 text-white" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-base font-bold leading-none">{value}</div>
+                        <div className="mt-0.5 text-[9px] font-semibold uppercase text-blue-100">{label}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-lg bg-white/10 px-2 py-2">
+                  <div className="mb-1 flex items-center justify-between text-xs font-semibold">
+                    <span>Team Self-Pick</span>
+                    <span>{selfPickPercentage}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-blue-950/30">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        selfPickPercentage >= 70 ? 'bg-green-400' :
+                          selfPickPercentage >= 50 ? 'bg-yellow-400' :
+                            'bg-red-400'
+                      }`}
+                      style={{ width: `${selfPickPercentage}%` }}
+                    />
+                  </div>
+                  <div className="mt-1 text-[10px] text-blue-100">Goal: 70%</div>
                 </div>
               </div>
             </div>
@@ -1694,23 +1824,28 @@ export default function Dashboard() {
           {/* Single merged controls row: Team identity + view controls (left)
               and Search + Category + Legend popover (right). Wraps on narrow
               screens via flex-wrap. */}
-          <div className="mb-3 flex items-center flex-wrap gap-2 lg:gap-3">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap lg:gap-3">
             {/* Team identity */}
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <img
-                src="/brand/icon-tech.png"
-                alt=""
-                aria-hidden="true"
-                className="w-6 h-6 flex-shrink-0"
-              />
-              <h2 className="text-base sm:text-lg font-semibold">Team</h2>
-              <span className="text-xs text-gray-500">
-                ({searchTerm || selectedCategories.length > 0 ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
+            <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start sm:flex-shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <img
+                  src="/brand/icon-tech.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="w-6 h-6 flex-shrink-0"
+                />
+                <h2 className="text-base sm:text-lg font-semibold">Team</h2>
+                <span className="text-xs text-gray-500">
+                  ({searchTerm || selectedCategories.length > 0 ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
+                </span>
+              </div>
+              <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-semibold text-gray-500 shadow-sm sm:hidden">
+                {isCompactView ? 'Compact on desktop' : 'Cards'}
               </span>
             </div>
 
             {/* View toggle — Card / Compact */}
-            <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-medium flex-shrink-0">
+            <div className="hidden bg-gray-100 rounded-lg p-0.5 text-xs font-medium flex-shrink-0 sm:flex">
               <button
                 onClick={() => { if (isCompactView) toggleCompactView(); }}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
@@ -1733,7 +1868,7 @@ export default function Dashboard() {
 
             <button
               onClick={handleToggleNoise}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
+              className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors sm:flex-shrink-0 ${
                 excludeNoise
                   ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
                   : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
@@ -1775,13 +1910,14 @@ export default function Dashboard() {
               onChange={setSearchTerm}
               placeholder="Search tickets..."
               resultsCount={searchTerm || selectedCategories.length > 0 ? searchResultsCount : null}
-              className="flex-1 min-w-[200px] max-w-md ml-auto"
+              className="w-full sm:flex-1 sm:min-w-[200px] sm:max-w-md sm:ml-auto"
             />
             <CategoryFilter
               categories={allCategories}
               selected={selectedCategories}
               onChange={setSelectedCategories}
               placeholder="Category"
+              className="w-full sm:w-auto"
             />
             {(searchTerm || selectedCategories.length > 0 || (viewMode === 'monthly' && monthlyData)) && (
               <button
@@ -1939,13 +2075,15 @@ export default function Dashboard() {
                 return isCompactView ? (
                   /* Compact view - data table with sticky column header */
                   <div className="animate-fadeIn">
-                    <TechCompactHeader
-                      viewMode={viewMode}
-                      sortField={compactSort.field}
-                      sortDirection={compactSort.direction}
-                      onSort={handleCompactSort}
-                    />
-                    <div className="space-y-1.5">
+                    <div className="hidden sm:block">
+                      <TechCompactHeader
+                        viewMode={viewMode}
+                        sortField={compactSort.field}
+                        sortDirection={compactSort.direction}
+                        onSort={handleCompactSort}
+                      />
+                    </div>
+                    <div className="hidden space-y-1.5 sm:block">
                       {compactRows.map((tech, index) => (
                         <div
                           key={tech.id}
@@ -1969,10 +2107,33 @@ export default function Dashboard() {
                         </div>
                       ))}
                     </div>
+                    <div className="grid grid-cols-1 gap-3 sm:hidden">
+                      {compactRows.map((tech, index) => (
+                        <div
+                          key={tech.id}
+                          className="animate-scaleIn"
+                          style={{ animationDelay: `${index * 20}ms` }}
+                        >
+                          <TechCard
+                            technician={tech}
+                            rank={tech.rank}
+                            onHide={handleHideTechnician}
+                            selectedDate={selectedDate}
+                            selectedWeek={selectedWeek}
+                            selectedMonth={selectedMonth}
+                            maxOpenCount={maxOpenCount}
+                            maxDailyCount={maxDailyCount}
+                            viewMode={viewMode}
+                            searchTerm={searchTerm}
+                            selectedCategories={selectedCategories}
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   /* Normal view - Grid layout with cards */
-                  <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4 animate-fadeIn">
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4 lg:gap-4 animate-fadeIn">
                     {techsWithRanks.map((tech, index) => (
                       <div
                         key={tech.id}
