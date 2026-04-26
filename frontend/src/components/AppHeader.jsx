@@ -100,7 +100,7 @@ export default function AppHeader({
             }}
             aria-current={isActive ? 'page' : undefined}
             aria-disabled={isActive ? 'true' : undefined}
-            className={`${compact ? 'h-9 w-9 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-none items-center justify-center border transition-colors ${
+            className={`${compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-none items-center justify-center border transition-colors ${
               isActive
                 ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400'
                 : `${inactiveClass} hover:shadow-sm`
@@ -155,7 +155,7 @@ export default function AppHeader({
           <div className="flex items-center justify-between gap-2 md:hidden">
             <div className="flex-1 min-w-0">
               <div className="flex min-w-0 items-center gap-1.5">
-                <div className="relative h-9 w-[125px] overflow-hidden flex items-center justify-start flex-shrink-0">
+                <div className="relative h-9 w-[112px] overflow-hidden flex items-center justify-start flex-shrink-0">
                   <button type="button" onClick={() => navigate('/dashboard')} title="Dashboard">
                     <img
                       src="/brand/logo-wordmark.png"
@@ -176,28 +176,33 @@ export default function AppHeader({
               </div>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {extraActions}
-              {backgroundSyncRunning && (
-                <button
-                  onClick={onKillSync}
-                  disabled={killingSync || !onKillSync}
-                  className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 touch-manipulation"
-                  title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing... (tap to stop)'}
-                >
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                </button>
-              )}
               {renderPrimaryNav(true)}
-              <button onClick={() => navigate('/settings')} className="p-2 hover:bg-gray-100 rounded-lg touch-manipulation" title="Settings"><Settings className="w-4 h-4" /></button>
+              <button onClick={() => navigate('/settings')} className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-gray-100 touch-manipulation" title="Settings"><Settings className="w-4 h-4" /></button>
               <button
                 onClick={handleLogout}
-                className="h-9 w-9 rounded-full border border-slate-200 bg-slate-100 text-slate-700 text-xs font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors touch-manipulation"
+                className="h-8 w-8 rounded-full border border-slate-200 bg-slate-100 text-slate-700 text-[11px] font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors touch-manipulation"
                 title={`Sign out ${displayUserName}`}
               >
                 {userInitials}
               </button>
             </div>
           </div>
+          {(extraActions || backgroundSyncRunning) && (
+            <div className="mt-2 flex items-center justify-end gap-1.5 md:hidden">
+              {extraActions}
+              {backgroundSyncRunning && (
+                <button
+                  onClick={onKillSync}
+                  disabled={killingSync || !onKillSync}
+                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 text-xs font-semibold text-blue-700 touch-manipulation disabled:opacity-50"
+                  title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing... (tap to stop)'}
+                >
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Syncing</span>
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="hidden md:grid grid-cols-12 gap-4 items-center">
             <div className="col-span-4">
