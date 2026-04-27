@@ -171,6 +171,21 @@ function formatDateTime(value) {
   });
 }
 
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mediaQuery = window.matchMedia(query);
+    setMatches(mediaQuery.matches);
+    const handleChange = (event) => setMatches(event.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [query]);
+
+  return matches;
+}
+
 function labelFromKey(value, labelMap = {}) {
   if (value === null || value === undefined || value === '') return 'Unknown';
   const raw = String(value);
@@ -200,15 +215,15 @@ function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', de
   }[tone] || 'border-blue-100 bg-blue-50 text-blue-700';
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">{title}</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
+          <p className="mt-1 text-xl font-bold text-slate-900 sm:text-2xl">{value}</p>
           {subtitle && <p className="mt-1 text-xs text-slate-500">{subtitle}</p>}
         </div>
         <div className={`rounded-lg border p-2 ${toneClass}`}>
-          <Icon className="h-5 w-5" />
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
         </div>
       </div>
       {delta !== undefined && delta !== null && (
@@ -222,7 +237,7 @@ function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', de
 
 function Panel({ title, subtitle, children, actions }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
@@ -272,30 +287,48 @@ function EmptyState({ text = 'No data for this range.' }) {
 function SimpleTable({ columns, rows, maxHeight = 'max-h-80' }) {
   if (!rows?.length) return <EmptyState />;
   return (
-    <div className={`overflow-auto rounded-lg border border-slate-200 ${maxHeight}`}>
-      <table className="min-w-full divide-y divide-slate-200 text-sm">
-        <thead className="sticky top-0 bg-slate-50">
-          <tr>
-            {columns.map((col) => (
-              <th key={col.key} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-normal text-slate-500">
-                {col.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100 bg-white">
-          {rows.map((row, idx) => (
-            <tr key={row.id || row.freshserviceTicketId || row.name || idx} className="hover:bg-slate-50">
+    <>
+      <div className={`space-y-2 overflow-auto sm:hidden ${maxHeight}`}>
+        {rows.map((row, idx) => (
+          <div key={row.id || row.freshserviceTicketId || row.name || idx} className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="space-y-2">
               {columns.map((col) => (
-                <td key={col.key} className="px-3 py-2 text-slate-700">
-                  {col.render ? col.render(row) : row[col.key]}
-                </td>
+                <div key={col.key} className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-2 text-sm">
+                  <span className="text-xs font-semibold uppercase tracking-normal text-slate-500">{col.label}</span>
+                  <span className="min-w-0 break-words text-slate-700">
+                    {col.render ? col.render(row) : row[col.key]}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className={`hidden overflow-auto rounded-lg border border-slate-200 sm:block ${maxHeight}`}>
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="sticky top-0 bg-slate-50">
+            <tr>
+              {columns.map((col) => (
+                <th key={col.key} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-normal text-slate-500">
+                  {col.label}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {rows.map((row, idx) => (
+              <tr key={row.id || row.freshserviceTicketId || row.name || idx} className="hover:bg-slate-50">
+                {columns.map((col) => (
+                  <td key={col.key} className="px-3 py-2 text-slate-700">
+                    {col.render ? col.render(row) : row[col.key]}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -434,7 +467,7 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
 
 function HighchartsBlock({ options, height = '24rem' }) {
   return (
-    <div style={{ height }}>
+    <div className="min-w-0" style={{ height }}>
       <HighchartsReact
         highcharts={Highcharts}
         options={options}
@@ -470,6 +503,7 @@ function exportAnalyticsWorkbook(payload, activeTab) {
 
 export default function Analytics() {
   const { currentWorkspace } = useWorkspace();
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const [activeTab, setActiveTab] = useState('overview');
   const [range, setRange] = useState('30d');
   const [groupBy, setGroupBy] = useState('day');
@@ -1047,7 +1081,7 @@ export default function Analytics() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel title="Assignment Mix" subtitle="How assigned tickets entered a technician's queue in the selected range.">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-            <div className="relative h-80 min-w-0">
+            <div className="relative h-64 min-w-0 sm:h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -1110,7 +1144,7 @@ export default function Analytics() {
   const renderDemand = () => (
     <div className="space-y-4">
       <Panel title="Created vs Closed / Resolved" subtitle="Resolved count uses tickets assigned in the same period because historical closedAt/resolvedAt coverage is sparse.">
-        <div className="h-80">
+        <div className="h-64 sm:h-80">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={demand?.trend || []}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -1222,20 +1256,69 @@ export default function Analytics() {
         title="Timeline by Agent"
         subtitle={`${teamTimelineMetricLabel} over the selected date range. Use the agent chips above to compare specific technicians.`}
       >
-        {teamRows.length ? <HighchartsBlock options={timelineChartOptions} height="26rem" /> : <EmptyState text="No agents match the current filters." />}
+        {teamRows.length ? <HighchartsBlock options={timelineChartOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState text="No agents match the current filters." />}
       </Panel>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Panel title="Workload by Agent" subtitle="Assigned tickets, current open queue, and closed count by agent.">
-          {teamRows.length ? <HighchartsBlock options={workloadChartOptions} height="26rem" /> : <EmptyState text="No agents match the current filters." />}
+          {teamRows.length ? <HighchartsBlock options={workloadChartOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState text="No agents match the current filters." />}
         </Panel>
         <Panel title="Assignment Source by Agent" subtitle="Shows self-picked, coordinator-assigned, and Ticket Pulse-assigned volume.">
-          {teamRows.length ? <HighchartsBlock options={sourceChartOptions} height="26rem" /> : <EmptyState text="No agents match the current filters." />}
+          {teamRows.length ? <HighchartsBlock options={sourceChartOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState text="No agents match the current filters." />}
         </Panel>
       </div>
 
       <Panel title="Team-Safe Distribution" subtitle="Sortable agent table with context metrics, not public winner/loser framing.">
-        <div className="overflow-auto rounded-lg border border-slate-200 max-h-[31rem]">
+        <div className="max-h-[31rem] space-y-2 overflow-auto sm:hidden">
+          {teamRows.map((row) => (
+            <div key={row.technicianId} className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900">{row.name}</p>
+                  <p className="text-xs text-slate-500">{row.assigned} assigned · {row.openNow} open · {row.closed} closed</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => toggleTeamSelection(row.technicianId)}
+                  className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                    selectedTeamIds.includes(row.technicianId)
+                      ? 'border-blue-600 bg-blue-50 text-blue-700'
+                      : 'border-slate-200 bg-slate-50 text-slate-600'
+                  }`}
+                >
+                  {selectedTeamIds.includes(row.technicianId) ? 'Selected' : 'Focus'}
+                </button>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="rounded bg-slate-50 p-2">
+                  <p className="text-slate-500">Self</p>
+                  <p className="font-bold text-slate-900">{row.selfPicked}</p>
+                </div>
+                <div className="rounded bg-slate-50 p-2">
+                  <p className="text-slate-500">Coord.</p>
+                  <p className="font-bold text-slate-900">{row.coordinatorAssigned}</p>
+                </div>
+                <div className="rounded bg-slate-50 p-2">
+                  <p className="text-slate-500">App</p>
+                  <p className="font-bold text-slate-900">{row.appAssigned}</p>
+                </div>
+                <div className="rounded bg-slate-50 p-2">
+                  <p className="text-slate-500">CSAT</p>
+                  <p className="font-bold text-slate-900">{row.csatAverage === null ? '—' : row.csatAverage}</p>
+                </div>
+                <div className="rounded bg-slate-50 p-2">
+                  <p className="text-slate-500">Leave</p>
+                  <p className="font-bold text-slate-900">{row.leaveDays}</p>
+                </div>
+                <div className="rounded bg-slate-50 p-2">
+                  <p className="text-slate-500">WFH</p>
+                  <p className="font-bold text-slate-900">{row.wfhDays || 0}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden max-h-[31rem] overflow-auto rounded-lg border border-slate-200 sm:block">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="sticky top-0 bg-slate-50">
               <tr>
@@ -1360,13 +1443,13 @@ export default function Analytics() {
           title="Resolution Distribution"
           subtitle="Resolved tickets grouped by populated resolutionTimeSeconds. Wider right-side bars indicate slower outcomes."
         >
-          {resolutionBucketRows.length ? <HighchartsBlock options={qualityDistributionOptions} height="22rem" /> : <EmptyState />}
+          {resolutionBucketRows.length ? <HighchartsBlock options={qualityDistributionOptions} height={isMobile ? '18rem' : '22rem'} /> : <EmptyState />}
         </Panel>
         <Panel
           title="Open Ticket Aging"
           subtitle="Current open queue age, not historical SLA breach rate."
         >
-          {openAgingRows.length ? <HighchartsBlock options={openAgingOptions} height="22rem" /> : <EmptyState />}
+          {openAgingRows.length ? <HighchartsBlock options={openAgingOptions} height={isMobile ? '18rem' : '22rem'} /> : <EmptyState />}
         </Panel>
       </div>
 
@@ -1375,7 +1458,7 @@ export default function Analytics() {
           title="CSAT Trend"
           subtitle="Average score with response count, so sparse survey coverage is visible."
         >
-          {(quality?.csat?.trend || []).length ? <HighchartsBlock options={csatTrendOptions} height="22rem" /> : <EmptyState text="No CSAT responses in this range." />}
+          {(quality?.csat?.trend || []).length ? <HighchartsBlock options={csatTrendOptions} height={isMobile ? '18rem' : '22rem'} /> : <EmptyState text="No CSAT responses in this range." />}
         </Panel>
         <Panel title="Quality Watchlist" subtitle="Useful checks for managers before opening tickets.">
           <div className="space-y-2">
@@ -1462,23 +1545,23 @@ export default function Analytics() {
           subtitle="Pipeline volume, pipeline errors, and sync failures over the selected range."
         >
           {((ops?.pipeline?.trend || []).length || (ops?.sync?.trend || []).length)
-            ? <HighchartsBlock options={opsTrendOptions} height="22rem" />
+            ? <HighchartsBlock options={opsTrendOptions} height={isMobile ? '18rem' : '22rem'} />
             : <EmptyState />}
         </Panel>
         <Panel title="Pipeline Outcomes" subtitle="Outcome mix for assignment pipeline runs.">
-          {opsFunnelRows.length ? <HighchartsBlock options={opsFunnelOptions} height="22rem" /> : <EmptyState />}
+          {opsFunnelRows.length ? <HighchartsBlock options={opsFunnelOptions} height={isMobile ? '18rem' : '22rem'} /> : <EmptyState />}
         </Panel>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Panel title="Step Health" subtitle="Completed, failed, and skipped step counts by pipeline stage.">
-          {(ops?.steps || []).length ? <HighchartsBlock options={opsStepHealthOptions} height="26rem" /> : <EmptyState />}
+          {(ops?.steps || []).length ? <HighchartsBlock options={opsStepHealthOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState />}
         </Panel>
         <Panel title="Step Duration Hotspots" subtitle="Average and p90 duration by step, in milliseconds.">
-          {(ops?.steps || []).length ? <HighchartsBlock options={opsStepDurationOptions} height="26rem" /> : <EmptyState />}
+          {(ops?.steps || []).length ? <HighchartsBlock options={opsStepDurationOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState />}
         </Panel>
         <Panel title="Trigger Sources" subtitle="What started pipeline runs in this range.">
-          {opsTriggerRows.length ? <HighchartsBlock options={opsTriggerOptions} height="22rem" /> : <EmptyState />}
+          {opsTriggerRows.length ? <HighchartsBlock options={opsTriggerOptions} height={isMobile ? '18rem' : '22rem'} /> : <EmptyState />}
         </Panel>
         <Panel title="Backfill Runs">
           <SimpleTable
@@ -1546,7 +1629,7 @@ export default function Analytics() {
       <div className="space-y-4">
         <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
           <Panel title="Insight Priority" subtitle="Rule-based alerts grouped by urgency.">
-            <HighchartsBlock options={insightSeverityOptions} height="18rem" />
+            <HighchartsBlock options={insightSeverityOptions} height={isMobile ? '15rem' : '18rem'} />
             <div className="mt-3 grid grid-cols-3 gap-2">
               {insightSeverityRows.map((row) => (
                 <div key={row.key} className={`rounded-lg border px-2 py-1.5 text-center ${row.badge}`}>
@@ -1659,7 +1742,7 @@ export default function Analytics() {
   return (
     <AppShell
       activePage="analytics"
-      contentClassName="max-w-7xl mx-auto w-full px-3 sm:px-4 py-4"
+      contentClassName="max-w-7xl mx-auto w-full px-2 py-3 sm:px-4 sm:py-4"
       extraActions={
         <button
           type="button"
@@ -1671,34 +1754,34 @@ export default function Analytics() {
         </button>
       }
     >
-      <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">Analytics and Insights</h1>
-            <p className="mt-1 text-sm text-slate-500">
+      <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold text-slate-900 sm:text-xl">Analytics and Insights</h1>
+            <p className="mt-1 break-words text-xs text-slate-500 sm:text-sm">
               {meta ? `${meta.range.start} to ${meta.range.end} ${meta.range.timezone}` : 'Deterministic analytics from local Ticket Pulse data'}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Filter className="h-4 w-4 text-slate-400" />
-            <select value={range} onChange={(e) => setRange(e.target.value)} className="h-9 rounded-lg border border-slate-300 bg-white px-2 text-sm">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+            <Filter className="hidden h-4 w-4 text-slate-400 sm:block" />
+            <select value={range} onChange={(e) => setRange(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
               {RANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
             {range === 'custom' && (
               <>
-                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-9 rounded-lg border border-slate-300 px-2 text-sm" />
-                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-9 rounded-lg border border-slate-300 px-2 text-sm" />
+                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm sm:w-auto" />
+                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm sm:w-auto" />
               </>
             )}
-            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className="h-9 rounded-lg border border-slate-300 bg-white px-2 text-sm">
+            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
               {GROUP_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
-            <select value={compare} onChange={(e) => setCompare(e.target.value)} className="h-9 rounded-lg border border-slate-300 bg-white px-2 text-sm">
+            <select value={compare} onChange={(e) => setCompare(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
               <option value="previous">Compare previous</option>
               <option value="none">No comparison</option>
             </select>
-            <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-2 text-sm text-slate-700">
+            <label className="inline-flex h-9 min-w-0 items-center justify-center gap-2 rounded-lg border border-slate-300 px-2 text-sm text-slate-700 sm:justify-start">
               <input
                 type="checkbox"
                 checked={excludeNoise}
@@ -1713,7 +1796,7 @@ export default function Analytics() {
               type="button"
               onClick={() => exportAnalyticsWorkbook(payload, activeTab)}
               disabled={loading || error}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+              className="col-span-2 inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50 sm:col-span-1"
             >
               <Download className="h-4 w-4" />
               Export
@@ -1721,7 +1804,7 @@ export default function Analytics() {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="-mx-3 mt-4 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden">
           {TABS.map(({ id, label, Icon }) => {
             const isActive = activeTab === id;
             return (
@@ -1729,7 +1812,7 @@ export default function Analytics() {
                 key={id}
                 type="button"
                 onClick={() => setActiveTab(id)}
-                className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors ${
+                className={`inline-flex h-9 flex-none items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors ${
                   isActive
                     ? 'border-slate-900 bg-slate-900 text-white'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
