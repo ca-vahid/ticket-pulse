@@ -49,6 +49,33 @@ function compactObject(value) {
   );
 }
 
+function decodeHtmlEntities(value) {
+  return String(value || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function toPlainText(value) {
+  return decodeHtmlEntities(value)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildClosureDescription(ticket) {
+  const existingDescription = ticket?.description || ticket?.description_text;
+  if (toPlainText(existingDescription)) return existingDescription;
+
+  const subject = toPlainText(ticket?.subject);
+  if (subject) return `Automated notification ticket: ${subject}`;
+
+  return 'Automated notification ticket closed by Ticket Pulse.';
+}
+
 function findDepartmentByName(departments, name) {
   const target = String(name || '').toLowerCase();
   return departments.find((dept) => String(dept.name || '').toLowerCase() === target);
@@ -656,6 +683,7 @@ class FreshServiceClient {
       sub_category: ticket?.sub_category,
       item_category: ticket?.item_category,
       department_id: needsDepartment ? inferDepartmentId(ticket, departments) : ticket?.department_id,
+      description: buildClosureDescription(ticket),
       resolution_notes: 'This automated notification did not require helpdesk follow-up.',
     });
 
