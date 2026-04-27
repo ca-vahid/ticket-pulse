@@ -4,9 +4,9 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-**Ticket Pulse** is a real-time IT helpdesk dashboard that provides visibility into FreshService ticket distribution across technicians. The primary user is an IT Coordinator who needs to fairly assign 20-30 tickets daily while balancing workload across ~11 technicians.
+**Ticket Pulse** is a real-time FreshService operations dashboard for workload visibility, team-safe analytics, and AI-assisted ticket assignment review. Primary users are IT coordinators and managers who need to balance day-to-day ticket assignment, understand team demand, and review assignment automation outcomes across one or more FreshService workspaces.
 
-**Current Status**: MVP implemented with real-time dashboard, search/filter functionality, and weekly view. Production-ready.
+**Current Status**: Post-MVP/v2 application. The live repo includes multi-workspace support, daily/weekly/monthly dashboard views, timeline exploration, CSAT, noise filtering, vacation/availability context, AI assignment pipeline review, daily review recommendations, ticket thread caching, assignment episodes/bounce tracking, historical backfills, and Analytics & Insights.
 
 ## Tech Stack
 
@@ -56,15 +56,38 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ### Core Dashboard Features
 - **Real-time Updates**: SSE (Server-Sent Events) for live data refresh
-- **Daily/Weekly Views**: Toggle between daily and weekly ticket views
+- **Daily/Weekly/Monthly Views**: Toggle between daily, weekly, and monthly ticket views
 - **Self-Picked Detection**: Algorithm identifies tickets picked vs assigned
 - **Load Level Indicators**: Visual workload indicators (light/medium/heavy)
 - **Compact View Mode**: Space-efficient display option
 - **Hidden Technicians**: Ability to hide inactive technicians
 - **Date Navigation**: Calendar picker and prev/next navigation
 - **Sync Controls**: Manual sync with FreshService API
-- **Week Sync**: Backfill historical weeks with real-time progress tracking (8-15 min for ~300 tickets)
+- **Week Sync and Backfill**: Backfill historical date ranges with progress tracking
 - **Progress Tracking**: Real-time sync progress with percentage, step details, and item counts
+
+### Analytics and Insights
+- **Route**: `/analytics`
+- **API**: `/api/analytics/*`
+- **Approach**: Deterministic, explainable v1 analytics; no LLM summaries, predictions, scheduled reports, or automated remediation.
+- **Views**: Overview, Demand & Flow, Team Balance, Quality, Automation Ops, and Insights.
+- **Data Rules**:
+  - Default range is last 30 days in selected workspace timezone.
+  - Resolution analytics use `resolutionTimeSeconds` because it is highly populated.
+  - Assignment timing uses `firstAssignedAt`, falling back to `createdAt` only where explicitly labeled.
+  - Category analytics use `ticketCategory`; `category`, `subCategory`, `department`, and `internalCategoryId` are sparse.
+  - CSAT metrics must show response/sample count because survey coverage is low.
+  - First-response analytics are omitted until `firstPublicAgentReplyAt` is populated.
+  - People analytics must stay team-safe; avoid public winner/loser leaderboards.
+
+### Assignment Review and Automation
+- **Assignment Review**: `/assignments` includes review queue, history, daily review, competencies, prompts, and configuration.
+- **Pipeline Storage**: `assignment_pipeline_runs` and `assignment_pipeline_steps` capture AI recommendations, decisions, sync state, errors, tool steps, token usage, and duration telemetry.
+- **Daily Review**: `assignment_daily_review_runs`, recommendations, consolidation runs/items/events support day-level review and approval workflows.
+- **Ticket Threads**: `ticket_thread_entries` caches FreshService activity/conversation bodies for review evidence.
+- **Assignment Episodes**: `ticket_assignment_episodes` tracks ownership windows, reassignments, rejected/bounced tickets, and active ownership state.
+- **Noise Filtering**: `noise_rules` and ticket `isNoise` fields identify low-value tickets that should not distort operational metrics.
+- **Vacation/Availability**: Vacation Tracker tables and technician schedule fields provide leave/capacity context.
 
 ## Planned Architecture
 
@@ -130,16 +153,27 @@ ticket-pulse/
 ## Database Schema (Prisma)
 
 ### Core Tables
-- **technicians**: IT staff (id, freshserviceId, name, email, timezone, location, isActive)
-- **tickets**: Help desk tickets (id, freshserviceTicketId, subject, status, priority, assignedTechId, isSelfPicked)
-- **ticket_activities**: Assignment audit trail (id, ticketId, activityType, performedBy, performedAt)
-- **app_settings**: Configuration key-value store (refreshInterval, defaultTimezone)
-- **sync_logs**: Background job execution logs (syncType, status, recordsProcessed, errorMessage)
+- **workspaces / workspace_access**: Multi-workspace scoping and per-workspace access roles.
+- **technicians**: Workspace-scoped agent records, including photo, timezone, map visibility, and work schedule fields.
+- **requesters**: FreshService requester metadata connected to tickets.
+- **tickets**: Main helpdesk record with FreshService IDs, subject/body, status/priority, assignment fields, requester, category/custom category, due dates, resolution timing, CSAT, noise, and bounce counters.
+- **ticket_activities**: Assignment/status/group/rejection audit events from FreshService activity streams.
+- **ticket_thread_entries**: Cached FreshService activity/conversation/thread content for analysis evidence.
+- **ticket_assignment_episodes**: Ownership windows with start/end method, rejected/reassigned tracking, and active ownership state.
+- **assignment_pipeline_runs / assignment_pipeline_steps**: AI assignment recommendation, decision, sync, error, and tool-step telemetry.
+- **assignment_daily_review_runs / recommendations / consolidation tables**: Daily assignment review outputs, approval state, and consolidation workflow.
+- **sync_logs / backfill_runs**: Incremental sync, Vacation Tracker sync, and long-running historical backfill observability.
+- **noise_rules**: Workspace-scoped noise matching rules.
+- **technician_leaves / Vacation Tracker tables**: Leave and availability context.
+- **competency tables**: Internal category taxonomy, technician competencies, prompt versions, analysis and calibration runs.
 
 ### Important Relationships
 - Tickets → Technicians (many-to-one via assignedTechId)
 - Tickets → TicketActivities (one-to-many)
-- Indexes on: tickets.status, tickets.assignedTechId, activities.ticketId
+- Tickets → Requesters (many-to-one via requesterId)
+- Tickets → AssignmentPipelineRuns / AssignmentEpisodes / TicketThreadEntries
+- Workspaces scope all tenant-specific operational tables.
+- Analytics caveat: some historical fields are sparse (`assignedAt`, `firstPublicAgentReplyAt`, `department`, `internalCategoryId`), so prefer populated fields documented above.
 
 ## Development Commands
 
@@ -172,6 +206,9 @@ npm run format --prefix backend
 
 ### Frontend
 ```bash
+# Install/update frontend dependencies (repo uses pnpm lockfile)
+pnpm install --dir frontend
+
 # Development with Vite HMR
 npm run dev --prefix frontend
 
@@ -206,16 +243,30 @@ npm run lint
 ## API Endpoints
 
 ### Authentication
-- `POST /api/auth/login` - Login with password (body: { password })
+- `POST /api/auth/login` - Legacy password login when enabled
+- `POST /api/auth/sso` - SSO login with ID token
 - `POST /api/auth/logout` - Logout and destroy session
-- `GET /api/auth/check` - Check if user is authenticated
+- `GET /api/auth/session` - Check active authenticated session
 
 ### Dashboard
 - `GET /api/dashboard` - Get all technicians with stats (cached 5s)
-- `GET /api/dashboard/stream` - SSE stream for real-time updates
+- `GET /api/dashboard/weekly` - Weekly dashboard data
+- `GET /api/dashboard/monthly` - Monthly dashboard data
 - `GET /api/dashboard/technician/:id` - Get technician details + tickets (supports ?date= and ?timezone=)
 - `GET /api/dashboard/technician/:id/weekly` - Get technician weekly stats (supports ?weekStart= and ?timezone=)
+- `GET /api/dashboard/technician/:id/monthly` - Get technician monthly stats
 - `GET /api/dashboard/weekly-stats` - Get weekly calendar day counts
+- `GET /api/dashboard/timeline` - Timeline/coverage data
+- `GET /api/dashboard/ticket/:id/history` - Ticket ownership/activity history
+
+### Analytics
+- `GET /api/analytics/overview` - KPI snapshot, assignment mix, data quality
+- `GET /api/analytics/demand-flow` - Created/resolved trend, heatmap, source/category/requester breakdowns
+- `GET /api/analytics/team-balance` - Team-safe distribution, load balance, open aging, leave context
+- `GET /api/analytics/quality` - Resolution distributions, open aging, CSAT trends/drilldowns
+- `GET /api/analytics/automation-ops` - Pipeline funnel, step failures/durations, sync/backfill/daily-review health
+- `GET /api/analytics/insights` - Deterministic explainable insight cards
+- Common params: `range=7d|30d|90d|12m|custom`, `start`, `end`, `compare=previous|none`, `timezone`, `excludeNoise=true|false`, `groupBy=day|week|month`
 
 ### Sync
 - `POST /api/sync/trigger` - Trigger full incremental sync (30s timeout)
@@ -223,6 +274,19 @@ npm run lint
 - `GET /api/sync/status` - Get current sync status and progress
 - `GET /api/sync/logs` - Get sync execution logs
 - `GET /api/sync/stats` - Get sync statistics
+- `POST /api/sync/backfill` - Start historical backfill
+- `GET /api/sync/backfill/current` - Get current backfill
+- `GET /api/sync/backfill/history` - Get past backfill runs
+- `POST /api/sync/backfill/:id/cancel` - Cancel running backfill
+
+### Workspace, Assignment, Visuals, and Integrations
+- `GET/POST/PUT /api/workspaces*` - Workspace selection, discovery, activation, and access management
+- `GET/POST/PUT/DELETE /api/assignment*` - Review queue, assignment runs, prompt management, competencies, daily review, and consolidation workflows
+- `GET/PATCH/POST /api/visuals*` - Agent map/location/visibility/schedule data
+- `GET/POST/PUT /api/vacation-tracker*` - Vacation Tracker config, sync, leave types, and user mappings
+- `GET/POST/PUT/DELETE /api/noise-rules*` - Noise rule management, test, seed, and backfill
+- `GET/POST /api/autoresponse*` - Auto-response tooling
+- `GET /api/sse/events` - SSE stream for real-time updates
 
 ### Settings
 - `GET /api/settings` - Get application settings
@@ -387,14 +451,12 @@ az webapp deployment source config \
 - Auto-refresh every 30s
 - Timezone support (PST default)
 
-### Explicitly Out of Scope (MVP)
-- Multi-user authentication (future Phase 3)
-- Historical analytics/trends (future Phase 2)
-- Ticket creation/editing (read-only dashboard)
-- Mobile responsive design (desktop-first, 1920x1080 target)
-- Email notifications
-- SLA tracking
-- Multi-workspace support
+### Still Out of Scope / Treat Carefully
+- Ticket creation/editing remains out of scope; Ticket Pulse is still read-heavy for FreshService ticket operations except approved assignment sync actions.
+- Predictive ML and LLM-generated analytics summaries are out of scope for Analytics v1.
+- Scheduled analytics report delivery is deferred.
+- Historical first-response analytics should not be claimed until `firstPublicAgentReplyAt` is populated.
+- Public technician leaderboards are intentionally avoided; frame people metrics as team balance and coaching signals.
 
 ## Success Metrics (30 Days Post-Launch)
 
@@ -452,12 +514,9 @@ az webapp deployment source config \
 - **React Context API**: https://react.dev/reference/react/useContext
 - **Server-Sent Events**: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events
 
-## Development Phase Roadmap
+## Current Roadmap Notes
 
-- **Phase 0**: Planning & setup (complete)
-- **Phase 1**: Backend implementation (weeks 1-2)
-- **Phase 2**: Frontend implementation (weeks 2-3)
-- **Phase 3**: Integration & testing (week 4)
-- **Phase 4**: Deployment & launch (week 5)
-
-Estimated MVP delivery: 5 weeks from project start.
+- The original MVP phase roadmap is complete and stale; do not treat it as the live implementation plan.
+- Analytics & Insights v1 is implemented as deterministic live aggregation at `/analytics`.
+- Future analytics work should focus on scheduled exports, materialized snapshots only if live aggregation becomes too slow, and first-response analytics after source data is populated.
+- Keep AGENTS.md synchronized when new major surfaces are added; this repo evolves quickly and old MVP assumptions are actively misleading.

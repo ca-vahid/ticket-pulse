@@ -1,6 +1,19 @@
-export const APP_VERSION = '2.1';
+export const APP_VERSION = '2.11';
 
 export const changelog = [
+  {
+    version: '2.11',
+    date: 'April 27, 2026',
+    entries: [
+      { type: 'new', text: 'Analytics and Insights adds Overview, Demand, Team Balance, Quality, Automation Ops, and Insights tabs.' },
+      { type: 'new', text: 'Highcharts-powered visuals add clickable manager charts, agent timelines, quality distributions, pipeline health, sync failure trends, and insight severity.' },
+      { type: 'new', text: 'Team Balance includes sortable columns, agent filters, technician selection, per-agent timelines, leave/WFH context, rejection rates, and top categories.' },
+      { type: 'improved', text: 'Demand hotspots, Assignment Mix labels, chart spacing, and XLSX export were tightened for clearer operational review.' },
+      { type: 'fixed', text: 'WFH no longer counts as leave days; WFH is tracked separately in Team Balance.' },
+      { type: 'database', text: 'Analytics v1 is read-only and uses existing tables; no new analytics migrations were required.' },
+      { type: 'security', text: 'Analytics endpoints are workspace-scoped, auth-protected, deterministic, and do not trigger FreshService writes or LLM summaries.' },
+    ],
+  },
   {
     version: '2.1',
     date: 'April 25, 2026',

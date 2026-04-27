@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Calendar,
   Clock,
+  BarChart3,
   LayoutDashboard,
   Map,
   RefreshCw,
@@ -77,6 +78,13 @@ export default function AppHeader({
       path: '/timeline',
       Icon: Clock,
       inactiveClass: 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300',
+    },
+    {
+      id: 'analytics',
+      label: 'Analytics',
+      path: '/analytics',
+      Icon: BarChart3,
+      inactiveClass: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300',
     },
     ...(canReview || activePage === 'assignments' ? [{
       id: 'assignments',

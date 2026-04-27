@@ -2,6 +2,34 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [2.11] - 2026-04-27
+
+### Analytics and Insights
+
+- **New `/analytics` workspace area** for managers and coordinators with Overview, Demand, Team Balance, Quality, Automation Ops, and Insights tabs.
+- **New `/api/analytics/*` backend routes** for overview, demand flow, team balance, quality, automation ops, and deterministic insights.
+- **Explainable insight cards** for demand spikes, backlog growth, stale tickets, team imbalance, overdue risk, sync degradation, weak data coverage, and CSAT warnings.
+- **Highcharts-powered manager visuals** added for team workload, assignment source mix, per-agent timelines, quality distributions, CSAT trends, pipeline health, sync failures, and insight severity.
+- **Agent-level analytics** now include sortable columns, filters, clickable technician selection, per-agent timelines, leave/WFH separation, workload context, source mix, rejection rate, and top categories.
+- **Demand views improved** with compact ranked hotspot lists for categories and requesters, readable assignment-source labels, and current-view export including team timeline data.
+
+### Fixes
+
+- **WFH is no longer counted as leave** in Team Balance; WFH days are tracked separately in backend aggregation, table columns, and agent detail cards.
+- **Assignment Mix labels clarified** from raw keys to user-facing labels: Ticket Pulse, coordinator, self-picked, and source unavailable.
+- **Chart readability improved** by removing oversized/cut-off donut labels and tightening hotspot row spacing.
+
+### Database
+
+- **No new analytics tables or migrations** in this release. Analytics v1 is read-only and aggregates from existing Prisma tables with short server-side caching.
+- **Production schema verified with Prisma**; no pending migration was required for the analytics release.
+
+### Security
+
+- **Analytics endpoints are auth-protected and workspace-scoped** through the existing route middleware and workspace context.
+- **No LLM summaries, predictive modeling, scheduled report delivery, or FreshService writes** are triggered by the analytics area in v1.
+- **Sparse or low-coverage fields are labeled** so CSAT, first-response, and historical SLA-style data are not overclaimed.
+
 ## [2.02-preview] - 2026-04-23
 
 ### Daily Review — performance + LLM context overhaul

@@ -23,4 +23,16 @@ describe('api auth/workspace helpers', () => {
     setWorkspaceId(42);
     expect(getWorkspaceId()).toBe(42);
   });
+
+  test('exports analytics client methods', async () => {
+    const { analyticsAPI } = await import('./api');
+    expect(Object.keys(analyticsAPI).sort()).toEqual([
+      'getAutomationOps',
+      'getDemandFlow',
+      'getInsights',
+      'getOverview',
+      'getQuality',
+      'getTeamBalance',
+    ]);
+  });
 });

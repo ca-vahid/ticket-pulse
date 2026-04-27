@@ -597,6 +597,18 @@ export const assignmentAPI = {
 };
 
 /**
+ * Analytics API
+ */
+export const analyticsAPI = {
+  getOverview: (params = {}) => api.get('/analytics/overview', { params }),
+  getDemandFlow: (params = {}) => api.get('/analytics/demand-flow', { params }),
+  getTeamBalance: (params = {}) => api.get('/analytics/team-balance', { params }),
+  getQuality: (params = {}) => api.get('/analytics/quality', { params }),
+  getAutomationOps: (params = {}) => api.get('/analytics/automation-ops', { params }),
+  getInsights: (params = {}) => api.get('/analytics/insights', { params }),
+};
+
+/**
  * Health check
  */
 export const healthCheck = async () => {

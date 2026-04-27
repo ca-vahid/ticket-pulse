@@ -12,6 +12,7 @@ import Settings from './pages/Settings';
 import Visuals from './pages/Visuals';
 import TimelineExplorer from './pages/TimelineExplorer';
 import AssignmentReview from './pages/AssignmentReview';
+import Analytics from './pages/Analytics';
 import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
 
@@ -164,6 +165,15 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <TimelineExplorer />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/analytics"
+                  element={
+                    <ProtectedRoute>
+                      <Analytics />
                     </ProtectedRoute>
                   }
                 />

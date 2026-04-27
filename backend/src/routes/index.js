@@ -14,6 +14,7 @@ import noiseRoutes from './noise.routes.js';
 import vacationTrackerRoutes from './vacationTracker.routes.js';
 import notificationsRoutes from './notifications.routes.js';
 import assignmentRoutes from './assignment.routes.js';
+import analyticsRoutes from './analytics.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
 
@@ -61,5 +62,6 @@ router.use('/noise-rules', noiseRoutes);
 router.use('/vacation-tracker', vacationTrackerRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/assignment', assignmentRoutes);
+router.use('/analytics', analyticsRoutes);
 
 export default router;
