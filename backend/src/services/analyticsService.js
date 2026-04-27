@@ -282,6 +282,19 @@ function compactTicket(ticket) {
   };
 }
 
+function compactCsatTicket(ticket) {
+  const compact = compactTicket(ticket);
+  if (!compact) return null;
+  return {
+    ...compact,
+    csatScore: ticket.csatScore,
+    csatTotalScore: ticket.csatTotalScore,
+    csatRatingText: ticket.csatRatingText || null,
+    csatFeedback: ticket.csatFeedback || null,
+    csatSubmittedAt: ticket.csatSubmittedAt,
+  };
+}
+
 async function getServiceAccountNames() {
   const rows = await prisma.appSettings.findMany({
     where: {
@@ -835,7 +848,9 @@ export async function getQuality(workspaceId, query = {}) {
           ? Number((csatTickets.reduce((sum, t) => sum + (t.csatScore || 0), 0) / csatTickets.length).toFixed(2))
           : null,
         trend: Array.from(csatTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
-        lowScoreTickets: lowCsat.slice(0, 25).map(compactTicket),
+        lowScoreCount: lowCsat.length,
+        lowScoreTickets: lowCsat.slice(0, 25).map(compactCsatTicket),
+        recentResponses: csatTickets.slice(0, 25).map(compactCsatTicket),
       },
     };
   });

@@ -18,6 +18,7 @@ All notable changes and improvements to Ticket Pulse.
 - **WFH is no longer counted as leave** in Team Balance; WFH days are tracked separately in backend aggregation, table columns, and agent detail cards.
 - **Assignment Mix labels clarified** from raw keys to user-facing labels: Ticket Pulse, coordinator, self-picked, and source unavailable.
 - **Chart readability improved** by removing oversized/cut-off donut labels and tightening hotspot row spacing.
+- **CSAT drilldown fixed** to show recent survey responses when the selected range has CSAT data but no low-score tickets.
 
 ### Database
 

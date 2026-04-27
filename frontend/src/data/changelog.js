@@ -10,6 +10,7 @@ export const changelog = [
       { type: 'new', text: 'Team Balance includes sortable columns, agent filters, technician selection, per-agent timelines, leave/WFH context, rejection rates, and top categories.' },
       { type: 'improved', text: 'Demand hotspots, Assignment Mix labels, chart spacing, and XLSX export were tightened for clearer operational review.' },
       { type: 'fixed', text: 'WFH no longer counts as leave days; WFH is tracked separately in Team Balance.' },
+      { type: 'fixed', text: 'CSAT drilldown now shows recent survey responses when a range has CSAT data but no low-score tickets.' },
       { type: 'database', text: 'Analytics v1 is read-only and uses existing tables; no new analytics migrations were required.' },
       { type: 'security', text: 'Analytics endpoints are workspace-scoped, auth-protected, deterministic, and do not trigger FreshService writes or LLM summaries.' },
     ],

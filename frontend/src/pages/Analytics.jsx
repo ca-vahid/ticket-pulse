@@ -159,6 +159,18 @@ function formatHours(value) {
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
 }
 
+function formatDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function labelFromKey(value, labelMap = {}) {
   if (value === null || value === undefined || value === '') return 'Unknown';
   const raw = String(value);
@@ -373,6 +385,8 @@ function exportAnalyticsWorkbook(payload, activeTab) {
   addSheet('Team Balance', payload.team?.technicians || []);
   addSheet('Team Timeline', payload.team?.timeline || []);
   addSheet('CSAT Trend', payload.quality?.csat?.trend || []);
+  addSheet('CSAT Responses', payload.quality?.csat?.recentResponses || []);
+  addSheet('Low CSAT', payload.quality?.csat?.lowScoreTickets || []);
   addSheet('Insights', payload.insights?.insights || []);
   addSheet('Pipeline Steps', payload.ops?.steps || []);
 
@@ -757,6 +771,12 @@ export default function Analytics() {
       ],
     };
   }, [quality?.csat?.trend]);
+
+  const lowCsatCount = quality?.csat?.lowScoreCount ?? quality?.csat?.lowScoreTickets?.length ?? 0;
+  const csatDrilldownRows = (quality?.csat?.lowScoreTickets || []).length
+    ? quality.csat.lowScoreTickets
+    : (quality?.csat?.recentResponses || []);
+  const showingRecentCsatFallback = lowCsatCount === 0 && (quality?.csat?.responses || 0) > 0;
 
   const opsFunnelRows = useMemo(() => (
     Object.entries(ops?.pipeline?.funnel || {})
@@ -1291,8 +1311,8 @@ export default function Analytics() {
               },
               {
                 label: 'Low CSAT tickets',
-                value: quality?.csat?.lowScoreTickets?.length || 0,
-                tone: (quality?.csat?.lowScoreTickets?.length || 0) > 0 ? 'text-amber-700 bg-amber-50 border-amber-100' : 'text-emerald-700 bg-emerald-50 border-emerald-100',
+                value: lowCsatCount,
+                tone: lowCsatCount > 0 ? 'text-amber-700 bg-amber-50 border-amber-100' : 'text-emerald-700 bg-emerald-50 border-emerald-100',
               },
             ].map((item) => (
               <div key={item.label} className={`flex items-center justify-between rounded-lg border px-3 py-2 ${item.tone}`}>
@@ -1307,16 +1327,41 @@ export default function Analytics() {
         </Panel>
       </div>
 
-      <Panel title="Low CSAT Drilldown" subtitle="Shows low-score tickets only when survey responses exist.">
-        <SimpleTable
-          rows={quality?.csat?.lowScoreTickets || []}
-          columns={[
-            { key: 'freshserviceTicketId', label: 'Ticket' },
-            { key: 'subject', label: 'Subject' },
-            { key: 'assignedTechName', label: 'Tech' },
-            { key: 'requesterName', label: 'Requester' },
-          ]}
-        />
+      <Panel
+        title="CSAT Response Drilldown"
+        subtitle={
+          lowCsatCount > 0
+            ? 'Showing low-score survey responses first.'
+            : showingRecentCsatFallback
+              ? 'No low-score responses in this range; showing the latest CSAT responses instead.'
+              : 'No CSAT responses in this range.'
+        }
+      >
+        <div className="space-y-3">
+          {showingRecentCsatFallback && (
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              No low-CSAT tickets found. Showing recent survey responses so this section still validates the source data.
+            </div>
+          )}
+          <SimpleTable
+            rows={csatDrilldownRows}
+            columns={[
+              { key: 'freshserviceTicketId', label: 'Ticket' },
+              {
+                key: 'csatScore',
+                label: 'Score',
+                render: (row) => row.csatScore === null || row.csatScore === undefined
+                  ? '—'
+                  : `${row.csatScore}/${row.csatTotalScore || 4}`,
+              },
+              { key: 'csatRatingText', label: 'Rating', render: (row) => row.csatRatingText || '—' },
+              { key: 'subject', label: 'Subject' },
+              { key: 'assignedTechName', label: 'Tech', render: (row) => row.assignedTechName || 'Unassigned' },
+              { key: 'requesterName', label: 'Requester', render: (row) => row.requesterName || row.requesterEmail || 'Unknown' },
+              { key: 'csatSubmittedAt', label: 'Submitted', render: (row) => formatDateTime(row.csatSubmittedAt) },
+            ]}
+          />
+        </div>
       </Panel>
     </div>
   );
