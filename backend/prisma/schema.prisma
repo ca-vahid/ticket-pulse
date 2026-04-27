@@ -51,6 +51,7 @@ model Workspace {
   assignmentEpisodes     TicketAssignmentEpisode[]
   backfillRuns           BackfillRun[]
   ticketThreadEntries    TicketThreadEntry[]
+  assignmentCorrections  AssignmentCorrection[]
 
   @@map("workspaces")
 }
@@ -93,6 +94,8 @@ model Technician {
   assignmentsReceived  TicketAssignment[] @relation("assignedTo")
   competencies         TechnicianCompetency[]
   pipelineAssignments  AssignmentPipelineRun[] @relation("pipelineAssignedTo")
+  assignmentCorrectionsFrom AssignmentCorrection[] @relation("correctionFromTech")
+  assignmentCorrectionsTo   AssignmentCorrection[] @relation("correctionToTech")
   competencyRuns       CompetencyAnalysisRun[]
   assignmentEpisodes   TicketAssignmentEpisode[]
 
@@ -214,6 +217,7 @@ model Ticket {
 
   ticketAssignments    TicketAssignment[]
   pipelineRuns         AssignmentPipelineRun[]
+  assignmentCorrections AssignmentCorrection[]
   assignmentEpisodes   TicketAssignmentEpisode[]
   threadEntries        TicketThreadEntry[]
 
@@ -755,12 +759,44 @@ model AssignmentPipelineRun {
 
   steps             AssignmentPipelineStep[]
   ticketAssignments TicketAssignment[]
+  corrections       AssignmentCorrection[]
 
   @@map("assignment_pipeline_runs")
   @@index([ticketId])
   @@index([workspaceId])
   @@index([status])
   @@index([decision])
+  @@index([createdAt])
+}
+
+model AssignmentCorrection {
+  id                    Int        @id @default(autoincrement())
+  workspaceId           Int        @map("workspace_id")
+  workspace             Workspace  @relation(fields: [workspaceId], references: [id])
+  pipelineRunId         Int        @map("pipeline_run_id")
+  pipelineRun           AssignmentPipelineRun @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+  ticketId              Int        @map("ticket_id")
+  ticket                Ticket     @relation(fields: [ticketId], references: [id])
+  fromTechnicianId      Int?       @map("from_technician_id")
+  fromTechnician        Technician? @relation("correctionFromTech", fields: [fromTechnicianId], references: [id])
+  toTechnicianId        Int        @map("to_technician_id")
+  toTechnician          Technician @relation("correctionToTech", fields: [toTechnicianId], references: [id])
+  selectionSource       String     @db.VarChar(30) @map("selection_source") // recommendation | manual
+  recommendationRank    Int?       @map("recommendation_rank")
+  reason                String     @db.Text
+  createdByEmail        String?    @db.VarChar(255) @map("created_by_email")
+  freshserviceSyncStatus String    @default("pending") @db.VarChar(20) @map("freshservice_sync_status")
+  freshserviceSyncError String?    @db.Text @map("freshservice_sync_error")
+  freshserviceSyncedAt  DateTime?  @map("freshservice_synced_at")
+  freshservicePayload   Json?      @map("freshservice_payload")
+  createdAt             DateTime   @default(now()) @map("created_at")
+  updatedAt             DateTime   @updatedAt @map("updated_at")
+
+  @@map("assignment_corrections")
+  @@index([workspaceId])
+  @@index([pipelineRunId])
+  @@index([ticketId])
+  @@index([toTechnicianId])
   @@index([createdAt])
 }
 

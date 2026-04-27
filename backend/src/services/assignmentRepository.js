@@ -218,6 +218,13 @@ class AssignmentRepository {
             },
           },
           assignedTech: { select: { id: true, name: true, email: true } },
+          corrections: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              fromTechnician: { select: { id: true, name: true, email: true } },
+              toTechnician: { select: { id: true, name: true, email: true } },
+            },
+          },
         },
       });
       if (!run) throw new NotFoundError(`Pipeline run ${id} not found`);

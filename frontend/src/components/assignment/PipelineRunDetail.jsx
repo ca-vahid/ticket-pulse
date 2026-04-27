@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
   ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag, Sparkles,
-  RotateCcw, OctagonAlert, ShieldCheck,
+  RotateCcw, OctagonAlert, ShieldCheck, UserCog, Search, X,
 } from 'lucide-react';
 import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
@@ -428,6 +428,9 @@ const SYNC_BADGES = {
   skipped: { label: 'Sync skipped', style: 'bg-gray-100 text-gray-500', icon: '–' },
 };
 
+const REASSIGNABLE_DECISIONS = new Set(['approved', 'modified', 'auto_assigned']);
+const REASSIGN_BLOCKING_STATUSES = new Set(['closed', 'resolved', 'deleted', 'spam', '4', '5']);
+
 function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const [syncing, setSyncing] = useState(false);
   const [localSyncStatus, setLocalSyncStatus] = useState(run.syncStatus);
@@ -511,6 +514,227 @@ function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezon
   );
 }
 
+function ReassignTicketModal({ run, onClose, onComplete }) {
+  const [technicians, setTechnicians] = useState([]);
+  const [loadingTechs, setLoadingTechs] = useState(true);
+  const [techSearch, setTechSearch] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const recommendations = run?.recommendation?.recommendations || [];
+  const currentTechId = run?.ticket?.assignedTechId || run?.assignedTechId || null;
+  const currentTechName = run?.ticket?.assignedTech?.name || run?.assignedTech?.name || 'Unassigned';
+  const recommendedTechIds = new Set(recommendations.map((rec) => Number(rec.techId)).filter(Boolean));
+  const reasonValid = reason.trim().length >= 15;
+  const canSubmit = selected?.assignedTechId && reasonValid && !submitting;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingTechs(true);
+    assignmentAPI.getCompetencyTechnicians()
+      .then((res) => {
+        const data = res?.data || res || [];
+        if (!cancelled) setTechnicians(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err?.response?.data?.message || err.message || 'Could not load technicians');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTechs(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const filteredTechnicians = technicians.filter((tech) => {
+    if (tech.id === currentTechId || recommendedTechIds.has(Number(tech.id))) return false;
+    const query = techSearch.trim().toLowerCase();
+    if (!query) return true;
+    return tech.name?.toLowerCase().includes(query)
+      || tech.email?.toLowerCase().includes(query)
+      || tech.location?.toLowerCase().includes(query);
+  });
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await assignmentAPI.reassignRun(run.id, {
+        assignedTechId: selected.assignedTechId,
+        selectionSource: selected.selectionSource,
+        recommendationRank: selected.recommendationRank,
+        reason: reason.trim(),
+      });
+      onComplete?.();
+      onClose();
+    } catch (err) {
+      const apiError = err?.response?.data;
+      const details = apiError?.freshserviceError?.body?.errors
+        ? ` ${apiError.freshserviceError.body.errors.map((e) => `${e.field}: ${e.message}`).join('; ')}`
+        : '';
+      setError(`${apiError?.message || err.message || 'Reassignment failed'}${details}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden bg-white rounded-lg shadow-xl border border-slate-200 flex flex-col">
+        <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold uppercase tracking-wide">
+              <UserCog className="w-4 h-4" />
+              Reassign Ticket
+            </div>
+            <h3 className="text-lg font-semibold text-slate-900 mt-1">{run?.ticket?.subject || 'Ticket'}</h3>
+            <p className="text-sm text-slate-500 mt-1">Current assignee: <span className="font-medium text-slate-700">{currentTechName}</span></p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-700">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-5 overflow-y-auto space-y-5">
+          <div>
+            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">LLM recommendations</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              {recommendations.map((rec, index) => {
+                const rank = index + 1;
+                const isCurrent = Number(rec.techId) === Number(currentTechId);
+                const isSelected = selected?.selectionSource === 'recommendation' && selected.recommendationRank === rank;
+                return (
+                  <button
+                    key={`${rec.techId}-${rank}`}
+                    type="button"
+                    disabled={isCurrent}
+                    onClick={() => setSelected({
+                      assignedTechId: rec.techId,
+                      selectionSource: 'recommendation',
+                      recommendationRank: rank,
+                      label: rec.techName,
+                    })}
+                    className={`text-left rounded-lg border p-3 transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${
+                      isSelected ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-slate-500">#{rank}</span>
+                      {typeof rec.score === 'number' && <span className="text-[11px] text-slate-400">{Math.round(rec.score * 100)}%</span>}
+                    </div>
+                    <p className="font-semibold text-sm text-slate-900 mt-1 truncate">{rec.techName}</p>
+                    {isCurrent && <p className="text-xs text-amber-600 mt-1">Already assigned</p>}
+                    {rec.reasoning && <p className="text-xs text-slate-500 mt-2 max-h-14 overflow-hidden">{rec.reasoning}</p>}
+                  </button>
+                );
+              })}
+              {recommendations.length === 0 && (
+                <div className="md:col-span-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                  No LLM recommendations were stored for this run.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Other technician</h4>
+              {selected?.selectionSource === 'manual' && (
+                <span className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded-full">{selected.label}</span>
+              )}
+            </div>
+            <div className="relative mb-2">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={techSearch}
+                onChange={(e) => setTechSearch(e.target.value)}
+                placeholder="Search active technicians..."
+                className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
+              />
+            </div>
+            <div className="max-h-44 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+              {loadingTechs ? (
+                <div className="p-4 text-sm text-slate-500 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading technicians...
+                </div>
+              ) : filteredTechnicians.length > 0 ? (
+                filteredTechnicians.map((tech) => {
+                  const isSelected = selected?.selectionSource === 'manual' && selected.assignedTechId === tech.id;
+                  return (
+                    <button
+                      key={tech.id}
+                      type="button"
+                      onClick={() => setSelected({
+                        assignedTechId: tech.id,
+                        selectionSource: 'manual',
+                        recommendationRank: null,
+                        label: tech.name,
+                      })}
+                      className={`w-full text-left px-3 py-2 flex items-center gap-3 hover:bg-slate-50 ${isSelected ? 'bg-blue-50' : 'bg-white'}`}
+                    >
+                      {tech.photoUrl ? (
+                        <img src={tech.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
+                      ) : (
+                        <span className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-xs font-bold flex items-center justify-center">
+                          {tech.name?.split(' ').map((part) => part[0]).join('').slice(0, 2) || '?'}
+                        </span>
+                      )}
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium text-slate-900 truncate">{tech.name}</span>
+                        <span className="block text-xs text-slate-500 truncate">{tech.email || tech.location || ''}</span>
+                      </span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="p-4 text-sm text-slate-500">No matching technicians.</div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 block">Correction reason</label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="w-full min-h-[96px] border border-slate-200 rounded-lg p-3 text-sm resize-y focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
+              placeholder="Required. Explain why this ticket belongs with the selected technician so future AI routing can learn from the correction."
+            />
+            <p className={`mt-1 text-xs ${reasonValid ? 'text-slate-400' : 'text-amber-600'}`}>
+              Minimum 15 characters. This is saved as assignment feedback and a private Freshservice note.
+            </p>
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-slate-200 flex items-center justify-end gap-2 bg-slate-50">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit}
+            className="px-4 py-2 text-sm font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+          >
+            {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            Reassign in Freshservice
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TranscriptSection({ transcript }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -560,6 +784,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const [freshness, setFreshness] = useState(null);
   const [freshnessLoading, setFreshnessLoading] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [showReassignModal, setShowReassignModal] = useState(false);
 
   useEffect(() => {
     assignmentAPI.getFreshServiceDomain().then(res => setFsDomain(res?.domain)).catch(() => {});
@@ -599,6 +824,12 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const PRIORITY_PILL = { 1: 'bg-slate-100 text-slate-600', 2: 'bg-yellow-100 text-yellow-800', 3: 'bg-orange-100 text-orange-800', 4: 'bg-red-100 text-red-800' };
 
   const ticketUrl = fsDomain && ticket?.freshserviceTicketId ? `https://${fsDomain}/a/tickets/${ticket.freshserviceTicketId}` : null;
+  const ticketStatusKey = String(ticket?.status || '').toLowerCase();
+  const canReassign = isAdmin
+    && run.status === 'completed'
+    && REASSIGNABLE_DECISIONS.has(run.decision)
+    && ticket?.id
+    && !REASSIGN_BLOCKING_STATUSES.has(ticketStatusKey);
 
   const hasFreshnessDiffs = freshness && !freshness.fresh && freshness.diffs?.length > 0;
 
@@ -663,11 +894,31 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
               {run.totalTokensUsed && <span>· {run.totalTokensUsed.toLocaleString()} tokens</span>}
             </div>
           </div>
-          <span className={`px-3 py-1 rounded-full text-xs font-medium flex-shrink-0 ${decisionBadge.style}`}>
-            {decisionBadge.label}
-          </span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {canReassign && (
+              <button
+                type="button"
+                onClick={() => setShowReassignModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
+              >
+                <UserCog className="w-3.5 h-3.5" />
+                Reassign
+              </button>
+            )}
+            <span className={`px-3 py-1 rounded-full text-xs font-medium ${decisionBadge.style}`}>
+              {decisionBadge.label}
+            </span>
+          </div>
         </div>
       </div>
+
+      {showReassignModal && (
+        <ReassignTicketModal
+          run={run}
+          onClose={() => setShowReassignModal(false)}
+          onComplete={onSyncComplete}
+        />
+      )}
 
       {/* Rebound / auto-fallback context strip — surfaces why this run exists.
           Two flavors: ongoing rebound (amber) vs auto-fallback exhausted (red). */}
@@ -883,6 +1134,39 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           {run.assignedTech && <p><span className="text-gray-500">Assigned to:</span> {run.assignedTech.name}</p>}
           {run.overrideReason && <p><span className="text-gray-500">Override reason:</span> {run.overrideReason}</p>}
           {run.decisionNote && <p><span className="text-gray-500">Triage note:</span> {run.decisionNote}</p>}
+        </div>
+      )}
+
+      {run.corrections?.length > 0 && (
+        <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm">
+          <h4 className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-2">Assignment corrections</h4>
+          <div className="space-y-2">
+            {run.corrections.map((correction) => (
+              <div key={correction.id} className="border border-blue-100 bg-white rounded-md p-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-medium text-slate-800">
+                    {correction.fromTechnician?.name || 'Unassigned'} → {correction.toTechnician?.name}
+                  </span>
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${
+                    correction.freshserviceSyncStatus === 'synced'
+                      ? 'bg-green-100 text-green-700'
+                      : correction.freshserviceSyncStatus === 'failed'
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {correction.freshserviceSyncStatus}
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    {formatDateTimeInTimezone(correction.createdAt, workspaceTimezone)}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-1">{correction.reason}</p>
+                {correction.freshserviceSyncError && (
+                  <p className="text-xs text-red-600 mt-1">{correction.freshserviceSyncError}</p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

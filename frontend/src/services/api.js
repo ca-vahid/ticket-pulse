@@ -528,6 +528,7 @@ export const assignmentAPI = {
   getRun: (id) => api.get(`/assignment/runs/${id}`),
   getLatestRunForTicket: (ticketId) => api.get(`/assignment/ticket/${ticketId}/latest-run`),
   decide: (id, data) => api.post(`/assignment/runs/${id}/decide`, data),
+  reassignRun: (id, data) => api.post(`/assignment/runs/${id}/reassign`, data),
   deleteRun: (id) => api.delete(`/assignment/runs/${id}`),
   dismissRun: (id) => api.post(`/assignment/runs/${id}/dismiss`),
   bulkDeleteRuns: (data) => api.post('/assignment/runs/bulk-delete', data),

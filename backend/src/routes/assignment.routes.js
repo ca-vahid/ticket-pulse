@@ -9,6 +9,7 @@ import freshServiceActionService from '../services/freshServiceActionService.js'
 import competencyFeedbackService from '../services/competencyFeedbackService.js';
 import assignmentDailyReviewService from '../services/assignmentDailyReviewService.js';
 import assignmentDailyReviewConsolidationService from '../services/assignmentDailyReviewConsolidationService.js';
+import assignmentCorrectionService from '../services/assignmentCorrectionService.js';
 import syncService from '../services/syncService.js';
 import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
@@ -574,6 +575,26 @@ router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) =
   }
 
   res.json({ success: true, data: updated });
+}));
+
+router.post('/runs/:id/reassign', requireAdmin, asyncHandler(async (req, res) => {
+  const runId = parseInt(req.params.id, 10);
+  const result = await assignmentCorrectionService.reassignRun(
+    runId,
+    req.workspaceId,
+    req.body || {},
+    req.session?.user?.email || 'admin',
+  );
+
+  if (!result.success) {
+    return res.status(result.status || 400).json({
+      success: false,
+      message: result.message,
+      freshserviceError: result.freshserviceError,
+    });
+  }
+
+  res.json({ success: true, data: result.data });
 }));
 
 router.delete('/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
