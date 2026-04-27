@@ -7,6 +7,7 @@ import {
   CalendarDays, FileText, Settings2, Award, ChevronRight, StopCircle,
   ArrowLeft, ExternalLink, Sparkles, Copy, ThumbsUp, AlertTriangle,
   Eye, MessageCircle, TrendingUp, ChevronUp, ChevronDown, Undo2, Trash2,
+  Tags,
 } from 'lucide-react';
 
 function StatusBadge({ status }) {
@@ -123,6 +124,31 @@ function isDevBacklogItem(item) {
     || text.includes('requires dev');
 }
 
+function getTaxonomyProposal(item = {}) {
+  const taxonomy = item.metadata?.taxonomy || {};
+  if (
+    item.kind !== 'taxonomy'
+    && !item.taxonomyAction
+    && !taxonomy.taxonomyAction
+    && !taxonomy.categoryName
+    && !taxonomy.parentCategoryName
+    && !taxonomy.newName
+  ) {
+    return null;
+  }
+  return {
+    action: item.taxonomyAction || taxonomy.taxonomyAction || 'review',
+    categoryName: item.categoryName || taxonomy.categoryName || null,
+    parentCategoryName: item.parentCategoryName || taxonomy.parentCategoryName || null,
+    newName: item.newName || taxonomy.newName || null,
+    source: taxonomy.source || null,
+    issue: taxonomy.issue || null,
+    categoryFit: taxonomy.categoryFit || null,
+    subcategoryFit: taxonomy.subcategoryFit || null,
+    evidenceRunIds: Array.isArray(taxonomy.evidenceRunIds) ? taxonomy.evidenceRunIds : [],
+  };
+}
+
 function RecommendationCard({
   item,
   workspaceTimezone,
@@ -139,6 +165,7 @@ function RecommendationCard({
   const [notes, setNotes] = useState(item.reviewNotes || '');
   const [expanded, setExpanded] = useState(!compact);
   const isSaving = savingRecommendationId === item.id;
+  const taxonomyProposal = getTaxonomyProposal(item);
 
   useEffect(() => {
     setNotes(item.reviewNotes || '');
@@ -255,6 +282,49 @@ function RecommendationCard({
       <SmoothCollapse open={expanded}>
         <div className="mt-3 border-t border-slate-200 pt-3">
           <div className="text-xs text-slate-600 mb-2">{item.rationale}</div>
+          {taxonomyProposal && (
+            <div className="mb-3 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
+                <Tags className="h-3.5 w-3.5" />
+                Taxonomy proposal
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                  {taxonomyProposal.action}
+                </span>
+                {taxonomyProposal.parentCategoryName && (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                    Parent: {taxonomyProposal.parentCategoryName}
+                  </span>
+                )}
+                {taxonomyProposal.categoryName && (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                    Target: {taxonomyProposal.categoryName}
+                  </span>
+                )}
+                {taxonomyProposal.newName && (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                    New: {taxonomyProposal.newName}
+                  </span>
+                )}
+                {taxonomyProposal.categoryFit && (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                    Category {taxonomyProposal.categoryFit}
+                  </span>
+                )}
+                {taxonomyProposal.subcategoryFit && (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                    Subcategory {taxonomyProposal.subcategoryFit}
+                  </span>
+                )}
+                {taxonomyProposal.evidenceRunIds.length > 0 && (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                    Runs {taxonomyProposal.evidenceRunIds.map((id) => `#${id}`).join(', ')}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
           <div className="text-xs text-slate-700 mb-2">
             <span className="font-medium">Suggested action:</span> {item.suggestedAction}
           </div>
@@ -326,11 +396,11 @@ function RunSignalCard({ label, value, detail, tone = 'slate', icon: Icon }) {
   );
 }
 
-function ReviewHighlights({ summary, warnings, promptRecommendations, processRecommendations, skillRecommendations }) {
+function ReviewHighlights({ summary, warnings, promptRecommendations, processRecommendations, taxonomyRecommendations, skillRecommendations }) {
   const totals = summary.totals || {};
   const totalReviewed = totals.totalTicketsReviewed || 0;
   const resolvedOutcomes = (totals.success || 0) + (totals.partialSuccess || 0) + (totals.failure || 0);
-  const recommendationTotal = promptRecommendations.length + processRecommendations.length + skillRecommendations.length;
+  const recommendationTotal = promptRecommendations.length + processRecommendations.length + taxonomyRecommendations.length + skillRecommendations.length;
   const noEvidence = totalReviewed <= 1 || resolvedOutcomes === 0;
   const threadGaps = summary.collectionDiagnostics?.ticketsWithNoThreadContext || 0;
 
@@ -346,7 +416,7 @@ function ReviewHighlights({ summary, warnings, promptRecommendations, processRec
       <RunSignalCard
         label="Recommendations"
         value={recommendationTotal}
-        detail={`${promptRecommendations.length} prompt · ${processRecommendations.length} process · ${skillRecommendations.length} skill`}
+        detail={`${promptRecommendations.length} prompt · ${processRecommendations.length} process · ${taxonomyRecommendations.length} taxonomy · ${skillRecommendations.length} agent skill`}
         tone={recommendationTotal > 0 ? 'purple' : 'slate'}
         icon={Sparkles}
       />
@@ -1676,8 +1746,8 @@ function ConsolidationPanel({
 
   const sections = [
     { key: 'prompt', label: 'Prompt Edits', icon: FileText, applyable: true },
-    { key: 'skills', label: 'Skill List Changes', icon: Award, applyable: true },
-    { key: 'technician_competencies', label: 'Technician Skill Changes', icon: Brain, applyable: true },
+    { key: 'skills', label: 'Taxonomy Changes', icon: Tags, applyable: true },
+    { key: 'technician_competencies', label: 'Agent Skill Changes', icon: Brain, applyable: true },
     { key: 'process', label: 'Process Changes', icon: Settings2, applyable: false },
   ];
 
@@ -2479,6 +2549,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
   const rates = summary.rates || {};
   const promptRecommendations = run.promptRecommendations || [];
   const processRecommendations = run.processRecommendations || [];
+  const taxonomyRecommendations = run.taxonomyRecommendations || [];
   const skillRecommendations = run.skillRecommendations || [];
   const warnings = run.warnings || [];
   const cases = run.evidenceCases || [];
@@ -2515,6 +2586,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
             warnings={warnings}
             promptRecommendations={promptRecommendations}
             processRecommendations={processRecommendations}
+            taxonomyRecommendations={taxonomyRecommendations}
             skillRecommendations={skillRecommendations}
           />
         </div>
@@ -2585,7 +2657,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
 
       <MeetingBriefingSection run={run} workspaceTimezone={workspaceTimezone} />
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <RecommendationSection
           title="Prompt Recommendations"
           items={promptRecommendations}
@@ -2607,10 +2679,20 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
           compactCards
         />
         <RecommendationSection
-          title="Skill Matrix Recommendations"
+          title="Taxonomy Recommendations"
+          items={taxonomyRecommendations}
+          icon={Tags}
+          emptyText="No category taxonomy changes recommended for this review."
+          workspaceTimezone={workspaceTimezone}
+          onRecommendationAction={onRecommendationAction}
+          savingRecommendationId={savingRecommendationId}
+          compactCards
+        />
+        <RecommendationSection
+          title="Agent Skill Recommendations"
           items={skillRecommendations}
           icon={Award}
-          emptyText="No skill matrix changes recommended for this review."
+          emptyText="No agent skill changes recommended for this review."
           workspaceTimezone={workspaceTimezone}
           onRecommendationAction={onRecommendationAction}
           savingRecommendationId={savingRecommendationId}
@@ -3038,7 +3120,8 @@ const REVIEW_PAGE_TABS = [
 const BACKLOG_KIND_TABS = [
   { key: 'prompt', label: 'Prompt', icon: FileText },
   { key: 'process', label: 'Process', icon: Settings2 },
-  { key: 'skill', label: 'Skill', icon: Award },
+  { key: 'taxonomy', label: 'Taxonomy', icon: Tags },
+  { key: 'skill', label: 'Agent Skills', icon: Award },
   { key: 'dev', label: 'Dev', icon: AlertTriangle, visibilityOnly: true },
 ];
 

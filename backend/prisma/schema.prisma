@@ -1003,6 +1003,7 @@ model AssignmentDailyReviewRecommendation {
   severity                      String                   @db.VarChar(20)
   rationale                     String                   @db.Text
   suggestedAction               String                   @db.Text @map("suggested_action")
+  metadata                      Json?
   skillsAffected                Json?                    @map("skills_affected")
   supportingTicketIds           Json?                    @map("supporting_ticket_ids")
   supportingFreshserviceTicketIds Json?                  @map("supporting_freshservice_ticket_ids")

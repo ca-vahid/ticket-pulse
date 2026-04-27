@@ -9,8 +9,8 @@ const ACTIVE_STATUSES = ['collecting', 'analyzing', 'saving'];
 const APPLYABLE_SECTIONS = ['prompt', 'skills', 'technician_competencies'];
 const SECTION_LABELS = {
   prompt: 'Prompt Edits',
-  skills: 'Skill List Changes',
-  technician_competencies: 'Technician Skill Changes',
+  skills: 'Taxonomy Changes',
+  technician_competencies: 'Agent Skill Changes',
   process: 'Process Changes',
 };
 
@@ -482,6 +482,7 @@ class AssignmentDailyReviewConsolidationService {
         severity: rec.severity,
         rationale: rec.rationale,
         suggestedAction: rec.suggestedAction,
+        metadata: rec.metadata || null,
         skillsAffected: toArray(rec.skillsAffected),
         supportingTicketIds: toArray(rec.supportingTicketIds),
         supportingFreshserviceTicketIds: toArray(rec.supportingFreshserviceTicketIds),
@@ -567,13 +568,13 @@ You will receive approved Daily Review recommendations, the current assignment p
 
 Produce a consolidation plan with exactly four sections:
 1. Prompt edits: suggest a complete updated assignment prompt, but do not assume it will be applied automatically.
-2. Skill list changes: add, rename, update, move, merge, or deprecate internal categories/subcategories where evidence supports it.
-3. Technician skill changes: suggest technician competency level updates or mappings where evidence supports it.
+2. Taxonomy changes: add, rename, update, move, merge, or deprecate internal categories/subcategories where evidence supports it.
+3. Agent skill changes: suggest technician competency level updates or mappings where evidence supports it.
 4. Process changes: operational or engineering work. These are visible but not directly applyable in the app.
 
 Rules:
 - The app has a two-level internal taxonomy: top-level category plus optional subcategory. FreshService categories are evidence only.
-- Daily Review may propose new categories, subcategories, or moves, but they only become active after admin approval through Skill List Changes.
+- Daily Review may propose new categories, subcategories, or moves, but they only become active after admin approval through Taxonomy Changes.
 - Pay close attention to taxonomyFit evidence from assignment runs. Treat weak/none fit and suggested category/subcategory names as leads, then validate them against ticket evidence and the current categoryTree before proposing changes.
 - Skill list changes may create top-level categories, create subcategories under a parent, move categories between top-level/subcategory positions, rename, update descriptions, merge duplicates, or deprecate stale entries.
 - Be conservative. Do not invent skills or competency changes without evidence from approved recommendations.

@@ -41,9 +41,11 @@ const MAX_DESCRIPTION_CHARS_FOR_LLM = 1500;
 const RECOMMENDATION_KIND_CONFIG = [
   { kind: 'prompt', field: 'promptRecommendations' },
   { kind: 'process', field: 'processRecommendations' },
+  { kind: 'taxonomy', field: 'taxonomyRecommendations' },
   { kind: 'skill', field: 'skillRecommendations' },
 ];
 const RECOMMENDATION_STATUSES = ['pending', 'approved', 'rejected', 'applied'];
+const TAXONOMY_ACTIONS = ['add', 'rename', 'update', 'move', 'merge', 'deprecate'];
 
 class DailyReviewCancelledError extends Error {
   constructor(message = 'Daily review cancelled by user') {
@@ -181,6 +183,22 @@ function toArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizeName(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function recommendationText(item = {}) {
+  return [
+    item.title,
+    item.rationale,
+    item.suggestedAction,
+    item.categoryName,
+    item.parentCategoryName,
+    item.newName,
+    ...(Array.isArray(item.skillsAffected) ? item.skillsAffected : []),
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
 class AssignmentDailyReviewService {
   constructor() {
     this.activeRunControllers = new Map();
@@ -206,12 +224,77 @@ class AssignmentDailyReviewService {
   }
 
   _validateRecommendationKind(kind) {
-    if (!['prompt', 'process', 'skill', 'all'].includes(kind)) {
+    if (!['prompt', 'process', 'taxonomy', 'skill', 'all'].includes(kind)) {
       throw new Error(`Invalid recommendation kind: ${kind}`);
     }
   }
 
+  _isTaxonomyRecommendation(item = {}) {
+    const action = item.taxonomyAction || item.metadata?.taxonomy?.taxonomyAction;
+    if (action && TAXONOMY_ACTIONS.includes(action)) return true;
+    if (action === 'competency_update') return false;
+
+    const text = recommendationText(item);
+    const agentSkillSignals = /\b(technician|agent|profile|competenc|proficiency|upgrade|downgrade|level|mapping to technician)\b/.test(text);
+    const taxonomySignals = /\b(taxonomy|subcategory|sub-category|category description|category mapping|freshservice mapping|skill list|rename category|merge category|deprecate category)\b/.test(text)
+      || /\b(add|create|split|rename|merge|deprecate|remove|update)\b.{0,80}\b(category|subcategory|sub-category)\b/.test(text)
+      || /\b(category|subcategory|sub-category)\b.{0,80}\b(add|create|split|rename|merge|deprecate|remove|update|description|mapping)\b/.test(text);
+
+    return taxonomySignals && !agentSkillSignals;
+  }
+
+  _splitSkillAndTaxonomyRecommendations(items = []) {
+    const skillRecommendations = [];
+    const taxonomyRecommendations = [];
+    for (const item of toArray(items)) {
+      if (this._isTaxonomyRecommendation(item)) taxonomyRecommendations.push(item);
+      else skillRecommendations.push(item);
+    }
+    return { skillRecommendations, taxonomyRecommendations };
+  }
+
+  _taxonomyMetadataFromItem(item = {}) {
+    const existing = item.metadata?.taxonomy || {};
+    const parsed = {};
+    const proposalText = String(item.suggestedAction || '').match(/Taxonomy proposal:\s*([^\n]+)/i)?.[1] || '';
+    for (const part of proposalText.split(';')) {
+      const [rawKey, ...rawValue] = part.split('=');
+      const key = rawKey?.trim();
+      const value = rawValue.join('=').trim();
+      if (key && value) parsed[key] = value;
+    }
+    const toNumberOrNull = (value) => {
+      const numeric = Number(value);
+      return Number.isInteger(numeric) ? numeric : null;
+    };
+    const taxonomyAction = item.taxonomyAction || existing.taxonomyAction || parsed.taxonomyAction || null;
+    const categoryId = item.categoryId ?? existing.categoryId ?? toNumberOrNull(parsed.categoryId);
+    const categoryName = item.categoryName || existing.categoryName || parsed.categoryName || null;
+    const parentCategoryId = item.parentCategoryId ?? existing.parentCategoryId ?? toNumberOrNull(parsed.parentCategoryId);
+    const parentCategoryName = item.parentCategoryName || existing.parentCategoryName || parsed.parentCategoryName || null;
+    const newName = item.newName || existing.newName || parsed.newName || null;
+
+    if (!taxonomyAction && !categoryId && !categoryName && !parentCategoryId && !parentCategoryName && !newName) {
+      return item.metadata || null;
+    }
+
+    return {
+      ...(item.metadata || {}),
+      taxonomy: {
+        ...existing,
+        taxonomyAction,
+        categoryId,
+        categoryName,
+        parentCategoryId,
+        parentCategoryName,
+        newName,
+      },
+    };
+  }
+
   _toRecommendationDto(row) {
+    const metadata = row.metadata || {};
+    const taxonomy = metadata.taxonomy || {};
     return {
       id: row.id,
       runId: row.runId,
@@ -223,6 +306,13 @@ class AssignmentDailyReviewService {
       severity: row.severity,
       rationale: row.rationale,
       suggestedAction: row.suggestedAction,
+      metadata,
+      taxonomyAction: taxonomy.taxonomyAction || null,
+      categoryId: taxonomy.categoryId ?? null,
+      categoryName: taxonomy.categoryName || null,
+      parentCategoryId: taxonomy.parentCategoryId ?? null,
+      parentCategoryName: taxonomy.parentCategoryName || null,
+      newName: taxonomy.newName || null,
       skillsAffected: toArray(row.skillsAffected),
       supportingTicketIds: toArray(row.supportingTicketIds),
       supportingFreshserviceTicketIds: toArray(row.supportingFreshserviceTicketIds),
@@ -252,14 +342,16 @@ class AssignmentDailyReviewService {
     for (const { kind, field } of RECOMMENDATION_KIND_CONFIG) {
       const items = toArray(recommendationGroups[field] ?? run[field]);
       items.forEach((item, index) => {
-        const taxonomyDetails = kind === 'skill'
+        const metadata = kind === 'taxonomy' ? this._taxonomyMetadataFromItem(item) : (item.metadata || null);
+        const taxonomy = metadata?.taxonomy || {};
+        const taxonomyDetails = kind === 'taxonomy'
           ? [
-            item.taxonomyAction ? `taxonomyAction=${item.taxonomyAction}` : null,
-            item.categoryId ? `categoryId=${item.categoryId}` : null,
-            item.categoryName ? `categoryName=${item.categoryName}` : null,
-            item.parentCategoryId ? `parentCategoryId=${item.parentCategoryId}` : null,
-            item.parentCategoryName ? `parentCategoryName=${item.parentCategoryName}` : null,
-            item.newName ? `newName=${item.newName}` : null,
+            taxonomy.taxonomyAction ? `taxonomyAction=${taxonomy.taxonomyAction}` : null,
+            taxonomy.categoryId ? `categoryId=${taxonomy.categoryId}` : null,
+            taxonomy.categoryName ? `categoryName=${taxonomy.categoryName}` : null,
+            taxonomy.parentCategoryId ? `parentCategoryId=${taxonomy.parentCategoryId}` : null,
+            taxonomy.parentCategoryName ? `parentCategoryName=${taxonomy.parentCategoryName}` : null,
+            taxonomy.newName ? `newName=${taxonomy.newName}` : null,
           ].filter(Boolean).join('; ')
           : '';
         const suggestedAction = String(item.suggestedAction || '');
@@ -275,6 +367,7 @@ class AssignmentDailyReviewService {
           suggestedAction: taxonomyDetails
             ? `${suggestedAction}\n\nTaxonomy proposal: ${taxonomyDetails}`
             : suggestedAction,
+          metadata: metadata ? sanitizeJsonForPostgres(metadata) : null,
           skillsAffected: toArray(item.skillsAffected),
           supportingTicketIds: toArray(item.supportingTicketIds),
           supportingFreshserviceTicketIds: toArray(item.supportingFreshserviceTicketIds),
@@ -297,6 +390,7 @@ class AssignmentDailyReviewService {
     const grouped = {
       promptRecommendations: [],
       processRecommendations: [],
+      taxonomyRecommendations: [],
       skillRecommendations: [],
       recommendationStatusCounts: {
         pending: 0,
@@ -310,6 +404,7 @@ class AssignmentDailyReviewService {
       const dto = this._toRecommendationDto(row);
       if (dto.kind === 'prompt') grouped.promptRecommendations.push(dto);
       if (dto.kind === 'process') grouped.processRecommendations.push(dto);
+      if (dto.kind === 'taxonomy') grouped.taxonomyRecommendations.push(dto);
       if (dto.kind === 'skill') grouped.skillRecommendations.push(dto);
       if (grouped.recommendationStatusCounts[dto.status] !== undefined) {
         grouped.recommendationStatusCounts[dto.status] += 1;
@@ -327,10 +422,73 @@ class AssignmentDailyReviewService {
       });
       if (existingCount > 0) continue;
 
-      const rows = this._buildRecommendationCreateData(run);
+      const skillSplit = this._splitSkillAndTaxonomyRecommendations(run.skillRecommendations);
+      const deterministicTaxonomy = this._buildDeterministicTaxonomyRecommendations({
+        cases: toArray(run.evidenceCases),
+      });
+      const rows = this._buildRecommendationCreateData(run, {
+        promptRecommendations: run.promptRecommendations,
+        processRecommendations: run.processRecommendations,
+        taxonomyRecommendations: this._mergeTaxonomyRecommendations([
+          ...skillSplit.taxonomyRecommendations,
+          ...deterministicTaxonomy,
+        ]),
+        skillRecommendations: skillSplit.skillRecommendations,
+      });
       if (rows.length === 0) continue;
 
       await prisma.assignmentDailyReviewRecommendation.createMany({ data: rows });
+    }
+  }
+
+  async _migrateRecentTaxonomySkillRecommendations(workspaceId) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const rows = await prisma.assignmentDailyReviewRecommendation.findMany({
+      where: {
+        workspaceId,
+        kind: 'skill',
+        createdAt: { gte: since },
+      },
+      orderBy: [{ runId: 'asc' }, { ordinal: 'asc' }],
+      take: 500,
+    });
+
+    const taxonomyRows = rows.filter((row) => this._isTaxonomyRecommendation({
+      title: row.title,
+      rationale: row.rationale,
+      suggestedAction: row.suggestedAction,
+      skillsAffected: toArray(row.skillsAffected),
+      metadata: row.metadata || null,
+    }));
+    if (taxonomyRows.length === 0) return;
+
+    const ordinalsByRun = new Map();
+    const existingTaxonomyRows = await prisma.assignmentDailyReviewRecommendation.findMany({
+      where: {
+        workspaceId,
+        kind: 'taxonomy',
+        runId: { in: Array.from(new Set(taxonomyRows.map((row) => row.runId))) },
+      },
+      select: { runId: true, ordinal: true },
+    });
+    for (const row of existingTaxonomyRows) {
+      const current = ordinalsByRun.get(row.runId) ?? -1;
+      ordinalsByRun.set(row.runId, Math.max(current, row.ordinal));
+    }
+
+    for (const row of taxonomyRows) {
+      const nextOrdinal = (ordinalsByRun.get(row.runId) ?? -1) + 1;
+      ordinalsByRun.set(row.runId, nextOrdinal);
+      await prisma.assignmentDailyReviewRecommendation.update({
+        where: { id: row.id },
+        data: {
+          kind: 'taxonomy',
+          ordinal: nextOrdinal,
+          metadata: sanitizeJsonForPostgres(row.metadata || this._taxonomyMetadataFromItem({
+            suggestedAction: row.suggestedAction,
+          })),
+        },
+      });
     }
   }
 
@@ -352,6 +510,7 @@ class AssignmentDailyReviewService {
         id: true,
         workspaceId: true,
         reviewDate: true,
+        evidenceCases: true,
         promptRecommendations: true,
         processRecommendations: true,
         skillRecommendations: true,
@@ -431,6 +590,156 @@ class AssignmentDailyReviewService {
       isBusinessDay: !!dayConfig,
       localDate: dateStr,
     };
+  }
+
+  _buildDeterministicTaxonomyRecommendations(dataset = {}) {
+    const cases = toArray(dataset.cases);
+    const flagged = cases.filter((item) => {
+      const fit = item.taxonomyFit || {};
+      return fit.reviewNeeded
+        || ['weak', 'none'].includes(fit.categoryFit)
+        || ['weak', 'none'].includes(fit.subcategoryFit)
+        || fit.suggestedCategoryName
+        || fit.suggestedSubcategoryName;
+    });
+    if (flagged.length === 0) return [];
+
+    const groups = new Map();
+    for (const item of flagged) {
+      const fit = item.taxonomyFit || {};
+      const category = item.internalCategory || {};
+      const parentCategoryName = category.name || item.category || 'Uncategorized';
+      const suggestedCategoryName = fit.suggestedCategoryName || null;
+      const suggestedSubcategoryName = fit.suggestedSubcategoryName || null;
+      const issue = fit.categoryFit === 'none'
+        ? 'missing_category'
+        : suggestedCategoryName
+          ? 'suggested_category'
+          : suggestedSubcategoryName
+            ? 'suggested_subcategory'
+            : fit.categoryFit === 'weak'
+              ? 'category_cleanup'
+              : fit.subcategoryFit === 'none'
+                ? 'missing_subcategory'
+                : fit.subcategoryFit === 'weak'
+                  ? 'subcategory_cleanup'
+                  : 'taxonomy_review';
+      const key = [
+        category.id || '',
+        parentCategoryName,
+        issue,
+        suggestedCategoryName || '',
+        suggestedSubcategoryName || '',
+      ].map(normalizeName).join('|');
+      if (!groups.has(key)) {
+        groups.set(key, {
+          issue,
+          categoryId: category.id || null,
+          categoryName: parentCategoryName,
+          suggestedCategoryName,
+          suggestedSubcategoryName,
+          categoryFit: fit.categoryFit || null,
+          subcategoryFit: fit.subcategoryFit || null,
+          cases: [],
+          rationales: [],
+        });
+      }
+      const group = groups.get(key);
+      group.cases.push(item);
+      if (fit.rationale && group.rationales.length < 3) group.rationales.push(fit.rationale);
+    }
+
+    return Array.from(groups.values())
+      .sort((a, b) => b.cases.length - a.cases.length || a.categoryName.localeCompare(b.categoryName))
+      .map((group) => {
+        const proposedName = group.suggestedSubcategoryName || group.suggestedCategoryName || null;
+        const isSubcategory = group.issue.includes('subcategory') || Boolean(group.suggestedSubcategoryName);
+        const taxonomyAction = proposedName ? 'add' : 'update';
+        const parentCategoryId = isSubcategory ? group.categoryId : null;
+        const parentCategoryName = isSubcategory ? group.categoryName : null;
+        const targetCategoryId = isSubcategory ? null : group.categoryId;
+        const targetCategoryName = isSubcategory
+          ? (proposedName || group.categoryName)
+          : (proposedName || group.categoryName);
+        const title = proposedName
+          ? `Review ${proposedName} ${isSubcategory ? `under ${group.categoryName}` : 'as a category'}`
+          : `Review taxonomy coverage for ${group.categoryName}`;
+        const fitText = [
+          group.categoryFit ? `categoryFit=${group.categoryFit}` : null,
+          group.subcategoryFit ? `subcategoryFit=${group.subcategoryFit}` : null,
+        ].filter(Boolean).join(', ');
+
+        return {
+          title,
+          severity: group.cases.length >= 3 ? 'high' : 'medium',
+          rationale: [
+            `${group.cases.length} assignment run${group.cases.length === 1 ? '' : 's'} flagged taxonomy review for ${group.categoryName}.`,
+            fitText ? `Observed ${fitText}.` : null,
+            group.rationales[0] || null,
+          ].filter(Boolean).join(' '),
+          suggestedAction: proposedName
+            ? `Review whether "${proposedName}" should be added or mapped in the category taxonomy, and adjust nearby category descriptions so future tickets route cleanly.`
+            : `Review whether "${group.categoryName}" needs subcategories, description cleanup, or FreshService mapping guidance based on the supporting tickets.`,
+          skillsAffected: [group.categoryName, proposedName].filter(Boolean),
+          taxonomyAction,
+          categoryId: targetCategoryId,
+          categoryName: targetCategoryName,
+          parentCategoryId,
+          parentCategoryName,
+          newName: proposedName,
+          supportingTicketIds: group.cases.map((item) => item.ticketId).filter(Boolean).slice(0, 10),
+          supportingFreshserviceTicketIds: group.cases.map((item) => item.freshserviceTicketId).filter(Boolean).slice(0, 10),
+          metadata: {
+            taxonomy: {
+              source: 'deterministic_assignment_taxonomy_flags',
+              issue: group.issue,
+              taxonomyAction,
+              categoryId: targetCategoryId,
+              categoryName: targetCategoryName,
+              parentCategoryId,
+              parentCategoryName,
+              newName: proposedName,
+              categoryFit: group.categoryFit,
+              subcategoryFit: group.subcategoryFit,
+              evidenceRunIds: group.cases.map((item) => item.runId).filter(Boolean).slice(0, 10),
+            },
+          },
+        };
+      });
+  }
+
+  _mergeTaxonomyRecommendations(items = []) {
+    const byKey = new Map();
+    for (const item of toArray(items)) {
+      const metadata = this._taxonomyMetadataFromItem(item);
+      const taxonomy = metadata?.taxonomy || {};
+      const key = [
+        taxonomy.taxonomyAction || item.taxonomyAction || 'update',
+        taxonomy.categoryId || item.categoryId || '',
+        taxonomy.categoryName || item.categoryName || '',
+        taxonomy.parentCategoryId || item.parentCategoryId || '',
+        taxonomy.parentCategoryName || item.parentCategoryName || '',
+        taxonomy.newName || item.newName || item.title || '',
+      ].map(normalizeName).join('|');
+      if (!byKey.has(key)) {
+        byKey.set(key, { ...item, metadata });
+        continue;
+      }
+      const existing = byKey.get(key);
+      byKey.set(key, {
+        ...existing,
+        severity: existing.severity === 'high' || item.severity === 'high' ? 'high' : existing.severity || item.severity || 'medium',
+        supportingTicketIds: Array.from(new Set([
+          ...toArray(existing.supportingTicketIds),
+          ...toArray(item.supportingTicketIds),
+        ])).slice(0, 10),
+        supportingFreshserviceTicketIds: Array.from(new Set([
+          ...toArray(existing.supportingFreshserviceTicketIds),
+          ...toArray(item.supportingFreshserviceTicketIds),
+        ])).slice(0, 10),
+      });
+    }
+    return Array.from(byKey.values());
   }
 
   async _getReviewWindow(workspaceId, reviewDate, timezone, options = {}) {
@@ -1483,6 +1792,7 @@ class AssignmentDailyReviewService {
     const promptRecommendations = [];
     const processRecommendations = [];
     const skillRecommendations = [];
+    const taxonomyRecommendations = this._buildDeterministicTaxonomyRecommendations(dataset);
 
     const failureCases = dataset.cases.filter((item) => item.outcome === DAILY_REVIEW_OUTCOMES.failure);
     const outsidePoolCases = failureCases.filter((item) => item.primaryTag === DAILY_REVIEW_PRIMARY_TAGS.rejectedReassigned);
@@ -1518,11 +1828,20 @@ class AssignmentDailyReviewService {
         }
         return item.internalCategory?.name || item.category || null;
       };
-      skillRecommendations.push({
+      taxonomyRecommendations.push({
         title: `Review skill coverage for ${topCategory.name}`,
         severity: topCategory.count >= 3 ? 'high' : 'medium',
-        rationale: 'The highest-friction category from this review day likely needs cleaner competency coverage or better normalization in the skill matrix.',
+        rationale: 'The highest-friction category from this review day likely needs cleaner taxonomy coverage or better normalization in the category map.',
         suggestedAction: `Check whether "${topCategory.name}" should be added, split, merged, or mapped more explicitly to one or more technician competencies.`,
+        taxonomyAction: 'update',
+        categoryName: topCategory.name,
+        metadata: {
+          taxonomy: {
+            source: 'heuristic_top_friction_category',
+            taxonomyAction: 'update',
+            categoryName: topCategory.name,
+          },
+        },
         supportingTicketIds: dataset.cases
           .filter((item) => caseTaxonomyName(item) === topCategory.name)
           .slice(0, 5)
@@ -1555,6 +1874,7 @@ class AssignmentDailyReviewService {
       executiveSummary: `Reviewed ${dataset.summaryMetrics.totals.totalTicketsReviewed} ticket(s) for ${dataset.reviewDate}. Success rate was ${dataset.summaryMetrics.rates.successRate}% with ${dataset.summaryMetrics.totals.failure} failure-classified case(s) and ${dataset.summaryMetrics.totals.rebounds} rebound(s).`,
       promptRecommendations,
       processRecommendations,
+      taxonomyRecommendations,
       skillRecommendations,
       warnings: ['Used heuristic recommendations because LLM analysis was unavailable.'],
       transcript: '',
@@ -1806,6 +2126,28 @@ class AssignmentDailyReviewService {
                 required: ['title', 'severity', 'rationale', 'suggestedAction'],
               },
             },
+            taxonomyRecommendations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+                  rationale: { type: 'string' },
+                  suggestedAction: { type: 'string' },
+                  skillsAffected: { type: 'array', items: { type: 'string' } },
+                  taxonomyAction: { type: ['string', 'null'], enum: ['add', 'rename', 'update', 'move', 'merge', 'deprecate', null] },
+                  categoryId: { type: ['integer', 'null'] },
+                  categoryName: { type: ['string', 'null'] },
+                  parentCategoryId: { type: ['integer', 'null'] },
+                  parentCategoryName: { type: ['string', 'null'] },
+                  newName: { type: ['string', 'null'] },
+                  supportingTicketIds: { type: 'array', items: { type: 'integer' } },
+                  supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
+                },
+                required: ['title', 'severity', 'rationale', 'suggestedAction'],
+              },
+            },
             skillRecommendations: {
               type: 'array',
               items: {
@@ -1816,12 +2158,6 @@ class AssignmentDailyReviewService {
                   rationale: { type: 'string' },
                   suggestedAction: { type: 'string' },
                   skillsAffected: { type: 'array', items: { type: 'string' } },
-                  taxonomyAction: { type: ['string', 'null'], enum: ['add', 'rename', 'update', 'move', 'merge', 'deprecate', 'competency_update', null] },
-                  categoryId: { type: ['integer', 'null'] },
-                  categoryName: { type: ['string', 'null'] },
-                  parentCategoryId: { type: ['integer', 'null'] },
-                  parentCategoryName: { type: ['string', 'null'] },
-                  newName: { type: ['string', 'null'] },
                   supportingTicketIds: { type: 'array', items: { type: 'integer' } },
                   supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
                 },
@@ -1837,6 +2173,7 @@ class AssignmentDailyReviewService {
             'executiveSummary',
             'promptRecommendations',
             'processRecommendations',
+            'taxonomyRecommendations',
             'skillRecommendations',
             'warnings',
           ],
@@ -1851,17 +2188,19 @@ Strict scoping rules:
 - supportingFreshserviceTicketIds MUST come from the analysisInput.allowedSupportingFreshserviceTicketIds list. Anything else will be discarded as a hallucination.
 - Never invent ticket numbers, technician names, or workflow names that are not present in the supplied cases.
 
-Your job is to recommend improvements in exactly three areas:
+Your job is to recommend improvements in exactly four areas:
 1. Prompt changes
 2. Process changes
-3. Skill matrix changes
+3. Taxonomy/category changes
+4. Agent skill changes
 
 Rules:
 - Base every recommendation on evidence from the supplied cases and metrics.
 - Pay special attention to cases with taxonomyFit.reviewNeeded=true, weak/none categoryFit, weak/none subcategoryFit, or suggested internal category/subcategory names.
 - Treat assignment-agent taxonomy suggestions as evidence, not truth: compare them against ticket descriptions, thread excerpts, outcomes, and the full categoryTree before recommending taxonomy changes.
-- Skill matrix recommendations may include adding, moving, renaming, merging, or deprecating internal top-level categories or subcategories when the evidence supports it.
-- For skillRecommendations about taxonomy structure, populate taxonomyAction and the relevant categoryId/categoryName/parentCategoryId/parentCategoryName/newName fields so consolidation can turn them into precise admin-reviewed Skill List Changes.
+- taxonomyRecommendations may include adding, moving, renaming, merging, deprecating, remapping, or updating descriptions for internal top-level categories or subcategories when the evidence supports it.
+- For taxonomyRecommendations, populate taxonomyAction and the relevant categoryId/categoryName/parentCategoryId/parentCategoryName/newName fields so consolidation can turn them into precise admin-reviewed Taxonomy Changes.
+- skillRecommendations are only agent skill/technician competency changes: add, remove, or change a technician's competency mapping or proficiency. Do not put category/subcategory structure changes there.
 - Be conservative. Fewer strong recommendations are better than many weak ones.
 - Do not rewrite the prompt or mutate the competency matrix directly.
 - Focus on why the system missed and how to improve future assignments.
@@ -1904,9 +2243,10 @@ Rules:
       const sanitizationCtx = { allowedInternalIds, allowedFreshserviceIds };
       const promptSanitized = this._sanitizeRecommendationItems(submission.promptRecommendations, sanitizationCtx);
       const processSanitized = this._sanitizeRecommendationItems(submission.processRecommendations, sanitizationCtx);
+      const taxonomySanitized = this._sanitizeRecommendationItems(submission.taxonomyRecommendations, sanitizationCtx);
       const skillSanitized = this._sanitizeRecommendationItems(submission.skillRecommendations, sanitizationCtx);
-      const totalDroppedInternal = promptSanitized.droppedInternal + processSanitized.droppedInternal + skillSanitized.droppedInternal;
-      const totalDroppedExternal = promptSanitized.droppedExternal + processSanitized.droppedExternal + skillSanitized.droppedExternal;
+      const totalDroppedInternal = promptSanitized.droppedInternal + processSanitized.droppedInternal + taxonomySanitized.droppedInternal + skillSanitized.droppedInternal;
+      const totalDroppedExternal = promptSanitized.droppedExternal + processSanitized.droppedExternal + taxonomySanitized.droppedExternal + skillSanitized.droppedExternal;
       const sanitizationWarnings = [];
       if (totalDroppedInternal > 0 || totalDroppedExternal > 0) {
         const dropMsg = `Dropped ${totalDroppedInternal + totalDroppedExternal} hallucinated supporting ticket id reference(s) (${totalDroppedInternal} internal, ${totalDroppedExternal} freshservice) returned by the LLM that were not part of this workspace's review cohort.`;
@@ -1918,6 +2258,7 @@ Rules:
         executiveSummary: submission.executiveSummary || '',
         promptRecommendations: promptSanitized.items,
         processRecommendations: processSanitized.items,
+        taxonomyRecommendations: taxonomySanitized.items,
         skillRecommendations: skillSanitized.items,
         warnings: [
           ...(submission.warnings || []),
@@ -2167,7 +2508,7 @@ Rules:
       const analyzingPayload = {
         phase: 'analyzing',
         percent: 92,
-        message: 'Generating prompt, process, and skill-matrix recommendations...',
+        message: 'Generating prompt, process, taxonomy, and agent-skill recommendations...',
         stats: dataset.summaryMetrics.totals || {},
       };
       emit({ type: 'phase_update', ...analyzingPayload });
@@ -2178,6 +2519,13 @@ Rules:
         signal: abortController.signal,
       });
       this._throwIfCancelled(abortController.signal);
+      const skillSplit = this._splitSkillAndTaxonomyRecommendations(analysis.skillRecommendations);
+      const taxonomyRecommendations = this._mergeTaxonomyRecommendations([
+        ...toArray(analysis.taxonomyRecommendations),
+        ...skillSplit.taxonomyRecommendations,
+        ...this._buildDeterministicTaxonomyRecommendations(dataset),
+      ]);
+      const agentSkillRecommendations = skillSplit.skillRecommendations;
       const mergedWarnings = [...dataset.warnings, ...(analysis.warnings || [])];
 
       run = await prisma.$transaction(async (tx) => {
@@ -2194,7 +2542,7 @@ Rules:
             evidenceCases: sanitizeJsonForPostgres(dataset.cases),
             promptRecommendations: sanitizeJsonForPostgres(analysis.promptRecommendations),
             processRecommendations: sanitizeJsonForPostgres(analysis.processRecommendations),
-            skillRecommendations: sanitizeJsonForPostgres(analysis.skillRecommendations),
+            skillRecommendations: sanitizeJsonForPostgres(agentSkillRecommendations),
             warnings: sanitizeJsonForPostgres(mergedWarnings),
             fullTranscript: sanitizeJsonForPostgres(analysis.transcript || null),
             totalTokensUsed: analysis.totalTokensUsed || 0,
@@ -2205,7 +2553,8 @@ Rules:
         await this._replaceRecommendationsForRun(tx, updatedRun, {
           promptRecommendations: analysis.promptRecommendations,
           processRecommendations: analysis.processRecommendations,
-          skillRecommendations: analysis.skillRecommendations,
+          taxonomyRecommendations,
+          skillRecommendations: agentSkillRecommendations,
         });
         return updatedRun;
       });
@@ -2215,7 +2564,8 @@ Rules:
         executiveSummary: analysis.executiveSummary,
         promptCount: analysis.promptRecommendations?.length || 0,
         processCount: analysis.processRecommendations?.length || 0,
-        skillCount: analysis.skillRecommendations?.length || 0,
+        taxonomyCount: taxonomyRecommendations.length,
+        skillCount: agentSkillRecommendations.length,
       });
       const completedPayload = {
         phase: 'completed',
@@ -2271,6 +2621,7 @@ Rules:
   }
 
   async getRuns(workspaceId, { limit = 20, offset = 0 } = {}) {
+    await this._migrateRecentTaxonomySkillRecommendations(workspaceId);
     const [items, total] = await Promise.all([
       prisma.assignmentDailyReviewRun.findMany({
         where: { workspaceId },
@@ -2324,6 +2675,7 @@ Rules:
     const run = await prisma.assignmentDailyReviewRun.findUnique({ where: { id } });
     if (!run) return null;
 
+    await this._migrateRecentTaxonomySkillRecommendations(run.workspaceId);
     await this._ensureRecommendationRowsForRuns(run.workspaceId, [run]);
     const rows = await prisma.assignmentDailyReviewRecommendation.findMany({
       where: { runId: id },
@@ -2354,6 +2706,7 @@ Rules:
     if (status && status !== 'all') this._validateRecommendationStatus(status);
     if (kind) this._validateRecommendationKind(kind);
 
+    await this._migrateRecentTaxonomySkillRecommendations(workspaceId);
     await this._ensureRecommendationRowsForWorkspace(workspaceId, { startDate, endDate });
 
     const where = { workspaceId };
