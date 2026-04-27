@@ -299,6 +299,81 @@ function SimpleTable({ columns, rows, maxHeight = 'max-h-80' }) {
   );
 }
 
+function normalizeInsightDrilldown(insight) {
+  const drilldown = insight?.drilldown;
+  if (Array.isArray(drilldown)) return drilldown;
+  if (drilldown && typeof drilldown === 'object') {
+    return Object.entries(drilldown).map(([key, count]) => ({
+      key,
+      name: labelFromKey(key, { ...RESOLUTION_BUCKET_LABELS, ...OPEN_AGING_LABELS }),
+      count,
+    }));
+  }
+  return [];
+}
+
+function insightDrilldownColumns(insight) {
+  switch (insight?.id) {
+  case 'backlog-growth':
+    return [
+      { key: 'date', label: 'Date' },
+      { key: 'created', label: 'Created', render: (row) => formatNumber(row.created || 0) },
+      { key: 'resolved', label: 'Closed / Resolved', render: (row) => formatNumber(row.resolved || 0) },
+      { key: 'net', label: 'Net Growth', render: (row) => `+${formatNumber(row.net || 0)}` },
+    ];
+  case 'load-imbalance':
+    return [
+      { key: 'name', label: 'Technician' },
+      { key: 'assigned', label: 'Assigned', render: (row) => formatNumber(row.assigned || 0) },
+      { key: 'openNow', label: 'Open Now', render: (row) => formatNumber(row.openNow || 0) },
+      { key: 'closed', label: 'Closed', render: (row) => formatNumber(row.closed || 0) },
+      { key: 'rejected', label: 'Rejected', render: (row) => formatNumber(row.rejected || 0) },
+      { key: 'leaveDays', label: 'Leave', render: (row) => formatNumber(row.leaveDays || 0) },
+      { key: 'wfhDays', label: 'WFH', render: (row) => formatNumber(row.wfhDays || 0) },
+    ];
+  case 'stale-open-tickets':
+    return [
+      { key: 'name', label: 'Age Bucket' },
+      { key: 'count', label: 'Open Tickets', render: (row) => formatNumber(row.count || 0) },
+    ];
+  case 'sync-degradation':
+    return [
+      { key: 'startedAt', label: 'Started', render: (row) => formatDateTime(row.startedAt) },
+      { key: 'syncType', label: 'Sync Type', render: (row) => labelFromKey(row.syncType) },
+      { key: 'status', label: 'Status', render: (row) => labelFromKey(row.status) },
+      { key: 'recordsProcessed', label: 'Records', render: (row) => formatNumber(row.recordsProcessed || 0) },
+      { key: 'errorMessage', label: 'Error', render: (row) => row.errorMessage || '—' },
+    ];
+  case 'csat-warning':
+    return [
+      { key: 'freshserviceTicketId', label: 'Ticket' },
+      {
+        key: 'csatScore',
+        label: 'Score',
+        render: (row) => row.csatScore === null || row.csatScore === undefined ? '—' : `${row.csatScore}/${row.csatTotalScore || 4}`,
+      },
+      { key: 'csatRatingText', label: 'Rating', render: (row) => row.csatRatingText || '—' },
+      { key: 'subject', label: 'Subject' },
+      { key: 'assignedTechName', label: 'Tech', render: (row) => row.assignedTechName || 'Unassigned' },
+    ];
+  case 'category-concentration':
+    return [
+      { key: 'name', label: 'Category' },
+      { key: 'count', label: 'Tickets', render: (row) => formatNumber(row.count || 0) },
+      { key: 'pct', label: 'Share', render: (row) => row.pct === undefined ? '—' : `${row.pct}%` },
+    ];
+  case 'demand-spike':
+  case 'overdue-risk':
+  default:
+    return [
+      { key: 'freshserviceTicketId', label: 'Ticket', render: (row) => row.freshserviceTicketId || row.id || '—' },
+      { key: 'subject', label: 'Subject', render: (row) => row.subject || row.title || row.name || '—' },
+      { key: 'status', label: 'Status', render: (row) => row.status || '—' },
+      { key: 'assignedTechName', label: 'Owner', render: (row) => row.assignedTechName || row.requesterName || row.technicianName || row.name || '—' },
+    ];
+  }
+}
+
 function CategoricalBars({ data, nameKey = 'name', valueKey = 'count', height = 260 }) {
   if (!data?.length) return <EmptyState />;
   return (
@@ -922,6 +997,12 @@ export default function Analytics() {
   const selectedInsight = useMemo(() => (
     insightRows.find((item) => item.id === selectedInsightId) || insightRows[0] || null
   ), [insightRows, selectedInsightId]);
+  const selectedInsightDrilldownRows = useMemo(() => (
+    normalizeInsightDrilldown(selectedInsight).slice(0, 15)
+  ), [selectedInsight]);
+  const selectedInsightDrilldownColumns = useMemo(() => (
+    insightDrilldownColumns(selectedInsight)
+  ), [selectedInsight]);
 
   const insightSeverityRows = useMemo(() => {
     const counts = { critical: 0, warning: 0, info: 0 };
@@ -1464,7 +1545,7 @@ export default function Analytics() {
     return (
       <div className="space-y-4">
         <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
-          <Panel title="Insight Severity" subtitle="Deterministic cards grouped by severity.">
+          <Panel title="Insight Priority" subtitle="Rule-based alerts grouped by urgency.">
             <HighchartsBlock options={insightSeverityOptions} height="18rem" />
             <div className="mt-3 grid grid-cols-3 gap-2">
               {insightSeverityRows.map((row) => (
@@ -1501,14 +1582,9 @@ export default function Analytics() {
                   </div>
                 )}
                 <SimpleTable
-                  rows={Array.isArray(selectedInsight.drilldown) ? selectedInsight.drilldown.slice(0, 15) : []}
+                  rows={selectedInsightDrilldownRows}
                   maxHeight="max-h-72"
-                  columns={[
-                    { key: 'freshserviceTicketId', label: 'Ticket', render: (row) => row.freshserviceTicketId || row.id || row.name || row.period || '—' },
-                    { key: 'subject', label: 'Subject', render: (row) => row.subject || row.title || row.stepName || row.name || JSON.stringify(row).slice(0, 80) },
-                    { key: 'status', label: 'Status', render: (row) => row.status || row.severity || row.count || '—' },
-                    { key: 'assignedTechName', label: 'Owner', render: (row) => row.assignedTechName || row.requesterName || row.technicianName || row.name || '—' },
-                  ]}
+                  columns={selectedInsightDrilldownColumns}
                 />
               </div>
             )}
