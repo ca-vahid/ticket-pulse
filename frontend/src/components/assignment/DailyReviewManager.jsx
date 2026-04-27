@@ -4083,7 +4083,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
           </div>
 
           <div className="mb-4 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1">
-            <div className="grid min-w-[560px] grid-cols-4 gap-1 sm:min-w-0">
+            <div className="grid min-w-[620px] grid-cols-5 gap-1 sm:min-w-0">
               {BACKLOG_KIND_TABS.map(({ key, label, icon: Icon, visibilityOnly }) => {
                 const selectedKind = backlogKind === key;
                 return (
@@ -4094,7 +4094,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                       setBacklogKind(key);
                       setBacklogStatus(key === 'dev' ? 'all' : 'pending');
                     }}
-                    className={`flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
+                    className={`flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all sm:px-2.5 ${
                       selectedKind
                         ? visibilityOnly
                           ? 'bg-amber-100 text-amber-800 shadow-sm ring-1 ring-amber-200'
