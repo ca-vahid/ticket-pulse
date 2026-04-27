@@ -9,6 +9,19 @@ function mapClosedStatus(status) {
   return 'Resolved';
 }
 
+function extractFreshServiceError(error) {
+  const status = error.freshserviceStatus
+    || error.response?.status
+    || error.statusCode
+    || error.originalError?.response?.status
+    || null;
+  const body = error.freshserviceDetail
+    || error.response?.data
+    || error.originalError?.response?.data
+    || null;
+  return status || body ? { status, body } : null;
+}
+
 class FreshServiceActionService {
   /**
    * Build the FreshService actions for a pipeline run decision.
@@ -255,9 +268,7 @@ class FreshServiceActionService {
       return { success: true, preview, actions, ticketGone, syncNote };
 
     } catch (err) {
-      const freshserviceError = err.freshserviceDetail
-        ? { status: err.freshserviceStatus, body: err.freshserviceDetail }
-        : null;
+      const freshserviceError = extractFreshServiceError(err);
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },
         data: {

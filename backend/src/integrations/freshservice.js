@@ -669,7 +669,8 @@ class FreshServiceClient {
 
   async closeTicket(ticketId, status = 4) {
     try {
-      const response = await this._put(`/tickets/${ticketId}`, { ticket: { status } });
+      const payload = await this._buildClosureRetryPayload(ticketId, status);
+      const response = await this._put(`/tickets/${ticketId}`, { ticket: payload });
       return response.data.ticket;
     } catch (error) {
       const httpStatus = getFreshServiceStatus(error);
