@@ -814,9 +814,12 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const externallyAssigned = run.status === 'completed'
     && run.decision === 'pending_review'
     && ticket?.assignedTechId;
+  const syncedAssignmentDecision = run.syncStatus === 'synced'
+    && REASSIGNABLE_DECISIONS.has(run.decision)
+    && (run.assignedTechId || ticket?.assignedTechId);
   const decisionBadge = externallyAssigned
     ? { label: 'Handled in FS', style: 'bg-amber-100 text-amber-800' }
-    : run.status === 'completed'
+    : (run.status === 'completed' || syncedAssignmentDecision)
       ? (DECISION_BADGES[run.decision] || DECISION_BADGES.pending_review)
       : (RUN_STATUS_BADGES[run.status] || RUN_STATUS_BADGES.running);
 
@@ -826,7 +829,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const ticketUrl = fsDomain && ticket?.freshserviceTicketId ? `https://${fsDomain}/a/tickets/${ticket.freshserviceTicketId}` : null;
   const ticketStatusKey = String(ticket?.status || '').toLowerCase();
   const canReassign = isAdmin
-    && run.status === 'completed'
+    && (run.status === 'completed' || syncedAssignmentDecision)
     && REASSIGNABLE_DECISIONS.has(run.decision)
     && ticket?.id
     && !REASSIGN_BLOCKING_STATUSES.has(ticketStatusKey);
@@ -1102,7 +1105,14 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         </div>
       )}
 
-      {run.status !== 'completed' && (
+      {run.status !== 'completed' && syncedAssignmentDecision && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">
+          FreshService sync completed for this assignment, but the pipeline status is still <strong>{run.status}</strong>.
+          {run.errorMessage ? ` Finalization warning: ${run.errorMessage}` : ''}
+        </div>
+      )}
+
+      {run.status !== 'completed' && !syncedAssignmentDecision && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
           This run is in status <strong>{run.status}</strong>.
           {run.errorMessage ? ` ${run.errorMessage}` : ''}

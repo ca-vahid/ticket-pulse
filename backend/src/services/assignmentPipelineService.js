@@ -839,6 +839,27 @@ class AssignmentPipelineService {
       return await assignmentRepository.getPipelineRun(runId);
 
     } catch (error) {
+      const currentRun = await prisma.assignmentPipelineRun.findUnique({
+        where: { id: runId },
+        select: { id: true, status: true, decision: true, syncStatus: true },
+      }).catch((lookupError) => {
+        logger.warn('Could not inspect pipeline run after failure', { runId, error: lookupError.message });
+        return null;
+      });
+
+      if (currentRun?.status === 'completed' && currentRun?.decision) {
+        logger.error('Pipeline post-completion hydration failed; preserving finalized run state', {
+          runId,
+          ticketId,
+          status: currentRun.status,
+          decision: currentRun.decision,
+          syncStatus: currentRun.syncStatus,
+          error: error.message,
+        });
+        emit({ type: 'complete', runId });
+        return currentRun;
+      }
+
       logger.error('Pipeline failed', { runId, ticketId, error: error.message });
       await assignmentRepository.updatePipelineRun(runId, {
         status: 'failed',

@@ -1,6 +1,7 @@
 import {
   buildCorrectionFeedbackEntry,
   findRecommendationByRank,
+  isCorrectableAssignmentRun,
   validateCorrectionInput,
 } from '../src/services/assignmentCorrectionService.js';
 
@@ -70,5 +71,28 @@ describe('assignment correction helpers', () => {
     expect(feedback).toContain('Corrected: New Owner');
     expect(feedback).toContain('LLM recommendation #2');
     expect(feedback).toContain('storage platform');
+  });
+
+  test('allows reassignment for completed runs and legacy synced assignment runs', () => {
+    expect(isCorrectableAssignmentRun({
+      status: 'completed',
+      decision: 'auto_assigned',
+      assignedTechId: 38,
+      syncStatus: 'synced',
+    })).toBe(true);
+
+    expect(isCorrectableAssignmentRun({
+      status: 'failed',
+      decision: 'auto_assigned',
+      assignedTechId: 38,
+      syncStatus: 'synced',
+    })).toBe(true);
+
+    expect(isCorrectableAssignmentRun({
+      status: 'failed',
+      decision: 'auto_assigned',
+      assignedTechId: 38,
+      syncStatus: 'failed',
+    })).toBe(false);
   });
 });

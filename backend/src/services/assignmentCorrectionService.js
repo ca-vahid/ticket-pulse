@@ -88,6 +88,12 @@ export function buildCorrectionFeedbackEntry({
   return `[${timestamp}] ${ticketRef}: Admin corrected assignment. Original: ${fromTech?.name || 'unassigned/unknown'}. Corrected: ${toTech?.name}. Source: ${source}. Reason: ${reason}`;
 }
 
+export function isCorrectableAssignmentRun(run) {
+  if (!run || !ASSIGNMENT_DECISIONS.has(run.decision)) return false;
+  if (run.status === 'completed') return true;
+  return run.syncStatus === 'synced' && !!run.assignedTechId;
+}
+
 class AssignmentCorrectionService {
   async reassignRun(runId, workspaceId, input, actorEmail) {
     const { valid, errors, normalized } = validateCorrectionInput(input);
@@ -99,8 +105,8 @@ class AssignmentCorrectionService {
     if (run.workspaceId !== workspaceId) {
       return { success: false, status: 403, message: 'Pipeline run belongs to a different workspace' };
     }
-    if (run.status !== 'completed' || !ASSIGNMENT_DECISIONS.has(run.decision)) {
-      return { success: false, status: 400, message: 'Only completed assignment decisions can be reassigned' };
+    if (!isCorrectableAssignmentRun(run)) {
+      return { success: false, status: 400, message: 'Only completed or already-synced assignment decisions can be reassigned' };
     }
 
     const localStatus = String(run.ticket?.status || '').toLowerCase();
