@@ -172,6 +172,21 @@ router.get('/queued', requireReviewer, asyncHandler(async (req, res) => {
   // and hid that the queue had problems). Also return totalCount so the UI
   // can warn when the queue exceeds the display cap.
   const limit = Math.min(Math.max(parseInt(req.query.limit) || 500, 1), 2000);
+  let reconciliation = null;
+  try {
+    reconciliation = await assignmentPipelineService.reconcileQueuedRuns(req.workspaceId, {
+      // Live FreshService validation is rate-limited. Keep the list endpoint
+      // responsive and let the scheduled reconciler/drain handle deeper queues.
+      limit: Math.min(limit, 40),
+      source: 'assignment-queued-endpoint',
+    });
+  } catch (error) {
+    logger.warn('Queued endpoint reconciliation failed; returning current queue snapshot', {
+      workspaceId: req.workspaceId,
+      error: error.message,
+    });
+  }
+
   const [runs, totalCount] = await Promise.all([
     assignmentRepository.listQueuedRuns(req.workspaceId, limit),
     assignmentRepository.countQueuedRuns(req.workspaceId),
@@ -182,31 +197,22 @@ router.get('/queued', requireReviewer, asyncHandler(async (req, res) => {
     total: runs.length,
     totalCount,
     truncated: runs.length < totalCount,
+    reconciliation,
   });
 }));
 
 // ─── Queue Pruning ──────────────────────────────────────────────────────
-// Mark all queued runs as skipped_stale if the underlying ticket is no
-// longer eligible for assignment (closed, deleted, or assigned). Used to
-// clean up after the email poller (or backfill, app restart, etc.) flooded
-// the queue with non-actionable items.
+// Mark stale queued runs as skipped_stale if the underlying ticket is no
+// longer eligible for assignment (closed, deleted, or assigned). FreshService
+// live checks are intentionally batch-limited here; scheduled reconciliation
+// and drain-time validation provide the deeper safety net.
 router.post('/queued/prune', requireReviewer, asyncHandler(async (req, res) => {
-  const queued = await assignmentRepository.listQueuedRuns(req.workspaceId, 2000);
-  let pruned = 0;
-  let kept = 0;
-  const reasons = {};
-  for (const run of queued) {
-    const validation = await assignmentPipelineService.validateQueuedRun(run);
-    if (!validation.valid) {
-      await assignmentRepository.markRunSkippedStale(run.id, validation.reason);
-      reasons[validation.reason] = (reasons[validation.reason] || 0) + 1;
-      pruned++;
-    } else {
-      kept++;
-    }
-  }
-  logger.info('Queue pruned', { workspaceId: req.workspaceId, pruned, kept, reasons });
-  res.json({ success: true, data: { pruned, kept, reasons } });
+  const result = await assignmentPipelineService.reconcileQueuedRuns(req.workspaceId, {
+    limit: 40,
+    source: 'assignment-queued-prune',
+  });
+  logger.info('Queue pruned', { workspaceId: req.workspaceId, ...result });
+  res.json({ success: true, data: result });
 }));
 
 router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {

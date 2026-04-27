@@ -3000,7 +3000,21 @@ class SyncService {
             },
           });
 
-          // Supersede any pending assignment pipeline runs for this ticket
+          // Clear queued assignment work for tickets that FreshService has
+          // already removed/terminalized. Without this, a hard-deleted ticket
+          // can sit in the business-hours queue until a user manually prunes.
+          await prisma.assignmentPipelineRun.updateMany({
+            where: {
+              ticketId: ticket.id,
+              status: 'queued',
+            },
+            data: {
+              status: 'skipped_stale',
+              errorMessage: reason,
+            },
+          });
+
+          // Supersede any completed pending-review runs for this ticket.
           await prisma.assignmentPipelineRun.updateMany({
             where: {
               ticketId: ticket.id,

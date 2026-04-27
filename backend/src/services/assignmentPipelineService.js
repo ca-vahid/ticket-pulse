@@ -3,11 +3,14 @@ import config from '../config/index.js';
 import assignmentRepository from './assignmentRepository.js';
 import promptRepository from './promptRepository.js';
 import availabilityService from './availabilityService.js';
+import settingsRepository from './settingsRepository.js';
+import ticketActivityRepository from './ticketActivityRepository.js';
 import { TOOL_SCHEMAS, executeTool } from './assignmentTools.js';
 import freshServiceActionService from './freshServiceActionService.js';
 import competencyFeedbackService from './competencyFeedbackService.js';
 import { formatDateInTimezone } from '../utils/timezone.js';
 import { formatInTimeZone } from 'date-fns-tz';
+import { createFreshServiceClient } from '../integrations/freshservice.js';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 // Pure helpers extracted to their own modules so unit tests can exercise the
@@ -15,9 +18,12 @@ import logger from '../utils/logger.js';
 // without pulling in Prisma/Anthropic.
 import { buildUserMessage } from './assignmentUserMessage.js';
 import { isGroupExcluded, isPipelineFinalDecision } from './assignmentDecisionRules.js';
+import {
+  getFreshServiceTicketQueueBlocker,
+  getLocalTicketQueueBlocker,
+} from './assignmentQueueEligibility.js';
 
 const MAX_TURNS = 20;
-const CLOSED_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
 
 function normalizeTaxonomyFit(value) {
   const normalized = String(value || '').toLowerCase();
@@ -179,13 +185,10 @@ class AssignmentPipelineService {
       where: { id: ticketId },
       select: { status: true, assignedTechId: true },
     });
-    if (!ticket) return { valid: false, reason: 'Ticket not found in database' };
-    if (CLOSED_STATUSES.includes(ticket.status)) {
-      return { valid: false, reason: `Ticket already ${ticket.status}` };
-    }
-    if (ticket.assignedTechId) {
-      return { valid: false, reason: 'Ticket already assigned to a technician' };
-    }
+    const blocker = getLocalTicketQueueBlocker(ticket);
+    if (blocker) return blocker.reason === 'Ticket no longer exists'
+      ? { valid: false, reason: 'Ticket not found in database' }
+      : blocker;
     return { valid: true };
   }
 
@@ -193,22 +196,25 @@ class AssignmentPipelineService {
    * Validate a queued run is still worth executing.
    * Returns { valid: true } or { valid: false, reason: string }.
    */
-  async validateQueuedRun(run) {
-    const ticket = await prisma.ticket.findUnique({
+  async validateQueuedRun(run, options = {}) {
+    const ticket = run.ticket || await prisma.ticket.findUnique({
       where: { id: run.ticketId },
-      select: { status: true, assignedTechId: true },
+      select: {
+        id: true,
+        workspaceId: true,
+        freshserviceTicketId: true,
+        subject: true,
+        status: true,
+        assignedTechId: true,
+      },
     });
 
-    if (!ticket) {
-      return { valid: false, reason: 'Ticket no longer exists' };
-    }
+    const localBlocker = getLocalTicketQueueBlocker(ticket);
+    if (localBlocker) return localBlocker;
 
-    if (CLOSED_STATUSES.includes(ticket.status)) {
-      return { valid: false, reason: `Ticket already ${ticket.status}` };
-    }
-
-    if (ticket.assignedTechId) {
-      return { valid: false, reason: 'Ticket already assigned to a technician' };
+    if (options.liveCheck !== false) {
+      const freshserviceBlocker = await this._validateQueuedRunAgainstFreshService(ticket, options);
+      if (freshserviceBlocker) return freshserviceBlocker;
     }
 
     const newerRun = await prisma.assignmentPipelineRun.findFirst({
@@ -228,6 +234,139 @@ class AssignmentPipelineService {
     return { valid: true };
   }
 
+  async _initializeQueueValidationClient(options = {}) {
+    const config = await settingsRepository.getFreshServiceConfig();
+    return createFreshServiceClient(config.domain, config.apiKey, {
+      priority: options.priority || 'high',
+      source: options.source || 'assignment-queue-validation',
+    });
+  }
+
+  async _validateQueuedRunAgainstFreshService(ticket, options = {}) {
+    const fsId = Number(ticket.freshserviceTicketId);
+    if (!Number.isFinite(fsId)) {
+      return { valid: false, reason: 'Ticket is missing a FreshService ticket ID' };
+    }
+
+    let fsTicket;
+    try {
+      const client = options.client || await this._initializeQueueValidationClient(options);
+      fsTicket = await client.fetchTicketSafe(fsId);
+    } catch (error) {
+      logger.warn('Queued run FreshService validation failed; leaving run eligible for retry', {
+        ticketId: ticket.id,
+        fsId,
+        error: error.message,
+      });
+      return null;
+    }
+
+    const blocker = getFreshServiceTicketQueueBlocker(fsTicket);
+    if (!blocker) return null;
+
+    if (blocker.localStatus && blocker.shouldUpdateTicket !== false) {
+      await this._markTicketStatusFromFreshService(ticket, blocker.localStatus, blocker.activityReason || blocker.reason);
+    } else if (blocker.freshserviceResponderId) {
+      await this._markTicketAssignedFromFreshService(ticket, blocker.freshserviceResponderId);
+    }
+
+    return blocker;
+  }
+
+  async _markTicketStatusFromFreshService(ticket, status, reason) {
+    if (String(ticket.status) === String(status)) return;
+
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { status, updatedAt: new Date() },
+    });
+
+    await ticketActivityRepository.create({
+      ticketId: ticket.id,
+      activityType: 'status_changed',
+      performedBy: 'System',
+      performedAt: new Date(),
+      details: {
+        oldStatus: ticket.status,
+        newStatus: status,
+        note: reason,
+      },
+    });
+  }
+
+  async _markTicketAssignedFromFreshService(ticket, freshserviceResponderId) {
+    const responderId = BigInt(freshserviceResponderId);
+    const tech = await prisma.technician.findFirst({
+      where: { freshserviceId: responderId, workspaceId: ticket.workspaceId },
+      select: { id: true },
+    }) || await prisma.technician.findFirst({
+      where: { freshserviceId: responderId },
+      select: { id: true },
+    });
+
+    if (!tech?.id || ticket.assignedTechId === tech.id) return;
+
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { assignedTechId: tech.id, updatedAt: new Date() },
+    });
+  }
+
+  async reconcileQueuedRuns(workspaceId, options = {}) {
+    const limit = Math.min(Math.max(parseInt(options.limit, 10) || 500, 1), 2000);
+    const queued = await assignmentRepository.listQueuedRuns(workspaceId, limit);
+    if (queued.length === 0) return { checked: 0, pruned: 0, kept: 0, reasons: {} };
+
+    let client = null;
+    if (options.liveCheck !== false) {
+      try {
+        client = await this._initializeQueueValidationClient({
+          priority: options.priority || 'high',
+          source: options.source || 'assignment-queue-reconcile',
+        });
+      } catch (error) {
+        logger.warn('Queue reconciliation could not initialize FreshService client; using local validation only', {
+          workspaceId,
+          error: error.message,
+        });
+      }
+    }
+
+    let pruned = 0;
+    let kept = 0;
+    const reasons = {};
+
+    for (const run of queued) {
+      try {
+        const validation = await this.validateQueuedRun(run, {
+          liveCheck: !!client,
+          client,
+        });
+        if (!validation.valid) {
+          await assignmentRepository.markRunSkippedStale(run.id, validation.reason);
+          reasons[validation.reason] = (reasons[validation.reason] || 0) + 1;
+          pruned++;
+        } else {
+          kept++;
+        }
+      } catch (error) {
+        kept++;
+        logger.warn('Queue reconciliation skipped one run after validation error', {
+          workspaceId,
+          runId: run.id,
+          ticketId: run.ticketId,
+          error: error.message,
+        });
+      }
+    }
+
+    if (pruned > 0) {
+      logger.info('Queue reconciliation pruned stale runs', { workspaceId, checked: queued.length, pruned, kept, reasons });
+    }
+
+    return { checked: queued.length, pruned, kept, reasons };
+  }
+
   /**
    * Process queued runs for a workspace. Called by the scheduler during business hours.
    * Returns count of processed/skipped runs.
@@ -238,6 +377,18 @@ class AssignmentPipelineService {
 
     let processed = 0;
     let skipped = 0;
+    let validationClient = null;
+    try {
+      validationClient = await this._initializeQueueValidationClient({
+        priority: 'high',
+        source: 'assignment-queue-drain',
+      });
+    } catch (error) {
+      logger.warn('Queue drain could not initialize FreshService validation client; using local validation only', {
+        workspaceId,
+        error: error.message,
+      });
+    }
 
     for (const run of queued) {
       const claimed = await assignmentRepository.claimQueuedRun(run.id);
@@ -246,7 +397,10 @@ class AssignmentPipelineService {
         continue;
       }
 
-      const validation = await this.validateQueuedRun(run);
+      const validation = await this.validateQueuedRun(run, {
+        liveCheck: !!validationClient,
+        client: validationClient,
+      });
       if (!validation.valid) {
         await assignmentRepository.markRunSkippedStale(run.id, validation.reason);
         logger.info('Queue drain: skipped stale run', { runId: run.id, ticketId: run.ticketId, reason: validation.reason });

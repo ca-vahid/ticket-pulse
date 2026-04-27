@@ -3041,7 +3041,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 onClick={handlePruneQueue}
                 disabled={pruning}
                 className="text-[10px] font-semibold text-amber-700 hover:text-amber-900 hover:bg-amber-100 px-2 py-0.5 rounded transition-colors disabled:opacity-50"
-                title="Mark all queued tickets as skipped if they're no longer eligible (closed, deleted, assigned)"
+                title="Mark stale queued tickets as skipped if they're no longer eligible (closed, deleted, assigned)"
               >
                 {pruning ? 'Pruning…' : 'Prune stale'}
               </button>

@@ -192,6 +192,7 @@ class AssignmentRepository {
           ticket: {
             select: {
               id: true,
+              workspaceId: true,
               freshserviceTicketId: true,
               subject: true,
               description: true,
@@ -569,6 +570,7 @@ class AssignmentRepository {
           ticket: {
             select: {
               id: true,
+              workspaceId: true,
               freshserviceTicketId: true,
               subject: true,
               priority: true,
@@ -576,6 +578,7 @@ class AssignmentRepository {
               status: true,
               assignedTechId: true,
               createdAt: true,
+              updatedAt: true,
               requester: { select: { name: true, email: true } },
             },
           },
