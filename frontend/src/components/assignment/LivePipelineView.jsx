@@ -105,7 +105,16 @@ function ScoreRing({ pct, selected = false, size = 52 }) {
   );
 }
 
-export function RecommendationCards({ data, onDecide, deciding, hideReasoning = false, hideAgentBriefing = false, decision = null }) {
+export function RecommendationCards({
+  data,
+  onDecide,
+  deciding,
+  hideReasoning = false,
+  hideAgentBriefing = false,
+  decision = null,
+  currentAssignedTechId = null,
+  originalAssignedTechId = null,
+}) {
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [decisionNote, setDecisionNote] = useState('');
   const [showTechPicker, setShowTechPicker] = useState(false);
@@ -154,6 +163,8 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
   const isOverride = selectedOverrideTech != null;
   const effectiveTechId = isOverride ? selectedTechId : (selectedTechId || topRec?.techId);
   const effectiveTechName = isOverride ? selectedOverrideTech.name : (data.recommendations.find((r) => r.techId === effectiveTechId)?.techName || topRec?.techName);
+  const displayAssignedTechId = currentAssignedTechId || effectiveTechId;
+  const assignmentWasCorrected = currentAssignedTechId && originalAssignedTechId && Number(currentAssignedTechId) !== Number(originalAssignedTechId);
 
   const loadTechs = async () => {
     if (allTechs.length === 0) {
@@ -170,8 +181,11 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
         <div className="lg:col-span-3 space-y-2 sm:space-y-2.5">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Recommendations</h4>
           {data.recommendations.map((rec, i) => {
-            const isSelected = effectiveTechId === rec.techId && !isOverride;
+            const isSelected = (onDecide ? effectiveTechId : displayAssignedTechId) === rec.techId && !isOverride;
             const isTopPick = i === 0;
+            const isCurrentAssignee = currentAssignedTechId && Number(currentAssignedTechId) === Number(rec.techId);
+            const isOriginalAssignment = originalAssignedTechId && Number(originalAssignedTechId) === Number(rec.techId);
+            const isSuperseded = assignmentWasCorrected && isOriginalAssignment && !isCurrentAssignee;
             const tech = techMap[rec.techId];
             const initials = rec.techName?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
             const pct = scorePercent(rec.score);
@@ -179,14 +193,16 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
             return (
               <div
                 key={rec.techId || i}
-                onClick={() => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); setShowTechPicker(false); }}
-                className={`relative rounded-xl cursor-pointer transition-all touch-manipulation overflow-hidden ${
+                onClick={onDecide ? () => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); setShowTechPicker(false); } : undefined}
+                className={`relative rounded-xl transition-all touch-manipulation overflow-hidden ${
                   isSelected
                     ? 'border-2 border-blue-500 bg-blue-50/60 shadow-md'
-                    : isTopPick
-                      ? 'border border-amber-200 bg-gradient-to-br from-amber-50/40 to-white hover:border-amber-300 hover:shadow-sm'
-                      : 'border border-slate-200 hover:border-slate-300 hover:shadow-sm bg-white'
-                }`}
+                    : isSuperseded
+                      ? 'border border-slate-200 bg-slate-50 opacity-80'
+                      : isTopPick
+                        ? 'border border-amber-200 bg-gradient-to-br from-amber-50/40 to-white hover:border-amber-300 hover:shadow-sm'
+                        : 'border border-slate-200 hover:border-slate-300 hover:shadow-sm bg-white'
+                } ${onDecide ? 'cursor-pointer' : 'cursor-default'}`}
               >
                 {/* Selected indicator stripe */}
                 {isSelected && (
@@ -210,9 +226,19 @@ export function RecommendationCards({ data, onDecide, deciding, hideReasoning = 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                       <span className={`font-semibold text-sm truncate ${isSelected ? 'text-blue-900' : 'text-slate-900'}`}>{rec.techName}</span>
+                      {isCurrentAssignee && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 bg-green-100 text-green-700">
+                          <CheckCircle className="w-2.5 h-2.5" /> Current Assignee
+                        </span>
+                      )}
                       {isTopPick && (
                         <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
                           <Star className="w-2.5 h-2.5" /> Top Pick
+                        </span>
+                      )}
+                      {isSuperseded && (
+                        <span className="inline-flex items-center text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 bg-slate-200 text-slate-600">
+                          Superseded
                         </span>
                       )}
                     </div>

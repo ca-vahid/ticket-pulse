@@ -827,6 +827,16 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const PRIORITY_PILL = { 1: 'bg-slate-100 text-slate-600', 2: 'bg-yellow-100 text-yellow-800', 3: 'bg-orange-100 text-orange-800', 4: 'bg-red-100 text-red-800' };
 
   const ticketUrl = fsDomain && ticket?.freshserviceTicketId ? `https://${fsDomain}/a/tickets/${ticket.freshserviceTicketId}` : null;
+  const latestSyncedCorrection = Array.isArray(run.corrections)
+    ? run.corrections.find((correction) => correction.freshserviceSyncStatus === 'synced') || null
+    : null;
+  const currentAssignedTechId = ticket?.assignedTechId || latestSyncedCorrection?.toTechnicianId || run.assignedTechId || null;
+  const currentAssignedTechName = ticket?.assignedTech?.name || latestSyncedCorrection?.toTechnician?.name || run.assignedTech?.name || null;
+  const originalAssignedTechId = run.assignedTechId || null;
+  const originalAssignedTechName = run.assignedTech?.name || null;
+  const assignmentWasCorrected = currentAssignedTechId
+    && originalAssignedTechId
+    && Number(currentAssignedTechId) !== Number(originalAssignedTechId);
   const ticketStatusKey = String(ticket?.status || '').toLowerCase();
   const canReassign = isAdmin
     && (run.status === 'completed' || syncedAssignmentDecision)
@@ -908,6 +918,11 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
                 Reassign
               </button>
             )}
+            {assignmentWasCorrected && (
+              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                Reassigned
+              </span>
+            )}
             <span className={`px-3 py-1 rounded-full text-xs font-medium ${decisionBadge.style}`}>
               {decisionBadge.label}
             </span>
@@ -921,6 +936,24 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           onClose={() => setShowReassignModal(false)}
           onComplete={onSyncComplete}
         />
+      )}
+
+      {assignmentWasCorrected && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-2.5">
+          <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-green-800">
+              Current assignee: {currentAssignedTechName}
+            </p>
+            <p className="text-xs text-green-700 mt-1">
+              Originally routed to <span className="font-semibold">{originalAssignedTechName}</span>
+              {latestSyncedCorrection?.createdAt && <>; corrected at {formatDateTimeInTimezone(latestSyncedCorrection.createdAt, workspaceTimezone)}</>}.
+              {latestSyncedCorrection?.selectionSource === 'recommendation' && latestSyncedCorrection?.recommendationRank && (
+                <> The correction used LLM recommendation #{latestSyncedCorrection.recommendationRank}.</>
+              )}
+            </p>
+          </div>
+        </div>
       )}
 
       {/* Rebound / auto-fallback context strip — surfaces why this run exists.
@@ -1133,6 +1166,8 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           hideReasoning={!!run.recommendation?.overallReasoning}
           hideAgentBriefing
           decision={run.decision}
+          currentAssignedTechId={currentAssignedTechId}
+          originalAssignedTechId={originalAssignedTechId}
         />
       )}
 
@@ -1141,7 +1176,13 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         <div className="bg-gray-50 border rounded-lg p-3 text-sm">
           <p><span className="text-gray-500">Decided by:</span> {run.decidedByEmail}</p>
           <p><span className="text-gray-500">At:</span> {formatDateTimeInTimezone(run.decidedAt, workspaceTimezone)}</p>
-          {run.assignedTech && <p><span className="text-gray-500">Assigned to:</span> {run.assignedTech.name}</p>}
+          {run.assignedTech && <p><span className="text-gray-500">Original AI assignment:</span> {run.assignedTech.name}</p>}
+          {currentAssignedTechName && (
+            <p>
+              <span className="text-gray-500">Current assignee:</span>{' '}
+              <span className={assignmentWasCorrected ? 'font-semibold text-green-700' : ''}>{currentAssignedTechName}</span>
+            </p>
+          )}
           {run.overrideReason && <p><span className="text-gray-500">Override reason:</span> {run.overrideReason}</p>}
           {run.decisionNote && <p><span className="text-gray-500">Triage note:</span> {run.decisionNote}</p>}
         </div>
