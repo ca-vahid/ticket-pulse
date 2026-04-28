@@ -64,6 +64,13 @@ const PROFICIENCY_LEVELS = [
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const REVIEW_RECOMMENDATION_TABS = [
+  { key: 'prompt', label: 'Prompt', title: 'Prompt Recommendations', icon: FileText, tone: 'indigo', emptyText: 'No prompt changes recommended for this review.' },
+  { key: 'process', label: 'Process', title: 'Process Recommendations', icon: Settings2, tone: 'sky', emptyText: 'No process changes recommended for this review.' },
+  { key: 'taxonomy', label: 'Taxonomy', title: 'Taxonomy Recommendations', icon: Tags, tone: 'emerald', emptyText: 'No category taxonomy changes recommended for this review.' },
+  { key: 'skill', label: 'Agent Skills', title: 'Agent Skill Recommendations', icon: Award, tone: 'violet', emptyText: 'No agent skill changes recommended for this review.' },
+];
+
 function formatReviewRunDateLabel(run, workspaceTimezone) {
   if (!run) return '';
   const summaryWindow = run.summaryMetrics?.reviewWindow;
@@ -438,49 +445,335 @@ function ReviewHighlights({ summary, warnings, promptRecommendations, processRec
   );
 }
 
-function RecommendationSection({
-  title,
-  items,
-  icon: Icon,
-  emptyText,
+function getReviewRecommendationTone(tone, status) {
+  if (status === 'approved') {
+    return {
+      card: 'border-green-200 bg-green-50/70 shadow-green-100/70',
+      icon: 'bg-green-100 text-green-700',
+      accent: 'from-green-400 to-emerald-500',
+    };
+  }
+  if (status === 'rejected') {
+    return {
+      card: 'border-red-200 bg-red-50/70 shadow-red-100/70',
+      icon: 'bg-red-100 text-red-700',
+      accent: 'from-red-400 to-rose-500',
+    };
+  }
+  if (status === 'applied') {
+    return {
+      card: 'border-blue-200 bg-blue-50/70 shadow-blue-100/70',
+      icon: 'bg-blue-100 text-blue-700',
+      accent: 'from-blue-400 to-cyan-500',
+    };
+  }
+
+  const tones = {
+    indigo: {
+      card: 'border-indigo-100 bg-indigo-50/40 shadow-indigo-100/60',
+      icon: 'bg-indigo-100 text-indigo-700',
+      accent: 'from-indigo-400 to-blue-500',
+    },
+    sky: {
+      card: 'border-sky-100 bg-sky-50/40 shadow-sky-100/60',
+      icon: 'bg-sky-100 text-sky-700',
+      accent: 'from-sky-400 to-cyan-500',
+    },
+    emerald: {
+      card: 'border-emerald-100 bg-emerald-50/40 shadow-emerald-100/60',
+      icon: 'bg-emerald-100 text-emerald-700',
+      accent: 'from-emerald-400 to-teal-500',
+    },
+    violet: {
+      card: 'border-violet-100 bg-violet-50/40 shadow-violet-100/60',
+      icon: 'bg-violet-100 text-violet-700',
+      accent: 'from-violet-400 to-fuchsia-500',
+    },
+  };
+
+  return tones[tone] || tones.indigo;
+}
+
+function ReviewRecommendationCard({
+  item,
+  tab,
   workspaceTimezone,
   onRecommendationAction,
   savingRecommendationId,
-  showDate = false,
-  showRunMeta = false,
-  selectableIds = null,
-  selectedIds = [],
-  onToggleSelected,
-  compactCards = false,
 }) {
+  const [notes, setNotes] = useState(item.reviewNotes || '');
+  const [expanded, setExpanded] = useState(false);
+  const isSaving = savingRecommendationId === item.id;
+  const taxonomyProposal = getTaxonomyProposal(item);
+  const supportTicketIds = getSupportingTicketIds(item);
+  const tone = getReviewRecommendationTone(tab.tone, item.status);
+  const Icon = tab.icon;
+
+  useEffect(() => {
+    setNotes(item.reviewNotes || '');
+  }, [item.id, item.reviewNotes]);
+
+  const handleAction = (status) => {
+    onRecommendationAction?.(item.id, status, notes);
+  };
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <Icon className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
-      </div>
-      {Array.isArray(items) && items.length > 0 ? (
-        <div className="space-y-3">
-          {items.map((item) => (
-            <RecommendationCard
-              key={item.id || `${title}-${item.title}-${item.ordinal || 0}`}
-              item={item}
-              workspaceTimezone={workspaceTimezone}
-              onRecommendationAction={onRecommendationAction}
-              savingRecommendationId={savingRecommendationId}
-              showDate={showDate}
-              showRunMeta={showRunMeta}
-              selectable={Array.isArray(selectableIds) ? selectableIds.includes(item.id) : false}
-              selected={selectedIds.includes(item.id)}
-              onToggleSelected={onToggleSelected}
-              compact={compactCards}
-            />
-          ))}
+    <article
+      className={`group relative overflow-hidden rounded-xl border p-4 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-md ${tone.card} ${
+        isSaving ? 'scale-[0.99] opacity-80' : ''
+      }`}
+    >
+      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${tone.accent}`} />
+      <div className="flex flex-col gap-4">
+        <div className="flex items-start gap-3">
+          <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tone.icon}`}>
+            <Icon className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                item.severity === 'high'
+                  ? 'bg-red-100 text-red-700'
+                  : item.severity === 'medium'
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-blue-100 text-blue-700'
+              }`}>
+                {item.severity || 'low'}
+              </span>
+              <RecommendationStatusBadge status={item.status} />
+              {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
+                <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  {supportTicketIds.length} ticket{supportTicketIds.length === 1 ? '' : 's'}
+                </span>
+              )}
+            </div>
+            <h4 className="text-base font-semibold leading-snug text-slate-900">{item.title}</h4>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{item.rationale || 'No recommendation rationale provided.'}</p>
+          </div>
         </div>
-      ) : (
-        <div className="text-sm text-slate-400">{emptyText}</div>
-      )}
-    </div>
+
+        {taxonomyProposal && (
+          <div className="rounded-lg border border-emerald-100 bg-white/70 px-3 py-2">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
+              <Tags className="h-3.5 w-3.5" />
+              Taxonomy proposal
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                {taxonomyProposal.action}
+              </span>
+              {taxonomyProposal.parentCategoryName && (
+                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  Parent: {taxonomyProposal.parentCategoryName}
+                </span>
+              )}
+              {taxonomyProposal.categoryName && (
+                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  Target: {taxonomyProposal.categoryName}
+                </span>
+              )}
+              {taxonomyProposal.newName && (
+                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  New: {taxonomyProposal.newName}
+                </span>
+              )}
+              {taxonomyProposal.categoryFit && (
+                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  Category {taxonomyProposal.categoryFit}
+                </span>
+              )}
+              {taxonomyProposal.subcategoryFit && (
+                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  Subcategory {taxonomyProposal.subcategoryFit}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-lg border border-white/70 bg-white/75 p-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Recommendation</div>
+          <div className="text-sm leading-6 text-slate-700">{item.suggestedAction || 'No suggested action provided.'}</div>
+          {Array.isArray(item.skillsAffected) && item.skillsAffected.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {item.skillsAffected.map((skill) => (
+                <span key={skill} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                  {skill}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <SmoothCollapse open={expanded}>
+          <div className="space-y-2 rounded-lg border border-white/70 bg-white/70 p-3 text-xs text-slate-600">
+            {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
+              <div>
+                <span className="font-semibold text-slate-700">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
+              </div>
+            )}
+            {item.reviewedBy && (
+              <div>
+                <span className="font-semibold text-slate-700">Reviewed:</span> {item.reviewedBy}
+                {item.reviewedAt ? ` on ${formatDateTimeInTimezone(item.reviewedAt, workspaceTimezone)}` : ''}
+              </div>
+            )}
+            {item.appliedBy && (
+              <div>
+                <span className="font-semibold text-slate-700">Applied:</span> {item.appliedBy}
+                {item.appliedAt ? ` on ${formatDateTimeInTimezone(item.appliedAt, workspaceTimezone)}` : ''}
+              </div>
+            )}
+          </div>
+        </SmoothCollapse>
+
+        <div className="grid gap-3 border-t border-white/70 pt-3 md:grid-cols-[1fr_auto] md:items-end">
+          <textarea
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Optional review note"
+            className="min-h-[44px] resize-y rounded-lg border border-white bg-white/90 px-3 py-2 text-xs text-slate-700 shadow-sm outline-none transition focus:border-indigo-200 focus:ring-2 focus:ring-indigo-100"
+          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+            >
+              {expanded ? 'Less' : 'Details'}
+            </button>
+            {item.status !== 'approved' && item.status !== 'applied' && (
+              <button
+                type="button"
+                onClick={() => handleAction('approved')}
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                Approve
+              </button>
+            )}
+            {item.status !== 'rejected' && item.status !== 'applied' && (
+              <button
+                type="button"
+                onClick={() => handleAction('rejected')}
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <XCircle className="h-3.5 w-3.5" />
+                Decline
+              </button>
+            )}
+            {item.status === 'approved' && (
+              <button
+                type="button"
+                onClick={() => handleAction('applied')}
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-600 shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <CheckCircle className="h-3.5 w-3.5" />
+                Mark Applied
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function RunRecommendationsPanel({
+  sections,
+  workspaceTimezone,
+  onRecommendationAction,
+  savingRecommendationId,
+}) {
+  const firstPopulated = sections.find((section) => section.items.length > 0)?.key || sections[0]?.key || 'prompt';
+  const [activeKey, setActiveKey] = useState(firstPopulated);
+
+  useEffect(() => {
+    if (!sections.some((section) => section.key === activeKey)) {
+      setActiveKey(firstPopulated);
+    }
+  }, [activeKey, firstPopulated, sections]);
+
+  const activeSection = sections.find((section) => section.key === activeKey) || sections[0];
+  const ActiveIcon = activeSection.icon;
+  const total = sections.reduce((sum, section) => sum + section.items.length, 0);
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 bg-slate-50/80 p-3 sm:p-4">
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Recommendation Approval</h3>
+            <p className="text-sm text-slate-500">Review one bucket at a time, then approve or decline each item.</p>
+          </div>
+          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm">
+            {total} item{total === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1 md:grid-cols-4">
+          {sections.map((section) => {
+            const Icon = section.icon;
+            const active = section.key === activeKey;
+            return (
+              <button
+                key={section.key}
+                type="button"
+                onClick={() => setActiveKey(section.key)}
+                className={`flex min-h-[42px] items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-200 ${
+                  active
+                    ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                }`}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span>{section.label}</span>
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                  active ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {section.items.length}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="p-3 sm:p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${getReviewRecommendationTone(activeSection.tone).icon}`}>
+              <ActiveIcon className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-slate-900">{activeSection.title}</div>
+              <div className="text-xs text-slate-500">{activeSection.items.length} queued for review</div>
+            </div>
+          </div>
+        </div>
+
+        {activeSection.items.length > 0 ? (
+          <div className="grid gap-3 xl:grid-cols-2">
+            {activeSection.items.map((item) => (
+              <ReviewRecommendationCard
+                key={item.id || `${activeSection.key}-${item.title}-${item.ordinal || 0}`}
+                item={item}
+                tab={activeSection}
+                workspaceTimezone={workspaceTimezone}
+                onRecommendationAction={onRecommendationAction}
+                savingRecommendationId={savingRecommendationId}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+            {activeSection.emptyText}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -2557,6 +2850,16 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
   const executiveSummary = summary.executiveSummary || '';
   const summaryIsLong = executiveSummary.length > 320;
   const visibleWarnings = warnings.slice(0, 4);
+  const recommendationSections = REVIEW_RECOMMENDATION_TABS.map((tab) => ({
+    ...tab,
+    items: tab.key === 'prompt'
+      ? promptRecommendations
+      : tab.key === 'process'
+        ? processRecommendations
+        : tab.key === 'taxonomy'
+          ? taxonomyRecommendations
+          : skillRecommendations,
+  }));
 
   return (
     <div className="space-y-4">
@@ -2657,48 +2960,12 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
 
       <MeetingBriefingSection run={run} workspaceTimezone={workspaceTimezone} />
 
-      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-        <RecommendationSection
-          title="Prompt Recommendations"
-          items={promptRecommendations}
-          icon={FileText}
-          emptyText="No prompt changes recommended for this review."
-          workspaceTimezone={workspaceTimezone}
-          onRecommendationAction={onRecommendationAction}
-          savingRecommendationId={savingRecommendationId}
-          compactCards
-        />
-        <RecommendationSection
-          title="Process Recommendations"
-          items={processRecommendations}
-          icon={Settings2}
-          emptyText="No process changes recommended for this review."
-          workspaceTimezone={workspaceTimezone}
-          onRecommendationAction={onRecommendationAction}
-          savingRecommendationId={savingRecommendationId}
-          compactCards
-        />
-        <RecommendationSection
-          title="Taxonomy Recommendations"
-          items={taxonomyRecommendations}
-          icon={Tags}
-          emptyText="No category taxonomy changes recommended for this review."
-          workspaceTimezone={workspaceTimezone}
-          onRecommendationAction={onRecommendationAction}
-          savingRecommendationId={savingRecommendationId}
-          compactCards
-        />
-        <RecommendationSection
-          title="Agent Skill Recommendations"
-          items={skillRecommendations}
-          icon={Award}
-          emptyText="No agent skill changes recommended for this review."
-          workspaceTimezone={workspaceTimezone}
-          onRecommendationAction={onRecommendationAction}
-          savingRecommendationId={savingRecommendationId}
-          compactCards
-        />
-      </div>
+      <RunRecommendationsPanel
+        sections={recommendationSections}
+        workspaceTimezone={workspaceTimezone}
+        onRecommendationAction={onRecommendationAction}
+        savingRecommendationId={savingRecommendationId}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -3567,6 +3834,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         ...prev,
         promptRecommendations: updateList(prev.promptRecommendations),
         processRecommendations: updateList(prev.processRecommendations),
+        taxonomyRecommendations: updateList(prev.taxonomyRecommendations),
         skillRecommendations: updateList(prev.skillRecommendations),
       };
     });
