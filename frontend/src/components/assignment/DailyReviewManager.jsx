@@ -3045,6 +3045,7 @@ function CollectionDiagnosticsSection({ summary }) {
 
 function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecommendationId }) {
   const [summaryExpanded, setSummaryExpanded] = useState(false);
+  const [detailSection, setDetailSection] = useState('recommendations');
   const summary = run.summaryMetrics || {};
   const totals = summary.totals || {};
   const rates = summary.rates || {};
@@ -3058,6 +3059,18 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
   const executiveSummary = summary.executiveSummary || '';
   const summaryIsLong = executiveSummary.length > 320;
   const visibleWarnings = warnings.slice(0, 4);
+  const recommendationTotal = promptRecommendations.length
+    + processRecommendations.length
+    + taxonomyRecommendations.length
+    + skillRecommendations.length;
+  const patternTotal = (summary.topCategories?.length || 0) + (summary.topTechnicians?.length || 0);
+  const detailTabs = [
+    { key: 'recommendations', label: 'Recommendations', icon: Sparkles, count: recommendationTotal },
+    { key: 'cases', label: 'Key Cases', icon: Eye, count: cases.length },
+    { key: 'briefing', label: 'Briefing', icon: MessageCircle, count: run.meetingBriefing ? 1 : 0 },
+    { key: 'diagnostics', label: 'Diagnostics', icon: AlertTriangle, count: summary.collectionDiagnostics ? 1 : 0 },
+    { key: 'patterns', label: 'Patterns', icon: TrendingUp, count: patternTotal },
+  ];
   const recommendationSections = REVIEW_RECOMMENDATION_TABS.map((tab) => ({
     ...tab,
     items: tab.key === 'prompt'
@@ -3164,51 +3177,94 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
         </div>
       )}
 
-      <CollectionDiagnosticsSection summary={summary} />
-
-      <MeetingBriefingSection run={run} workspaceTimezone={workspaceTimezone} />
-
-      <RunRecommendationsPanel
-        sections={recommendationSections}
-        workspaceTimezone={workspaceTimezone}
-        onRecommendationAction={onRecommendationAction}
-        savingRecommendationId={savingRecommendationId}
-      />
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-slate-800 mb-3">Top Categories</h3>
-          {summary.topCategories?.length ? (
-            <div className="space-y-2">
-              {summary.topCategories.map((item) => (
-                <div key={item.name} className="flex items-center justify-between text-sm">
-                  <span className="text-slate-700">{item.name}</span>
-                  <span className="font-semibold text-slate-900">{item.count}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-sm text-slate-400">No category mismatches detected.</div>
-          )}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 bg-slate-50/80 p-2">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+            {detailTabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = detailSection === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setDetailSection(tab.key)}
+                  className={`flex min-h-[44px] items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-200 ${
+                    active
+                      ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                      : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
+                  }`}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span>{tab.label}</span>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                    active ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
+                  }`}>
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-slate-800 mb-3">Top Technicians Involved</h3>
-          {summary.topTechnicians?.length ? (
-            <div className="space-y-2">
-              {summary.topTechnicians.map((item) => (
-                <div key={item.name} className="flex items-center justify-between text-sm">
-                  <span className="text-slate-700">{item.name}</span>
-                  <span className="font-semibold text-slate-900">{item.count}</span>
-                </div>
-              ))}
+
+        <div className="p-3 sm:p-4">
+          {detailSection === 'recommendations' && (
+            <RunRecommendationsPanel
+              sections={recommendationSections}
+              workspaceTimezone={workspaceTimezone}
+              onRecommendationAction={onRecommendationAction}
+              savingRecommendationId={savingRecommendationId}
+            />
+          )}
+
+          {detailSection === 'cases' && (
+            <CasesTable cases={cases} workspaceTimezone={workspaceTimezone} />
+          )}
+
+          {detailSection === 'briefing' && (
+            <MeetingBriefingSection run={run} workspaceTimezone={workspaceTimezone} />
+          )}
+
+          {detailSection === 'diagnostics' && (
+            <CollectionDiagnosticsSection summary={summary} />
+          )}
+
+          {detailSection === 'patterns' && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">Top Categories</h3>
+                {summary.topCategories?.length ? (
+                  <div className="space-y-2">
+                    {summary.topCategories.map((item) => (
+                      <div key={item.name} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-700">{item.name}</span>
+                        <span className="font-semibold text-slate-900">{item.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-400">No category mismatches detected.</div>
+                )}
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">Top Technicians Involved</h3>
+                {summary.topTechnicians?.length ? (
+                  <div className="space-y-2">
+                    {summary.topTechnicians.map((item) => (
+                      <div key={item.name} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-700">{item.name}</span>
+                        <span className="font-semibold text-slate-900">{item.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-400">No technician mismatch clusters detected.</div>
+                )}
+              </div>
             </div>
-          ) : (
-            <div className="text-sm text-slate-400">No technician mismatch clusters detected.</div>
           )}
         </div>
       </div>
-
-      <CasesTable cases={cases} workspaceTimezone={workspaceTimezone} />
     </div>
   );
 }
