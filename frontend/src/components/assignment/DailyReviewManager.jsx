@@ -682,6 +682,199 @@ function ReviewRecommendationCard({
   );
 }
 
+function getTaxonomyActionInfo(action) {
+  const normalized = String(action || 'review').toLowerCase();
+  if (normalized.includes('remove') || normalized.includes('delete')) {
+    return {
+      label: 'Remove',
+      className: 'bg-red-100 text-red-700 border-red-200',
+    };
+  }
+  if (normalized.includes('update') || normalized.includes('rename') || normalized.includes('cleanup')) {
+    return {
+      label: 'Update',
+      className: 'bg-blue-100 text-blue-700 border-blue-200',
+    };
+  }
+  if (normalized.includes('add') || normalized.includes('create')) {
+    return {
+      label: 'Add',
+      className: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    };
+  }
+  return {
+    label: 'Review',
+    className: 'bg-slate-100 text-slate-700 border-slate-200',
+  };
+}
+
+function getTaxonomyTableRow(item) {
+  const proposal = getTaxonomyProposal(item) || {};
+  const action = proposal.action || item.taxonomyAction || 'review';
+  const category = proposal.parentCategoryName || proposal.categoryName || item.categoryName || proposal.newName || 'Unspecified';
+  const subcategory = proposal.parentCategoryName
+    ? proposal.newName || proposal.categoryName || item.newName || '-'
+    : proposal.newName && proposal.newName !== category
+      ? proposal.newName
+      : item.subcategoryName || '-';
+
+  return {
+    action,
+    category,
+    subcategory,
+    explanation: item.rationale || item.suggestedAction || 'No explanation provided.',
+    recommendation: item.suggestedAction || '',
+    supportTicketIds: getSupportingTicketIds(item),
+  };
+}
+
+function TaxonomyRecommendationsTable({
+  items,
+  onRecommendationAction,
+  savingRecommendationId,
+}) {
+  const [notesById, setNotesById] = useState({});
+
+  const updateNotes = (id, value) => {
+    setNotesById((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const handleAction = (item, status) => {
+    onRecommendationAction?.(item.id, status, notesById[item.id] ?? item.reviewNotes ?? '');
+  };
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-emerald-100 bg-white shadow-sm">
+      <div className="border-b border-emerald-100 bg-emerald-50/70 px-4 py-3">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-emerald-950">Taxonomy Change List</div>
+            <div className="text-xs text-emerald-700">Each row is one category or subcategory change proposed by the review.</div>
+          </div>
+          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 shadow-sm">
+            {items.length} proposed
+          </span>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[1120px] table-fixed divide-y divide-slate-100">
+          <colgroup>
+            <col className="w-[120px]" />
+            <col className="w-[210px]" />
+            <col className="w-[230px]" />
+            <col />
+            <col className="w-[230px]" />
+          </colgroup>
+          <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-3">Action</th>
+              <th className="px-4 py-3">Category</th>
+              <th className="px-4 py-3">Subcategory</th>
+              <th className="px-4 py-3">Explanation</th>
+              <th className="px-4 py-3">Decision</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {items.map((item) => {
+              const row = getTaxonomyTableRow(item);
+              const actionInfo = getTaxonomyActionInfo(row.action);
+              const isSaving = savingRecommendationId === item.id;
+              const supportCount = Array.isArray(row.supportTicketIds) ? row.supportTicketIds.length : 0;
+              const rowStateClass = item.status === 'approved'
+                ? 'bg-green-50/60'
+                : item.status === 'rejected'
+                  ? 'bg-red-50/60'
+                  : item.status === 'applied'
+                    ? 'bg-blue-50/60'
+                    : 'hover:bg-emerald-50/35';
+
+              return (
+                <tr key={item.id || `${item.title}-${item.ordinal || 0}`} className={`align-top transition-colors duration-200 ${rowStateClass}`}>
+                  <td className="px-4 py-4">
+                    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${actionInfo.className}`}>
+                      {actionInfo.label}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="text-sm font-semibold leading-5 text-slate-900">{row.category}</div>
+                    {supportCount > 0 && (
+                      <div className="mt-1 text-[11px] font-medium text-slate-400">
+                        {supportCount} ticket{supportCount === 1 ? '' : 's'}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className={`text-sm leading-5 ${row.subcategory === '-' ? 'text-slate-400' : 'font-semibold text-slate-800'}`}>
+                      {row.subcategory}
+                    </div>
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="max-w-3xl text-sm leading-6 text-slate-700">{row.explanation}</div>
+                    {row.recommendation && row.recommendation !== row.explanation && (
+                      <div className="mt-2 rounded-lg border border-slate-100 bg-white/80 px-3 py-2 text-xs leading-5 text-slate-500">
+                        {row.recommendation}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <RecommendationStatusBadge status={item.status} />
+                        {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
+                      </div>
+                      <textarea
+                        value={notesById[item.id] ?? item.reviewNotes ?? ''}
+                        onChange={(event) => updateNotes(item.id, event.target.value)}
+                        placeholder="Note"
+                        className="min-h-[38px] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        {item.status !== 'approved' && item.status !== 'applied' && (
+                          <button
+                            type="button"
+                            onClick={() => handleAction(item, 'approved')}
+                            disabled={isSaving}
+                            className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            Approve
+                          </button>
+                        )}
+                        {item.status !== 'rejected' && item.status !== 'applied' && (
+                          <button
+                            type="button"
+                            onClick={() => handleAction(item, 'rejected')}
+                            disabled={isSaving}
+                            className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                            Decline
+                          </button>
+                        )}
+                        {item.status === 'approved' && (
+                          <button
+                            type="button"
+                            onClick={() => handleAction(item, 'applied')}
+                            disabled={isSaving}
+                            className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            Applied
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function RunRecommendationsPanel({
   sections,
   workspaceTimezone,
@@ -754,7 +947,13 @@ function RunRecommendationsPanel({
           </div>
         </div>
 
-        {activeSection.items.length > 0 ? (
+        {activeSection.items.length > 0 && activeSection.key === 'taxonomy' ? (
+          <TaxonomyRecommendationsTable
+            items={activeSection.items}
+            onRecommendationAction={onRecommendationAction}
+            savingRecommendationId={savingRecommendationId}
+          />
+        ) : activeSection.items.length > 0 ? (
           <div className="grid gap-3 xl:grid-cols-2">
             {activeSection.items.map((item) => (
               <ReviewRecommendationCard
