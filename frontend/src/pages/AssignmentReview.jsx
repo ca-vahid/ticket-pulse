@@ -1188,6 +1188,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   // though they currently share one source of truth.
   const queuePageSize = pageSize;
   const resultsPageSize = pageSize;
+  // Decided/All merge multiple backend result sets and then apply client-side
+  // source/dedupe/different-agent logic. Fetch a broad window once per filter
+  // state so the paged UI is not capped by "pageSize * currentPage".
+  const NON_PENDING_FETCH_LIMIT = 5000;
   const queuedSectionRef = useRef(null);
   const [queuedExpanded, setQueuedExpanded] = useState(false);
 
@@ -1271,14 +1275,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         search: searchQuery.trim() || undefined,
       };
 
-      const aggregatedResultsLimit = resultsPageSize * (resultsPage + 1);
       const queueLimit = subView === 'pending'
         ? queuePageSize
-        : subView === 'all'
-          ? aggregatedResultsLimit
-          : 1;
+        : 1;
       const queueOffset = subView === 'pending' ? queuePage * queuePageSize : 0;
-      const nonPendingLimit = subView === 'pending' ? 1 : aggregatedResultsLimit;
+      const nonPendingLimit = subView === 'pending' ? 1 : NON_PENDING_FETCH_LIMIT;
 
       // Decided tab decisions: empty selection means "every decision valid for
       // this tab" (auto + approved + modified). When the user picks specific
