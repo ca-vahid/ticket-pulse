@@ -231,6 +231,11 @@ class TicketRepository {
         noiseRuleMatched: data.noiseRuleMatched ?? undefined,
         groupId: data.groupId !== undefined ? data.groupId : undefined,
         rejectionCount: data.rejectionCount !== undefined ? data.rejectionCount : undefined,
+        freshserviceUpdatedAt: data.freshserviceUpdatedAt || undefined,
+        activitiesSyncedAt: data.activitiesSyncedAt || undefined,
+        activitiesSyncFreshserviceUpdatedAt: data.activitiesSyncFreshserviceUpdatedAt || undefined,
+        activitiesSyncError: data.activitiesSyncError !== undefined ? data.activitiesSyncError : undefined,
+        activitiesSyncErrorAt: data.activitiesSyncErrorAt !== undefined ? data.activitiesSyncErrorAt : undefined,
         updatedAt: new Date(),
       };
 
@@ -270,6 +275,11 @@ class TicketRepository {
         noiseRuleMatched: data.noiseRuleMatched || null,
         groupId: data.groupId || null,
         rejectionCount: data.rejectionCount || 0,
+        freshserviceUpdatedAt: data.freshserviceUpdatedAt || null,
+        activitiesSyncedAt: data.activitiesSyncedAt || null,
+        activitiesSyncFreshserviceUpdatedAt: data.activitiesSyncFreshserviceUpdatedAt || null,
+        activitiesSyncError: data.activitiesSyncError || null,
+        activitiesSyncErrorAt: data.activitiesSyncErrorAt || null,
         workspaceId: data.workspaceId || 1,
       };
 

@@ -67,6 +67,7 @@ export function transformTicket(fsTicket, { categoryCustomField = 'security' } =
       dueBy: fsTicket.due_by ? new Date(fsTicket.due_by) : null,
       frDueBy: fsTicket.fr_due_by ? new Date(fsTicket.fr_due_by) : null,
       updatedAt: fsTicket.updated_at ? new Date(fsTicket.updated_at) : new Date(),
+      freshserviceUpdatedAt: fsTicket.updated_at ? new Date(fsTicket.updated_at) : null,
       source: fsTicket.source || null,
       category: fsTicket.category || null,
       subCategory: fsTicket.sub_category || null,

@@ -22,6 +22,7 @@ import assignmentRepository from './assignmentRepository.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
 import freshServiceActionService from './freshServiceActionService.js';
 import { shouldTriggerAssignmentForLatestRun } from './assignmentFlowGuards.js';
+import { getActivityRefreshReason } from './activitySyncFreshness.js';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
@@ -795,17 +796,26 @@ class SyncService {
 
     const processOne = async (ticket) => {
       const ticketId = ticket.id || ticket.freshserviceTicketId;
+      const freshserviceUpdatedAt = ticket.updated_at
+        ? new Date(ticket.updated_at)
+        : (ticket.freshserviceUpdatedAt || null);
       try {
         const activities = await client.fetchTicketActivities(Number(ticketId));
-        if (activities && activities.length > 0) {
-          const analysis = analyzeTicketActivities(activities);
-          analysisMap.set(ticketId.toString(), { analysis, activities });
-          processedCount++;
-        } else {
-          processedCount++;
-        }
+        const analysis = analyzeTicketActivities(Array.isArray(activities) ? activities : []);
+        analysisMap.set(ticketId.toString(), {
+          analysis,
+          activities: Array.isArray(activities) ? activities : [],
+          activityFetchSucceeded: true,
+          freshserviceUpdatedAt,
+        });
+        processedCount++;
       } catch (error) {
         errorCount++;
+        analysisMap.set(ticketId.toString(), {
+          activityFetchSucceeded: false,
+          freshserviceUpdatedAt,
+          errorMessage: error.message || String(error),
+        });
         if (!String(error).includes('500')) {
           logger.warn(`Failed to analyze ticket ${ticketId}: ${error.message || error}`);
         }
@@ -861,19 +871,30 @@ class SyncService {
       try {
         const analysis = payload?.analysis || payload;
         const activities = payload?.activities || null;
+        const activityFetchSucceeded = payload?.activityFetchSucceeded !== false;
+        const freshserviceUpdatedAt = payload?.freshserviceUpdatedAt || null;
+        const syncFinishedAt = new Date();
         const updated = await prisma.ticket.update({
           where: { freshserviceTicketId: BigInt(ticketId) },
           data: {
-            firstAssignedAt: analysis.firstAssignedAt,
+            firstAssignedAt: activityFetchSucceeded ? analysis.firstAssignedAt : undefined,
             // Prefer currentIsSelfPicked (new semantic) over legacy isSelfPicked
-            isSelfPicked: analysis.currentIsSelfPicked ?? analysis.isSelfPicked ?? false,
-            assignedBy: analysis.assignedBy,
-            firstPublicAgentReplyAt: analysis.firstPublicAgentReplyAt || undefined,
-            rejectionCount: analysis.rejectionCount || 0,
+            isSelfPicked: activityFetchSucceeded
+              ? (analysis.currentIsSelfPicked ?? analysis.isSelfPicked ?? false)
+              : undefined,
+            assignedBy: activityFetchSucceeded ? analysis.assignedBy : undefined,
+            firstPublicAgentReplyAt: activityFetchSucceeded ? (analysis.firstPublicAgentReplyAt || undefined) : undefined,
+            rejectionCount: activityFetchSucceeded ? (analysis.rejectionCount || 0) : undefined,
+            activitiesSyncedAt: activityFetchSucceeded ? syncFinishedAt : undefined,
+            activitiesSyncFreshserviceUpdatedAt: activityFetchSucceeded ? freshserviceUpdatedAt : undefined,
+            activitiesSyncError: activityFetchSucceeded ? null : (payload?.errorMessage || 'FreshService activity fetch failed'),
+            activitiesSyncErrorAt: activityFetchSucceeded ? null : syncFinishedAt,
           },
           select: { id: true, workspaceId: true },
         });
         updatedCount++;
+
+        if (!activityFetchSucceeded) continue;
 
         // Reconcile episodes + write event activities (if we have tech map)
         if (techNameMap && analysis.episodes?.length) {
@@ -1102,6 +1123,34 @@ class SyncService {
       );
       logger.info(`Found ${existingTicketsMap.size} existing tickets out of ${ticketIds.length}`);
 
+      const preparedTicketMap = new Map(
+        ticketsWithTechIds.map(t => [t.freshserviceTicketId.toString(), t]),
+      );
+      const activeEpisodeMap = new Map();
+      if (existingTicketsArray.length > 0) {
+        const activeEpisodes = await prisma.ticketAssignmentEpisode.findMany({
+          where: {
+            ticketId: { in: existingTicketsArray.map(t => t.id) },
+            endedAt: null,
+            OR: [
+              { endMethod: 'still_active' },
+              { endMethod: null },
+            ],
+          },
+          select: {
+            ticketId: true,
+            technicianId: true,
+            startedAt: true,
+          },
+          orderBy: { startedAt: 'desc' },
+        });
+        for (const episode of activeEpisodes) {
+          if (!activeEpisodeMap.has(episode.ticketId)) {
+            activeEpisodeMap.set(episode.ticketId, episode);
+          }
+        }
+      }
+
       // Step 5: Use _analyzeTicketActivities() with broadened filter
       // Fetch activities when: new ticket, assignment data incomplete,
       // FS updated_at newer than our record, or ticket has an active pipeline run.
@@ -1116,25 +1165,21 @@ class SyncService {
         }
       } catch { /* non-fatal */ }
 
+      const activityRefreshReasons = new Map();
       const ticketFilter = (fsTicket) => {
         const existingTicket = existingTicketsMap.get(fsTicket.id.toString());
-        if (!existingTicket) return true;
-
-        const hasAssignedTech = fsTicket.responder_id !== null && fsTicket.responder_id !== undefined;
-
-        // Missing episodes or assignment data
-        if (hasAssignedTech && (!existingTicket.assignedBy || !existingTicket.firstAssignedAt)) return true;
-
-        // FS updated since our last record
-        if (fsTicket.updated_at) {
-          const fsUpdated = new Date(fsTicket.updated_at).getTime();
-          const ourUpdated = existingTicket.updatedAt ? new Date(existingTicket.updatedAt).getTime() : 0;
-          if (fsUpdated > ourUpdated) return true;
+        const preparedTicket = preparedTicketMap.get(fsTicket.id.toString()) || null;
+        const reason = getActivityRefreshReason({
+          fsTicket,
+          preparedTicket,
+          existingTicket,
+          activeEpisode: existingTicket ? activeEpisodeMap.get(existingTicket.id) : null,
+          hasActiveRun: ticketsWithActiveRuns.has(fsTicket.id.toString()),
+        });
+        if (reason) {
+          activityRefreshReasons.set(fsTicket.id.toString(), reason);
+          return true;
         }
-
-        // Has an active pipeline run
-        if (ticketsWithActiveRuns.has(fsTicket.id.toString())) return true;
-
         return false;
       };
 
@@ -1142,7 +1187,10 @@ class SyncService {
         ticketFilter,
       });
 
-      logger.info(`Analyzed ${activityAnalysisMap.size} tickets for activity data`);
+      logger.info(`Analyzed ${activityAnalysisMap.size} tickets for activity data`, {
+        refreshReasons: [...activityRefreshReasons.entries()].slice(0, 50),
+        refreshReasonCount: activityRefreshReasons.size,
+      });
 
       // Build tech name→id map for episode reconciliation
       const allTechs = await technicianRepository.getAll(options.workspaceId, { lite: true });
@@ -1193,6 +1241,8 @@ class SyncService {
           const analyzedPayload = activityAnalysisMap.get(ticket.freshserviceTicketId.toString());
           const analysis = analyzedPayload?.analysis || null;
           const activities = analyzedPayload?.activities || null;
+          const activityFetchSucceeded = analyzedPayload?.activityFetchSucceeded === true;
+          const activityFetchFailed = analyzedPayload?.activityFetchSucceeded === false;
           if (analysis) {
             isSelfPicked = analysis.currentIsSelfPicked;
             assignedBy = analysis.assignedBy;
@@ -1210,6 +1260,7 @@ class SyncService {
             isNoise,
             noiseRuleMatched: ruleId,
             ticketCategory: ticket.ticketCategory || normalizedNoiseCategory,
+            freshserviceUpdatedAt: ticket.freshserviceUpdatedAt || null,
             isSelfPicked,
             assignedBy,
             firstAssignedAt,
@@ -1262,6 +1313,25 @@ class SyncService {
           }
           if (activities && activities.length > 0) {
             await this._writeThreadEntries(upsertedTicket.id, ticketWorkspaceId, activities);
+          }
+
+          if (activityFetchSucceeded || activityFetchFailed) {
+            const activitySyncFinishedAt = new Date();
+            const activitySyncData = activityFetchSucceeded
+              ? {
+                activitiesSyncedAt: activitySyncFinishedAt,
+                activitiesSyncFreshserviceUpdatedAt: analyzedPayload.freshserviceUpdatedAt || ticket.freshserviceUpdatedAt || null,
+                activitiesSyncError: null,
+                activitiesSyncErrorAt: null,
+              }
+              : {
+                activitiesSyncError: analyzedPayload.errorMessage || 'FreshService activity fetch failed',
+                activitiesSyncErrorAt: activitySyncFinishedAt,
+              };
+            await prisma.ticket.update({
+              where: { id: upsertedTicket.id },
+              data: activitySyncData,
+            });
           }
 
           // --- Bounce detection: ticket was assigned then unassigned ---
@@ -1428,6 +1498,7 @@ class SyncService {
           isNoise,
           noiseRuleMatched: ruleId,
           ticketCategory: ticket.ticketCategory || normalizedNoiseCategory,
+          freshserviceUpdatedAt: ticket.freshserviceUpdatedAt || null,
           isSelfPicked: existingTicket?.isSelfPicked || false,
           assignedBy: existingTicket?.assignedBy || null,
           firstAssignedAt: existingTicket?.firstAssignedAt || null,

@@ -158,6 +158,11 @@ model Ticket {
   dueBy                 DateTime? @map("due_by")
   frDueBy               DateTime? @map("fr_due_by") // First response due by
   updatedAt             DateTime  @updatedAt @map("updated_at")
+  freshserviceUpdatedAt DateTime? @map("freshservice_updated_at")
+  activitiesSyncedAt    DateTime? @map("activities_synced_at")
+  activitiesSyncFreshserviceUpdatedAt DateTime? @map("activities_sync_freshservice_updated_at")
+  activitiesSyncError   String?   @db.Text @map("activities_sync_error")
+  activitiesSyncErrorAt DateTime? @map("activities_sync_error_at")
 
   // Assignment tracking
   isSelfPicked          Boolean   @default(false) @map("is_self_picked")
@@ -233,6 +238,8 @@ model Ticket {
   @@index([firstPublicAgentReplyAt])
   @@index([firstAssignedAt])
   @@index([isNoise])
+  @@index([freshserviceUpdatedAt])
+  @@index([activitiesSyncFreshserviceUpdatedAt])
   @@index([internalCategoryId])
   @@index([internalSubcategoryId])
   @@index([taxonomyReviewNeeded])
