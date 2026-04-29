@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { assignmentAPI } from '../../services/api';
 import { formatDateLocal, formatDateOnlyInTimezone, formatDateTimeInTimezone } from '../../utils/dateHelpers';
@@ -728,6 +728,31 @@ function getTaxonomyTableRow(item) {
   };
 }
 
+function TaxonomyContextPopover({ label, icon: Icon, title, children, tone = 'slate' }) {
+  const tones = {
+    slate: 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+    indigo: 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100',
+  };
+
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        className={`inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-[11px] font-semibold transition ${tones[tone] || tones.slate}`}
+        aria-label={title}
+      >
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </button>
+      <span className="pointer-events-none absolute left-0 top-8 z-30 w-[360px] rounded-xl border border-slate-200 bg-white p-3 text-left text-xs leading-5 text-slate-700 opacity-0 shadow-xl ring-1 ring-slate-900/5 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</span>
+        {children}
+      </span>
+    </span>
+  );
+}
+
 function TaxonomyRecommendationsTable({
   items,
   onRecommendationAction,
@@ -757,12 +782,12 @@ function TaxonomyRecommendationsTable({
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[980px] table-fixed">
+        <table className="min-w-[980px] table-fixed divide-y divide-slate-100">
           <colgroup>
             <col className="w-[120px]" />
-            <col className="w-[260px]" />
-            <col className="w-[280px]" />
-            <col />
+            <col className="w-[300px]" />
+            <col className="w-[370px]" />
+            <col className="w-[360px]" />
           </colgroup>
           <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
             <tr>
@@ -787,94 +812,81 @@ function TaxonomyRecommendationsTable({
                     : 'hover:bg-emerald-50/35';
 
               return (
-                <Fragment key={item.id || `${item.title}-${item.ordinal || 0}`}>
-                  <tr className={`align-top transition-colors duration-200 ${rowStateClass}`}>
-                    <td className="border-t border-slate-100 px-4 pt-4 pb-2">
-                      <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${actionInfo.className}`}>
-                        {actionInfo.label}
-                      </span>
-                    </td>
-                    <td className="border-t border-slate-100 px-4 pt-4 pb-2">
-                      <div className="text-sm font-semibold leading-5 text-slate-900">{row.category}</div>
-                      {supportCount > 0 && (
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">
-                          {supportCount} ticket{supportCount === 1 ? '' : 's'}
-                        </div>
-                      )}
-                    </td>
-                    <td className="border-t border-slate-100 px-4 pt-4 pb-2">
-                      <div className={`text-sm leading-5 ${row.subcategory === '-' ? 'text-slate-400' : 'font-semibold text-slate-800'}`}>
+                <tr key={item.id || `${item.title}-${item.ordinal || 0}`} className={`align-middle transition-colors duration-200 ${rowStateClass}`}>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${actionInfo.className}`}>
+                      {actionInfo.label}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="text-sm font-semibold leading-5 text-slate-900">{row.category}</div>
+                    {supportCount > 0 && (
+                      <div className="mt-0.5 text-[11px] font-medium text-slate-400">
+                        {supportCount} ticket{supportCount === 1 ? '' : 's'}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`text-sm leading-5 ${row.subcategory === '-' ? 'text-slate-400' : 'font-semibold text-slate-800'}`}>
                         {row.subcategory}
-                      </div>
-                    </td>
-                    <td className="border-t border-slate-100 px-4 pt-4 pb-2">
-                      <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-2">
-                          <RecommendationStatusBadge status={item.status} />
-                          {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {item.status !== 'approved' && item.status !== 'applied' && (
-                            <button
-                              type="button"
-                              onClick={() => handleAction(item, 'approved')}
-                              disabled={isSaving}
-                              className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <CheckCircle className="h-3.5 w-3.5" />
-                              Approve
-                            </button>
-                          )}
-                          {item.status !== 'rejected' && item.status !== 'applied' && (
-                            <button
-                              type="button"
-                              onClick={() => handleAction(item, 'rejected')}
-                              disabled={isSaving}
-                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <XCircle className="h-3.5 w-3.5" />
-                              Decline
-                            </button>
-                          )}
-                          {item.status === 'approved' && (
-                            <button
-                              type="button"
-                              onClick={() => handleAction(item, 'applied')}
-                              disabled={isSaving}
-                              className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <CheckCircle className="h-3.5 w-3.5" />
-                              Applied
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr className={`${rowStateClass}`}>
-                    <td colSpan={4} className="border-b border-slate-100 px-4 pb-4">
-                      <div className="grid gap-3 rounded-xl border border-slate-100 bg-white/80 p-3 md:grid-cols-[1fr_1fr_220px]">
-                        <div>
-                          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Explanation</div>
-                          <div className="text-sm leading-6 text-slate-700">{row.explanation}</div>
-                        </div>
-                        <div>
-                          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Suggestion</div>
-                          <div className="text-sm leading-6 text-slate-700">{row.recommendation || 'No specific suggestion provided.'}</div>
-                        </div>
-                        <div>
-                          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Review note</div>
-                          <textarea
-                            value={notesById[item.id] ?? item.reviewNotes ?? ''}
-                            onChange={(event) => updateNotes(item.id, event.target.value)}
-                            placeholder="Optional note"
-                            className="min-h-[70px] w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
-                          />
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                </Fragment>
+                      </span>
+                      <TaxonomyContextPopover label="Why" icon={MessageCircle} title="Explanation" tone="indigo">
+                        {row.explanation}
+                      </TaxonomyContextPopover>
+                      <TaxonomyContextPopover label="Suggest" icon={FileText} title="Suggestion" tone="emerald">
+                        {row.recommendation || 'No specific suggestion provided.'}
+                      </TaxonomyContextPopover>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <RecommendationStatusBadge status={item.status} />
+                      {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
+                      {item.status !== 'approved' && item.status !== 'applied' && (
+                        <button
+                          type="button"
+                          onClick={() => handleAction(item, 'approved')}
+                          disabled={isSaving}
+                          className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <CheckCircle className="h-3.5 w-3.5" />
+                          Approve
+                        </button>
+                      )}
+                      {item.status !== 'rejected' && item.status !== 'applied' && (
+                        <button
+                          type="button"
+                          onClick={() => handleAction(item, 'rejected')}
+                          disabled={isSaving}
+                          className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                          Decline
+                        </button>
+                      )}
+                      {item.status === 'approved' && (
+                        <button
+                          type="button"
+                          onClick={() => handleAction(item, 'applied')}
+                          disabled={isSaving}
+                          className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <CheckCircle className="h-3.5 w-3.5" />
+                          Applied
+                        </button>
+                      )}
+                      <TaxonomyContextPopover label="Note" icon={MessageCircle} title="Review Note">
+                        <textarea
+                          value={notesById[item.id] ?? item.reviewNotes ?? ''}
+                          onChange={(event) => updateNotes(item.id, event.target.value)}
+                          placeholder="Optional note"
+                          className="min-h-[72px] w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                        />
+                      </TaxonomyContextPopover>
+                    </div>
+                  </td>
+                </tr>
               );
             })}
           </tbody>
