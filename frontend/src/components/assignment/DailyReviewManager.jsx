@@ -728,7 +728,16 @@ function getTaxonomyTableRow(item) {
   };
 }
 
-function TaxonomyContextPopover({ label, icon: Icon, title, children, tone = 'slate' }) {
+function TaxonomyContextPopover({
+  label,
+  icon: Icon,
+  title,
+  children,
+  tone = 'slate',
+  open = false,
+  onToggle,
+  align = 'left',
+}) {
   const tones = {
     slate: 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
     emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
@@ -736,19 +745,31 @@ function TaxonomyContextPopover({ label, icon: Icon, title, children, tone = 'sl
   };
 
   return (
-    <span className="group relative inline-flex">
+    <span className="relative inline-flex">
       <button
         type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle?.();
+        }}
         className={`inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-[11px] font-semibold transition ${tones[tone] || tones.slate}`}
         aria-label={title}
+        aria-expanded={open}
       >
         <Icon className="h-3.5 w-3.5" />
         {label}
       </button>
-      <span className="pointer-events-none absolute left-0 top-8 z-30 w-[360px] rounded-xl border border-slate-200 bg-white p-3 text-left text-xs leading-5 text-slate-700 opacity-0 shadow-xl ring-1 ring-slate-900/5 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</span>
-        {children}
-      </span>
+      {open && (
+        <span
+          className={`absolute top-8 z-50 w-[360px] rounded-xl border border-slate-200 bg-white p-3 text-left text-xs leading-5 text-slate-700 shadow-xl ring-1 ring-slate-900/5 ${
+            align === 'right' ? 'right-0' : 'left-0'
+          }`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</span>
+          {children}
+        </span>
+      )}
     </span>
   );
 }
@@ -759,6 +780,7 @@ function TaxonomyRecommendationsTable({
   savingRecommendationId,
 }) {
   const [notesById, setNotesById] = useState({});
+  const [openPopoverId, setOpenPopoverId] = useState(null);
 
   const updateNotes = (id, value) => {
     setNotesById((prev) => ({ ...prev, [id]: value }));
@@ -768,9 +790,13 @@ function TaxonomyRecommendationsTable({
     onRecommendationAction?.(item.id, status, notesById[item.id] ?? item.reviewNotes ?? '');
   };
 
+  const togglePopover = (id) => {
+    setOpenPopoverId((current) => (current === id ? null : id));
+  };
+
   return (
-    <div className="overflow-hidden rounded-xl border border-emerald-100 bg-white shadow-sm">
-      <div className="border-b border-emerald-100 bg-emerald-50/70 px-4 py-3">
+    <div className="rounded-xl border border-emerald-100 bg-white shadow-sm">
+      <div className="rounded-t-xl border-b border-emerald-100 bg-emerald-50/70 px-4 py-3">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <div className="text-sm font-semibold text-emerald-950">Taxonomy Change List</div>
@@ -781,8 +807,8 @@ function TaxonomyRecommendationsTable({
           </span>
         </div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-[980px] table-fixed divide-y divide-slate-100">
+      <div className="overflow-visible">
+        <table className="w-full table-fixed divide-y divide-slate-100">
           <colgroup>
             <col className="w-[120px]" />
             <col className="w-[300px]" />
@@ -827,20 +853,34 @@ function TaxonomyRecommendationsTable({
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`text-sm leading-5 ${row.subcategory === '-' ? 'text-slate-400' : 'font-semibold text-slate-800'}`}>
+                    <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
+                      <span className={`min-w-0 truncate text-sm leading-5 ${row.subcategory === '-' ? 'text-slate-400' : 'font-semibold text-slate-800'}`}>
                         {row.subcategory}
                       </span>
-                      <TaxonomyContextPopover label="Why" icon={MessageCircle} title="Explanation" tone="indigo">
+                      <TaxonomyContextPopover
+                        label="Why"
+                        icon={MessageCircle}
+                        title="Explanation"
+                        tone="indigo"
+                        open={openPopoverId === `${item.id}:why`}
+                        onToggle={() => togglePopover(`${item.id}:why`)}
+                      >
                         {row.explanation}
                       </TaxonomyContextPopover>
-                      <TaxonomyContextPopover label="Suggest" icon={FileText} title="Suggestion" tone="emerald">
+                      <TaxonomyContextPopover
+                        label="Suggest"
+                        icon={FileText}
+                        title="Suggestion"
+                        tone="emerald"
+                        open={openPopoverId === `${item.id}:suggest`}
+                        onToggle={() => togglePopover(`${item.id}:suggest`)}
+                      >
                         {row.recommendation || 'No specific suggestion provided.'}
                       </TaxonomyContextPopover>
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-2 whitespace-nowrap">
                       <RecommendationStatusBadge status={item.status} />
                       {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
                       {item.status !== 'approved' && item.status !== 'applied' && (
@@ -876,7 +916,14 @@ function TaxonomyRecommendationsTable({
                           Applied
                         </button>
                       )}
-                      <TaxonomyContextPopover label="Note" icon={MessageCircle} title="Review Note">
+                      <TaxonomyContextPopover
+                        label="Note"
+                        icon={MessageCircle}
+                        title="Review Note"
+                        open={openPopoverId === `${item.id}:note`}
+                        onToggle={() => togglePopover(`${item.id}:note`)}
+                        align="right"
+                      >
                         <textarea
                           value={notesById[item.id] ?? item.reviewNotes ?? ''}
                           onChange={(event) => updateNotes(item.id, event.target.value)}
@@ -916,7 +963,7 @@ function RunRecommendationsPanel({
   const total = sections.reduce((sum, section) => sum + section.items.length, 0);
 
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section className="overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 bg-slate-50/80 p-3 sm:p-4">
         <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
