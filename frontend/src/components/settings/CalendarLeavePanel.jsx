@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Bot, CalendarDays, CheckCircle, Loader, Plus, RefreshCw, Save, Trash2,
+  Ban, Bot, CalendarDays, CheckCircle, Loader, Plus, RefreshCw, Save, Trash2, UserPlus,
 } from 'lucide-react';
-import { calendarLeaveAPI, dashboardAPI } from '../../services/api';
+import { calendarLeaveAPI, visualsAPI } from '../../services/api';
 
 const DEFAULT_CONFIG = {
   mailbox: 'accounting@bgcengineering.ca',
@@ -30,23 +30,31 @@ export default function CalendarLeavePanel() {
   const [newAlias, setNewAlias] = useState({ alias: '', technicianId: '', isIgnored: false });
   const [newRule, setNewRule] = useState(EMPTY_RULE);
   const [preview, setPreview] = useState(null);
+  const [lastPreviewMode, setLastPreviewMode] = useState(false);
+  const [reviewSelections, setReviewSelections] = useState({});
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [configRes, rulesRes, aliasesRes, dashboardRes] = await Promise.allSettled([
+    const [configRes, rulesRes, aliasesRes, agentsRes] = await Promise.allSettled([
       calendarLeaveAPI.getConfig(),
       calendarLeaveAPI.getRules(),
       calendarLeaveAPI.getAliases(),
-      dashboardAPI.getDashboard(),
+      visualsAPI.getAgents({ includeInactive: true }),
     ]);
     if (configRes.status === 'fulfilled' && configRes.value?.data) {
       setConfig({ ...DEFAULT_CONFIG, ...configRes.value.data });
     }
     if (rulesRes.status === 'fulfilled') setRules(rulesRes.value?.data || []);
     if (aliasesRes.status === 'fulfilled') setAliases(aliasesRes.value?.data || []);
-    if (dashboardRes.status === 'fulfilled') {
-      setTechnicians((dashboardRes.value?.data?.technicians || []).map((t) => ({ id: t.id, name: t.name, email: t.email })));
+    if (agentsRes.status === 'fulfilled') {
+      const agents = agentsRes.value?.data?.agents || [];
+      setTechnicians(agents.map((t) => ({
+        id: t.id,
+        name: t.name,
+        email: t.email,
+        isActive: t.isActive,
+      })));
     }
   }, []);
 
@@ -112,11 +120,36 @@ export default function CalendarLeavePanel() {
       const res = await calendarLeaveAPI.preview({
         useLlm,
         top: 300,
-        llmLimit: useLlm ? 20 : 0,
       });
       setPreview(res.data);
-      const llmText = useLlm ? `, ${res.data.llmApplied || 0} checked by Haiku` : '';
+      setLastPreviewMode(useLlm);
+      const llmText = useLlm
+        ? `, Haiku: ${res.data.llmFreshCalls || 0} new / ${res.data.llmCacheHits || 0} cached${res.data.llmSkipped ? ` / ${res.data.llmSkipped} skipped` : ''}`
+        : '';
       setStatus({ ok: true, text: `Preview loaded: ${res.data.total} events, ${res.data.reviewNeeded} need review${llmText}` });
+    } catch (err) {
+      setStatus({ ok: false, text: err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveReviewAlias = async (row, { isIgnored = false } = {}) => {
+    const alias = (row.nameGuess || row.personAlias || '').trim();
+    if (!alias) return;
+    const selectedTechId = reviewSelections[row.eventFingerprint || row.subject];
+    if (!isIgnored && !selectedTechId) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      await calendarLeaveAPI.saveAlias({
+        alias,
+        technicianId: isIgnored ? null : Number(selectedTechId),
+        isIgnored,
+      });
+      await refresh();
+      await runPreview(lastPreviewMode);
+      setStatus({ ok: true, text: isIgnored ? `Ignored "${alias}" and refreshed preview` : `Mapped "${alias}" and refreshed preview` });
     } catch (err) {
       setStatus({ ok: false, text: err.message });
     } finally {
@@ -259,17 +292,57 @@ export default function CalendarLeavePanel() {
             <CheckCircle className="w-4 h-4 text-emerald-600" />
             <span className="font-semibold text-sm">Preview</span>
             <span className="text-xs text-gray-500">{preview.matched} matched · {preview.reviewNeeded} review · {preview.ignored} ignored</span>
+            {preview.llmApplied > 0 && (
+              <span className="ml-auto text-xs text-gray-500">
+                Haiku {preview.llmFreshCalls || 0} new · {preview.llmCacheHits || 0} cached · {preview.durationMs || 0}ms
+              </span>
+            )}
           </div>
           <div className="max-h-96 overflow-auto divide-y">
             {(preview.rows || []).slice(0, 120).map((row, idx) => (
-              <div key={`${row.subject}-${idx}`} className={`px-4 py-2 text-sm ${row.requiresReview ? 'bg-amber-50' : ''}`}>
+              <div key={`${row.eventFingerprint || row.subject}-${idx}`} className={`px-4 py-2 text-sm ${row.requiresReview ? 'bg-amber-50' : ''}`}>
                 <div className="flex gap-2">
                   <span className="font-medium text-gray-900">{row.subject}</span>
                   <span className="ml-auto text-xs text-gray-500">{row.category}{row.halfDayPart ? `/${row.halfDayPart}` : ''}</span>
                 </div>
                 <div className="text-xs text-gray-500">
-                  {row.start?.dateTime} · {row.technicianName || row.nameGuess || 'unmatched'} · {row.source} · {Math.round((row.confidence || 0) * 100)}% · {row.reason}
+                  {row.start?.dateTime} · {row.technicianName || row.nameGuess || 'unmatched'}{row.technicianIsActive === false ? ' (inactive)' : ''} · {row.source === 'llm' && row.llmCached ? 'haiku cache' : row.source} · {Math.round((row.confidence || 0) * 100)}% · {row.reason}
                 </div>
+                {row.requiresReview && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-amber-800">Review {row.nameGuess || 'entry'}</span>
+                    <select
+                      value={reviewSelections[row.eventFingerprint || row.subject] || ''}
+                      onChange={(e) => setReviewSelections(prev => ({ ...prev, [row.eventFingerprint || row.subject]: e.target.value }))}
+                      className="rounded border border-amber-200 bg-white px-2 py-1 text-xs"
+                    >
+                      <option value="">Map to technician</option>
+                      {technicians.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}{t.isActive === false ? ' (inactive)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => saveReviewAlias(row)}
+                      disabled={busy || !reviewSelections[row.eventFingerprint || row.subject]}
+                      className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-white px-2 py-1 text-xs font-medium text-emerald-700 disabled:opacity-40"
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                      Map Alias
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => saveReviewAlias(row, { isIgnored: true })}
+                      disabled={busy || !(row.nameGuess || row.personAlias)}
+                      className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 disabled:opacity-40"
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                      Ignore Name
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

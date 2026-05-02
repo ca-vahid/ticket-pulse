@@ -10,6 +10,7 @@ import vtRepo from './vacationTrackerRepository.js';
 
 const VALID_CATEGORIES = new Set(['OFF', 'WFH', 'OTHER', 'IGNORED']);
 const VALID_HALF_DAY = new Set(['AM', 'PM', 'INFER', null, undefined, '']);
+const CLASSIFICATION_VERSION = 'calendar-v2';
 
 const DEFAULT_RULES = [
   { name: 'Ignore statutory holidays', priority: 10, pattern: '\\b(stat|holiday|family day|canada day|thanksgiving|christmas|boxing day|new year)\\b', category: 'IGNORED', notes: 'Calendar-wide holidays are not individual technician leave.' },
@@ -70,8 +71,9 @@ function firstSubjectChunk(subject) {
     .replace(/^fw:\s*/i, '')
     .replace(/^re:\s*/i, '')
     .trim();
-  const stop = cleaned.search(/\s+-|\s+–|\s+—|\s+off\b|\s+vacation\b|\s+appt\b|\s+appointment\b|\s+doctor\b|\s+dentist\b|\s+early\b|\s+working\b|\s+on\b|\s+\(/i);
-  const head = (stop >= 0 ? cleaned.slice(0, stop) : cleaned).trim();
+  const beforeSeparator = cleaned.split(/\s*[-–—]\s*/)[0];
+  const stop = beforeSeparator.search(/\s+off\b|\s+vacation\b|\s+appt\b|\s+appointment\b|\s+doctor\b|\s+dentist\b|\s+early\b|\s+working\b|\s+on\b|\s+\(/i);
+  const head = (stop >= 0 ? beforeSeparator.slice(0, stop) : beforeSeparator).trim();
   return head.split(/\s+/).slice(0, 2).join(' ');
 }
 
@@ -181,7 +183,7 @@ class CalendarLeaveService {
     }
 
     const technicians = await prisma.technician.findMany({
-      where: { workspaceId, isActive: true },
+      where: { workspaceId, email: { not: 'ticketpulse@bgcengineering.ca' } },
       select: { id: true, name: true, email: true },
     });
 
@@ -198,6 +200,7 @@ class CalendarLeaveService {
         });
       }
     }
+    await prisma.calendarLeaveClassification.deleteMany({ where: { workspaceId } });
   }
 
   async getRules(workspaceId) {
@@ -251,7 +254,7 @@ class CalendarLeaveService {
   async upsertAlias(workspaceId, data) {
     const normalizedAlias = normalize(data.alias);
     if (!normalizedAlias) throw new Error('Alias is required');
-    return prisma.calendarLeaveAlias.upsert({
+    const alias = await prisma.calendarLeaveAlias.upsert({
       where: { workspaceId_normalizedAlias: { workspaceId, normalizedAlias } },
       create: {
         workspaceId,
@@ -266,10 +269,16 @@ class CalendarLeaveService {
         isIgnored: data.isIgnored === true,
       },
     });
+    await prisma.calendarLeaveClassification.deleteMany({ where: { workspaceId } });
+    return alias;
   }
 
   async deleteAlias(workspaceId, id) {
-    return prisma.calendarLeaveAlias.deleteMany({ where: { id, workspaceId } });
+    const result = await prisma.calendarLeaveAlias.deleteMany({ where: { id, workspaceId } });
+    if (result.count > 0) {
+      await prisma.calendarLeaveClassification.deleteMany({ where: { workspaceId } });
+    }
+    return result;
   }
 
   async fetchEvents(workspaceId, { startDate, endDate, top = 500 } = {}) {
@@ -347,10 +356,12 @@ class CalendarLeaveService {
     const cached = await prisma.calendarLeaveClassification.findUnique({
       where: { workspaceId_eventFingerprint: { workspaceId, eventFingerprint: fingerprint } },
     });
-    if (cached) return { ...cached.classification, source: cached.source, cached: true };
+    if (cached?.classification?.version === CLASSIFICATION_VERSION) {
+      return { ...cached.classification, source: cached.source, cached: true };
+    }
 
     if (!anthropicService.isConfigured()) {
-      return { category: 'OTHER', isLeave: false, confidence: 0, source: 'none', reason: 'ANTHROPIC_API_KEY is not configured' };
+      return { category: 'OTHER', isLeave: false, confidence: 0, source: 'none', cached: false, reason: 'ANTHROPIC_API_KEY is not configured' };
     }
 
     const systemPrompt = 'You classify shared Accounting calendar entries into technician availability records. Return only JSON. Categories: OFF, WFH, OTHER, IGNORED. Use IGNORED for statutory holidays, meetings, reminders, pension/admin events, or entries that are not a person\'s leave/appointment. If an entry looks like a person\'s leave but the person is not in the technician/alias list, keep the leave category with technicianId null so it can be reviewed. Use halfDayPart AM or PM only when the subject/time clearly indicates it.';
@@ -364,7 +375,7 @@ class CalendarLeaveService {
         categories: event.categories || [],
         location: event.location?.displayName || '',
       },
-      activeTechnicians: technicians.map((t) => ({ id: t.id, name: t.name, email: t.email })),
+      technicians: technicians.map((t) => ({ id: t.id, name: t.name, email: t.email, isActive: t.isActive })),
       aliases: aliases.map((a) => ({ alias: a.alias, technicianId: a.technicianId, technicianName: a.technician?.name || null, isIgnored: a.isIgnored })),
       requiredJsonShape: {
         isLeave: true,
@@ -400,6 +411,7 @@ class CalendarLeaveService {
       halfDayPart: ['AM', 'PM'].includes(parsed.halfDayPart) ? parsed.halfDayPart : null,
       confidence: typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0.4,
       reason: typeof parsed.reason === 'string' ? parsed.reason.slice(0, 500) : 'LLM classified calendar entry',
+      version: CLASSIFICATION_VERSION,
     };
 
     await prisma.calendarLeaveClassification.upsert({
@@ -420,19 +432,22 @@ class CalendarLeaveService {
         confidence: classification.confidence,
       },
     });
-    return { ...classification, source: 'llm' };
+    return { ...classification, source: 'llm', cached: false };
   }
 
   async classifyEvents(workspaceId, events, { useLlm = true, llmLimit = null } = {}) {
     const [rules, aliases, technicians] = await Promise.all([
       this.getRules(workspaceId),
       this.getAliases(workspaceId),
-      prisma.technician.findMany({ where: { workspaceId, isActive: true }, select: { id: true, name: true, email: true } }),
+      prisma.technician.findMany({ where: { workspaceId }, select: { id: true, name: true, email: true, isActive: true } }),
     ]);
 
     const rows = [];
     let llmApplied = 0;
     let llmSkipped = 0;
+    let llmCacheHits = 0;
+    let llmFreshCalls = 0;
+    let llmFailures = 0;
     for (const event of events) {
       const fingerprint = eventFingerprint(event);
       const aliasMatch = this._matchAlias(event.subject, aliases);
@@ -450,6 +465,9 @@ class CalendarLeaveService {
       } else if (useLlm && (llmLimit === null || llmApplied < llmLimit)) {
         llmApplied++;
         classification = await this._classifyWithLlm(workspaceId, event, technicians, aliases, fingerprint);
+        if (classification.cached) llmCacheHits++;
+        else if (classification.source === 'llm') llmFreshCalls++;
+        else llmFailures++;
         technicianId = classification.technicianId || technicianId;
         if (classification.category === 'IGNORED' && ruleMatch && ruleMatch.category !== 'IGNORED') {
           classification = {
@@ -476,53 +494,89 @@ class CalendarLeaveService {
 
       if (!technicianId && classification.category !== 'IGNORED') requiresReview = true;
       if ((classification.confidence ?? 0) < 0.75 && classification.category !== 'IGNORED') requiresReview = true;
+      if (technician?.isActive === false && classification.category !== 'IGNORED') requiresReview = true;
 
       rows.push({
         event,
         eventFingerprint: fingerprint,
         subject: event.subject || '',
         nameGuess: firstSubjectChunk(event.subject),
+        personAlias: classification.personAlias || null,
         technicianId,
         technician,
+        technicianIsActive: technician?.isActive ?? null,
         category: classification.category,
         halfDayPart: classification.halfDayPart || inferHalfDay(event.subject, event),
         confidence: classification.confidence ?? 0,
         source: classification.source,
+        llmCached: classification.cached === true,
         reason: classification.reason,
         aliasStatus: aliasMatch.status,
         isLeave,
         requiresReview,
       });
     }
-    return { rows, llmApplied, llmSkipped };
+    return { rows, llmApplied, llmSkipped, llmCacheHits, llmFreshCalls, llmFailures };
   }
 
   async preview(workspaceId, { startDate, endDate, useLlm = false, top = 200, llmLimit = null } = {}) {
+    const startedAt = Date.now();
     const events = await this.fetchEvents(workspaceId, { startDate, endDate, top });
-    const { rows, llmApplied, llmSkipped } = await this.classifyEvents(workspaceId, events, { useLlm, llmLimit });
-    return {
+    const {
+      rows,
+      llmApplied,
+      llmSkipped,
+      llmCacheHits,
+      llmFreshCalls,
+      llmFailures,
+    } = await this.classifyEvents(workspaceId, events, { useLlm, llmLimit });
+    const result = {
       total: rows.length,
       matched: rows.filter((r) => r.isLeave && !r.requiresReview).length,
       reviewNeeded: rows.filter((r) => r.requiresReview).length,
       ignored: rows.filter((r) => r.category === 'IGNORED').length,
       llmApplied,
       llmSkipped,
+      llmCacheHits,
+      llmFreshCalls,
+      llmFailures,
+      durationMs: Date.now() - startedAt,
       rows: rows.map((r) => ({
+        eventFingerprint: r.eventFingerprint,
         subject: r.subject,
         start: r.event.start,
         end: r.event.end,
         isAllDay: r.event.isAllDay,
         technicianId: r.technicianId,
         technicianName: r.technician?.name || null,
+        technicianIsActive: r.technicianIsActive,
         nameGuess: r.nameGuess,
+        personAlias: r.personAlias,
         category: r.category,
         halfDayPart: r.halfDayPart,
         confidence: r.confidence,
         source: r.source,
+        llmCached: r.llmCached,
         reason: r.reason,
         requiresReview: r.requiresReview,
       })),
     };
+    logger.info('Calendar leave preview completed', {
+      workspaceId,
+      useLlm,
+      top,
+      llmLimit,
+      total: result.total,
+      reviewNeeded: result.reviewNeeded,
+      ignored: result.ignored,
+      llmApplied,
+      llmSkipped,
+      llmCacheHits,
+      llmFreshCalls,
+      llmFailures,
+      durationMs: result.durationMs,
+    });
+    return result;
   }
 
   async sync(workspaceId, { startDate, endDate, useLlm = true } = {}) {
