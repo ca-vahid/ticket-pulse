@@ -42,6 +42,23 @@ function inclusiveCalendarDays(startDateKey, endDateKey) {
   return Math.max(1, Math.round((endNoon - startNoon) / 864e5) + 1);
 }
 
+function businessDays(startDateKey, endDateKey) {
+  let count = 0;
+  const cursor = dateKeyToUtcNoon(startDateKey);
+  const end = dateKeyToUtcNoon(endDateKey);
+  while (cursor <= end) {
+    const day = cursor.getUTCDay();
+    if (day !== 0 && day !== 6) count += 1;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return Math.max(1, count);
+}
+
+function isBusinessDateKey(dateKey) {
+  const day = dateKeyToUtcNoon(dateKey).getUTCDay();
+  return day !== 0 && day !== 6;
+}
+
 export function parseAnalyticsRange(query = {}, reference = new Date()) {
   const timezone = query.timezone || DEFAULT_TIMEZONE;
   const range = query.range || '30d';
@@ -542,6 +559,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
   return withCache(workspaceId, 'team-balance', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
     const excludeNoise = query.excludeNoise === 'true';
+    const rangeBusinessDays = businessDays(rangeInfo.startDate, rangeInfo.endDate);
     const [technicians, tickets, episodes, openTickets, leaves, serviceAccountNames] = await Promise.all([
       prisma.technician.findMany({
         where: { workspaceId, isActive: true },
@@ -592,6 +610,9 @@ export async function getTeamBalance(workspaceId, query = {}) {
       openNow: 0,
       rejected: 0,
       reassignedAway: 0,
+      availableDays: rangeBusinessDays,
+      assignedPerAvailableDay: 0,
+      capacityLeaveDays: 0,
       leaveDays: 0,
       wfhDays: 0,
       leaveFullDays: 0,
@@ -632,9 +653,18 @@ export async function getTeamBalance(workspaceId, query = {}) {
     }
     const resolutionByTech = new Map();
     const csatByTech = new Map();
+    let unassignedTickets = 0;
+    let hiddenAssignedTickets = 0;
 
     for (const ticket of tickets) {
-      if (!ticket.assignedTechId || !byTech.has(ticket.assignedTechId)) continue;
+      if (!ticket.assignedTechId) {
+        unassignedTickets += 1;
+        continue;
+      }
+      if (!byTech.has(ticket.assignedTechId)) {
+        hiddenAssignedTickets += 1;
+        continue;
+      }
       const row = byTech.get(ticket.assignedTechId);
       row.assigned += 1;
       const source = assignmentSource(ticket, serviceAccountNames);
@@ -680,6 +710,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
       if (!byTech.has(leave.technicianId)) continue;
       const row = byTech.get(leave.technicianId);
       const leaveAmount = leave.isFullDay ? 1 : 0.5;
+      const leaveDateKey = leave.leaveDate.toISOString().slice(0, 10);
       const label = leave.leaveTypeName || leave.category || 'Leave';
       const normalizedLabel = label.trim().toLowerCase();
       const normalizedCategory = String(leave.category || '').trim().toLowerCase();
@@ -692,10 +723,11 @@ export async function getTeamBalance(workspaceId, query = {}) {
         if (timelineRow) timelineRow.wfhDays += leaveAmount;
       } else {
         row.leaveDays += leaveAmount;
+        if (isBusinessDateKey(leaveDateKey)) row.capacityLeaveDays += leaveAmount;
         if (leave.isFullDay) row.leaveFullDays += 1;
         else row.leaveHalfDays += 1;
         row.leaveTypes[label] = (row.leaveTypes[label] || 0) + leaveAmount;
-        const period = groupKey(dateKeyToUtcNoon(leave.leaveDate.toISOString().slice(0, 10)), rangeInfo);
+        const period = groupKey(dateKeyToUtcNoon(leaveDateKey), rangeInfo);
         const timelineRow = ensureTimelineRow(leave.technicianId, period);
         if (timelineRow) timelineRow.leaveDays += leaveAmount;
       }
@@ -714,6 +746,10 @@ export async function getTeamBalance(workspaceId, query = {}) {
         : null;
     }
     for (const row of byTech.values()) {
+      row.availableDays = Number(Math.max(0, rangeBusinessDays - row.capacityLeaveDays).toFixed(1));
+      row.assignedPerAvailableDay = row.availableDays > 0
+        ? Number((row.assigned / row.availableDays).toFixed(1))
+        : null;
       row.closeRatePct = row.assigned ? Number(((row.closed / row.assigned) * 100).toFixed(1)) : 0;
       row.selfPickRatePct = row.assigned ? Number(((row.selfPicked / row.assigned) * 100).toFixed(1)) : 0;
       row.rejectionRatePct = row.assigned ? Number(((row.rejected / row.assigned) * 100).toFixed(1)) : 0;
@@ -728,12 +764,23 @@ export async function getTeamBalance(workspaceId, query = {}) {
 
     const rows = Array.from(byTech.values());
     const assignedCounts = rows.map((r) => r.assigned);
+    const representedAssigned = rows.reduce((sum, row) => sum + row.assigned, 0);
     const avg = assignedCounts.length ? assignedCounts.reduce((a, b) => a + b, 0) / assignedCounts.length : 0;
     const variance = assignedCounts.length
       ? assignedCounts.reduce((sum, n) => sum + ((n - avg) ** 2), 0) / assignedCounts.length
       : 0;
     const stdDev = Math.sqrt(variance);
-    const balanceScore = avg > 0 ? Math.max(0, Math.round(100 - ((stdDev / avg) * 100))) : 100;
+    const rawBalanceScore = avg > 0 ? Math.max(0, Math.round(100 - ((stdDev / avg) * 100))) : 100;
+    const rateValues = rows
+      .map((row) => row.assignedPerAvailableDay)
+      .filter((value) => Number.isFinite(value));
+    const rateAvg = rateValues.length ? rateValues.reduce((a, b) => a + b, 0) / rateValues.length : 0;
+    const rateVariance = rateValues.length
+      ? rateValues.reduce((sum, n) => sum + ((n - rateAvg) ** 2), 0) / rateValues.length
+      : 0;
+    const rateStdDev = Math.sqrt(rateVariance);
+    const balanceScore = rateAvg > 0 ? Math.max(0, Math.round(100 - ((rateStdDev / rateAvg) * 100))) : 100;
+    const activeCapacityDays = rows.reduce((sum, row) => sum + (row.availableDays || 0), 0);
 
     const now = new Date();
     const ageBuckets = { under4h: 0, h4to8: 0, h8to24: 0, over24h: 0 };
@@ -749,18 +796,28 @@ export async function getTeamBalance(workspaceId, query = {}) {
       metadata: metadata(rangeInfo, { excludeNoise }),
       summary: {
         activeTechnicians: technicians.length,
-        totalAssigned: tickets.length,
+        rangeBusinessDays,
+        totalAssigned: representedAssigned,
+        rangeTickets: tickets.length,
+        unassignedTickets,
+        hiddenAssignedTickets,
+        excludedFromDistribution: unassignedTickets + hiddenAssignedTickets,
         avgAssignedPerTech: Number(avg.toFixed(1)),
+        avgAssignedPerAvailableDay: activeCapacityDays > 0
+          ? Number((representedAssigned / activeCapacityDays).toFixed(1))
+          : 0,
         stdDev: Number(stdDev.toFixed(1)),
+        rawBalanceScore,
         balanceScore,
         spread: assignedCounts.length ? Math.max(...assignedCounts) - Math.min(...assignedCounts) : 0,
+        availableDayRateSpread: rateValues.length ? Number((Math.max(...rateValues) - Math.min(...rateValues)).toFixed(1)) : 0,
         openAgeBuckets: ageBuckets,
       },
       technicians: rows.sort((a, b) => a.name.localeCompare(b.name)),
       timeline: Array.from(timelineMap.values()).sort((a, b) => a.period.localeCompare(b.period) || a.name.localeCompare(b.name)),
       notes: [
         'Team Balance is sorted alphabetically and avoids ranked winner/loser framing by design.',
-        'Leave-aware capacity is shown as context; v1 does not normalize every metric by scheduled hours.',
+        'Balance Score uses assignments per available weekday, subtracting OFF/OTHER leave days from either Vacation Tracker or shared mailbox sync.',
       ],
     };
   });
@@ -1059,9 +1116,9 @@ export async function getInsights(workspaceId, query = {}) {
         id: 'load-imbalance',
         title: 'Assignments are unevenly distributed',
         severity: team.summary.balanceScore < 50 ? 'warning' : 'info',
-        rule: 'Team balance score is below 70 after comparing assignment counts across active technicians.',
+        rule: 'Team balance score is below 70 after comparing assignments per available weekday across active technicians.',
         evidenceCount: team.summary.totalAssigned,
-        affected: [`Balance score: ${team.summary.balanceScore}`, `Spread: ${team.summary.spread}`],
+        affected: [`Balance score: ${team.summary.balanceScore}`, `Rate spread: ${team.summary.availableDayRateSpread}`],
         drilldown: team.technicians,
       }));
     }

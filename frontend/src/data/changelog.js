@@ -10,6 +10,7 @@ export const changelog = [
       { type: 'new', html: '<mark>Major</mark> <strong>Per-workspace noise rules</strong> are live: IT keeps the existing defaults, while other workspaces can build their own focused rules without inheriting IT noise.' },
       { type: 'improved', html: '<strong>Noise rule testing</strong> now shows richer sample matches with requester/sender details, dates, ticket IDs, and status context.' },
       { type: 'improved', html: '<strong>Assignment Review and Daily Review</strong> received cleaner tabs, taxonomy review tables, compact recommendation rows, refreshed approvals, and clearer run details.' },
+      { type: 'improved', html: '<strong>Analytics Team Balance</strong> now shows available weekdays and assignments per available day, using mailbox or Vacation Tracker leave as capacity context.' },
       { type: 'improved', html: '<strong>Mobile polish</strong> improves Dashboard, Timeline, Analytics, header actions, version badge spacing, and Daily Review layouts on smaller screens.' },
       { type: 'fixed', html: '<strong>Accounting assignment queue</strong> now loads from a fast database snapshot, avoiding long blank loads when FreshService reconciliation is slow.' },
       { type: 'fixed', html: '<strong>FreshService sync reliability</strong> improved for corrected assignments, finalization failures, stale queue entries, and noise-dismissal close payloads.' },

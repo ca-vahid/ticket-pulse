@@ -361,6 +361,8 @@ function insightDrilldownColumns(insight) {
       { key: 'openNow', label: 'Open Now', render: (row) => formatNumber(row.openNow || 0) },
       { key: 'closed', label: 'Closed', render: (row) => formatNumber(row.closed || 0) },
       { key: 'rejected', label: 'Rejected', render: (row) => formatNumber(row.rejected || 0) },
+      { key: 'availableDays', label: 'Available', render: (row) => formatNumber(row.availableDays || 0) },
+      { key: 'assignedPerAvailableDay', label: 'Per Avail. Day', render: (row) => row.assignedPerAvailableDay ?? '—' },
       { key: 'leaveDays', label: 'Leave', render: (row) => formatNumber(row.leaveDays || 0) },
       { key: 'wfhDays', label: 'WFH', render: (row) => formatNumber(row.wfhDays || 0) },
     ];
@@ -1179,11 +1181,16 @@ export default function Analytics() {
   const renderTeam = () => (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Balance Score" value={formatNumber(team?.summary?.balanceScore)} subtitle="Higher means more even distribution" icon={Gauge} tone="green" />
+        <StatCard title="Balance Score" value={formatNumber(team?.summary?.balanceScore)} subtitle="Adjusted for leave days" icon={Gauge} tone="green" />
         <StatCard title="Avg Assigned" value={formatNumber(team?.summary?.avgAssignedPerTech)} subtitle="Per active technician" icon={Users} />
-        <StatCard title="Spread" value={formatNumber(team?.summary?.spread)} subtitle="Max minus min assigned" icon={BarChart3} tone="amber" />
+        <StatCard title="Avg / Available Day" value={formatNumber(team?.summary?.avgAssignedPerAvailableDay)} subtitle={`${formatNumber(team?.summary?.rangeBusinessDays || 0)} weekdays in range`} icon={BarChart3} tone="amber" />
         <StatCard title="Open > 24h" value={formatNumber((team?.summary?.openAgeBuckets?.over24h || 0))} subtitle="Current open queue" icon={Clock} tone="red" />
       </div>
+      {(team?.summary?.excludedFromDistribution || 0) > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {formatNumber(team.summary.excludedFromDistribution)} range ticket{team.summary.excludedFromDistribution === 1 ? '' : 's'} are excluded from the active-team distribution because they are unassigned or assigned outside the visible active team.
+        </div>
+      )}
       <Panel
         title="Manager Filters"
         subtitle="Filter the agent-level analytics before reviewing the table and visuals."
@@ -1276,6 +1283,7 @@ export default function Analytics() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900">{row.name}</p>
                   <p className="text-xs text-slate-500">{row.assigned} assigned · {row.openNow} open · {row.closed} closed</p>
+                  <p className="text-xs text-slate-500">{row.availableDays} available days · {row.assignedPerAvailableDay ?? '—'} / available day</p>
                 </div>
                 <button
                   type="button"
@@ -1314,6 +1322,14 @@ export default function Analytics() {
                   <p className="text-slate-500">WFH</p>
                   <p className="font-bold text-slate-900">{row.wfhDays || 0}</p>
                 </div>
+                <div className="rounded bg-slate-50 p-2">
+                  <p className="text-slate-500">Avail.</p>
+                  <p className="font-bold text-slate-900">{row.availableDays}</p>
+                </div>
+                <div className="rounded bg-slate-50 p-2">
+                  <p className="text-slate-500">Rate</p>
+                  <p className="font-bold text-slate-900">{row.assignedPerAvailableDay ?? '—'}</p>
+                </div>
               </div>
             </div>
           ))}
@@ -1334,6 +1350,8 @@ export default function Analytics() {
                   ['avgResolutionHours', 'Avg Res.'],
                   ['csatAverage', 'CSAT'],
                   ['rejected', 'Rejected'],
+                  ['availableDays', 'Available Days'],
+                  ['assignedPerAvailableDay', 'Assigned / Avail. Day'],
                   ['leaveDays', 'Leave Days'],
                   ['wfhDays', 'WFH Days'],
                 ].map(([key, label]) => (
@@ -1364,6 +1382,8 @@ export default function Analytics() {
                   <td className="px-3 py-2 text-slate-700">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</td>
                   <td className="px-3 py-2 text-slate-700">{row.csatAverage === null ? '—' : `${row.csatAverage} (${row.csatCount})`}</td>
                   <td className="px-3 py-2 text-slate-700">{row.rejected}</td>
+                  <td className="px-3 py-2 text-slate-700">{row.availableDays}</td>
+                  <td className="px-3 py-2 text-slate-700">{row.assignedPerAvailableDay ?? '—'}</td>
                   <td className="px-3 py-2 text-slate-700">
                     <span title={row.leaveTypes?.map((leave) => `${leave.name}: ${leave.days}`).join('\n') || ''}>
                       {row.leaveDays}
@@ -1415,6 +1435,7 @@ export default function Analytics() {
               <div className="mt-3 space-y-2 text-xs text-slate-600">
                 <p><span className="font-semibold text-slate-800">Sources:</span> {row.selfPicked} self, {row.coordinatorAssigned} coordinator, {row.appAssigned} app</p>
                 <p><span className="font-semibold text-slate-800">Rejected:</span> {row.rejected} ({row.rejectionRatePct}%)</p>
+                <p><span className="font-semibold text-slate-800">Available:</span> {row.availableDays} days, {row.assignedPerAvailableDay ?? '—'} assigned / available day</p>
                 <p><span className="font-semibold text-slate-800">Leave:</span> {row.leaveDays} days{row.leaveHalfDays ? ` (${row.leaveHalfDays} half-day records)` : ''}</p>
                 <p><span className="font-semibold text-slate-800">WFH:</span> {row.wfhDays || 0} days</p>
                 <p>
