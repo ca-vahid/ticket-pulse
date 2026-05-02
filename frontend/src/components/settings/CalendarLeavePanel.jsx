@@ -67,6 +67,16 @@ export default function CalendarLeavePanel() {
     }
   };
 
+  const ensureConfigSaved = async () => {
+    if (config?.id) return;
+    if (!config.mailbox || !config.graphGroupId) {
+      throw new Error('Mailbox and Graph Group ID are required');
+    }
+    await calendarLeaveAPI.updateConfig(config);
+    await calendarLeaveAPI.seedDefaults();
+    await refresh();
+  };
+
   const saveRule = async (rule) => {
     setBusy(true);
     try {
@@ -98,6 +108,7 @@ export default function CalendarLeavePanel() {
     setBusy(true);
     setStatus(null);
     try {
+      await ensureConfigSaved();
       const res = await calendarLeaveAPI.preview({ useLlm, top: 300 });
       setPreview(res.data);
       setStatus({ ok: true, text: `Preview loaded: ${res.data.total} events, ${res.data.reviewNeeded} need review` });
@@ -112,6 +123,7 @@ export default function CalendarLeavePanel() {
     setBusy(true);
     setStatus(null);
     try {
+      await ensureConfigSaved();
       const res = await calendarLeaveAPI.sync({ useLlm: true });
       setStatus({ ok: true, text: `Sync complete: ${res.data.leaveDaysCreated} leave-days, ${res.data.reviewNeeded} review-needed events` });
     } catch (err) {
