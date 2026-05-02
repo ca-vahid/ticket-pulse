@@ -109,9 +109,14 @@ export default function CalendarLeavePanel() {
     setStatus(null);
     try {
       await ensureConfigSaved();
-      const res = await calendarLeaveAPI.preview({ useLlm, top: 300 });
+      const res = await calendarLeaveAPI.preview({
+        useLlm,
+        top: 300,
+        llmLimit: useLlm ? 20 : 0,
+      });
       setPreview(res.data);
-      setStatus({ ok: true, text: `Preview loaded: ${res.data.total} events, ${res.data.reviewNeeded} need review` });
+      const llmText = useLlm ? `, ${res.data.llmApplied || 0} checked by Haiku` : '';
+      setStatus({ ok: true, text: `Preview loaded: ${res.data.total} events, ${res.data.reviewNeeded} need review${llmText}` });
     } catch (err) {
       setStatus({ ok: false, text: err.message });
     } finally {

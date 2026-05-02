@@ -77,6 +77,7 @@ router.post('/preview', requireAdmin, asyncHandler(async (req, res) => {
     endDate: req.body.endDate,
     useLlm: req.body.useLlm === true,
     top: req.body.top ? parseInt(req.body.top, 10) : 200,
+    llmLimit: req.body.llmLimit !== undefined ? parseInt(req.body.llmLimit, 10) : null,
   });
   res.json({ success: true, data: result });
 }));

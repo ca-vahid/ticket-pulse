@@ -423,7 +423,7 @@ class CalendarLeaveService {
     return { ...classification, source: 'llm' };
   }
 
-  async classifyEvents(workspaceId, events, { useLlm = true } = {}) {
+  async classifyEvents(workspaceId, events, { useLlm = true, llmLimit = null } = {}) {
     const [rules, aliases, technicians] = await Promise.all([
       this.getRules(workspaceId),
       this.getAliases(workspaceId),
@@ -431,6 +431,8 @@ class CalendarLeaveService {
     ]);
 
     const rows = [];
+    let llmApplied = 0;
+    let llmSkipped = 0;
     for (const event of events) {
       const fingerprint = eventFingerprint(event);
       const aliasMatch = this._matchAlias(event.subject, aliases);
@@ -445,7 +447,8 @@ class CalendarLeaveService {
         classification = ruleMatch;
       } else if (ruleMatch?.category === 'IGNORED') {
         classification = ruleMatch;
-      } else if (useLlm) {
+      } else if (useLlm && (llmLimit === null || llmApplied < llmLimit)) {
+        llmApplied++;
         classification = await this._classifyWithLlm(workspaceId, event, technicians, aliases, fingerprint);
         technicianId = classification.technicianId || technicianId;
         if (classification.category === 'IGNORED' && ruleMatch && ruleMatch.category !== 'IGNORED') {
@@ -457,6 +460,7 @@ class CalendarLeaveService {
           };
         }
       } else {
+        if (useLlm) llmSkipped++;
         classification = ruleMatch || { category: 'OTHER', halfDayPart: null, confidence: 0.2, source: 'unmatched', reason: 'No alias/rule match' };
       }
 
@@ -490,17 +494,19 @@ class CalendarLeaveService {
         requiresReview,
       });
     }
-    return rows;
+    return { rows, llmApplied, llmSkipped };
   }
 
-  async preview(workspaceId, { startDate, endDate, useLlm = false, top = 200 } = {}) {
+  async preview(workspaceId, { startDate, endDate, useLlm = false, top = 200, llmLimit = null } = {}) {
     const events = await this.fetchEvents(workspaceId, { startDate, endDate, top });
-    const rows = await this.classifyEvents(workspaceId, events, { useLlm });
+    const { rows, llmApplied, llmSkipped } = await this.classifyEvents(workspaceId, events, { useLlm, llmLimit });
     return {
       total: rows.length,
       matched: rows.filter((r) => r.isLeave && !r.requiresReview).length,
       reviewNeeded: rows.filter((r) => r.requiresReview).length,
       ignored: rows.filter((r) => r.category === 'IGNORED').length,
+      llmApplied,
+      llmSkipped,
       rows: rows.map((r) => ({
         subject: r.subject,
         start: r.event.start,
@@ -525,7 +531,7 @@ class CalendarLeaveService {
     const start = startDate || formatDateUTC(new Date(Date.now() - cfg.lookbackDays * 86400000));
     const end = endDate || formatDateUTC(new Date(Date.now() + cfg.horizonDays * 86400000));
     const events = await this.fetchEvents(workspaceId, { startDate: start, endDate: end, top: 1000 });
-    const rows = await this.classifyEvents(workspaceId, events, { useLlm });
+    const { rows } = await this.classifyEvents(workspaceId, events, { useLlm });
     const leaveRows = [];
     const validKeys = new Set();
 
