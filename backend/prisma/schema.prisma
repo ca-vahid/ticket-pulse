@@ -35,6 +35,10 @@ model Workspace {
   vacationTrackerConfig  VacationTrackerConfig?
   vtLeaveTypes           VtLeaveType[]
   vtUserMappings         VtUserMapping[]
+  calendarLeaveConfig    CalendarLeaveSourceConfig?
+  calendarLeaveRules     CalendarLeaveRule[]
+  calendarLeaveAliases   CalendarLeaveAlias[]
+  calendarLeaveClassifications CalendarLeaveClassification[]
   technicianLeaves       TechnicianLeave[]
   ticketAssignments      TicketAssignment[]
   assignmentConfig       AssignmentConfig?
@@ -91,6 +95,7 @@ model Technician {
   tickets              Ticket[]
   leaves               TechnicianLeave[]
   vtUserMappings       VtUserMapping[]
+  calendarLeaveAliases CalendarLeaveAlias[]
   assignmentsReceived  TicketAssignment[] @relation("assignedTo")
   competencies         TechnicianCompetency[]
   pipelineAssignments  AssignmentPipelineRun[] @relation("pipelineAssignedTo")
@@ -535,6 +540,79 @@ model LlmConfigHistory {
   @@map("llm_config_history")
   @@index([configId])
   @@index([createdAt])
+  @@index([workspaceId])
+}
+
+model CalendarLeaveSourceConfig {
+  id             Int       @id @default(autoincrement())
+  workspaceId    Int       @unique @map("workspace_id")
+  workspace      Workspace @relation(fields: [workspaceId], references: [id])
+  provider       String    @default("graph_group_calendar") @db.VarChar(50)
+  mailbox        String    @db.VarChar(255)
+  graphGroupId   String    @db.VarChar(255) @map("graph_group_id")
+  timezone       String    @default("America/Vancouver") @db.VarChar(50)
+  syncEnabled    Boolean   @default(false) @map("sync_enabled")
+  lastSyncAt     DateTime? @map("last_sync_at")
+  lookbackDays   Int       @default(7) @map("lookback_days")
+  horizonDays    Int       @default(90) @map("horizon_days")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("calendar_leave_source_configs")
+}
+
+model CalendarLeaveRule {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  name        String    @db.VarChar(120)
+  priority    Int       @default(100)
+  pattern     String    @db.Text
+  category    String    @db.VarChar(20) // OFF | WFH | OTHER | IGNORED
+  halfDayPart String?   @db.VarChar(10) @map("half_day_part") // AM | PM | INFER | null
+  isActive    Boolean   @default(true) @map("is_active")
+  notes       String?   @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("calendar_leave_rules")
+  @@index([workspaceId])
+  @@index([priority])
+}
+
+model CalendarLeaveAlias {
+  id              Int         @id @default(autoincrement())
+  workspaceId     Int         @map("workspace_id")
+  workspace       Workspace   @relation(fields: [workspaceId], references: [id])
+  alias           String      @db.VarChar(120)
+  normalizedAlias String      @db.VarChar(120) @map("normalized_alias")
+  technicianId    Int?        @map("technician_id")
+  technician      Technician? @relation(fields: [technicianId], references: [id])
+  isIgnored       Boolean     @default(false) @map("is_ignored")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, normalizedAlias])
+  @@map("calendar_leave_aliases")
+  @@index([workspaceId])
+  @@index([technicianId])
+}
+
+model CalendarLeaveClassification {
+  id                 Int       @id @default(autoincrement())
+  workspaceId        Int       @map("workspace_id")
+  workspace          Workspace @relation(fields: [workspaceId], references: [id])
+  graphEventId       String    @db.Text @map("graph_event_id")
+  lastModifiedAt     DateTime? @map("last_modified_at")
+  eventFingerprint   String    @db.VarChar(64) @map("event_fingerprint")
+  source             String    @db.VarChar(20) // deterministic | llm | manual
+  classification     Json
+  confidence         Float?
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, eventFingerprint])
+  @@map("calendar_leave_classifications")
   @@index([workspaceId])
 }
 

@@ -1289,6 +1289,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         ? selectedDecisions.join(',')
         : 'approved,modified,auto_assigned';
 
+      const queuedSnapshotFallback = { data: [], totalCount: 0, truncated: false };
       const [queueRes, outsideRes, assignedRes, dismissedRes, rejectedRes, deletedRes, queuedRes, statusRes] = await Promise.all([
         assignmentAPI.getQueue({
           limit: queueLimit,
@@ -1319,7 +1320,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         assignmentAPI.getRuns({ decisions: 'noise_dismissed', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: dismissedTicketStatus, ...commonFilters }),
         assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: rejectedTicketStatus, ...commonFilters }),
         assignmentAPI.getRuns({ since, sinceField: 'createdAt', limit: nonPendingLimit, ticketStatus: 'deleted', ...commonFilters }),
-        assignmentAPI.getQueuedRuns(),
+        assignmentAPI.getQueuedRuns().catch(() => queuedSnapshotFallback),
         assignmentAPI.getQueueStatus().catch(() => null),
       ]);
       setQueue({

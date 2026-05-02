@@ -1,6 +1,8 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 
+const DEFAULT_NOISE_RULE_WORKSPACE_SLUG = 'it';
+
 const DEFAULT_RULES = [
   {
     name: 'Synology NAS Alerts',
@@ -154,6 +156,30 @@ function notFoundError() {
 }
 
 class NoiseRuleService {
+  async _getDefaultNoiseWorkspace() {
+    const workspace = await prisma.workspace.findUnique({
+      where: { slug: DEFAULT_NOISE_RULE_WORKSPACE_SLUG },
+      select: { id: true, name: true, slug: true },
+    });
+    if (workspace) return workspace;
+
+    const legacyWorkspace = await prisma.workspace.findUnique({
+      where: { id: 1 },
+      select: { id: true, name: true, slug: true },
+    });
+    if (
+      legacyWorkspace
+      && (
+        legacyWorkspace.slug?.toLowerCase() === DEFAULT_NOISE_RULE_WORKSPACE_SLUG
+        || legacyWorkspace.name?.toLowerCase() === DEFAULT_NOISE_RULE_WORKSPACE_SLUG
+      )
+    ) {
+      return legacyWorkspace;
+    }
+
+    return null;
+  }
+
   async _getRules(workspaceId) {
     const wsId = workspaceId ?? 1;
     const now = Date.now();
@@ -294,36 +320,40 @@ class NoiseRuleService {
   }
 
   async seedDefaults(workspaceId = null) {
-    if (workspaceId !== null) {
-      const wsId = workspaceId;
-      const existing = await prisma.noiseRule.count({ where: { workspaceId: wsId } });
-      if (existing > 0) {
-        logger.info(`Noise rules already seeded for workspace ${wsId} (${existing} rules exist)`);
-        return 0;
-      }
-
-      logger.info(`Seeding ${DEFAULT_RULES.length} default noise rules for workspace ${wsId}...`);
-      await prisma.noiseRule.createMany({
-        data: DEFAULT_RULES.map(r => ({
-          name: r.name,
-          pattern: r.pattern,
-          description: r.description ?? null,
-          category: r.category,
-          isEnabled: true,
-          dedupWindowDays: r.dedupWindowDays ?? null,
-          workspaceId: wsId,
-        })),
-      });
-      this.invalidateCache();
-      return DEFAULT_RULES.length;
+    const defaultWorkspace = await this._getDefaultNoiseWorkspace();
+    if (!defaultWorkspace) {
+      logger.warn('Default IT noise rules were not seeded because the IT workspace could not be found');
+      return 0;
     }
 
-    const workspaces = await prisma.workspace.findMany({ select: { id: true } });
-    let seeded = 0;
-    for (const { id } of workspaces) {
-      seeded += await this.seedDefaults(id);
+    if (workspaceId !== null && Number(workspaceId) !== defaultWorkspace.id) {
+      logger.info(
+        `Skipping default IT noise rules for workspace ${workspaceId}; non-IT workspaces start with empty noise rules`,
+      );
+      return 0;
     }
-    return seeded;
+
+    const wsId = defaultWorkspace.id;
+    const existing = await prisma.noiseRule.count({ where: { workspaceId: wsId } });
+    if (existing > 0) {
+      logger.info(`Noise rules already seeded for workspace ${wsId} (${existing} rules exist)`);
+      return 0;
+    }
+
+    logger.info(`Seeding ${DEFAULT_RULES.length} default IT noise rules for workspace ${wsId}...`);
+    await prisma.noiseRule.createMany({
+      data: DEFAULT_RULES.map(r => ({
+        name: r.name,
+        pattern: r.pattern,
+        description: r.description ?? null,
+        category: r.category,
+        isEnabled: true,
+        dedupWindowDays: r.dedupWindowDays ?? null,
+        workspaceId: wsId,
+      })),
+    });
+    this.invalidateCache();
+    return DEFAULT_RULES.length;
   }
 
   /**
@@ -469,18 +499,39 @@ class NoiseRuleService {
     try {
       const regex = new RegExp(pattern, 'i');
       const tickets = await prisma.ticket.findMany({
-        select: { subject: true },
+        select: {
+          freshserviceTicketId: true,
+          subject: true,
+          status: true,
+          createdAt: true,
+          requester: {
+            select: {
+              name: true,
+              email: true,
+            },
+          },
+        },
         where: { workspaceId: wsId, subject: { not: null } },
+        orderBy: { createdAt: 'desc' },
       });
 
       const matches = tickets.filter(t => regex.test(t.subject));
       const sampleSubjects = [...new Set(matches.map(t => t.subject))].slice(0, 15);
+      const sampleMatches = matches.slice(0, 15).map(t => ({
+        ticketId: t.freshserviceTicketId?.toString() || null,
+        subject: t.subject,
+        status: t.status,
+        createdAt: t.createdAt,
+        requesterName: t.requester?.name || null,
+        requesterEmail: t.requester?.email || null,
+      }));
 
       return {
         matchCount: matches.length,
         totalTickets: tickets.length,
-        percentage: ((matches.length / tickets.length) * 100).toFixed(1),
+        percentage: tickets.length > 0 ? ((matches.length / tickets.length) * 100).toFixed(1) : '0',
         sampleSubjects,
+        sampleMatches,
       };
     } catch (e) {
       throw new Error(`Invalid regex pattern: ${e.message}`);

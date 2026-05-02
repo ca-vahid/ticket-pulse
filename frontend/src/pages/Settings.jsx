@@ -15,6 +15,7 @@ import BackfillPanel from '../components/settings/BackfillPanel';
 import WorkspaceManagementPanel from '../components/settings/WorkspaceManagementPanel';
 import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
+import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
 import TechnicianVisibilityPanel from '../components/settings/TechnicianVisibilityPanel';
 import WorkspaceAccessPanel from '../components/settings/WorkspaceAccessPanel';
 import {
@@ -56,7 +57,7 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker'];
+  const validSections = ['freshservice', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -108,6 +109,7 @@ export default function Settings() {
     { id: 'llm-config', label: 'LLM Config', Icon: Bot, minRole: 'admin' },
     { id: 'auto-response-test', label: 'Test Auto-Response', Icon: FlaskConical, minRole: 'admin' },
     { id: 'vacation-tracker', label: 'Vacation Tracker', Icon: CalendarDays, minRole: 'admin' },
+    { id: 'calendar-leave', label: 'Shared Calendar', Icon: CalendarDays, minRole: 'admin' },
   ];
 
   const navigationItems = allNavigationItems.filter(item => {
@@ -998,6 +1000,13 @@ export default function Settings() {
             {activeSection === 'vacation-tracker' && (
               <div className="p-6">
                 <VacationTrackerPanel />
+              </div>
+            )}
+
+            {/* Shared Calendar Leave */}
+            {activeSection === 'calendar-leave' && (
+              <div className="p-6">
+                <CalendarLeavePanel />
               </div>
             )}
           </div>

@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import syncService from './syncService.js';
 import vtService from './vacationTrackerService.js';
 import vtRepo from './vacationTrackerRepository.js';
+import calendarLeaveService from './calendarLeaveService.js';
 import syncLogRepository from './syncLogRepository.js';
 import workspaceRepository from './workspaceRepository.js';
 import emailPollingService from './emailPollingService.js';
@@ -19,6 +20,7 @@ class ScheduledSyncService {
   constructor() {
     this.cronJobs = new Map();
     this.vtCronJobs = new Map();
+    this.calendarLeaveCronJobs = new Map();
   }
 
   /**
@@ -37,6 +39,7 @@ class ScheduledSyncService {
       for (const ws of workspaces) {
         await this.startForWorkspace(ws);
         await this.startVTSyncForWorkspace(ws);
+        await this.startCalendarLeaveSyncForWorkspace(ws);
       }
 
       // Start email polling for assignment pipeline
@@ -202,12 +205,64 @@ class ScheduledSyncService {
     this.vtCronJobs.set(wsId, { job, workspaceName: wsName });
   }
 
+  async startCalendarLeaveSyncForWorkspace(workspace) {
+    const wsId = workspace.id;
+    const wsName = workspace.name;
+
+    this.stopCalendarLeaveSyncForWorkspace(wsId);
+
+    const config = await calendarLeaveService.getConfig(wsId);
+    if (!config?.syncEnabled || !config?.graphGroupId) {
+      return;
+    }
+
+    logger.info(`Starting shared calendar leave sync for workspace "${wsName}" (id=${wsId}) every 60m`);
+
+    const job = cron.schedule(
+      '15 * * * *',
+      async () => {
+        const logEntry = await syncLogRepository.createLog({
+          syncType: 'calendar-leave',
+          status: 'started',
+          workspaceId: wsId,
+        });
+        try {
+          logger.info(`Scheduled shared calendar leave sync triggered for workspace "${wsName}"`);
+          const result = await calendarLeaveService.sync(wsId, { useLlm: true });
+          await syncLogRepository.completeLog(logEntry.id, {
+            ticketsSynced: result.leaveDaysCreated || 0,
+            techniciansSynced: result.eventsProcessed || 0,
+          });
+          logger.info(`Scheduled shared calendar leave sync completed for workspace "${wsName}": ${result.leaveDaysCreated} leave-days`);
+        } catch (error) {
+          logger.error(`Scheduled shared calendar leave sync failed for workspace "${wsName}":`, error);
+          await syncLogRepository.failLog(logEntry.id, error.message);
+        }
+      },
+      {
+        scheduled: true,
+        timezone: workspace.defaultTimezone || config.timezone || 'America/Los_Angeles',
+      },
+    );
+
+    this.calendarLeaveCronJobs.set(wsId, { job, workspaceName: wsName });
+  }
+
   stopVTSyncForWorkspace(wsId) {
     const entry = this.vtCronJobs.get(wsId);
     if (entry) {
       logger.info(`Stopping VT sync for workspace "${entry.workspaceName}"`);
       entry.job.stop();
       this.vtCronJobs.delete(wsId);
+    }
+  }
+
+  stopCalendarLeaveSyncForWorkspace(wsId) {
+    const entry = this.calendarLeaveCronJobs.get(wsId);
+    if (entry) {
+      logger.info(`Stopping shared calendar leave sync for workspace "${entry.workspaceName}"`);
+      entry.job.stop();
+      this.calendarLeaveCronJobs.delete(wsId);
     }
   }
 
@@ -219,6 +274,7 @@ class ScheduledSyncService {
       this.cronJobs.delete(wsId);
     }
     this.stopVTSyncForWorkspace(wsId);
+    this.stopCalendarLeaveSyncForWorkspace(wsId);
   }
 
   stopAll() {
@@ -227,6 +283,12 @@ class ScheduledSyncService {
       for (const [wsId] of this.cronJobs) {
         this.stopForWorkspace(wsId);
       }
+    }
+    for (const [wsId] of this.vtCronJobs) {
+      this.stopVTSyncForWorkspace(wsId);
+    }
+    for (const [wsId] of this.calendarLeaveCronJobs) {
+      this.stopCalendarLeaveSyncForWorkspace(wsId);
     }
   }
 
@@ -243,6 +305,7 @@ class ScheduledSyncService {
       this.stopForWorkspace(workspaceId);
       await this.startForWorkspace(ws);
       await this.startVTSyncForWorkspace(ws);
+      await this.startCalendarLeaveSyncForWorkspace(ws);
     } else {
       return await this.start();
     }

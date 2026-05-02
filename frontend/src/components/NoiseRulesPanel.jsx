@@ -18,6 +18,77 @@ function getCategoryStyle(category) {
   return CATEGORIES.find(c => c.value === category)?.color || 'bg-gray-100 text-gray-700';
 }
 
+function formatTestDate(value) {
+  if (!value) return 'Unknown date';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown date';
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function getSenderLabel(match) {
+  if (match.requesterName && match.requesterEmail) {
+    return `${match.requesterName} <${match.requesterEmail}>`;
+  }
+  return match.requesterEmail || match.requesterName || 'Unknown sender';
+}
+
+function getStatusStyle(status) {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'open') return 'bg-blue-50 text-blue-700 border-blue-100';
+  if (normalized === 'pending') return 'bg-amber-50 text-amber-700 border-amber-100';
+  if (normalized === 'spam' || normalized === 'deleted') return 'bg-red-50 text-red-700 border-red-100';
+  if (normalized === 'closed') return 'bg-slate-100 text-slate-600 border-slate-200';
+  return 'bg-gray-50 text-gray-600 border-gray-200';
+}
+
+function TestPatternMatches({ testResult }) {
+  const sampleMatches = testResult.sampleMatches || [];
+  const fallbackSubjects = testResult.sampleSubjects || [];
+
+  if (sampleMatches.length === 0 && fallbackSubjects.length === 0) return null;
+
+  return (
+    <div className="mt-2 max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+      {sampleMatches.length > 0 ? (
+        <div className="divide-y divide-slate-100">
+          {sampleMatches.map((match, i) => (
+            <div key={`${match.ticketId || 'ticket'}-${i}`} className="grid gap-1 px-3 py-2 text-[11px] sm:grid-cols-[7.5rem_minmax(9rem,16rem)_5rem_minmax(0,1fr)] sm:items-start">
+              <div className="font-medium text-slate-500">
+                {formatTestDate(match.createdAt)}
+                {match.ticketId && <span className="ml-1 text-slate-400">#{match.ticketId}</span>}
+              </div>
+              <div className="min-w-0 text-slate-600" title={getSenderLabel(match)}>
+                <div className="truncate font-medium text-slate-700">{match.requesterName || match.requesterEmail || 'Unknown sender'}</div>
+                {match.requesterName && match.requesterEmail && (
+                  <div className="truncate text-slate-400">{match.requesterEmail}</div>
+                )}
+              </div>
+              <div>
+                <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${getStatusStyle(match.status)}`}>
+                  {match.status || 'Unknown'}
+                </span>
+              </div>
+              <div className="min-w-0 truncate text-slate-700" title={match.subject || ''}>
+                {match.subject || '(no subject)'}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-0.5 px-3 py-2">
+          {fallbackSubjects.map((subject, i) => (
+            <p key={i} className="truncate text-[11px] text-slate-600">{subject}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RuleRow({ rule, onUpdate, onDelete }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({});
@@ -194,13 +265,7 @@ function RuleRow({ rule, onUpdate, onDelete }) {
                   <p className="text-xs font-medium text-gray-700">
                     Matches <span className="text-blue-600 font-bold">{testResult.matchCount}</span> of {testResult.totalTickets} tickets ({testResult.percentage}%)
                   </p>
-                  {testResult.sampleSubjects?.length > 0 && (
-                    <div className="mt-2 space-y-0.5 max-h-32 overflow-y-auto">
-                      {testResult.sampleSubjects.map((s, i) => (
-                        <p key={i} className="text-[11px] text-gray-500 truncate">{s}</p>
-                      ))}
-                    </div>
-                  )}
+                  <TestPatternMatches testResult={testResult} />
                 </>
               )}
             </div>

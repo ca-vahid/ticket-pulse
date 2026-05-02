@@ -191,7 +191,7 @@ async function initialize() {
     }
     logger.info('Availability and LLM configuration initialized for all active workspaces');
 
-    // Seed default noise rules (non-critical, must not block sync startup)
+    // Seed default IT noise rules only; other workspaces intentionally start empty.
     try {
       await noiseRuleService.seedDefaults();
       logger.info('Noise rules initialized');

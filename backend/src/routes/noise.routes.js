@@ -162,7 +162,7 @@ router.post(
 
 /**
  * POST /api/noise-rules/seed
- * Seed default noise rules (only if none exist)
+ * Seed default IT noise rules (no-op outside the IT workspace)
  */
 router.post(
   '/seed',

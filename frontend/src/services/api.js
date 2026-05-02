@@ -509,6 +509,25 @@ export const vacationTrackerAPI = {
 };
 
 /**
+ * Shared mailbox calendar leave API
+ */
+export const calendarLeaveAPI = {
+  getConfig: () => api.get('/calendar-leave/config'),
+  updateConfig: (data) => api.put('/calendar-leave/config', data),
+  seedDefaults: () => api.post('/calendar-leave/seed-defaults'),
+  getRules: () => api.get('/calendar-leave/rules'),
+  saveRule: (rule) => rule.id
+    ? api.put(`/calendar-leave/rules/${rule.id}`, rule)
+    : api.post('/calendar-leave/rules', rule),
+  deleteRule: (id) => api.delete(`/calendar-leave/rules/${id}`),
+  getAliases: () => api.get('/calendar-leave/aliases'),
+  saveAlias: (alias) => api.post('/calendar-leave/aliases', alias),
+  deleteAlias: (id) => api.delete(`/calendar-leave/aliases/${id}`),
+  preview: (data) => api.post('/calendar-leave/preview', data),
+  sync: (data) => api.post('/calendar-leave/sync', data),
+};
+
+/**
  * Assignment Pipeline API
  */
 export const assignmentAPI = {

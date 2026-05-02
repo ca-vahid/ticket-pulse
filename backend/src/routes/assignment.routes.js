@@ -173,20 +173,6 @@ router.get('/queued', requireReviewer, asyncHandler(async (req, res) => {
   // and hid that the queue had problems). Also return totalCount so the UI
   // can warn when the queue exceeds the display cap.
   const limit = Math.min(Math.max(parseInt(req.query.limit) || 500, 1), 2000);
-  let reconciliation = null;
-  try {
-    reconciliation = await assignmentPipelineService.reconcileQueuedRuns(req.workspaceId, {
-      // Live FreshService validation is rate-limited. Keep the list endpoint
-      // responsive and let the scheduled reconciler/drain handle deeper queues.
-      limit: Math.min(limit, 40),
-      source: 'assignment-queued-endpoint',
-    });
-  } catch (error) {
-    logger.warn('Queued endpoint reconciliation failed; returning current queue snapshot', {
-      workspaceId: req.workspaceId,
-      error: error.message,
-    });
-  }
 
   const [runs, totalCount] = await Promise.all([
     assignmentRepository.listQueuedRuns(req.workspaceId, limit),
@@ -198,7 +184,7 @@ router.get('/queued', requireReviewer, asyncHandler(async (req, res) => {
     total: runs.length,
     totalCount,
     truncated: runs.length < totalCount,
-    reconciliation,
+    reconciliation: null,
   });
 }));
 

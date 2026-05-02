@@ -43,7 +43,8 @@ router.get(
 );
 
 /**
- * Initialize a workspace with defaults (business hours, LLM, noise rules, sync).
+ * Initialize a workspace with defaults (business hours, LLM, sync).
+ * Noise rules intentionally start empty outside the IT workspace.
  */
 async function initializeWorkspace(ws) {
   try {
