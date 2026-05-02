@@ -60,6 +60,10 @@ const FALLBACK_CONFIG = {
   dotColor: 'bg-gray-500',
 };
 
+const stripHtml = (value = '') => value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+const getEntryText = (entry) => entry.text || stripHtml(entry.html);
+
 export default function ChangelogModal({ isOpen, onClose }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilters, setActiveFilters] = useState(new Set());
@@ -91,8 +95,9 @@ export default function ChangelogModal({ isOpen, onClose }) {
 
   const filterEntries = (entries) => {
     return entries.filter(entry => {
+      const searchableText = getEntryText(entry).toLowerCase();
       const matchesSearch = !searchTerm ||
-        entry.text.toLowerCase().includes(searchTerm.toLowerCase());
+        searchableText.includes(searchTerm.toLowerCase());
       const matchesFilter = activeFilters.size === 0 || activeFilters.has(entry.type);
       return matchesSearch && matchesFilter;
     });
@@ -197,7 +202,14 @@ export default function ChangelogModal({ isOpen, onClose }) {
                           <config.icon className="w-3 h-3" />
                           {config.label}
                         </span>
-                        <p className="text-sm text-gray-700 leading-relaxed">{entry.text}</p>
+                        {entry.html ? (
+                          <p
+                            className="text-sm text-gray-700 leading-relaxed [&_strong]:font-semibold [&_strong]:text-gray-900 [&_mark]:rounded [&_mark]:bg-amber-100 [&_mark]:px-1 [&_mark]:py-0.5 [&_mark]:text-amber-900"
+                            dangerouslySetInnerHTML={{ __html: entry.html }}
+                          />
+                        ) : (
+                          <p className="text-sm text-gray-700 leading-relaxed">{entry.text}</p>
+                        )}
                       </div>
                     );
                   })}

@@ -1,6 +1,22 @@
-export const APP_VERSION = '2.11';
+export const APP_VERSION = '2.15';
 
 export const changelog = [
+  {
+    version: '2.15',
+    date: 'May 2, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>Shared Calendar Leave</strong> is now available for Accounting: connect the shared mailbox calendar, preview events, review uncertain names, and sync approved leave into availability.' },
+      { type: 'new', html: '<mark>Major</mark> <strong>Preview + Haiku</strong> adds AI-assisted calendar classification with cached results, editable rules, aliases, ignore handling, and inline review actions before syncing.' },
+      { type: 'new', html: '<mark>Major</mark> <strong>Per-workspace noise rules</strong> are live: IT keeps the existing defaults, while other workspaces can build their own focused rules without inheriting IT noise.' },
+      { type: 'improved', html: '<strong>Noise rule testing</strong> now shows richer sample matches with requester/sender details, dates, ticket IDs, and status context.' },
+      { type: 'improved', html: '<strong>Assignment Review and Daily Review</strong> received cleaner tabs, taxonomy review tables, compact recommendation rows, refreshed approvals, and clearer run details.' },
+      { type: 'improved', html: '<strong>Mobile polish</strong> improves Dashboard, Timeline, Analytics, header actions, version badge spacing, and Daily Review layouts on smaller screens.' },
+      { type: 'fixed', html: '<strong>Accounting assignment queue</strong> now loads from a fast database snapshot, avoiding long blank loads when FreshService reconciliation is slow.' },
+      { type: 'fixed', html: '<strong>FreshService sync reliability</strong> improved for corrected assignments, finalization failures, stale queue entries, and noise-dismissal close payloads.' },
+      { type: 'security', html: '<strong>Workspace isolation</strong> was tightened for noise rules and shared-calendar admin actions so workspace-specific settings stay scoped.' },
+      { type: 'database', html: '<strong>Database updates</strong> added Graph shared-calendar leave source tables, rules, aliases, classification cache, and IT-only default noise scoping.' },
+    ],
+  },
   {
     version: '2.11',
     date: 'April 27, 2026',
