@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import * as Icons from 'lucide-react';
@@ -11,6 +11,26 @@ function Icon({ name, className = 'h-4 w-4' }) {
 
 function voteCount(votes, itemId, voteType = 'support') {
   return votes?.totals?.find(v => v.itemId === itemId && v.voteType === voteType)?.count || 0;
+}
+
+function normalizeVotes(votes) {
+  return {
+    participantCount: votes?.participantCount || 0,
+    totals: Array.isArray(votes?.totals) ? votes.totals : [],
+    mergeSuggestions: Array.isArray(votes?.mergeSuggestions) ? votes.mergeSuggestions : [],
+    categorySuggestions: Array.isArray(votes?.categorySuggestions) ? votes.categorySuggestions : [],
+  };
+}
+
+function totalVoteCount(votes) {
+  return (votes?.totals || []).reduce((sum, vote) => sum + (vote.count || 0), 0);
+}
+
+function toastToneClasses(tone) {
+  if (tone === 'amber') return 'border-amber-300 bg-amber-50 text-amber-950';
+  if (tone === 'emerald') return 'border-emerald-300 bg-emerald-50 text-emerald-950';
+  if (tone === 'red') return 'border-red-300 bg-red-50 text-red-950';
+  return 'border-cyan-300 bg-cyan-50 text-cyan-950';
 }
 
 function compactText(value, max = 130) {
@@ -70,11 +90,13 @@ export default function SummitVote() {
   const { token } = useParams();
   const storageKey = `summit_vote_${token}`;
   const [session, setSession] = useState(null);
-  const [votes, setVotes] = useState({ participantCount: 0, totals: [], mergeSuggestions: [], categorySuggestions: [] });
+  const [votes, setVotes] = useState(() => normalizeVotes());
   const [displayName, setDisplayName] = useState('');
   const [participantKey, setParticipantKey] = useState('');
   const [myVotes, setMyVotes] = useState({});
   const [priorityItems, setPriorityItems] = useState([]);
+  const [highlightIds, setHighlightIds] = useState({});
+  const [toasts, setToasts] = useState([]);
   const [dragItem, setDragItem] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [showMobilePriorities, setShowMobilePriorities] = useState(false);
@@ -91,6 +113,8 @@ export default function SummitVote() {
   const [error, setError] = useState('');
   const [expiredMessage, setExpiredMessage] = useState('');
   const [joining, setJoining] = useState(false);
+  const votesRef = useRef(normalizeVotes());
+  const toastIdRef = useRef(0);
   const suggestRef = useRef(null);
   const suggestionsRef = useRef(null);
 
@@ -138,6 +162,55 @@ export default function SummitVote() {
     useSensor(KeyboardSensor),
   );
 
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id));
+  }, []);
+
+  const pushToast = useCallback(({ title, message, icon = 'Bell', tone = 'cyan', duration = 3200 }) => {
+    const id = `${Date.now()}_${toastIdRef.current += 1}`;
+    setToasts(prev => [{ id, title, message, icon, tone }, ...prev].slice(0, 3));
+    window.setTimeout(() => {
+      setToasts(prev => prev.filter(toast => toast.id !== id));
+    }, duration);
+  }, []);
+
+  const markHighlight = useCallback((id) => {
+    setHighlightIds(prev => ({ ...prev, [id]: true }));
+    window.setTimeout(() => {
+      setHighlightIds((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }, 1800);
+  }, []);
+
+  const applyVotes = useCallback((incomingVotes, { silent = false } = {}) => {
+    const next = normalizeVotes(incomingVotes);
+    const previous = votesRef.current || normalizeVotes();
+    if (!silent) {
+      const previousSupportCounts = new Map(previous.totals.filter(vote => vote.voteType === 'support').map(vote => [vote.itemId, vote.count || 0]));
+      next.totals
+        .filter(vote => vote.voteType === 'support' && (vote.count || 0) !== (previousSupportCounts.get(vote.itemId) || 0))
+        .slice(0, 8)
+        .forEach((vote) => markHighlight(`vote-${vote.itemId}`));
+      if (totalVoteCount(next) !== totalVoteCount(previous)) markHighlight('votes');
+      if ((next.participantCount || 0) !== (previous.participantCount || 0)) markHighlight('participants');
+
+      const previousIdeaIds = new Set(previous.categorySuggestions.map(suggestion => suggestion.id));
+      next.categorySuggestions
+        .filter(suggestion => !previousIdeaIds.has(suggestion.id))
+        .slice(0, 5)
+        .forEach((suggestion) => {
+          markHighlight(`idea-${suggestion.itemId}`);
+          markHighlight(`category-${suggestion.value?.parentId}`);
+          markHighlight('ideas');
+        });
+    }
+    votesRef.current = next;
+    setVotes(next);
+  }, [markHighlight]);
+
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
@@ -156,12 +229,12 @@ export default function SummitVote() {
       .then((res) => {
         if (cancelled) return;
         setSession(res.session);
-        setVotes(res.votes || { participantCount: 0, totals: [], mergeSuggestions: [], categorySuggestions: [] });
+        applyVotes(res.votes, { silent: true });
       })
       .catch((err) => setError(err.message || 'Voting link is not available'));
     const source = summitAPI.getPublicEventSource(token);
     source.addEventListener('state', (event) => setSession(JSON.parse(event.data)));
-    source.addEventListener('votes', (event) => setVotes(JSON.parse(event.data)));
+    source.addEventListener('votes', (event) => applyVotes(JSON.parse(event.data)));
     source.addEventListener('expired', (event) => {
       try {
         const payload = JSON.parse(event.data);
@@ -176,7 +249,7 @@ export default function SummitVote() {
       cancelled = true;
       source.close();
     };
-  }, [token]);
+  }, [applyVotes, token]);
 
   useEffect(() => {
     if (!displayName && !participantKey) return;
@@ -205,7 +278,8 @@ export default function SummitVote() {
       const res = await summitAPI.joinPublicWorkshop(token, { displayName, participantKey: participantKey || null });
       setParticipantKey(res.participant.participantKey);
       setDisplayName(res.participant.displayName);
-      setVotes(res.votes || votes);
+      applyVotes(res.votes, { silent: true });
+      pushToast({ title: 'Joined', message: `Voting as ${res.participant.displayName}`, icon: 'UserCheck', tone: 'emerald' });
     } catch (err) {
       setError(err.message || 'Could not join');
     } finally {
@@ -231,7 +305,16 @@ export default function SummitVote() {
         voteType: 'support',
         active,
       });
-      setVotes(res.votes || votes);
+      applyVotes(res.votes, { silent: true });
+      markHighlight(`vote-${item.id}`);
+      if (active && navigator.vibrate) navigator.vibrate(12);
+      pushToast({
+        title: active ? 'Vote added' : 'Vote removed',
+        message: item.name,
+        icon: active ? 'ThumbsUp' : 'MinusCircle',
+        tone: active ? 'cyan' : 'amber',
+        duration: 2400,
+      });
     } catch (err) {
       setError(err.message || 'Vote failed');
       setMyVotes(prev => ({ ...prev, [item.id]: !active }));
@@ -274,8 +357,9 @@ export default function SummitVote() {
       const res = await summitAPI.joinPublicWorkshop(token, { displayName: nextName, participantKey });
       setParticipantKey(res.participant.participantKey);
       setDisplayName(res.participant.displayName);
-      setVotes(res.votes || votes);
+      applyVotes(res.votes, { silent: true });
       setEditingName(false);
+      pushToast({ title: 'Name updated', message: res.participant.displayName, icon: 'Pencil', tone: 'emerald' });
     } catch (err) {
       setError(err.message || 'Could not update name');
     }
@@ -302,8 +386,9 @@ export default function SummitVote() {
         voteType: 'merge_suggestion',
         value: { from, to, reason: mergeReason },
       });
-      setVotes(res.votes || votes);
+      applyVotes(res.votes, { silent: true });
       setMergeReason('');
+      pushToast({ title: 'Merge suggestion shared', message: `${from} + ${to}`, icon: 'Merge', tone: 'cyan' });
     } catch (err) {
       setError(err.message || 'Suggestion failed');
     }
@@ -327,9 +412,11 @@ export default function SummitVote() {
           reason: ideaReason.trim(),
         },
       });
-      setVotes(res.votes || votes);
+      applyVotes(res.votes, { silent: true });
+      markHighlight(`idea-${name}`);
       setIdeaName('');
       setIdeaReason('');
+      pushToast({ title: 'Category suggestion shared', message: name, icon: 'Lightbulb', tone: 'amber' });
     } catch (err) {
       setError(err.message || 'Suggestion failed');
     }
@@ -353,8 +440,10 @@ export default function SummitVote() {
           reason: '',
         },
       });
-      setVotes(res.votes || votes);
+      applyVotes(res.votes, { silent: true });
+      markHighlight(`category-${category.id}`);
       setQuickSubcategoryNames(prev => ({ ...prev, [category.id]: '' }));
+      pushToast({ title: 'Subcategory suggestion shared', message: `${name} under ${category.name}`, icon: 'Tag', tone: 'amber' });
     } catch (err) {
       setError(err.message || 'Suggestion failed');
     }
@@ -375,6 +464,42 @@ export default function SummitVote() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
+      <style>{`
+        @keyframes voteToastIn {
+          from { opacity: 0; transform: translate3d(0, -10px, 0) scale(.98); }
+          to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+        }
+        @keyframes voteSoftPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); }
+          50% { box-shadow: 0 0 0 7px rgba(34, 211, 238, .2); }
+        }
+        .vote-toast { animation: voteToastIn 180ms ease-out both; }
+        .vote-soft-pulse { animation: voteSoftPulse 1.1s ease-in-out 2; }
+        @media (prefers-reduced-motion: reduce) {
+          .vote-toast, .vote-soft-pulse { animation: none; }
+        }
+      `}</style>
+      <div className="fixed left-3 right-3 top-3 z-[80] mx-auto grid max-w-md gap-2" aria-live="polite">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`vote-toast flex items-start gap-3 rounded-lg border px-3 py-2 shadow-2xl ${toastToneClasses(toast.tone)}`}>
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/75">
+              <Icon name={toast.icon} className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold">{toast.title}</div>
+              <div className="mt-0.5 break-words text-xs opacity-80">{toast.message}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => dismissToast(toast.id)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition hover:bg-white/70 active:scale-95"
+              aria-label={`Dismiss ${toast.title}`}
+            >
+              <Icons.X className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+      </div>
       <div className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-6">
         <header className="mb-5 overflow-hidden rounded-lg border border-white/10 bg-white/5 shadow-xl">
           <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
@@ -386,12 +511,16 @@ export default function SummitVote() {
               <h1 className="mt-2 text-xl font-semibold sm:text-2xl">Category live voting</h1>
               <p className="mt-1 text-sm text-slate-300">Tap to vote, suggest missing categories, and add subcategory ideas.</p>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-slate-950">
-              <div className="rounded-lg bg-cyan-400 px-4 py-3">
+            <div className="grid grid-cols-3 gap-2 text-slate-950">
+              <div className={`rounded-lg bg-cyan-400 px-3 py-3 transition-all duration-300 ${highlightIds.participants ? 'vote-soft-pulse scale-[1.02]' : ''}`}>
                 <div className="text-xs font-medium uppercase">Participants</div>
                 <div className="text-2xl font-semibold">{votes.participantCount || 0}</div>
               </div>
-              <div className="rounded-lg bg-amber-300 px-4 py-3">
+              <div className={`rounded-lg bg-white px-3 py-3 transition-all duration-300 ${highlightIds.votes ? 'vote-soft-pulse scale-[1.02]' : ''}`}>
+                <div className="text-xs font-medium uppercase">Votes</div>
+                <div className="text-2xl font-semibold">{totalVoteCount(votes)}</div>
+              </div>
+              <div className={`rounded-lg bg-amber-300 px-3 py-3 transition-all duration-300 ${highlightIds.ideas ? 'vote-soft-pulse scale-[1.02]' : ''}`}>
                 <div className="text-xs font-medium uppercase">New ideas</div>
                 <div className="text-2xl font-semibold">{votes.categorySuggestions?.length || 0}</div>
               </div>
@@ -503,7 +632,11 @@ export default function SummitVote() {
                         key={cat.id}
                         draggable
                         onDragStart={() => setDragItem({ ...cat, itemType: 'category' })}
-                        className="rounded-lg border border-white/10 bg-white p-3 text-slate-900 shadow-lg transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl sm:p-4"
+                        className={`rounded-lg border bg-white p-3 text-slate-900 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl sm:p-4 ${
+                          highlightIds[`category-${cat.id}`] || highlightIds[`vote-${cat.id}`]
+                            ? 'vote-soft-pulse border-cyan-300 ring-2 ring-cyan-200'
+                            : 'border-white/10'
+                        }`}
                       >
                         <div className="flex items-start gap-3">
                           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white sm:h-11 sm:w-11" style={{ backgroundColor: cat.color }}>
@@ -522,7 +655,9 @@ export default function SummitVote() {
                           <button
                             aria-pressed={Boolean(myVotes[cat.id])}
                             onClick={() => toggleVote(cat, 'category')}
-                            className={`min-h-11 shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-all active:scale-[0.96] [touch-action:manipulation] ${myVotes[cat.id] ? 'bg-cyan-600 text-white shadow-md ring-2 ring-cyan-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                            className={`min-h-11 shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-all active:scale-[0.96] [touch-action:manipulation] ${
+                              highlightIds[`vote-${cat.id}`] ? 'scale-[1.05]' : ''
+                            } ${myVotes[cat.id] ? 'bg-cyan-600 text-white shadow-md ring-2 ring-cyan-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                           >
                             <Icons.ThumbsUp className="mr-1 inline h-4 w-4" />
                             {voteCount(votes, cat.id)}
@@ -533,7 +668,9 @@ export default function SummitVote() {
                           {visibleSubcategories.map(sub => (
                             <div
                               key={sub.id}
-                              className={`flex min-h-[52px] items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-all duration-150 active:scale-[0.985] [touch-action:manipulation] ${myVotes[sub.id] ? 'border-cyan-500 bg-cyan-50 text-cyan-900 shadow-sm ring-1 ring-cyan-200' : 'border-slate-200 bg-slate-50 text-slate-650 hover:border-slate-300 hover:bg-white'}`}
+                              className={`flex min-h-[52px] items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.985] [touch-action:manipulation] ${
+                                highlightIds[`vote-${sub.id}`] ? 'vote-soft-pulse scale-[1.01]' : ''
+                              } ${myVotes[sub.id] ? 'border-cyan-500 bg-cyan-50 text-cyan-900 shadow-sm ring-1 ring-cyan-200' : 'border-slate-200 bg-slate-50 text-slate-650 hover:border-slate-300 hover:bg-white'}`}
                             >
                               <DragHandle item={{ ...sub, color: cat.color }} itemType="subcategory" label={sub.name} />
                               <button
@@ -555,7 +692,9 @@ export default function SummitVote() {
                             return (
                               <div
                                 key={suggestion.id}
-                                className={`flex min-h-[64px] items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-all duration-150 active:scale-[0.985] [touch-action:manipulation] ${myVotes[item.id] ? 'border-amber-400 bg-amber-50 text-amber-950 shadow-sm ring-1 ring-amber-200' : 'border-amber-200 bg-amber-50/70 text-slate-800 hover:border-amber-300 hover:bg-amber-50'}`}
+                                className={`flex min-h-[64px] items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.985] [touch-action:manipulation] ${
+                                  highlightIds[`idea-${item.id}`] || highlightIds[`vote-${item.id}`] ? 'vote-soft-pulse scale-[1.01]' : ''
+                                } ${myVotes[item.id] ? 'border-amber-400 bg-amber-50 text-amber-950 shadow-sm ring-1 ring-amber-200' : 'border-amber-200 bg-amber-50/70 text-slate-800 hover:border-amber-300 hover:bg-amber-50'}`}
                               >
                                 <DragHandle item={item} itemType="suggestion" label={item.name} />
                                 <button
@@ -663,7 +802,12 @@ export default function SummitVote() {
                       const item = suggestionSupportItem(suggestion);
                       const isSubcategoryIdea = suggestion.value?.scope === 'subcategory';
                       return (
-                        <div key={suggestion.id} className={`rounded-lg border bg-white p-3 text-slate-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isSubcategoryIdea ? 'border-amber-200' : 'border-slate-200'}`}>
+                        <div
+                          key={suggestion.id}
+                          className={`rounded-lg border bg-white p-3 text-slate-900 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
+                            highlightIds[`idea-${item.id}`] || highlightIds[`vote-${item.id}`] ? 'vote-soft-pulse scale-[1.01] ring-2 ring-amber-200' : ''
+                          } ${isSubcategoryIdea ? 'border-amber-200' : 'border-slate-200'}`}
+                        >
                           <div className="flex items-start gap-3">
                             <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${isSubcategoryIdea ? 'bg-amber-50 text-amber-700' : 'bg-cyan-50 text-cyan-700'}`}>
                               <Icon name={item.icon} className="h-5 w-5" />
@@ -691,7 +835,9 @@ export default function SummitVote() {
                             <button
                               aria-pressed={Boolean(myVotes[item.id])}
                               onClick={() => toggleVote(item, 'suggestion')}
-                              className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition active:scale-[0.96] [touch-action:manipulation] ${myVotes[item.id] ? 'bg-cyan-600 text-white shadow-md ring-2 ring-cyan-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                              className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition active:scale-[0.96] [touch-action:manipulation] ${
+                                highlightIds[`vote-${item.id}`] ? 'scale-[1.05]' : ''
+                              } ${myVotes[item.id] ? 'bg-cyan-600 text-white shadow-md ring-2 ring-cyan-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                             >
                               <Icons.ThumbsUp className="mr-1 inline h-4 w-4" />
                               {voteCount(votes, item.id)}
