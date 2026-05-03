@@ -858,7 +858,7 @@ export default function SummitTaxonomyWorkshop() {
       setSelectedCategoryId(newCategory.id);
     }
     pushToast({
-      title: 'Idea added to taxonomy',
+      title: 'Idea added to categories',
       message: name,
       icon: 'Plus',
       tone: 'emerald',
@@ -900,12 +900,12 @@ export default function SummitTaxonomyWorkshop() {
 
   const exportExcel = () => {
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(flattenRows(state)), 'Taxonomy');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(flattenRows(state)), 'Categories');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.totals || []), 'Votes');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.mergeSuggestions || []), 'Merge Suggestions');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.categorySuggestions || []), 'Category Ideas');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.participantStats || []), 'Voter Stats');
-    XLSX.writeFile(workbook, 'BGC-IT-Summit-Taxonomy.xlsx');
+    XLSX.writeFile(workbook, 'BGC-IT-Summit-Categories.xlsx');
   };
 
   const importJson = async (event) => {
@@ -1285,7 +1285,7 @@ export default function SummitTaxonomyWorkshop() {
               <Icons.Sparkles className="h-4 w-4" />
               BGC Engineering IT Summit
             </div>
-            <h1 className="mt-2 text-2xl font-semibold">Taxonomy Workshop</h1>
+            <h1 className="mt-2 text-2xl font-semibold">Categories Workshop</h1>
             <p className="mt-1 max-w-3xl text-sm text-slate-300">Move categories, rename items, combine top-level groups, restore deleted ideas, and collect live votes from the room.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1403,7 +1403,7 @@ export default function SummitTaxonomyWorkshop() {
             )}
           </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
-            {searchNeedle ? `${visibleCategories.length} categories / ${searchVisibleSubcategoryCount} subcategories shown` : 'Fuzzy search is ready'}
+            {searchNeedle ? `${visibleCategories.length} categories / ${searchVisibleSubcategoryCount} subcategories shown` : 'Search is ready'}
           </div>
         </div>
       </div>
@@ -1869,7 +1869,7 @@ export default function SummitTaxonomyWorkshop() {
                     onClick={() => addSuggestedCategory(suggestion)}
                     className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800"
                   >
-                    <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />Add to taxonomy
+                    <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />Add to categories
                   </button>
                 </div>
               ))}
@@ -1951,7 +1951,7 @@ export default function SummitTaxonomyWorkshop() {
               </div>
             </div>
             <div className="px-5 py-4 text-sm text-slate-600">
-              Participants already on the old link will see that the link expired and will need the new link. Participant count, votes, merge suggestions, and category ideas will reset. Taxonomy edits and backups stay.
+              Participants already on the old link will see that the link expired and will need the new link. Participant count, votes, merge suggestions, and category ideas will reset. Category edits and backups stay.
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
               <button onClick={() => setShowRegenerateLinkConfirm(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">

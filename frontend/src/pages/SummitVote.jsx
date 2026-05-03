@@ -383,7 +383,7 @@ export default function SummitVote() {
                 <Icons.Sparkles className="h-4 w-4" />
                 BGC Engineering IT Summit
               </div>
-              <h1 className="mt-2 text-xl font-semibold sm:text-2xl">Taxonomy live voting</h1>
+              <h1 className="mt-2 text-xl font-semibold sm:text-2xl">Category live voting</h1>
               <p className="mt-1 text-sm text-slate-300">Tap to vote, suggest missing categories, and add subcategory ideas.</p>
             </div>
             <div className="grid grid-cols-2 gap-2 text-slate-950">

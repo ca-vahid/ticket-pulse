@@ -49,7 +49,7 @@ export function getInitialSummitState() {
   return {
     schemaVersion: 1,
     title: 'BGC Engineering IT Summit',
-    subtitle: 'IT ticket category taxonomy workshop',
+    subtitle: 'IT ticket category workshop',
     lastEditedAt: now,
     workshopMode: 'facilitator',
     categories: [
@@ -168,7 +168,7 @@ export function getInitialSummitState() {
         sub('iPad / MDM Provisioning', 'Tablet'),
         sub('Device Tracking / Find My', 'MapPinned'),
       ], 'AI suggestions included phone number provisioning, Telus coordination, number porting, iPad/MDM, and device tracking.'),
-      category('Noise, Non-Actionable & Misdirected', 'ArchiveX', '#64748b', 'Operational handling bucket for non-actionable or misdirected items, not a skills taxonomy for assignment routing.', [
+      category('Noise, Non-Actionable & Misdirected', 'ArchiveX', '#64748b', 'Operational handling bucket for non-actionable or misdirected items, not an assignment category for routing.', [
         sub('Vendor Marketing / Promotional Email', 'Megaphone'),
         sub('FreshService Digest / Trending', 'Newspaper'),
         sub('Non-actionable Notifications', 'BellOff'),
@@ -180,7 +180,7 @@ export function getInitialSummitState() {
     parkingLot: [
       { id: makeId('park', 'SharePoint and OneDrive boundary'), text: 'Decide whether OneDrive/SharePoint sync lives under Collaboration or Software.', createdAt: now },
       { id: makeId('park', 'Mobile Devices boundary'), text: 'Decide whether Mobile Devices lives under Endpoint or Telecom.', createdAt: now },
-      { id: makeId('park', 'Finance requests boundary'), text: 'Decide whether Finance & Administrative Requests is a real IT taxonomy item or a misdirected/non-IT route.', createdAt: now },
+      { id: makeId('park', 'Finance requests boundary'), text: 'Decide whether Finance & Administrative Requests is a real IT category or a misdirected/non-IT route.', createdAt: now },
     ],
     deletedItems: [],
     mergeSuggestions: [],
@@ -189,7 +189,7 @@ export function getInitialSummitState() {
 
 function assertItWorkspace(workspaceId) {
   if (Number(workspaceId) !== IT_WORKSPACE_ID) {
-    throw new AuthorizationError('The summit taxonomy workshop is currently available only in the IT workspace');
+    throw new AuthorizationError('The summit category workshop is currently available only in the IT workspace');
   }
 }
 
@@ -370,7 +370,7 @@ async function createSession(workspaceId, userEmail) {
       snapshots: {
         create: {
           version: 1,
-          label: 'Initial summit taxonomy seed',
+          label: 'Initial summit category seed',
           snapshotType: 'seed',
           state,
           createdBy: userEmail || null,
@@ -390,7 +390,7 @@ export async function getOrCreateWorkshop(workspaceId, userEmail) {
 export async function saveWorkshopState(workspaceId, { state, label, snapshotType = 'manual' }, userEmail) {
   assertItWorkspace(workspaceId);
   if (!state || typeof state !== 'object' || !Array.isArray(state.categories)) {
-    throw new ValidationError('A valid taxonomy state with categories is required');
+    throw new ValidationError('A valid category workshop state with categories is required');
   }
 
   const existing = await findActiveSession(workspaceId) || await createSession(workspaceId, userEmail);

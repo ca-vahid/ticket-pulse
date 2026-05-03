@@ -629,7 +629,7 @@ export const analyticsAPI = {
 };
 
 /**
- * IT Summit taxonomy workshop API
+ * IT Summit category workshop API
  */
 export const summitAPI = {
   getWorkshop: () => api.get('/summit/workshop'),

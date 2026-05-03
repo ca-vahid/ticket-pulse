@@ -1216,7 +1216,7 @@ export default function Dashboard() {
             type="button"
             onClick={() => navigate('/summit-taxonomy')}
             className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-200 bg-cyan-50 text-cyan-700 transition-colors hover:border-cyan-300 hover:bg-cyan-100 hover:shadow-sm"
-            title="BGC Engineering IT Summit taxonomy workshop"
+            title="BGC Engineering IT Summit category workshop"
           >
             <Boxes className="h-5 w-5" />
           </button>
