@@ -397,6 +397,10 @@ export async function configureVoting(workspaceId, durationMinutes = DEFAULT_DUR
     closePublicStreams(existing.id, 'expired', {
       message: 'The facilitator regenerated the voting link. Please use the new link.',
     });
+    await prisma.$transaction([
+      prisma.summitWorkshopVote.deleteMany({ where: { sessionId: existing.id } }),
+      prisma.summitWorkshopParticipant.deleteMany({ where: { sessionId: existing.id } }),
+    ]);
   }
   const session = await prisma.summitWorkshopSession.update({
     where: { id: existing.id },

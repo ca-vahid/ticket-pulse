@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as Icons from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -65,9 +65,32 @@ function voteCount(votes, itemId, voteType = 'support') {
   return votes?.totals?.find(v => v.itemId === itemId && v.voteType === voteType)?.count || 0;
 }
 
+function normalizeVotes(votes) {
+  return {
+    participantCount: votes?.participantCount || 0,
+    totals: Array.isArray(votes?.totals) ? votes.totals : [],
+    mergeSuggestions: Array.isArray(votes?.mergeSuggestions) ? votes.mergeSuggestions : [],
+    categorySuggestions: Array.isArray(votes?.categorySuggestions) ? votes.categorySuggestions : [],
+  };
+}
+
+function totalVoteCount(votes) {
+  return (votes?.totals || []).reduce((sum, vote) => sum + (vote.count || 0), 0);
+}
+
+function formatCountdown(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return 'Expired';
+  const totalSeconds = Math.ceil(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
 function Stat({ label, value, icon }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-center gap-2 text-slate-500 text-xs">
         <Icon name={icon} className="h-3.5 w-3.5" />
         {label}
@@ -83,7 +106,7 @@ export default function SummitTaxonomyWorkshop() {
   const [state, setState] = useState(null);
   const [session, setSession] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
-  const [votes, setVotes] = useState({ participantCount: 0, totals: [], mergeSuggestions: [] });
+  const [votes, setVotes] = useState(() => normalizeVotes());
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [selectedForMerge, setSelectedForMerge] = useState([]);
   const [history, setHistory] = useState([]);
@@ -95,8 +118,13 @@ export default function SummitTaxonomyWorkshop() {
   const [showVotes, setShowVotes] = useState(true);
   const [showRegenerateLinkConfirm, setShowRegenerateLinkConfirm] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [highlightIds, setHighlightIds] = useState({});
+  const [countdownMs, setCountdownMs] = useState(0);
   const hydratedRef = useRef(false);
   const saveTimerRef = useRef(null);
+  const votesRef = useRef(normalizeVotes());
+  const toastIdRef = useRef(0);
 
   const isItWorkspace = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
   const activeCategories = useMemo(() => (state?.categories || []).filter(c => !c.deleted), [state]);
@@ -106,6 +134,78 @@ export default function SummitTaxonomyWorkshop() {
   ], [state]);
   const selectedCategory = activeCategories.find(c => c.id === selectedCategoryId) || activeCategories[0] || null;
 
+  const pushToast = useCallback(({ title, message, icon = 'Bell', tone = 'cyan' }) => {
+    const id = `${Date.now()}_${toastIdRef.current += 1}`;
+    setToasts(prev => [{ id, title, message, icon, tone }, ...prev].slice(0, 4));
+    window.setTimeout(() => {
+      setToasts(prev => prev.filter(toast => toast.id !== id));
+    }, 6500);
+  }, []);
+
+  const markHighlight = useCallback((id) => {
+    setHighlightIds(prev => ({ ...prev, [id]: true }));
+    window.setTimeout(() => {
+      setHighlightIds((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }, 8000);
+  }, []);
+
+  const applyVotes = useCallback((incomingVotes, { silent = false } = {}) => {
+    const next = normalizeVotes(incomingVotes);
+    const previous = votesRef.current || normalizeVotes();
+
+    if (!silent) {
+      const previousMergeIds = new Set(previous.mergeSuggestions.map(suggestion => suggestion.id));
+      const previousIdeaIds = new Set(previous.categorySuggestions.map(suggestion => suggestion.id));
+      const newMergeSuggestions = next.mergeSuggestions.filter(suggestion => !previousMergeIds.has(suggestion.id));
+      const newCategoryIdeas = next.categorySuggestions.filter(suggestion => !previousIdeaIds.has(suggestion.id));
+
+      newCategoryIdeas.slice(0, 3).forEach((suggestion) => {
+        markHighlight(`idea-${suggestion.id}`);
+        pushToast({
+          title: 'New category idea',
+          message: `${suggestion.participantName}: ${suggestion.itemLabel}`,
+          icon: 'Lightbulb',
+          tone: 'amber',
+        });
+      });
+
+      newMergeSuggestions.slice(0, 3).forEach((suggestion) => {
+        markHighlight(`merge-${suggestion.id}`);
+        pushToast({
+          title: 'New merge suggestion',
+          message: `${suggestion.participantName}: ${suggestion.value?.from || ''} + ${suggestion.value?.to || ''}`,
+          icon: 'Merge',
+          tone: 'cyan',
+        });
+      });
+
+      if (next.participantCount > previous.participantCount) {
+        pushToast({
+          title: 'Participant joined',
+          message: `${next.participantCount} participant${next.participantCount === 1 ? '' : 's'} connected.`,
+          icon: 'UserPlus',
+          tone: 'emerald',
+        });
+      }
+
+      if (!newCategoryIdeas.length && !newMergeSuggestions.length && totalVoteCount(next) > totalVoteCount(previous)) {
+        pushToast({
+          title: 'Vote received',
+          message: `${totalVoteCount(next)} total vote${totalVoteCount(next) === 1 ? '' : 's'} recorded.`,
+          icon: 'ThumbsUp',
+          tone: 'cyan',
+        });
+      }
+    }
+
+    votesRef.current = next;
+    setVotes(next);
+  }, [markHighlight, pushToast]);
+
   useEffect(() => {
     let cancelled = false;
     summitAPI.getWorkshop()
@@ -114,7 +214,7 @@ export default function SummitTaxonomyWorkshop() {
         setSession(res.session);
         setState(res.session.state);
         setSnapshots(res.snapshots || []);
-        setVotes(res.votes || { participantCount: 0, totals: [], mergeSuggestions: [] });
+        applyVotes(res.votes, { silent: true });
         setSelectedCategoryId(res.session.state?.categories?.find(c => !c.deleted)?.id || null);
         setSaveStatus('Saved');
         setLastSavedAt(res.session.updatedAt);
@@ -122,14 +222,14 @@ export default function SummitTaxonomyWorkshop() {
       })
       .catch((err) => setError(err.message || 'Failed to load workshop'));
     return () => { cancelled = true; };
-  }, []);
+  }, [applyVotes]);
 
   useEffect(() => {
     if (!session?.voteToken) return undefined;
     let source;
     try {
       source = summitAPI.getPublicEventSource(session.voteToken);
-      source.addEventListener('votes', (event) => setVotes(JSON.parse(event.data)));
+      source.addEventListener('votes', (event) => applyVotes(JSON.parse(event.data)));
       source.addEventListener('state', (event) => {
         const next = JSON.parse(event.data);
         setSession(prev => prev ? { ...prev, voteEnabled: next.voteEnabled, voteExpiresAt: next.voteExpiresAt } : prev);
@@ -138,7 +238,18 @@ export default function SummitTaxonomyWorkshop() {
       return undefined;
     }
     return () => source?.close();
-  }, [session?.voteToken]);
+  }, [applyVotes, session?.voteToken]);
+
+  useEffect(() => {
+    if (!session?.voteExpiresAt) {
+      setCountdownMs(0);
+      return undefined;
+    }
+    const tick = () => setCountdownMs(new Date(session.voteExpiresAt).getTime() - Date.now());
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [session?.voteExpiresAt]);
 
   useEffect(() => {
     if (!hydratedRef.current || !state) return undefined;
@@ -149,14 +260,14 @@ export default function SummitTaxonomyWorkshop() {
         .then((res) => {
           setSession(res.session);
           setSnapshots(res.snapshots || []);
-          setVotes(res.votes || votes);
+          applyVotes(res.votes, { silent: true });
           setSaveStatus('Saved');
           setLastSavedAt(res.session.updatedAt);
         })
         .catch((err) => setSaveStatus(err.message || 'Autosave failed'));
     }, 1800);
     return () => window.clearTimeout(saveTimerRef.current);
-  }, [state]);
+  }, [applyVotes, state]);
 
   const commit = (updater) => {
     setState((current) => {
@@ -175,7 +286,7 @@ export default function SummitTaxonomyWorkshop() {
     const res = await summitAPI.saveState(state, { label: 'Manual summit save', snapshotType: 'manual' });
     setSession(res.session);
     setSnapshots(res.snapshots || []);
-    setVotes(res.votes || votes);
+    applyVotes(res.votes, { silent: true });
     setSaveStatus('Saved');
     setLastSavedAt(res.session.updatedAt);
   };
@@ -310,21 +421,79 @@ export default function SummitTaxonomyWorkshop() {
     setSelectedCategoryId(keeper.id);
   };
 
+  const addSuggestedCategory = (suggestion) => {
+    const name = suggestion.itemLabel || suggestion.value?.name || 'Suggested Category';
+    if (suggestion.value?.scope === 'subcategory' && suggestion.value?.parentId && activeCategories.some(category => category.id === suggestion.value.parentId)) {
+      commit((draft) => {
+        draft.categories = draft.categories.map(category => category.id === suggestion.value.parentId
+          ? {
+            ...category,
+            subcategories: [
+              ...(category.subcategories || []),
+              {
+                id: makeId('sub', name),
+                name,
+                icon: 'Lightbulb',
+                status: 'suggested',
+                evidence: suggestion.value?.reason ? `Suggested by ${suggestion.participantName}: ${suggestion.value.reason}` : `Suggested by ${suggestion.participantName}`,
+                deleted: false,
+              },
+            ],
+          }
+          : category);
+        return draft;
+      });
+      setSelectedCategoryId(suggestion.value.parentId);
+    } else {
+      const newCategory = {
+        id: makeId('cat', name),
+        name,
+        icon: 'Lightbulb',
+        color: '#f59e0b',
+        description: suggestion.value?.reason || '',
+        status: 'suggested',
+        notes: `Suggested by ${suggestion.participantName}`,
+        deleted: false,
+        collapsed: false,
+        subcategories: [],
+      };
+      commit((draft) => ({ ...draft, categories: [...draft.categories, newCategory] }));
+      setSelectedCategoryId(newCategory.id);
+    }
+    pushToast({
+      title: 'Idea added to taxonomy',
+      message: name,
+      icon: 'Plus',
+      tone: 'emerald',
+    });
+  };
+
   const enableVoting = async (regenerate = false) => {
     const res = await summitAPI.enableVoting(120, regenerate);
     setSession(res.session);
     setSnapshots(res.snapshots || []);
-    setVotes(res.votes || votes);
+    applyVotes(res.votes, { silent: true });
     setShowRegenerateLinkConfirm(false);
+    pushToast({
+      title: regenerate ? 'Voting link regenerated' : 'Voting link opened',
+      message: regenerate ? 'Stats, participants, votes, and suggestions were reset.' : 'The two-hour voting window is live.',
+      icon: regenerate ? 'RefreshCcw' : 'Radio',
+      tone: regenerate ? 'amber' : 'emerald',
+    });
   };
 
   const voteUrl = session?.voteToken ? `${window.location.origin}/summit/vote/${session.voteToken}` : '';
+  const effectiveCountdownMs = session?.voteExpiresAt
+    ? Math.max(0, countdownMs || new Date(session.voteExpiresAt).getTime() - Date.now())
+    : 0;
+  const isVotingExpired = Boolean(session?.voteExpiresAt && effectiveCountdownMs <= 0);
 
   const exportExcel = () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(flattenRows(state)), 'Taxonomy');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.totals || []), 'Votes');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.mergeSuggestions || []), 'Merge Suggestions');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.categorySuggestions || []), 'Category Ideas');
     XLSX.writeFile(workbook, 'BGC-IT-Summit-Taxonomy.xlsx');
   };
 
@@ -367,6 +536,29 @@ export default function SummitTaxonomyWorkshop() {
 
   return (
     <AppShell activePage="dashboard" contentClassName="max-w-[1500px] mx-auto w-full px-2 sm:px-4 py-4">
+      <div className="fixed right-4 top-20 z-[60] w-[min(380px,calc(100vw-2rem))] space-y-2">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`rounded-lg border bg-white p-3 shadow-lg transition-all duration-300 ${
+              toast.tone === 'amber' ? 'border-amber-200' : toast.tone === 'emerald' ? 'border-emerald-200' : 'border-cyan-200'
+            }`}
+          >
+            <div className="flex gap-3">
+              <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                toast.tone === 'amber' ? 'bg-amber-100 text-amber-700' : toast.tone === 'emerald' ? 'bg-emerald-100 text-emerald-700' : 'bg-cyan-100 text-cyan-700'
+              }`}>
+                <Icon name={toast.icon} className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-950">{toast.title}</div>
+                <div className="mt-0.5 truncate text-xs text-slate-600">{toast.message}</div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-950 px-5 py-4 text-white lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -386,11 +578,12 @@ export default function SummitTaxonomyWorkshop() {
           </div>
         </div>
 
-        <div className="grid gap-3 px-5 py-4 md:grid-cols-5">
+        <div className="grid gap-3 px-5 py-4 md:grid-cols-6">
           <Stat label="Top Categories" value={activeCategories.length} icon="Folders" />
           <Stat label="Subcategories" value={activeCategories.reduce((sum, c) => sum + (c.subcategories || []).filter(s => !s.deleted).length, 0)} icon="Tags" />
           <Stat label="Participants" value={votes.participantCount || 0} icon="UsersRound" />
-          <Stat label="Votes" value={(votes.totals || []).reduce((sum, v) => sum + v.count, 0)} icon="ThumbsUp" />
+          <Stat label="Votes" value={totalVoteCount(votes)} icon="ThumbsUp" />
+          <Stat label="New Ideas" value={(votes.categorySuggestions || []).length} icon="Lightbulb" />
           <Stat label="State" value={saveStatus} icon="DatabaseZap" />
         </div>
 
@@ -408,12 +601,16 @@ export default function SummitTaxonomyWorkshop() {
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {voteUrl ? (
               <>
-                <span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-800">Voting open until {new Date(session.voteExpiresAt).toLocaleTimeString()}</span>
-                <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-500"><Icons.Link className="mr-1 inline h-4 w-4" />Copy voting link</button>
-                <button onClick={() => setShowRegenerateLinkConfirm(true)} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 font-semibold text-amber-800 hover:bg-amber-100"><Icons.RefreshCcw className="mr-1 inline h-4 w-4" />Regenerate</button>
+                <span className={`rounded-lg px-3 py-2 font-medium ${isVotingExpired ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'}`}>
+                  <Icons.Clock3 className="mr-1 inline h-4 w-4" />
+                  {formatCountdown(effectiveCountdownMs)} {isVotingExpired ? '' : 'left'}
+                </span>
+                <span className="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">Ends {new Date(session.voteExpiresAt).toLocaleTimeString()}</span>
+                <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md"><Icons.Link className="mr-1 inline h-4 w-4" />Copy voting link</button>
+                <button onClick={() => setShowRegenerateLinkConfirm(true)} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:bg-amber-100 hover:shadow-md"><Icons.RefreshCcw className="mr-1 inline h-4 w-4" />Reset stats + link</button>
               </>
             ) : (
-              <button onClick={() => enableVoting(false)} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-500"><Icons.Radio className="mr-1 inline h-4 w-4" />Open 2-hour voting link</button>
+              <button onClick={() => enableVoting(false)} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md"><Icons.Radio className="mr-1 inline h-4 w-4" />Open 2-hour voting link</button>
             )}
           </div>
         </div>
@@ -438,7 +635,7 @@ export default function SummitTaxonomyWorkshop() {
                   setDragItem(null);
                 }}
                 onClick={() => setSelectedCategoryId(cat.id)}
-                className={`w-full rounded-lg border p-3 text-left transition-all ${selectedCategory?.id === cat.id ? 'border-slate-900 bg-slate-50 shadow-sm' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}
+                className={`w-full rounded-lg border p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm ${selectedCategory?.id === cat.id ? 'border-slate-900 bg-slate-50 shadow-sm' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}
               >
                 <div className="flex items-center gap-3">
                   <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: cat.color }}>
@@ -464,7 +661,7 @@ export default function SummitTaxonomyWorkshop() {
           </div>
         </aside>
 
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200">
           {selectedCategory && (
             <>
               <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
@@ -503,7 +700,7 @@ export default function SummitTaxonomyWorkshop() {
                     key={subcat.id}
                     draggable
                     onDragStart={() => setDragItem({ type: 'sub', categoryId: selectedCategory.id, id: subcat.id })}
-                    className="group rounded-lg border border-slate-200 bg-slate-50 p-3 transition hover:border-slate-300 hover:bg-white hover:shadow-sm"
+                    className="group rounded-lg border border-slate-200 bg-slate-50 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm"
                   >
                     <div className="flex items-start gap-2">
                       <span className="mt-1 text-slate-500"><Icon name={subcat.icon || 'Tag'} /></span>
@@ -524,7 +721,7 @@ export default function SummitTaxonomyWorkshop() {
         </section>
 
         <aside className="space-y-4">
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-900">Live Feedback</h2>
               <button onClick={() => setShowVotes(!showVotes)} className="text-xs text-slate-500 hover:text-slate-900">{showVotes ? 'Hide' : 'Show'}</button>
@@ -547,11 +744,59 @@ export default function SummitTaxonomyWorkshop() {
             )}
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-900">New Category Ideas</h2>
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{(votes.categorySuggestions || []).length}</span>
+            </div>
+            <div className="max-h-72 space-y-2 overflow-auto">
+              {(votes.categorySuggestions || []).map(suggestion => (
+                <div
+                  key={suggestion.id}
+                  className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
+                    highlightIds[`idea-${suggestion.id}`]
+                      ? 'border-amber-300 bg-amber-50 shadow-md ring-2 ring-amber-200'
+                      : 'border-amber-100 bg-amber-50/60'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <Icons.Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-slate-900">{suggestion.itemLabel}</div>
+                      <div className="mt-0.5 text-slate-500">
+                        {suggestion.value?.scope === 'subcategory' ? 'Subcategory' : 'Top category'} suggested by {suggestion.participantName}
+                        {suggestion.value?.parentName ? ` under ${suggestion.value.parentName}` : ''}
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-700">
+                      {voteCount(votes, suggestion.itemId)}
+                    </span>
+                  </div>
+                  {suggestion.value?.reason && <div className="mt-2 text-slate-600">{suggestion.value.reason}</div>}
+                  <button
+                    onClick={() => addSuggestedCategory(suggestion)}
+                    className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800"
+                  >
+                    <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />Add to taxonomy
+                  </button>
+                </div>
+              ))}
+              {!(votes.categorySuggestions || []).length && <p className="text-sm text-slate-500">New category suggestions will appear here as people submit them.</p>}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
             <h2 className="mb-3 text-sm font-semibold text-slate-900">Merge Suggestions</h2>
             <div className="max-h-64 space-y-2 overflow-auto">
               {(votes.mergeSuggestions || []).map(s => (
-                <div key={s.id} className="rounded-lg bg-slate-50 p-2 text-xs">
+                <div
+                  key={s.id}
+                  className={`rounded-lg border p-2 text-xs transition-all duration-500 ${
+                    highlightIds[`merge-${s.id}`]
+                      ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-200'
+                      : 'border-slate-100 bg-slate-50'
+                  }`}
+                >
                   <div className="font-semibold text-slate-800">{s.participantName}</div>
                   <div className="mt-1 text-slate-600">{s.value?.from} + {s.value?.to}</div>
                   {s.value?.reason && <div className="mt-1 text-slate-500">{s.value.reason}</div>}
@@ -561,7 +806,7 @@ export default function SummitTaxonomyWorkshop() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
             <h2 className="mb-3 text-sm font-semibold text-slate-900">Backups</h2>
             <div className="max-h-64 space-y-2 overflow-auto">
               {snapshots.map(snapshot => (
@@ -614,14 +859,14 @@ export default function SummitTaxonomyWorkshop() {
               </div>
             </div>
             <div className="px-5 py-4 text-sm text-slate-600">
-              Participants already on the old link will see that the link expired and will need the new link. Existing saved votes and suggestions stay in this workshop.
+              Participants already on the old link will see that the link expired and will need the new link. Participant count, votes, merge suggestions, and category ideas will reset. Taxonomy edits and backups stay.
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
               <button onClick={() => setShowRegenerateLinkConfirm(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                 Cancel
               </button>
               <button onClick={() => enableVoting(true)} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600">
-                Regenerate link
+                Reset stats and regenerate
               </button>
             </div>
           </div>
