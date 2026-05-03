@@ -336,6 +336,18 @@ function publicSession(session) {
   };
 }
 
+function withVotingState(state, patch) {
+  const current = state && typeof state === 'object' ? state : {};
+  const currentVoting = current.voting && typeof current.voting === 'object' ? current.voting : {};
+  return {
+    ...current,
+    voting: {
+      ...currentVoting,
+      ...patch,
+    },
+  };
+}
+
 async function serialize(session) {
   const [snapshots, votes] = await Promise.all([
     prisma.summitWorkshopSnapshot.findMany({
@@ -399,6 +411,12 @@ export async function saveWorkshopState(workspaceId, { state, label, snapshotTyp
   const existing = await findActiveSession(workspaceId) || await createSession(workspaceId, userEmail);
   const nextVersion = existing.activeVersion + 1;
   const nextState = { ...state, lastEditedAt: new Date().toISOString() };
+  if (existing.state?.voting && typeof existing.state.voting === 'object') {
+    nextState.voting = {
+      ...nextState.voting,
+      ...existing.state.voting,
+    };
+  }
   const session = await prisma.summitWorkshopSession.update({
     where: { id: existing.id },
     data: {
@@ -440,7 +458,9 @@ export async function configureVoting(workspaceId, durationMinutes = DEFAULT_DUR
   assertItWorkspace(workspaceId);
   const existing = await findActiveSession(workspaceId) || await createSession(workspaceId, null);
   const token = regenerate || !existing.voteToken ? crypto.randomBytes(24).toString('hex') : existing.voteToken;
-  const voteExpiresAt = new Date(Date.now() + Math.max(15, Number(durationMinutes) || DEFAULT_DURATION_MINUTES) * 60 * 1000);
+  const startedAt = new Date();
+  const duration = Math.max(15, Number(durationMinutes) || DEFAULT_DURATION_MINUTES);
+  const voteExpiresAt = new Date(startedAt.getTime() + duration * 60 * 1000);
   if (regenerate && existing.voteToken) {
     closePublicStreams(existing.id, 'expired', {
       message: 'The facilitator regenerated the voting link. Please use the new link.',
@@ -452,7 +472,48 @@ export async function configureVoting(workspaceId, durationMinutes = DEFAULT_DUR
   }
   const session = await prisma.summitWorkshopSession.update({
     where: { id: existing.id },
-    data: { voteToken: token, voteEnabled: true, voteExpiresAt },
+    data: {
+      voteToken: token,
+      voteEnabled: true,
+      voteExpiresAt,
+      state: withVotingState(existing.state, {
+        startedAt: startedAt.toISOString(),
+        originalDurationMinutes: duration,
+        extendedByMinutes: 0,
+        lastExtendedAt: null,
+      }),
+    },
+  });
+  broadcast(session.id, 'state', publicSession(session));
+  return serialize(session);
+}
+
+export async function extendVoting(workspaceId, extensionMinutes = 30) {
+  assertItWorkspace(workspaceId);
+  const existing = await findActiveSession(workspaceId);
+  if (!existing || !existing.voteToken) throw new NotFoundError('Voting session not found');
+
+  const minutes = Math.max(5, Math.min(240, Number(extensionMinutes) || 30));
+  const currentExpiryMs = existing.voteExpiresAt ? new Date(existing.voteExpiresAt).getTime() : Date.now();
+  const voteExpiresAt = new Date(Math.max(Date.now(), currentExpiryMs) + minutes * 60 * 1000);
+  const existingVoting = existing.state?.voting && typeof existing.state.voting === 'object' ? existing.state.voting : {};
+  const fallbackStartedAt = existing.voteExpiresAt
+    ? new Date(new Date(existing.voteExpiresAt).getTime() - DEFAULT_DURATION_MINUTES * 60 * 1000).toISOString()
+    : new Date().toISOString();
+  const lastExtendedAt = new Date().toISOString();
+
+  const session = await prisma.summitWorkshopSession.update({
+    where: { id: existing.id },
+    data: {
+      voteEnabled: true,
+      voteExpiresAt,
+      state: withVotingState(existing.state, {
+        startedAt: existingVoting.startedAt || fallbackStartedAt,
+        originalDurationMinutes: existingVoting.originalDurationMinutes || DEFAULT_DURATION_MINUTES,
+        extendedByMinutes: Number(existingVoting.extendedByMinutes || 0) + minutes,
+        lastExtendedAt,
+      }),
+    },
   });
   broadcast(session.id, 'state', publicSession(session));
   return serialize(session);
@@ -589,6 +650,7 @@ export default {
   saveWorkshopState,
   restoreSnapshot,
   configureVoting,
+  extendVoting,
   resetParticipantVotes,
   getPublicWorkshop,
   joinPublicWorkshop,

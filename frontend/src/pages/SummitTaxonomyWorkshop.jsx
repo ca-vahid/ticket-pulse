@@ -15,6 +15,7 @@ const ICONS = [
 ];
 
 const COLORS = ['#0f4c81', '#b42318', '#2563eb', '#7c3aed', '#0891b2', '#0f766e', '#4f46e5', '#c2410c', '#334155', '#16a34a', '#64748b'];
+const DEFAULT_VOTE_DURATION_MINUTES = 120;
 
 function Icon({ name, className = 'h-4 w-4' }) {
   const LucideIcon = Icons[name] || Icons.Tags;
@@ -196,6 +197,16 @@ function formatCountdown(ms) {
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '0m 00s';
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
 function CardActionsMenu({
   value,
   color = '#0f4c81',
@@ -319,6 +330,8 @@ export default function SummitTaxonomyWorkshop() {
   const [showVotes, setShowVotes] = useState(true);
   const [showRegenerateLinkConfirm, setShowRegenerateLinkConfirm] = useState(false);
   const [showVotingShare, setShowVotingShare] = useState(false);
+  const [showVotingDetails, setShowVotingDetails] = useState(false);
+  const [extendingVoting, setExtendingVoting] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [activityFeed, setActivityFeed] = useState([]);
@@ -629,7 +642,13 @@ export default function SummitTaxonomyWorkshop() {
       source.addEventListener('votes', (event) => applyVotes(JSON.parse(event.data)));
       source.addEventListener('state', (event) => {
         const next = JSON.parse(event.data);
-        setSession(prev => prev ? { ...prev, voteEnabled: next.voteEnabled, voteExpiresAt: next.voteExpiresAt } : prev);
+        setSession(prev => prev ? {
+          ...prev,
+          state: next.state || prev.state,
+          voteEnabled: next.voteEnabled,
+          voteExpiresAt: next.voteExpiresAt,
+          updatedAt: next.updatedAt || prev.updatedAt,
+        } : prev);
       });
     } catch {
       return undefined;
@@ -1038,6 +1057,31 @@ export default function SummitTaxonomyWorkshop() {
     });
   };
 
+  const extendVoting = async () => {
+    setExtendingVoting(true);
+    try {
+      const res = await summitAPI.extendVoting(30);
+      setSession(res.session);
+      setSnapshots(res.snapshots || []);
+      applyVotes(res.votes, { silent: true });
+      pushToast({
+        title: 'Voting window extended',
+        message: `Added 30 minutes. New end time: ${new Date(res.session.voteExpiresAt).toLocaleTimeString()}.`,
+        icon: 'Clock3',
+        tone: 'emerald',
+      });
+    } catch (err) {
+      pushToast({
+        title: 'Could not extend voting',
+        message: err.message || 'The voting window could not be extended.',
+        icon: 'AlertTriangle',
+        tone: 'red',
+      });
+    } finally {
+      setExtendingVoting(false);
+    }
+  };
+
   const resetParticipantVotes = async () => {
     if (!participantResetTarget) return;
     const res = await summitAPI.resetParticipantVotes(participantResetTarget.id);
@@ -1056,6 +1100,17 @@ export default function SummitTaxonomyWorkshop() {
     ? Math.max(0, countdownMs || new Date(session.voteExpiresAt).getTime() - Date.now())
     : 0;
   const isVotingExpired = Boolean(session?.voteExpiresAt && effectiveCountdownMs <= 0);
+  const votingMeta = session?.state?.voting || {};
+  const votingStartedAt = votingMeta.startedAt || (session?.voteExpiresAt
+    ? new Date(new Date(session.voteExpiresAt).getTime() - DEFAULT_VOTE_DURATION_MINUTES * 60 * 1000).toISOString()
+    : null);
+  const votingElapsedMs = votingStartedAt ? Math.max(0, Date.now() - new Date(votingStartedAt).getTime()) : 0;
+  const supportVoteTotal = (votes.totals || [])
+    .filter(vote => vote.voteType === 'support')
+    .reduce((sum, vote) => sum + (vote.count || 0), 0);
+  const activeVoterCount = (votes.participantStats || []).filter(participant => (participant.totalCount || 0) > 0).length;
+  const latestParticipant = [...(votes.participantStats || [])]
+    .sort((a, b) => new Date(b.joinedAt || 0).getTime() - new Date(a.joinedAt || 0).getTime())[0];
 
   const exportExcel = () => {
     const workbook = XLSX.utils.book_new();
@@ -1640,10 +1695,15 @@ export default function SummitTaxonomyWorkshop() {
             <button onClick={() => navigator.clipboard.writeText(JSON.stringify(state, null, 2))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Copy JSON"><Icons.Copy className="h-4 w-4" /></button>
             {voteUrl ? (
               <>
-                <span className={`flex h-9 items-center rounded-lg px-2.5 text-xs font-semibold ${isVotingExpired ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'}`} title={`Ends ${new Date(session.voteExpiresAt).toLocaleTimeString()}`}>
+                <button
+                  type="button"
+                  onClick={() => setShowVotingDetails(true)}
+                  className={`flex h-9 items-center rounded-lg px-2.5 text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-md ${isVotingExpired ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+                  title={`Voting details. Ends ${new Date(session.voteExpiresAt).toLocaleTimeString()}`}
+                >
                   <Icons.Clock3 className="mr-1 h-4 w-4" />
                   {formatCountdown(effectiveCountdownMs)}
-                </span>
+                </button>
                 <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md" title="Copy voting link"><Icons.Link className="h-4 w-4" /></button>
                 <button onClick={() => setShowVotingShare(true)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md" title="Fullscreen QR"><Icons.QrCode className="h-4 w-4" /></button>
                 <button onClick={() => setShowRegenerateLinkConfirm(true)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:bg-amber-100 hover:shadow-md" title="Reset stats and regenerate link"><Icons.RefreshCcw className="h-4 w-4" /></button>
@@ -2276,6 +2336,134 @@ export default function SummitTaxonomyWorkshop() {
                 </div>
               ))}
               {!deletedItems.length && <p className="text-sm text-slate-500">Nothing removed yet.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showVotingDetails && voteUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-2xl">
+            <div className={`border-b px-5 py-4 ${isVotingExpired ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className={`flex h-11 w-11 items-center justify-center rounded-lg text-white ${isVotingExpired ? 'bg-red-600' : 'bg-emerald-600'}`}>
+                    <Icons.Clock3 className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-950">Voting window</h2>
+                    <p className={`text-sm ${isVotingExpired ? 'text-red-800' : 'text-emerald-800'}`}>
+                      {isVotingExpired ? 'Expired' : `${formatCountdown(effectiveCountdownMs)} remaining`}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowVotingDetails(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/70 hover:text-slate-900"
+                  aria-label="Close voting details"
+                >
+                  <Icons.X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="space-y-4 px-5 py-4">
+              <div className="grid gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                    <Icons.UsersRound className="h-3.5 w-3.5" />
+                    Joined
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-slate-950">{votes.participantCount || 0}</div>
+                  <div className="mt-1 text-xs text-slate-500">{pluralize(activeVoterCount, 'active voter')}</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                    <Icons.ThumbsUp className="h-3.5 w-3.5" />
+                    Votes
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-slate-950">{supportVoteTotal}</div>
+                  <div className="mt-1 text-xs text-slate-500">{pluralize(totalVoteCount(votes), 'total action')}</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                    <Icons.Lightbulb className="h-3.5 w-3.5" />
+                    Ideas
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-slate-950">{votes.categorySuggestions.length}</div>
+                  <div className="mt-1 text-xs text-slate-500">{pluralize(votes.mergeSuggestions.length, 'merge idea')}</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                    <Icons.Plus className="h-3.5 w-3.5" />
+                    Extended
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-slate-950">{Number(votingMeta.extendedByMinutes || 0)}m</div>
+                  <div className="mt-1 text-xs text-slate-500">added time</div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 rounded-lg border border-slate-200 p-4 text-sm sm:grid-cols-2">
+                <div>
+                  <div className="text-xs font-semibold uppercase text-slate-500">Started</div>
+                  <div className="mt-1 font-medium text-slate-900">
+                    {votingStartedAt ? new Date(votingStartedAt).toLocaleString() : 'Not available'}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">{formatDuration(votingElapsedMs)} elapsed</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-slate-500">Ends</div>
+                  <div className="mt-1 font-medium text-slate-900">{new Date(session.voteExpiresAt).toLocaleString()}</div>
+                  <div className={`mt-1 text-xs font-semibold ${isVotingExpired ? 'text-red-700' : 'text-emerald-700'}`}>
+                    {isVotingExpired ? 'Voting is currently closed by time limit' : `${formatCountdown(effectiveCountdownMs)} left`}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-slate-500">Original window</div>
+                  <div className="mt-1 font-medium text-slate-900">{Number(votingMeta.originalDurationMinutes || DEFAULT_VOTE_DURATION_MINUTES)} minutes</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-slate-500">Latest join</div>
+                  <div className="mt-1 font-medium text-slate-900">{latestParticipant?.displayName || 'No participants yet'}</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {latestParticipant?.joinedAt ? new Date(latestParticipant.joinedAt).toLocaleTimeString() : 'Share the link to start voting'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold uppercase text-slate-500">Voting link</div>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard.writeText(voteUrl)}
+                    className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100"
+                  >
+                    <Icons.Copy className="h-3.5 w-3.5" />
+                    Copy
+                  </button>
+                </div>
+                <div className="break-all text-sm font-medium text-slate-700">{voteUrl}</div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-slate-500">
+                Extending keeps the same public link and current votes.
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setShowVotingDetails(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={extendVoting}
+                  disabled={extendingVoting}
+                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Icons.Plus className="h-4 w-4" />
+                  {extendingVoting ? 'Extending...' : 'Extend 30 min'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

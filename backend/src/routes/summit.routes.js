@@ -64,6 +64,14 @@ summitProtectedRouter.post('/workshop/voting', asyncHandler(async (req, res) => 
   res.json({ success: true, ...result });
 }));
 
+summitProtectedRouter.post('/workshop/voting/extend', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.extendVoting(
+    req.workspaceId,
+    req.body?.extensionMinutes,
+  );
+  res.json({ success: true, ...result });
+}));
+
 summitProtectedRouter.post('/workshop/participants/:id/reset', asyncHandler(async (req, res) => {
   const result = await summitWorkshopService.resetParticipantVotes(req.workspaceId, req.params.id);
   res.json({ success: true, ...result });
