@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import * as Icons from 'lucide-react';
@@ -16,10 +16,6 @@ function voteCount(votes, itemId, voteType = 'support') {
 function compactText(value, max = 130) {
   const text = String(value || '');
   return text.length > max ? `${text.slice(0, max).trim()}...` : text;
-}
-
-function categoryOptionLabel(category) {
-  return category?.name || '';
 }
 
 function DragHandle({ item, itemType, label }) {
@@ -47,8 +43,8 @@ function DragHandle({ item, itemType, label }) {
   );
 }
 
-function PriorityDropZone({ children, collapsed }) {
-  const { isOver, setNodeRef } = useDroppable({ id: 'priority-tray' });
+function PriorityDropZone({ children, collapsed, id = 'priority-tray' }) {
+  const { isOver, setNodeRef } = useDroppable({ id });
   return (
     <div
       ref={setNodeRef}
@@ -73,18 +69,21 @@ export default function SummitVote() {
   const [dragItem, setDragItem] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [showMobilePriorities, setShowMobilePriorities] = useState(false);
+  const [showMobileActions, setShowMobileActions] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
   const [query, setQuery] = useState('');
   const [mergeFrom, setMergeFrom] = useState('');
   const [mergeTo, setMergeTo] = useState('');
   const [mergeReason, setMergeReason] = useState('');
   const [ideaName, setIdeaName] = useState('');
-  const [ideaParentId, setIdeaParentId] = useState('');
   const [ideaReason, setIdeaReason] = useState('');
-  const [ideaScope, setIdeaScope] = useState('top_category');
   const [quickSubcategoryNames, setQuickSubcategoryNames] = useState({});
   const [error, setError] = useState('');
   const [expiredMessage, setExpiredMessage] = useState('');
   const [joining, setJoining] = useState(false);
+  const suggestRef = useRef(null);
+  const suggestionsRef = useRef(null);
 
   const categories = useMemo(() => (session?.state?.categories || []).filter(c => !c.deleted), [session]);
   const filteredCategories = useMemo(() => {
@@ -199,8 +198,35 @@ export default function SummitVote() {
     toggleVote(item, item.itemType, false);
   };
 
+  const scrollToSection = (ref) => {
+    setShowMobileActions(false);
+    window.setTimeout(() => {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
+
+  const startNameEdit = () => {
+    setNameDraft(displayName);
+    setEditingName(true);
+  };
+
+  const saveName = async (event) => {
+    event.preventDefault();
+    const nextName = nameDraft.trim();
+    if (!nextName || !participantKey) return;
+    try {
+      const res = await summitAPI.joinPublicWorkshop(token, { displayName: nextName, participantKey });
+      setParticipantKey(res.participant.participantKey);
+      setDisplayName(res.participant.displayName);
+      setVotes(res.votes || votes);
+      setEditingName(false);
+    } catch (err) {
+      setError(err.message || 'Could not update name');
+    }
+  };
+
   const handleDragEnd = ({ active, over }) => {
-    if (over?.id !== 'priority-tray') return;
+    if (!['priority-tray', 'desktop-priority-tray'].includes(over?.id)) return;
     const data = active?.data?.current;
     if (!data?.item) return;
     toggleVote(data.item, data.itemType, true);
@@ -231,26 +257,23 @@ export default function SummitVote() {
     event.preventDefault();
     const name = ideaName.trim();
     if (!name || !participantKey) return;
-    const parent = categories.find(c => c.id === ideaParentId);
     try {
       const res = await summitAPI.submitVote(token, {
         participantKey,
-        itemType: ideaScope,
+        itemType: 'top_category',
         itemLabel: name,
         voteType: 'new_category_suggestion',
         value: {
           name,
-          scope: ideaScope,
-          parentId: parent?.id || null,
-          parentName: parent?.name || null,
+          scope: 'top_category',
+          parentId: null,
+          parentName: null,
           reason: ideaReason.trim(),
         },
       });
       setVotes(res.votes || votes);
       setIdeaName('');
       setIdeaReason('');
-      setIdeaParentId('');
-      setIdeaScope('top_category');
     } catch (err) {
       setError(err.message || 'Suggestion failed');
     }
@@ -350,25 +373,16 @@ export default function SummitVote() {
                 <div
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={dropVote}
-                  className="rounded-lg border border-cyan-300/40 bg-cyan-400/10 p-3 shadow-xl sm:p-4"
+                  className="hidden rounded-lg border border-cyan-300/40 bg-cyan-400/10 p-3 shadow-xl sm:p-4 lg:block"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <h2 className="font-semibold text-white">My priorities</h2>
-                      <p className="mt-1 text-xs text-cyan-100 lg:hidden">{activePriorityItems.length} selected</p>
-                      <p className="mt-1 hidden text-xs text-cyan-100 lg:block">Drag categories or subcategories here to support them.</p>
+                      <p className="mt-1 text-xs text-cyan-100">Drag categories or subcategories here to support them.</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowMobilePriorities(prev => !prev)}
-                      className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-cyan-200/30 text-cyan-100 transition active:scale-[0.98] lg:hidden [touch-action:manipulation]"
-                      title="Show selected priorities"
-                    >
-                      {showMobilePriorities ? <Icons.ChevronUp className="h-5 w-5" /> : <Icons.ChevronDown className="h-5 w-5" />}
-                    </button>
-                    <Icons.MousePointer2 className="hidden h-5 w-5 text-cyan-200 lg:block" />
+                    <Icons.MousePointer2 className="h-5 w-5 text-cyan-200" />
                   </div>
-                  <PriorityDropZone collapsed={!showMobilePriorities}>
+                  <PriorityDropZone collapsed={false} id="desktop-priority-tray">
                     {activePriorityItems.map((item, index) => (
                       <div key={item.id} className="flex items-center gap-2 rounded-lg bg-white px-2 py-2 text-slate-900 shadow-sm">
                         <span className="flex h-7 w-7 items-center justify-center rounded text-white" style={{ backgroundColor: item.color }}>
@@ -388,9 +402,31 @@ export default function SummitVote() {
                   </PriorityDropZone>
                 </div>
 
-                <div className="mt-4 rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
-                Voting as <span className="font-semibold text-white">{displayName}</span>
-                  <div className="mt-1 text-xs text-slate-400">Link expires {session?.voteExpiresAt ? new Date(session.voteExpiresAt).toLocaleTimeString() : ''}</div>
+                <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200 lg:mt-4">
+                  {editingName ? (
+                    <form onSubmit={saveName} className="space-y-2">
+                      <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Display name</label>
+                      <div className="flex gap-2">
+                        <input
+                          value={nameDraft}
+                          onChange={(event) => setNameDraft(event.target.value)}
+                          className="min-h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-white px-3 py-2 text-base text-slate-900 outline-none focus:border-cyan-300 lg:min-h-0 lg:text-sm"
+                        />
+                        <button disabled={!nameDraft.trim()} className="rounded-lg bg-cyan-400 px-3 py-2 font-semibold text-slate-950 disabled:opacity-50">Save</button>
+                      </div>
+                      <button type="button" onClick={() => setEditingName(false)} className="text-xs text-slate-400">Cancel</button>
+                    </form>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        Voting as <span className="font-semibold text-white">{displayName}</span>
+                        <div className="mt-1 text-xs text-slate-400">Link expires {session?.voteExpiresAt ? new Date(session.voteExpiresAt).toLocaleTimeString() : ''}</div>
+                      </div>
+                      <button onClick={startNameEdit} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-white/10 text-slate-200 transition hover:bg-white/10 active:scale-[0.98] [touch-action:manipulation]" title="Change name">
+                        <Icons.Pencil className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </aside>
 
@@ -497,31 +533,24 @@ export default function SummitVote() {
               </main>
 
               <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-                <form onSubmit={submitIdea} className="rounded-lg border border-amber-300/30 bg-amber-300/10 p-4 shadow-xl">
+                <form ref={suggestRef} onSubmit={submitIdea} className="scroll-mt-20 rounded-lg border border-amber-300/30 bg-amber-300/10 p-4 shadow-xl">
                   <div className="flex items-center gap-2">
                     <Icons.Lightbulb className="h-5 w-5 text-amber-200" />
-                    <h2 className="font-semibold text-white">Suggest a new category</h2>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-slate-900/70 p-1">
-                    <button type="button" onClick={() => setIdeaScope('top_category')} className={`rounded-md px-2 py-1.5 text-sm ${ideaScope === 'top_category' ? 'bg-white text-slate-950' : 'text-slate-300'}`}>Top category</button>
-                    <button type="button" onClick={() => setIdeaScope('subcategory')} className={`rounded-md px-2 py-1.5 text-sm ${ideaScope === 'subcategory' ? 'bg-white text-slate-950' : 'text-slate-300'}`}>Subcategory</button>
+                    <div>
+                      <h2 className="font-semibold text-white">Suggest a new category</h2>
+                      <p className="mt-0.5 text-xs text-amber-100/80">Use the category cards to suggest subcategories.</p>
+                    </div>
                   </div>
                   <input
                     value={ideaName}
                     onChange={(event) => setIdeaName(event.target.value)}
-                    className="mt-3 w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-amber-300"
-                    placeholder={ideaScope === 'top_category' ? 'New top category name' : 'New subcategory name'}
+                    className="mt-3 min-h-11 w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-base text-slate-900 outline-none focus:border-amber-300 lg:min-h-0 lg:text-sm"
+                    placeholder="New top category name"
                   />
-                  {ideaScope === 'subcategory' && (
-                    <select value={ideaParentId} onChange={(event) => setIdeaParentId(event.target.value)} className="mt-2 w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900">
-                      <option value="">Suggested parent category</option>
-                      {categories.map(category => <option key={category.id} value={category.id}>{categoryOptionLabel(category)}</option>)}
-                    </select>
-                  )}
                   <textarea
                     value={ideaReason}
                     onChange={(event) => setIdeaReason(event.target.value)}
-                    className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-amber-300"
+                    className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-white px-3 py-2 text-base text-slate-900 outline-none focus:border-amber-300 lg:text-sm"
                     rows={3}
                     placeholder="Why should we consider it?"
                   />
@@ -530,7 +559,7 @@ export default function SummitVote() {
                   </button>
                 </form>
 
-                <section className="rounded-lg border border-white/10 bg-white/5 p-4 shadow-xl">
+                <section ref={suggestionsRef} className="scroll-mt-20 rounded-lg border border-white/10 bg-white/5 p-4 shadow-xl">
                   <h2 className="font-semibold text-white">Room ideas</h2>
                   <div className="mt-3 max-h-72 space-y-2 overflow-auto">
                     {(votes.categorySuggestions || []).map(suggestion => {
@@ -599,6 +628,86 @@ export default function SummitVote() {
                 </form>
               </aside>
             </div>
+            <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2 lg:hidden">
+              <div className={`grid gap-2 transition-all duration-200 ${showMobileActions ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-3 opacity-0'}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobilePriorities(true);
+                    setShowMobileActions(false);
+                  }}
+                  className="flex min-h-12 items-center gap-2 rounded-full border border-cyan-200/30 bg-cyan-500 px-4 text-sm font-semibold text-slate-950 shadow-xl transition active:scale-[0.97] [touch-action:manipulation]"
+                >
+                  <Icons.ListChecks className="h-4 w-4" />
+                  Priorities
+                  <span className="rounded-full bg-slate-950 px-2 py-0.5 text-xs text-white">{activePriorityItems.length}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollToSection(suggestRef)}
+                  className="flex min-h-12 items-center gap-2 rounded-full border border-amber-200/40 bg-amber-300 px-4 text-sm font-semibold text-slate-950 shadow-xl transition active:scale-[0.97] [touch-action:manipulation]"
+                >
+                  <Icons.Lightbulb className="h-4 w-4" />
+                  Suggest
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollToSection(suggestionsRef)}
+                  className="flex min-h-12 items-center gap-2 rounded-full border border-white/20 bg-slate-100 px-4 text-sm font-semibold text-slate-950 shadow-xl transition active:scale-[0.97] [touch-action:manipulation]"
+                >
+                  <Icons.MessageSquareText className="h-4 w-4" />
+                  Room ideas
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMobileActions(prev => !prev)}
+                className="flex min-h-14 min-w-14 items-center justify-center rounded-full bg-white text-slate-950 shadow-2xl ring-1 ring-white/20 transition active:scale-[0.96] [touch-action:manipulation]"
+                title="Workshop actions"
+              >
+                {showMobileActions ? <Icons.X className="h-6 w-6" /> : <Icons.Plus className="h-6 w-6" />}
+              </button>
+            </div>
+
+            {showMobilePriorities && (
+              <div className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm lg:hidden">
+                <div className="absolute inset-x-0 bottom-0 max-h-[78vh] overflow-hidden rounded-t-2xl border border-cyan-200/20 bg-slate-950 shadow-2xl transition-all">
+                  <div className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
+                    <div>
+                      <h2 className="text-base font-semibold text-white">My priorities</h2>
+                      <p className="mt-1 text-xs text-cyan-100">{activePriorityItems.length} selected. Tap X to remove a vote.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowMobilePriorities(false)}
+                      className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-white/10 text-slate-200 transition active:scale-[0.98] [touch-action:manipulation]"
+                    >
+                      <Icons.X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <div className="max-h-[58vh] overflow-auto px-4 pb-5">
+                    <PriorityDropZone collapsed={false}>
+                      {activePriorityItems.map((item, index) => (
+                        <div key={item.id} className="flex items-center gap-2 rounded-lg bg-white px-3 py-3 text-slate-900 shadow-sm">
+                          <span className="flex h-9 w-9 items-center justify-center rounded text-white" style={{ backgroundColor: item.color }}>
+                            <Icon name={item.icon} className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0 flex-1 break-words text-sm font-medium leading-snug">{index + 1}. {item.name}</span>
+                          <button onClick={() => removePriority(item)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
+                            <Icons.X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                      {!activePriorityItems.length && (
+                        <div className="flex min-h-28 items-center justify-center rounded-lg text-center text-sm text-cyan-100">
+                          Tap vote buttons or drag handles to add priorities.
+                        </div>
+                      )}
+                    </PriorityDropZone>
+                  </div>
+                </div>
+              </div>
+            )}
           </DndContext>
         )}
       </div>
