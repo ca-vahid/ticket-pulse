@@ -33,6 +33,11 @@ export default function Login() {
       />
       <div className="absolute inset-0 bg-gradient-to-r from-slate-950/35 via-slate-950/5 to-slate-950/10" />
       <div className="absolute inset-0 bg-gradient-to-t from-slate-950/45 via-transparent to-slate-950/15 md:from-slate-950/20" />
+      <img
+        src="/brand/bgc-logo-transparent.png"
+        alt="BGC Engineering"
+        className="pointer-events-none absolute bottom-5 right-5 z-20 h-24 w-auto brightness-0 invert opacity-82 drop-shadow-[0_14px_32px_rgba(0,0,0,0.55)] sm:bottom-7 sm:right-7 sm:h-28 md:bottom-9 md:right-10 md:h-36 lg:h-44 xl:h-48"
+      />
 
       <section className="relative z-10 flex h-full min-h-[100dvh] items-end justify-center px-5 pb-10 pt-8 sm:px-8 sm:pb-14 md:items-start md:justify-start md:px-[5.4vw] md:pt-[58vh] lg:pt-[59vh]">
         <div className="w-full max-w-[20rem] sm:max-w-[26rem]">
@@ -66,20 +71,11 @@ export default function Login() {
             <span className="relative">{isLoading ? 'Signing you in...' : 'Sign in with your BGC Account'}</span>
           </button>
 
-          <div className="mt-4 rounded-2xl border border-white/14 bg-slate-950/28 px-4 py-4 text-center text-cyan-50/82 shadow-[0_18px_60px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.14)] backdrop-blur-xl">
-            <div className="mx-auto mb-3 grid h-12 w-16 place-items-center overflow-hidden rounded-xl border border-white/15 bg-white/95 shadow-sm">
-              <img
-                src="/brand/BGC-Corp.png"
-                alt="BGC Engineering"
-                className="h-14 w-14 scale-[1.45] object-contain"
-              />
-            </div>
-            <p className="text-sm font-semibold text-white">BGC Engineering AI Tools</p>
-            <p className="mt-1 text-xs leading-relaxed text-cyan-50/72">
-              Ticket Pulse is an internal operations tool maintained by IT for authorized BGC users.
-            </p>
-            <p className="mt-2 text-[11px] leading-relaxed text-cyan-50/55">
-              © {new Date().getFullYear()} BGC Engineering Inc. All rights reserved.
+          <div className="mx-auto mt-4 max-w-[22rem] rounded-xl bg-slate-950/28 px-4 py-3 text-center shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-sm">
+            <p className="space-y-0.5 overflow-hidden text-xs leading-5 text-cyan-50/76 [text-shadow:0_2px_18px_rgba(0,0,0,0.65)]">
+              <span className="block whitespace-nowrap font-semibold text-white/92">BGC Engineering AI Tools</span>
+              <span className="block whitespace-nowrap">Internal operations for authorized BGC users.</span>
+              <span className="block whitespace-nowrap text-cyan-50/58">© {new Date().getFullYear()} BGC Engineering Inc.</span>
             </p>
           </div>
         </div>
