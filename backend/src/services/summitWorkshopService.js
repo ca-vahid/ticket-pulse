@@ -465,16 +465,18 @@ export async function resetParticipantVotes(workspaceId, participantId) {
 
   const participant = await prisma.summitWorkshopParticipant.findUnique({
     where: { id: Number(participantId) },
-    select: { id: true, sessionId: true, displayName: true },
+    select: { id: true, sessionId: true, displayName: true, participantKey: true },
   });
   if (!participant || participant.sessionId !== existing.id) throw new NotFoundError('Participant not found');
 
-  await prisma.$transaction([
-    prisma.summitWorkshopVote.deleteMany({ where: { participantId: participant.id } }),
-    prisma.summitWorkshopParticipant.delete({ where: { id: participant.id } }),
-  ]);
+  await prisma.summitWorkshopVote.deleteMany({ where: { participantId: participant.id } });
 
   const votes = await getVoteSummary(existing.id);
+  broadcast(existing.id, 'participant-reset', {
+    participantId: participant.id,
+    participantKey: participant.participantKey,
+    displayName: participant.displayName,
+  });
   broadcast(existing.id, 'votes', votes);
   return { participant, votes };
 }

@@ -47,6 +47,10 @@ function suggestionSupportItem(suggestion) {
   };
 }
 
+function isJoinRequiredError(err) {
+  return String(err?.message || err || '').toLowerCase().includes('join the workshop before voting');
+}
+
 function DragHandle({ item, itemType, label }) {
   const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, isDragging } = useDraggable({
     id: `${itemType}:${item.id}`,
@@ -114,6 +118,7 @@ export default function SummitVote() {
   const [expiredMessage, setExpiredMessage] = useState('');
   const [joining, setJoining] = useState(false);
   const votesRef = useRef(normalizeVotes());
+  const participantKeyRef = useRef('');
   const toastIdRef = useRef(0);
   const suggestRef = useRef(null);
   const suggestionsRef = useRef(null);
@@ -211,6 +216,28 @@ export default function SummitVote() {
     setVotes(next);
   }, [markHighlight]);
 
+  const resetLocalVotingState = useCallback(() => {
+    setMyVotes({});
+    setPriorityItems([]);
+    setQuickSubcategoryNames({});
+    setMergeFrom('');
+    setMergeTo('');
+    setMergeReason('');
+  }, []);
+
+  const resetStaleParticipantSession = useCallback((message = 'Your session was reset. Rejoin to keep voting.') => {
+    setParticipantKey('');
+    setError(message);
+    resetLocalVotingState();
+    pushToast({
+      title: 'Session reset',
+      message,
+      icon: 'RotateCcw',
+      tone: 'amber',
+      duration: 5200,
+    });
+  }, [pushToast, resetLocalVotingState]);
+
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
@@ -224,6 +251,10 @@ export default function SummitVote() {
   }, [storageKey]);
 
   useEffect(() => {
+    participantKeyRef.current = participantKey;
+  }, [participantKey]);
+
+  useEffect(() => {
     let cancelled = false;
     summitAPI.getPublicWorkshop(token)
       .then((res) => {
@@ -235,6 +266,24 @@ export default function SummitVote() {
     const source = summitAPI.getPublicEventSource(token);
     source.addEventListener('state', (event) => setSession(JSON.parse(event.data)));
     source.addEventListener('votes', (event) => applyVotes(JSON.parse(event.data)));
+    source.addEventListener('participant-reset', (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.participantKey !== participantKeyRef.current) return;
+        resetLocalVotingState();
+        setError('');
+        markHighlight('votes');
+        pushToast({
+          title: 'Your votes were reset',
+          message: 'The facilitator cleared your activity. You can keep voting now.',
+          icon: 'RotateCcw',
+          tone: 'amber',
+          duration: 5200,
+        });
+      } catch {
+        // ignore malformed SSE payloads
+      }
+    });
     source.addEventListener('expired', (event) => {
       try {
         const payload = JSON.parse(event.data);
@@ -249,7 +298,7 @@ export default function SummitVote() {
       cancelled = true;
       source.close();
     };
-  }, [applyVotes, token]);
+  }, [applyVotes, markHighlight, pushToast, resetLocalVotingState, token]);
 
   useEffect(() => {
     if (!displayName && !participantKey) return;
@@ -316,6 +365,10 @@ export default function SummitVote() {
         duration: 2400,
       });
     } catch (err) {
+      if (isJoinRequiredError(err)) {
+        resetStaleParticipantSession();
+        return;
+      }
       setError(err.message || 'Vote failed');
       setMyVotes(prev => ({ ...prev, [item.id]: !active }));
     }
@@ -361,6 +414,10 @@ export default function SummitVote() {
       setEditingName(false);
       pushToast({ title: 'Name updated', message: res.participant.displayName, icon: 'Pencil', tone: 'emerald' });
     } catch (err) {
+      if (isJoinRequiredError(err)) {
+        resetStaleParticipantSession();
+        return;
+      }
       setError(err.message || 'Could not update name');
     }
   };
@@ -390,6 +447,10 @@ export default function SummitVote() {
       setMergeReason('');
       pushToast({ title: 'Merge suggestion shared', message: `${from} + ${to}`, icon: 'Merge', tone: 'cyan' });
     } catch (err) {
+      if (isJoinRequiredError(err)) {
+        resetStaleParticipantSession();
+        return;
+      }
       setError(err.message || 'Suggestion failed');
     }
   };
@@ -418,6 +479,10 @@ export default function SummitVote() {
       setIdeaReason('');
       pushToast({ title: 'Category suggestion shared', message: name, icon: 'Lightbulb', tone: 'amber' });
     } catch (err) {
+      if (isJoinRequiredError(err)) {
+        resetStaleParticipantSession();
+        return;
+      }
       setError(err.message || 'Suggestion failed');
     }
   };
@@ -445,6 +510,10 @@ export default function SummitVote() {
       setQuickSubcategoryNames(prev => ({ ...prev, [category.id]: '' }));
       pushToast({ title: 'Subcategory suggestion shared', message: `${name} under ${category.name}`, icon: 'Tag', tone: 'amber' });
     } catch (err) {
+      if (isJoinRequiredError(err)) {
+        resetStaleParticipantSession();
+        return;
+      }
       setError(err.message || 'Suggestion failed');
     }
   };

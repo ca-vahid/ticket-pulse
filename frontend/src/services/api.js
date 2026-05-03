@@ -66,8 +66,9 @@ const errorInterceptor = (error) => {
   if (error.response) {
     const status = error.response.status;
     const requestUrl = error.config?.url || '';
+    const isPublicSummitRequest = requestUrl.startsWith('/summit/public/');
 
-    if (status === 401 && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout' && requestUrl !== '/auth/sso' && !error.config?._speculative) {
+    if (status === 401 && !isPublicSummitRequest && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout' && requestUrl !== '/auth/sso' && !error.config?._speculative) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: { url: requestUrl },
       }));

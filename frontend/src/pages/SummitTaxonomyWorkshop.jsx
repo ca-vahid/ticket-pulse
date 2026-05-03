@@ -1046,7 +1046,7 @@ export default function SummitTaxonomyWorkshop() {
     setParticipantResetTarget(null);
     pushToast({
       title: 'Voter reset',
-      message: `${participantResetTarget.displayName}'s votes and suggestions were removed.`,
+      message: `${participantResetTarget.displayName}'s votes and suggestions were cleared. They can keep voting.`,
       icon: 'UserX',
       tone: 'amber',
     });
@@ -2349,7 +2349,7 @@ export default function SummitTaxonomyWorkshop() {
               </div>
             </div>
             <div className="px-5 py-4 text-sm text-slate-600">
-              This removes their votes, category ideas, merge suggestions, participant stats, and current participant session from this voting room.
+              This clears their votes, category ideas, merge suggestions, and priority selections. They stay connected and can keep voting.
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
               <button onClick={() => setParticipantResetTarget(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
