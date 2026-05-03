@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
@@ -35,7 +35,7 @@ export default function Login() {
       <div className="absolute inset-0 bg-gradient-to-t from-slate-950/45 via-transparent to-slate-950/15 md:from-slate-950/20" />
 
       <section className="relative z-10 flex h-full min-h-[100dvh] items-end justify-center px-5 pb-10 pt-8 sm:px-8 sm:pb-14 md:items-start md:justify-start md:px-[5.4vw] md:pt-[58vh] lg:pt-[59vh]">
-        <div className="w-full max-w-[18.5rem] sm:max-w-sm md:max-w-[24rem]">
+        <div className="w-full max-w-[20rem] sm:max-w-[26rem]">
           {error && (
             <div className="mb-4 flex items-start gap-2 rounded-2xl border border-red-200/40 bg-red-950/40 px-4 py-3 text-sm text-red-100 shadow-2xl shadow-red-950/20 backdrop-blur-xl">
               <ShieldCheck className="mt-0.5 h-4 w-4 flex-none" />
@@ -47,10 +47,12 @@ export default function Login() {
             type="button"
             onClick={loginWithSSO}
             disabled={isLoading}
-            className="group flex w-full items-center justify-center gap-3 rounded-2xl border border-white/24 bg-white/10 px-5 py-4 text-base font-semibold text-white shadow-[0_20px_60px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-2xl transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-200/50 hover:bg-white/16 hover:shadow-[0_24px_70px_rgba(8,47,73,0.45),inset_0_1px_0_rgba(255,255,255,0.35)] focus:outline-none focus:ring-2 focus:ring-cyan-200/70 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+            className="group relative flex w-full items-center justify-center gap-3 overflow-hidden rounded-[1.35rem] border border-cyan-100/35 bg-slate-800/62 px-6 py-[1.125rem] text-base font-semibold text-white shadow-[0_24px_80px_rgba(0,0,0,0.46),inset_0_1px_0_rgba(255,255,255,0.42),inset_0_-18px_45px_rgba(14,165,233,0.12)] backdrop-blur-2xl transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-100/60 hover:bg-slate-700/68 hover:shadow-[0_30px_90px_rgba(8,47,73,0.52),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-18px_50px_rgba(34,211,238,0.16)] focus:outline-none focus:ring-2 focus:ring-cyan-200/70 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
           >
+            <span className="pointer-events-none absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent" />
+            <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/16 via-transparent to-cyan-300/10 opacity-90" />
             <svg
-              className="h-5 w-5 flex-none"
+              className="relative h-5 w-5 flex-none"
               viewBox="0 0 21 21"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
@@ -61,15 +63,25 @@ export default function Login() {
               <rect y="11" width="10" height="10" fill="#00a4ef" />
               <rect x="11" y="11" width="10" height="10" fill="#ffb900" />
             </svg>
-            <span>{isLoading ? 'Signing you in...' : 'Sign in with Microsoft'}</span>
-            {!isLoading && (
-              <ArrowRight className="h-4 w-4 flex-none opacity-70 transition-transform duration-200 group-hover:translate-x-1 group-hover:opacity-100" />
-            )}
+            <span className="relative">{isLoading ? 'Signing you in...' : 'Sign in with your BGC Account'}</span>
           </button>
 
-          <p className="mt-3 text-center text-xs font-medium text-cyan-50/75 drop-shadow md:text-left">
-            Secure access through Microsoft Entra ID
-          </p>
+          <div className="mt-4 rounded-2xl border border-white/14 bg-slate-950/28 px-4 py-4 text-center text-cyan-50/82 shadow-[0_18px_60px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.14)] backdrop-blur-xl">
+            <div className="mx-auto mb-3 grid h-12 w-16 place-items-center overflow-hidden rounded-xl border border-white/15 bg-white/95 shadow-sm">
+              <img
+                src="/brand/BGC-Corp.png"
+                alt="BGC Engineering"
+                className="h-14 w-14 scale-[1.45] object-contain"
+              />
+            </div>
+            <p className="text-sm font-semibold text-white">BGC Engineering AI Tools</p>
+            <p className="mt-1 text-xs leading-relaxed text-cyan-50/72">
+              Ticket Pulse is an internal operations tool maintained by IT for authorized BGC users.
+            </p>
+            <p className="mt-2 text-[11px] leading-relaxed text-cyan-50/55">
+              © {new Date().getFullYear()} BGC Engineering Inc. All rights reserved.
+            </p>
+          </div>
         </div>
       </section>
     </main>
