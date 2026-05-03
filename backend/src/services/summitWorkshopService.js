@@ -455,6 +455,27 @@ export async function configureVoting(workspaceId, durationMinutes = DEFAULT_DUR
   return serialize(session);
 }
 
+export async function resetParticipantVotes(workspaceId, participantId) {
+  assertItWorkspace(workspaceId);
+  const existing = await findActiveSession(workspaceId);
+  if (!existing) throw new NotFoundError('Workshop session not found');
+
+  const participant = await prisma.summitWorkshopParticipant.findUnique({
+    where: { id: Number(participantId) },
+    select: { id: true, sessionId: true, displayName: true },
+  });
+  if (!participant || participant.sessionId !== existing.id) throw new NotFoundError('Participant not found');
+
+  await prisma.$transaction([
+    prisma.summitWorkshopVote.deleteMany({ where: { participantId: participant.id } }),
+    prisma.summitWorkshopParticipant.delete({ where: { id: participant.id } }),
+  ]);
+
+  const votes = await getVoteSummary(existing.id);
+  broadcast(existing.id, 'votes', votes);
+  return { participant, votes };
+}
+
 export async function getSessionByVoteToken(token) {
   const session = await prisma.summitWorkshopSession.findUnique({ where: { voteToken: token } });
   if (!session) throw new NotFoundError('Voting session not found');
@@ -563,6 +584,7 @@ export default {
   saveWorkshopState,
   restoreSnapshot,
   configureVoting,
+  resetParticipantVotes,
   getPublicWorkshop,
   joinPublicWorkshop,
   submitVote,

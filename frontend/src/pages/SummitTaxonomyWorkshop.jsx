@@ -32,6 +32,34 @@ function normalizeLabel(label) {
   return String(label || '').trim().toLowerCase();
 }
 
+function fuzzyMatchText(value, query) {
+  const haystack = normalizeLabel(value);
+  const needle = normalizeLabel(query);
+  if (!needle) return true;
+  if (haystack.includes(needle)) return true;
+
+  let cursor = 0;
+  for (const char of needle) {
+    cursor = haystack.indexOf(char, cursor);
+    if (cursor === -1) return false;
+    cursor += 1;
+  }
+  return true;
+}
+
+function categorySearchText(category) {
+  return [
+    category.name,
+    category.description,
+    category.evidence,
+    ...(category.subcategories || []).filter(subcat => !subcat.deleted).flatMap(subcat => [subcat.name, subcat.evidence, subcat.notes]),
+  ].filter(Boolean).join(' ');
+}
+
+function subcategorySearchText(subcategory) {
+  return [subcategory.name, subcategory.evidence, subcategory.notes].filter(Boolean).join(' ');
+}
+
 function flattenRows(state) {
   const rows = [];
   (state?.categories || []).filter(c => !c.deleted).forEach((cat, index) => {
@@ -67,6 +95,11 @@ function flattenRows(state) {
 
 function voteCount(votes, itemId, voteType = 'support') {
   return votes?.totals?.find(v => v.itemId === itemId && v.voteType === voteType)?.count || 0;
+}
+
+function linkedVoteCount(votes, item, voteType = 'support') {
+  const ids = new Set([item?.id, item?.sourceSuggestionItemId].filter(Boolean));
+  return [...ids].reduce((sum, id) => sum + voteCount(votes, id, voteType), 0);
 }
 
 function normalizeVotes(votes) {
@@ -128,7 +161,7 @@ function CardActionsMenu({
         <Icons.EllipsisVertical className="h-5 w-5" />
       </button>
       {isOpen && (
-        <div className="absolute right-0 top-12 z-50 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-2xl">
+        <div className="absolute right-0 top-12 z-[120] w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-2xl">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
             <button type="button" onClick={onToggle} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
@@ -216,6 +249,9 @@ export default function SummitTaxonomyWorkshop() {
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
   const [dragItem, setDragItem] = useState(null);
+  const [dragPreview, setDragPreview] = useState(null);
+  const [dragPosition, setDragPosition] = useState(null);
+  const [dragOverTarget, setDragOverTarget] = useState(null);
   const [saveStatus, setSaveStatus] = useState('Loading...');
   const [error, setError] = useState('');
   const [showDeleted, setShowDeleted] = useState(false);
@@ -228,6 +264,8 @@ export default function SummitTaxonomyWorkshop() {
   const [newSubcategoryName, setNewSubcategoryName] = useState('');
   const [newSubcategoryEvidence, setNewSubcategoryEvidence] = useState('');
   const [iconPickerTarget, setIconPickerTarget] = useState(null);
+  const [taxonomySearch, setTaxonomySearch] = useState('');
+  const [participantResetTarget, setParticipantResetTarget] = useState(null);
   const hydratedRef = useRef(false);
   const saveTimerRef = useRef(null);
   const votesRef = useRef(normalizeVotes());
@@ -238,14 +276,43 @@ export default function SummitTaxonomyWorkshop() {
 
   const isItWorkspace = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
   const activeCategories = useMemo(() => (state?.categories || []).filter(c => !c.deleted), [state]);
+  const searchNeedle = taxonomySearch.trim();
+  const visibleCategories = useMemo(() => {
+    if (!searchNeedle) return activeCategories;
+    return activeCategories.filter(category => fuzzyMatchText(categorySearchText(category), searchNeedle));
+  }, [activeCategories, searchNeedle]);
   const deletedItems = useMemo(() => [
     ...(state?.deletedItems || []),
     ...(state?.categories || []).filter(c => c.deleted).map(c => ({ ...c, type: 'category' })),
   ], [state]);
-  const selectedCategory = activeCategories.find(c => c.id === selectedCategoryId) || activeCategories[0] || null;
+  const selectedCategory = visibleCategories.find(c => c.id === selectedCategoryId) || visibleCategories[0] || activeCategories.find(c => c.id === selectedCategoryId) || activeCategories[0] || null;
+  const visibleSubcategories = useMemo(() => {
+    const subcategories = (selectedCategory?.subcategories || []).filter(subcat => !subcat.deleted);
+    if (!searchNeedle || fuzzyMatchText([selectedCategory?.name, selectedCategory?.description].filter(Boolean).join(' '), searchNeedle)) {
+      return subcategories;
+    }
+    return subcategories.filter(subcategory => fuzzyMatchText(subcategorySearchText(subcategory), searchNeedle));
+  }, [searchNeedle, selectedCategory]);
+  const acceptedSuggestionItemIds = useMemo(() => {
+    const ids = new Set();
+    activeCategories.forEach((category) => {
+      if (category.sourceSuggestionItemId) ids.add(category.sourceSuggestionItemId);
+      if (category.sourceSuggestionId) ids.add(category.id);
+      (category.subcategories || []).forEach((subcategory) => {
+        if (subcategory.deleted) return;
+        if (subcategory.sourceSuggestionItemId) ids.add(subcategory.sourceSuggestionItemId);
+        if (subcategory.sourceSuggestionId) ids.add(subcategory.id);
+      });
+    });
+    return ids;
+  }, [activeCategories]);
   const topCategorySuggestions = useMemo(
-    () => (votes.categorySuggestions || []).filter(suggestion => suggestion.value?.scope !== 'subcategory'),
-    [votes.categorySuggestions],
+    () => (votes.categorySuggestions || []).filter(suggestion => suggestion.value?.scope !== 'subcategory' && !acceptedSuggestionItemIds.has(suggestion.itemId)),
+    [acceptedSuggestionItemIds, votes.categorySuggestions],
+  );
+  const pendingSubcategorySuggestionCount = useMemo(
+    () => (votes.categorySuggestions || []).filter(suggestion => suggestion.value?.scope === 'subcategory' && !acceptedSuggestionItemIds.has(suggestion.itemId)).length,
+    [acceptedSuggestionItemIds, votes.categorySuggestions],
   );
   const liveVoteLeaders = useMemo(
     () => (votes.totals || []).filter(vote => vote.voteType === 'support' && vote.count > 0).slice(0, 6),
@@ -254,13 +321,13 @@ export default function SummitTaxonomyWorkshop() {
   const subcategorySuggestionsByParent = useMemo(() => {
     const groups = new Map();
     (votes.categorySuggestions || [])
-      .filter(suggestion => suggestion.value?.scope === 'subcategory' && suggestion.value?.parentId)
+      .filter(suggestion => suggestion.value?.scope === 'subcategory' && suggestion.value?.parentId && !acceptedSuggestionItemIds.has(suggestion.itemId))
       .forEach((suggestion) => {
         const parentId = suggestion.value.parentId;
         groups.set(parentId, [...(groups.get(parentId) || []), suggestion]);
       });
     return groups;
-  }, [votes.categorySuggestions]);
+  }, [acceptedSuggestionItemIds, votes.categorySuggestions]);
   const selectedCategorySuggestions = selectedCategory ? subcategorySuggestionsByParent.get(selectedCategory.id) || [] : [];
 
   const pushToast = useCallback(({ title, message, icon = 'Bell', tone = 'cyan' }) => {
@@ -477,9 +544,9 @@ export default function SummitTaxonomyWorkshop() {
     setSelectedCategoryId(newCategory.id);
   };
 
-  const createSubcategory = (categoryId, { name, evidence = '', icon = 'Tag', status = 'draft', showToast = true }) => {
+  const createSubcategory = (categoryId, { id, name, evidence = '', icon = 'Tag', status = 'draft', showToast = true, sourceSuggestionItemId = null, sourceSuggestionId = null }) => {
     const trimmedName = String(name || '').trim() || 'New Subcategory';
-    const newId = makeId('sub', trimmedName);
+    const newId = id || makeId('sub', trimmedName);
     commit((draft) => {
       draft.categories = draft.categories.map(c => c.id === categoryId
         ? {
@@ -492,6 +559,8 @@ export default function SummitTaxonomyWorkshop() {
               icon,
               status,
               evidence,
+              sourceSuggestionItemId,
+              sourceSuggestionId,
               deleted: false,
             },
           ],
@@ -553,13 +622,72 @@ export default function SummitTaxonomyWorkshop() {
     }, 50);
   };
 
-  const startDrag = (event, item) => {
-    setDragItem(item);
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', `${item.type}:${item.id}`);
+  const updateDragPosition = (event) => {
+    if (event.clientX || event.clientY) {
+      setDragPosition({ x: event.clientX, y: event.clientY });
+    }
   };
 
-  const finishDrag = () => setDragItem(null);
+  const setDropTarget = (event, target) => {
+    event.preventDefault();
+    updateDragPosition(event);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    setDragOverTarget(target);
+  };
+
+  const startDrag = (event, item) => {
+    setDragItem(item);
+    setDragPreview(item);
+    updateDragPosition(event);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', `${item.type}:${item.id}`);
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    event.dataTransfer.setDragImage(canvas, 0, 0);
+  };
+
+  const finishDrag = () => {
+    setDragItem(null);
+    setDragPreview(null);
+    setDragPosition(null);
+    setDragOverTarget(null);
+  };
+
+  const dropCategory = (event, cat) => {
+    event.stopPropagation();
+    if (!dragItem) return;
+    if (dragItem.type === 'category' && dragItem.id !== cat.id) {
+      moveCategory(dragItem.id, cat.id);
+      pushToast({ title: 'Category moved', message: `${dragItem.name} moved before ${cat.name}`, icon: 'Move', tone: 'cyan' });
+    }
+    if (dragItem.type === 'sub') {
+      moveSubcategory(dragItem.categoryId, dragItem.id, cat.id);
+      setSelectedCategoryId(cat.id);
+      pushToast({ title: 'Subcategory moved', message: `${dragItem.name} moved into ${cat.name}`, icon: 'Move', tone: 'cyan' });
+    }
+    finishDrag();
+  };
+
+  const dropSubcategory = (event, subcat) => {
+    event.stopPropagation();
+    if (dragItem?.type !== 'sub' || dragItem.id === subcat.id || !selectedCategory) {
+      finishDrag();
+      return;
+    }
+    moveSubcategory(dragItem.categoryId, dragItem.id, selectedCategory.id, subcat.id);
+    pushToast({ title: 'Subcategory moved', message: `${dragItem.name} moved before ${subcat.name}`, icon: 'Move', tone: 'cyan' });
+    finishDrag();
+  };
+
+  const dropIntoSelectedCategory = (event) => {
+    event.stopPropagation();
+    if (dragItem?.type === 'sub' && selectedCategory) {
+      moveSubcategory(dragItem.categoryId, dragItem.id, selectedCategory.id);
+      pushToast({ title: 'Subcategory moved', message: `${dragItem.name} moved to the end of ${selectedCategory.name}`, icon: 'Move', tone: 'cyan' });
+    }
+    finishDrag();
+  };
 
   const softDeleteCategory = (categoryId) => commit((draft) => {
     draft.categories = draft.categories.map(c => c.id === categoryId ? { ...c, deleted: true, deletedAt: new Date().toISOString() } : c);
@@ -641,22 +769,27 @@ export default function SummitTaxonomyWorkshop() {
     const name = suggestion.itemLabel || suggestion.value?.name || 'Suggested Category';
     if (suggestion.value?.scope === 'subcategory' && suggestion.value?.parentId && activeCategories.some(category => category.id === suggestion.value.parentId)) {
       createSubcategory(suggestion.value.parentId, {
+        id: suggestion.itemId || undefined,
         name,
         icon: 'Lightbulb',
         status: 'suggested',
         evidence: suggestion.value?.reason ? `Suggested by ${suggestion.participantName}: ${suggestion.value.reason}` : `Suggested by ${suggestion.participantName}`,
+        sourceSuggestionItemId: suggestion.itemId,
+        sourceSuggestionId: suggestion.id,
         showToast: false,
       });
       setSelectedCategoryId(suggestion.value.parentId);
     } else {
       const newCategory = {
-        id: makeId('cat', name),
+        id: suggestion.itemId || makeId('cat', name),
         name,
         icon: 'Lightbulb',
         color: '#f59e0b',
         description: suggestion.value?.reason || '',
         status: 'suggested',
         notes: `Suggested by ${suggestion.participantName}`,
+        sourceSuggestionItemId: suggestion.itemId,
+        sourceSuggestionId: suggestion.id,
         deleted: false,
         collapsed: false,
         subcategories: [],
@@ -683,6 +816,19 @@ export default function SummitTaxonomyWorkshop() {
       message: regenerate ? 'Stats, participants, votes, and suggestions were reset.' : 'The two-hour voting window is live.',
       icon: regenerate ? 'RefreshCcw' : 'Radio',
       tone: regenerate ? 'amber' : 'emerald',
+    });
+  };
+
+  const resetParticipantVotes = async () => {
+    if (!participantResetTarget) return;
+    const res = await summitAPI.resetParticipantVotes(participantResetTarget.id);
+    applyVotes(res.votes, { silent: true });
+    setParticipantResetTarget(null);
+    pushToast({
+      title: 'Voter reset',
+      message: `${participantResetTarget.displayName}'s votes and suggestions were removed.`,
+      icon: 'UserX',
+      tone: 'amber',
     });
   };
 
@@ -764,6 +910,31 @@ export default function SummitTaxonomyWorkshop() {
         ))}
       </div>
 
+      {dragPreview && (
+        <div className="pointer-events-none fixed bottom-5 left-1/2 z-[75] -translate-x-1/2 rounded-full border border-cyan-200 bg-white/95 px-4 py-2 text-sm shadow-2xl backdrop-blur">
+          <span className="font-semibold text-slate-950">Dragging {dragPreview.name}</span>
+          <span className="mx-2 text-slate-400">to</span>
+          <span className="font-medium text-cyan-800">{dragOverTarget?.label || 'choose a highlighted target'}</span>
+        </div>
+      )}
+
+      {dragPreview && dragPosition && (
+        <div
+          className="pointer-events-none fixed z-[80] w-72 -rotate-1 rounded-lg border border-cyan-200 bg-white/80 p-3 text-slate-900 shadow-2xl ring-4 ring-cyan-100/70 backdrop-blur transition-transform duration-75"
+          style={{ left: dragPosition.x + 16, top: dragPosition.y + 16 }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: dragPreview.color || '#0891b2' }}>
+              <Icon name={dragPreview.icon || (dragPreview.type === 'category' ? 'Folder' : 'Tag')} className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">{dragPreview.name}</div>
+              <div className="text-xs capitalize text-slate-500">{dragPreview.type === 'sub' ? 'Subcategory' : 'Top category'}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-950 px-5 py-4 text-white lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -830,7 +1001,7 @@ export default function SummitTaxonomyWorkshop() {
                 <div className="text-[11px] uppercase text-slate-500">Top-level</div>
               </div>
               <div className="rounded-lg bg-white px-3 py-2">
-                <div className="text-xl font-semibold text-slate-900">{(votes.categorySuggestions || []).length - topCategorySuggestions.length}</div>
+                <div className="text-xl font-semibold text-slate-900">{pendingSubcategorySuggestionCount}</div>
                 <div className="text-[11px] uppercase text-slate-500">Subcategory</div>
               </div>
             </div>
@@ -867,6 +1038,33 @@ export default function SummitTaxonomyWorkshop() {
         </div>
       </div>
 
+      <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Icons.Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+            <input
+              value={taxonomySearch}
+              onChange={(event) => setTaxonomySearch(event.target.value)}
+              className="min-h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-9 py-2 text-sm text-slate-900 outline-none transition focus:border-cyan-300 focus:bg-white focus:ring-2 focus:ring-cyan-100"
+              placeholder="Search categories, subcategories, evidence, or notes"
+            />
+            {taxonomySearch && (
+              <button
+                type="button"
+                onClick={() => setTaxonomySearch('')}
+                className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                title="Clear search"
+              >
+                <Icons.X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+            {searchNeedle ? `${visibleCategories.length} categories / ${visibleSubcategories.length} subcategories shown` : 'Fuzzy search is ready'}
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)_320px]">
         <aside className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
@@ -874,31 +1072,41 @@ export default function SummitTaxonomyWorkshop() {
             <span className="text-xs text-slate-500">Use grips to reorder</span>
           </div>
           <div className="space-y-2">
-            {activeCategories.map((cat) => (
+            {visibleCategories.map((cat) => (
               <div
                 key={cat.id}
-                onDragOver={(e) => e.preventDefault()}
-                onDragEnter={(e) => e.preventDefault()}
+                onDragOver={(event) => setDropTarget(event, {
+                  type: 'category',
+                  id: cat.id,
+                  label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
+                })}
+                onDragEnter={(event) => setDropTarget(event, {
+                  type: 'category',
+                  id: cat.id,
+                  label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
+                })}
                 onDrop={(event) => {
-                  event.stopPropagation();
-                  if (dragItem?.type === 'category') moveCategory(dragItem.id, cat.id);
-                  if (dragItem?.type === 'sub') moveSubcategory(dragItem.categoryId, dragItem.id, cat.id);
-                  finishDrag();
+                  dropCategory(event, cat);
                 }}
                 onClick={() => setSelectedCategoryId(cat.id)}
                 className={`w-full rounded-lg border p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
-                  highlightIds[`vote-${cat.id}`]
-                    ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                    : selectedCategory?.id === cat.id
-                      ? 'border-slate-900 bg-slate-50 shadow-sm'
-                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id
+                    ? 'scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                    : dragItem?.type === 'category' && dragItem.id === cat.id
+                      ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                      : highlightIds[`vote-${cat.id}`]
+                        ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                        : selectedCategory?.id === cat.id
+                          ? 'border-slate-900 bg-slate-50 shadow-sm'
+                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                 }`}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3">
                   <button
                     type="button"
                     draggable
-                    onDragStart={(event) => startDrag(event, { type: 'category', id: cat.id })}
+                    onDragStart={(event) => startDrag(event, { type: 'category', id: cat.id, name: cat.name, icon: cat.icon, color: cat.color })}
+                    onDrag={(event) => updateDragPosition(event)}
                     onDragEnd={finishDrag}
                     onClick={(event) => event.stopPropagation()}
                     className="flex h-9 w-7 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
@@ -910,56 +1118,73 @@ export default function SummitTaxonomyWorkshop() {
                     <Icon name={cat.icon} className="h-5 w-5" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-slate-900">{cat.name}</span>
-                    <span className="text-xs text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
+                    <span className="block break-words text-sm font-semibold leading-snug text-slate-900">{cat.name}</span>
+                    <span className="mt-1 block text-xs text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
                     {!!(subcategorySuggestionsByParent.get(cat.id)?.length || 0) && (
-                      <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                      <span className="mt-1 inline-flex rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
                         {subcategorySuggestionsByParent.get(cat.id).length} ideas
                       </span>
                     )}
                   </span>
-                  <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
-                    voteCount(votes, cat.id) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                    {voteCount(votes, cat.id)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedCategoryId(cat.id);
-                      focusCategoryName();
-                    }}
-                    className="rounded p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                    title="Rename category"
-                  >
-                    <Icons.Pencil className="h-4 w-4" />
-                  </button>
-                  <input
-                    type="checkbox"
-                    checked={selectedForMerge.includes(cat.id)}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      setSelectedForMerge(prev => e.target.checked ? [...prev, cat.id] : prev.filter(id => id !== cat.id));
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    title="Select for combine"
-                  />
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                  <span className="text-[11px] font-medium uppercase text-slate-400">Controls</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
+                      linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
+                    }`}>
+                      <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                      {linkedVoteCount(votes, cat)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedCategoryId(cat.id);
+                        focusCategoryName();
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                      title="Rename category"
+                    >
+                      <Icons.Pencil className="h-4 w-4" />
+                    </button>
+                    <label className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition hover:bg-slate-100" title="Select for combine">
+                      <input
+                        type="checkbox"
+                        checked={selectedForMerge.includes(cat.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setSelectedForMerge(prev => e.target.checked ? [...prev, cat.id] : prev.filter(id => id !== cat.id));
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </label>
+                  </div>
                 </div>
               </div>
             ))}
+            {!visibleCategories.length && (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
+                No categories match this search.
+              </div>
+            )}
           </div>
         </aside>
 
         <section
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.stopPropagation();
-            if (dragItem?.type === 'sub' && selectedCategory) moveSubcategory(dragItem.categoryId, dragItem.id, selectedCategory.id);
-            finishDrag();
+          onDragOver={(event) => {
+            if (selectedCategory && dragItem?.type === 'sub') {
+              setDropTarget(event, { type: 'selected-category', id: selectedCategory.id, label: `move to end of ${selectedCategory.name}` });
+            } else {
+              event.preventDefault();
+            }
           }}
-          className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200"
+          onDrop={dropIntoSelectedCategory}
+          className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
+            dragOverTarget?.type === 'selected-category' && selectedCategory?.id === dragOverTarget.id
+              ? 'border-cyan-300 ring-2 ring-cyan-100'
+              : 'border-slate-200'
+          }`}
         >
           {selectedCategory && (
             <>
@@ -977,10 +1202,10 @@ export default function SummitTaxonomyWorkshop() {
                         className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300"
                       />
                       <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
-                        voteCount(votes, selectedCategory.id) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
+                        linkedVoteCount(votes, selectedCategory) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
                       } ${highlightIds[`vote-${selectedCategory.id}`] ? 'scale-110 ring-2 ring-cyan-200' : ''}`}>
                         <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                        {voteCount(votes, selectedCategory.id)} votes
+                        {linkedVoteCount(votes, selectedCategory)} votes
                       </span>
                     </div>
                     <textarea
@@ -1012,27 +1237,44 @@ export default function SummitTaxonomyWorkshop() {
               </div>
 
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {(selectedCategory.subcategories || []).filter(s => !s.deleted).map((subcat) => (
+                {visibleSubcategories.map((subcat) => (
                   <div
                     key={subcat.id}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDragEnter={(event) => event.preventDefault()}
-                    onDrop={(event) => {
+                    onDragOver={(event) => {
                       event.stopPropagation();
-                      if (dragItem?.type === 'sub') moveSubcategory(dragItem.categoryId, dragItem.id, selectedCategory.id, subcat.id);
-                      finishDrag();
+                      if (dragItem?.type !== 'sub') {
+                        event.preventDefault();
+                        return;
+                      }
+                      setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
                     }}
+                    onDragEnter={(event) => {
+                      event.stopPropagation();
+                      if (dragItem?.type !== 'sub') {
+                        event.preventDefault();
+                        return;
+                      }
+                      setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
+                    }}
+                    onDrop={(event) => dropSubcategory(event, subcat)}
                     className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm ${
-                      highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
-                        ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                        : 'border-slate-200 bg-slate-50'
+                      iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id
+                        ? 'z-50 border-slate-300 bg-white shadow-xl'
+                        : dragOverTarget?.type === 'sub' && dragOverTarget.id === subcat.id
+                          ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                          : dragItem?.type === 'sub' && dragItem.id === subcat.id
+                            ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                            : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
+                              ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                              : 'border-slate-200 bg-slate-50'
                     }`}
                   >
                     <div className="flex items-start gap-2">
                       <button
                         type="button"
                         draggable
-                        onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: selectedCategory.id, id: subcat.id })}
+                        onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: selectedCategory.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: selectedCategory.color })}
+                        onDrag={(event) => updateDragPosition(event)}
                         onDragEnd={finishDrag}
                         className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing"
                         title="Drag subcategory"
@@ -1053,10 +1295,10 @@ export default function SummitTaxonomyWorkshop() {
                         <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white" placeholder="Evidence or discussion note" />
                       </div>
                       <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
-                        voteCount(votes, subcat.id) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
+                        linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
                       }`}>
                         <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                        {voteCount(votes, subcat.id)}
+                        {linkedVoteCount(votes, subcat)}
                       </span>
                       <CardActionsMenu
                         value={subcat.icon || 'Tag'}
@@ -1074,6 +1316,11 @@ export default function SummitTaxonomyWorkshop() {
                     </div>
                   </div>
                 ))}
+                {!visibleSubcategories.length && (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2">
+                    No subcategories match this search in {selectedCategory.name}.
+                  </div>
+                )}
               </div>
 
               {!!selectedCategorySuggestions.length && (
@@ -1195,7 +1442,17 @@ export default function SummitTaxonomyWorkshop() {
                         Last activity {participant.lastActivityAt ? new Date(participant.lastActivityAt).toLocaleTimeString() : 'none yet'}
                       </div>
                     </div>
-                    <span className="rounded-lg bg-white px-2 py-1 font-semibold text-slate-800">{participant.totalCount || 0} total</span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="rounded-lg bg-white px-2 py-1 font-semibold text-slate-800">{participant.totalCount || 0} total</span>
+                      <button
+                        type="button"
+                        onClick={() => setParticipantResetTarget(participant)}
+                        className="rounded-lg border border-red-100 bg-white px-2 py-1 font-semibold text-red-600 transition hover:bg-red-50"
+                        title="Reset this voter"
+                      >
+                        <Icons.UserX className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-1 text-center">
                     <div className="rounded-md bg-white px-2 py-1">
@@ -1346,6 +1603,35 @@ export default function SummitTaxonomyWorkshop() {
               </button>
               <button onClick={() => enableVoting(true)} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600">
                 Reset stats and regenerate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {participantResetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-2xl">
+            <div className="border-b border-red-200 bg-red-50 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-600 text-white">
+                  <Icons.UserX className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-950">Reset voter?</h2>
+                  <p className="text-sm text-red-800">{participantResetTarget.displayName}</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-4 text-sm text-slate-600">
+              This removes their votes, category ideas, merge suggestions, participant stats, and current participant session from this voting room.
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              <button onClick={() => setParticipantResetTarget(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button onClick={resetParticipantVotes} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">
+                Reset voter
               </button>
             </div>
           </div>
