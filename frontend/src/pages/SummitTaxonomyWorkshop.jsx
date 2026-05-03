@@ -315,6 +315,7 @@ export default function SummitTaxonomyWorkshop() {
   const [saveStatus, setSaveStatus] = useState('Loading...');
   const [error, setError] = useState('');
   const [showDeleted, setShowDeleted] = useState(false);
+  const [topCategoriesCollapsed, setTopCategoriesCollapsed] = useState(false);
   const [showVotes, setShowVotes] = useState(true);
   const [showRegenerateLinkConfirm, setShowRegenerateLinkConfirm] = useState(false);
   const [showVotingShare, setShowVotingShare] = useState(false);
@@ -1654,132 +1655,174 @@ export default function SummitTaxonomyWorkshop() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)_320px]">
-        <aside className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900">Top Categories</h2>
-            <div className="flex items-center gap-2">
-              {selectedForMerge.length > 0 && (
-                <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">
-                  {selectedForMerge.length} selected
-                </span>
-              )}
-              <span className="text-xs text-slate-500">Grip to reorder</span>
+      <div
+        className="grid gap-4 transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--summit-workshop-grid)]"
+        style={{ '--summit-workshop-grid': topCategoriesCollapsed ? '72px minmax(0,1fr) 320px' : '360px minmax(0,1fr) 320px' }}
+      >
+        <aside className={`relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-out ${topCategoriesCollapsed ? 'p-2' : 'p-3'}`}>
+          <div className={`transition-all duration-300 ease-out ${
+            topCategoriesCollapsed ? 'pointer-events-none absolute inset-0 -translate-x-4 opacity-0' : 'relative translate-x-0 opacity-100'
+          }`}>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="truncate text-sm font-semibold text-slate-900">Top Categories</h2>
+              <div className="flex shrink-0 items-center gap-2">
+                {selectedForMerge.length > 0 && (
+                  <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">
+                    {selectedForMerge.length} selected
+                  </span>
+                )}
+                <span className="text-xs text-slate-500">Grip to reorder</span>
+                <button
+                  type="button"
+                  onClick={() => setTopCategoriesCollapsed(true)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-sm"
+                  title="Collapse top categories"
+                  aria-label="Collapse top categories"
+                >
+                  <Icons.ChevronsLeft className="h-4 w-4" />
+                </button>
+              </div>
             </div>
-          </div>
-          <div className="space-y-2">
-            {visibleCategories.map((cat) => (
-              <div
-                key={cat.id}
-                onDragOver={(event) => setDropTarget(event, {
-                  type: 'category',
-                  id: cat.id,
-                  label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
-                })}
-                onDragEnter={(event) => setDropTarget(event, {
-                  type: 'category',
-                  id: cat.id,
-                  label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
-                })}
-                onDrop={(event) => {
-                  dropCategory(event, cat);
-                }}
-                onClick={() => setSelectedCategoryId(cat.id)}
-                className={`relative w-full rounded-lg border p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
-                  dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id
-                    ? 'scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
-                    : dragItem?.type === 'category' && dragItem.id === cat.id
-                      ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
-                      : highlightIds[`move-category-${cat.id}`]
-                        ? 'summit-drop-land border-cyan-400 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                        : highlightIds[`vote-${cat.id}`]
-                          ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                          : selectedCategory?.id === cat.id
-                            ? 'border-slate-900 bg-slate-50 shadow-sm'
-                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <button
-                    type="button"
-                    draggable
-                    onDragStart={(event) => startDrag(event, { type: 'category', id: cat.id, name: cat.name, icon: cat.icon, color: cat.color })}
-                    onDrag={(event) => updateDragPosition(event)}
-                    onDragEnd={finishDrag}
-                    onClick={(event) => event.stopPropagation()}
-                    className="flex h-9 w-7 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
-                    title="Drag to reorder"
-                  >
-                    <Icons.GripVertical className="h-4 w-4" />
-                  </button>
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: cat.color }}>
-                    <Icon name={cat.icon} className="h-5 w-5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block break-words text-sm font-semibold leading-snug text-slate-900">
-                      <HighlightText text={cat.name} query={searchNeedle} />
-                    </span>
-                    <span className="mt-1 block text-xs text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
-                    {!!(subcategorySuggestionsByParent.get(cat.id)?.length || 0) && (
-                      <span className="mt-1 inline-flex rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                        {subcategorySuggestionsByParent.get(cat.id).length} ideas
-                      </span>
-                    )}
-                  </span>
-                  <div className="flex shrink-0 items-center gap-1.5">
+            <div className="space-y-2">
+              {visibleCategories.map((cat) => (
+                <div
+                  key={cat.id}
+                  onDragOver={(event) => setDropTarget(event, {
+                    type: 'category',
+                    id: cat.id,
+                    label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
+                  })}
+                  onDragEnter={(event) => setDropTarget(event, {
+                    type: 'category',
+                    id: cat.id,
+                    label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
+                  })}
+                  onDrop={(event) => {
+                    dropCategory(event, cat);
+                  }}
+                  onClick={() => setSelectedCategoryId(cat.id)}
+                  className={`relative w-full rounded-lg border p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
+                    dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id
+                      ? 'scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                      : dragItem?.type === 'category' && dragItem.id === cat.id
+                        ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                        : highlightIds[`move-category-${cat.id}`]
+                          ? 'summit-drop-land border-cyan-400 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                          : highlightIds[`vote-${cat.id}`]
+                            ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                            : selectedCategory?.id === cat.id
+                              ? 'border-slate-900 bg-slate-50 shadow-sm'
+                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
                     <button
                       type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleSelectedForMerge(cat.id);
-                      }}
-                      className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 ${
-                        selectedForMerge.includes(cat.id)
-                          ? 'border-cyan-300 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-100'
-                          : 'border-slate-200 bg-white text-slate-400 hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700'
-                      }`}
-                      title={selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
+                      draggable
+                      onDragStart={(event) => startDrag(event, { type: 'category', id: cat.id, name: cat.name, icon: cat.icon, color: cat.color })}
+                      onDrag={(event) => updateDragPosition(event)}
+                      onDragEnd={finishDrag}
+                      onClick={(event) => event.stopPropagation()}
+                      className="flex h-9 w-7 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
+                      title="Drag to reorder"
                     >
-                      {selectedForMerge.includes(cat.id) ? <Icons.Check className="h-4 w-4" /> : <Icons.Square className="h-4 w-4" />}
+                      <Icons.GripVertical className="h-4 w-4" />
                     </button>
-                    <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
-                      linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
-                    }`}>
-                      <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                      {linkedVoteCount(votes, cat)}
+                    <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: cat.color }}>
+                      <Icon name={cat.icon} className="h-5 w-5" />
                     </span>
-                    <div onClick={(event) => event.stopPropagation()}>
-                      <CardActionsMenu
-                        value={cat.icon}
-                        color={cat.color}
-                        isOpen={iconPickerTarget?.type === 'category-list' && iconPickerTarget.id === cat.id}
-                        onToggle={() => setIconPickerTarget(prev => prev?.type === 'category-list' && prev.id === cat.id ? null : { type: 'category-list', id: cat.id })}
-                        onRename={() => openCategoryForEdit(cat.id)}
-                        onIconSelect={(iconName) => {
-                          updateCategory(cat.id, { icon: iconName });
-                          setIconPickerTarget(null);
+                    <span className="min-w-0 flex-1">
+                      <span className="block break-words text-sm font-semibold leading-snug text-slate-900">
+                        <HighlightText text={cat.name} query={searchNeedle} />
+                      </span>
+                      <span className="mt-1 block text-xs text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
+                      {!!(subcategorySuggestionsByParent.get(cat.id)?.length || 0) && (
+                        <span className="mt-1 inline-flex rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                          {subcategorySuggestionsByParent.get(cat.id).length} ideas
+                        </span>
+                      )}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSelectedForMerge(cat.id);
                         }}
-                        onColorSelect={(color) => updateCategory(cat.id, { color })}
-                        onRemove={() => softDeleteCategory(cat.id)}
-                        label="Category options"
-                      />
+                        className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 ${
+                          selectedForMerge.includes(cat.id)
+                            ? 'border-cyan-300 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-100'
+                            : 'border-slate-200 bg-white text-slate-400 hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700'
+                        }`}
+                        title={selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
+                      >
+                        {selectedForMerge.includes(cat.id) ? <Icons.Check className="h-4 w-4" /> : <Icons.Square className="h-4 w-4" />}
+                      </button>
+                      <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
+                        linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
+                      }`}>
+                        <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                        {linkedVoteCount(votes, cat)}
+                      </span>
+                      <div onClick={(event) => event.stopPropagation()}>
+                        <CardActionsMenu
+                          value={cat.icon}
+                          color={cat.color}
+                          isOpen={iconPickerTarget?.type === 'category-list' && iconPickerTarget.id === cat.id}
+                          onToggle={() => setIconPickerTarget(prev => prev?.type === 'category-list' && prev.id === cat.id ? null : { type: 'category-list', id: cat.id })}
+                          onRename={() => openCategoryForEdit(cat.id)}
+                          onIconSelect={(iconName) => {
+                            updateCategory(cat.id, { icon: iconName });
+                            setIconPickerTarget(null);
+                          }}
+                          onColorSelect={(color) => updateCategory(cat.id, { color })}
+                          onRemove={() => softDeleteCategory(cat.id)}
+                          label="Category options"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-                {dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id && (
-                  <div className="pointer-events-none absolute inset-x-3 -bottom-2 z-10 flex justify-center">
-                    <span className="rounded-full bg-cyan-600 px-2 py-0.5 text-[11px] font-semibold text-white shadow-lg">
+                  {dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id && (
+                    <div className="pointer-events-none absolute inset-x-3 -bottom-2 z-10 flex justify-center">
+                      <span className="rounded-full bg-cyan-600 px-2 py-0.5 text-[11px] font-semibold text-white shadow-lg">
                       Drop here: {dragOverTarget.label}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ))}
-            {!visibleCategories.length && (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {!visibleCategories.length && (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
                 No categories match this search.
-              </div>
-            )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className={`flex flex-col items-center gap-3 p-2 transition-all duration-300 ease-out ${
+            topCategoriesCollapsed ? 'relative translate-x-0 opacity-100' : 'pointer-events-none absolute inset-0 translate-x-4 opacity-0'
+          }`}>
+            <button
+              type="button"
+              onClick={() => setTopCategoriesCollapsed(false)}
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-950 text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"
+              title="Expand top categories"
+              aria-label="Expand top categories"
+            >
+              <Icons.ChevronsRight className="h-4 w-4" />
+            </button>
+            <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-2 text-slate-700">
+              <Icons.Folders className="h-4 w-4 text-slate-500" />
+              <span className="text-sm font-bold text-slate-950">{activeCategories.length}</span>
+            </div>
+            <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-cyan-100 bg-cyan-50 px-1.5 py-2 text-cyan-800">
+              <Icons.Check className="h-4 w-4" />
+              <span className="text-sm font-bold">{selectedForMerge.length}</span>
+            </div>
+            <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-slate-200 bg-white px-1.5 py-2 text-slate-600">
+              <Icons.ThumbsUp className="h-4 w-4 text-slate-500" />
+              <span className="text-sm font-bold">{activeCategories.reduce((sum, category) => sum + linkedVoteCount(votes, category), 0)}</span>
+            </div>
           </div>
         </aside>
 
