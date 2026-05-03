@@ -105,6 +105,52 @@ function Stat({ label, value, icon }) {
   );
 }
 
+function IconPickerButton({ value, color = '#0f4c81', isOpen, onToggle, onSelect, label = 'Change icon' }) {
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md"
+        title={label}
+      >
+        <Icon name={value || 'Tag'} className="h-5 w-5" />
+      </button>
+      {isOpen && (
+        <div className="absolute right-0 top-12 z-50 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-2xl">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
+            <button type="button" onClick={onToggle} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+              <Icons.X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid max-h-64 grid-cols-7 gap-1 overflow-auto pr-1">
+            {ICONS.map((iconName) => (
+              <button
+                key={iconName}
+                type="button"
+                onClick={() => onSelect(iconName)}
+                className={`flex h-9 w-9 items-center justify-center rounded-lg border transition hover:-translate-y-0.5 hover:shadow-sm ${
+                  iconName === value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-white'
+                }`}
+                title={iconName}
+              >
+                <Icon name={iconName} className="h-4 w-4" />
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-1.5 text-xs text-slate-500">
+            <span className="flex h-5 w-5 items-center justify-center rounded text-white" style={{ backgroundColor: color }}>
+              <Icon name={value || 'Tag'} className="h-3.5 w-3.5" />
+            </span>
+            {value || 'Tag'}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SummitTaxonomyWorkshop() {
   const navigate = useNavigate();
   const { currentWorkspace } = useWorkspace();
@@ -128,11 +174,14 @@ export default function SummitTaxonomyWorkshop() {
   const [countdownMs, setCountdownMs] = useState(0);
   const [newSubcategoryName, setNewSubcategoryName] = useState('');
   const [newSubcategoryEvidence, setNewSubcategoryEvidence] = useState('');
+  const [iconPickerTarget, setIconPickerTarget] = useState(null);
   const hydratedRef = useRef(false);
   const saveTimerRef = useRef(null);
   const votesRef = useRef(normalizeVotes());
   const toastIdRef = useRef(0);
   const subcategoryNameInputRef = useRef(null);
+  const categoryNameInputRef = useRef(null);
+  const subcategoryNameInputRefs = useRef({});
 
   const isItWorkspace = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
   const activeCategories = useMemo(() => (state?.categories || []).filter(c => !c.deleted), [state]);
@@ -437,6 +486,28 @@ export default function SummitTaxonomyWorkshop() {
     return Boolean(suggestionName && (category?.subcategories || []).some(subcat => !subcat.deleted && normalizeLabel(subcat.name) === suggestionName));
   };
 
+  const focusCategoryName = () => {
+    window.setTimeout(() => {
+      categoryNameInputRef.current?.focus();
+      categoryNameInputRef.current?.select();
+    }, 50);
+  };
+
+  const focusSubcategoryName = (subId) => {
+    window.setTimeout(() => {
+      subcategoryNameInputRefs.current[subId]?.focus();
+      subcategoryNameInputRefs.current[subId]?.select();
+    }, 50);
+  };
+
+  const startDrag = (event, item) => {
+    setDragItem(item);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', `${item.type}:${item.id}`);
+  };
+
+  const finishDrag = () => setDragItem(null);
+
   const softDeleteCategory = (categoryId) => commit((draft) => {
     draft.categories = draft.categories.map(c => c.id === categoryId ? { ...c, deleted: true, deletedAt: new Date().toISOString() } : c);
     const next = draft.categories.find(c => !c.deleted && c.id !== categoryId);
@@ -477,15 +548,22 @@ export default function SummitTaxonomyWorkshop() {
     return draft;
   });
 
-  const moveSubcategory = (fromCategoryId, subId, toCategoryId) => commit((draft) => {
+  const moveSubcategory = (fromCategoryId, subId, toCategoryId, beforeSubId = null) => commit((draft) => {
     let moving = null;
     draft.categories = draft.categories.map(c => {
       if (c.id !== fromCategoryId) return c;
-      moving = c.subcategories.find(s => s.id === subId);
-      return { ...c, subcategories: c.subcategories.filter(s => s.id !== subId) };
+      moving = (c.subcategories || []).find(s => s.id === subId);
+      return { ...c, subcategories: (c.subcategories || []).filter(s => s.id !== subId) };
     });
     if (!moving) return draft;
-    draft.categories = draft.categories.map(c => c.id === toCategoryId ? { ...c, subcategories: [...c.subcategories, moving] } : c);
+    draft.categories = draft.categories.map((c) => {
+      if (c.id !== toCategoryId) return c;
+      const list = [...(c.subcategories || [])];
+      const insertAt = beforeSubId ? list.findIndex(s => s.id === beforeSubId) : -1;
+      if (insertAt >= 0) list.splice(insertAt, 0, moving);
+      else list.push(moving);
+      return { ...c, subcategories: list };
+    });
     return draft;
   });
 
@@ -740,19 +818,19 @@ export default function SummitTaxonomyWorkshop() {
         <aside className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-900">Top Categories</h2>
-            <span className="text-xs text-slate-500">Drag to reorder</span>
+            <span className="text-xs text-slate-500">Use grips to reorder</span>
           </div>
           <div className="space-y-2">
             {activeCategories.map((cat) => (
-              <button
+              <div
                 key={cat.id}
-                draggable
-                onDragStart={() => setDragItem({ type: 'category', id: cat.id })}
                 onDragOver={(e) => e.preventDefault()}
-                onDrop={() => {
+                onDragEnter={(e) => e.preventDefault()}
+                onDrop={(event) => {
+                  event.stopPropagation();
                   if (dragItem?.type === 'category') moveCategory(dragItem.id, cat.id);
                   if (dragItem?.type === 'sub') moveSubcategory(dragItem.categoryId, dragItem.id, cat.id);
-                  setDragItem(null);
+                  finishDrag();
                 }}
                 onClick={() => setSelectedCategoryId(cat.id)}
                 className={`w-full rounded-lg border p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
@@ -764,6 +842,17 @@ export default function SummitTaxonomyWorkshop() {
                 }`}
               >
                 <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    draggable
+                    onDragStart={(event) => startDrag(event, { type: 'category', id: cat.id })}
+                    onDragEnd={finishDrag}
+                    onClick={(event) => event.stopPropagation()}
+                    className="flex h-9 w-7 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
+                    title="Drag to reorder"
+                  >
+                    <Icons.GripVertical className="h-4 w-4" />
+                  </button>
                   <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: cat.color }}>
                     <Icon name={cat.icon} className="h-5 w-5" />
                   </span>
@@ -782,6 +871,18 @@ export default function SummitTaxonomyWorkshop() {
                     <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
                     {voteCount(votes, cat.id)}
                   </span>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedCategoryId(cat.id);
+                      focusCategoryName();
+                    }}
+                    className="rounded p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                    title="Rename category"
+                  >
+                    <Icons.Pencil className="h-4 w-4" />
+                  </button>
                   <input
                     type="checkbox"
                     checked={selectedForMerge.includes(cat.id)}
@@ -793,12 +894,20 @@ export default function SummitTaxonomyWorkshop() {
                     title="Select for combine"
                   />
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </aside>
 
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200">
+        <section
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.stopPropagation();
+            if (dragItem?.type === 'sub' && selectedCategory) moveSubcategory(dragItem.categoryId, dragItem.id, selectedCategory.id);
+            finishDrag();
+          }}
+          className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200"
+        >
           {selectedCategory && (
             <>
               <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
@@ -809,10 +918,19 @@ export default function SummitTaxonomyWorkshop() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <input
+                        ref={categoryNameInputRef}
                         value={selectedCategory.name}
                         onChange={(e) => updateCategory(selectedCategory.id, { name: e.target.value })}
                         className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300"
                       />
+                      <button
+                        type="button"
+                        onClick={focusCategoryName}
+                        className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-sm"
+                        title="Rename category"
+                      >
+                        <Icons.Pencil className="h-4 w-4" />
+                      </button>
                       <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
                         voteCount(votes, selectedCategory.id) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
                       } ${highlightIds[`vote-${selectedCategory.id}`] ? 'scale-110 ring-2 ring-cyan-200' : ''}`}>
@@ -830,9 +948,17 @@ export default function SummitTaxonomyWorkshop() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <select value={selectedCategory.icon} onChange={(e) => updateCategory(selectedCategory.id, { icon: e.target.value })} className="rounded-lg border border-slate-300 px-2 py-2 text-sm">
-                    {ICONS.map(i => <option key={i} value={i}>{i}</option>)}
-                  </select>
+                  <IconPickerButton
+                    value={selectedCategory.icon}
+                    color={selectedCategory.color}
+                    isOpen={iconPickerTarget?.type === 'category' && iconPickerTarget.id === selectedCategory.id}
+                    onToggle={() => setIconPickerTarget(prev => prev?.type === 'category' && prev.id === selectedCategory.id ? null : { type: 'category', id: selectedCategory.id })}
+                    onSelect={(iconName) => {
+                      updateCategory(selectedCategory.id, { icon: iconName });
+                      setIconPickerTarget(null);
+                    }}
+                    label="Category icon"
+                  />
                   <input type="color" value={selectedCategory.color} onChange={(e) => updateCategory(selectedCategory.id, { color: e.target.value })} className="h-10 w-12 rounded border border-slate-300" title="Category color" />
                   <button onClick={() => addSubcategory(selectedCategory.id)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
                   <button onClick={() => softDeleteCategory(selectedCategory.id)} className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50"><Icons.Trash2 className="mr-1 inline h-4 w-4" />Remove</button>
@@ -843,8 +969,13 @@ export default function SummitTaxonomyWorkshop() {
                 {(selectedCategory.subcategories || []).filter(s => !s.deleted).map((subcat) => (
                   <div
                     key={subcat.id}
-                    draggable
-                    onDragStart={() => setDragItem({ type: 'sub', categoryId: selectedCategory.id, id: subcat.id })}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDragEnter={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.stopPropagation();
+                      if (dragItem?.type === 'sub') moveSubcategory(dragItem.categoryId, dragItem.id, selectedCategory.id, subcat.id);
+                      finishDrag();
+                    }}
                     className={`group rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm ${
                       highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
                         ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
@@ -852,9 +983,27 @@ export default function SummitTaxonomyWorkshop() {
                     }`}
                   >
                     <div className="flex items-start gap-2">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: selectedCategory.id, id: subcat.id })}
+                        onDragEnd={finishDrag}
+                        className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing"
+                        title="Drag subcategory"
+                      >
+                        <Icons.GripVertical className="h-4 w-4" />
+                      </button>
                       <span className="mt-1 text-slate-500"><Icon name={subcat.icon || 'Tag'} /></span>
                       <div className="min-w-0 flex-1">
-                        <input value={subcat.name} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { name: e.target.value })} className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white" />
+                        <input
+                          ref={(node) => {
+                            if (node) subcategoryNameInputRefs.current[subcat.id] = node;
+                            else delete subcategoryNameInputRefs.current[subcat.id];
+                          }}
+                          value={subcat.name}
+                          onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { name: e.target.value })}
+                          className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white"
+                        />
                         <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white" placeholder="Evidence or discussion note" />
                       </div>
                       <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
@@ -863,9 +1012,25 @@ export default function SummitTaxonomyWorkshop() {
                         <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
                         {voteCount(votes, subcat.id)}
                       </span>
-                      <select value={subcat.icon || 'Tag'} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { icon: e.target.value })} className="hidden rounded border border-slate-200 bg-white px-1 py-1 text-xs group-hover:block">
-                        {ICONS.map(i => <option key={i} value={i}>{i}</option>)}
-                      </select>
+                      <IconPickerButton
+                        value={subcat.icon || 'Tag'}
+                        color={selectedCategory.color}
+                        isOpen={iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id}
+                        onToggle={() => setIconPickerTarget(prev => prev?.type === 'subcategory' && prev.id === subcat.id ? null : { type: 'subcategory', categoryId: selectedCategory.id, id: subcat.id })}
+                        onSelect={(iconName) => {
+                          updateSubcategory(selectedCategory.id, subcat.id, { icon: iconName });
+                          setIconPickerTarget(null);
+                        }}
+                        label="Subcategory icon"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => focusSubcategoryName(subcat.id)}
+                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        title="Rename subcategory"
+                      >
+                        <Icons.Pencil className="h-4 w-4" />
+                      </button>
                       <button onClick={() => softDeleteSubcategory(selectedCategory.id, subcat.id)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Remove"><Icons.X className="h-4 w-4" /></button>
                     </div>
                   </div>
