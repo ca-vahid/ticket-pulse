@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as Icons from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { QRCodeSVG } from 'qrcode.react';
 import AppShell from '../components/AppShell';
 import { summitAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -178,6 +179,13 @@ function toastToneClasses(tone) {
   };
 }
 
+function activityToneClasses(tone) {
+  if (tone === 'amber') return 'bg-amber-100 text-amber-700';
+  if (tone === 'emerald') return 'bg-emerald-100 text-emerald-700';
+  if (tone === 'violet') return 'bg-violet-100 text-violet-700';
+  return 'bg-cyan-100 text-cyan-700';
+}
+
 function formatCountdown(ms) {
   if (!Number.isFinite(ms) || ms <= 0) return 'Expired';
   const totalSeconds = Math.ceil(ms / 1000);
@@ -323,8 +331,10 @@ export default function SummitTaxonomyWorkshop() {
   const [showDeleted, setShowDeleted] = useState(false);
   const [showVotes, setShowVotes] = useState(true);
   const [showRegenerateLinkConfirm, setShowRegenerateLinkConfirm] = useState(false);
+  const [showVotingShare, setShowVotingShare] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [activityFeed, setActivityFeed] = useState([]);
   const [highlightIds, setHighlightIds] = useState({});
   const [countdownMs, setCountdownMs] = useState(0);
   const [newSubcategoryName, setNewSubcategoryName] = useState('');
@@ -336,6 +346,7 @@ export default function SummitTaxonomyWorkshop() {
   const saveTimerRef = useRef(null);
   const votesRef = useRef(normalizeVotes());
   const toastIdRef = useRef(0);
+  const activityIdRef = useRef(0);
   const subcategoryNameInputRef = useRef(null);
   const categoryNameInputRef = useRef(null);
   const subcategoryNameInputRefs = useRef({});
@@ -384,6 +395,31 @@ export default function SummitTaxonomyWorkshop() {
     () => (votes.totals || []).filter(vote => vote.voteType === 'support' && vote.count > 0).slice(0, 6),
     [votes.totals],
   );
+  const risingIdeas = useMemo(() => {
+    const recentWindowMs = 10 * 60 * 1000;
+    const recentCutoff = Date.now() - recentWindowMs;
+    const recentCounts = activityFeed.reduce((map, activity) => {
+      if (!activity.itemId || !activity.timestamp || new Date(activity.timestamp).getTime() < recentCutoff) return map;
+      map.set(activity.itemId, (map.get(activity.itemId) || 0) + 1);
+      return map;
+    }, new Map());
+
+    return (votes.categorySuggestions || [])
+      .filter(suggestion => !acceptedSuggestionItemIds.has(suggestion.itemId))
+      .map((suggestion) => {
+        const support = voteCount(votes, suggestion.itemId);
+        const recentActivity = recentCounts.get(suggestion.itemId) || 0;
+        return {
+          ...suggestion,
+          support,
+          recentActivity,
+          score: support * 2 + recentActivity,
+        };
+      })
+      .filter(suggestion => suggestion.score > 0 || suggestion.recentActivity > 0)
+      .sort((a, b) => b.score - a.score || new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 5);
+  }, [acceptedSuggestionItemIds, activityFeed, votes]);
   const subcategorySuggestionsByParent = useMemo(() => {
     const groups = new Map();
     (votes.categorySuggestions || [])
@@ -419,6 +455,21 @@ export default function SummitTaxonomyWorkshop() {
     }, duration);
   }, []);
 
+  const addActivity = useCallback(({ type, title, detail, actor, icon = 'Activity', tone = 'cyan', itemId = null }) => {
+    const id = `${Date.now()}_${activityIdRef.current += 1}`;
+    setActivityFeed(prev => [{
+      id,
+      type,
+      title,
+      detail,
+      actor,
+      icon,
+      tone,
+      itemId,
+      timestamp: new Date().toISOString(),
+    }, ...prev].slice(0, 40));
+  }, []);
+
   const markHighlight = useCallback((id) => {
     setHighlightIds(prev => ({ ...prev, [id]: true }));
     window.setTimeout(() => {
@@ -435,6 +486,13 @@ export default function SummitTaxonomyWorkshop() {
     const previous = votesRef.current || normalizeVotes();
 
     if (!silent) {
+      const findRecentActor = (itemId, voteType) => {
+        const matches = next.participantStats.flatMap(participant => (participant.recentItems || [])
+          .filter(item => item.itemId === itemId && item.voteType === voteType)
+          .map(item => ({ participant, item })));
+        matches.sort((a, b) => new Date(b.item.createdAt || 0) - new Date(a.item.createdAt || 0));
+        return matches[0]?.participant?.displayName || null;
+      };
       const previousMergeIds = new Set(previous.mergeSuggestions.map(suggestion => suggestion.id));
       const previousIdeaIds = new Set(previous.categorySuggestions.map(suggestion => suggestion.id));
       const previousParticipantIds = new Set(previous.participantStats.map(participant => participant.id));
@@ -449,6 +507,15 @@ export default function SummitTaxonomyWorkshop() {
       newCategoryIdeas.slice(0, 3).forEach((suggestion) => {
         markHighlight(`idea-${suggestion.id}`);
         markHighlight('ideas');
+        addActivity({
+          type: 'idea',
+          title: suggestion.value?.scope === 'subcategory' ? 'Subcategory idea' : 'Category idea',
+          detail: suggestion.value?.parentName ? `${suggestion.itemLabel} under ${suggestion.value.parentName}` : suggestion.itemLabel,
+          actor: suggestion.participantName,
+          icon: 'Lightbulb',
+          tone: 'amber',
+          itemId: suggestion.itemId,
+        });
         pushToast({
           title: suggestion.value?.scope === 'subcategory' ? 'New subcategory idea' : 'New category idea',
           message: suggestion.itemLabel,
@@ -465,6 +532,15 @@ export default function SummitTaxonomyWorkshop() {
 
       newMergeSuggestions.slice(0, 3).forEach((suggestion) => {
         markHighlight(`merge-${suggestion.id}`);
+        addActivity({
+          type: 'merge',
+          title: 'Merge suggestion',
+          detail: `${suggestion.value?.from || 'Category'} + ${suggestion.value?.to || 'Category'}`,
+          actor: suggestion.participantName,
+          icon: 'Merge',
+          tone: 'violet',
+          itemId: suggestion.itemId,
+        });
         pushToast({
           title: 'New merge suggestion',
           message: `${suggestion.value?.from || 'Category'} + ${suggestion.value?.to || 'Category'}`,
@@ -480,11 +556,32 @@ export default function SummitTaxonomyWorkshop() {
 
       changedSupportVotes.slice(0, 6).forEach((vote) => {
         markHighlight(`vote-${vote.itemId}`);
+        if (vote.delta > 0) {
+          addActivity({
+            type: 'vote',
+            title: 'Vote added',
+            detail: vote.itemLabel || 'Workshop item',
+            actor: findRecentActor(vote.itemId, 'support'),
+            icon: 'ThumbsUp',
+            tone: 'cyan',
+            itemId: vote.itemId,
+          });
+        }
       });
 
       if (next.participantCount > previous.participantCount) {
         markHighlight('participants');
         const names = newParticipants.map(participant => participant.displayName).filter(Boolean);
+        newParticipants.slice(0, 4).forEach((participant) => {
+          addActivity({
+            type: 'participant',
+            title: 'Participant joined',
+            detail: `${next.participantCount} total participants`,
+            actor: participant.displayName,
+            icon: 'UserPlus',
+            tone: 'emerald',
+          });
+        });
         pushToast({
           title: 'Participant joined',
           message: names.length ? names.slice(0, 2).join(', ') : `${next.participantCount} connected`,
@@ -517,7 +614,7 @@ export default function SummitTaxonomyWorkshop() {
 
     votesRef.current = next;
     setVotes(next);
-  }, [markHighlight, pushToast]);
+  }, [addActivity, markHighlight, pushToast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1335,10 +1432,15 @@ export default function SummitTaxonomyWorkshop() {
           0%, 100% { box-shadow: 0 0 0 0 rgba(8, 145, 178, 0); }
           50% { box-shadow: 0 0 0 6px rgba(8, 145, 178, .12); }
         }
+        @keyframes summitQrPulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.015); }
+        }
         .summit-toast { animation: summitToastIn 180ms ease-out both; }
         .summit-soft-pulse { animation: summitSoftPulse 1.2s ease-in-out 2; }
+        .summit-qr-pulse { animation: summitQrPulse 2.2s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce) {
-          .summit-toast, .summit-soft-pulse { animation: none; }
+          .summit-toast, .summit-soft-pulse, .summit-qr-pulse { animation: none; }
         }
       `}</style>
       <div className="fixed right-4 top-20 z-[60] w-[min(420px,calc(100vw-2rem))] space-y-2" aria-live="polite">
@@ -1476,21 +1578,58 @@ export default function SummitTaxonomyWorkshop() {
           <div className={`rounded-lg border bg-amber-50/80 p-3 transition-all duration-300 ${
             highlightIds.ideas ? 'scale-[1.01] border-amber-300 shadow-md ring-2 ring-amber-100' : 'border-amber-100'
           }`}>
-            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <Icons.Lightbulb className="h-4 w-4 text-amber-700" />
-              Ideas by placement
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-center">
-              <div className="rounded-lg bg-white px-3 py-2">
-                <div className="text-xl font-semibold text-slate-900">{topCategorySuggestions.length}</div>
-                <div className="text-[11px] uppercase text-slate-500">Top-level</div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <Icons.Flame className="h-4 w-4 text-amber-700" />
+                Top rising ideas
               </div>
-              <div className="rounded-lg bg-white px-3 py-2">
-                <div className="text-xl font-semibold text-slate-900">{pendingSubcategorySuggestionCount}</div>
-                <div className="text-[11px] uppercase text-slate-500">Subcategory</div>
+              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-800">{risingIdeas.length}</span>
+            </div>
+            <div className="space-y-2">
+              {risingIdeas.map((idea, index) => (
+                <div
+                  key={idea.id}
+                  className={`rounded-lg border bg-white p-2 transition-all duration-300 ${
+                    highlightIds[`idea-${idea.id}`] || highlightIds[`vote-${idea.itemId}`]
+                      ? 'summit-soft-pulse border-amber-300 ring-2 ring-amber-100'
+                      : 'border-amber-100'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-xs font-bold text-amber-800">{index + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-semibold text-slate-900">{idea.itemLabel}</div>
+                      <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                        {idea.value?.scope === 'subcategory' ? `Subcategory under ${idea.value?.parentName || 'category'}` : 'Top-level category'}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-xs font-bold text-amber-800">{idea.support}</div>
+                      <div className="text-[10px] uppercase text-slate-400">votes</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Suggested by {idea.participantName || 'participant'}</span>
+                    <span>{idea.recentActivity} recent</span>
+                  </div>
+                </div>
+              ))}
+              {!risingIdeas.length && (
+                <div className="rounded-lg bg-white px-3 py-3 text-sm text-amber-900">
+                  Rising ideas will appear after participants suggest or vote on ideas.
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 text-center">
+                <div className="rounded-lg bg-white px-3 py-2">
+                  <div className="text-lg font-semibold text-slate-900">{topCategorySuggestions.length}</div>
+                  <div className="text-[11px] uppercase text-slate-500">Top-level</div>
+                </div>
+                <div className="rounded-lg bg-white px-3 py-2">
+                  <div className="text-lg font-semibold text-slate-900">{pendingSubcategorySuggestionCount}</div>
+                  <div className="text-[11px] uppercase text-slate-500">Subcategory</div>
+                </div>
               </div>
             </div>
-            <div className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-medium text-amber-900">Contextual review queue</div>
           </div>
         </div>
 
@@ -1514,6 +1653,7 @@ export default function SummitTaxonomyWorkshop() {
                 </span>
                 <span className="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">Ends {new Date(session.voteExpiresAt).toLocaleTimeString()}</span>
                 <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md"><Icons.Link className="mr-1 inline h-4 w-4" />Copy voting link</button>
+                <button onClick={() => setShowVotingShare(true)} className="rounded-lg bg-slate-950 px-3 py-2 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"><Icons.QrCode className="mr-1 inline h-4 w-4" />Fullscreen QR</button>
                 <button onClick={() => setShowRegenerateLinkConfirm(true)} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:bg-amber-100 hover:shadow-md"><Icons.RefreshCcw className="mr-1 inline h-4 w-4" />Reset stats + link</button>
               </>
             ) : (
@@ -1903,6 +2043,36 @@ export default function SummitTaxonomyWorkshop() {
         )}
 
         <aside className="space-y-4">
+          <div className="rounded-lg border border-cyan-100 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Icons.Radio className="h-4 w-4 text-cyan-700" />
+                <h2 className="text-sm font-semibold text-slate-900">Recent Activity</h2>
+              </div>
+              <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800">live</span>
+            </div>
+            <div className="max-h-80 space-y-2 overflow-auto pr-1">
+              {activityFeed.map(activity => (
+                <div key={activity.id} className="summit-toast flex gap-3 rounded-lg border border-slate-100 bg-slate-50 p-2 text-xs">
+                  <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${activityToneClasses(activity.tone)}`}>
+                    <Icon name={activity.icon} className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="truncate font-semibold text-slate-900">{activity.title}</div>
+                      <div className="shrink-0 text-[10px] text-slate-400">{new Date(activity.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</div>
+                    </div>
+                    <div className="mt-0.5 break-words text-slate-600">{activity.detail}</div>
+                    {activity.actor && <div className="mt-1 text-[11px] font-medium text-slate-500">by {activity.actor}</div>}
+                  </div>
+                </div>
+              ))}
+              {!activityFeed.length && (
+                <p className="text-sm text-slate-500">Live participant joins, votes, category ideas, and merge suggestions will appear here.</p>
+              )}
+            </div>
+          </div>
+
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-900">Live Feedback</h2>
@@ -2074,6 +2244,62 @@ export default function SummitTaxonomyWorkshop() {
                 </div>
               ))}
               {!deletedItems.length && <p className="text-sm text-slate-500">Nothing removed yet.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showVotingShare && voteUrl && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950 p-4 text-white">
+          <div className="absolute right-4 top-4 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigator.clipboard.writeText(voteUrl)}
+              className="rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
+            >
+              <Icons.Copy className="mr-1 inline h-4 w-4" />
+              Copy link
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowVotingShare(false)}
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white transition hover:bg-white/15"
+              aria-label="Close fullscreen QR"
+            >
+              <Icons.X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="grid w-full max-w-6xl gap-8 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.22em] text-cyan-200">
+                <Icons.Sparkles className="h-5 w-5" />
+                BGC Engineering IT Summit
+              </div>
+              <h2 className="mt-5 text-5xl font-semibold leading-tight lg:text-7xl">Join the category vote</h2>
+              <p className="mt-5 max-w-3xl text-xl leading-relaxed text-slate-300">
+                Scan the QR code, enter your name, then vote for categories and suggest anything missing.
+              </p>
+              <div className="mt-8 flex flex-wrap items-center gap-3 text-base">
+                <span className={`rounded-lg px-4 py-3 font-semibold ${isVotingExpired ? 'bg-red-500/15 text-red-100' : 'bg-emerald-400 text-slate-950'}`}>
+                  <Icons.Clock3 className="mr-2 inline h-5 w-5" />
+                  {formatCountdown(effectiveCountdownMs)} {isVotingExpired ? '' : 'left'}
+                </span>
+                <span className="rounded-lg border border-white/10 bg-white/10 px-4 py-3 text-slate-100">
+                  {pluralize(votes.participantCount || 0, 'participant')}
+                </span>
+                <span className="rounded-lg border border-white/10 bg-white/10 px-4 py-3 text-slate-100">
+                  {pluralize(totalVoteCount(votes), 'vote')}
+                </span>
+              </div>
+              <div className="mt-8 max-w-4xl rounded-xl border border-white/10 bg-white/10 p-4 text-lg font-medium text-cyan-100">
+                {voteUrl}
+              </div>
+            </div>
+            <div className="summit-qr-pulse rounded-3xl border border-white/10 bg-white p-5 shadow-2xl">
+              <QRCodeSVG value={voteUrl} size={420} marginSize={3} className="aspect-square h-auto w-full rounded-2xl" title="Category workshop voting link" />
+              <div className="mt-4 rounded-2xl bg-slate-950 px-4 py-3 text-center text-lg font-semibold text-white">
+                Scan to vote
+              </div>
             </div>
           </div>
         </div>
