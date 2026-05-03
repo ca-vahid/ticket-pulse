@@ -210,12 +210,25 @@ function broadcast(sessionId, event, payload = {}) {
   }
 }
 
+function closePublicStreams(sessionId, event = 'expired', payload = {}) {
+  const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const res of [...room(sessionId)]) {
+    try {
+      res.write(data);
+      res.end();
+    } catch {
+      // connection is already gone
+    }
+    room(sessionId).delete(res);
+  }
+}
+
 async function getVoteSummary(sessionId) {
-  const [participants, grouped, suggestions] = await Promise.all([
+  const [participants, grouped, mergeSuggestions, categorySuggestions] = await Promise.all([
     prisma.summitWorkshopParticipant.count({ where: { sessionId } }),
     prisma.summitWorkshopVote.groupBy({
       by: ['itemId', 'itemType', 'itemLabel', 'voteType'],
-      where: { sessionId, voteType: { not: 'merge_suggestion' } },
+      where: { sessionId, voteType: { notIn: ['merge_suggestion', 'new_category_suggestion'] } },
       _count: { _all: true },
       orderBy: { _count: { itemId: 'desc' } },
     }),
@@ -224,6 +237,12 @@ async function getVoteSummary(sessionId) {
       include: { participant: { select: { displayName: true } } },
       orderBy: { createdAt: 'desc' },
       take: 50,
+    }),
+    prisma.summitWorkshopVote.findMany({
+      where: { sessionId, voteType: 'new_category_suggestion' },
+      include: { participant: { select: { displayName: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 75,
     }),
   ]);
 
@@ -236,9 +255,18 @@ async function getVoteSummary(sessionId) {
       voteType: row.voteType,
       count: row._count._all,
     })),
-    mergeSuggestions: suggestions.map((vote) => ({
+    mergeSuggestions: mergeSuggestions.map((vote) => ({
       id: vote.id,
       itemId: vote.itemId,
+      itemLabel: vote.itemLabel,
+      participantName: vote.participant.displayName,
+      value: vote.value,
+      createdAt: vote.createdAt,
+    })),
+    categorySuggestions: categorySuggestions.map((vote) => ({
+      id: vote.id,
+      itemId: vote.itemId,
+      itemType: vote.itemType,
       itemLabel: vote.itemLabel,
       participantName: vote.participant.displayName,
       value: vote.value,
@@ -360,11 +388,16 @@ export async function restoreSnapshot(workspaceId, snapshotId, userEmail) {
   }, userEmail);
 }
 
-export async function configureVoting(workspaceId, durationMinutes = DEFAULT_DURATION_MINUTES) {
+export async function configureVoting(workspaceId, durationMinutes = DEFAULT_DURATION_MINUTES, regenerate = false) {
   assertItWorkspace(workspaceId);
   const existing = await findActiveSession(workspaceId) || await createSession(workspaceId, null);
-  const token = existing.voteToken || crypto.randomBytes(24).toString('hex');
+  const token = regenerate || !existing.voteToken ? crypto.randomBytes(24).toString('hex') : existing.voteToken;
   const voteExpiresAt = new Date(Date.now() + Math.max(15, Number(durationMinutes) || DEFAULT_DURATION_MINUTES) * 60 * 1000);
+  if (regenerate && existing.voteToken) {
+    closePublicStreams(existing.id, 'expired', {
+      message: 'The facilitator regenerated the voting link. Please use the new link.',
+    });
+  }
   const session = await prisma.summitWorkshopSession.update({
     where: { id: existing.id },
     data: { voteToken: token, voteEnabled: true, voteExpiresAt },
@@ -414,8 +447,8 @@ export async function submitVote(token, body) {
   const voteType = String(body.voteType || 'support').slice(0, 40);
   const itemLabel = String(body.itemLabel || 'Workshop item').slice(0, 255);
   const itemType = String(body.itemType || 'category').slice(0, 30);
-  const itemId = voteType === 'merge_suggestion'
-    ? `merge_${participant.id}_${Date.now()}`
+  const itemId = ['merge_suggestion', 'new_category_suggestion'].includes(voteType)
+    ? `${voteType.replace('_suggestion', '')}_${participant.id}_${Date.now()}`
     : String(body.itemId || '').slice(0, 120);
   if (!itemId) throw new ValidationError('itemId is required');
 
@@ -429,7 +462,7 @@ export async function submitVote(token, body) {
     value: body.value || null,
   };
 
-  if (voteType === 'merge_suggestion') {
+  if (voteType === 'merge_suggestion' || voteType === 'new_category_suggestion') {
     await prisma.summitWorkshopVote.create({ data });
   } else if (body.active === false) {
     await prisma.summitWorkshopVote.deleteMany({

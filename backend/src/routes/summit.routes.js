@@ -56,7 +56,11 @@ summitProtectedRouter.post('/workshop/snapshots/:id/restore', asyncHandler(async
 }));
 
 summitProtectedRouter.post('/workshop/voting', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.configureVoting(req.workspaceId, req.body?.durationMinutes);
+  const result = await summitWorkshopService.configureVoting(
+    req.workspaceId,
+    req.body?.durationMinutes,
+    !!req.body?.regenerate,
+  );
   res.json({ success: true, ...result });
 }));
 

@@ -636,7 +636,7 @@ export const summitAPI = {
   saveState: (state, { label = 'Manual save', snapshotType = 'manual' } = {}) =>
     api.put('/summit/workshop/state', { state, label, snapshotType }),
   restoreSnapshot: (id) => api.post(`/summit/workshop/snapshots/${id}/restore`),
-  enableVoting: (durationMinutes = 120) => api.post('/summit/workshop/voting', { durationMinutes }),
+  enableVoting: (durationMinutes = 120, regenerate = false) => api.post('/summit/workshop/voting', { durationMinutes, regenerate }),
   getPublicWorkshop: (token) => api.get(`/summit/public/${token}`),
   joinPublicWorkshop: (token, data) => api.post(`/summit/public/${token}/join`, data),
   submitVote: (token, data) => api.post(`/summit/public/${token}/votes`, data),

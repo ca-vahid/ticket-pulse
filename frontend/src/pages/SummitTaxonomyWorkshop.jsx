@@ -93,6 +93,7 @@ export default function SummitTaxonomyWorkshop() {
   const [error, setError] = useState('');
   const [showDeleted, setShowDeleted] = useState(false);
   const [showVotes, setShowVotes] = useState(true);
+  const [showRegenerateLinkConfirm, setShowRegenerateLinkConfirm] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const hydratedRef = useRef(false);
   const saveTimerRef = useRef(null);
@@ -309,11 +310,12 @@ export default function SummitTaxonomyWorkshop() {
     setSelectedCategoryId(keeper.id);
   };
 
-  const enableVoting = async () => {
-    const res = await summitAPI.enableVoting(120);
+  const enableVoting = async (regenerate = false) => {
+    const res = await summitAPI.enableVoting(120, regenerate);
     setSession(res.session);
     setSnapshots(res.snapshots || []);
     setVotes(res.votes || votes);
+    setShowRegenerateLinkConfirm(false);
   };
 
   const voteUrl = session?.voteToken ? `${window.location.origin}/summit/vote/${session.voteToken}` : '';
@@ -408,9 +410,10 @@ export default function SummitTaxonomyWorkshop() {
               <>
                 <span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-800">Voting open until {new Date(session.voteExpiresAt).toLocaleTimeString()}</span>
                 <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-500"><Icons.Link className="mr-1 inline h-4 w-4" />Copy voting link</button>
+                <button onClick={() => setShowRegenerateLinkConfirm(true)} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 font-semibold text-amber-800 hover:bg-amber-100"><Icons.RefreshCcw className="mr-1 inline h-4 w-4" />Regenerate</button>
               </>
             ) : (
-              <button onClick={enableVoting} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-500"><Icons.Radio className="mr-1 inline h-4 w-4" />Open 2-hour voting link</button>
+              <button onClick={() => enableVoting(false)} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-500"><Icons.Radio className="mr-1 inline h-4 w-4" />Open 2-hour voting link</button>
             )}
           </div>
         </div>
@@ -591,6 +594,35 @@ export default function SummitTaxonomyWorkshop() {
                 </div>
               ))}
               {!deletedItems.length && <p className="text-sm text-slate-500">Nothing removed yet.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRegenerateLinkConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-2xl">
+            <div className="border-b border-amber-200 bg-amber-50 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500 text-white">
+                  <Icons.RefreshCcw className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-950">Regenerate voting link?</h2>
+                  <p className="text-sm text-amber-800">The current public voting URL will stop working.</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-4 text-sm text-slate-600">
+              Participants already on the old link will see that the link expired and will need the new link. Existing saved votes and suggestions stay in this workshop.
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              <button onClick={() => setShowRegenerateLinkConfirm(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button onClick={() => enableVoting(true)} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600">
+                Regenerate link
+              </button>
             </div>
           </div>
         </div>
