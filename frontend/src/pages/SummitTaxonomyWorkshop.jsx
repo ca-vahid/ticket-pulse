@@ -60,6 +60,41 @@ function subcategorySearchText(subcategory) {
   return [subcategory.name, subcategory.evidence, subcategory.notes].filter(Boolean).join(' ');
 }
 
+function HighlightText({ text, query, className = '' }) {
+  const value = String(text || '');
+  const needle = String(query || '').trim();
+  if (!needle) return <span className={className}>{value}</span>;
+
+  const lowerValue = value.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  const index = lowerValue.indexOf(lowerNeedle);
+  if (index >= 0) {
+    return (
+      <span className={className}>
+        {value.slice(0, index)}
+        <mark className="rounded bg-yellow-200 px-0.5 text-slate-950">{value.slice(index, index + needle.length)}</mark>
+        {value.slice(index + needle.length)}
+      </span>
+    );
+  }
+
+  const chars = [];
+  let cursor = 0;
+  const matched = new Set();
+  for (const char of lowerNeedle) {
+    cursor = lowerValue.indexOf(char, cursor);
+    if (cursor === -1) return <span className={className}>{value}</span>;
+    matched.add(cursor);
+    cursor += 1;
+  }
+  for (let i = 0; i < value.length; i += 1) {
+    chars.push(matched.has(i)
+      ? <mark key={i} className="rounded bg-yellow-100 px-0.5 text-slate-950">{value[i]}</mark>
+      : <span key={i}>{value[i]}</span>);
+  }
+  return <span className={className}>{chars}</span>;
+}
+
 function flattenRows(state) {
   const rows = [];
   (state?.categories || []).filter(c => !c.deleted).forEach((cat, index) => {
@@ -147,6 +182,7 @@ function CardActionsMenu({
   onIconSelect,
   onColorSelect,
   onRemove,
+  extraActions = null,
   label = 'Card actions',
 }) {
   return (
@@ -180,6 +216,7 @@ function CardActionsMenu({
               <Icons.Pencil className="h-4 w-4 text-slate-500" />
               Rename
             </button>
+            {extraActions}
           </div>
           <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Icon</div>
           <div className="grid max-h-64 grid-cols-7 gap-1 overflow-auto pr-1">
@@ -328,6 +365,17 @@ export default function SummitTaxonomyWorkshop() {
       });
     return groups;
   }, [acceptedSuggestionItemIds, votes.categorySuggestions]);
+  const isSearchMode = Boolean(searchNeedle);
+  const categoryOwnMatches = (category) => fuzzyMatchText([category?.name, category?.description, category?.evidence].filter(Boolean).join(' '), searchNeedle);
+  const getVisibleSubcategoriesForCategory = (category) => {
+    const subcategories = (category?.subcategories || []).filter(subcat => !subcat.deleted);
+    if (!searchNeedle || categoryOwnMatches(category)) return subcategories;
+    return subcategories.filter(subcategory => fuzzyMatchText(subcategorySearchText(subcategory), searchNeedle));
+  };
+  const mainCategories = isSearchMode ? visibleCategories : selectedCategory ? [selectedCategory] : [];
+  const searchVisibleSubcategoryCount = isSearchMode
+    ? visibleCategories.reduce((sum, category) => sum + getVisibleSubcategoriesForCategory(category).length, 0)
+    : visibleSubcategories.length;
   const selectedCategorySuggestions = selectedCategory ? subcategorySuggestionsByParent.get(selectedCategory.id) || [] : [];
 
   const pushToast = useCallback(({ title, message, icon = 'Bell', tone = 'cyan' }) => {
@@ -622,6 +670,18 @@ export default function SummitTaxonomyWorkshop() {
     }, 50);
   };
 
+  const openCategoryForEdit = (categoryId, focus = 'category', subId = null) => {
+    setSelectedCategoryId(categoryId);
+    setTaxonomySearch('');
+    window.setTimeout(() => {
+      if (focus === 'subcategory' && subId) {
+        focusSubcategoryName(subId);
+      } else {
+        focusCategoryName();
+      }
+    }, 80);
+  };
+
   const updateDragPosition = (event) => {
     if (event.clientX || event.clientY) {
       setDragPosition({ x: event.clientX, y: event.clientY });
@@ -669,22 +729,22 @@ export default function SummitTaxonomyWorkshop() {
     finishDrag();
   };
 
-  const dropSubcategory = (event, subcat) => {
+  const dropSubcategory = (event, subcat, targetCategory = selectedCategory) => {
     event.stopPropagation();
-    if (dragItem?.type !== 'sub' || dragItem.id === subcat.id || !selectedCategory) {
+    if (dragItem?.type !== 'sub' || dragItem.id === subcat.id || !targetCategory) {
       finishDrag();
       return;
     }
-    moveSubcategory(dragItem.categoryId, dragItem.id, selectedCategory.id, subcat.id);
+    moveSubcategory(dragItem.categoryId, dragItem.id, targetCategory.id, subcat.id);
     pushToast({ title: 'Subcategory moved', message: `${dragItem.name} moved before ${subcat.name}`, icon: 'Move', tone: 'cyan' });
     finishDrag();
   };
 
-  const dropIntoSelectedCategory = (event) => {
+  const dropIntoCategory = (event, targetCategory = selectedCategory) => {
     event.stopPropagation();
-    if (dragItem?.type === 'sub' && selectedCategory) {
-      moveSubcategory(dragItem.categoryId, dragItem.id, selectedCategory.id);
-      pushToast({ title: 'Subcategory moved', message: `${dragItem.name} moved to the end of ${selectedCategory.name}`, icon: 'Move', tone: 'cyan' });
+    if (dragItem?.type === 'sub' && targetCategory) {
+      moveSubcategory(dragItem.categoryId, dragItem.id, targetCategory.id);
+      pushToast({ title: 'Subcategory moved', message: `${dragItem.name} moved to the end of ${targetCategory.name}`, icon: 'Move', tone: 'cyan' });
     }
     finishDrag();
   };
@@ -856,6 +916,289 @@ export default function SummitTaxonomyWorkshop() {
     if (!Array.isArray(parsed.categories)) throw new Error('Backup JSON must include categories');
     commit(parsed);
     event.target.value = '';
+  };
+
+  const renderCategoryPanel = (category) => {
+    const isFocusedEditor = !isSearchMode && selectedCategory?.id === category.id;
+    const categorySubcategories = getVisibleSubcategoriesForCategory(category);
+    const categorySuggestions = (subcategorySuggestionsByParent.get(category.id) || []).filter((suggestion) => {
+      if (!isSearchMode || categoryOwnMatches(category)) return true;
+      return fuzzyMatchText([suggestion.itemLabel, suggestion.participantName, suggestion.value?.reason].filter(Boolean).join(' '), searchNeedle);
+    });
+
+    return (
+      <div
+        key={category.id}
+        onDragOver={(event) => {
+          if (dragItem?.type === 'sub') {
+            setDropTarget(event, { type: 'selected-category', id: category.id, label: `move to end of ${category.name}` });
+          } else {
+            event.preventDefault();
+          }
+        }}
+        onDrop={(event) => dropIntoCategory(event, category)}
+        className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
+          dragOverTarget?.type === 'selected-category' && category.id === dragOverTarget.id
+            ? 'border-cyan-300 ring-2 ring-cyan-100'
+            : 'border-slate-200'
+        }`}
+      >
+        <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
+          <div className="flex min-w-0 flex-1 gap-3">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: category.color }}>
+              <Icon name={category.icon} className="h-6 w-6" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                {isFocusedEditor ? (
+                  <input
+                    ref={categoryNameInputRef}
+                    value={category.name}
+                    onChange={(e) => updateCategory(category.id, { name: e.target.value })}
+                    className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300"
+                  />
+                ) : (
+                  <h2 className="min-w-0 flex-1 break-words text-xl font-semibold text-slate-950">
+                    <HighlightText text={category.name} query={searchNeedle} />
+                  </h2>
+                )}
+                <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
+                  linkedVoteCount(votes, category) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
+                } ${highlightIds[`vote-${category.id}`] ? 'scale-110 ring-2 ring-cyan-200' : ''}`}>
+                  <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                  {linkedVoteCount(votes, category)} votes
+                </span>
+              </div>
+              {isFocusedEditor ? (
+                <textarea
+                  value={category.description || ''}
+                  onChange={(e) => updateCategory(category.id, { description: e.target.value })}
+                  rows={2}
+                  className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400"
+                  placeholder="Describe the category boundary"
+                />
+              ) : (
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  <HighlightText text={category.description || 'No category description yet.'} query={searchNeedle} />
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-start gap-2">
+            {isSearchMode ? (
+              <button
+                type="button"
+                onClick={() => openCategoryForEdit(category.id)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm"
+              >
+                <Icons.Pencil className="mr-1 inline h-4 w-4" />
+                Open/edit
+              </button>
+            ) : (
+              <button onClick={() => addSubcategory(category.id)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
+            )}
+            <CardActionsMenu
+              value={category.icon}
+              color={category.color}
+              isOpen={iconPickerTarget?.type === 'category' && iconPickerTarget.id === category.id}
+              onToggle={() => setIconPickerTarget(prev => prev?.type === 'category' && prev.id === category.id ? null : { type: 'category', id: category.id })}
+              onRename={() => openCategoryForEdit(category.id)}
+              onIconSelect={(iconName) => {
+                updateCategory(category.id, { icon: iconName });
+                setIconPickerTarget(null);
+              }}
+              onColorSelect={(color) => updateCategory(category.id, { color })}
+              onRemove={() => softDeleteCategory(category.id)}
+              label="Category options"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {categorySubcategories.map((subcat) => (
+            <div
+              key={subcat.id}
+              onDragOver={(event) => {
+                event.stopPropagation();
+                if (dragItem?.type !== 'sub') {
+                  event.preventDefault();
+                  return;
+                }
+                setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
+              }}
+              onDragEnter={(event) => {
+                event.stopPropagation();
+                if (dragItem?.type !== 'sub') {
+                  event.preventDefault();
+                  return;
+                }
+                setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
+              }}
+              onDrop={(event) => dropSubcategory(event, subcat, category)}
+              className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm ${
+                iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id
+                  ? 'z-50 border-slate-300 bg-white shadow-xl'
+                  : dragOverTarget?.type === 'sub' && dragOverTarget.id === subcat.id
+                    ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                    : dragItem?.type === 'sub' && dragItem.id === subcat.id
+                      ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                      : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
+                        ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                        : 'border-slate-200 bg-slate-50'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                <button
+                  type="button"
+                  draggable
+                  onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: category.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: category.color })}
+                  onDrag={(event) => updateDragPosition(event)}
+                  onDragEnd={finishDrag}
+                  className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing"
+                  title="Drag subcategory"
+                >
+                  <Icons.GripVertical className="h-4 w-4" />
+                </button>
+                <span className="mt-1 text-slate-500"><Icon name={subcat.icon || 'Tag'} /></span>
+                <div className="min-w-0 flex-1">
+                  {isFocusedEditor ? (
+                    <input
+                      ref={(node) => {
+                        if (node) subcategoryNameInputRefs.current[subcat.id] = node;
+                        else delete subcategoryNameInputRefs.current[subcat.id];
+                      }}
+                      value={subcat.name}
+                      onChange={(e) => updateSubcategory(category.id, subcat.id, { name: e.target.value })}
+                      className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white"
+                    />
+                  ) : (
+                    <div className="break-words text-sm font-semibold text-slate-900">
+                      <HighlightText text={subcat.name} query={searchNeedle} />
+                    </div>
+                  )}
+                  {isFocusedEditor ? (
+                    <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(category.id, subcat.id, { evidence: e.target.value })} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white" placeholder="Evidence or discussion note" />
+                  ) : (
+                    <div className="mt-1 break-words text-xs text-slate-500">
+                      <HighlightText text={subcat.evidence || 'Evidence or discussion note'} query={searchNeedle} />
+                    </div>
+                  )}
+                </div>
+                <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
+                  linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
+                }`}>
+                  <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                  {linkedVoteCount(votes, subcat)}
+                </span>
+                <CardActionsMenu
+                  value={subcat.icon || 'Tag'}
+                  color={category.color}
+                  isOpen={iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id}
+                  onToggle={() => setIconPickerTarget(prev => prev?.type === 'subcategory' && prev.id === subcat.id ? null : { type: 'subcategory', categoryId: category.id, id: subcat.id })}
+                  onRename={() => openCategoryForEdit(category.id, 'subcategory', subcat.id)}
+                  onIconSelect={(iconName) => {
+                    updateSubcategory(category.id, subcat.id, { icon: iconName });
+                    setIconPickerTarget(null);
+                  }}
+                  onRemove={() => softDeleteSubcategory(category.id, subcat.id)}
+                  label="Subcategory options"
+                />
+              </div>
+            </div>
+          ))}
+          {!categorySubcategories.length && (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2">
+              No subcategories match this search in {category.name}.
+            </div>
+          )}
+        </div>
+
+        {!!categorySuggestions.length && (
+          <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <Icons.Lightbulb className="h-4 w-4 text-amber-700" />
+                Suggested subcategories
+              </div>
+              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-800">{categorySuggestions.length}</span>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {categorySuggestions.map((suggestion) => {
+                const alreadyAdded = isSuggestionAlreadyInCategory(category, suggestion);
+                return (
+                  <div
+                    key={suggestion.id}
+                    className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
+                      highlightIds[`idea-${suggestion.id}`]
+                        ? 'border-amber-300 bg-white shadow-md ring-2 ring-amber-200'
+                        : 'border-amber-100 bg-white/90'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <Icons.Tag className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                      <div className="min-w-0 flex-1">
+                        <div className="break-words text-sm font-semibold text-slate-900">
+                          <HighlightText text={suggestion.itemLabel} query={searchNeedle} />
+                        </div>
+                        <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
+                      </div>
+                      <span className={`rounded-lg px-2 py-1 text-xs font-bold ${voteCount(votes, suggestion.itemId) > 0 ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                        <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                        {voteCount(votes, suggestion.itemId)}
+                      </span>
+                    </div>
+                    {suggestion.value?.reason && (
+                      <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-slate-600">
+                        <HighlightText text={suggestion.value.reason} query={searchNeedle} />
+                      </div>
+                    )}
+                    <button
+                      onClick={() => addSuggestedCategory(suggestion)}
+                      disabled={alreadyAdded}
+                      className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                    >
+                      <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />
+                      {alreadyAdded ? 'Already added' : 'Add subcategory'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {isFocusedEditor && (
+          <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <Icons.Tag className="h-4 w-4 shrink-0 text-slate-500" />
+                <input
+                  ref={subcategoryNameInputRef}
+                  value={newSubcategoryName}
+                  onChange={(e) => setNewSubcategoryName(e.target.value)}
+                  className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                  placeholder={`Add subcategory under ${category.name}`}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={!newSubcategoryName.trim()}
+                className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+              >
+                <Icons.Plus className="mr-1 inline h-4 w-4" />
+                Add sub
+              </button>
+            </div>
+            <input
+              value={newSubcategoryEvidence}
+              onChange={(e) => setNewSubcategoryEvidence(e.target.value)}
+              className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-cyan-300"
+              placeholder="Evidence or discussion note"
+            />
+          </form>
+        )}
+      </div>
+    );
   };
 
   if (!isItWorkspace) {
@@ -1060,7 +1403,7 @@ export default function SummitTaxonomyWorkshop() {
             )}
           </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
-            {searchNeedle ? `${visibleCategories.length} categories / ${visibleSubcategories.length} subcategories shown` : 'Fuzzy search is ready'}
+            {searchNeedle ? `${visibleCategories.length} categories / ${searchVisibleSubcategoryCount} subcategories shown` : 'Fuzzy search is ready'}
           </div>
         </div>
       </div>
@@ -1118,7 +1461,9 @@ export default function SummitTaxonomyWorkshop() {
                     <Icon name={cat.icon} className="h-5 w-5" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block break-words text-sm font-semibold leading-snug text-slate-900">{cat.name}</span>
+                    <span className="block break-words text-sm font-semibold leading-snug text-slate-900">
+                      <HighlightText text={cat.name} query={searchNeedle} />
+                    </span>
                     <span className="mt-1 block text-xs text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
                     {!!(subcategorySuggestionsByParent.get(cat.id)?.length || 0) && (
                       <span className="mt-1 inline-flex rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
@@ -1126,39 +1471,39 @@ export default function SummitTaxonomyWorkshop() {
                       </span>
                     )}
                   </span>
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
-                  <span className="text-[11px] font-medium uppercase text-slate-400">Controls</span>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex shrink-0 items-center gap-1.5">
                     <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
                       linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
                     }`}>
                       <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
                       {linkedVoteCount(votes, cat)}
                     </span>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSelectedCategoryId(cat.id);
-                        focusCategoryName();
-                      }}
-                      className="flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                      title="Rename category"
-                    >
-                      <Icons.Pencil className="h-4 w-4" />
-                    </button>
-                    <label className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition hover:bg-slate-100" title="Select for combine">
-                      <input
-                        type="checkbox"
-                        checked={selectedForMerge.includes(cat.id)}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          setSelectedForMerge(prev => e.target.checked ? [...prev, cat.id] : prev.filter(id => id !== cat.id));
+                    <div onClick={(event) => event.stopPropagation()}>
+                      <CardActionsMenu
+                        value={cat.icon}
+                        color={cat.color}
+                        isOpen={iconPickerTarget?.type === 'category-list' && iconPickerTarget.id === cat.id}
+                        onToggle={() => setIconPickerTarget(prev => prev?.type === 'category-list' && prev.id === cat.id ? null : { type: 'category-list', id: cat.id })}
+                        onRename={() => openCategoryForEdit(cat.id)}
+                        onIconSelect={(iconName) => {
+                          updateCategory(cat.id, { icon: iconName });
+                          setIconPickerTarget(null);
                         }}
-                        onClick={(e) => e.stopPropagation()}
+                        onColorSelect={(color) => updateCategory(cat.id, { color })}
+                        onRemove={() => softDeleteCategory(cat.id)}
+                        label="Category options"
+                        extraActions={(
+                          <button
+                            type="button"
+                            onClick={() => setSelectedForMerge(prev => prev.includes(cat.id) ? prev.filter(id => id !== cat.id) : [...prev, cat.id])}
+                            className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-semibold text-slate-800 transition hover:bg-white hover:shadow-sm"
+                          >
+                            {selectedForMerge.includes(cat.id) ? <Icons.CheckSquare className="h-4 w-4 text-cyan-600" /> : <Icons.Square className="h-4 w-4 text-slate-500" />}
+                            {selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
+                          </button>
+                        )}
                       />
-                    </label>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1171,237 +1516,248 @@ export default function SummitTaxonomyWorkshop() {
           </div>
         </aside>
 
-        <section
-          onDragOver={(event) => {
-            if (selectedCategory && dragItem?.type === 'sub') {
-              setDropTarget(event, { type: 'selected-category', id: selectedCategory.id, label: `move to end of ${selectedCategory.name}` });
-            } else {
-              event.preventDefault();
-            }
-          }}
-          onDrop={dropIntoSelectedCategory}
-          className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
-            dragOverTarget?.type === 'selected-category' && selectedCategory?.id === dragOverTarget.id
-              ? 'border-cyan-300 ring-2 ring-cyan-100'
-              : 'border-slate-200'
-          }`}
-        >
-          {selectedCategory && (
-            <>
-              <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
-                <div className="flex min-w-0 flex-1 gap-3">
-                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: selectedCategory.color }}>
-                    <Icon name={selectedCategory.icon} className="h-6 w-6" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <input
-                        ref={categoryNameInputRef}
-                        value={selectedCategory.name}
-                        onChange={(e) => updateCategory(selectedCategory.id, { name: e.target.value })}
-                        className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300"
+        {isSearchMode ? (
+          <section className="space-y-4">
+            {mainCategories.map(renderCategoryPanel)}
+            {!mainCategories.length && (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+                No category or subcategory matches this search.
+              </div>
+            )}
+          </section>
+        ) : (
+          <section
+            onDragOver={(event) => {
+              if (selectedCategory && dragItem?.type === 'sub') {
+                setDropTarget(event, { type: 'selected-category', id: selectedCategory.id, label: `move to end of ${selectedCategory.name}` });
+              } else {
+                event.preventDefault();
+              }
+            }}
+            onDrop={(event) => dropIntoCategory(event, selectedCategory)}
+            className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
+              dragOverTarget?.type === 'selected-category' && selectedCategory?.id === dragOverTarget.id
+                ? 'border-cyan-300 ring-2 ring-cyan-100'
+                : 'border-slate-200'
+            }`}
+          >
+            {selectedCategory && (
+              <>
+                <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
+                  <div className="flex min-w-0 flex-1 gap-3">
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: selectedCategory.color }}>
+                      <Icon name={selectedCategory.icon} className="h-6 w-6" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <input
+                          ref={categoryNameInputRef}
+                          value={selectedCategory.name}
+                          onChange={(e) => updateCategory(selectedCategory.id, { name: e.target.value })}
+                          className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300"
+                        />
+                        <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
+                          linkedVoteCount(votes, selectedCategory) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
+                        } ${highlightIds[`vote-${selectedCategory.id}`] ? 'scale-110 ring-2 ring-cyan-200' : ''}`}>
+                          <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                          {linkedVoteCount(votes, selectedCategory)} votes
+                        </span>
+                      </div>
+                      <textarea
+                        value={selectedCategory.description || ''}
+                        onChange={(e) => updateCategory(selectedCategory.id, { description: e.target.value })}
+                        rows={2}
+                        className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400"
+                        placeholder="Describe the category boundary"
                       />
-                      <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
-                        linkedVoteCount(votes, selectedCategory) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
-                      } ${highlightIds[`vote-${selectedCategory.id}`] ? 'scale-110 ring-2 ring-cyan-200' : ''}`}>
-                        <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                        {linkedVoteCount(votes, selectedCategory)} votes
-                      </span>
                     </div>
-                    <textarea
-                      value={selectedCategory.description || ''}
-                      onChange={(e) => updateCategory(selectedCategory.id, { description: e.target.value })}
-                      rows={2}
-                      className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400"
-                      placeholder="Describe the category boundary"
+                  </div>
+                  <div className="flex flex-wrap items-start gap-2">
+                    <button onClick={() => addSubcategory(selectedCategory.id)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
+                    <CardActionsMenu
+                      value={selectedCategory.icon}
+                      color={selectedCategory.color}
+                      isOpen={iconPickerTarget?.type === 'category' && iconPickerTarget.id === selectedCategory.id}
+                      onToggle={() => setIconPickerTarget(prev => prev?.type === 'category' && prev.id === selectedCategory.id ? null : { type: 'category', id: selectedCategory.id })}
+                      onRename={focusCategoryName}
+                      onIconSelect={(iconName) => {
+                        updateCategory(selectedCategory.id, { icon: iconName });
+                        setIconPickerTarget(null);
+                      }}
+                      onColorSelect={(color) => updateCategory(selectedCategory.id, { color })}
+                      onRemove={() => softDeleteCategory(selectedCategory.id)}
+                      label="Category options"
                     />
                   </div>
                 </div>
-                <div className="flex flex-wrap items-start gap-2">
-                  <button onClick={() => addSubcategory(selectedCategory.id)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
-                  <CardActionsMenu
-                    value={selectedCategory.icon}
-                    color={selectedCategory.color}
-                    isOpen={iconPickerTarget?.type === 'category' && iconPickerTarget.id === selectedCategory.id}
-                    onToggle={() => setIconPickerTarget(prev => prev?.type === 'category' && prev.id === selectedCategory.id ? null : { type: 'category', id: selectedCategory.id })}
-                    onRename={focusCategoryName}
-                    onIconSelect={(iconName) => {
-                      updateCategory(selectedCategory.id, { icon: iconName });
-                      setIconPickerTarget(null);
-                    }}
-                    onColorSelect={(color) => updateCategory(selectedCategory.id, { color })}
-                    onRemove={() => softDeleteCategory(selectedCategory.id)}
-                    label="Category options"
-                  />
-                </div>
-              </div>
 
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {visibleSubcategories.map((subcat) => (
-                  <div
-                    key={subcat.id}
-                    onDragOver={(event) => {
-                      event.stopPropagation();
-                      if (dragItem?.type !== 'sub') {
-                        event.preventDefault();
-                        return;
-                      }
-                      setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
-                    }}
-                    onDragEnter={(event) => {
-                      event.stopPropagation();
-                      if (dragItem?.type !== 'sub') {
-                        event.preventDefault();
-                        return;
-                      }
-                      setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
-                    }}
-                    onDrop={(event) => dropSubcategory(event, subcat)}
-                    className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm ${
-                      iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id
-                        ? 'z-50 border-slate-300 bg-white shadow-xl'
-                        : dragOverTarget?.type === 'sub' && dragOverTarget.id === subcat.id
-                          ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
-                          : dragItem?.type === 'sub' && dragItem.id === subcat.id
-                            ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
-                            : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
-                              ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                              : 'border-slate-200 bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2">
-                      <button
-                        type="button"
-                        draggable
-                        onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: selectedCategory.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: selectedCategory.color })}
-                        onDrag={(event) => updateDragPosition(event)}
-                        onDragEnd={finishDrag}
-                        className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing"
-                        title="Drag subcategory"
-                      >
-                        <Icons.GripVertical className="h-4 w-4" />
-                      </button>
-                      <span className="mt-1 text-slate-500"><Icon name={subcat.icon || 'Tag'} /></span>
-                      <div className="min-w-0 flex-1">
-                        <input
-                          ref={(node) => {
-                            if (node) subcategoryNameInputRefs.current[subcat.id] = node;
-                            else delete subcategoryNameInputRefs.current[subcat.id];
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {visibleSubcategories.map((subcat) => (
+                    <div
+                      key={subcat.id}
+                      onDragOver={(event) => {
+                        event.stopPropagation();
+                        if (dragItem?.type !== 'sub') {
+                          event.preventDefault();
+                          return;
+                        }
+                        setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
+                      }}
+                      onDragEnter={(event) => {
+                        event.stopPropagation();
+                        if (dragItem?.type !== 'sub') {
+                          event.preventDefault();
+                          return;
+                        }
+                        setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
+                      }}
+                      onDrop={(event) => dropSubcategory(event, subcat)}
+                      className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm ${
+                        iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id
+                          ? 'z-50 border-slate-300 bg-white shadow-xl'
+                          : dragOverTarget?.type === 'sub' && dragOverTarget.id === subcat.id
+                            ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                            : dragItem?.type === 'sub' && dragItem.id === subcat.id
+                              ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                              : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
+                                ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                                : 'border-slate-200 bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <button
+                          type="button"
+                          draggable
+                          onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: selectedCategory.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: selectedCategory.color })}
+                          onDrag={(event) => updateDragPosition(event)}
+                          onDragEnd={finishDrag}
+                          className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing"
+                          title="Drag subcategory"
+                        >
+                          <Icons.GripVertical className="h-4 w-4" />
+                        </button>
+                        <span className="mt-1 text-slate-500"><Icon name={subcat.icon || 'Tag'} /></span>
+                        <div className="min-w-0 flex-1">
+                          <input
+                            ref={(node) => {
+                              if (node) subcategoryNameInputRefs.current[subcat.id] = node;
+                              else delete subcategoryNameInputRefs.current[subcat.id];
+                            }}
+                            value={subcat.name}
+                            onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { name: e.target.value })}
+                            className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white"
+                          />
+                          <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white" placeholder="Evidence or discussion note" />
+                        </div>
+                        <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
+                          linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
+                        }`}>
+                          <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                          {linkedVoteCount(votes, subcat)}
+                        </span>
+                        <CardActionsMenu
+                          value={subcat.icon || 'Tag'}
+                          color={selectedCategory.color}
+                          isOpen={iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id}
+                          onToggle={() => setIconPickerTarget(prev => prev?.type === 'subcategory' && prev.id === subcat.id ? null : { type: 'subcategory', categoryId: selectedCategory.id, id: subcat.id })}
+                          onRename={() => focusSubcategoryName(subcat.id)}
+                          onIconSelect={(iconName) => {
+                            updateSubcategory(selectedCategory.id, subcat.id, { icon: iconName });
+                            setIconPickerTarget(null);
                           }}
-                          value={subcat.name}
-                          onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { name: e.target.value })}
-                          className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white"
+                          onRemove={() => softDeleteSubcategory(selectedCategory.id, subcat.id)}
+                          label="Subcategory options"
                         />
-                        <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white" placeholder="Evidence or discussion note" />
                       </div>
-                      <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
-                        linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
-                      }`}>
-                        <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                        {linkedVoteCount(votes, subcat)}
-                      </span>
-                      <CardActionsMenu
-                        value={subcat.icon || 'Tag'}
-                        color={selectedCategory.color}
-                        isOpen={iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id}
-                        onToggle={() => setIconPickerTarget(prev => prev?.type === 'subcategory' && prev.id === subcat.id ? null : { type: 'subcategory', categoryId: selectedCategory.id, id: subcat.id })}
-                        onRename={() => focusSubcategoryName(subcat.id)}
-                        onIconSelect={(iconName) => {
-                          updateSubcategory(selectedCategory.id, subcat.id, { icon: iconName });
-                          setIconPickerTarget(null);
-                        }}
-                        onRemove={() => softDeleteSubcategory(selectedCategory.id, subcat.id)}
-                        label="Subcategory options"
-                      />
                     </div>
-                  </div>
-                ))}
-                {!visibleSubcategories.length && (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2">
+                  ))}
+                  {!visibleSubcategories.length && (
+                    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2">
                     No subcategories match this search in {selectedCategory.name}.
+                    </div>
+                  )}
+                </div>
+
+                {!!selectedCategorySuggestions.length && (
+                  <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <Icons.Lightbulb className="h-4 w-4 text-amber-700" />
+                      Suggested subcategories
+                      </div>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-800">{selectedCategorySuggestions.length}</span>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {selectedCategorySuggestions.map((suggestion) => {
+                        const alreadyAdded = isSuggestionAlreadyInCategory(selectedCategory, suggestion);
+                        return (
+                          <div
+                            key={suggestion.id}
+                            className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
+                              highlightIds[`idea-${suggestion.id}`]
+                                ? 'border-amber-300 bg-white shadow-md ring-2 ring-amber-200'
+                                : 'border-amber-100 bg-white/90'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2">
+                              <Icons.Tag className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-semibold text-slate-900">{suggestion.itemLabel}</div>
+                                <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
+                              </div>
+                              <span className={`rounded-lg px-2 py-1 text-xs font-bold ${voteCount(votes, suggestion.itemId) > 0 ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                                <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                                {voteCount(votes, suggestion.itemId)}
+                              </span>
+                            </div>
+                            {suggestion.value?.reason && <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-slate-600">{suggestion.value.reason}</div>}
+                            <button
+                              onClick={() => addSuggestedCategory(suggestion)}
+                              disabled={alreadyAdded}
+                              className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                            >
+                              <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />
+                              {alreadyAdded ? 'Already added' : 'Add subcategory'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
-              </div>
 
-              {!!selectedCategorySuggestions.length && (
-                <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                      <Icons.Lightbulb className="h-4 w-4 text-amber-700" />
-                      Suggested subcategories
+                <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                    <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <Icons.Tag className="h-4 w-4 shrink-0 text-slate-500" />
+                      <input
+                        ref={subcategoryNameInputRef}
+                        value={newSubcategoryName}
+                        onChange={(e) => setNewSubcategoryName(e.target.value)}
+                        className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                        placeholder={`Add subcategory under ${selectedCategory.name}`}
+                      />
                     </div>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-800">{selectedCategorySuggestions.length}</span>
-                  </div>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    {selectedCategorySuggestions.map((suggestion) => {
-                      const alreadyAdded = isSuggestionAlreadyInCategory(selectedCategory, suggestion);
-                      return (
-                        <div
-                          key={suggestion.id}
-                          className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
-                            highlightIds[`idea-${suggestion.id}`]
-                              ? 'border-amber-300 bg-white shadow-md ring-2 ring-amber-200'
-                              : 'border-amber-100 bg-white/90'
-                          }`}
-                        >
-                          <div className="flex items-start gap-2">
-                            <Icons.Tag className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-semibold text-slate-900">{suggestion.itemLabel}</div>
-                              <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
-                            </div>
-                            <span className={`rounded-lg px-2 py-1 text-xs font-bold ${voteCount(votes, suggestion.itemId) > 0 ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
-                              <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                              {voteCount(votes, suggestion.itemId)}
-                            </span>
-                          </div>
-                          {suggestion.value?.reason && <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-slate-600">{suggestion.value.reason}</div>}
-                          <button
-                            onClick={() => addSuggestedCategory(suggestion)}
-                            disabled={alreadyAdded}
-                            className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
-                          >
-                            <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />
-                            {alreadyAdded ? 'Already added' : 'Add subcategory'}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
-                <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                  <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                    <Icons.Tag className="h-4 w-4 shrink-0 text-slate-500" />
-                    <input
-                      ref={subcategoryNameInputRef}
-                      value={newSubcategoryName}
-                      onChange={(e) => setNewSubcategoryName(e.target.value)}
-                      className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-900 outline-none"
-                      placeholder={`Add subcategory under ${selectedCategory.name}`}
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={!newSubcategoryName.trim()}
-                    className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
-                  >
-                    <Icons.Plus className="mr-1 inline h-4 w-4" />
+                    <button
+                      type="submit"
+                      disabled={!newSubcategoryName.trim()}
+                      className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                    >
+                      <Icons.Plus className="mr-1 inline h-4 w-4" />
                     Add sub
-                  </button>
-                </div>
-                <input
-                  value={newSubcategoryEvidence}
-                  onChange={(e) => setNewSubcategoryEvidence(e.target.value)}
-                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-cyan-300"
-                  placeholder="Evidence or discussion note"
-                />
-              </form>
-            </>
-          )}
-        </section>
+                    </button>
+                  </div>
+                  <input
+                    value={newSubcategoryEvidence}
+                    onChange={(e) => setNewSubcategoryEvidence(e.target.value)}
+                    className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-cyan-300"
+                    placeholder="Evidence or discussion note"
+                  />
+                </form>
+              </>
+            )}
+          </section>
+        )}
 
         <aside className="space-y-4">
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
