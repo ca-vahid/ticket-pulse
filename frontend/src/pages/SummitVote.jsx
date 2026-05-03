@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import * as Icons from 'lucide-react';
 import { summitAPI } from '../services/api';
 
@@ -21,6 +22,45 @@ function categoryOptionLabel(category) {
   return category?.name || '';
 }
 
+function DragHandle({ item, itemType, label }) {
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, isDragging } = useDraggable({
+    id: `${itemType}:${item.id}`,
+    data: { item, itemType },
+  });
+  const style = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+    : undefined;
+
+  return (
+    <span ref={setNodeRef} style={style} className={isDragging ? 'relative z-50 opacity-80' : ''}>
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        {...listeners}
+        {...attributes}
+        className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:scale-[0.96] [touch-action:none]"
+        title={`Drag ${label} to priorities`}
+      >
+        <Icons.GripVertical className="h-4 w-4" />
+      </button>
+    </span>
+  );
+}
+
+function PriorityDropZone({ children, collapsed }) {
+  const { isOver, setNodeRef } = useDroppable({ id: 'priority-tray' });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`${collapsed ? 'hidden' : 'block'} mt-3 min-h-24 space-y-2 rounded-lg border border-dashed p-2 transition-all duration-200 lg:block lg:min-h-32 ${
+        isOver ? 'border-cyan-200 bg-cyan-300/20 shadow-inner' : 'border-cyan-200/40'
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function SummitVote() {
   const { token } = useParams();
   const storageKey = `summit_vote_${token}`;
@@ -32,6 +72,7 @@ export default function SummitVote() {
   const [priorityItems, setPriorityItems] = useState([]);
   const [dragItem, setDragItem] = useState(null);
   const [expanded, setExpanded] = useState({});
+  const [showMobilePriorities, setShowMobilePriorities] = useState(false);
   const [query, setQuery] = useState('');
   const [mergeFrom, setMergeFrom] = useState('');
   const [mergeTo, setMergeTo] = useState('');
@@ -55,6 +96,11 @@ export default function SummitVote() {
     });
   }, [categories, query]);
   const isJoined = Boolean(participantKey && displayName);
+  const activePriorityItems = priorityItems.filter(item => myVotes[item.id]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor),
+  );
 
   useEffect(() => {
     try {
@@ -151,6 +197,13 @@ export default function SummitVote() {
 
   const removePriority = (item) => {
     toggleVote(item, item.itemType, false);
+  };
+
+  const handleDragEnd = ({ active, over }) => {
+    if (over?.id !== 'priority-tray') return;
+    const data = active?.data?.current;
+    if (!data?.item) return;
+    toggleVote(data.item, data.itemType, true);
   };
 
   const submitMerge = async (event) => {
@@ -250,16 +303,16 @@ export default function SummitVote() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto max-w-7xl px-4 py-6">
+      <div className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-6">
         <header className="mb-5 overflow-hidden rounded-lg border border-white/10 bg-white/5 shadow-xl">
-          <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <div>
               <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-cyan-200">
                 <Icons.Sparkles className="h-4 w-4" />
                 BGC Engineering IT Summit
               </div>
-              <h1 className="mt-2 text-2xl font-semibold">Taxonomy live voting</h1>
-              <p className="mt-1 text-sm text-slate-300">Drag cards into your priority tray, vote on ideas, and suggest missing categories.</p>
+              <h1 className="mt-2 text-xl font-semibold sm:text-2xl">Taxonomy live voting</h1>
+              <p className="mt-1 text-sm text-slate-300">Tap to vote, suggest missing categories, and add subcategory ideas.</p>
             </div>
             <div className="grid grid-cols-2 gap-2 text-slate-950">
               <div className="rounded-lg bg-cyan-400 px-4 py-3">
@@ -286,244 +339,267 @@ export default function SummitVote() {
               autoFocus
             />
             {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-            <button disabled={!displayName.trim() || joining} className="mt-4 w-full rounded-lg bg-slate-950 px-4 py-2 font-semibold text-white disabled:opacity-50">
+            <button disabled={!displayName.trim() || joining} className="mt-4 min-h-12 w-full rounded-lg bg-slate-950 px-4 py-2 font-semibold text-white transition active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]">
               {joining ? 'Joining...' : 'Join workshop'}
             </button>
           </form>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-[290px_minmax(0,1fr)_360px]">
-            <aside className="lg:sticky lg:top-4 lg:self-start">
-              <div
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={dropVote}
-                className="rounded-lg border border-cyan-300/40 bg-cyan-400/10 p-4 shadow-xl"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <h2 className="font-semibold text-white">My priorities</h2>
-                    <p className="mt-1 text-xs text-cyan-100">Drag categories or subcategories here to support them.</p>
-                  </div>
-                  <Icons.MousePointer2 className="h-5 w-5 text-cyan-200" />
-                </div>
-                <div className="mt-3 min-h-32 space-y-2 rounded-lg border border-dashed border-cyan-200/40 p-2">
-                  {priorityItems.filter(item => myVotes[item.id]).map((item, index) => (
-                    <div key={item.id} className="flex items-center gap-2 rounded-lg bg-white px-2 py-2 text-slate-900 shadow-sm">
-                      <span className="flex h-7 w-7 items-center justify-center rounded text-white" style={{ backgroundColor: item.color }}>
-                        <Icon name={item.icon} className="h-3.5 w-3.5" />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{index + 1}. {item.name}</span>
-                      <button onClick={() => removePriority(item)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Remove vote">
-                        <Icons.X className="h-4 w-4" />
-                      </button>
+          <DndContext sensors={sensors} onDragStart={() => setShowMobilePriorities(true)} onDragEnd={handleDragEnd}>
+            <div className="grid gap-3 lg:grid-cols-[290px_minmax(0,1fr)_360px] lg:gap-4">
+              <aside className="lg:sticky lg:top-4 lg:self-start">
+                <div
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={dropVote}
+                  className="rounded-lg border border-cyan-300/40 bg-cyan-400/10 p-3 shadow-xl sm:p-4"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h2 className="font-semibold text-white">My priorities</h2>
+                      <p className="mt-1 text-xs text-cyan-100 lg:hidden">{activePriorityItems.length} selected</p>
+                      <p className="mt-1 hidden text-xs text-cyan-100 lg:block">Drag categories or subcategories here to support them.</p>
                     </div>
-                  ))}
-                  {!priorityItems.filter(item => myVotes[item.id]).length && (
-                    <div className="flex min-h-24 items-center justify-center text-center text-sm text-cyan-100">
-                      Drop items here or use the vote buttons.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
-                Voting as <span className="font-semibold text-white">{displayName}</span>
-                <div className="mt-1 text-xs text-slate-400">Link expires {session?.voteExpiresAt ? new Date(session.voteExpiresAt).toLocaleTimeString() : ''}</div>
-              </div>
-            </aside>
-
-            <main className="min-w-0">
-              <div className="mb-3 rounded-lg border border-white/10 bg-white/5 p-3">
-                <div className="relative">
-                  <Icons.Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-slate-900 px-9 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-300"
-                    placeholder="Search categories or subcategories"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {filteredCategories.map((cat) => {
-                  const subcategories = (cat.subcategories || []).filter(s => !s.deleted);
-                  const isExpanded = expanded[cat.id] !== false;
-                  const visibleSubcategories = isExpanded ? subcategories : subcategories.slice(0, 4);
-                  return (
-                    <article
-                      key={cat.id}
-                      draggable
-                      onDragStart={() => setDragItem({ ...cat, itemType: 'category' })}
-                      className="rounded-lg border border-white/10 bg-white p-4 text-slate-900 shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl"
+                    <button
+                      type="button"
+                      onClick={() => setShowMobilePriorities(prev => !prev)}
+                      className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-cyan-200/30 text-cyan-100 transition active:scale-[0.98] lg:hidden [touch-action:manipulation]"
+                      title="Show selected priorities"
                     >
-                      <div className="flex items-start gap-3">
-                        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-white" style={{ backgroundColor: cat.color }}>
-                          <Icon name={cat.icon} className="h-5 w-5" />
+                      {showMobilePriorities ? <Icons.ChevronUp className="h-5 w-5" /> : <Icons.ChevronDown className="h-5 w-5" />}
+                    </button>
+                    <Icons.MousePointer2 className="hidden h-5 w-5 text-cyan-200 lg:block" />
+                  </div>
+                  <PriorityDropZone collapsed={!showMobilePriorities}>
+                    {activePriorityItems.map((item, index) => (
+                      <div key={item.id} className="flex items-center gap-2 rounded-lg bg-white px-2 py-2 text-slate-900 shadow-sm">
+                        <span className="flex h-7 w-7 items-center justify-center rounded text-white" style={{ backgroundColor: item.color }}>
+                          <Icon name={item.icon} className="h-3.5 w-3.5" />
                         </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h2 className="text-base font-semibold">{cat.name}</h2>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{subcategories.length} subcategories</span>
-                          </div>
-                          <p className="mt-1 text-sm text-slate-500">{compactText(cat.description)}</p>
-                        </div>
-                        <button
-                          onClick={() => toggleVote(cat, 'category')}
-                          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${myVotes[cat.id] ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                        >
-                          <Icons.ThumbsUp className="mr-1 inline h-4 w-4" />
-                          {voteCount(votes, cat.id)}
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{index + 1}. {item.name}</span>
+                        <button onClick={() => removePriority(item)} className="flex min-h-9 min-w-9 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
+                          <Icons.X className="h-4 w-4" />
                         </button>
                       </div>
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        {visibleSubcategories.map(sub => (
-                          <button
-                            key={sub.id}
-                            draggable
-                            onDragStart={() => setDragItem({ ...sub, color: cat.color, itemType: 'subcategory' })}
-                            onClick={() => toggleVote({ ...sub, color: cat.color }, 'subcategory')}
-                            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${myVotes[sub.id] ? 'border-cyan-500 bg-cyan-50 text-cyan-900' : 'border-slate-200 bg-slate-50 text-slate-650 hover:border-slate-300 hover:bg-white'}`}
-                          >
-                            <Icon name={sub.icon || 'Tag'} className="h-4 w-4 text-slate-500" />
-                            <span className="min-w-0 flex-1 truncate">{sub.name}</span>
-                            <span className="text-xs text-slate-400">{voteCount(votes, sub.id) || ''}</span>
-                          </button>
-                        ))}
-                        <form
-                          onSubmit={(event) => submitQuickSubcategory(event, cat)}
-                          className="flex items-center gap-2 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-3 py-2"
-                        >
-                          <Icons.Plus className="h-4 w-4 shrink-0 text-amber-700" />
-                          <input
-                            value={quickSubcategoryNames[cat.id] || ''}
-                            onChange={(event) => setQuickSubcategoryNames(prev => ({ ...prev, [cat.id]: event.target.value }))}
-                            className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-amber-700/70"
-                            placeholder={`Suggest subcategory under ${cat.name}`}
-                          />
-                          <button
-                            disabled={!String(quickSubcategoryNames[cat.id] || '').trim()}
-                            className="rounded-md bg-amber-300 px-2 py-1 text-xs font-semibold text-slate-950 transition hover:bg-amber-200 disabled:opacity-50"
-                          >
-                            Add
-                          </button>
-                        </form>
+                    ))}
+                    {!activePriorityItems.length && (
+                      <div className="flex min-h-24 items-center justify-center text-center text-sm text-cyan-100">
+                      Tap vote buttons to add priorities.
                       </div>
-                      {subcategories.length > 4 && (
-                        <button
-                          onClick={() => setExpanded(prev => ({ ...prev, [cat.id]: !isExpanded }))}
-                          className="mt-3 text-sm font-semibold text-cyan-700 hover:text-cyan-900"
-                        >
-                          {isExpanded ? 'Show fewer subcategories' : `Show ${subcategories.length - 4} more subcategories`}
-                        </button>
-                      )}
-                    </article>
-                  );
-                })}
-              </div>
-            </main>
-
-            <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-              <form onSubmit={submitIdea} className="rounded-lg border border-amber-300/30 bg-amber-300/10 p-4 shadow-xl">
-                <div className="flex items-center gap-2">
-                  <Icons.Lightbulb className="h-5 w-5 text-amber-200" />
-                  <h2 className="font-semibold text-white">Suggest a new category</h2>
+                    )}
+                  </PriorityDropZone>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-slate-900/70 p-1">
-                  <button type="button" onClick={() => setIdeaScope('top_category')} className={`rounded-md px-2 py-1.5 text-sm ${ideaScope === 'top_category' ? 'bg-white text-slate-950' : 'text-slate-300'}`}>Top category</button>
-                  <button type="button" onClick={() => setIdeaScope('subcategory')} className={`rounded-md px-2 py-1.5 text-sm ${ideaScope === 'subcategory' ? 'bg-white text-slate-950' : 'text-slate-300'}`}>Subcategory</button>
-                </div>
-                <input
-                  value={ideaName}
-                  onChange={(event) => setIdeaName(event.target.value)}
-                  className="mt-3 w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-amber-300"
-                  placeholder={ideaScope === 'top_category' ? 'New top category name' : 'New subcategory name'}
-                />
-                {ideaScope === 'subcategory' && (
-                  <select value={ideaParentId} onChange={(event) => setIdeaParentId(event.target.value)} className="mt-2 w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900">
-                    <option value="">Suggested parent category</option>
-                    {categories.map(category => <option key={category.id} value={category.id}>{categoryOptionLabel(category)}</option>)}
-                  </select>
-                )}
-                <textarea
-                  value={ideaReason}
-                  onChange={(event) => setIdeaReason(event.target.value)}
-                  className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-amber-300"
-                  rows={3}
-                  placeholder="Why should we consider it?"
-                />
-                <button disabled={!ideaName.trim()} className="mt-3 w-full rounded-lg bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">
-                  Submit idea
-                </button>
-              </form>
 
-              <section className="rounded-lg border border-white/10 bg-white/5 p-4 shadow-xl">
-                <h2 className="font-semibold text-white">Room ideas</h2>
-                <div className="mt-3 max-h-72 space-y-2 overflow-auto">
-                  {(votes.categorySuggestions || []).map(suggestion => {
-                    const item = suggestionSupportItem(suggestion);
+                <div className="mt-4 rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+                Voting as <span className="font-semibold text-white">{displayName}</span>
+                  <div className="mt-1 text-xs text-slate-400">Link expires {session?.voteExpiresAt ? new Date(session.voteExpiresAt).toLocaleTimeString() : ''}</div>
+                </div>
+              </aside>
+
+              <main className="min-w-0">
+                <div className="sticky top-0 z-30 -mx-3 mb-3 border-y border-white/10 bg-slate-950/95 px-3 py-2 backdrop-blur sm:static sm:mx-0 sm:rounded-lg sm:border sm:bg-white/5 sm:p-3">
+                  <div className="relative">
+                    <Icons.Search className="absolute left-3 top-3.5 h-4 w-4 text-slate-400 sm:top-2.5" />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      className="min-h-11 w-full rounded-lg border border-white/10 bg-slate-900 px-9 py-2 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300 sm:min-h-0 sm:text-sm"
+                      placeholder="Search categories or subcategories"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {filteredCategories.map((cat) => {
+                    const subcategories = (cat.subcategories || []).filter(s => !s.deleted);
+                    const isExpanded = expanded[cat.id] !== false;
+                    const visibleSubcategories = isExpanded ? subcategories : subcategories.slice(0, 4);
                     return (
-                      <div key={suggestion.id} className="rounded-lg bg-white p-4 text-slate-900 shadow-sm">
+                      <article
+                        key={cat.id}
+                        draggable
+                        onDragStart={() => setDragItem({ ...cat, itemType: 'category' })}
+                        className="rounded-lg border border-white/10 bg-white p-3 text-slate-900 shadow-lg transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl sm:p-4"
+                      >
                         <div className="flex items-start gap-3">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
-                            <Icon name={item.icon} className="h-5 w-5" />
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white sm:h-11 sm:w-11" style={{ backgroundColor: cat.color }}>
+                            <Icon name={cat.icon} className="h-5 w-5" />
                           </span>
                           <div className="min-w-0 flex-1">
-                            <div className="text-lg font-semibold leading-tight">{suggestion.itemLabel}</div>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
-                                <Icons.UserRound className="h-3.5 w-3.5" />
-                                {suggestion.participantName}
-                              </span>
-                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                                <Icons.Tags className="h-3.5 w-3.5" />
-                                {suggestion.value?.scope === 'subcategory' ? 'Subcategory' : 'Top category'}
-                              </span>
-                              {suggestion.value?.parentName && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800">
-                                  <Icons.FolderTree className="h-3.5 w-3.5" />
-                                  {suggestion.value.parentName}
-                                </span>
-                              )}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h2 className="break-words text-base font-semibold leading-snug sm:text-lg">{cat.name}</h2>
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{subcategories.length} subcategories</span>
                             </div>
-                            {suggestion.value?.reason && <p className="mt-2 rounded-md bg-slate-50 px-2 py-1.5 text-sm text-slate-600">{suggestion.value.reason}</p>}
+                            <p className="mt-1 text-sm text-slate-500">{compactText(cat.description)}</p>
                           </div>
                           <button
-                            onClick={() => toggleVote(item, 'suggestion')}
-                            className={`rounded-lg px-3 py-2 text-sm font-semibold ${myVotes[item.id] ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+                            aria-pressed={Boolean(myVotes[cat.id])}
+                            onClick={() => toggleVote(cat, 'category')}
+                            className={`min-h-11 shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-all active:scale-[0.96] [touch-action:manipulation] ${myVotes[cat.id] ? 'bg-cyan-600 text-white shadow-md ring-2 ring-cyan-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                           >
                             <Icons.ThumbsUp className="mr-1 inline h-4 w-4" />
-                            {voteCount(votes, item.id)}
+                            {voteCount(votes, cat.id)}
                           </button>
+                          <DragHandle item={cat} itemType="category" label={cat.name} />
                         </div>
-                      </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {visibleSubcategories.map(sub => (
+                            <div
+                              key={sub.id}
+                              className={`flex min-h-[52px] items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-all duration-150 active:scale-[0.985] [touch-action:manipulation] ${myVotes[sub.id] ? 'border-cyan-500 bg-cyan-50 text-cyan-900 shadow-sm ring-1 ring-cyan-200' : 'border-slate-200 bg-slate-50 text-slate-650 hover:border-slate-300 hover:bg-white'}`}
+                            >
+                              <DragHandle item={{ ...sub, color: cat.color }} itemType="subcategory" label={sub.name} />
+                              <button
+                                type="button"
+                                aria-pressed={Boolean(myVotes[sub.id])}
+                                onClick={() => toggleVote({ ...sub, color: cat.color }, 'subcategory')}
+                                className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md text-left transition active:scale-[0.99] [touch-action:manipulation]"
+                              >
+                                <Icon name={sub.icon || 'Tag'} className="h-4 w-4 shrink-0 text-slate-500" />
+                                <span className="min-w-0 flex-1 break-words leading-snug">{sub.name}</span>
+                                <span className={`flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold ${myVotes[sub.id] ? 'bg-cyan-600 text-white' : 'bg-white text-slate-500'}`}>
+                                  {voteCount(votes, sub.id) || <Icons.ThumbsUp className="h-3.5 w-3.5" />}
+                                </span>
+                              </button>
+                            </div>
+                          ))}
+                          <form
+                            onSubmit={(event) => submitQuickSubcategory(event, cat)}
+                            className="grid gap-2 rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 sm:flex sm:items-center sm:px-3 sm:py-2"
+                          >
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <Icons.Plus className="h-4 w-4 shrink-0 text-amber-700" />
+                              <input
+                                value={quickSubcategoryNames[cat.id] || ''}
+                                onChange={(event) => setQuickSubcategoryNames(prev => ({ ...prev, [cat.id]: event.target.value }))}
+                                className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-slate-900 outline-none placeholder:text-amber-700/70 sm:min-h-0 sm:text-sm"
+                                placeholder="Suggest another subcategory"
+                              />
+                            </div>
+                            <button
+                              disabled={!String(quickSubcategoryNames[cat.id] || '').trim()}
+                              className="min-h-11 rounded-md bg-amber-300 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 active:scale-[0.98] disabled:opacity-50 sm:min-h-0 sm:px-2 sm:py-1 sm:text-xs [touch-action:manipulation]"
+                            >
+                            Add
+                            </button>
+                          </form>
+                        </div>
+                        {subcategories.length > 4 && (
+                          <button
+                            onClick={() => setExpanded(prev => ({ ...prev, [cat.id]: !isExpanded }))}
+                            className="mt-3 min-h-10 rounded-lg px-1 text-sm font-semibold text-cyan-700 transition active:scale-[0.98] hover:text-cyan-900 [touch-action:manipulation]"
+                          >
+                            {isExpanded ? 'Show fewer subcategories' : `Show ${subcategories.length - 4} more subcategories`}
+                          </button>
+                        )}
+                      </article>
                     );
                   })}
-                  {!(votes.categorySuggestions || []).length && <p className="text-sm text-slate-400">New category suggestions will appear here for everyone.</p>}
                 </div>
-              </section>
+              </main>
 
-              <form onSubmit={submitMerge} className="rounded-lg border border-white/10 bg-white/5 p-4 shadow-xl">
-                <div className="flex items-center gap-2">
-                  <Icons.Merge className="h-5 w-5 text-cyan-200" />
-                  <h2 className="font-semibold text-white">Suggest a merge</h2>
-                </div>
-                <div className="mt-3 space-y-2">
-                  <select value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900">
-                    <option value="">First category</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  <select value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900">
-                    <option value="">Second category</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  <input value={mergeReason} onChange={(e) => setMergeReason(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900" placeholder="Optional reason" />
-                </div>
-                <button disabled={!mergeFrom || !mergeTo || mergeFrom === mergeTo} className="mt-3 w-full rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">
+              <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+                <form onSubmit={submitIdea} className="rounded-lg border border-amber-300/30 bg-amber-300/10 p-4 shadow-xl">
+                  <div className="flex items-center gap-2">
+                    <Icons.Lightbulb className="h-5 w-5 text-amber-200" />
+                    <h2 className="font-semibold text-white">Suggest a new category</h2>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-slate-900/70 p-1">
+                    <button type="button" onClick={() => setIdeaScope('top_category')} className={`rounded-md px-2 py-1.5 text-sm ${ideaScope === 'top_category' ? 'bg-white text-slate-950' : 'text-slate-300'}`}>Top category</button>
+                    <button type="button" onClick={() => setIdeaScope('subcategory')} className={`rounded-md px-2 py-1.5 text-sm ${ideaScope === 'subcategory' ? 'bg-white text-slate-950' : 'text-slate-300'}`}>Subcategory</button>
+                  </div>
+                  <input
+                    value={ideaName}
+                    onChange={(event) => setIdeaName(event.target.value)}
+                    className="mt-3 w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-amber-300"
+                    placeholder={ideaScope === 'top_category' ? 'New top category name' : 'New subcategory name'}
+                  />
+                  {ideaScope === 'subcategory' && (
+                    <select value={ideaParentId} onChange={(event) => setIdeaParentId(event.target.value)} className="mt-2 w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900">
+                      <option value="">Suggested parent category</option>
+                      {categories.map(category => <option key={category.id} value={category.id}>{categoryOptionLabel(category)}</option>)}
+                    </select>
+                  )}
+                  <textarea
+                    value={ideaReason}
+                    onChange={(event) => setIdeaReason(event.target.value)}
+                    className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-amber-300"
+                    rows={3}
+                    placeholder="Why should we consider it?"
+                  />
+                  <button disabled={!ideaName.trim()} className="mt-3 min-h-11 w-full rounded-lg bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 transition active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]">
+                  Submit idea
+                  </button>
+                </form>
+
+                <section className="rounded-lg border border-white/10 bg-white/5 p-4 shadow-xl">
+                  <h2 className="font-semibold text-white">Room ideas</h2>
+                  <div className="mt-3 max-h-72 space-y-2 overflow-auto">
+                    {(votes.categorySuggestions || []).map(suggestion => {
+                      const item = suggestionSupportItem(suggestion);
+                      return (
+                        <div key={suggestion.id} className="rounded-lg bg-white p-4 text-slate-900 shadow-sm">
+                          <div className="flex items-start gap-3">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+                              <Icon name={item.icon} className="h-5 w-5" />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-lg font-semibold leading-tight">{suggestion.itemLabel}</div>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                                  <Icons.UserRound className="h-3.5 w-3.5" />
+                                  {suggestion.participantName}
+                                </span>
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                                  <Icons.Tags className="h-3.5 w-3.5" />
+                                  {suggestion.value?.scope === 'subcategory' ? 'Subcategory' : 'Top category'}
+                                </span>
+                                {suggestion.value?.parentName && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800">
+                                    <Icons.FolderTree className="h-3.5 w-3.5" />
+                                    {suggestion.value.parentName}
+                                  </span>
+                                )}
+                              </div>
+                              {suggestion.value?.reason && <p className="mt-2 rounded-md bg-slate-50 px-2 py-1.5 text-sm text-slate-600">{suggestion.value.reason}</p>}
+                            </div>
+                            <button
+                              aria-pressed={Boolean(myVotes[item.id])}
+                              onClick={() => toggleVote(item, 'suggestion')}
+                              className={`rounded-lg px-3 py-2 text-sm font-semibold ${myVotes[item.id] ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+                            >
+                              <Icons.ThumbsUp className="mr-1 inline h-4 w-4" />
+                              {voteCount(votes, item.id)}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {!(votes.categorySuggestions || []).length && <p className="text-sm text-slate-400">New category suggestions will appear here for everyone.</p>}
+                  </div>
+                </section>
+
+                <form onSubmit={submitMerge} className="rounded-lg border border-white/10 bg-white/5 p-4 shadow-xl">
+                  <div className="flex items-center gap-2">
+                    <Icons.Merge className="h-5 w-5 text-cyan-200" />
+                    <h2 className="font-semibold text-white">Suggest a merge</h2>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <select value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900">
+                      <option value="">First category</option>
+                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <select value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900">
+                      <option value="">Second category</option>
+                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <input value={mergeReason} onChange={(e) => setMergeReason(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900" placeholder="Optional reason" />
+                  </div>
+                  <button disabled={!mergeFrom || !mergeTo || mergeFrom === mergeTo} className="mt-3 w-full rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">
                   Submit merge suggestion
-                </button>
-              </form>
-            </aside>
-          </div>
+                  </button>
+                </form>
+              </aside>
+            </div>
+          </DndContext>
         )}
       </div>
     </div>
