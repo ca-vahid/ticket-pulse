@@ -40,6 +40,7 @@ export default function SummitVote() {
   const [ideaParentId, setIdeaParentId] = useState('');
   const [ideaReason, setIdeaReason] = useState('');
   const [ideaScope, setIdeaScope] = useState('top_category');
+  const [quickSubcategoryNames, setQuickSubcategoryNames] = useState({});
   const [error, setError] = useState('');
   const [expiredMessage, setExpiredMessage] = useState('');
   const [joining, setJoining] = useState(false);
@@ -202,6 +203,31 @@ export default function SummitVote() {
     }
   };
 
+  const submitQuickSubcategory = async (event, category) => {
+    event.preventDefault();
+    const name = String(quickSubcategoryNames[category.id] || '').trim();
+    if (!name || !participantKey) return;
+    try {
+      const res = await summitAPI.submitVote(token, {
+        participantKey,
+        itemType: 'subcategory',
+        itemLabel: name,
+        voteType: 'new_category_suggestion',
+        value: {
+          name,
+          scope: 'subcategory',
+          parentId: category.id,
+          parentName: category.name,
+          reason: '',
+        },
+      });
+      setVotes(res.votes || votes);
+      setQuickSubcategoryNames(prev => ({ ...prev, [category.id]: '' }));
+    } catch (err) {
+      setError(err.message || 'Suggestion failed');
+    }
+  };
+
   const suggestionSupportItem = (suggestion) => ({
     id: suggestion.itemId,
     name: suggestion.itemLabel,
@@ -321,7 +347,7 @@ export default function SummitVote() {
               <div className="space-y-3">
                 {filteredCategories.map((cat) => {
                   const subcategories = (cat.subcategories || []).filter(s => !s.deleted);
-                  const isExpanded = expanded[cat.id];
+                  const isExpanded = expanded[cat.id] !== false;
                   const visibleSubcategories = isExpanded ? subcategories : subcategories.slice(0, 4);
                   return (
                     <article
@@ -363,10 +389,28 @@ export default function SummitVote() {
                             <span className="text-xs text-slate-400">{voteCount(votes, sub.id) || ''}</span>
                           </button>
                         ))}
+                        <form
+                          onSubmit={(event) => submitQuickSubcategory(event, cat)}
+                          className="flex items-center gap-2 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-3 py-2"
+                        >
+                          <Icons.Plus className="h-4 w-4 shrink-0 text-amber-700" />
+                          <input
+                            value={quickSubcategoryNames[cat.id] || ''}
+                            onChange={(event) => setQuickSubcategoryNames(prev => ({ ...prev, [cat.id]: event.target.value }))}
+                            className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-amber-700/70"
+                            placeholder={`Suggest subcategory under ${cat.name}`}
+                          />
+                          <button
+                            disabled={!String(quickSubcategoryNames[cat.id] || '').trim()}
+                            className="rounded-md bg-amber-300 px-2 py-1 text-xs font-semibold text-slate-950 transition hover:bg-amber-200 disabled:opacity-50"
+                          >
+                            Add
+                          </button>
+                        </form>
                       </div>
                       {subcategories.length > 4 && (
                         <button
-                          onClick={() => setExpanded(prev => ({ ...prev, [cat.id]: !prev[cat.id] }))}
+                          onClick={() => setExpanded(prev => ({ ...prev, [cat.id]: !isExpanded }))}
                           className="mt-3 text-sm font-semibold text-cyan-700 hover:text-cyan-900"
                         >
                           {isExpanded ? 'Show fewer subcategories' : `Show ${subcategories.length - 4} more subcategories`}
