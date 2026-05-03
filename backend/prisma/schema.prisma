@@ -56,6 +56,7 @@ model Workspace {
   backfillRuns           BackfillRun[]
   ticketThreadEntries    TicketThreadEntry[]
   assignmentCorrections  AssignmentCorrection[]
+  summitWorkshopSessions SummitWorkshopSession[]
 
   @@map("workspaces")
 }
@@ -1198,4 +1199,82 @@ model CompetencyAnalysisStep {
   @@map("competency_analysis_steps")
   @@index([runId])
   @@index([stepName])
+}
+
+model SummitWorkshopSession {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id])
+  title         String    @db.VarChar(160)
+  status        String    @default("active") @db.VarChar(30)
+  state         Json
+  baselineState Json      @map("baseline_state")
+  activeVersion Int       @default(1) @map("active_version")
+  voteToken     String?   @unique @db.VarChar(80) @map("vote_token")
+  voteEnabled   Boolean   @default(false) @map("vote_enabled")
+  voteExpiresAt DateTime? @map("vote_expires_at")
+  lastSavedBy   String?   @db.VarChar(255) @map("last_saved_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  snapshots    SummitWorkshopSnapshot[]
+  participants SummitWorkshopParticipant[]
+  votes        SummitWorkshopVote[]
+
+  @@map("summit_workshop_sessions")
+  @@index([workspaceId])
+  @@index([status])
+  @@index([voteToken])
+}
+
+model SummitWorkshopSnapshot {
+  id           Int                   @id @default(autoincrement())
+  sessionId    Int                   @map("session_id")
+  session      SummitWorkshopSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  version      Int
+  label        String?               @db.VarChar(160)
+  snapshotType String                @default("manual") @db.VarChar(30) @map("snapshot_type")
+  state        Json
+  createdBy    String?               @db.VarChar(255) @map("created_by")
+  createdAt    DateTime              @default(now()) @map("created_at")
+
+  @@map("summit_workshop_snapshots")
+  @@index([sessionId])
+  @@index([createdAt])
+}
+
+model SummitWorkshopParticipant {
+  id             Int                   @id @default(autoincrement())
+  sessionId      Int                   @map("session_id")
+  session        SummitWorkshopSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  participantKey String                @unique @db.VarChar(80) @map("participant_key")
+  displayName    String                @db.VarChar(120) @map("display_name")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  lastSeenAt     DateTime              @default(now()) @map("last_seen_at")
+
+  votes SummitWorkshopVote[]
+
+  @@map("summit_workshop_participants")
+  @@index([sessionId])
+}
+
+model SummitWorkshopVote {
+  id            Int                       @id @default(autoincrement())
+  sessionId     Int                       @map("session_id")
+  session       SummitWorkshopSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  participantId Int                       @map("participant_id")
+  participant   SummitWorkshopParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  itemId        String                    @db.VarChar(120) @map("item_id")
+  itemType      String                    @db.VarChar(30) @map("item_type")
+  itemLabel     String                    @db.VarChar(255) @map("item_label")
+  voteType      String                    @db.VarChar(40) @map("vote_type")
+  value         Json?
+  createdAt     DateTime                  @default(now()) @map("created_at")
+  updatedAt     DateTime                  @updatedAt @map("updated_at")
+
+  @@unique([participantId, itemId, voteType])
+  @@map("summit_workshop_votes")
+  @@index([sessionId])
+  @@index([itemId])
+  @@index([voteType])
 }

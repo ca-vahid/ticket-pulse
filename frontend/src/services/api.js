@@ -629,6 +629,21 @@ export const analyticsAPI = {
 };
 
 /**
+ * IT Summit taxonomy workshop API
+ */
+export const summitAPI = {
+  getWorkshop: () => api.get('/summit/workshop'),
+  saveState: (state, { label = 'Manual save', snapshotType = 'manual' } = {}) =>
+    api.put('/summit/workshop/state', { state, label, snapshotType }),
+  restoreSnapshot: (id) => api.post(`/summit/workshop/snapshots/${id}/restore`),
+  enableVoting: (durationMinutes = 120) => api.post('/summit/workshop/voting', { durationMinutes }),
+  getPublicWorkshop: (token) => api.get(`/summit/public/${token}`),
+  joinPublicWorkshop: (token, data) => api.post(`/summit/public/${token}/join`, data),
+  submitVote: (token, data) => api.post(`/summit/public/${token}/votes`, data),
+  getPublicEventSource: (token) => new EventSource(`${API_BASE_URL}/summit/public/${token}/events`, { withCredentials: true }),
+};
+
+/**
  * Health check
  */
 export const healthCheck = async () => {

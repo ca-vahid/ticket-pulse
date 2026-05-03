@@ -13,6 +13,8 @@ import Visuals from './pages/Visuals';
 import TimelineExplorer from './pages/TimelineExplorer';
 import AssignmentReview from './pages/AssignmentReview';
 import Analytics from './pages/Analytics';
+import SummitTaxonomyWorkshop from './pages/SummitTaxonomyWorkshop';
+import SummitVote from './pages/SummitVote';
 import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
 
@@ -123,6 +125,11 @@ function App() {
                   }
                 />
 
+                <Route
+                  path="/summit/vote/:token"
+                  element={<SummitVote />}
+                />
+
                 {/* Protected Routes */}
                 <Route
                   path="/dashboard"
@@ -174,6 +181,15 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <Analytics />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/summit-taxonomy"
+                  element={
+                    <ProtectedRoute>
+                      <SummitTaxonomyWorkshop />
                     </ProtectedRoute>
                   }
                 />

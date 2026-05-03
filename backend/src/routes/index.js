@@ -16,6 +16,7 @@ import calendarLeaveRoutes from './calendarLeave.routes.js';
 import notificationsRoutes from './notifications.routes.js';
 import assignmentRoutes from './assignment.routes.js';
 import analyticsRoutes from './analytics.routes.js';
+import summitRoutes, { summitPublicRouter } from './summit.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
 
@@ -33,6 +34,10 @@ router.use('/workspaces', workspaceRoutes);
 // External webhooks: uses shared-secret auth, NOT session/JWT auth.
 // Must be mounted BEFORE requireAuth so FreshService can reach them.
 router.use('/webhook', webhookRoutes);
+
+// Temporary IT Summit voting links intentionally bypass app auth but require
+// an expiring workshop token.
+router.use('/summit/public', summitPublicRouter);
 
 // Promote JWT from query param for SSE requests (EventSource can't set headers).
 // Must run before requireAuth so the token is available for authentication.
@@ -65,5 +70,6 @@ router.use('/calendar-leave', calendarLeaveRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/assignment', assignmentRoutes);
 router.use('/analytics', analyticsRoutes);
+router.use('/summit', summitRoutes);
 
 export default router;
