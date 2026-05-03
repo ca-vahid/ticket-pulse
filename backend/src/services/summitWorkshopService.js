@@ -224,8 +224,29 @@ function closePublicStreams(sessionId, event = 'expired', payload = {}) {
 }
 
 async function getVoteSummary(sessionId) {
-  const [participants, grouped, mergeSuggestions, categorySuggestions] = await Promise.all([
+  const [participantCount, participantRows, grouped, mergeSuggestions, categorySuggestions] = await Promise.all([
     prisma.summitWorkshopParticipant.count({ where: { sessionId } }),
+    prisma.summitWorkshopParticipant.findMany({
+      where: { sessionId },
+      orderBy: { lastSeenAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        displayName: true,
+        createdAt: true,
+        lastSeenAt: true,
+        votes: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            itemId: true,
+            itemType: true,
+            itemLabel: true,
+            voteType: true,
+            createdAt: true,
+          },
+        },
+      },
+    }),
     prisma.summitWorkshopVote.groupBy({
       by: ['itemId', 'itemType', 'itemLabel', 'voteType'],
       where: { sessionId, voteType: { notIn: ['merge_suggestion', 'new_category_suggestion'] } },
@@ -247,7 +268,31 @@ async function getVoteSummary(sessionId) {
   ]);
 
   return {
-    participantCount: participants,
+    participantCount,
+    participantStats: participantRows.map((participant) => {
+      const counts = participant.votes.reduce((acc, vote) => {
+        acc[vote.voteType] = (acc[vote.voteType] || 0) + 1;
+        return acc;
+      }, {});
+      return {
+        id: participant.id,
+        displayName: participant.displayName,
+        supportCount: counts.support || 0,
+        mergeSuggestionCount: counts.merge_suggestion || 0,
+        categorySuggestionCount: counts.new_category_suggestion || 0,
+        totalCount: participant.votes.length,
+        joinedAt: participant.createdAt,
+        lastSeenAt: participant.lastSeenAt,
+        lastActivityAt: participant.votes[0]?.createdAt || participant.lastSeenAt,
+        recentItems: participant.votes.slice(0, 4).map((vote) => ({
+          itemId: vote.itemId,
+          itemType: vote.itemType,
+          itemLabel: vote.itemLabel,
+          voteType: vote.voteType,
+          createdAt: vote.createdAt,
+        })),
+      };
+    }),
     totals: grouped.map((row) => ({
       itemId: row.itemId,
       itemType: row.itemType,

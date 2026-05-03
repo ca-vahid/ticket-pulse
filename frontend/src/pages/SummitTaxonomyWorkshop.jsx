@@ -71,6 +71,7 @@ function normalizeVotes(votes) {
     totals: Array.isArray(votes?.totals) ? votes.totals : [],
     mergeSuggestions: Array.isArray(votes?.mergeSuggestions) ? votes.mergeSuggestions : [],
     categorySuggestions: Array.isArray(votes?.categorySuggestions) ? votes.categorySuggestions : [],
+    participantStats: Array.isArray(votes?.participantStats) ? votes.participantStats : [],
   };
 }
 
@@ -494,6 +495,7 @@ export default function SummitTaxonomyWorkshop() {
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.totals || []), 'Votes');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.mergeSuggestions || []), 'Merge Suggestions');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.categorySuggestions || []), 'Category Ideas');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.participantStats || []), 'Voter Stats');
     XLSX.writeFile(workbook, 'BGC-IT-Summit-Taxonomy.xlsx');
   };
 
@@ -742,6 +744,52 @@ export default function SummitTaxonomyWorkshop() {
                 {!(votes.totals || []).length && <p className="text-sm text-slate-500">Votes will appear here once participants join.</p>}
               </div>
             )}
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-900">Voter Stats</h2>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{(votes.participantStats || []).length}</span>
+            </div>
+            <div className="max-h-72 space-y-2 overflow-auto">
+              {(votes.participantStats || []).map(participant => (
+                <div key={participant.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-900">{participant.displayName}</div>
+                      <div className="mt-0.5 text-slate-500">
+                        Last activity {participant.lastActivityAt ? new Date(participant.lastActivityAt).toLocaleTimeString() : 'none yet'}
+                      </div>
+                    </div>
+                    <span className="rounded-lg bg-white px-2 py-1 font-semibold text-slate-800">{participant.totalCount || 0} total</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-1 text-center">
+                    <div className="rounded-md bg-white px-2 py-1">
+                      <div className="font-semibold text-cyan-700">{participant.supportCount || 0}</div>
+                      <div className="text-[10px] uppercase text-slate-400">Votes</div>
+                    </div>
+                    <div className="rounded-md bg-white px-2 py-1">
+                      <div className="font-semibold text-amber-700">{participant.categorySuggestionCount || 0}</div>
+                      <div className="text-[10px] uppercase text-slate-400">Ideas</div>
+                    </div>
+                    <div className="rounded-md bg-white px-2 py-1">
+                      <div className="font-semibold text-violet-700">{participant.mergeSuggestionCount || 0}</div>
+                      <div className="text-[10px] uppercase text-slate-400">Merges</div>
+                    </div>
+                  </div>
+                  {!!participant.recentItems?.length && (
+                    <div className="mt-2 space-y-1">
+                      {participant.recentItems.slice(0, 2).map(item => (
+                        <div key={`${participant.id}-${item.itemId}-${item.voteType}-${item.createdAt}`} className="truncate text-[11px] text-slate-500">
+                          {item.voteType === 'support' ? 'Voted for' : item.voteType === 'merge_suggestion' ? 'Merge idea' : 'New idea'}: {item.itemLabel}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {!(votes.participantStats || []).length && <p className="text-sm text-slate-500">Per-voter stats will appear after people join.</p>}
+            </div>
           </div>
 
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">

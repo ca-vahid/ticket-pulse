@@ -462,22 +462,36 @@ export default function SummitVote() {
                   {(votes.categorySuggestions || []).map(suggestion => {
                     const item = suggestionSupportItem(suggestion);
                     return (
-                      <div key={suggestion.id} className="rounded-lg bg-white p-3 text-slate-900">
-                        <div className="flex items-start gap-2">
-                          <Icon name={item.icon} className="mt-0.5 h-4 w-4 text-amber-600" />
+                      <div key={suggestion.id} className="rounded-lg bg-white p-4 text-slate-900 shadow-sm">
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+                            <Icon name={item.icon} className="h-5 w-5" />
+                          </span>
                           <div className="min-w-0 flex-1">
-                            <div className="font-semibold">{suggestion.itemLabel}</div>
-                            <div className="text-xs text-slate-500">
-                              Suggested by {suggestion.participantName}
-                              {suggestion.value?.parentName ? ` under ${suggestion.value.parentName}` : ''}
+                            <div className="text-lg font-semibold leading-tight">{suggestion.itemLabel}</div>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                                <Icons.UserRound className="h-3.5 w-3.5" />
+                                {suggestion.participantName}
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                                <Icons.Tags className="h-3.5 w-3.5" />
+                                {suggestion.value?.scope === 'subcategory' ? 'Subcategory' : 'Top category'}
+                              </span>
+                              {suggestion.value?.parentName && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800">
+                                  <Icons.FolderTree className="h-3.5 w-3.5" />
+                                  {suggestion.value.parentName}
+                                </span>
+                              )}
                             </div>
-                            {suggestion.value?.reason && <p className="mt-1 text-xs text-slate-600">{suggestion.value.reason}</p>}
+                            {suggestion.value?.reason && <p className="mt-2 rounded-md bg-slate-50 px-2 py-1.5 text-sm text-slate-600">{suggestion.value.reason}</p>}
                           </div>
                           <button
                             onClick={() => toggleVote(item, 'suggestion')}
-                            className={`rounded-lg px-2 py-1 text-xs font-semibold ${myVotes[item.id] ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+                            className={`rounded-lg px-3 py-2 text-sm font-semibold ${myVotes[item.id] ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-700'}`}
                           >
-                            <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                            <Icons.ThumbsUp className="mr-1 inline h-4 w-4" />
                             {voteCount(votes, item.id)}
                           </button>
                         </div>
