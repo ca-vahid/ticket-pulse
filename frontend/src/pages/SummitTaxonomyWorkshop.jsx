@@ -196,20 +196,6 @@ function formatCountdown(ms) {
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-function Stat({ label, value, icon, active = false }) {
-  return (
-    <div className={`rounded-lg border bg-white px-3 py-2 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
-      active ? 'scale-[1.02] border-cyan-300 shadow-md ring-2 ring-cyan-100' : 'border-slate-200'
-    }`}>
-      <div className="flex items-center gap-2 text-slate-500 text-xs">
-        <Icon name={icon} className="h-3.5 w-3.5" />
-        {label}
-      </div>
-      <div className="mt-1 text-xl font-semibold text-slate-900">{value}</div>
-    </div>
-  );
-}
-
 function CardActionsMenu({
   value,
   color = '#0f4c81',
@@ -879,11 +865,15 @@ export default function SummitTaxonomyWorkshop() {
     if (!dragItem) return;
     if (dragItem.type === 'category' && dragItem.id !== cat.id) {
       moveCategory(dragItem.id, cat.id);
+      markHighlight(`move-category-${dragItem.id}`);
+      markHighlight(`move-category-${cat.id}`);
       pushToast({ title: 'Category moved', message: `${dragItem.name} moved before ${cat.name}`, icon: 'Move', tone: 'cyan' });
     }
     if (dragItem.type === 'sub') {
       moveSubcategory(dragItem.categoryId, dragItem.id, cat.id);
       setSelectedCategoryId(cat.id);
+      markHighlight(`move-sub-${dragItem.id}`);
+      markHighlight(`move-category-${cat.id}`);
       pushToast({ title: 'Subcategory moved', message: `${dragItem.name} moved into ${cat.name}`, icon: 'Move', tone: 'cyan' });
     }
     finishDrag();
@@ -896,6 +886,8 @@ export default function SummitTaxonomyWorkshop() {
       return;
     }
     moveSubcategory(dragItem.categoryId, dragItem.id, targetCategory.id, subcat.id);
+    markHighlight(`move-sub-${dragItem.id}`);
+    markHighlight(`move-sub-${subcat.id}`);
     pushToast({ title: 'Subcategory moved', message: `${dragItem.name} moved before ${subcat.name}`, icon: 'Move', tone: 'cyan' });
     finishDrag();
   };
@@ -904,6 +896,8 @@ export default function SummitTaxonomyWorkshop() {
     event.stopPropagation();
     if (dragItem?.type === 'sub' && targetCategory) {
       moveSubcategory(dragItem.categoryId, dragItem.id, targetCategory.id);
+      markHighlight(`move-sub-${dragItem.id}`);
+      markHighlight(`move-category-${targetCategory.id}`);
       pushToast({ title: 'Subcategory moved', message: `${dragItem.name} moved to the end of ${targetCategory.name}`, icon: 'Move', tone: 'cyan' });
     }
     finishDrag();
@@ -967,6 +961,10 @@ export default function SummitTaxonomyWorkshop() {
     });
     return draft;
   });
+
+  const toggleSelectedForMerge = (categoryId) => {
+    setSelectedForMerge(prev => (prev.includes(categoryId) ? prev.filter(id => id !== categoryId) : [...prev, categoryId]));
+  };
 
   const mergeSelectedCategories = () => {
     if (selectedForMerge.length < 2) return;
@@ -1132,7 +1130,9 @@ export default function SummitTaxonomyWorkshop() {
         className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
           dragOverTarget?.type === 'selected-category' && category.id === dragOverTarget.id
             ? 'border-cyan-300 ring-2 ring-cyan-100'
-            : 'border-slate-200'
+            : highlightIds[`move-category-${category.id}`]
+              ? 'summit-drop-land border-cyan-300 ring-2 ring-cyan-100'
+              : 'border-slate-200'
         }`}
       >
         <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
@@ -1234,9 +1234,11 @@ export default function SummitTaxonomyWorkshop() {
                     ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
                     : dragItem?.type === 'sub' && dragItem.id === subcat.id
                       ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
-                      : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
-                        ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                        : 'border-slate-200 bg-slate-50'
+                      : highlightIds[`move-sub-${subcat.id}`]
+                        ? 'summit-drop-land border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                        : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
+                          ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                          : 'border-slate-200 bg-slate-50'
               }`}
             >
               <div className="flex items-start gap-2">
@@ -1436,11 +1438,17 @@ export default function SummitTaxonomyWorkshop() {
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.015); }
         }
+        @keyframes summitDropLand {
+          0% { transform: translate3d(0, -7px, 0) scale(.985); box-shadow: 0 0 0 0 rgba(8, 145, 178, .28); }
+          45% { transform: translate3d(0, 0, 0) scale(1.018); box-shadow: 0 0 0 7px rgba(8, 145, 178, .16); }
+          100% { transform: translate3d(0, 0, 0) scale(1); box-shadow: 0 0 0 0 rgba(8, 145, 178, 0); }
+        }
         .summit-toast { animation: summitToastIn 180ms ease-out both; }
         .summit-soft-pulse { animation: summitSoftPulse 1.2s ease-in-out 2; }
         .summit-qr-pulse { animation: summitQrPulse 2.2s ease-in-out infinite; }
+        .summit-drop-land { animation: summitDropLand 700ms cubic-bezier(.2,.8,.2,1) both; }
         @media (prefers-reduced-motion: reduce) {
-          .summit-toast, .summit-soft-pulse, .summit-qr-pulse { animation: none; }
+          .summit-toast, .summit-soft-pulse, .summit-qr-pulse, .summit-drop-land { animation: none; }
         }
       `}</style>
       <div className="fixed right-4 top-20 z-[60] w-[min(420px,calc(100vw-2rem))] space-y-2" aria-live="polite">
@@ -1491,16 +1499,21 @@ export default function SummitTaxonomyWorkshop() {
       </div>
 
       {dragPreview && (
-        <div className="pointer-events-none fixed bottom-5 left-1/2 z-[75] -translate-x-1/2 rounded-full border border-cyan-200 bg-white/95 px-4 py-2 text-sm shadow-2xl backdrop-blur">
-          <span className="font-semibold text-slate-950">Dragging {dragPreview.name}</span>
-          <span className="mx-2 text-slate-400">to</span>
-          <span className="font-medium text-cyan-800">{dragOverTarget?.label || 'choose a highlighted target'}</span>
+        <div className="pointer-events-none fixed bottom-5 left-1/2 z-[75] flex max-w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 items-center gap-2 rounded-full border border-cyan-200 bg-white/95 px-4 py-2 text-sm shadow-2xl backdrop-blur transition-all duration-150">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-600 text-white">
+            <Icons.Move className="h-3.5 w-3.5" />
+          </span>
+          <span className="max-w-56 truncate font-semibold text-slate-950">Dragging {dragPreview.name}</span>
+          <Icons.CornerDownRight className="h-4 w-4 text-slate-400" />
+          <span className={`truncate font-medium ${dragOverTarget?.label ? 'text-cyan-800' : 'text-slate-500'}`}>
+            {dragOverTarget?.label || 'choose a highlighted target'}
+          </span>
         </div>
       )}
 
       {dragPreview && dragPosition && (
         <div
-          className="pointer-events-none fixed z-[80] w-72 -rotate-1 rounded-lg border border-cyan-200 bg-white/80 p-3 text-slate-900 shadow-2xl ring-4 ring-cyan-100/70 backdrop-blur transition-transform duration-75"
+          className="pointer-events-none fixed z-[80] w-72 -rotate-1 rounded-lg border border-cyan-200 bg-white/80 p-3 text-slate-900 shadow-2xl ring-4 ring-cyan-100/70 backdrop-blur transition-all duration-150 ease-out"
           style={{ left: dragPosition.x + 16, top: dragPosition.y + 16 }}
         >
           <div className="flex items-center gap-3">
@@ -1515,177 +1528,128 @@ export default function SummitTaxonomyWorkshop() {
         </div>
       )}
 
-      <div className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-950 px-5 py-4 text-white lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-cyan-200">
-              <Icons.Sparkles className="h-4 w-4" />
-              BGC Engineering IT Summit
-            </div>
-            <h1 className="mt-2 text-2xl font-semibold">Categories Workshop</h1>
-            <p className="mt-1 max-w-3xl text-sm text-slate-300">Move categories, rename items, combine top-level groups, restore deleted ideas, and collect live votes from the room.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => navigate('/dashboard')} className="rounded-lg border border-white/20 px-3 py-2 text-sm hover:bg-white/10">Dashboard</button>
-            <button onClick={undo} disabled={!history.length} className="rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40 hover:bg-white/10"><Icons.Undo2 className="mr-1 inline h-4 w-4" />Undo</button>
-            <button onClick={redo} disabled={!future.length} className="rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40 hover:bg-white/10"><Icons.Redo2 className="mr-1 inline h-4 w-4" />Redo</button>
-            <button onClick={manualSave} className="rounded-lg bg-cyan-400 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300"><Icons.Save className="mr-1 inline h-4 w-4" />Save</button>
-            <button onClick={exportExcel} className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-100"><Icons.FileSpreadsheet className="mr-1 inline h-4 w-4" />Excel</button>
-          </div>
-        </div>
-
-        <div className="grid gap-3 px-5 py-4 md:grid-cols-6">
-          <Stat label="Top Categories" value={activeCategories.length} icon="Folders" />
-          <Stat label="Subcategories" value={activeCategories.reduce((sum, c) => sum + (c.subcategories || []).filter(s => !s.deleted).length, 0)} icon="Tags" />
-          <Stat label="Participants" value={votes.participantCount || 0} icon="UsersRound" active={highlightIds.participants} />
-          <Stat label="Votes" value={totalVoteCount(votes)} icon="ThumbsUp" active={highlightIds.votes} />
-          <Stat label="New Ideas" value={(votes.categorySuggestions || []).length} icon="Lightbulb" active={highlightIds.ideas} />
-          <Stat label="State" value={saveStatus} icon="DatabaseZap" />
-        </div>
-
-        <div className="grid gap-3 border-t border-slate-200 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
-          <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 p-3">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <Icons.Activity className="h-4 w-4 text-cyan-700" />
-                Live vote counts
+      <div className="mb-3 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-950 px-4 py-3 text-white xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-400 text-slate-950">
+                <Icons.Sparkles className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <div className="truncate text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">BGC Engineering IT Summit</div>
+                <h1 className="truncate text-xl font-semibold">Categories Workshop</h1>
               </div>
-              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-cyan-800">{totalVoteCount(votes)} total</span>
             </div>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {liveVoteLeaders.map((vote) => (
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+              <span title="Top categories" className="rounded-lg bg-white/10 px-2 py-1 font-semibold"><Icons.Folders className="mr-1 inline h-3.5 w-3.5" />{activeCategories.length}</span>
+              <span title="Subcategories" className="rounded-lg bg-white/10 px-2 py-1 font-semibold"><Icons.Tags className="mr-1 inline h-3.5 w-3.5" />{activeCategories.reduce((sum, c) => sum + (c.subcategories || []).filter(s => !s.deleted).length, 0)}</span>
+              <span title="Participants" className={`rounded-lg px-2 py-1 font-semibold transition ${highlightIds.participants ? 'bg-cyan-400 text-slate-950' : 'bg-white/10'}`}><Icons.UsersRound className="mr-1 inline h-3.5 w-3.5" />{votes.participantCount || 0}</span>
+              <span title="Votes" className={`rounded-lg px-2 py-1 font-semibold transition ${highlightIds.votes ? 'bg-cyan-400 text-slate-950' : 'bg-white/10'}`}><Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />{totalVoteCount(votes)}</span>
+              <span title={`${pendingSubcategorySuggestionCount} subcategory ideas`} className={`rounded-lg px-2 py-1 font-semibold transition ${highlightIds.ideas ? 'bg-amber-300 text-slate-950' : 'bg-white/10'}`}><Icons.Lightbulb className="mr-1 inline h-3.5 w-3.5" />{(votes.categorySuggestions || []).length}</span>
+              <span title="Save state" className="rounded-lg bg-white/10 px-2 py-1 font-semibold"><Icons.DatabaseZap className="mr-1 inline h-3.5 w-3.5" />{saveStatus}</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button onClick={() => navigate('/dashboard')} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition hover:bg-white/10" title="Dashboard"><Icons.LayoutDashboard className="h-4 w-4" /></button>
+            <button onClick={undo} disabled={!history.length} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title="Undo"><Icons.Undo2 className="h-4 w-4" /></button>
+            <button onClick={redo} disabled={!future.length} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title="Redo"><Icons.Redo2 className="h-4 w-4" /></button>
+            <button onClick={manualSave} className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 font-semibold text-slate-950 transition hover:bg-cyan-300" title="Save"><Icons.Save className="h-4 w-4" /></button>
+            <button onClick={exportExcel} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white font-semibold text-slate-900 transition hover:bg-slate-100" title="Export Excel"><Icons.FileSpreadsheet className="h-4 w-4" /></button>
+          </div>
+        </div>
+
+        <div className="grid gap-2 border-b border-slate-200 px-4 py-2 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]">
+          <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-cyan-100 bg-cyan-50/70 px-2 py-2">
+            <div className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-cyan-900">
+              <Icons.Activity className="h-4 w-4 text-cyan-700" />
+              Live
+            </div>
+            <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-0.5">
+              {liveVoteLeaders.slice(0, 4).map((vote) => (
                 <div
                   key={`${vote.itemId}-${vote.voteType}`}
-                  className={`rounded-lg border bg-white p-2 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
-                    highlightIds[`vote-${vote.itemId}`] ? 'summit-soft-pulse scale-[1.02] border-cyan-300 ring-2 ring-cyan-100' : 'border-cyan-100'
+                  className={`flex min-w-[170px] items-center gap-2 rounded-lg border bg-white px-2 py-1.5 transition-all duration-300 ${
+                    highlightIds[`vote-${vote.itemId}`] ? 'summit-soft-pulse border-cyan-300 ring-2 ring-cyan-100' : 'border-cyan-100'
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-xs font-semibold text-slate-900">{vote.itemLabel}</div>
-                      <div className="text-[11px] capitalize text-slate-500">{vote.itemType || 'category'}</div>
-                    </div>
-                    <span className="rounded-lg bg-cyan-600 px-2 py-1 text-xs font-bold text-white">{vote.count}</span>
-                  </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-cyan-100">
-                    <div className="h-1.5 rounded-full bg-cyan-500 transition-all duration-500" style={{ width: `${Math.min(100, vote.count * 12)}%` }} />
-                  </div>
+                  <span className="rounded-md bg-cyan-600 px-1.5 py-1 text-xs font-bold text-white">{vote.count}</span>
+                  <span className="min-w-0 truncate text-xs font-semibold text-slate-900">{vote.itemLabel}</span>
                 </div>
               ))}
-              {!liveVoteLeaders.length && <p className="text-sm text-slate-500">Live vote leaders will appear as people vote.</p>}
+              {!liveVoteLeaders.length && <span className="text-xs text-slate-500">Vote leaders appear here as people vote.</span>}
             </div>
           </div>
-          <div className={`rounded-lg border bg-amber-50/80 p-3 transition-all duration-300 ${
-            highlightIds.ideas ? 'scale-[1.01] border-amber-300 shadow-md ring-2 ring-amber-100' : 'border-amber-100'
+          <div className={`flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border bg-amber-50/80 px-2 py-2 transition-all duration-300 ${
+            highlightIds.ideas ? 'border-amber-300 shadow-md ring-2 ring-amber-100' : 'border-amber-100'
           }`}>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <Icons.Flame className="h-4 w-4 text-amber-700" />
-                Top rising ideas
-              </div>
-              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-800">{risingIdeas.length}</span>
+            <div className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-amber-900">
+              <Icons.Flame className="h-4 w-4 text-amber-700" />
+              Rising
             </div>
-            <div className="space-y-2">
-              {risingIdeas.map((idea, index) => (
+            <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-0.5">
+              {risingIdeas.slice(0, 2).map((idea) => (
                 <div
                   key={idea.id}
-                  className={`rounded-lg border bg-white p-2 transition-all duration-300 ${
-                    highlightIds[`idea-${idea.id}`] || highlightIds[`vote-${idea.itemId}`]
-                      ? 'summit-soft-pulse border-amber-300 ring-2 ring-amber-100'
-                      : 'border-amber-100'
+                  className={`flex min-w-[180px] items-center gap-2 rounded-lg border bg-white px-2 py-1.5 transition-all duration-300 ${
+                    highlightIds[`idea-${idea.id}`] || highlightIds[`vote-${idea.itemId}`] ? 'summit-soft-pulse border-amber-300 ring-2 ring-amber-100' : 'border-amber-100'
                   }`}
                 >
-                  <div className="flex items-start gap-2">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-xs font-bold text-amber-800">{index + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs font-semibold text-slate-900">{idea.itemLabel}</div>
-                      <div className="mt-0.5 truncate text-[11px] text-slate-500">
-                        {idea.value?.scope === 'subcategory' ? `Subcategory under ${idea.value?.parentName || 'category'}` : 'Top-level category'}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-xs font-bold text-amber-800">{idea.support}</div>
-                      <div className="text-[10px] uppercase text-slate-400">votes</div>
-                    </div>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-                    <span>Suggested by {idea.participantName || 'participant'}</span>
-                    <span>{idea.recentActivity} recent</span>
-                  </div>
+                  <span className="rounded-md bg-amber-100 px-1.5 py-1 text-xs font-bold text-amber-800">{idea.support}</span>
+                  <span className="min-w-0 truncate text-xs font-semibold text-slate-900">{idea.itemLabel}</span>
                 </div>
               ))}
-              {!risingIdeas.length && (
-                <div className="rounded-lg bg-white px-3 py-3 text-sm text-amber-900">
-                  Rising ideas will appear after participants suggest or vote on ideas.
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-2 text-center">
-                <div className="rounded-lg bg-white px-3 py-2">
-                  <div className="text-lg font-semibold text-slate-900">{topCategorySuggestions.length}</div>
-                  <div className="text-[11px] uppercase text-slate-500">Top-level</div>
-                </div>
-                <div className="rounded-lg bg-white px-3 py-2">
-                  <div className="text-lg font-semibold text-slate-900">{pendingSubcategorySuggestionCount}</div>
-                  <div className="text-[11px] uppercase text-slate-500">Subcategory</div>
-                </div>
-              </div>
+              {!risingIdeas.length && <span className="text-xs text-amber-900">Ideas appear here during voting.</span>}
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <button onClick={addCategory} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"><Icons.FolderPlus className="mr-1 inline h-4 w-4" />Add top category</button>
-            <button onClick={() => setShowDeleted(!showDeleted)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"><Icons.ArchiveRestore className="mr-1 inline h-4 w-4" />Removed items</button>
-            <button onClick={mergeSelectedCategories} disabled={selectedForMerge.length < 2} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-40 hover:bg-slate-50"><Icons.Merge className="mr-1 inline h-4 w-4" />Combine selected</button>
-            <label className="cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50">
-              <Icons.Upload className="mr-1 inline h-4 w-4" />Restore JSON
+        <div className="flex flex-col gap-2 px-4 py-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-center">
+            <div className="relative min-w-0 flex-1">
+              <Icons.Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input
+                value={taxonomySearch}
+                onChange={(event) => setTaxonomySearch(event.target.value)}
+                className="min-h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-9 py-1.5 text-sm text-slate-900 outline-none transition focus:border-cyan-300 focus:bg-white focus:ring-2 focus:ring-cyan-100"
+                placeholder="Search categories, subcategories, evidence, notes"
+              />
+              {taxonomySearch && (
+                <button
+                  type="button"
+                  onClick={() => setTaxonomySearch('')}
+                  className="absolute right-2 top-1.5 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  title="Clear search"
+                >
+                  <Icons.X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <span className="rounded-lg bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-600">
+              {searchNeedle ? `${visibleCategories.length} cat / ${searchVisibleSubcategoryCount} sub` : 'Ready'}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 text-sm">
+            <button onClick={addCategory} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition hover:bg-slate-50" title="Add top category"><Icons.FolderPlus className="h-4 w-4" /><span className="hidden sm:inline">Add</span></button>
+            <button onClick={() => setShowDeleted(!showDeleted)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Removed items"><Icons.ArchiveRestore className="h-4 w-4" /></button>
+            <button onClick={mergeSelectedCategories} disabled={selectedForMerge.length < 2} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition disabled:opacity-40 hover:bg-slate-50" title="Combine selected categories"><Icons.Merge className="h-4 w-4" /><span>{selectedForMerge.length || ''}</span></button>
+            <label className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Restore JSON">
+              <Icons.Upload className="h-4 w-4" />
               <input type="file" accept="application/json" onChange={importJson} className="hidden" />
             </label>
-            <button onClick={() => navigator.clipboard.writeText(JSON.stringify(state, null, 2))} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"><Icons.Copy className="mr-1 inline h-4 w-4" />Copy JSON</button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <button onClick={() => navigator.clipboard.writeText(JSON.stringify(state, null, 2))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Copy JSON"><Icons.Copy className="h-4 w-4" /></button>
             {voteUrl ? (
               <>
-                <span className={`rounded-lg px-3 py-2 font-medium ${isVotingExpired ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'}`}>
-                  <Icons.Clock3 className="mr-1 inline h-4 w-4" />
-                  {formatCountdown(effectiveCountdownMs)} {isVotingExpired ? '' : 'left'}
+                <span className={`flex h-9 items-center rounded-lg px-2.5 text-xs font-semibold ${isVotingExpired ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'}`} title={`Ends ${new Date(session.voteExpiresAt).toLocaleTimeString()}`}>
+                  <Icons.Clock3 className="mr-1 h-4 w-4" />
+                  {formatCountdown(effectiveCountdownMs)}
                 </span>
-                <span className="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">Ends {new Date(session.voteExpiresAt).toLocaleTimeString()}</span>
-                <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md"><Icons.Link className="mr-1 inline h-4 w-4" />Copy voting link</button>
-                <button onClick={() => setShowVotingShare(true)} className="rounded-lg bg-slate-950 px-3 py-2 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"><Icons.QrCode className="mr-1 inline h-4 w-4" />Fullscreen QR</button>
-                <button onClick={() => setShowRegenerateLinkConfirm(true)} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:bg-amber-100 hover:shadow-md"><Icons.RefreshCcw className="mr-1 inline h-4 w-4" />Reset stats + link</button>
+                <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md" title="Copy voting link"><Icons.Link className="h-4 w-4" /></button>
+                <button onClick={() => setShowVotingShare(true)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md" title="Fullscreen QR"><Icons.QrCode className="h-4 w-4" /></button>
+                <button onClick={() => setShowRegenerateLinkConfirm(true)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:bg-amber-100 hover:shadow-md" title="Reset stats and regenerate link"><Icons.RefreshCcw className="h-4 w-4" /></button>
               </>
             ) : (
-              <button onClick={() => enableVoting(false)} className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md"><Icons.Radio className="mr-1 inline h-4 w-4" />Open 2-hour voting link</button>
+              <button onClick={() => enableVoting(false)} className="flex h-9 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md"><Icons.Radio className="h-4 w-4" /><span>Open vote</span></button>
             )}
-          </div>
-        </div>
-      </div>
-
-      <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Icons.Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-            <input
-              value={taxonomySearch}
-              onChange={(event) => setTaxonomySearch(event.target.value)}
-              className="min-h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-9 py-2 text-sm text-slate-900 outline-none transition focus:border-cyan-300 focus:bg-white focus:ring-2 focus:ring-cyan-100"
-              placeholder="Search categories, subcategories, evidence, or notes"
-            />
-            {taxonomySearch && (
-              <button
-                type="button"
-                onClick={() => setTaxonomySearch('')}
-                className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                title="Clear search"
-              >
-                <Icons.X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
-            {searchNeedle ? `${visibleCategories.length} categories / ${searchVisibleSubcategoryCount} subcategories shown` : 'Search is ready'}
           </div>
         </div>
       </div>
@@ -1694,7 +1658,14 @@ export default function SummitTaxonomyWorkshop() {
         <aside className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-900">Top Categories</h2>
-            <span className="text-xs text-slate-500">Use grips to reorder</span>
+            <div className="flex items-center gap-2">
+              {selectedForMerge.length > 0 && (
+                <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">
+                  {selectedForMerge.length} selected
+                </span>
+              )}
+              <span className="text-xs text-slate-500">Grip to reorder</span>
+            </div>
           </div>
           <div className="space-y-2">
             {visibleCategories.map((cat) => (
@@ -1714,16 +1685,18 @@ export default function SummitTaxonomyWorkshop() {
                   dropCategory(event, cat);
                 }}
                 onClick={() => setSelectedCategoryId(cat.id)}
-                className={`w-full rounded-lg border p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
+                className={`relative w-full rounded-lg border p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
                   dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id
                     ? 'scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
                     : dragItem?.type === 'category' && dragItem.id === cat.id
                       ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
-                      : highlightIds[`vote-${cat.id}`]
-                        ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                        : selectedCategory?.id === cat.id
-                          ? 'border-slate-900 bg-slate-50 shadow-sm'
-                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      : highlightIds[`move-category-${cat.id}`]
+                        ? 'summit-drop-land border-cyan-400 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                        : highlightIds[`vote-${cat.id}`]
+                          ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                          : selectedCategory?.id === cat.id
+                            ? 'border-slate-900 bg-slate-50 shadow-sm'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                 }`}
               >
                 <div className="flex items-start gap-3">
@@ -1754,6 +1727,21 @@ export default function SummitTaxonomyWorkshop() {
                     )}
                   </span>
                   <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleSelectedForMerge(cat.id);
+                      }}
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 ${
+                        selectedForMerge.includes(cat.id)
+                          ? 'border-cyan-300 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-100'
+                          : 'border-slate-200 bg-white text-slate-400 hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700'
+                      }`}
+                      title={selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
+                    >
+                      {selectedForMerge.includes(cat.id) ? <Icons.Check className="h-4 w-4" /> : <Icons.Square className="h-4 w-4" />}
+                    </button>
                     <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
                       linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
                     }`}>
@@ -1774,20 +1762,17 @@ export default function SummitTaxonomyWorkshop() {
                         onColorSelect={(color) => updateCategory(cat.id, { color })}
                         onRemove={() => softDeleteCategory(cat.id)}
                         label="Category options"
-                        extraActions={(
-                          <button
-                            type="button"
-                            onClick={() => setSelectedForMerge(prev => prev.includes(cat.id) ? prev.filter(id => id !== cat.id) : [...prev, cat.id])}
-                            className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-semibold text-slate-800 transition hover:bg-white hover:shadow-sm"
-                          >
-                            {selectedForMerge.includes(cat.id) ? <Icons.CheckSquare className="h-4 w-4 text-cyan-600" /> : <Icons.Square className="h-4 w-4 text-slate-500" />}
-                            {selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
-                          </button>
-                        )}
                       />
                     </div>
                   </div>
                 </div>
+                {dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id && (
+                  <div className="pointer-events-none absolute inset-x-3 -bottom-2 z-10 flex justify-center">
+                    <span className="rounded-full bg-cyan-600 px-2 py-0.5 text-[11px] font-semibold text-white shadow-lg">
+                      Drop here: {dragOverTarget.label}
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
             {!visibleCategories.length && (
@@ -1820,7 +1805,9 @@ export default function SummitTaxonomyWorkshop() {
             className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
               dragOverTarget?.type === 'selected-category' && selectedCategory?.id === dragOverTarget.id
                 ? 'border-cyan-300 ring-2 ring-cyan-100'
-                : 'border-slate-200'
+                : selectedCategory && highlightIds[`move-category-${selectedCategory.id}`]
+                  ? 'summit-drop-land border-cyan-300 ring-2 ring-cyan-100'
+                  : 'border-slate-200'
             }`}
           >
             {selectedCategory && (
@@ -1901,9 +1888,11 @@ export default function SummitTaxonomyWorkshop() {
                             ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
                             : dragItem?.type === 'sub' && dragItem.id === subcat.id
                               ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
-                              : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
-                                ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                                : 'border-slate-200 bg-slate-50'
+                              : highlightIds[`move-sub-${subcat.id}`]
+                                ? 'summit-drop-land border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                                : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
+                                  ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                                  : 'border-slate-200 bg-slate-50'
                       }`}
                     >
                       <div className="flex items-start gap-2">
