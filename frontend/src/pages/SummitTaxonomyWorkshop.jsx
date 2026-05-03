@@ -918,6 +918,38 @@ export default function SummitTaxonomyWorkshop() {
     event.target.value = '';
   };
 
+  const renderMoveSubcategoryAction = (category, subcat) => (
+    <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 p-2">
+      <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-cyan-900">
+        <Icons.MoveRight className="h-3.5 w-3.5" />
+        Move to category
+      </label>
+      <select
+        value={category.id}
+        onClick={(event) => event.stopPropagation()}
+        onChange={(event) => {
+          const nextCategoryId = event.target.value;
+          if (!nextCategoryId || nextCategoryId === category.id) return;
+          const targetCategory = activeCategories.find(candidate => candidate.id === nextCategoryId);
+          moveSubcategory(category.id, subcat.id, nextCategoryId);
+          setSelectedCategoryId(nextCategoryId);
+          setIconPickerTarget(null);
+          pushToast({
+            title: 'Subcategory moved',
+            message: targetCategory ? `${subcat.name} moved to ${targetCategory.name}` : subcat.name,
+            icon: 'MoveRight',
+            tone: 'cyan',
+          });
+        }}
+        className="w-full rounded-md border border-cyan-200 bg-white px-2 py-1.5 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+      >
+        {activeCategories.map(candidate => (
+          <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+        ))}
+      </select>
+    </div>
+  );
+
   const renderCategoryPanel = (category) => {
     const isFocusedEditor = !isSearchMode && selectedCategory?.id === category.id;
     const categorySubcategories = getVisibleSubcategoriesForCategory(category);
@@ -1101,6 +1133,7 @@ export default function SummitTaxonomyWorkshop() {
                     setIconPickerTarget(null);
                   }}
                   onRemove={() => softDeleteSubcategory(category.id, subcat.id)}
+                  extraActions={renderMoveSubcategoryAction(category, subcat)}
                   label="Subcategory options"
                 />
               </div>
@@ -1666,6 +1699,7 @@ export default function SummitTaxonomyWorkshop() {
                             setIconPickerTarget(null);
                           }}
                           onRemove={() => softDeleteSubcategory(selectedCategory.id, subcat.id)}
+                          extraActions={renderMoveSubcategoryAction(selectedCategory, subcat)}
                           label="Subcategory options"
                         />
                       </div>
