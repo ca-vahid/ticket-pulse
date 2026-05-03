@@ -146,6 +146,20 @@ export default function SummitVote() {
     localStorage.setItem(storageKey, JSON.stringify({ displayName, participantKey, myVotes, priorityItems }));
   }, [displayName, participantKey, myVotes, priorityItems, storageKey]);
 
+  useEffect(() => {
+    if (!showMobilePriorities) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') closeMobilePriorities();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showMobilePriorities]);
+
   const join = async (event) => {
     event.preventDefault();
     setJoining(true);
@@ -203,6 +217,11 @@ export default function SummitVote() {
     window.setTimeout(() => {
       ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 50);
+  };
+
+  const closeMobilePriorities = () => {
+    setShowMobilePriorities(false);
+    setShowMobileActions(false);
   };
 
   const startNameEdit = () => {
@@ -670,22 +689,39 @@ export default function SummitVote() {
             </div>
 
             {showMobilePriorities && (
-              <div className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm lg:hidden">
-                <div className="absolute inset-x-0 bottom-0 max-h-[78vh] overflow-hidden rounded-t-2xl border border-cyan-200/20 bg-slate-950 shadow-2xl transition-all">
+              <div
+                className="fixed inset-0 z-[80] flex items-end bg-slate-950/75 backdrop-blur-sm lg:hidden"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="mobile-priorities-title"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) closeMobilePriorities();
+                }}
+                onTouchStart={(event) => {
+                  if (event.target === event.currentTarget) closeMobilePriorities();
+                }}
+              >
+                <div className="max-h-[86dvh] w-full overflow-hidden rounded-t-2xl border border-cyan-200/20 bg-slate-950 shadow-2xl transition-all duration-200 animate-in slide-in-from-bottom-4">
                   <div className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
                     <div>
-                      <h2 className="text-base font-semibold text-white">My priorities</h2>
-                      <p className="mt-1 text-xs text-cyan-100">{activePriorityItems.length} selected. Tap X to remove a vote.</p>
+                      <h2 id="mobile-priorities-title" className="text-base font-semibold text-white">My priorities</h2>
+                      <p className="mt-1 text-xs text-cyan-100">{activePriorityItems.length} selected. Tap an item X to remove a vote.</p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setShowMobilePriorities(false)}
-                      className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-white/10 text-slate-200 transition active:scale-[0.98] [touch-action:manipulation]"
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        closeMobilePriorities();
+                      }}
+                      onClick={closeMobilePriorities}
+                      className="relative z-[90] flex min-h-12 min-w-12 items-center justify-center rounded-full border border-white/10 bg-white/10 text-slate-100 shadow-lg transition hover:bg-white/15 active:scale-[0.96] [touch-action:manipulation]"
+                      aria-label="Close priorities"
                     >
                       <Icons.X className="h-5 w-5" />
                     </button>
                   </div>
-                  <div className="max-h-[58vh] overflow-auto px-4 pb-5">
+                  <div className="max-h-[58dvh] overflow-auto px-4 pb-4">
                     <PriorityDropZone collapsed={false}>
                       {activePriorityItems.map((item, index) => (
                         <div key={item.id} className="flex items-center gap-2 rounded-lg bg-white px-3 py-3 text-slate-900 shadow-sm">
@@ -704,6 +740,15 @@ export default function SummitVote() {
                         </div>
                       )}
                     </PriorityDropZone>
+                  </div>
+                  <div className="border-t border-white/10 bg-slate-950 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
+                    <button
+                      type="button"
+                      onClick={closeMobilePriorities}
+                      className="min-h-12 w-full rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-lg transition active:scale-[0.98] [touch-action:manipulation]"
+                    >
+                      Done
+                    </button>
                   </div>
                 </div>
               </div>
