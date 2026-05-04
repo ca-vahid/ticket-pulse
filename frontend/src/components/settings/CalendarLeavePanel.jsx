@@ -31,16 +31,25 @@ export default function CalendarLeavePanel() {
   const [newRule, setNewRule] = useState(EMPTY_RULE);
   const [preview, setPreview] = useState(null);
   const [lastPreviewMode, setLastPreviewMode] = useState(false);
+  const [reviewRows, setReviewRows] = useState([]);
+  const [reviewFilter, setReviewFilter] = useState('review');
   const [reviewSelections, setReviewSelections] = useState({});
+  const [reviewEdits, setReviewEdits] = useState({});
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  const loadReviewRows = useCallback(async (statusFilter = reviewFilter) => {
+    const res = await calendarLeaveAPI.getReviewRows({ status: statusFilter, limit: 250 });
+    setReviewRows(res.data || []);
+  }, [reviewFilter]);
+
   const refresh = useCallback(async () => {
-    const [configRes, rulesRes, aliasesRes, agentsRes] = await Promise.allSettled([
+    const [configRes, rulesRes, aliasesRes, agentsRes, reviewRes] = await Promise.allSettled([
       calendarLeaveAPI.getConfig(),
       calendarLeaveAPI.getRules(),
       calendarLeaveAPI.getAliases(),
       visualsAPI.getAgents({ includeInactive: true }),
+      calendarLeaveAPI.getReviewRows({ status: reviewFilter, limit: 250 }),
     ]);
     if (configRes.status === 'fulfilled' && configRes.value?.data) {
       setConfig({ ...DEFAULT_CONFIG, ...configRes.value.data });
@@ -56,9 +65,12 @@ export default function CalendarLeavePanel() {
         isActive: t.isActive,
       })));
     }
-  }, []);
+    if (reviewRes.status === 'fulfilled') setReviewRows(reviewRes.value?.data || []);
+  }, [reviewFilter]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => { loadReviewRows(reviewFilter).catch(() => {}); }, [loadReviewRows, reviewFilter]);
 
   const saveConfig = async () => {
     setBusy(true);
@@ -91,6 +103,7 @@ export default function CalendarLeavePanel() {
       await calendarLeaveAPI.saveRule(rule);
       setNewRule(EMPTY_RULE);
       await refresh();
+      if (preview) await runPreview(lastPreviewMode);
     } finally {
       setBusy(false);
     }
@@ -123,6 +136,7 @@ export default function CalendarLeavePanel() {
       });
       setPreview(res.data);
       setLastPreviewMode(useLlm);
+      await loadReviewRows(reviewFilter);
       const llmText = useLlm
         ? `, Haiku: ${res.data.llmFreshCalls || 0} new / ${res.data.llmCacheHits || 0} cached${res.data.llmSkipped ? ` / ${res.data.llmSkipped} skipped` : ''}`
         : '';
@@ -135,7 +149,7 @@ export default function CalendarLeavePanel() {
   };
 
   const saveReviewAlias = async (row, { isIgnored = false } = {}) => {
-    const alias = (row.nameGuess || row.personAlias || '').trim();
+    const alias = (row.personAlias || row.nameGuess || '').trim();
     if (!alias) return;
     const selectedTechId = reviewSelections[row.eventFingerprint || row.subject];
     if (!isIgnored && !selectedTechId) return;
@@ -163,13 +177,55 @@ export default function CalendarLeavePanel() {
     try {
       await ensureConfigSaved();
       const res = await calendarLeaveAPI.sync({ useLlm: true });
-      setStatus({ ok: true, text: `Sync complete: ${res.data.leaveDaysCreated} leave-days, ${res.data.reviewNeeded} review-needed events` });
+      setPreview(res.data);
+      setLastPreviewMode(true);
+      await loadReviewRows(reviewFilter);
+      setStatus({ ok: true, text: `Sync complete: ${res.data.leaveDaysCreated} leave-days, ${res.data.reviewNeeded} review-needed events. Review list loaded below.` });
     } catch (err) {
       setStatus({ ok: false, text: err.message });
     } finally {
       setBusy(false);
     }
   };
+
+  const saveManualDecision = async (row, { isIgnored = false } = {}) => {
+    const key = row.eventFingerprint || row.subject;
+    const rowEdit = reviewEdits[key] || {};
+    const selectedTechId = reviewSelections[key] || row.technicianId;
+    if (!isIgnored && !selectedTechId) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      const selectedTech = technicians.find((t) => String(t.id) === String(selectedTechId));
+      await calendarLeaveAPI.saveReviewDecision({
+        eventFingerprint: row.eventFingerprint,
+        graphEventId: row.graphEventId,
+        subject: row.subject,
+        start: row.start,
+        end: row.end,
+        isAllDay: row.isAllDay,
+        nameGuess: row.nameGuess,
+        personAlias: row.personAlias,
+        technicianId: isIgnored ? null : Number(selectedTechId),
+        technicianName: selectedTech?.name || row.technicianName || null,
+        category: isIgnored ? 'IGNORED' : (rowEdit.category || row.category || 'OFF'),
+        halfDayPart: rowEdit.halfDayPart ?? row.halfDayPart ?? null,
+        isIgnored,
+      });
+      await loadReviewRows(reviewFilter);
+      if (preview) await runPreview(lastPreviewMode);
+      setStatus({ ok: true, text: isIgnored ? `Ignored event "${row.subject}"` : `Approved event "${row.subject}"` });
+    } catch (err) {
+      setStatus({ ok: false, text: err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const visibleRows = preview?.rows?.length ? preview.rows : reviewRows;
+  const visibleSummary = preview
+    ? `${preview.matched || 0} matched · ${preview.reviewNeeded || 0} review · ${preview.ignored || 0} ignored`
+    : `${reviewRows.length} saved ${reviewFilter === 'review' ? 'review-needed' : 'review'} rows`;
 
   return (
     <div className="space-y-5">
@@ -286,65 +342,142 @@ export default function CalendarLeavePanel() {
         </div>
       </div>
 
-      {preview && (
+      {(visibleRows || []).length === 0 && (
+        <div className="bg-white border rounded-lg p-4 text-sm text-gray-600">
+          <div className="flex flex-wrap items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-gray-400" />
+            <span className="font-semibold text-gray-800">Review Queue</span>
+            <span>No saved calendar review rows yet.</span>
+            <button
+              type="button"
+              onClick={() => loadReviewRows(reviewFilter)}
+              className="ml-auto rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600"
+            >
+              Refresh Saved Reviews
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            Preview, Preview + Haiku, and Sync now save their review-needed events here so unresolved calendar entries remain visible.
+          </p>
+        </div>
+      )}
+
+      {(visibleRows || []).length > 0 && (
         <div className="bg-white border rounded-lg overflow-hidden">
-          <div className="px-4 py-3 border-b flex items-center gap-2">
+          <div className="px-4 py-3 border-b flex flex-wrap items-center gap-2">
             <CheckCircle className="w-4 h-4 text-emerald-600" />
-            <span className="font-semibold text-sm">Preview</span>
-            <span className="text-xs text-gray-500">{preview.matched} matched · {preview.reviewNeeded} review · {preview.ignored} ignored</span>
-            {preview.llmApplied > 0 && (
-              <span className="ml-auto text-xs text-gray-500">
+            <span className="font-semibold text-sm">{preview ? 'Latest Preview / Sync Result' : 'Saved Review Queue'}</span>
+            <span className="text-xs text-gray-500">{visibleSummary}</span>
+            {preview?.llmApplied > 0 && (
+              <span className="text-xs text-gray-500">
                 Haiku {preview.llmFreshCalls || 0} new · {preview.llmCacheHits || 0} cached · {preview.durationMs || 0}ms
               </span>
             )}
+            <div className="ml-auto flex items-center gap-2">
+              <select
+                value={reviewFilter}
+                onChange={(e) => setReviewFilter(e.target.value)}
+                className="rounded border border-gray-200 bg-white px-2 py-1 text-xs"
+              >
+                <option value="review">Saved review-needed</option>
+                <option value="all">Saved all recent</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => { setPreview(null); loadReviewRows(reviewFilter); }}
+                className="rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600"
+              >
+                Show Saved
+              </button>
+            </div>
           </div>
           <div className="max-h-96 overflow-auto divide-y">
-            {(preview.rows || []).slice(0, 120).map((row, idx) => (
-              <div key={`${row.eventFingerprint || row.subject}-${idx}`} className={`px-4 py-2 text-sm ${row.requiresReview ? 'bg-amber-50' : ''}`}>
-                <div className="flex gap-2">
-                  <span className="font-medium text-gray-900">{row.subject}</span>
-                  <span className="ml-auto text-xs text-gray-500">{row.category}{row.halfDayPart ? `/${row.halfDayPart}` : ''}</span>
-                </div>
-                <div className="text-xs text-gray-500">
-                  {row.start?.dateTime} · {row.technicianName || row.nameGuess || 'unmatched'}{row.technicianIsActive === false ? ' (inactive)' : ''} · {row.source === 'llm' && row.llmCached ? 'haiku cache' : row.source} · {Math.round((row.confidence || 0) * 100)}% · {row.reason}
-                </div>
-                {row.requiresReview && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium text-amber-800">Review {row.nameGuess || 'entry'}</span>
-                    <select
-                      value={reviewSelections[row.eventFingerprint || row.subject] || ''}
-                      onChange={(e) => setReviewSelections(prev => ({ ...prev, [row.eventFingerprint || row.subject]: e.target.value }))}
-                      className="rounded border border-amber-200 bg-white px-2 py-1 text-xs"
-                    >
-                      <option value="">Map to technician</option>
-                      {technicians.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}{t.isActive === false ? ' (inactive)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => saveReviewAlias(row)}
-                      disabled={busy || !reviewSelections[row.eventFingerprint || row.subject]}
-                      className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-white px-2 py-1 text-xs font-medium text-emerald-700 disabled:opacity-40"
-                    >
-                      <UserPlus className="h-3.5 w-3.5" />
-                      Map Alias
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => saveReviewAlias(row, { isIgnored: true })}
-                      disabled={busy || !(row.nameGuess || row.personAlias)}
-                      className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 disabled:opacity-40"
-                    >
-                      <Ban className="h-3.5 w-3.5" />
-                      Ignore Name
-                    </button>
+            {(visibleRows || []).slice(0, 160).map((row, idx) => {
+              const key = row.eventFingerprint || row.subject;
+              const rowEdit = reviewEdits[key] || {};
+              return (
+                <div key={`${key}-${idx}`} className={`px-4 py-2 text-sm ${row.requiresReview ? 'bg-amber-50' : ''}`}>
+                  <div className="flex gap-2">
+                    <span className="font-medium text-gray-900">{row.subject}</span>
+                    <span className="ml-auto text-xs text-gray-500">{row.category}{row.halfDayPart ? `/${row.halfDayPart}` : ''}</span>
                   </div>
-                )}
-              </div>
-            ))}
+                  <div className="text-xs text-gray-500">
+                    {row.start?.dateTime} · {row.technicianName || row.personAlias || row.nameGuess || 'unmatched'}{row.technicianIsActive === false ? ' (inactive)' : ''} · {row.source === 'llm' && row.llmCached ? 'haiku cache' : row.source} · {Math.round((row.confidence || 0) * 100)}% · {row.reason}
+                  </div>
+                  {row.requiresReview && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-amber-800">Review {row.personAlias || row.nameGuess || 'entry'}</span>
+                      <select
+                        value={reviewSelections[key] || ''}
+                        onChange={(e) => setReviewSelections(prev => ({ ...prev, [key]: e.target.value }))}
+                        className="rounded border border-amber-200 bg-white px-2 py-1 text-xs"
+                      >
+                        <option value="">Map to technician</option>
+                        {technicians.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}{t.isActive === false ? ' (inactive)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={rowEdit.category || row.category || 'OFF'}
+                        onChange={(e) => setReviewEdits(prev => ({ ...prev, [key]: { ...prev[key], category: e.target.value } }))}
+                        className="rounded border border-gray-200 bg-white px-2 py-1 text-xs"
+                      >
+                        <option value="OFF">Off</option>
+                        <option value="WFH">WFH</option>
+                        <option value="OTHER">Other leave</option>
+                      </select>
+                      <select
+                        value={rowEdit.halfDayPart ?? row.halfDayPart ?? ''}
+                        onChange={(e) => setReviewEdits(prev => ({ ...prev, [key]: { ...prev[key], halfDayPart: e.target.value || null } }))}
+                        className="rounded border border-gray-200 bg-white px-2 py-1 text-xs"
+                      >
+                        <option value="">Full / infer</option>
+                        <option value="AM">AM</option>
+                        <option value="PM">PM</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => saveReviewAlias(row)}
+                        disabled={busy || !reviewSelections[key]}
+                        className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-white px-2 py-1 text-xs font-medium text-emerald-700 disabled:opacity-40"
+                      >
+                        <UserPlus className="h-3.5 w-3.5" />
+                      Map Alias
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveManualDecision(row)}
+                        disabled={busy || !(reviewSelections[key] || row.technicianId) || row.category === 'IGNORED'}
+                        className="inline-flex items-center gap-1 rounded border border-sky-200 bg-white px-2 py-1 text-xs font-medium text-sky-700 disabled:opacity-40"
+                      >
+                        <CheckCircle className="h-3.5 w-3.5" />
+                      Approve Event
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveReviewAlias(row, { isIgnored: true })}
+                        disabled={busy || !(row.nameGuess || row.personAlias)}
+                        className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 disabled:opacity-40"
+                      >
+                        <Ban className="h-3.5 w-3.5" />
+                      Ignore Name
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveManualDecision(row, { isIgnored: true })}
+                        disabled={busy}
+                        className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 disabled:opacity-40"
+                      >
+                        <Ban className="h-3.5 w-3.5" />
+                      Ignore Event
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

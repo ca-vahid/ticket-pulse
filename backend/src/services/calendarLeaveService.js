@@ -89,6 +89,17 @@ function eventFingerprint(event) {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
+function serializeEvent(event) {
+  return {
+    id: event.id,
+    subject: event.subject || '',
+    start: event.start || null,
+    end: event.end || null,
+    isAllDay: event.isAllDay === true,
+    lastModifiedDateTime: event.lastModifiedDateTime || null,
+  };
+}
+
 function compileRule(rule) {
   try {
     return new RegExp(rule.pattern, 'i');
@@ -200,7 +211,6 @@ class CalendarLeaveService {
         });
       }
     }
-    await prisma.calendarLeaveClassification.deleteMany({ where: { workspaceId } });
   }
 
   async getRules(workspaceId) {
@@ -212,7 +222,9 @@ class CalendarLeaveService {
     if (!VALID_HALF_DAY.has(data.halfDayPart)) throw new Error('Invalid halfDayPart');
     new RegExp(data.pattern, 'i');
     if (data.id) {
-      return prisma.calendarLeaveRule.update({
+      const existing = await prisma.calendarLeaveRule.findUnique({ where: { id: data.id }, select: { workspaceId: true } });
+      if (!existing || existing.workspaceId !== workspaceId) throw new Error('Calendar leave rule not found');
+      const rule = await prisma.calendarLeaveRule.update({
         where: { id: data.id },
         data: {
           name: data.name,
@@ -224,8 +236,10 @@ class CalendarLeaveService {
           notes: data.notes || null,
         },
       });
+      await this._markLlmCacheStale(workspaceId, 'Detection rule changed');
+      return rule;
     }
-    return prisma.calendarLeaveRule.create({
+    const rule = await prisma.calendarLeaveRule.create({
       data: {
         workspaceId,
         name: data.name,
@@ -237,10 +251,14 @@ class CalendarLeaveService {
         notes: data.notes || null,
       },
     });
+    await this._markLlmCacheStale(workspaceId, 'Detection rule added');
+    return rule;
   }
 
   async deleteRule(workspaceId, id) {
-    return prisma.calendarLeaveRule.deleteMany({ where: { id, workspaceId } });
+    const result = await prisma.calendarLeaveRule.deleteMany({ where: { id, workspaceId } });
+    if (result.count > 0) await this._markLlmCacheStale(workspaceId, 'Detection rule deleted');
+    return result;
   }
 
   async getAliases(workspaceId) {
@@ -269,16 +287,35 @@ class CalendarLeaveService {
         isIgnored: data.isIgnored === true,
       },
     });
-    await prisma.calendarLeaveClassification.deleteMany({ where: { workspaceId } });
+    await this._markLlmCacheStale(workspaceId, 'Alias mapping changed');
     return alias;
   }
 
   async deleteAlias(workspaceId, id) {
     const result = await prisma.calendarLeaveAlias.deleteMany({ where: { id, workspaceId } });
     if (result.count > 0) {
-      await prisma.calendarLeaveClassification.deleteMany({ where: { workspaceId } });
+      await this._markLlmCacheStale(workspaceId, 'Alias mapping deleted');
     }
     return result;
+  }
+
+  async _markLlmCacheStale(workspaceId, reason) {
+    const rows = await prisma.calendarLeaveClassification.findMany({
+      where: { workspaceId, source: 'llm' },
+      select: { id: true, classification: true },
+    });
+    await Promise.all(rows.map((row) => prisma.calendarLeaveClassification.update({
+      where: { id: row.id },
+      data: {
+        source: 'stale_llm',
+        classification: {
+          ...(row.classification || {}),
+          version: `${CLASSIFICATION_VERSION}:stale`,
+          staleReason: reason,
+          staleAt: new Date().toISOString(),
+        },
+      },
+    })));
   }
 
   async fetchEvents(workspaceId, { startDate, endDate, top = 500 } = {}) {
@@ -356,7 +393,7 @@ class CalendarLeaveService {
     const cached = await prisma.calendarLeaveClassification.findUnique({
       where: { workspaceId_eventFingerprint: { workspaceId, eventFingerprint: fingerprint } },
     });
-    if (cached?.classification?.version === CLASSIFICATION_VERSION) {
+    if (cached?.source === 'llm' && cached?.classification?.version === CLASSIFICATION_VERSION) {
       return { ...cached.classification, source: cached.source, cached: true };
     }
 
@@ -436,11 +473,17 @@ class CalendarLeaveService {
   }
 
   async classifyEvents(workspaceId, events, { useLlm = true, llmLimit = null } = {}) {
+    const fingerprints = events.map((event) => eventFingerprint(event));
     const [rules, aliases, technicians] = await Promise.all([
       this.getRules(workspaceId),
       this.getAliases(workspaceId),
       prisma.technician.findMany({ where: { workspaceId }, select: { id: true, name: true, email: true, isActive: true } }),
     ]);
+    const manualClassifications = await prisma.calendarLeaveClassification.findMany({
+      where: { workspaceId, source: 'manual', eventFingerprint: { in: fingerprints } },
+      select: { eventFingerprint: true, classification: true },
+    });
+    const manualByFingerprint = new Map(manualClassifications.map((row) => [row.eventFingerprint, row.classification || {}]));
 
     const rows = [];
     let llmApplied = 0;
@@ -450,13 +493,21 @@ class CalendarLeaveService {
     let llmFailures = 0;
     for (const event of events) {
       const fingerprint = eventFingerprint(event);
+      const manualClassification = manualByFingerprint.get(fingerprint);
       const aliasMatch = this._matchAlias(event.subject, aliases);
       const ruleMatch = this._applyRules(event, rules);
       let classification = null;
-      let technicianId = aliasMatch.technicianId || null;
+      let technicianId = manualClassification?.technicianId || aliasMatch.technicianId || null;
       let requiresReview = false;
 
-      if (aliasMatch.status === 'ignored_alias') {
+      if (manualClassification?.version === CLASSIFICATION_VERSION) {
+        classification = {
+          ...manualClassification,
+          confidence: manualClassification.confidence ?? 1,
+          source: 'manual',
+          reason: manualClassification.reason || 'Manual review decision',
+        };
+      } else if (aliasMatch.status === 'ignored_alias') {
         classification = { category: 'IGNORED', halfDayPart: null, confidence: 1, source: 'alias', reason: `Ignored alias: ${aliasMatch.alias.alias}` };
       } else if (ruleMatch && aliasMatch.status === 'matched') {
         classification = ruleMatch;
@@ -519,6 +570,167 @@ class CalendarLeaveService {
     return { rows, llmApplied, llmSkipped, llmCacheHits, llmFreshCalls, llmFailures };
   }
 
+  _formatRows(rows) {
+    return rows.map((r) => ({
+      eventFingerprint: r.eventFingerprint,
+      graphEventId: r.event?.id || null,
+      subject: r.subject,
+      start: r.event.start,
+      end: r.event.end,
+      isAllDay: r.event.isAllDay,
+      technicianId: r.technicianId,
+      technicianName: r.technician?.name || null,
+      technicianIsActive: r.technicianIsActive,
+      nameGuess: r.nameGuess,
+      personAlias: r.personAlias,
+      category: r.category,
+      halfDayPart: r.halfDayPart,
+      confidence: r.confidence,
+      source: r.source,
+      llmCached: r.llmCached,
+      reason: r.reason,
+      requiresReview: r.requiresReview,
+      isLeave: r.isLeave,
+      aliasStatus: r.aliasStatus,
+    }));
+  }
+
+  async _persistRows(workspaceId, rows, mode) {
+    const nowIso = new Date().toISOString();
+    for (const row of rows) {
+      const existing = await prisma.calendarLeaveClassification.findUnique({
+        where: { workspaceId_eventFingerprint: { workspaceId, eventFingerprint: row.eventFingerprint } },
+        select: { source: true },
+      });
+      if (existing?.source === 'manual' && row.source !== 'manual') continue;
+      const classification = {
+        version: CLASSIFICATION_VERSION,
+        event: serializeEvent(row.event),
+        isLeave: row.isLeave,
+        personAlias: row.personAlias,
+        technicianId: row.technicianId,
+        technicianName: row.technician?.name || null,
+        technicianIsActive: row.technicianIsActive,
+        nameGuess: row.nameGuess,
+        category: row.category,
+        halfDayPart: row.halfDayPart,
+        confidence: row.confidence,
+        reason: row.reason,
+        requiresReview: row.requiresReview,
+        aliasStatus: row.aliasStatus,
+        classifierSource: row.source,
+        lastSeenMode: mode,
+        lastSeenAt: nowIso,
+      };
+      await prisma.calendarLeaveClassification.upsert({
+        where: { workspaceId_eventFingerprint: { workspaceId, eventFingerprint: row.eventFingerprint } },
+        create: {
+          workspaceId,
+          graphEventId: row.event.id,
+          lastModifiedAt: row.event.lastModifiedDateTime ? new Date(row.event.lastModifiedDateTime) : null,
+          eventFingerprint: row.eventFingerprint,
+          source: row.source || 'deterministic',
+          classification,
+          confidence: row.confidence,
+        },
+        update: {
+          graphEventId: row.event.id,
+          lastModifiedAt: row.event.lastModifiedDateTime ? new Date(row.event.lastModifiedDateTime) : null,
+          source: row.source || 'deterministic',
+          classification,
+          confidence: row.confidence,
+        },
+      });
+    }
+  }
+
+  async getReviewRows(workspaceId, { status = 'review', limit = 200 } = {}) {
+    const normalizedLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
+    const rows = await prisma.calendarLeaveClassification.findMany({
+      where: { workspaceId },
+      orderBy: { updatedAt: 'desc' },
+      take: status === 'review' ? 500 : normalizedLimit,
+    });
+    return rows.filter((row) => {
+      const c = row.classification || {};
+      return status === 'review' ? c.requiresReview === true : true;
+    }).slice(0, normalizedLimit).map((row) => {
+      const c = row.classification || {};
+      const event = c.event || {};
+      return {
+        eventFingerprint: row.eventFingerprint,
+        graphEventId: row.graphEventId,
+        subject: event.subject || c.subject || '(no subject)',
+        start: event.start || null,
+        end: event.end || null,
+        isAllDay: event.isAllDay === true,
+        technicianId: c.technicianId || null,
+        technicianName: c.technicianName || null,
+        technicianIsActive: c.technicianIsActive ?? null,
+        nameGuess: c.nameGuess || null,
+        personAlias: c.personAlias || null,
+        category: c.category || 'OTHER',
+        halfDayPart: c.halfDayPart || null,
+        confidence: c.confidence ?? row.confidence ?? 0,
+        source: row.source,
+        reason: c.reason || '',
+        requiresReview: c.requiresReview === true,
+        isLeave: c.isLeave === true,
+        aliasStatus: c.aliasStatus || null,
+        lastSeenMode: c.lastSeenMode || null,
+        updatedAt: row.updatedAt,
+      };
+    });
+  }
+
+  async saveManualDecision(workspaceId, data) {
+    if (!data.eventFingerprint) throw new Error('eventFingerprint is required');
+    if (!data.graphEventId) throw new Error('graphEventId is required');
+    const category = data.isIgnored ? 'IGNORED' : data.category;
+    if (!VALID_CATEGORIES.has(category)) throw new Error('Invalid category');
+    if (!VALID_HALF_DAY.has(data.halfDayPart)) throw new Error('Invalid halfDayPart');
+    const classification = {
+      version: CLASSIFICATION_VERSION,
+      event: {
+        id: data.graphEventId,
+        subject: data.subject || '',
+        start: data.start || null,
+        end: data.end || null,
+        isAllDay: data.isAllDay === true,
+      },
+      isLeave: !data.isIgnored && category !== 'IGNORED' && !!data.technicianId,
+      personAlias: data.personAlias || null,
+      technicianId: data.isIgnored ? null : Number(data.technicianId) || null,
+      technicianName: data.technicianName || null,
+      nameGuess: data.nameGuess || null,
+      category,
+      halfDayPart: data.halfDayPart || null,
+      confidence: 1,
+      reason: data.isIgnored ? 'Manual decision: ignore this event' : 'Manual decision: approved from review',
+      requiresReview: false,
+      classifierSource: 'manual',
+      lastSeenMode: 'manual',
+      lastSeenAt: new Date().toISOString(),
+    };
+    return prisma.calendarLeaveClassification.upsert({
+      where: { workspaceId_eventFingerprint: { workspaceId, eventFingerprint: data.eventFingerprint } },
+      create: {
+        workspaceId,
+        graphEventId: data.graphEventId,
+        lastModifiedAt: data.lastModifiedDateTime ? new Date(data.lastModifiedDateTime) : null,
+        eventFingerprint: data.eventFingerprint,
+        source: 'manual',
+        classification,
+        confidence: 1,
+      },
+      update: {
+        source: 'manual',
+        classification,
+        confidence: 1,
+      },
+    });
+  }
+
   async preview(workspaceId, { startDate, endDate, useLlm = false, top = 200, llmLimit = null } = {}) {
     const startedAt = Date.now();
     const events = await this.fetchEvents(workspaceId, { startDate, endDate, top });
@@ -530,6 +742,7 @@ class CalendarLeaveService {
       llmFreshCalls,
       llmFailures,
     } = await this.classifyEvents(workspaceId, events, { useLlm, llmLimit });
+    await this._persistRows(workspaceId, rows, useLlm ? 'preview_llm' : 'preview');
     const result = {
       total: rows.length,
       matched: rows.filter((r) => r.isLeave && !r.requiresReview).length,
@@ -541,25 +754,7 @@ class CalendarLeaveService {
       llmFreshCalls,
       llmFailures,
       durationMs: Date.now() - startedAt,
-      rows: rows.map((r) => ({
-        eventFingerprint: r.eventFingerprint,
-        subject: r.subject,
-        start: r.event.start,
-        end: r.event.end,
-        isAllDay: r.event.isAllDay,
-        technicianId: r.technicianId,
-        technicianName: r.technician?.name || null,
-        technicianIsActive: r.technicianIsActive,
-        nameGuess: r.nameGuess,
-        personAlias: r.personAlias,
-        category: r.category,
-        halfDayPart: r.halfDayPart,
-        confidence: r.confidence,
-        source: r.source,
-        llmCached: r.llmCached,
-        reason: r.reason,
-        requiresReview: r.requiresReview,
-      })),
+      rows: this._formatRows(rows),
     };
     logger.info('Calendar leave preview completed', {
       workspaceId,
@@ -586,6 +781,7 @@ class CalendarLeaveService {
     const end = endDate || formatDateUTC(new Date(Date.now() + cfg.horizonDays * 86400000));
     const events = await this.fetchEvents(workspaceId, { startDate: start, endDate: end, top: 1000 });
     const { rows } = await this.classifyEvents(workspaceId, events, { useLlm });
+    await this._persistRows(workspaceId, rows, 'sync');
     const leaveRows = [];
     const validKeys = new Set();
 
@@ -635,10 +831,13 @@ class CalendarLeaveService {
 
     return {
       eventsProcessed: rows.length,
+      total: rows.length,
+      matched: rows.filter((r) => r.isLeave && !r.requiresReview).length,
       leaveDaysCreated: leaveRows.length,
       staleRemoved: deleted.count || 0,
       reviewNeeded: rows.filter((r) => r.requiresReview).length,
       ignored: rows.filter((r) => r.category === 'IGNORED').length,
+      rows: this._formatRows(rows),
     };
   }
 }

@@ -61,6 +61,14 @@ router.get('/aliases', asyncHandler(async (req, res) => {
   res.json({ success: true, data: aliases });
 }));
 
+router.get('/review', asyncHandler(async (req, res) => {
+  const rows = await calendarLeaveService.getReviewRows(req.workspaceId, {
+    status: req.query.status || 'review',
+    limit: req.query.limit ? parseInt(req.query.limit, 10) : 200,
+  });
+  res.json({ success: true, data: rows });
+}));
+
 router.post('/aliases', requireAdmin, asyncHandler(async (req, res) => {
   const alias = await calendarLeaveService.upsertAlias(req.workspaceId, req.body);
   res.json({ success: true, data: alias });
@@ -68,6 +76,11 @@ router.post('/aliases', requireAdmin, asyncHandler(async (req, res) => {
 
 router.delete('/aliases/:id', requireAdmin, asyncHandler(async (req, res) => {
   const result = await calendarLeaveService.deleteAlias(req.workspaceId, parseInt(req.params.id, 10));
+  res.json({ success: true, data: result });
+}));
+
+router.post('/review-decision', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await calendarLeaveService.saveManualDecision(req.workspaceId, req.body);
   res.json({ success: true, data: result });
 }));
 
