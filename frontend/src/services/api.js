@@ -625,6 +625,7 @@ export const assignmentAPI = {
 export const agentAPI = {
   getMyCompetencies: (params = {}) => api.get('/agent/competencies', { params }),
   submitCompetencyChange: (data) => api.post('/agent/competencies/changes', data),
+  cancelCompetencyChange: (id) => api.delete(`/agent/competencies/changes/${id}`),
 };
 
 /**

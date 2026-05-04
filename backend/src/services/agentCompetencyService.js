@@ -230,6 +230,37 @@ export async function submitMyCompetencyChange(email, body = {}) {
   return { changed: true, autoApplied: false, data: await getMyCompetencyMatrix(email, technician.workspaceId) };
 }
 
+export async function cancelMyCompetencyChange(email, requestId) {
+  const normalizedEmail = normalizeEmail(email);
+  const id = Number(requestId);
+  if (!Number.isInteger(id)) throw new ValidationError('requestId is required');
+
+  const matches = await getAgentTechnicians(normalizedEmail);
+  if (!matches.length) {
+    throw new AuthenticationError('No active technician profile is linked to this SSO account');
+  }
+  const technicianIds = new Set(matches.map((technician) => technician.id));
+  const request = await prisma.competencyChangeRequest.findUnique({ where: { id } });
+  if (!request || !technicianIds.has(request.technicianId)) {
+    throw new NotFoundError('Competency request not found');
+  }
+  if (request.status !== 'pending') {
+    throw new ValidationError('Only pending requests can be cancelled');
+  }
+
+  await prisma.competencyChangeRequest.update({
+    where: { id },
+    data: {
+      status: 'cancelled',
+      reviewedByEmail: normalizedEmail,
+      reviewedAt: new Date(),
+      decisionNote: 'Cancelled by requester',
+    },
+  });
+
+  return { changed: true, data: await getMyCompetencyMatrix(normalizedEmail, request.workspaceId) };
+}
+
 export async function listCompetencyRequests(workspaceId, { status = 'pending', limit = 100 } = {}) {
   const where = { workspaceId };
   if (status && status !== 'all') where.status = status;
@@ -300,6 +331,7 @@ export default {
   getAgentProfiles,
   getMyCompetencyMatrix,
   submitMyCompetencyChange,
+  cancelMyCompetencyChange,
   listCompetencyRequests,
   getPendingRequestCount,
   decideCompetencyRequest,

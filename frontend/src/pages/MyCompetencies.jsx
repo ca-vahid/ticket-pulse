@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2, Clock3, LogOut, Search, ShieldCheck, UserRound,
-  XCircle, Loader2, AlertCircle, BriefcaseBusiness,
+  XCircle, Loader2, AlertCircle, BriefcaseBusiness, PlusCircle,
+  X, Send, Sparkles, Undo2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { agentAPI } from '../services/api';
@@ -51,6 +52,10 @@ export default function MyCompetencies() {
   const [savingCell, setSavingCell] = useState(null);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
+  const [requestForm, setRequestForm] = useState({ categoryId: '', requestedLevel: 'basic', note: '' });
+  const [highlightCategoryId, setHighlightCategoryId] = useState(null);
+  const [cancellingRequestId, setCancellingRequestId] = useState(null);
 
   const fetchData = async (targetWorkspaceId = workspaceId) => {
     try {
@@ -99,15 +104,120 @@ export default function MyCompetencies() {
     ));
   }, [data?.categories, data?.categoryTree, query]);
 
+  const allCategories = useMemo(() => flattenCategories(data?.categoryTree, data?.categories), [data?.categories, data?.categoryTree]);
+  const subcategoryOptions = useMemo(() => allCategories.filter((category) => category.depth === 1), [allCategories]);
+
   const myTechId = data?.technician?.id;
   const myMappedCount = Object.keys(mappingMap[myTechId] || {}).length;
   const pendingCount = (data?.requests || []).filter((request) => request.status === 'pending').length;
+
+  useEffect(() => {
+    if (!message?.autoClose) return undefined;
+    const timer = window.setTimeout(() => setMessage(null), message.autoClose);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
+  const flashCategory = (categoryId) => {
+    setHighlightCategoryId(categoryId);
+    window.setTimeout(() => {
+      setHighlightCategoryId((current) => (current === categoryId ? null : current));
+    }, 2600);
+  };
+
+  const openRequestModal = (category = null) => {
+    const target = category?.depth === 1
+      ? category
+      : subcategoryOptions.find((candidate) => !category || candidate.parentId === category.id)
+        || subcategoryOptions[0];
+    setRequestForm({
+      categoryId: target ? String(target.id) : '',
+      requestedLevel: 'basic',
+      note,
+    });
+    setRequestModalOpen(true);
+  };
+
+  const submitRequestForm = async (event) => {
+    event?.preventDefault();
+    if (!requestForm.categoryId) {
+      setMessage({
+        type: 'warning',
+        title: 'Choose a subcategory',
+        text: 'New skills must be requested from an existing subcategory.',
+        autoClose: 5000,
+      });
+      return;
+    }
+    const category = subcategoryOptions.find((option) => String(option.id) === String(requestForm.categoryId));
+    if (!category) return;
+
+    setSavingCell(category.id);
+    setMessage(null);
+    try {
+      const res = await agentAPI.submitCompetencyChange({
+        workspaceId: data.technician.workspaceId,
+        competencyCategoryId: category.id,
+        requestedLevel: requestForm.requestedLevel || null,
+        note: requestForm.note,
+      });
+      setData(res.data);
+      setRequestModalOpen(false);
+      flashCategory(category.id);
+      setMessage({
+        type: res.autoApplied ? 'success' : 'info',
+        title: res.autoApplied ? 'Skill updated' : 'Request sent',
+        text: res.autoApplied
+          ? `${category.name} was saved immediately.`
+          : `${category.name} is pending admin approval. It will not become active until approved.`,
+        autoClose: 7000,
+      });
+    } catch (err) {
+      setMessage({
+        type: 'error',
+        title: 'Could not submit request',
+        text: err.message || 'Change could not be submitted.',
+      });
+    } finally {
+      setSavingCell(null);
+    }
+  };
+
+  const cancelRequest = async (request) => {
+    setCancellingRequestId(request.id);
+    setMessage(null);
+    try {
+      const res = await agentAPI.cancelCompetencyChange(request.id);
+      setData(res.data);
+      flashCategory(request.competencyCategoryId);
+      setMessage({
+        type: 'success',
+        title: 'Request cancelled',
+        text: `${request.competencyCategory?.name || 'Skill request'} was moved to history and the matrix reverted to the approved level.`,
+        autoClose: 6000,
+      });
+    } catch (err) {
+      setMessage({
+        type: 'error',
+        title: 'Could not cancel request',
+        text: err.message || 'The pending request could not be cancelled.',
+      });
+    } finally {
+      setCancellingRequestId(null);
+    }
+  };
 
   const handleChange = async (category, nextLevel) => {
     const currentLevel = mappingMap[myTechId]?.[category.id] || '';
     if (nextLevel === currentLevel) return;
     if (!currentLevel && nextLevel && !category.parentId) {
-      setMessage({ type: 'warning', text: 'New skills must be requested from an existing subcategory.' });
+      flashCategory(category.id);
+      setMessage({
+        type: 'warning',
+        title: 'Pick a subcategory',
+        text: `${category.name} is a top-level category. Use Request skill and choose a subcategory under it.`,
+        actionLabel: 'Request skill',
+        onAction: () => openRequestModal(category),
+      });
       return;
     }
 
@@ -121,12 +231,17 @@ export default function MyCompetencies() {
         note,
       });
       setData(res.data);
+      flashCategory(category.id);
       setMessage({
         type: res.autoApplied ? 'success' : 'info',
-        text: res.autoApplied ? 'Change saved immediately.' : 'Request submitted for admin approval.',
+        title: res.autoApplied ? 'Change saved' : 'Request sent',
+        text: res.autoApplied
+          ? `${category.name} was updated immediately.`
+          : `${category.name} is pending admin approval. The cell is highlighted until an admin reviews it.`,
+        autoClose: 7000,
       });
     } catch (err) {
-      setMessage({ type: 'error', text: err.message || 'Change could not be submitted.' });
+      setMessage({ type: 'error', title: 'Could not submit change', text: err.message || 'Change could not be submitted.' });
     } finally {
       setSavingCell(null);
     }
@@ -138,6 +253,147 @@ export default function MyCompetencies() {
 
   return (
     <div className="min-h-screen bg-slate-100 bg-[url('/brand/dashboard-background.webp')] bg-cover bg-fixed">
+      <style>{`
+        @keyframes slideIn { from { opacity: 0; transform: translate3d(16px, -8px, 0) scale(.98); } to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes popIn { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes pulseOnce { 0% { box-shadow: inset 0 0 0 0 rgba(37, 99, 235, 0); } 35% { box-shadow: inset 0 0 0 9999px rgba(219, 234, 254, .78); } 100% { box-shadow: inset 0 0 0 0 rgba(37, 99, 235, 0); } }
+      `}</style>
+      {message && (
+        <div className="fixed right-4 top-20 z-50 w-[min(420px,calc(100vw-2rem))] animate-[slideIn_.24s_ease-out]">
+          <div className={`overflow-hidden rounded-xl border bg-white shadow-2xl shadow-slate-200/70 ${
+            message.type === 'error' ? 'border-red-200'
+              : message.type === 'warning' ? 'border-amber-200'
+                : message.type === 'success' ? 'border-emerald-200'
+                  : 'border-blue-200'
+          }`}>
+            <div className={`h-1 ${
+              message.type === 'error' ? 'bg-red-500'
+                : message.type === 'warning' ? 'bg-amber-500'
+                  : message.type === 'success' ? 'bg-emerald-500'
+                    : 'bg-blue-500'
+            }`} />
+            <div className="flex gap-3 p-4">
+              <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                message.type === 'error' ? 'bg-red-50 text-red-600'
+                  : message.type === 'warning' ? 'bg-amber-50 text-amber-600'
+                    : message.type === 'success' ? 'bg-emerald-50 text-emerald-600'
+                      : 'bg-blue-50 text-blue-600'
+              }`}>
+                {message.type === 'success' ? <CheckCircle2 className="h-5 w-5" /> : message.type === 'error' ? <XCircle className="h-5 w-5" /> : <Clock3 className="h-5 w-5" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-slate-950">{message.title || 'Update'}</div>
+                <div className="mt-1 text-sm leading-5 text-slate-600">{message.text}</div>
+                {message.actionLabel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      message.onAction?.();
+                      setMessage(null);
+                    }}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800"
+                  >
+                    <PlusCircle className="h-3.5 w-3.5" />
+                    {message.actionLabel}
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setMessage(null)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close notification"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {requestModalOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm animate-[fadeIn_.18s_ease-out]">
+          <form
+            onSubmit={submitRequestForm}
+            className="w-full max-w-lg animate-[popIn_.2s_ease-out] rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+                  <Sparkles className="h-5 w-5 text-blue-600" />
+                  Request a skill
+                </div>
+                <p className="mt-1 text-sm text-slate-500">Choose an existing subcategory, set the level you want, and send it for admin approval.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRequestModalOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close request dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <label className="mt-5 block text-xs font-semibold uppercase text-slate-500">Subcategory</label>
+            <select
+              value={requestForm.categoryId}
+              onChange={(event) => setRequestForm((current) => ({ ...current, categoryId: event.target.value }))}
+              className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+            >
+              {subcategoryOptions.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.parentName ? `${category.parentName} / ` : ''}{category.name}
+                </option>
+              ))}
+            </select>
+
+            <label className="mt-4 block text-xs font-semibold uppercase text-slate-500">Requested level</label>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {LEVELS.filter((level) => level.value).map((level) => (
+                <button
+                  key={level.value}
+                  type="button"
+                  onClick={() => setRequestForm((current) => ({ ...current, requestedLevel: level.value }))}
+                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                    requestForm.requestedLevel === level.value ? `${level.className} ring-2 ring-blue-200` : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {level.short} {level.label}
+                </button>
+              ))}
+            </div>
+
+            <label className="mt-4 block text-xs font-semibold uppercase text-slate-500">Note</label>
+            <textarea
+              value={requestForm.note}
+              onChange={(event) => setRequestForm((current) => ({ ...current, note: event.target.value }))}
+              placeholder="Optional evidence or context for the admin"
+              className="mt-1 min-h-[82px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+            />
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setRequestModalOpen(false)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingCell !== null}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+              >
+                {savingCell !== null ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Send request
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
           <div className="flex min-w-0 items-center gap-3">
@@ -237,6 +493,14 @@ export default function MyCompetencies() {
                     className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => openRequestModal()}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm shadow-blue-100 transition hover:-translate-y-0.5 hover:bg-blue-700"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  Request skill
+                </button>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                   {LEVELS.map((level) => (
                     <span key={level.value || 'none'} className={`rounded-md border px-2 py-1 font-semibold ${level.className}`}>
@@ -251,17 +515,10 @@ export default function MyCompetencies() {
                 placeholder="Optional note for your next request"
                 className="mt-3 min-h-[48px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
               />
-              {message && (
-                <div className={`mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
-                  message.type === 'error' ? 'bg-red-50 text-red-700'
-                    : message.type === 'warning' ? 'bg-amber-50 text-amber-700'
-                      : message.type === 'success' ? 'bg-emerald-50 text-emerald-700'
-                        : 'bg-blue-50 text-blue-700'
-                }`}>
-                  {message.type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <Clock3 className="h-4 w-4" />}
-                  {message.text}
-                </div>
-              )}
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                <Sparkles className="h-4 w-4" />
+                Additions and level increases are sent for admin approval. Decreases/removals save immediately. Pending requests can be cancelled below.
+              </div>
             </section>
 
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -294,9 +551,10 @@ export default function MyCompetencies() {
                   <tbody>
                     {categories.map((category) => {
                       const pending = pendingByCategory[category.id];
+                      const isHighlighted = highlightCategoryId === category.id;
                       return (
-                        <tr key={category.id} className={`border-t border-slate-100 ${category.depth === 0 ? 'bg-slate-50/70' : 'hover:bg-slate-50'}`}>
-                          <td className={`sticky left-0 z-10 px-3 py-2 ${category.depth === 0 ? 'bg-slate-50 font-semibold text-slate-800' : 'bg-white text-slate-700'}`}>
+                        <tr key={category.id} className={`border-t border-slate-100 transition-colors duration-300 ${isHighlighted ? 'animate-[pulseOnce_1.8s_ease-out]' : ''} ${category.depth === 0 ? 'bg-slate-50/70' : 'hover:bg-slate-50'}`}>
+                          <td className={`sticky left-0 z-10 px-3 py-2 transition-colors duration-300 ${isHighlighted ? 'bg-blue-50' : category.depth === 0 ? 'bg-slate-50' : 'bg-white'} ${category.depth === 0 ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
                             <div className="flex items-center gap-2">
                               {category.depth === 1 && <span className="ml-3 h-px w-4 bg-slate-300" />}
                               <span>{category.name}</span>
@@ -309,13 +567,13 @@ export default function MyCompetencies() {
                             const level = mappingMap[tech.id]?.[category.id] || '';
                             const levelInfo = levelByValue[level] || levelByValue[''];
                             return (
-                              <td key={tech.id} className={`px-1 py-1 text-center ${isMe ? 'bg-blue-50/50' : ''}`}>
+                              <td key={tech.id} className={`px-1 py-1 text-center transition-colors duration-300 ${isHighlighted && isMe ? 'bg-blue-100/80' : isMe ? 'bg-blue-50/50' : ''}`}>
                                 {isMe ? (
                                   <select
                                     value={pending?.requestedLevel ?? level}
                                     disabled={savingCell === category.id}
                                     onChange={(event) => handleChange(category, event.target.value)}
-                                    className={`h-8 w-16 rounded-lg border text-center text-xs font-bold outline-none transition hover:shadow-sm focus:ring-2 focus:ring-blue-100 ${pending ? 'border-amber-300 bg-amber-50 text-amber-800' : levelInfo.className}`}
+                                    className={`h-8 w-16 rounded-lg border text-center text-xs font-bold outline-none transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus:ring-2 focus:ring-blue-100 ${pending ? 'border-amber-300 bg-amber-50 text-amber-800 ring-1 ring-amber-100' : levelInfo.className}`}
                                     title={pending ? `Pending: ${formatRequest(pending)}` : `${category.name}: ${levelInfo.label}`}
                                   >
                                     {LEVELS.map((option) => (
@@ -350,9 +608,22 @@ export default function MyCompetencies() {
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="h-4 w-4 text-amber-500" /> Pending Requests</h2>
                 <div className="mt-3 space-y-2">
                   {(data.requests || []).filter((request) => request.status === 'pending').map((request) => (
-                    <div key={request.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
-                      <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
-                      <div className="text-xs text-amber-800">{formatRequest(request)}</div>
+                    <div key={request.id} className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm transition hover:border-amber-300 hover:shadow-sm">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
+                        <div className="text-xs text-amber-800">{formatRequest(request)}</div>
+                        {request.note && <div className="mt-1 text-xs text-slate-500">{request.note}</div>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => cancelRequest(request)}
+                        disabled={cancellingRequestId === request.id}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:border-amber-300 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                        title="Cancel this pending request"
+                      >
+                        {cancellingRequestId === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
+                        Cancel
+                      </button>
                     </div>
                   ))}
                   {pendingCount === 0 && <p className="text-sm text-slate-500">No pending changes.</p>}
@@ -364,7 +635,11 @@ export default function MyCompetencies() {
                 <div className="mt-3 space-y-2">
                   {(data.requests || []).filter((request) => request.status !== 'pending').slice(0, 8).map((request) => (
                     <div key={request.id} className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                      {request.status === 'rejected' ? <XCircle className="mt-0.5 h-4 w-4 text-red-500" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />}
+                      {request.status === 'rejected'
+                        ? <XCircle className="mt-0.5 h-4 w-4 text-red-500" />
+                        : request.status === 'cancelled'
+                          ? <Undo2 className="mt-0.5 h-4 w-4 text-amber-500" />
+                          : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />}
                       <div>
                         <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
                         <div className="text-xs text-slate-500">{request.status.replace('_', ' ')} - {formatRequest(request)}</div>

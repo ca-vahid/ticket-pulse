@@ -20,4 +20,12 @@ router.post('/competencies/changes', asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
+router.delete('/competencies/changes/:id', asyncHandler(async (req, res) => {
+  const result = await agentCompetencyService.cancelMyCompetencyChange(
+    req.session?.user?.email,
+    req.params.id,
+  );
+  res.json({ success: true, ...result });
+}));
+
 export default router;
