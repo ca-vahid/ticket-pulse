@@ -649,11 +649,13 @@ class CalendarLeaveService {
     const rows = await prisma.calendarLeaveClassification.findMany({
       where: { workspaceId },
       orderBy: { updatedAt: 'desc' },
-      take: status === 'review' ? 500 : normalizedLimit,
+      take: ['review', 'manual'].includes(status) ? 500 : normalizedLimit,
     });
     return rows.filter((row) => {
       const c = row.classification || {};
-      return status === 'review' ? c.requiresReview === true : true;
+      if (status === 'review') return c.requiresReview === true;
+      if (status === 'manual') return row.source === 'manual';
+      return true;
     }).slice(0, normalizedLimit).map((row) => {
       const c = row.classification || {};
       const event = c.event || {};
@@ -681,6 +683,47 @@ class CalendarLeaveService {
         updatedAt: row.updatedAt,
       };
     });
+  }
+
+  async getReviewSummary(workspaceId) {
+    const [sourceConfig, aliasCount, ruleCount, rows] = await Promise.all([
+      prisma.calendarLeaveSourceConfig.findUnique({ where: { workspaceId }, select: { lastSyncAt: true } }),
+      prisma.calendarLeaveAlias.count({ where: { workspaceId } }),
+      prisma.calendarLeaveRule.count({ where: { workspaceId } }),
+      prisma.calendarLeaveClassification.findMany({
+        where: { workspaceId },
+        select: { source: true, classification: true, updatedAt: true },
+        orderBy: { updatedAt: 'desc' },
+        take: 1000,
+      }),
+    ]);
+    const sources = {};
+    const categories = {};
+    const modes = {};
+    let reviewNeeded = 0;
+    let manual = 0;
+    let lastRunAt = null;
+    for (const row of rows) {
+      const c = row.classification || {};
+      sources[row.source] = (sources[row.source] || 0) + 1;
+      categories[c.category || 'UNKNOWN'] = (categories[c.category || 'UNKNOWN'] || 0) + 1;
+      modes[c.lastSeenMode || 'unknown'] = (modes[c.lastSeenMode || 'unknown'] || 0) + 1;
+      if (c.requiresReview === true) reviewNeeded++;
+      if (row.source === 'manual') manual++;
+      if (!lastRunAt && c.lastSeenMode && c.lastSeenMode !== 'manual') lastRunAt = row.updatedAt;
+    }
+    return {
+      aliasCount,
+      ruleCount,
+      classificationCount: rows.length,
+      reviewNeeded,
+      manual,
+      sources,
+      categories,
+      modes,
+      lastRunAt,
+      lastSyncAt: sourceConfig?.lastSyncAt || null,
+    };
   }
 
   async saveManualDecision(workspaceId, data) {

@@ -22,6 +22,20 @@ const EMPTY_RULE = {
   isActive: true,
 };
 
+function formatDateTime(value) {
+  if (!value) return 'Never';
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(value));
+  } catch {
+    return 'Unknown';
+  }
+}
+
 export default function CalendarLeavePanel() {
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [rules, setRules] = useState([]);
@@ -32,24 +46,32 @@ export default function CalendarLeavePanel() {
   const [preview, setPreview] = useState(null);
   const [lastPreviewMode, setLastPreviewMode] = useState(false);
   const [reviewRows, setReviewRows] = useState([]);
+  const [reviewSummary, setReviewSummary] = useState(null);
   const [reviewFilter, setReviewFilter] = useState('review');
   const [reviewSelections, setReviewSelections] = useState({});
   const [reviewEdits, setReviewEdits] = useState({});
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [loadingInitial, setLoadingInitial] = useState(true);
 
   const loadReviewRows = useCallback(async (statusFilter = reviewFilter) => {
     const res = await calendarLeaveAPI.getReviewRows({ status: statusFilter, limit: 250 });
     setReviewRows(res.data || []);
   }, [reviewFilter]);
 
+  const loadReviewSummary = useCallback(async () => {
+    const res = await calendarLeaveAPI.getReviewSummary();
+    setReviewSummary(res.data || null);
+  }, []);
+
   const refresh = useCallback(async () => {
-    const [configRes, rulesRes, aliasesRes, agentsRes, reviewRes] = await Promise.allSettled([
+    const [configRes, rulesRes, aliasesRes, agentsRes, reviewRes, summaryRes] = await Promise.allSettled([
       calendarLeaveAPI.getConfig(),
       calendarLeaveAPI.getRules(),
       calendarLeaveAPI.getAliases(),
       visualsAPI.getAgents({ includeInactive: true }),
       calendarLeaveAPI.getReviewRows({ status: reviewFilter, limit: 250 }),
+      calendarLeaveAPI.getReviewSummary(),
     ]);
     if (configRes.status === 'fulfilled' && configRes.value?.data) {
       setConfig({ ...DEFAULT_CONFIG, ...configRes.value.data });
@@ -66,6 +88,8 @@ export default function CalendarLeavePanel() {
       })));
     }
     if (reviewRes.status === 'fulfilled') setReviewRows(reviewRes.value?.data || []);
+    if (summaryRes.status === 'fulfilled') setReviewSummary(summaryRes.value?.data || null);
+    setLoadingInitial(false);
   }, [reviewFilter]);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -136,7 +160,7 @@ export default function CalendarLeavePanel() {
       });
       setPreview(res.data);
       setLastPreviewMode(useLlm);
-      await loadReviewRows(reviewFilter);
+      await Promise.all([loadReviewRows(reviewFilter), loadReviewSummary()]);
       const llmText = useLlm
         ? `, Haiku: ${res.data.llmFreshCalls || 0} new / ${res.data.llmCacheHits || 0} cached${res.data.llmSkipped ? ` / ${res.data.llmSkipped} skipped` : ''}`
         : '';
@@ -179,7 +203,7 @@ export default function CalendarLeavePanel() {
       const res = await calendarLeaveAPI.sync({ useLlm: true });
       setPreview(res.data);
       setLastPreviewMode(true);
-      await loadReviewRows(reviewFilter);
+      await Promise.all([loadReviewRows(reviewFilter), loadReviewSummary()]);
       setStatus({ ok: true, text: `Sync complete: ${res.data.leaveDaysCreated} leave-days, ${res.data.reviewNeeded} review-needed events. Review list loaded below.` });
     } catch (err) {
       setStatus({ ok: false, text: err.message });
@@ -212,7 +236,7 @@ export default function CalendarLeavePanel() {
         halfDayPart: rowEdit.halfDayPart ?? row.halfDayPart ?? null,
         isIgnored,
       });
-      await loadReviewRows(reviewFilter);
+      await Promise.all([loadReviewRows(reviewFilter), loadReviewSummary()]);
       if (preview) await runPreview(lastPreviewMode);
       setStatus({ ok: true, text: isIgnored ? `Ignored event "${row.subject}"` : `Approved event "${row.subject}"` });
     } catch (err) {
@@ -223,9 +247,14 @@ export default function CalendarLeavePanel() {
   };
 
   const visibleRows = preview?.rows?.length ? preview.rows : reviewRows;
+  const filterLabel = {
+    review: 'review-needed',
+    manual: 'manual fixes',
+    all: 'recent saved',
+  }[reviewFilter] || 'saved';
   const visibleSummary = preview
     ? `${preview.matched || 0} matched · ${preview.reviewNeeded || 0} review · ${preview.ignored || 0} ignored`
-    : `${reviewRows.length} saved ${reviewFilter === 'review' ? 'review-needed' : 'review'} rows`;
+    : `${reviewRows.length} ${filterLabel} rows`;
 
   return (
     <div className="space-y-5">
@@ -254,6 +283,38 @@ export default function CalendarLeavePanel() {
       {status && (
         <div className={`p-3 rounded-lg border text-sm ${status.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
           {status.text}
+        </div>
+      )}
+
+      {loadingInitial && (
+        <div className="rounded-lg border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800 flex items-center gap-2">
+          <Loader className="h-4 w-4 animate-spin" />
+          Loading aliases, detection rules, and saved calendar review history...
+        </div>
+      )}
+
+      {reviewSummary && (
+        <div className="grid gap-3 md:grid-cols-5">
+          <div className="rounded-lg border bg-white p-3">
+            <div className="text-xs font-medium text-gray-500">Needs Review</div>
+            <div className="mt-1 text-2xl font-semibold text-gray-900">{reviewSummary.reviewNeeded || 0}</div>
+          </div>
+          <div className="rounded-lg border bg-white p-3">
+            <div className="text-xs font-medium text-gray-500">Manual Fixes</div>
+            <div className="mt-1 text-2xl font-semibold text-gray-900">{reviewSummary.manual || 0}</div>
+          </div>
+          <div className="rounded-lg border bg-white p-3">
+            <div className="text-xs font-medium text-gray-500">Saved Events</div>
+            <div className="mt-1 text-2xl font-semibold text-gray-900">{reviewSummary.classificationCount || 0}</div>
+          </div>
+          <div className="rounded-lg border bg-white p-3">
+            <div className="text-xs font-medium text-gray-500">Aliases / Rules</div>
+            <div className="mt-1 text-2xl font-semibold text-gray-900">{reviewSummary.aliasCount || 0} / {reviewSummary.ruleCount || 0}</div>
+          </div>
+          <div className="rounded-lg border bg-white p-3">
+            <div className="text-xs font-medium text-gray-500">Last Sync</div>
+            <div className="mt-1 text-sm font-semibold text-gray-900">{formatDateTime(reviewSummary.lastSyncAt)}</div>
+          </div>
         </div>
       )}
 
@@ -347,7 +408,11 @@ export default function CalendarLeavePanel() {
           <div className="flex flex-wrap items-center gap-2">
             <CheckCircle className="w-4 h-4 text-gray-400" />
             <span className="font-semibold text-gray-800">Review Queue</span>
-            <span>No saved calendar review rows yet.</span>
+            <span>
+              {reviewFilter === 'review' && 'No unresolved review-needed calendar rows.'}
+              {reviewFilter === 'manual' && 'No manual calendar fixes saved yet.'}
+              {reviewFilter === 'all' && 'No saved calendar rows yet.'}
+            </span>
             <button
               type="button"
               onClick={() => loadReviewRows(reviewFilter)}
@@ -357,7 +422,7 @@ export default function CalendarLeavePanel() {
             </button>
           </div>
           <p className="mt-2 text-xs text-gray-500">
-            Preview, Preview + Haiku, and Sync now save their review-needed events here so unresolved calendar entries remain visible.
+            Use Preview or Sync to populate the latest result list. Use the filter on saved rows to switch between unresolved review items, manual fixes, and recent history.
           </p>
         </div>
       )}
@@ -380,6 +445,7 @@ export default function CalendarLeavePanel() {
                 className="rounded border border-gray-200 bg-white px-2 py-1 text-xs"
               >
                 <option value="review">Saved review-needed</option>
+                <option value="manual">Saved manual fixes</option>
                 <option value="all">Saved all recent</option>
               </select>
               <button

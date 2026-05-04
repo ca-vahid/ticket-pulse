@@ -69,6 +69,11 @@ router.get('/review', asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows });
 }));
 
+router.get('/review-summary', asyncHandler(async (req, res) => {
+  const summary = await calendarLeaveService.getReviewSummary(req.workspaceId);
+  res.json({ success: true, data: summary });
+}));
+
 router.post('/aliases', requireAdmin, asyncHandler(async (req, res) => {
   const alias = await calendarLeaveService.upsertAlias(req.workspaceId, req.body);
   res.json({ success: true, data: alias });

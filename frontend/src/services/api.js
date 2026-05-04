@@ -525,6 +525,7 @@ export const calendarLeaveAPI = {
   saveAlias: (alias) => api.post('/calendar-leave/aliases', alias),
   deleteAlias: (id) => api.delete(`/calendar-leave/aliases/${id}`),
   getReviewRows: (params = {}) => api.get('/calendar-leave/review', { params }),
+  getReviewSummary: () => api.get('/calendar-leave/review-summary'),
   saveReviewDecision: (data) => api.post('/calendar-leave/review-decision', data),
   preview: (data) => apiLongTimeout.post('/calendar-leave/preview', data),
   sync: (data) => apiLongTimeout.post('/calendar-leave/sync', data),
