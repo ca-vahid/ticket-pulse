@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Calendar,
+  Award,
   Clock,
   BarChart3,
   LayoutDashboard,
@@ -92,6 +93,13 @@ export default function AppHeader({
       path: '/assignments',
       Icon: Sparkles,
       inactiveClass: 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300',
+    }] : []),
+    ...(user?.agentProfile ? [{
+      id: 'my-competencies',
+      label: 'My Skills',
+      path: '/my-competencies',
+      Icon: Award,
+      inactiveClass: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300',
     }] : []),
   ];
 

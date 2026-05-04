@@ -586,6 +586,8 @@ export const assignmentAPI = {
   publishCompetencyPrompt: (id) => api.post(`/assignment/competency-prompts/${id}/publish`),
   restoreCompetencyPrompt: (id) => api.post(`/assignment/competency-prompts/${id}/restore`),
   getCompetencyTools: () => api.get('/assignment/competency-tools'),
+  getCompetencyRequests: (params = {}) => api.get('/assignment/competency-requests', { params }),
+  decideCompetencyRequest: (id, data) => api.post(`/assignment/competency-requests/${id}/decision`, data),
   detectDuplicateCategories: () => api.get('/assignment/competencies/duplicates'),
   mergeCategories: (data) => api.post('/assignment/competencies/merge', data),
   getCompetencies: () => api.get('/assignment/competencies'),
@@ -615,6 +617,14 @@ export const assignmentAPI = {
   deleteDailyReviewConsolidation: (id) => api.delete(`/assignment/daily-review/consolidations/runs/${id}`),
   updateDailyReviewConsolidationItem: (id, data) => api.put(`/assignment/daily-review/consolidations/items/${id}`, data),
   applyDailyReviewConsolidation: (id, data) => api.post(`/assignment/daily-review/consolidations/runs/${id}/apply`, data),
+};
+
+/**
+ * Agent self-service API
+ */
+export const agentAPI = {
+  getMyCompetencies: (params = {}) => api.get('/agent/competencies', { params }),
+  submitCompetencyChange: (data) => api.post('/agent/competencies/changes', data),
 };
 
 /**

@@ -17,6 +17,7 @@ import notificationsRoutes from './notifications.routes.js';
 import assignmentRoutes from './assignment.routes.js';
 import analyticsRoutes from './analytics.routes.js';
 import summitRoutes, { summitPublicRouter } from './summit.routes.js';
+import agentRoutes from './agent.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
 
@@ -52,6 +53,7 @@ router.use((req, _res, next) => {
 // requireAuth MUST run first so req.session.user is populated from JWT
 // before requireWorkspaceAccess checks the user's email against the DB.
 router.use(requireAuth);
+router.use('/agent', agentRoutes);
 router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 

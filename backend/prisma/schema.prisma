@@ -48,6 +48,7 @@ model Workspace {
   assignmentPrompts      AssignmentPromptVersion[]
   competencyPrompts      CompetencyPromptVersion[]
   competencyRuns         CompetencyAnalysisRun[]
+  competencyChangeRequests CompetencyChangeRequest[]
   calibrationRuns        CalibrationRun[]
   dailyReviewRuns        AssignmentDailyReviewRun[]
   dailyReviewRecommendations AssignmentDailyReviewRecommendation[]
@@ -103,6 +104,7 @@ model Technician {
   assignmentCorrectionsFrom AssignmentCorrection[] @relation("correctionFromTech")
   assignmentCorrectionsTo   AssignmentCorrection[] @relation("correctionToTech")
   competencyRuns       CompetencyAnalysisRun[]
+  competencyChangeRequests CompetencyChangeRequest[]
   assignmentEpisodes   TicketAssignmentEpisode[]
 
   @@unique([freshserviceId, workspaceId])
@@ -778,6 +780,7 @@ model CompetencyCategory {
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   technicianCompetencies TechnicianCompetency[]
+  competencyChangeRequests CompetencyChangeRequest[]
   ticketsAsInternalCategory Ticket[] @relation("TicketInternalCategory")
   ticketsAsInternalSubcategory Ticket[] @relation("TicketInternalSubcategory")
 
@@ -806,6 +809,34 @@ model TechnicianCompetency {
   @@index([workspaceId])
   @@index([technicianId])
   @@index([competencyCategoryId])
+}
+
+model CompetencyChangeRequest {
+  id                   Int                @id @default(autoincrement())
+  workspaceId          Int                @map("workspace_id")
+  workspace            Workspace          @relation(fields: [workspaceId], references: [id])
+  technicianId         Int                @map("technician_id")
+  technician           Technician         @relation(fields: [technicianId], references: [id])
+  competencyCategoryId Int                @map("competency_category_id")
+  competencyCategory   CompetencyCategory @relation(fields: [competencyCategoryId], references: [id], onDelete: Cascade)
+  requestType          String             @db.VarChar(30) @map("request_type") // add | increase | decrease | remove
+  currentLevel         String?            @db.VarChar(20) @map("current_level")
+  requestedLevel       String?            @db.VarChar(20) @map("requested_level")
+  note                 String?            @db.Text
+  status               String             @default("pending") @db.VarChar(20) // pending | approved | rejected | auto_applied
+  requestedByEmail     String             @db.VarChar(255) @map("requested_by_email")
+  reviewedByEmail      String?            @db.VarChar(255) @map("reviewed_by_email")
+  reviewedAt           DateTime?          @map("reviewed_at")
+  decisionNote         String?            @db.Text @map("decision_note")
+  appliedAt            DateTime?          @map("applied_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  @@map("competency_change_requests")
+  @@index([workspaceId, status])
+  @@index([technicianId, status])
+  @@index([competencyCategoryId])
+  @@index([requestedByEmail])
 }
 
 model AssignmentPipelineRun {

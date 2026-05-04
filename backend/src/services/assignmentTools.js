@@ -56,7 +56,7 @@ export const TOOL_SCHEMAS = [
         category: { type: 'string', description: 'Legacy/internal category name. Prefer categoryId/categoryName and subcategoryId/subcategoryName.' },
         requires_physical_presence: { type: 'boolean', description: 'If true, excludes WFH and remote agents' },
         preferred_location: { type: 'string', description: 'Preferred agent location for physical tasks (e.g., "Vancouver", "Calgary")' },
-        min_proficiency: { type: 'string', enum: ['basic', 'intermediate', 'expert'], description: 'Minimum competency level required' },
+        min_proficiency: { type: 'string', enum: ['basic', 'intermediate', 'advanced', 'expert'], description: 'Minimum competency level required' },
       },
       required: [],
     },
@@ -81,7 +81,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'get_competencies',
-    description: 'Get skill/competency mappings for all technicians: which categories each tech handles and their proficiency level (basic/intermediate/expert).',
+    description: 'Get skill/competency mappings for all technicians: which categories each tech handles and their proficiency level (basic/intermediate/advanced/expert).',
     input_schema: {
       type: 'object',
       properties: {},
@@ -757,7 +757,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
   const { start: dateStart, end: dateEnd } = getLocalDateBounds(timezone);
   const { start: todayStart, end: todayEnd } = getTodayRange(timezone);
 
-  const proficiencyOrder = { basic: 1, intermediate: 2, expert: 3 };
+  const proficiencyOrder = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
   const minLevel = proficiencyOrder[min_proficiency] || 0;
   const categorySelection = await resolveInternalCategorySelection(workspaceId, {
     category,

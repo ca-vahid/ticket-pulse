@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
 import PipelineRunDetail from '../components/assignment/PipelineRunDetail';
 import CompetencyManager from '../components/assignment/CompetencyManager';
+import CompetencyRequestsTab from '../components/assignment/CompetencyRequestsTab';
 import DailyReviewManager from '../components/assignment/DailyReviewManager';
 import PromptManager from '../components/assignment/PromptManager';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
@@ -27,6 +28,7 @@ const ALL_TABS = [
   { id: 'history', label: 'History', icon: History, minRole: 'reviewer' },
   { id: 'daily-review', label: 'Review', icon: CalendarDays, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
+  { id: 'competency-requests', label: 'Requests', icon: ShieldCheck, minRole: 'admin' },
   { id: 'prompts', label: 'Prompts', icon: FileText, minRole: 'admin' },
   { id: 'config', label: 'Configuration', icon: Settings2, minRole: 'admin' },
 ];
@@ -3902,6 +3904,7 @@ export default function AssignmentReview() {
   const [assignmentHeaderAction, setAssignmentHeaderAction] = useState(null);
   const [workspaceTimezone, setWorkspaceTimezone] = useState('America/Los_Angeles');
   const [timeRange, setTimeRange] = useState('7d');
+  const [competencyRequestCount, setCompetencyRequestCount] = useState(0);
 
   const isGlobalAdmin = user?.role === 'admin';
   const wsRole = (() => {
@@ -3936,6 +3939,16 @@ export default function AssignmentReview() {
       cancelled = true;
     };
   }, [currentWorkspace?.id]);
+
+  useEffect(() => {
+    if (!isWsAdmin) {
+      setCompetencyRequestCount(0);
+      return;
+    }
+    assignmentAPI.getCompetencyRequests({ status: 'pending', limit: 1 })
+      .then((res) => setCompetencyRequestCount(res.pendingCount || 0))
+      .catch(() => setCompetencyRequestCount(0));
+  }, [isWsAdmin, currentWorkspace?.id]);
 
   const TABS = ALL_TABS.filter(tab => {
     if (tab.minRole === 'admin') return isWsAdmin;
@@ -4024,6 +4037,7 @@ export default function AssignmentReview() {
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
+            const badge = tab.id === 'competency-requests' ? competencyRequestCount : 0;
             return (
               <button
                 key={tab.id}
@@ -4036,6 +4050,11 @@ export default function AssignmentReview() {
               >
                 <Icon className="w-5 h-5 sm:w-4 sm:h-4" />
                 <span className="hidden sm:inline">{tab.label}</span>
+                {badge > 0 && (
+                  <span className="ml-0.5 rounded-full bg-amber-300 px-1.5 py-0.5 text-[10px] font-bold leading-none text-amber-950">
+                    {badge}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -4074,6 +4093,7 @@ export default function AssignmentReview() {
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'competency-requests' && <CompetencyRequestsTab onPendingCountChange={setCompetencyRequestCount} />}
             {activeTab === 'prompts' && <PromptManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'config' && <ConfigTab workspaceTimezone={workspaceTimezone} />}
           </div>

@@ -26,7 +26,7 @@ function truncate(text, max = 1200) {
 
 function normalizeLevel(value) {
   const level = String(value || '').toLowerCase();
-  if (['basic', 'intermediate', 'expert'].includes(level)) return level;
+  if (['basic', 'intermediate', 'advanced', 'expert'].includes(level)) return level;
   return 'intermediate';
 }
 
@@ -775,7 +775,7 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
                 technicianName: { type: 'string' },
                 categoryId: { type: ['number', 'null'] },
                 categoryName: { type: 'string' },
-                proficiencyLevel: { type: 'string', enum: ['basic', 'intermediate', 'expert'] },
+                proficiencyLevel: { type: 'string', enum: ['basic', 'intermediate', 'advanced', 'expert'] },
                 notes: { type: ['string', 'null'] },
                 rationale: { type: 'string' },
                 sourceRecommendationIds: { type: 'array', items: { type: 'number' } },

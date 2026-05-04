@@ -283,7 +283,7 @@ class CompetencyRepository {
     }
   }
   async mergeCategories(workspaceId, keepId, mergeIds) {
-    const LEVEL_ORDER = { basic: 1, intermediate: 2, expert: 3 };
+    const LEVEL_ORDER = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
 
     try {
       return await prisma.$transaction(async (tx) => {

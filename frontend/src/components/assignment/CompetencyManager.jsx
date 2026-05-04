@@ -17,8 +17,9 @@ import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 
 const PROFICIENCY_LEVELS = [
   { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 text-yellow-800' },
-  { value: 'intermediate', label: 'Intermediate', num: '2', color: 'bg-blue-100 text-blue-800' },
-  { value: 'expert', label: 'Expert', num: '3', color: 'bg-green-100 text-green-800' },
+  { value: 'intermediate', label: 'Comfortable', num: '2', color: 'bg-blue-100 text-blue-800' },
+  { value: 'advanced', label: 'Advanced', num: '3', color: 'bg-indigo-100 text-indigo-800' },
+  { value: 'expert', label: 'Expert / SME', num: '4', color: 'bg-green-100 text-green-800' },
 ];
 
 const CATEGORY_GROUPS = [
@@ -460,7 +461,7 @@ function MatrixTab({ onAnalyze }) {
                   {technicians.map((tech) => {
                     const level = mappingMap[tech.id]?.[cat.id] || '';
                     const levelInfo = PROFICIENCY_LEVELS.find((l) => l.value === level);
-                    const CYCLE = ['', 'basic', 'intermediate', 'expert'];
+                    const CYCLE = ['', 'basic', 'intermediate', 'advanced', 'expert'];
                     const handleCycle = (e) => {
                       e.stopPropagation();
                       const currentIdx = CYCLE.indexOf(level);
@@ -506,8 +507,9 @@ function MatrixTab({ onAnalyze }) {
         <div className="flex items-center gap-4 text-xs text-slate-500">
           <span className="font-medium">Legend:</span>
           <span className="px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">1 = Basic</span>
-          <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">2 = Intermediate</span>
-          <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800">3 = Expert</span>
+          <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">2 = Comfortable</span>
+          <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">3 = Advanced</span>
+          <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800">4 = Expert / SME</span>
           <span className="ml-2 text-slate-400">Click cell to cycle · Click avatar to edit</span>
         </div>
       )}

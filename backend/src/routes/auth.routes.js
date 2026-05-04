@@ -6,6 +6,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { ValidationError, AuthenticationError } from '../utils/errors.js';
 import workspaceRepository from '../services/workspaceRepository.js';
 import settingsRepository from '../services/settingsRepository.js';
+import agentCompetencyService from '../services/agentCompetencyService.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -94,10 +95,11 @@ router.post(
     }
 
     const adminEmails = await getAdminEmails();
-    const role = adminEmails.includes(email) ? 'admin' : 'viewer';
+    let role = adminEmails.includes(email) ? 'admin' : 'viewer';
 
     // Fetch workspaces this user has access to
     let availableWorkspaces = [];
+    let agentProfiles = [];
     try {
       if (role === 'admin') {
         availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
@@ -108,6 +110,10 @@ router.post(
         }));
       } else {
         availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
+      }
+      agentProfiles = await agentCompetencyService.getAgentProfiles(email);
+      if (role !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
+        role = 'agent';
       }
     } catch (err) {
       logger.warn('Failed to fetch workspaces during login:', err.message);
@@ -138,14 +144,23 @@ router.post(
       loginTime: new Date().toISOString(),
       authMethod: 'sso',
       availableWorkspaces,
+      agentProfiles,
+      agentProfile: agentProfiles[0] || null,
       selectedWorkspaceId,
       selectedWorkspaceName,
       selectedWorkspaceSlug,
     };
 
-    logger.info(`SSO login: ${name} (${email}) as ${role}, ${availableWorkspaces.length} workspace(s)`);
+    logger.info(`SSO login: ${name} (${email}) as ${role}, ${availableWorkspaces.length} workspace(s), ${agentProfiles.length} technician profile(s)`);
 
-    const userPayload = { email, name, username: name, role };
+    const userPayload = {
+      email,
+      name,
+      username: name,
+      role,
+      agentProfile: agentProfiles[0] || null,
+      agentProfiles,
+    };
     if (selectedWorkspaceId) {
       userPayload.selectedWorkspaceId = selectedWorkspaceId;
     }
@@ -209,6 +224,8 @@ router.get(
           name: req.session.user.name,
           username: req.session.user.username || req.session.user.name,
           role: req.session.user.role,
+          agentProfile: req.session.user.agentProfile || null,
+          agentProfiles: req.session.user.agentProfiles || [],
         },
         availableWorkspaces: req.session.user.availableWorkspaces || [],
         selectedWorkspaceId: req.session.user.selectedWorkspaceId || null,
@@ -237,6 +254,10 @@ router.get(
           } else if (email) {
             availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
           }
+          const agentProfiles = email ? await agentCompetencyService.getAgentProfiles(email) : [];
+          if (role !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
+            decoded.role = 'agent';
+          }
           if (decoded.selectedWorkspaceId) {
             selectedWorkspaceId = decoded.selectedWorkspaceId;
           } else if (availableWorkspaces.length === 1) {
@@ -248,6 +269,8 @@ router.get(
           if (req.session) {
             req.session.user = {
               ...decoded,
+              agentProfiles,
+              agentProfile: agentProfiles[0] || null,
               availableWorkspaces,
               selectedWorkspaceId: req.session.user?.selectedWorkspaceId || selectedWorkspaceId,
               selectedWorkspaceName: req.session.user?.selectedWorkspaceName || selectedWs?.name || null,
@@ -266,6 +289,8 @@ router.get(
             name: decoded.name,
             username: decoded.username || decoded.name,
             role: decoded.role,
+            agentProfile: req.session?.user?.agentProfile || decoded.agentProfile || null,
+            agentProfiles: req.session?.user?.agentProfiles || decoded.agentProfiles || [],
           },
           availableWorkspaces,
           selectedWorkspaceId: req.session?.user?.selectedWorkspaceId || selectedWorkspaceId,

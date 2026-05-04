@@ -15,6 +15,7 @@ import AssignmentReview from './pages/AssignmentReview';
 import Analytics from './pages/Analytics';
 import SummitTaxonomyWorkshop from './pages/SummitTaxonomyWorkshop';
 import SummitVote from './pages/SummitVote';
+import MyCompetencies from './pages/MyCompetencies';
 import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
 
@@ -23,7 +24,7 @@ import { Activity } from 'lucide-react';
  * Redirects to login if not authenticated
  */
 function ProtectedRoute({ children }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const { isWorkspaceSelected, availableWorkspaces, isHydrated } = useWorkspace();
 
   if (isLoading || !isHydrated) {
@@ -41,6 +42,10 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/login" replace />;
   }
 
+  if (user?.role === 'agent') {
+    return <Navigate to="/my-competencies" replace />;
+  }
+
   if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
     return <Navigate to="/workspace" replace />;
   }
@@ -53,7 +58,7 @@ function ProtectedRoute({ children }) {
  * Redirects to dashboard if already authenticated
  */
 function PublicRoute({ children }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -67,19 +72,61 @@ function PublicRoute({ children }) {
   }
 
   if (isAuthenticated) {
+    if (user?.role === 'agent') {
+      return <Navigate to="/my-competencies" replace />;
+    }
     return <Navigate to="/dashboard" replace />;
   }
 
   return children;
 }
 
-function AuthCallback() {
+function AgentRoute({ children }) {
   const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+}
+
+function HomeRedirect() {
+  const { user, isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return <Navigate to={user?.role === 'agent' ? '/my-competencies' : '/dashboard'} replace />;
+}
+
+function AuthCallback() {
+  const { user, isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      navigate('/dashboard', { replace: true });
+      navigate(user?.role === 'agent' ? '/my-competencies' : '/dashboard', { replace: true });
     }
     if (!isLoading && !isAuthenticated) {
       const timer = setTimeout(() => {
@@ -87,7 +134,7 @@ function AuthCallback() {
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [isAuthenticated, isLoading, navigate]);
+  }, [isAuthenticated, isLoading, navigate, user?.role]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
@@ -128,6 +175,15 @@ function App() {
                 <Route
                   path="/summit/vote/:token"
                   element={<SummitVote />}
+                />
+
+                <Route
+                  path="/my-competencies"
+                  element={
+                    <AgentRoute>
+                      <MyCompetencies />
+                    </AgentRoute>
+                  }
                 />
 
                 {/* Protected Routes */}
@@ -258,10 +314,10 @@ function App() {
                 />
 
                 {/* Default Route */}
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/" element={<HomeRedirect />} />
 
                 {/* 404 Catch-all */}
-                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                <Route path="*" element={<HomeRedirect />} />
               </Routes>
               <DemoModeBanner />
             </SettingsProvider>

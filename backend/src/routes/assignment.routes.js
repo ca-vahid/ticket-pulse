@@ -2,6 +2,7 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import assignmentRepository from '../services/assignmentRepository.js';
 import competencyRepository from '../services/competencyRepository.js';
+import agentCompetencyService from '../services/agentCompetencyService.js';
 import assignmentPipelineService from '../services/assignmentPipelineService.js';
 import competencyAnalysisService from '../services/competencyAnalysisService.js';
 import competencyPromptRepository from '../services/competencyPromptRepository.js';
@@ -1045,6 +1046,29 @@ router.get('/competencies/duplicates', requireAdmin, asyncHandler(async (req, re
   }
 
   res.json({ success: true, data: groups });
+}));
+
+router.get('/competency-requests', requireAdmin, asyncHandler(async (req, res) => {
+  const [items, pendingCount] = await Promise.all([
+    agentCompetencyService.listCompetencyRequests(req.workspaceId, {
+      status: req.query.status || 'pending',
+      limit: req.query.limit || 100,
+    }),
+    agentCompetencyService.getPendingRequestCount(req.workspaceId),
+  ]);
+  res.json({ success: true, data: items, pendingCount });
+}));
+
+router.post('/competency-requests/:id/decision', requireAdmin, asyncHandler(async (req, res) => {
+  const items = await agentCompetencyService.decideCompetencyRequest(
+    req.workspaceId,
+    req.params.id,
+    req.body?.decision,
+    req.session?.user?.email,
+    req.body?.decisionNote,
+  );
+  const pendingCount = await agentCompetencyService.getPendingRequestCount(req.workspaceId);
+  res.json({ success: true, data: items, pendingCount });
 }));
 
 router.post('/competencies/merge', requireAdmin, asyncHandler(async (req, res) => {

@@ -58,8 +58,9 @@ const RECOMMENDATION_STATUS_STYLES = {
 
 const PROFICIENCY_LEVELS = [
   { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
-  { value: 'intermediate', label: 'Intermediate', num: '2', color: 'bg-blue-100 text-blue-800 border-blue-200' },
-  { value: 'expert', label: 'Expert', num: '3', color: 'bg-green-100 text-green-800 border-green-200' },
+  { value: 'intermediate', label: 'Comfortable', num: '2', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+  { value: 'advanced', label: 'Advanced', num: '3', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+  { value: 'expert', label: 'Expert / SME', num: '4', color: 'bg-green-100 text-green-800 border-green-200' },
 ];
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1858,9 +1859,11 @@ function TechnicianCompetencyCompactEditor({
       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
         <span>1 Basic</span>
         <span className="text-slate-300">•</span>
-        <span>2 Intermediate</span>
+        <span>2 Comfortable</span>
         <span className="text-slate-300">•</span>
-        <span>3 Expert</span>
+        <span>3 Advanced</span>
+        <span className="text-slate-300">•</span>
+        <span>4 Expert / SME</span>
         {currentLevel && (
           <>
             <span className="text-slate-300">•</span>

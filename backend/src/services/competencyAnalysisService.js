@@ -318,7 +318,7 @@ class CompetencyAnalysisService {
       }
 
       // Deduplicate: if same category appears twice, keep the higher proficiency
-      const LEVEL_RANK = { basic: 1, intermediate: 2, expert: 3 };
+      const LEVEL_RANK = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
       const existing = mappings.find((m) => m.competencyCategoryId === category.id);
       if (existing) {
         const existingRank = LEVEL_RANK[existing.proficiencyLevel] || 0;

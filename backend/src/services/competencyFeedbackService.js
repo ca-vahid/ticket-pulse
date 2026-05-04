@@ -2,7 +2,7 @@ import prisma from './prisma.js';
 import { findBestCategoryMatch } from '../utils/categoryMatcher.js';
 import logger from '../utils/logger.js';
 
-const LEVEL_ORDER = { basic: 1, intermediate: 2, expert: 3 };
+const LEVEL_ORDER = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
 const PROMOTE_THRESHOLDS = { basic: 3, intermediate: 5 };
 
 class CompetencyFeedbackService {
