@@ -168,7 +168,16 @@ export async function submitMyCompetencyChange(email, body = {}) {
   }
 
   if (!currentLevel && requestedLevel && !category.parentId) {
-    throw new ValidationError('New skill requests must use an existing subcategory');
+    const childCount = await prisma.competencyCategory.count({
+      where: {
+        workspaceId: technician.workspaceId,
+        parentId: category.id,
+        isActive: true,
+      },
+    });
+    if (childCount > 0) {
+      throw new ValidationError('Choose a subcategory under this category');
+    }
   }
 
   const requestType = requestTypeFor(currentLevel, requestedLevel);

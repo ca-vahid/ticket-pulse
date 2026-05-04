@@ -105,7 +105,16 @@ export default function MyCompetencies() {
   }, [data?.categories, data?.categoryTree, query]);
 
   const allCategories = useMemo(() => flattenCategories(data?.categoryTree, data?.categories), [data?.categories, data?.categoryTree]);
-  const subcategoryOptions = useMemo(() => allCategories.filter((category) => category.depth === 1), [allCategories]);
+  const categoryHasChildren = useMemo(() => {
+    const map = {};
+    for (const category of allCategories) {
+      if (category.parentId) map[category.parentId] = true;
+    }
+    return map;
+  }, [allCategories]);
+  const requestableSkills = useMemo(() => allCategories.filter((category) => (
+    category.depth === 1 || !categoryHasChildren[category.id]
+  )), [allCategories, categoryHasChildren]);
 
   const myTechId = data?.technician?.id;
   const myMappedCount = Object.keys(mappingMap[myTechId] || {}).length;
@@ -124,14 +133,14 @@ export default function MyCompetencies() {
     }, 2600);
   };
 
-  const openRequestModal = (category = null) => {
-    const target = category?.depth === 1
+  const openRequestModal = (category = null, requestedLevel = 'basic') => {
+    const target = category && (category.depth === 1 || !categoryHasChildren[category.id])
       ? category
-      : subcategoryOptions.find((candidate) => !category || candidate.parentId === category.id)
-        || subcategoryOptions[0];
+      : requestableSkills.find((candidate) => !category || candidate.parentId === category.id)
+        || requestableSkills[0];
     setRequestForm({
       categoryId: target ? String(target.id) : '',
-      requestedLevel: 'basic',
+      requestedLevel: requestedLevel || 'basic',
       note,
     });
     setRequestModalOpen(true);
@@ -142,13 +151,13 @@ export default function MyCompetencies() {
     if (!requestForm.categoryId) {
       setMessage({
         type: 'warning',
-        title: 'Choose a subcategory',
-        text: 'New skills must be requested from an existing subcategory.',
+        title: 'Choose a skill',
+        text: 'Choose a subcategory, or a top-level category that has no subcategories.',
         autoClose: 5000,
       });
       return;
     }
-    const category = subcategoryOptions.find((option) => String(option.id) === String(requestForm.categoryId));
+    const category = requestableSkills.find((option) => String(option.id) === String(requestForm.categoryId));
     if (!category) return;
 
     setSavingCell(category.id);
@@ -210,11 +219,15 @@ export default function MyCompetencies() {
     const currentLevel = mappingMap[myTechId]?.[category.id] || '';
     if (nextLevel === currentLevel) return;
     if (!currentLevel && nextLevel && !category.parentId) {
+      if (!categoryHasChildren[category.id]) {
+        openRequestModal(category, nextLevel);
+        return;
+      }
       flashCategory(category.id);
       setMessage({
         type: 'warning',
         title: 'Pick a subcategory',
-        text: `${category.name} is a top-level category. Use Request skill and choose a subcategory under it.`,
+        text: `${category.name} has subcategories. Use Request skill and choose the specific subcategory under it.`,
         actionLabel: 'Request skill',
         onAction: () => openRequestModal(category),
       });
@@ -324,7 +337,7 @@ export default function MyCompetencies() {
                   <Sparkles className="h-5 w-5 text-blue-600" />
                   Request a skill
                 </div>
-                <p className="mt-1 text-sm text-slate-500">Choose an existing subcategory, set the level you want, and send it for admin approval.</p>
+                <p className="mt-1 text-sm text-slate-500">Choose a subcategory when available. If a category has no subcategories, request the category itself.</p>
               </div>
               <button
                 type="button"
@@ -336,18 +349,23 @@ export default function MyCompetencies() {
               </button>
             </div>
 
-            <label className="mt-5 block text-xs font-semibold uppercase text-slate-500">Subcategory</label>
+            <label className="mt-5 block text-xs font-semibold uppercase text-slate-500">Skill</label>
             <select
               value={requestForm.categoryId}
               onChange={(event) => setRequestForm((current) => ({ ...current, categoryId: event.target.value }))}
               className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
             >
-              {subcategoryOptions.map((category) => (
+              {requestableSkills.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.parentName ? `${category.parentName} / ` : ''}{category.name}
                 </option>
               ))}
             </select>
+            {requestableSkills.length === 0 && (
+              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                No active skills are available to request in this workspace.
+              </div>
+            )}
 
             <label className="mt-4 block text-xs font-semibold uppercase text-slate-500">Requested level</label>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
