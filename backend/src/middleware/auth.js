@@ -37,13 +37,20 @@ export function requireAuth(req, res, next) {
     try {
       const token = authHeader.substring(7);
       const decoded = jwt.verify(token, config.session.secret, { algorithms: ['HS256'] });
-      req.user = decoded;
+      const safeUser = {
+        email: decoded.email,
+        name: decoded.name,
+        username: decoded.username || decoded.name,
+        role: decoded.role,
+        selectedWorkspaceId: decoded.selectedWorkspaceId,
+      };
+      req.user = safeUser;
       if (!req.session.user) {
-        req.session.user = decoded;
+        req.session.user = safeUser;
       } else {
-        req.session.user.email = decoded.email;
-        req.session.user.name = decoded.name;
-        req.session.user.role = decoded.role;
+        req.session.user.email = safeUser.email;
+        req.session.user.name = safeUser.name;
+        req.session.user.role = safeUser.role;
       }
       return next();
     } catch {

@@ -60,6 +60,56 @@ function verifyIdToken(idToken) {
   });
 }
 
+function sanitizeWorkspace(workspace) {
+  if (!workspace) return null;
+  return {
+    id: workspace.id,
+    name: workspace.name,
+    slug: workspace.slug,
+    defaultTimezone: workspace.defaultTimezone,
+  };
+}
+
+function sanitizeAgentProfile(profile) {
+  if (!profile) return null;
+  return {
+    id: profile.id,
+    name: profile.name,
+    email: profile.email,
+    location: profile.location || null,
+    workspaceId: profile.workspaceId || profile.workspace?.id || null,
+    workspace: sanitizeWorkspace(profile.workspace),
+  };
+}
+
+function sanitizeAgentProfiles(profiles = []) {
+  if (!Array.isArray(profiles)) return [];
+  return profiles.map(sanitizeAgentProfile).filter(Boolean);
+}
+
+function buildTokenUser({ email, name, role, selectedWorkspaceId }) {
+  const payload = {
+    email,
+    name,
+    username: name,
+    role,
+  };
+  if (selectedWorkspaceId) {
+    payload.selectedWorkspaceId = selectedWorkspaceId;
+  }
+  return payload;
+}
+
+function buildResponseUser({ email, name, role, selectedWorkspaceId, agentProfiles = [] }) {
+  const sanitizedAgentProfiles = sanitizeAgentProfiles(agentProfiles);
+  return {
+    ...buildTokenUser({ email, name, role, selectedWorkspaceId }),
+    hasAgentProfile: sanitizedAgentProfiles.length > 0,
+    agentProfile: sanitizedAgentProfiles[0] || null,
+    agentProfiles: sanitizedAgentProfiles,
+  };
+}
+
 /**
  * POST /api/auth/sso
  * Validate Azure AD ID token and create session
@@ -135,6 +185,8 @@ router.post(
       selectedWorkspaceSlug = availableWorkspaces[0].slug;
     }
 
+    const sanitizedAgentProfiles = sanitizeAgentProfiles(agentProfiles);
+
     req.session.user = {
       email,
       name,
@@ -144,8 +196,8 @@ router.post(
       loginTime: new Date().toISOString(),
       authMethod: 'sso',
       availableWorkspaces,
-      agentProfiles,
-      agentProfile: agentProfiles[0] || null,
+      agentProfiles: sanitizedAgentProfiles,
+      agentProfile: sanitizedAgentProfiles[0] || null,
       selectedWorkspaceId,
       selectedWorkspaceName,
       selectedWorkspaceSlug,
@@ -153,18 +205,20 @@ router.post(
 
     logger.info(`SSO login: ${name} (${email}) as ${role}, ${availableWorkspaces.length} workspace(s), ${agentProfiles.length} technician profile(s)`);
 
-    const userPayload = {
+    const tokenPayload = buildTokenUser({
       email,
       name,
-      username: name,
       role,
-      agentProfile: agentProfiles[0] || null,
+      selectedWorkspaceId,
+    });
+    const userPayload = buildResponseUser({
+      email,
+      name,
+      role,
+      selectedWorkspaceId,
       agentProfiles,
-    };
-    if (selectedWorkspaceId) {
-      userPayload.selectedWorkspaceId = selectedWorkspaceId;
-    }
-    const authToken = jwt.sign(userPayload, config.session.secret, {
+    });
+    const authToken = jwt.sign(tokenPayload, config.session.secret, {
       algorithm: 'HS256',
       expiresIn: '8h',
     });
@@ -216,6 +270,7 @@ router.get(
   '/session',
   asyncHandler(async (req, res) => {
     if (req.session?.user) {
+      const sessionAgentProfiles = sanitizeAgentProfiles(req.session.user.agentProfiles || []);
       return res.json({
         success: true,
         authenticated: true,
@@ -224,8 +279,9 @@ router.get(
           name: req.session.user.name,
           username: req.session.user.username || req.session.user.name,
           role: req.session.user.role,
-          agentProfile: req.session.user.agentProfile || null,
-          agentProfiles: req.session.user.agentProfiles || [],
+          hasAgentProfile: sessionAgentProfiles.length > 0,
+          agentProfile: sessionAgentProfiles[0] || null,
+          agentProfiles: sessionAgentProfiles,
         },
         availableWorkspaces: req.session.user.availableWorkspaces || [],
         selectedWorkspaceId: req.session.user.selectedWorkspaceId || null,
@@ -244,9 +300,12 @@ router.get(
         // Resolve workspace access from DB since JWT doesn't carry it
         let availableWorkspaces = [];
         let selectedWorkspaceId = null;
+        let selectedWorkspaceName = null;
+        let selectedWorkspaceSlug = null;
+        let agentProfiles = [];
         try {
           const email = decoded.email?.toLowerCase();
-          const role = decoded.role;
+          let role = decoded.role;
           if (role === 'admin') {
             availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
               id: ws.id, name: ws.name, slug: ws.slug, role: 'admin',
@@ -254,9 +313,10 @@ router.get(
           } else if (email) {
             availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
           }
-          const agentProfiles = email ? await agentCompetencyService.getAgentProfiles(email) : [];
+          agentProfiles = email ? await agentCompetencyService.getAgentProfiles(email) : [];
           if (role !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
-            decoded.role = 'agent';
+            role = 'agent';
+            decoded.role = role;
           }
           if (decoded.selectedWorkspaceId) {
             selectedWorkspaceId = decoded.selectedWorkspaceId;
@@ -266,36 +326,42 @@ router.get(
           const selectedWs = selectedWorkspaceId
             ? availableWorkspaces.find(w => w.id === selectedWorkspaceId) || null
             : null;
+          selectedWorkspaceName = req.session?.user?.selectedWorkspaceName || selectedWs?.name || null;
+          selectedWorkspaceSlug = req.session?.user?.selectedWorkspaceSlug || selectedWs?.slug || null;
+          const sanitizedAgentProfiles = sanitizeAgentProfiles(agentProfiles);
           if (req.session) {
             req.session.user = {
-              ...decoded,
-              agentProfiles,
-              agentProfile: agentProfiles[0] || null,
-              availableWorkspaces,
+              email: decoded.email,
+              name: decoded.name,
+              username: decoded.username || decoded.name,
+              role,
               selectedWorkspaceId: req.session.user?.selectedWorkspaceId || selectedWorkspaceId,
-              selectedWorkspaceName: req.session.user?.selectedWorkspaceName || selectedWs?.name || null,
-              selectedWorkspaceSlug: req.session.user?.selectedWorkspaceSlug || selectedWs?.slug || null,
+              agentProfiles: sanitizedAgentProfiles,
+              agentProfile: sanitizedAgentProfiles[0] || null,
+              availableWorkspaces,
+              selectedWorkspaceName,
+              selectedWorkspaceSlug,
             };
           }
         } catch (wsErr) {
           logger.warn('Failed to resolve workspaces in JWT fallback:', wsErr.message);
         }
+        const responseUser = buildResponseUser({
+          email: decoded.email,
+          name: decoded.name,
+          role: decoded.role,
+          selectedWorkspaceId: req.session?.user?.selectedWorkspaceId || selectedWorkspaceId,
+          agentProfiles: req.session?.user?.agentProfiles || agentProfiles,
+        });
 
         return res.json({
           success: true,
           authenticated: true,
-          user: {
-            email: decoded.email,
-            name: decoded.name,
-            username: decoded.username || decoded.name,
-            role: decoded.role,
-            agentProfile: req.session?.user?.agentProfile || decoded.agentProfile || null,
-            agentProfiles: req.session?.user?.agentProfiles || decoded.agentProfiles || [],
-          },
+          user: responseUser,
           availableWorkspaces,
           selectedWorkspaceId: req.session?.user?.selectedWorkspaceId || selectedWorkspaceId,
-          selectedWorkspaceName: req.session?.user?.selectedWorkspaceName || null,
-          selectedWorkspaceSlug: req.session?.user?.selectedWorkspaceSlug || null,
+          selectedWorkspaceName,
+          selectedWorkspaceSlug,
         });
       } catch {
         // Invalid token — fall through
