@@ -25,13 +25,23 @@ Call **get_technician_ticket_history** with a large window (days=180, limit=100)
 - Breadth vs depth of expertise
 - Categories with even small ticket counts (5+) — these still indicate competency
 
-## Step 5: Check AD Profile
+## Step 5: Review Assignment Quality Signals
+Call **get_technician_assignment_signals** with a large window (days=180, limit=60, includeThreadSnippets=true). Use this to review:
+- Tickets the technician rejected or was reassigned away from
+- Rebound runs where the ticket came back after assignment
+- Ticket descriptions and cached FreshService private notes, public replies, customer replies, and activity snippets
+- Assignment timelines that show whether the technician successfully owned the ticket or only briefly held it
+- Admin notes, override reasons, and errors from assignment pipeline runs when available
+
+Treat this as required quality evidence before final submission. Rejection or reassignment does not automatically mean the technician lacks skill, but it is a caution signal. Use notes and ticket context to decide whether the issue was a skill mismatch, bad category mapping, availability/process issue, unclear requester detail, or a normal reassignment. Do not raise a skill level based on ticket volume alone when the same category has repeated rejected/reassigned evidence.
+
+## Step 6: Check AD Profile
 Call **get_technician_ad_profile** to get the technician's job title, IT level (IT 1-5), seniority (Jr/Sr/Lead), department, and role from Azure AD. Use this to calibrate proficiency levels — a Senior IT Support 4 handling networking tickets should be rated higher than a Junior IT Support 1 doing the same volume.
 
-## Step 6: Compare with Peers (optional)
+## Step 7: Compare with Peers (optional)
 If helpful, call **get_comparable_technicians** to see how this technician's category distribution compares with peers. This helps identify unique specializations vs common generalist work.
 
-## Step 7: Submit Assessment
+## Step 8: Submit Assessment
 Call **submit_competency_assessment** with your final assessment. You MUST always call this tool.
 
 ## Thoroughness
@@ -52,6 +62,7 @@ Use the current five-level display model. "No experience" means no competency ma
 
 ## Important Rules
 - Only assess categories where there is real evidence from ticket history
+- Use assignment-quality signals, rejection/reassignment history, and note/reply snippets as evidence about successful handling versus misassignment. If notes are absent, say so in caveats instead of assuming success.
 - Do NOT invent active competencies without supporting ticket data
 - **CRITICAL: Before proposing a new category or subcategory, carefully check if an existing parent or subcategory covers the same domain under a slightly different name.** For example:
   - "VPN and Remote Access Client" tickets should use the existing "VPN and Remote Access" category
@@ -71,7 +82,8 @@ function needsCompetencyPromptUpgrade(systemPrompt = '') {
     || !systemPrompt.includes('parentCategoryId')
     || !systemPrompt.includes('categoryId whenever available')
     || !systemPrompt.includes('3 Advanced')
-    || !systemPrompt.includes('4 Expert / SME');
+    || !systemPrompt.includes('4 Expert / SME')
+    || !systemPrompt.includes('get_technician_assignment_signals');
 }
 
 class CompetencyPromptRepository {

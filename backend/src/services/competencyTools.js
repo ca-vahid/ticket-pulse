@@ -54,6 +54,37 @@ function summarizeInternalTaxonomyRows(rows = [], totalTickets = 0) {
     .sort((a, b) => b.count - a.count || a.categoryName.localeCompare(b.categoryName));
 }
 
+function clampInteger(value, defaultValue, maxValue) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return defaultValue;
+  return Math.min(parsed, maxValue);
+}
+
+function toIsoDateTime(value) {
+  return value ? value.toISOString() : null;
+}
+
+function toIsoDate(value) {
+  return value?.toISOString()?.slice(0, 10) || null;
+}
+
+function cleanSnippet(value, maxLength = 650) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function groupBy(items, keyFn) {
+  const map = new Map();
+  for (const item of items) {
+    const key = keyFn(item);
+    const list = map.get(key) || [];
+    list.push(item);
+    map.set(key, list);
+  }
+  return map;
+}
+
 export const COMPETENCY_TOOL_SCHEMAS = [
   {
     name: 'get_technician_profile',
@@ -67,7 +98,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'get_technician_ticket_history',
-    description: 'Get recent tickets handled by this technician. Shows category, subcategory, priority, subject, created/resolved dates, and self-picked flag. Use this to understand what work domains the technician covers.',
+    description: 'Get recent tickets handled by this technician. Shows category, subcategory, priority, subject, created/resolved dates, self-picked flag, and rejection count. Use this to understand what work domains the technician covers.',
     input_schema: {
       type: 'object',
       properties: {
@@ -79,7 +110,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'get_technician_category_distribution',
-    description: 'Get deterministic aggregate breakdown of ticket categories/subcategories for this technician: counts, recency, average resolution time. Best tool for understanding specialization patterns.',
+    description: 'Get deterministic aggregate breakdown of ticket categories/subcategories for this technician: counts, recency, resolution rate, self-picks, and rejected assignment episodes. Best tool for understanding specialization patterns.',
     input_schema: {
       type: 'object',
       properties: {
@@ -89,8 +120,21 @@ export const COMPETENCY_TOOL_SCHEMAS = [
     },
   },
   {
+    name: 'get_technician_assignment_signals',
+    description: 'Get assignment-quality evidence for this technician: rejected/reassigned episodes, rebound runs, ticket descriptions, and cached FreshService note/reply snippets. Use this before final assessment to distinguish successful experience from misassignments or uncertain skill fit.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        days: { type: 'integer', description: 'How many days of history (default 180, max 365)' },
+        limit: { type: 'integer', description: 'Max tickets to return (default 40, max 80)' },
+        includeThreadSnippets: { type: 'boolean', description: 'Include cached FreshService note/reply snippets when available (default true)' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'search_workspace_tickets',
-    description: 'Search tickets across the entire workspace by keyword, category, or technician. Use for comparison and context.',
+    description: 'Search tickets across the entire workspace by keyword, category, or technician. Returns short description snippets and assignment-quality counts for comparison and context.',
     input_schema: {
       type: 'object',
       properties: {
@@ -162,6 +206,8 @@ export async function executeCompetencyTool(toolName, toolInput, context) {
     return await getTechnicianTicketHistory(workspaceId, technicianId, toolInput);
   case 'get_technician_category_distribution':
     return await getTechnicianCategoryDistribution(workspaceId, technicianId, toolInput);
+  case 'get_technician_assignment_signals':
+    return await getTechnicianAssignmentSignals(workspaceId, technicianId, toolInput);
   case 'search_workspace_tickets':
     return await searchWorkspaceTickets(workspaceId, toolInput);
   case 'get_comparable_technicians':
@@ -226,9 +272,9 @@ async function getExistingCategories(workspaceId) {
   };
 }
 
-async function getTechnicianTicketHistory(workspaceId, technicianId, params) {
-  const days = Math.min(params.days || 90, 180);
-  const limit = Math.min(params.limit || 50, 100);
+async function getTechnicianTicketHistory(workspaceId, technicianId, params = {}) {
+  const days = clampInteger(params.days, 90, 180);
+  const limit = clampInteger(params.limit, 50, 100);
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -243,6 +289,7 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params) {
       internalCategoryFit: true,
       internalSubcategoryFit: true,
       taxonomyReviewNeeded: true,
+      rejectionCount: true,
       createdAt: true, resolvedAt: true,
       isSelfPicked: true, resolutionTimeSeconds: true,
     },
@@ -280,21 +327,25 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params) {
         subcategoryFit: t.internalSubcategoryFit,
         reviewNeeded: t.taxonomyReviewNeeded,
       },
-      createdAt: t.createdAt?.toISOString()?.slice(0, 10),
-      resolvedAt: t.resolvedAt?.toISOString()?.slice(0, 10),
+      assignmentSignals: {
+        rejectionCount: t.rejectionCount || 0,
+        hasRejectedEpisode: (t.rejectionCount || 0) > 0,
+      },
+      createdAt: toIsoDate(t.createdAt),
+      resolvedAt: toIsoDate(t.resolvedAt),
       selfPicked: t.isSelfPicked,
       resolutionMins: t.resolutionTimeSeconds ? Math.round(t.resolutionTimeSeconds / 60) : null,
     })),
   };
 }
 
-async function getTechnicianCategoryDistribution(workspaceId, technicianId, params) {
-  const days = Math.min(params.days || 90, 180);
+async function getTechnicianCategoryDistribution(workspaceId, technicianId, params = {}) {
+  const days = clampInteger(params.days, 90, 180);
   const since = new Date();
   since.setDate(since.getDate() - days);
 
   // Use whichever category field has data: prefer category, fall back to ticketCategory
-  const [byFsCategory, byTicketCategory, total, resolved, selfPicked] = await Promise.all([
+  const [byFsCategory, byTicketCategory, total, resolved, selfPicked, rejectedEpisodes, reassignedEpisodes] = await Promise.all([
     prisma.ticket.groupBy({
       by: ['category'],
       where: { workspaceId, assignedTechId: technicianId, createdAt: { gte: since }, category: { not: null } },
@@ -315,6 +366,12 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
     }),
     prisma.ticket.count({
       where: { workspaceId, assignedTechId: technicianId, createdAt: { gte: since }, isSelfPicked: true },
+    }),
+    prisma.ticketAssignmentEpisode.count({
+      where: { workspaceId, technicianId, startedAt: { gte: since }, endMethod: 'rejected' },
+    }),
+    prisma.ticketAssignmentEpisode.count({
+      where: { workspaceId, technicianId, startedAt: { gte: since }, endMethod: 'reassigned' },
     }),
   ]);
 
@@ -358,13 +415,21 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
       select: { createdAt: true },
       orderBy: { createdAt: 'desc' },
     });
-    recentByCategory[cat.category] = latest?.createdAt?.toISOString()?.slice(0, 10);
+    recentByCategory[cat.category] = toIsoDate(latest?.createdAt);
   }
 
   return {
     technicianId,
     period: `Last ${days} days`,
-    summary: { totalTickets: total, resolved, selfPicked, resolveRate: total > 0 ? Math.round((resolved / total) * 100) : 0 },
+    summary: {
+      totalTickets: total,
+      resolved,
+      selfPicked,
+      rejectedEpisodes,
+      reassignedEpisodes,
+      resolveRate: total > 0 ? Math.round((resolved / total) * 100) : 0,
+      rejectionRatePerHandledTicket: total > 0 ? Number(((rejectedEpisodes / total) * 100).toFixed(1)) : 0,
+    },
     internalTaxonomyBreakdown: summarizeInternalTaxonomyRows(internalRows, total),
     categoryBreakdown: byCategory.map((c) => ({
       category: c.category,
@@ -378,8 +443,260 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
   };
 }
 
-async function searchWorkspaceTickets(workspaceId, params) {
-  const limit = Math.min(params.limit || 15, 25);
+async function getTechnicianAssignmentSignals(workspaceId, technicianId, params = {}) {
+  const days = clampInteger(params.days, 180, 365);
+  const limit = clampInteger(params.limit, 40, 80);
+  const includeThreadSnippets = params.includeThreadSnippets !== false;
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  const [technician, targetEpisodes] = await Promise.all([
+    prisma.technician.findFirst({
+      where: { id: technicianId, workspaceId },
+      select: { id: true, name: true, email: true },
+    }),
+    prisma.ticketAssignmentEpisode.findMany({
+      where: { workspaceId, technicianId, startedAt: { gte: since } },
+      select: {
+        ticketId: true,
+        startedAt: true,
+        endedAt: true,
+        startMethod: true,
+        startAssignedByName: true,
+        endMethod: true,
+        endActorName: true,
+      },
+      orderBy: { startedAt: 'desc' },
+    }),
+  ]);
+
+  if (!technician) return { error: 'Technician not found' };
+
+  const targetTicketIds = Array.from(new Set(targetEpisodes.map((episode) => episode.ticketId)));
+
+  const tickets = await prisma.ticket.findMany({
+    where: {
+      workspaceId,
+      createdAt: { gte: since },
+      OR: [
+        { assignedTechId: technicianId },
+        { id: { in: targetTicketIds.length > 0 ? targetTicketIds : [-1] } },
+      ],
+    },
+    select: {
+      id: true,
+      freshserviceTicketId: true,
+      subject: true,
+      descriptionText: true,
+      status: true,
+      priority: true,
+      category: true,
+      subCategory: true,
+      ticketCategory: true,
+      internalCategory: { select: { id: true, name: true } },
+      internalSubcategory: { select: { id: true, name: true, parentId: true } },
+      internalCategoryFit: true,
+      internalSubcategoryFit: true,
+      taxonomyReviewNeeded: true,
+      rejectionCount: true,
+      createdAt: true,
+      resolvedAt: true,
+      assignedTech: { select: { id: true, name: true } },
+      _count: { select: { threadEntries: true, assignmentEpisodes: true, pipelineRuns: true } },
+    },
+    orderBy: [{ rejectionCount: 'desc' }, { createdAt: 'desc' }],
+    take: limit,
+  });
+
+  const ticketIds = tickets.map((ticket) => ticket.id);
+  const [episodes, activities, threadEntries, pipelineRuns] = ticketIds.length > 0
+    ? await Promise.all([
+      prisma.ticketAssignmentEpisode.findMany({
+        where: { workspaceId, ticketId: { in: ticketIds } },
+        include: { technician: { select: { id: true, name: true } } },
+        orderBy: { startedAt: 'asc' },
+      }),
+      prisma.ticketActivity.findMany({
+        where: {
+          ticketId: { in: ticketIds },
+          activityType: {
+            in: ['self_picked', 'coordinator_assigned', 'assigned', 'rejected', 'reassigned', 'status_changed', 'resolved', 'group_changed'],
+          },
+        },
+        select: { ticketId: true, activityType: true, performedBy: true, performedAt: true, details: true },
+        orderBy: { performedAt: 'asc' },
+      }),
+      includeThreadSnippets
+        ? prisma.ticketThreadEntry.findMany({
+          where: { workspaceId, ticketId: { in: ticketIds }, bodyText: { not: null } },
+          select: {
+            ticketId: true,
+            source: true,
+            eventType: true,
+            actorName: true,
+            actorEmail: true,
+            visibility: true,
+            isPrivate: true,
+            title: true,
+            bodyText: true,
+            occurredAt: true,
+          },
+          orderBy: { occurredAt: 'desc' },
+          take: Math.min(ticketIds.length * 4, 240),
+        })
+        : Promise.resolve([]),
+      prisma.assignmentPipelineRun.findMany({
+        where: { workspaceId, ticketId: { in: ticketIds } },
+        select: {
+          id: true,
+          ticketId: true,
+          triggerSource: true,
+          reboundFrom: true,
+          assignedTechId: true,
+          decision: true,
+          decisionNote: true,
+          overrideReason: true,
+          errorMessage: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: Math.min(ticketIds.length * 3, 180),
+      }),
+    ])
+    : [[], [], [], []];
+
+  const episodesByTicket = groupBy(episodes, (episode) => episode.ticketId);
+  const activitiesByTicket = groupBy(activities, (activity) => activity.ticketId);
+  const threadsByTicket = groupBy(threadEntries, (entry) => entry.ticketId);
+  const runsByTicket = groupBy(pipelineRuns, (run) => run.ticketId);
+
+  const analyzedTickets = tickets.map((ticket) => {
+    const ticketEpisodes = episodesByTicket.get(ticket.id) || [];
+    const targetTicketEpisodes = ticketEpisodes.filter((episode) => episode.technicianId === technicianId);
+    const rejectedByTechnician = targetTicketEpisodes.filter((episode) => episode.endMethod === 'rejected');
+    const reassignedAwayFromTechnician = targetTicketEpisodes.filter((episode) => episode.endMethod === 'reassigned');
+    const ticketRuns = runsByTicket.get(ticket.id) || [];
+    const reboundRuns = ticketRuns.filter((run) => {
+      const rebound = run.reboundFrom || {};
+      return run.triggerSource === 'rebound'
+        || run.triggerSource === 'rebound_exhausted'
+        || rebound.previousTechId === technicianId
+        || rebound.previousTechName === technician.name;
+    });
+
+    return {
+      id: ticket.id,
+      freshserviceTicketId: Number(ticket.freshserviceTicketId),
+      subject: ticket.subject,
+      descriptionSnippet: cleanSnippet(ticket.descriptionText, 500),
+      status: ticket.status,
+      priority: ticket.priority,
+      category: ticket.category,
+      subCategory: ticket.subCategory,
+      ticketCategory: ticket.ticketCategory,
+      internalCategory: ticket.internalCategory
+        ? {
+          id: ticket.internalCategory.id,
+          name: ticket.internalCategory.name,
+          subcategory: ticket.internalSubcategory ? { id: ticket.internalSubcategory.id, name: ticket.internalSubcategory.name } : null,
+        }
+        : null,
+      taxonomyFit: {
+        categoryFit: ticket.internalCategoryFit,
+        subcategoryFit: ticket.internalSubcategoryFit,
+        reviewNeeded: ticket.taxonomyReviewNeeded,
+      },
+      currentAssignedTo: ticket.assignedTech ? { id: ticket.assignedTech.id, name: ticket.assignedTech.name } : null,
+      createdAt: toIsoDate(ticket.createdAt),
+      resolvedAt: toIsoDate(ticket.resolvedAt),
+      assignmentQualitySignals: {
+        ticketRejectionCount: ticket.rejectionCount || 0,
+        targetEpisodeCount: targetTicketEpisodes.length,
+        rejectedByTechnicianCount: rejectedByTechnician.length,
+        reassignedAwayFromTechnicianCount: reassignedAwayFromTechnician.length,
+        hasNegativeTargetSignal: rejectedByTechnician.length > 0 || reassignedAwayFromTechnician.length > 0 || reboundRuns.length > 0,
+        cachedThreadEntryCount: ticket._count.threadEntries,
+        assignmentEpisodeCount: ticket._count.assignmentEpisodes,
+        pipelineRunCount: ticket._count.pipelineRuns,
+      },
+      targetEpisodes: targetTicketEpisodes.map((episode) => ({
+        startedAt: toIsoDateTime(episode.startedAt),
+        endedAt: toIsoDateTime(episode.endedAt),
+        startMethod: episode.startMethod,
+        startedBy: episode.startAssignedByName,
+        endMethod: episode.endMethod,
+        endedBy: episode.endActorName,
+      })),
+      ticketAssignmentTimeline: ticketEpisodes.map((episode) => ({
+        technicianId: episode.technicianId,
+        technicianName: episode.technician?.name || null,
+        startedAt: toIsoDateTime(episode.startedAt),
+        endedAt: toIsoDateTime(episode.endedAt),
+        startMethod: episode.startMethod,
+        startedBy: episode.startAssignedByName,
+        endMethod: episode.endMethod,
+        endedBy: episode.endActorName,
+      })),
+      activityTimeline: (activitiesByTicket.get(ticket.id) || []).slice(-12).map((activity) => ({
+        type: activity.activityType,
+        performedBy: activity.performedBy,
+        performedAt: toIsoDateTime(activity.performedAt),
+        details: activity.details || null,
+      })),
+      reboundRuns: reboundRuns.slice(0, 5).map((run) => ({
+        runId: run.id,
+        createdAt: toIsoDateTime(run.createdAt),
+        triggerSource: run.triggerSource,
+        decision: run.decision,
+        assignedTechId: run.assignedTechId,
+        reboundFrom: run.reboundFrom || null,
+        decisionNote: cleanSnippet(run.decisionNote, 450),
+        overrideReason: cleanSnippet(run.overrideReason, 450),
+        errorMessage: cleanSnippet(run.errorMessage, 450),
+      })),
+      threadSnippets: (threadsByTicket.get(ticket.id) || []).slice(0, 4).map((entry) => ({
+        occurredAt: toIsoDateTime(entry.occurredAt),
+        source: entry.source,
+        eventType: entry.eventType,
+        visibility: entry.visibility,
+        isPrivate: entry.isPrivate,
+        actorName: entry.actorName,
+        actorEmail: entry.actorEmail,
+        title: entry.title,
+        snippet: cleanSnippet(entry.bodyText, 650),
+      })).filter((entry) => entry.snippet),
+    };
+  });
+
+  const totals = analyzedTickets.reduce((acc, ticket) => {
+    acc.rejectedByTechnician += ticket.assignmentQualitySignals.rejectedByTechnicianCount;
+    acc.reassignedAwayFromTechnician += ticket.assignmentQualitySignals.reassignedAwayFromTechnicianCount;
+    acc.negativeSignalTickets += ticket.assignmentQualitySignals.hasNegativeTargetSignal ? 1 : 0;
+    acc.threadSnippetsReturned += ticket.threadSnippets.length;
+    return acc;
+  }, {
+    rejectedByTechnician: 0,
+    reassignedAwayFromTechnician: 0,
+    negativeSignalTickets: 0,
+    threadSnippetsReturned: 0,
+  });
+
+  return {
+    technician: { id: technician.id, name: technician.name, email: technician.email },
+    period: `Last ${days} days`,
+    returnedTickets: analyzedTickets.length,
+    totals,
+    interpretationGuidance: [
+      'Use rejected/reassigned episodes and rebound runs as caution signals: they can indicate misassignment, insufficient skill fit, unavailable context, or process issues.',
+      'Do not raise proficiency on volume alone when the same category has repeated rejection/reassignment signals.',
+      'Use thread snippets and ticket descriptions to understand why the assignment succeeded or failed; absence of snippets means the cache may not have notes for that ticket.',
+    ],
+    tickets: analyzedTickets,
+  };
+}
+
+async function searchWorkspaceTickets(workspaceId, params = {}) {
+  const limit = clampInteger(params.limit, 15, 25);
   const where = { workspaceId };
 
   if (params.category) where.category = params.category;
@@ -395,11 +712,14 @@ async function searchWorkspaceTickets(workspaceId, params) {
     where,
     select: {
       id: true, freshserviceTicketId: true, subject: true,
+      descriptionText: true,
       status: true, priority: true, category: true,
+      rejectionCount: true,
       internalCategory: { select: { id: true, name: true } },
       internalSubcategory: { select: { id: true, name: true, parentId: true } },
       createdAt: true, resolvedAt: true,
       assignedTech: { select: { id: true, name: true } },
+      _count: { select: { threadEntries: true, assignmentEpisodes: true } },
     },
     orderBy: { createdAt: 'desc' },
     take: limit,
@@ -411,6 +731,7 @@ async function searchWorkspaceTickets(workspaceId, params) {
       id: t.id,
       freshserviceTicketId: Number(t.freshserviceTicketId),
       subject: t.subject,
+      descriptionSnippet: cleanSnippet(t.descriptionText, 350),
       status: t.status,
       priority: t.priority,
       category: t.category,
@@ -421,8 +742,13 @@ async function searchWorkspaceTickets(workspaceId, params) {
           subcategory: t.internalSubcategory ? { id: t.internalSubcategory.id, name: t.internalSubcategory.name } : null,
         }
         : null,
-      createdAt: t.createdAt?.toISOString()?.slice(0, 10),
-      resolvedAt: t.resolvedAt?.toISOString()?.slice(0, 10),
+      assignmentSignals: {
+        rejectionCount: t.rejectionCount || 0,
+        assignmentEpisodeCount: t._count.assignmentEpisodes,
+        cachedThreadEntryCount: t._count.threadEntries,
+      },
+      createdAt: toIsoDate(t.createdAt),
+      resolvedAt: toIsoDate(t.resolvedAt),
       assignedTo: t.assignedTech?.name || 'Unassigned',
     })),
   };
