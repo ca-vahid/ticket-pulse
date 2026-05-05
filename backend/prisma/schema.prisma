@@ -799,7 +799,7 @@ model TechnicianCompetency {
   workspace            Workspace          @relation(fields: [workspaceId], references: [id])
   competencyCategoryId Int                @map("competency_category_id")
   competencyCategory   CompetencyCategory @relation(fields: [competencyCategoryId], references: [id], onDelete: Cascade)
-  proficiencyLevel     String             @default("intermediate") @db.VarChar(20) @map("proficiency_level") // basic | intermediate | expert
+  proficiencyLevel     String             @default("intermediate") @db.VarChar(20) @map("proficiency_level") // basic | intermediate | advanced | expert
   notes                String?            @db.Text
   createdAt            DateTime           @default(now()) @map("created_at")
   updatedAt            DateTime           @updatedAt @map("updated_at")

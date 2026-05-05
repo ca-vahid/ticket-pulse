@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 
 const LEVEL_ORDER = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
 const PROMOTE_THRESHOLDS = { basic: 3, intermediate: 5 };
+const NEXT_PROMOTION_LEVEL = { basic: 'intermediate', intermediate: 'advanced' };
 
 class CompetencyFeedbackService {
   /**
@@ -78,7 +79,7 @@ class CompetencyFeedbackService {
       } else {
         const currentRank = LEVEL_ORDER[existing.proficiencyLevel] || 0;
         if (currentRank >= 3) {
-          // Already expert, no promotion needed
+          // Advanced and expert levels need stronger explicit evidence than assignment feedback alone.
           await prisma.assignmentPipelineRun.update({
             where: { id: runId },
             data: { feedbackApplied: true },
@@ -90,7 +91,14 @@ class CompetencyFeedbackService {
         const threshold = PROMOTE_THRESHOLDS[existing.proficiencyLevel];
 
         if (threshold && recentCount >= threshold) {
-          const nextLevel = currentRank === 1 ? 'intermediate' : 'expert';
+          const nextLevel = NEXT_PROMOTION_LEVEL[existing.proficiencyLevel];
+          if (!nextLevel) {
+            await prisma.assignmentPipelineRun.update({
+              where: { id: runId },
+              data: { feedbackApplied: true },
+            });
+            return;
+          }
           await prisma.technicianCompetency.update({
             where: { id: existing.id },
             data: { proficiencyLevel: nextLevel },

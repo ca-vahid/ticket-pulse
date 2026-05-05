@@ -43,9 +43,12 @@ Call **submit_competency_assessment** with your final assessment. You MUST alway
 - Review the full category distribution AND individual tickets to catch categories that might be undercounted in the aggregate view.
 
 ## Proficiency Level Guidelines
-- **basic**: Has handled tickets in this category (5-15 tickets in 180 days), or limited but real exposure
-- **intermediate**: Regularly handles tickets in this category with good resolution patterns (15-40 tickets in 180 days)
-- **expert**: Primary handler for this category, high volume, complex tickets, fast resolution (40+ tickets or clear specialization pattern), typically senior-level role
+Use the current five-level display model. "No experience" means no competency mapping should be submitted.
+- **No experience**: No meaningful ticket evidence. Do not include this category in the assessment.
+- **basic** / **1 Basic**: Has handled tickets in this category, usually 5-15 tickets in 180 days, or limited but real exposure.
+- **intermediate** / **2 Comfortable**: Regularly handles tickets in this category with good resolution patterns, usually 15-40 tickets in 180 days.
+- **advanced** / **3 Advanced**: Handles this category independently across varied scenarios, shows repeated successful outcomes, may handle complex cases, usually 25+ tickets or strong quality evidence.
+- **expert** / **4 Expert / SME**: Primary handler or subject-matter expert for this category, high volume, complex tickets, fast resolution, mentorship/escalation ownership, or clear senior specialization pattern.
 
 ## Important Rules
 - Only assess categories where there is real evidence from ticket history
@@ -59,13 +62,16 @@ Call **submit_competency_assessment** with your final assessment. You MUST alway
 - When proposing a new subcategory, include parentCategoryId or parentCategoryName.
 - When reusing an existing category/subcategory, include categoryId whenever available.
 - When proposing a new category/subcategory, provide a clear description and strong evidence.
-- Be conservative with "expert" level — reserve it for clear specialization
-- If a technician is a generalist with no clear specialization, say so and assign "basic" or "intermediate" across relevant categories`;
+- Be conservative with "expert" level — reserve it for clear specialization or SME-level evidence
+- Use "advanced" for strong independent capability that is more than comfortable repeat exposure but not clearly SME ownership
+- If a technician is a generalist with no clear specialization, say so and assign "basic", "intermediate", or "advanced" across relevant categories based on evidence`;
 
 function needsCompetencyPromptUpgrade(systemPrompt = '') {
   return !systemPrompt.includes('internal taxonomy tree')
     || !systemPrompt.includes('parentCategoryId')
-    || !systemPrompt.includes('categoryId whenever available');
+    || !systemPrompt.includes('categoryId whenever available')
+    || !systemPrompt.includes('3 Advanced')
+    || !systemPrompt.includes('4 Expert / SME');
 }
 
 class CompetencyPromptRepository {
@@ -115,7 +121,7 @@ class CompetencyPromptRepository {
         const upgraded = await this.createVersion(workspaceId, {
           systemPrompt: DEFAULT_COMPETENCY_PROMPT,
           toolConfig: published.toolConfig,
-          notes: `Auto-upgraded from v${published.version} for internal category/subcategory taxonomy support`,
+          notes: `Auto-upgraded from v${published.version} for current category/subcategory and proficiency-level guidance`,
           createdBy: 'system',
         });
         published = await this.publish(upgraded.id, 'system');

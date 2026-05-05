@@ -130,7 +130,11 @@ export const COMPETENCY_TOOL_SCHEMAS = [
               parentCategoryId: { type: 'integer', description: 'Parent top-level category ID when proposing a new subcategory' },
               categoryDescription: { type: 'string', description: 'Brief description of what this category covers' },
               categoryAction: { type: 'string', enum: ['reuse_existing', 'create_new'], description: 'Whether to use an existing category/subcategory or propose a new inactive taxonomy entry for admin review' },
-              proficiencyLevel: { type: 'string', enum: ['basic', 'intermediate', 'expert'], description: 'Assessed proficiency level' },
+              proficiencyLevel: {
+                type: 'string',
+                enum: ['basic', 'intermediate', 'advanced', 'expert'],
+                description: 'Assessed proficiency level. Use basic=1 Basic, intermediate=2 Comfortable, advanced=3 Advanced, expert=4 Expert / SME. Do not submit categories with no experience.',
+              },
               confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Confidence in this assessment' },
               evidenceSummary: { type: 'string', description: 'Brief summary of evidence supporting this assessment' },
               ticketCount: { type: 'integer', description: 'Number of tickets in this category handled by the technician' },

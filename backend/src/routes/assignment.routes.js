@@ -1157,8 +1157,8 @@ router.put('/competencies/technician/:techId', requireAdmin, asyncHandler(async 
 // ─── Competency Analysis Pipeline ───────────────────────────────────────
 
 router.get('/competency-prompts', requireAdmin, asyncHandler(async (req, res) => {
-  const versions = await competencyPromptRepository.getVersions(req.workspaceId);
   const published = await competencyPromptRepository.getPublished(req.workspaceId);
+  const versions = await competencyPromptRepository.getVersions(req.workspaceId);
   res.json({ success: true, data: { versions, published } });
 }));
 
