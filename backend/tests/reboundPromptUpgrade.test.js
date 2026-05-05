@@ -26,6 +26,12 @@ describe('rebound prompt content', () => {
   test('default prompt is not flagged as needing upgrade', () => {
     expect(needsPromptUpgrade(DEFAULT_SYSTEM_PROMPT)).toBe(false);
   });
+
+  test('default prompt includes internal category coverage guidance', () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('pendingReviewSuggestions');
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('competencyCoverage');
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('internal category/subcategory');
+  });
 });
 
 describe('rebound prompt upgrade detector', () => {
@@ -71,11 +77,16 @@ Call find_matching_agents. Use get_technician_ad_profile.
 agentBriefingHtml — public note. If a Rebound Context block was present in the user message, include a brief acknowledgement.
 
 submit_recommendation includes taxonomyReviewNeeded when internal taxonomy fit is weak.`;
+    const upToDateWithCoverage = `${upToDate}
+
+get_ticket_categories can return pendingReviewSuggestions.
+find_matching_agents returns competencyCoverage.
+search_tickets can search internal category/subcategory.`;
 
     // This passes ONLY because we explicitly added the marker — proves the
     // detector keys on the literal "Rebound Context" string, not on a regex
     // that would false-positive on similar text.
-    expect(needsPromptUpgrade(upToDate)).toBe(false);
+    expect(needsPromptUpgrade(upToDateWithCoverage)).toBe(false);
   });
 });
 

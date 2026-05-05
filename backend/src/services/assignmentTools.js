@@ -16,7 +16,7 @@ import logger from '../utils/logger.js';
 export const TOOL_SCHEMAS = [
   {
     name: 'get_ticket_details',
-    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, category, and creation timestamps in workspace-local time.',
+    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, raw FreshService categories, stored internal category/subcategory classification, taxonomy fit, previous AI category suggestions, and creation timestamps in workspace-local time.',
     input_schema: {
       type: 'object',
       properties: {
@@ -36,7 +36,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'get_ticket_categories',
-    description: 'Get the internal category/subcategory taxonomy used for assignment matching. Use this to classify the ticket into an existing internal category and optional subcategory. FreshService category fields are returned only as raw evidence.',
+    description: 'Get the active internal category/subcategory taxonomy used for assignment matching, plus inactive AI-suggested categories waiting for admin review. Use active categories only for assignment matching; use pending suggestions as review context to avoid duplicate new-category suggestions. FreshService category fields are returned only as raw evidence.',
     input_schema: {
       type: 'object',
       properties: {},
@@ -56,7 +56,7 @@ export const TOOL_SCHEMAS = [
         category: { type: 'string', description: 'Legacy/internal category name. Prefer categoryId/categoryName and subcategoryId/subcategoryName.' },
         requires_physical_presence: { type: 'boolean', description: 'If true, excludes WFH and remote agents' },
         preferred_location: { type: 'string', description: 'Preferred agent location for physical tasks (e.g., "Vancouver", "Calgary")' },
-        min_proficiency: { type: 'string', enum: ['basic', 'intermediate', 'advanced', 'expert'], description: 'Minimum competency level required' },
+        min_proficiency: { type: 'string', enum: ['basic', 'intermediate', 'advanced', 'expert'], description: 'Minimum active competency level required. No experience is represented by the absence of a competency mapping and is not an eligible skill match.' },
       },
       required: [],
     },
@@ -81,7 +81,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'get_competencies',
-    description: 'Get skill/competency mappings for all technicians: which categories each tech handles and their proficiency level (basic/intermediate/advanced/expert).',
+    description: 'Get skill/competency mappings for all technicians: active category/subcategory skills each tech handles and their proficiency level (basic/intermediate/advanced/expert). No experience is represented by no mapping.',
     input_schema: {
       type: 'object',
       properties: {},
@@ -101,13 +101,18 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'search_tickets',
-    description: 'Search the workspace ticket database. Use this to find similar past tickets, see who resolved them, understand patterns, and build context for your recommendation. You can search by keyword, category, assigned technician, status, date range, and more. Returns up to 25 results sorted by relevance.',
+    description: 'Search the workspace ticket database. Use this to find similar past tickets, see who resolved them, understand internal category/subcategory patterns, review previous AI category suggestions, and build context for your recommendation. You can search by keyword, raw FreshService category, internal category/subcategory, assigned technician, status, date range, and more. Returns up to 25 results.',
     input_schema: {
       type: 'object',
       properties: {
         keyword: { type: 'string', description: 'Search term to match against ticket subject and description (case-insensitive partial match)' },
         category: { type: 'string', description: 'Filter by FreshService category (exact match)' },
         sub_category: { type: 'string', description: 'Filter by sub-category (exact match)' },
+        internal_category_id: { type: 'integer', description: 'Filter by stored internal top-level category ID' },
+        internal_subcategory_id: { type: 'integer', description: 'Filter by stored internal subcategory ID' },
+        internal_category_name: { type: 'string', description: 'Filter by stored internal top-level category name (case-insensitive partial match)' },
+        internal_subcategory_name: { type: 'string', description: 'Filter by stored internal subcategory name (case-insensitive partial match)' },
+        taxonomy_review_needed: { type: 'boolean', description: 'Filter tickets where previous analysis flagged category/subcategory review as needed' },
         assigned_tech_id: { type: 'integer', description: 'Filter by assigned technician ID to see their ticket history' },
         status: { type: 'string', description: 'Filter by status: Open, Pending, Resolved, Closed' },
         priority: { type: 'integer', description: 'Filter by priority: 1=Low, 2=Medium, 3=High, 4=Urgent' },
@@ -121,7 +126,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'get_tech_ticket_history',
-    description: 'Get a specific technician\'s recent ticket history. Shows what categories they handle, their resolution patterns, and workload trends. Use this to evaluate whether a technician is a good fit for the current ticket.',
+    description: 'Get a specific technician\'s recent ticket history. Shows raw and internal category/subcategory breakdowns, taxonomy-fit warnings, previous AI category suggestions, rejection signals, resolution patterns, and workload trends. Use this to evaluate whether a technician is a good fit and whether missing subcategory competencies may be a matrix gap.',
     input_schema: {
       type: 'object',
       properties: {
@@ -601,6 +606,97 @@ function buildInternalTaxonomy(categories = []) {
   }));
 }
 
+function formatTicketInternalClassification(ticket) {
+  const internalCategory = ticket.internalCategory
+    ? {
+      id: ticket.internalCategory.id,
+      name: ticket.internalCategory.name,
+      parentId: ticket.internalCategory.parentId || null,
+    }
+    : null;
+  const internalSubcategory = ticket.internalSubcategory
+    ? {
+      id: ticket.internalSubcategory.id,
+      name: ticket.internalSubcategory.name,
+      parentId: ticket.internalSubcategory.parentId || null,
+    }
+    : null;
+
+  return {
+    internalCategory,
+    internalSubcategory,
+    internalPath: internalCategory
+      ? `${internalCategory.name}${internalSubcategory ? ` > ${internalSubcategory.name}` : ''}`
+      : null,
+    taxonomyFit: {
+      categoryFit: ticket.internalCategoryFit || null,
+      subcategoryFit: ticket.internalSubcategoryFit || null,
+      reviewNeeded: Boolean(ticket.taxonomyReviewNeeded),
+      confidence: ticket.internalCategoryConfidence || null,
+      rationale: ticket.internalCategoryRationale || null,
+      suggestedInternalCategoryName: ticket.suggestedInternalCategoryName || null,
+      suggestedInternalSubcategoryName: ticket.suggestedInternalSubcategoryName || null,
+    },
+  };
+}
+
+function buildInternalTaxonomyBreakdown(tickets = []) {
+  const byPath = new Map();
+  const suggestionBreakdown = new Map();
+
+  for (const ticket of tickets) {
+    const classification = formatTicketInternalClassification(ticket);
+    const path = classification.internalPath || 'Unclassified';
+    if (!byPath.has(path)) {
+      byPath.set(path, {
+        internalPath: path,
+        internalCategoryId: classification.internalCategory?.id || null,
+        internalCategoryName: classification.internalCategory?.name || null,
+        internalSubcategoryId: classification.internalSubcategory?.id || null,
+        internalSubcategoryName: classification.internalSubcategory?.name || null,
+        count: 0,
+        resolved: 0,
+        selfPicked: 0,
+        rejectedSignals: 0,
+        taxonomyReviewNeeded: 0,
+      });
+    }
+    const row = byPath.get(path);
+    row.count += 1;
+    if (ticket.resolvedAt) row.resolved += 1;
+    if (ticket.isSelfPicked) row.selfPicked += 1;
+    if ((ticket.rejectionCount || 0) > 0) row.rejectedSignals += 1;
+    if (ticket.taxonomyReviewNeeded) row.taxonomyReviewNeeded += 1;
+
+    const suggestedCategory = ticket.suggestedInternalCategoryName?.trim();
+    const suggestedSubcategory = ticket.suggestedInternalSubcategoryName?.trim();
+    if (suggestedCategory || suggestedSubcategory) {
+      const key = `${suggestedCategory || classification.internalCategory?.name || 'Unspecified'} > ${suggestedSubcategory || '(category only)'}`;
+      if (!suggestionBreakdown.has(key)) {
+        suggestionBreakdown.set(key, {
+          suggestedInternalCategoryName: suggestedCategory || null,
+          suggestedInternalSubcategoryName: suggestedSubcategory || null,
+          currentInternalPath: classification.internalPath,
+          count: 0,
+          ticketIds: [],
+        });
+      }
+      const suggestion = suggestionBreakdown.get(key);
+      suggestion.count += 1;
+      if (suggestion.ticketIds.length < 8) suggestion.ticketIds.push(Number(ticket.freshserviceTicketId));
+    }
+  }
+
+  return {
+    internalTaxonomyBreakdown: Array.from(byPath.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 15),
+    taxonomySuggestionBreakdown: Array.from(suggestionBreakdown.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10),
+  };
+}
+
 async function resolveInternalCategorySelection(workspaceId, selection = {}) {
   const requestedCategoryId = Number(selection.categoryId);
   const requestedSubcategoryId = Number(selection.subcategoryId);
@@ -670,7 +766,7 @@ function findBestCompetencyMatch(skills, selection) {
 }
 
 async function getTicketCategories(workspaceId) {
-  const [fsCategories, fsSubs, ticketCategories, competencyCategories] = await Promise.all([
+  const [fsCategories, fsSubs, ticketCategories, competencyCategories, pendingReviewCategories] = await Promise.all([
     prisma.ticket.findMany({
       where: { workspaceId, category: { not: null } },
       select: { category: true },
@@ -693,6 +789,20 @@ async function getTicketCategories(workspaceId) {
       where: { workspaceId, isActive: true },
       select: { id: true, name: true, description: true, parentId: true, sortOrder: true },
       orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
+    }),
+    prisma.competencyCategory.findMany({
+      where: { workspaceId, isActive: false, isSystemSuggested: true },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        parentId: true,
+        source: true,
+        createdAt: true,
+        parent: { select: { id: true, name: true, isActive: true } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { name: 'asc' }],
+      take: 25,
     }),
   ]);
 
@@ -723,9 +833,23 @@ async function getTicketCategories(workspaceId) {
     category: name,
     subCategories: subs,
   }));
+  const pendingReviewSuggestions = pendingReviewCategories.map((c) => ({
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    parentId: c.parentId,
+    parentName: c.parent?.name || null,
+    parentIsActive: c.parent?.isActive ?? null,
+    level: c.parentId ? 'subcategory' : 'category',
+    displayName: c.parent ? `${c.parent.name} > ${c.name}` : c.name,
+    source: c.source,
+    suggestedAt: c.createdAt?.toISOString?.() || null,
+    usableForAssignment: false,
+  }));
 
   return {
     internalTaxonomy,
+    pendingReviewSuggestions,
     freshserviceEvidence: {
       freshserviceCategories,
       ticketCategories: ticketCategories.map((t) => t.ticketCategory),
@@ -734,7 +858,7 @@ async function getTicketCategories(workspaceId) {
     freshserviceCategories,
     ticketCategories: ticketCategories.map((t) => t.ticketCategory),
     competencyCategories: flatCategories,
-    instruction: 'Classify into an existing internalTaxonomy category and optional subcategory. Do not invent active categories. FreshService values are raw evidence only. Call find_matching_agents with internal category/subcategory IDs when possible; subcategory experts are preferred and parent-category experts are the fallback.',
+    instruction: 'Classify into an existing active internalTaxonomy category and optional subcategory. Do not use pendingReviewSuggestions as active categories; they are review-only context to prevent duplicate suggestions and to understand known gaps. FreshService values are raw evidence only. Call find_matching_agents with internal category/subcategory IDs when possible; subcategory experts are preferred and parent-category experts are the fallback.',
   };
 }
 
@@ -905,6 +1029,22 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     } catch { /* non-fatal */ }
   }
 
+  const competencyCoverage = {
+    selectedCategoryId: categorySelection.category?.id || null,
+    selectedCategoryName: categorySelection.category?.name || categoryName || category || null,
+    selectedSubcategoryId: categorySelection.subcategory?.id || null,
+    selectedSubcategoryName: categorySelection.subcategory?.name || subcategoryName || null,
+    exactSubcategoryMatches: results.filter((r) => r.competencyMatch?.matchType === 'subcategory_exact').length,
+    parentFallbackMatches: results.filter((r) => r.competencyMatch?.matchType === 'parent_fallback').length,
+    categoryExactMatches: results.filter((r) => r.competencyMatch?.matchType === 'category_exact').length,
+    noCompetencyMatch: results.filter((r) => !r.competencyMatch).length,
+  };
+  competencyCoverage.note = categorySelection.subcategory
+    ? (competencyCoverage.exactSubcategoryMatches > 0
+      ? `${competencyCoverage.exactSubcategoryMatches} agent(s) have exact subcategory competency for ${categorySelection.subcategory.name}.`
+      : `No active agent has exact subcategory competency for ${categorySelection.subcategory.name}; parent-category fallback is the best available competency signal unless history shows otherwise.`)
+    : 'No subcategory was selected; parent-category competency is the strongest available taxonomy match.';
+
   return {
     criteria: {
       category,
@@ -916,6 +1056,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
       preferred_location,
       min_proficiency,
     },
+    competencyCoverage,
     matchCount: results.length,
     matches: results,
     excludedCount: excluded.length,
@@ -932,6 +1073,9 @@ async function searchTickets(workspaceId, params) {
   const {
     keyword, category, sub_category, assigned_tech_id,
     status, priority, date_from, date_to, sort_by,
+    internal_category_id, internal_subcategory_id,
+    internal_category_name, internal_subcategory_name,
+    taxonomy_review_needed,
   } = params;
   const limit = Math.min(params.limit || 15, 25);
 
@@ -947,6 +1091,9 @@ async function searchTickets(workspaceId, params) {
   if (assigned_tech_id) where.assignedTechId = assigned_tech_id;
   if (status) where.status = { in: [status, status.toLowerCase(), status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()] };
   if (priority) where.priority = priority;
+  if (Number.isInteger(Number(internal_category_id))) where.internalCategoryId = Number(internal_category_id);
+  if (Number.isInteger(Number(internal_subcategory_id))) where.internalSubcategoryId = Number(internal_subcategory_id);
+  if (typeof taxonomy_review_needed === 'boolean') where.taxonomyReviewNeeded = taxonomy_review_needed;
 
   if (date_from || date_to) {
     where.createdAt = {};
@@ -962,12 +1109,33 @@ async function searchTickets(workspaceId, params) {
 
   const andClauses = [];
   if (category) {
-    andClauses.push({ OR: [{ category }, { ticketCategory: category }] });
+    andClauses.push({
+      OR: [
+        { category },
+        { ticketCategory: category },
+        { internalCategory: { name: { contains: category, mode: 'insensitive' } } },
+        { internalSubcategory: { name: { contains: category, mode: 'insensitive' } } },
+      ],
+    });
+  }
+  if (internal_category_name) {
+    andClauses.push({
+      internalCategory: { name: { contains: internal_category_name, mode: 'insensitive' } },
+    });
+  }
+  if (internal_subcategory_name) {
+    andClauses.push({
+      internalSubcategory: { name: { contains: internal_subcategory_name, mode: 'insensitive' } },
+    });
   }
   if (keyword) {
     andClauses.push({ OR: [
       { subject: { contains: keyword, mode: 'insensitive' } },
       { descriptionText: { contains: keyword, mode: 'insensitive' } },
+      { internalCategory: { name: { contains: keyword, mode: 'insensitive' } } },
+      { internalSubcategory: { name: { contains: keyword, mode: 'insensitive' } } },
+      { suggestedInternalCategoryName: { contains: keyword, mode: 'insensitive' } },
+      { suggestedInternalSubcategoryName: { contains: keyword, mode: 'insensitive' } },
     ] });
   }
   if (andClauses.length > 0) {
@@ -991,10 +1159,21 @@ async function searchTickets(workspaceId, params) {
         priority: true,
         category: true,
         subCategory: true,
+        ticketCategory: true,
+        internalCategoryFit: true,
+        internalSubcategoryFit: true,
+        internalCategoryConfidence: true,
+        internalCategoryRationale: true,
+        taxonomyReviewNeeded: true,
+        suggestedInternalCategoryName: true,
+        suggestedInternalSubcategoryName: true,
+        rejectionCount: true,
         createdAt: true,
         resolvedAt: true,
         assignedTechId: true,
         isSelfPicked: true,
+        internalCategory: { select: { id: true, name: true, parentId: true } },
+        internalSubcategory: { select: { id: true, name: true, parentId: true } },
         assignedTech: { select: { id: true, name: true } },
         requester: { select: { name: true, department: true } },
       },
@@ -1015,11 +1194,17 @@ async function searchTickets(workspaceId, params) {
       priority: t.priority,
       category: t.category,
       subCategory: t.subCategory,
+      ticketCategory: t.ticketCategory,
+      ...formatTicketInternalClassification(t),
       createdAt: t.createdAt ? formatDateInTimezone(t.createdAt, tz) : null,
       resolvedAt: t.resolvedAt ? formatDateInTimezone(t.resolvedAt, tz) : null,
       assignedTo: t.assignedTech?.name || 'Unassigned',
       assignedTechId: t.assignedTechId,
       selfPicked: t.isSelfPicked,
+      assignmentSignals: {
+        rejectionCount: t.rejectionCount || 0,
+        hasRejectedEpisode: (t.rejectionCount || 0) > 0,
+      },
       requester: t.requester?.name || 'Unknown',
       department: t.requester?.department || null,
     })),
@@ -1060,9 +1245,19 @@ async function getTechTicketHistory(workspaceId, params) {
         category: true,
         subCategory: true,
         ticketCategory: true,
+        internalCategoryFit: true,
+        internalSubcategoryFit: true,
+        internalCategoryConfidence: true,
+        internalCategoryRationale: true,
+        taxonomyReviewNeeded: true,
+        suggestedInternalCategoryName: true,
+        suggestedInternalSubcategoryName: true,
+        rejectionCount: true,
         createdAt: true,
         resolvedAt: true,
         isSelfPicked: true,
+        internalCategory: { select: { id: true, name: true, parentId: true } },
+        internalSubcategory: { select: { id: true, name: true, parentId: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 25,
@@ -1083,6 +1278,9 @@ async function getTechTicketHistory(workspaceId, params) {
   const totalTickets = resolutionStats._count;
   const resolved = tickets.filter((t) => t.resolvedAt).length;
   const selfPicked = tickets.filter((t) => t.isSelfPicked).length;
+  const taxonomyReviewNeeded = tickets.filter((t) => t.taxonomyReviewNeeded).length;
+  const rejectedSignals = tickets.reduce((sum, t) => sum + (t.rejectionCount || 0), 0);
+  const taxonomyBreakdowns = buildInternalTaxonomyBreakdown(tickets);
 
   return {
     technician: { id: tech.id, name: tech.name, location: tech.location },
@@ -1091,6 +1289,8 @@ async function getTechTicketHistory(workspaceId, params) {
       totalTickets,
       resolvedInPeriod: resolved,
       selfPickedInPeriod: selfPicked,
+      taxonomyReviewNeeded,
+      rejectedSignals,
       avgResolutionTimeMins: resolutionStats._avg?.resolutionTimeSeconds
         ? Math.round(resolutionStats._avg.resolutionTimeSeconds / 60)
         : null,
@@ -1099,6 +1299,7 @@ async function getTechTicketHistory(workspaceId, params) {
       category: c.ticketCategory || c.category,
       count: c._count,
     })),
+    ...taxonomyBreakdowns,
     recentTickets: tickets.slice(0, 15).map((t) => ({
       id: t.id,
       freshserviceTicketId: Number(t.freshserviceTicketId),
@@ -1106,13 +1307,20 @@ async function getTechTicketHistory(workspaceId, params) {
       status: t.status,
       priority: t.priority,
       category: t.ticketCategory || t.category,
+      rawFreshServiceCategory: t.category,
+      rawFreshServiceSubcategory: t.subCategory,
+      ...formatTicketInternalClassification(t),
+      assignmentSignals: {
+        rejectionCount: t.rejectionCount || 0,
+        hasRejectedEpisode: (t.rejectionCount || 0) > 0,
+      },
       createdAt: t.createdAt ? formatDateInTimezone(t.createdAt, tz) : null,
       resolvedAt: t.resolvedAt ? formatDateInTimezone(t.resolvedAt, tz) : null,
       selfPicked: t.isSelfPicked,
     })),
-    insight: categoryBreakdown.length > 0
-      ? `${tech.name}'s top categories: ${categoryBreakdown.slice(0, 5).map((c) => `${c.ticketCategory || c.category} (${c._count})`).join(', ')}`
-      : `${tech.name} has no categorized tickets in the last ${days} days.`,
+    insight: taxonomyBreakdowns.internalTaxonomyBreakdown.length > 0
+      ? `${tech.name}'s top internal categories: ${taxonomyBreakdowns.internalTaxonomyBreakdown.slice(0, 5).map((c) => `${c.internalPath} (${c.count})`).join(', ')}`
+      : `${tech.name} has no internally categorized tickets in the last ${days} days.`,
   };
 }
 
@@ -1176,6 +1384,8 @@ async function getTicketDetails(ticketId) {
     include: {
       requester: { select: { name: true, email: true, department: true, jobTitle: true, phone: true } },
       assignedTech: { select: { id: true, name: true } },
+      internalCategory: { select: { id: true, name: true, parentId: true } },
+      internalSubcategory: { select: { id: true, name: true, parentId: true } },
     },
   });
 
@@ -1193,9 +1403,14 @@ async function getTicketDetails(ticketId) {
     category: ticket.category,
     subCategory: ticket.subCategory,
     ticketCategory: ticket.ticketCategory,
+    ...formatTicketInternalClassification(ticket),
     department: ticket.department,
     source: ticket.source,
     isEscalated: ticket.isEscalated,
+    assignmentSignals: {
+      rejectionCount: ticket.rejectionCount || 0,
+      hasRejectedEpisode: (ticket.rejectionCount || 0) > 0,
+    },
     createdAt: ticket.createdAt ? convertToTimezone(ticket.createdAt, timezone) : null,
     createdAtUtc: ticket.createdAt?.toISOString?.() || null,
     createdDate: ticket.createdAt ? formatDateInTimezone(ticket.createdAt, timezone) : null,
@@ -1277,18 +1492,19 @@ async function getWorkloadStats(workspaceId) {
 }
 
 async function getCompetencies(workspaceId) {
-  const [categories, mappings] = await Promise.all([
+  const [categories, mappings, activeTechnicians] = await Promise.all([
     prisma.competencyCategory.findMany({
       where: { workspaceId, isActive: true },
       orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
     }),
     prisma.technicianCompetency.findMany({
-      where: { workspaceId },
+      where: { workspaceId, competencyCategory: { isActive: true } },
       include: {
         technician: { select: { id: true, name: true } },
         competencyCategory: { select: { id: true, name: true, parentId: true } },
       },
     }),
+    prisma.technician.count({ where: { workspaceId, isActive: true } }),
   ]);
 
   if (categories.length === 0) {
@@ -1308,6 +1524,25 @@ async function getCompetencies(workspaceId) {
       level: m.proficiencyLevel,
     });
   }
+  const coverageByCategoryId = new Map();
+  for (const category of categories) {
+    coverageByCategoryId.set(category.id, {
+      categoryId: category.id,
+      category: category.name,
+      parentId: category.parentId,
+      levelType: category.parentId ? 'subcategory' : 'category',
+      mappedTechnicians: 0,
+      byLevel: { basic: 0, intermediate: 0, advanced: 0, expert: 0 },
+    });
+  }
+  for (const mapping of mappings) {
+    const coverage = coverageByCategoryId.get(mapping.competencyCategoryId);
+    if (!coverage) continue;
+    coverage.mappedTechnicians += 1;
+    if (coverage.byLevel[mapping.proficiencyLevel] !== undefined) {
+      coverage.byLevel[mapping.proficiencyLevel] += 1;
+    }
+  }
 
   return {
     categories: categories.map((c) => ({
@@ -1317,6 +1552,13 @@ async function getCompetencies(workspaceId) {
       levelType: c.parentId ? 'subcategory' : 'category',
     })),
     categoryTree: buildInternalTaxonomy(categories),
+    competencyCoverage: {
+      activeTechnicians,
+      categoriesWithNoMappedTechnicians: Array.from(coverageByCategoryId.values())
+        .filter((row) => row.mappedTechnicians === 0),
+      categoryCoverage: Array.from(coverageByCategoryId.values()),
+      note: 'No experience is represented by no competency mapping. For a selected subcategory, prefer technicians mapped to that exact subcategory; parent-category mappings are fallback only.',
+    },
     technicianSkills: Object.values(byTech),
   };
 }

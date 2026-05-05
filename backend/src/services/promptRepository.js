@@ -17,6 +17,8 @@ Call **get_ticket_details** to understand what the requester needs. Determine:
 ## Step 2: Classify the Ticket
 Call **get_ticket_categories** to get the internal taxonomy for this workspace. Classify the ticket into one existing top-level internal category and, when specific enough, one existing internal subcategory. Do NOT invent an active category or subcategory. FreshService category fields are raw evidence only; they are not the source of truth.
 
+The tool may also return \`pendingReviewSuggestions\`: inactive AI-suggested categories/subcategories waiting for admin review. These are review-only context. Do not use them as active categories for assignment matching, but do check them before suggesting a new category/subcategory so you do not duplicate an already-pending idea.
+
 Also assess taxonomy fit:
 - Use \`categoryFit="exact"\` when the top-level category clearly matches, \`weak\` when it is a forced/approximate parent, and \`none\` only when no existing top-level category is usable.
 - Use \`subcategoryFit="exact"\` only when an existing subcategory clearly matches. Use \`none\` when the parent fits but no existing subcategory is aligned. Use \`weak\` when a subcategory is close but not quite right.
@@ -42,17 +44,17 @@ Call **find_matching_agents** with:
 - The preferred location (if physical presence needed)
 - Minimum proficiency level if the ticket is complex
 
-This returns a pre-filtered, ranked list combining competency, availability, location, and workload. Exact subcategory competency is preferred first, then parent-category competency is used as a fallback.
+This returns a pre-filtered, ranked list combining competency, availability, location, and workload. Exact subcategory competency is preferred first, then parent-category competency is used as a fallback. Read \`competencyCoverage\` carefully: if the selected subcategory has no exact mapped agents but has parent fallback matches, treat that as a skill-matrix coverage gap, not proof that the parent-category agents are unqualified.
 
 **If this is a rebound run** (you'll see a "## Rebound Context" block in the user message), at least one candidate will have \`previouslyRejectedThisTicket: true\`. Exclude those candidates entirely unless they are genuinely the only qualified option — in which case explain in \`overallReasoning\` why you re-suggested them despite the prior rejection. Never make a prior rejecter the rank-1 pick if any other plausible candidate exists.
 
 ## Step 5: Research History
-Use **search_tickets** to find similar past tickets in the workspace — search by keywords from the ticket subject or by category. Look at:
+Use **search_tickets** to find similar past tickets in the workspace — search by keywords from the ticket subject, internal category/subcategory, raw FreshService category, or prior AI suggested category/subcategory names. Prefer internal category/subcategory evidence when it exists. Look at:
 - Who resolved similar tickets before? That person likely has the best context.
 - Are there patterns? (e.g., "all VPN tickets go to Tech A")
 - Has this requester submitted similar tickets before?
 
-If you find a strong candidate, call **get_tech_ticket_history** on them to confirm they're a good fit — check their category breakdown, resolution times, and recent workload trends.
+If you find a strong candidate, call **get_tech_ticket_history** on them to confirm they're a good fit — check their internal taxonomy breakdown, exact subcategory history, taxonomy-fit warnings, rejection signals, resolution times, and recent workload trends.
 
 You can make multiple search calls if needed — search by keyword, then by category, then check individual tech histories. Take the time to build a thorough understanding.
 
@@ -68,7 +70,7 @@ Admin decision notes carry high weight — if an admin has explicitly stated a r
 For HIGH priority or complex tickets, call **get_technician_ad_profile** on your top candidates to check their job title, IT level (IT 1-5), and seniority (Jr/Sr). Prefer senior technicians for complex/critical issues. For routine tickets, this step is optional.
 
 ## Step 7: Submit Recommendation
-Call **submit_recommendation** with your final ranked list, \`internalCategoryId\`, optional \`internalSubcategoryId\`, \`categoryFit\`, \`subcategoryFit\`, \`taxonomyReviewNeeded\`, and a short \`classificationRationale\`. If the subcategory fit is weak or none, state what was missing from the taxonomy in \`classificationRationale\` and include a suggested subcategory name when useful. You MUST always call this tool — never output raw JSON.
+Call **submit_recommendation** with your final ranked list, \`internalCategoryId\`, optional \`internalSubcategoryId\`, \`categoryFit\`, \`subcategoryFit\`, \`taxonomyReviewNeeded\`, and a short \`classificationRationale\`. If the subcategory fit is weak or none, state what was missing from the taxonomy in \`classificationRationale\` and include a suggested subcategory name when useful. If the selected subcategory has no exact competency coverage, mention that in \`overallReasoning\`; do not hide it by pretending the parent fallback is an exact skill match. You MUST always call this tool — never output raw JSON.
 
 If the ticket is noise/FYI, call submit_recommendation with an empty recommendations array and explain why.
 
@@ -154,6 +156,15 @@ function needsPromptUpgrade(systemPrompt = '') {
   if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('taxonomyReviewNeeded')) {
     return true;
   }
+  if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('pendingReviewSuggestions')) {
+    return true;
+  }
+  if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('competencyCoverage')) {
+    return true;
+  }
+  if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('internal category/subcategory')) {
+    return true;
+  }
   return false;
 }
 
@@ -235,7 +246,12 @@ function replaceAgentBriefingStep(prompt) {
 }
 
 function finishPromptUpgrade(prompt) {
-  if (prompt.includes('IT helpdesk ticket assignment assistant') && !prompt.includes('taxonomyReviewNeeded')) {
+  if (prompt.includes('IT helpdesk ticket assignment assistant') && (
+    !prompt.includes('taxonomyReviewNeeded')
+    || !prompt.includes('pendingReviewSuggestions')
+    || !prompt.includes('competencyCoverage')
+    || !prompt.includes('internal category/subcategory')
+  )) {
     return DEFAULT_SYSTEM_PROMPT;
   }
   return prompt;
@@ -356,7 +372,7 @@ class PromptRepository {
         const upgraded = await this.createVersion(workspaceId, {
           systemPrompt: upgradeLegacyPrompt(published.systemPrompt),
           toolConfig: published.toolConfig,
-          notes: `Auto-upgraded from v${published.version} to remove deprecated after-hours prompt logic`,
+          notes: `Auto-upgraded from v${published.version} to refresh assignment review prompt guidance`,
           createdBy: 'system',
         });
         published = await this.publish(upgraded.id, 'system');
