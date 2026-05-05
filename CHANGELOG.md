@@ -2,6 +2,48 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [2.2] - 2026-05-04
+
+### Major Features
+
+- **BGC Engineering IT Summit Categories Workshop** added as an IT-only dashboard mini-app with editable categories/subcategories, rename, add/remove, combine, drag/drop, soft-delete restore, autosave/manual save, JSON backup/restore, and Excel export.
+- **Live summit voting** added public time-limited voting links, QR/fullscreen sharing, mobile-optimized voting, participant names, category/subcategory suggestions, priority voting, live room ideas, voter stats, recent activity, rising ideas, and extendable voting windows.
+- **Agent competency self-service** added `/my-competencies` for SSO-matched agents to review the full team matrix, edit their own column, request skill increases or new existing skills, add optional notes, and undo pending requests.
+- **Admin competency review** added a Competency Requests workflow inside Assignment Review so admins can approve or reject agent skill changes with audit history.
+- **AI Suggested Categories** added a dedicated review tab with a counter, search, filters, sorting, confidence and duplicate indicators, bulk approve/merge/reject, and compact row actions.
+- **Daily Review recommendation backlog** now uses a staged review flow: pending queue, approve/reject, approved-for-consolidation staging, grouped review, and ready-to-apply status.
+
+### Improvements
+
+- **Assignment and competency prompts** updated for the current category/subcategory model, five-level competency display, richer ticket evidence, rejection/bounce signals, and AI category suggestion handling.
+- **Competency analysis context** now exposes richer assignment signals and taxonomy suggestion breakdowns so the one-agent assessment can identify skill gaps more accurately.
+- **Summit workshop UI** received smoother drag/drop feedback, animated sidebars, clearer toasts, compact facilitator controls, searchable highlighted matches, live feedback panels, and countdown details with 30-minute extension.
+- **Category language** replaced user-facing taxonomy wording throughout the summit workshop experience.
+- **Skill request UX** now uses clearer modals and notices, supports requesting top-level skills when no subcategory exists, and explains why increases or new skills require approval.
+- **Review queue UI** was tightened with compact cards, bulk review actions, staging panels, visual counters, search, filters, and clearer approve/reject hierarchy.
+
+### Fixes
+
+- **Mobile summit voting** fixed the priority sheet dismissal issue and improved touch drag/drop, sticky search, larger vote targets, and bottom-sheet behavior.
+- **Summit voter reset** fixed stale participant sessions after a facilitator reset so reset voters can rejoin and vote cleanly.
+- **Accepted summit suggestions** now preserve vote linkage so suggestion votes continue counting after a facilitator adds the idea to the category list.
+- **Auth token size** was reduced by removing large agent photo payloads from signed auth tokens, preventing oversized SSO/SSE requests.
+- **Competency request selection** now gives immediate visible feedback when a change requires approval instead of appearing to silently fail.
+- **AI suggestion review rows** were compacted so confidence, source metadata, assignment target, and approve/merge/reject actions share space efficiently.
+
+### Database
+
+- **Summit workshop persistence** added database-backed session state, snapshots, participants, votes, category ideas, and merge suggestions.
+- **Competency change requests** added persistence and audit support for pending, approved, rejected, and withdrawn agent skill changes.
+- **Production schema status verified with Prisma** for this release; no pending migration was required at release time.
+
+### Security
+
+- **Agent competency access** requires an SSO identity matched to an internal technician profile; users without admin access can still access only the limited self-service competency page.
+- **Self-service edits are constrained** so agents can only edit their own competency column, while other agents' competencies remain read-only context.
+- **Approval required for privilege-like competency increases** and new skill requests; decreases/removals can be handled without broad admin write access.
+- **Summit facilitator access remains IT-workspace scoped**, while public voting links are limited-purpose, resettable, and time-bound.
+
 ## [2.11] - 2026-04-27
 
 ### Analytics and Insights

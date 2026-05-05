@@ -22,6 +22,7 @@ import { runJobsInPool } from '../utils/parallelPool.js';
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const STALE_RUNNING_MS = 30 * 60 * 1000;
+const ANALYSIS_TIMEOUT_MS = 25 * 60 * 1000;
 const MAX_CASES_FOR_ANALYSIS = 15;
 // Bumped from 6 → 12 so we can include both the conversation bodies and the
 // most-recent state-change events for a single ticket. The summarizer below
@@ -215,6 +216,43 @@ class AssignmentDailyReviewService {
     return error instanceof DailyReviewCancelledError
       || error?.name === 'DailyReviewCancelledError'
       || error?.name === 'APIUserAbortError';
+  }
+
+  async _analyzeDatasetWithTimeout(workspaceId, dataset, llmModel, parentSignal) {
+    const analysisAbortController = new AbortController();
+    let timedOut = false;
+    const abortFromParent = () => analysisAbortController.abort();
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      analysisAbortController.abort();
+    }, ANALYSIS_TIMEOUT_MS);
+
+    if (parentSignal?.aborted) {
+      clearTimeout(timeout);
+      throw new DailyReviewCancelledError();
+    }
+    parentSignal?.addEventListener?.('abort', abortFromParent, { once: true });
+
+    try {
+      return await this._analyzeDataset(workspaceId, dataset, llmModel, {
+        signal: analysisAbortController.signal,
+      });
+    } catch (error) {
+      if (timedOut && this._isCancellationError(error)) {
+        logger.warn('Daily review LLM analysis timed out; falling back to heuristic recommendations', {
+          workspaceId,
+          reviewDate: dataset.reviewDate,
+          timeoutMs: ANALYSIS_TIMEOUT_MS,
+        });
+        const heuristic = this._buildHeuristicRecommendations(dataset);
+        heuristic.warnings.push(`LLM analysis timed out after ${Math.round(ANALYSIS_TIMEOUT_MS / 60000)} minutes; heuristic recommendations were used instead.`);
+        return heuristic;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener?.('abort', abortFromParent);
+    }
   }
 
   _validateRecommendationStatus(status) {
@@ -417,6 +455,7 @@ class AssignmentDailyReviewService {
   async _ensureRecommendationRowsForRuns(workspaceId, runs = []) {
     for (const run of runs) {
       if (!run || run.workspaceId !== workspaceId) continue;
+      if (ACTIVE_STATUSES.includes(run.status)) continue;
       const existingCount = await prisma.assignmentDailyReviewRecommendation.count({
         where: { runId: run.id },
       });
@@ -522,19 +561,74 @@ class AssignmentDailyReviewService {
     await this._ensureRecommendationRowsForRuns(workspaceId, runs);
   }
 
-  async _markStaleRunsFailed() {
+  async _markStaleRunsFailed(workspaceId = null) {
     const staleBefore = new Date(Date.now() - STALE_RUNNING_MS);
-    await prisma.assignmentDailyReviewRun.updateMany({
+    const staleRuns = await prisma.assignmentDailyReviewRun.findMany({
       where: {
+        ...(workspaceId ? { workspaceId } : {}),
         status: { in: ACTIVE_STATUSES },
-        updatedAt: { lt: staleBefore },
+        OR: [
+          { progressUpdatedAt: { lt: staleBefore } },
+          { progressUpdatedAt: null, updatedAt: { lt: staleBefore } },
+        ],
       },
-      data: {
-        status: 'failed',
-        errorMessage: 'Marked stale after 30 minutes without progress',
-        completedAt: new Date(),
+      select: { id: true, createdAt: true, progressUpdatedAt: true, updatedAt: true },
+      take: 50,
+    });
+
+    const now = new Date();
+    for (const staleRun of staleRuns) {
+      await prisma.assignmentDailyReviewRun.update({
+        where: { id: staleRun.id },
+        data: {
+          status: 'failed',
+          errorMessage: 'Marked stale after 30 minutes without progress; the worker likely stopped before writing a terminal status.',
+          totalDurationMs: Math.max(0, now.getTime() - new Date(staleRun.createdAt).getTime()),
+          completedAt: now,
+          progress: sanitizeJsonForPostgres({
+            phase: 'failed',
+            percent: 100,
+            message: 'Marked stale after 30 minutes without progress. Start a new review to regenerate results.',
+            stats: {},
+          }),
+          progressUpdatedAt: now,
+        },
+      });
+      logger.warn('Marked stale daily review run failed', {
+        runId: staleRun.id,
+        lastProgressAt: staleRun.progressUpdatedAt || staleRun.updatedAt,
+      });
+    }
+
+    return staleRuns.length;
+  }
+
+  async markStaleRunsFailed(workspaceId = null) {
+    return this._markStaleRunsFailed(workspaceId);
+  }
+
+  async getRunProgress(id, workspaceId) {
+    await this._markStaleRunsFailed(workspaceId);
+    const row = await prisma.assignmentDailyReviewRun.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        workspaceId: true,
+        status: true,
+        progress: true,
+        progressUpdatedAt: true,
+        errorMessage: true,
+        completedAt: true,
+        totalDurationMs: true,
       },
     });
+    if (!row) return null;
+    if (row.workspaceId !== workspaceId) {
+      const error = new Error('Run belongs to a different workspace');
+      error.statusCode = 403;
+      throw error;
+    }
+    return row;
   }
 
   async _getWorkspaceContext(workspaceId) {
@@ -2515,9 +2609,7 @@ Rules:
       persistProgress(analyzingPayload);
 
       this._throwIfCancelled(abortController.signal);
-      const analysis = await this._analyzeDataset(workspace.id, dataset, config?.llmModel, {
-        signal: abortController.signal,
-      });
+      const analysis = await this._analyzeDatasetWithTimeout(workspace.id, dataset, config?.llmModel, abortController.signal);
       this._throwIfCancelled(abortController.signal);
       const skillSplit = this._splitSkillAndTaxonomyRecommendations(analysis.skillRecommendations);
       const taxonomyRecommendations = this._mergeTaxonomyRecommendations([
@@ -2621,6 +2713,7 @@ Rules:
   }
 
   async getRuns(workspaceId, { limit = 20, offset = 0 } = {}) {
+    await this._markStaleRunsFailed(workspaceId);
     await this._migrateRecentTaxonomySkillRecommendations(workspaceId);
     const [items, total] = await Promise.all([
       prisma.assignmentDailyReviewRun.findMany({
@@ -2675,8 +2768,13 @@ Rules:
     const run = await prisma.assignmentDailyReviewRun.findUnique({ where: { id } });
     if (!run) return null;
 
-    await this._migrateRecentTaxonomySkillRecommendations(run.workspaceId);
-    await this._ensureRecommendationRowsForRuns(run.workspaceId, [run]);
+    await this._markStaleRunsFailed(run.workspaceId);
+    const refreshedRun = ACTIVE_STATUSES.includes(run.status)
+      ? await prisma.assignmentDailyReviewRun.findUnique({ where: { id } })
+      : run;
+
+    await this._migrateRecentTaxonomySkillRecommendations(refreshedRun.workspaceId);
+    await this._ensureRecommendationRowsForRuns(refreshedRun.workspaceId, [refreshedRun]);
     const rows = await prisma.assignmentDailyReviewRecommendation.findMany({
       where: { runId: id },
       include: {
@@ -2688,7 +2786,7 @@ Rules:
     });
 
     return {
-      ...run,
+      ...refreshedRun,
       ...this._groupRecommendations(rows),
     };
   }
@@ -2706,6 +2804,7 @@ Rules:
     if (status && status !== 'all') this._validateRecommendationStatus(status);
     if (kind) this._validateRecommendationKind(kind);
 
+    await this._markStaleRunsFailed(workspaceId);
     await this._migrateRecentTaxonomySkillRecommendations(workspaceId);
     await this._ensureRecommendationRowsForWorkspace(workspaceId, { startDate, endDate });
 

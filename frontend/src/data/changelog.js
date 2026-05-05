@@ -1,6 +1,23 @@
-export const APP_VERSION = '2.15';
+export const APP_VERSION = '2.2';
 
 export const changelog = [
+  {
+    version: '2.2',
+    date: 'May 4, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>BGC Engineering IT Summit Categories Workshop</strong> adds an IT-only facilitator app with live category editing, voting links, mobile voting, QR/fullscreen sharing, recent activity, rising ideas, and Excel/JSON export.' },
+      { type: 'new', html: '<mark>Major</mark> <strong>Agent competency self-service</strong> lets SSO-matched agents review the full skill matrix, edit their own competency column, request increases or new skills, and undo pending requests.' },
+      { type: 'new', html: '<mark>Major</mark> <strong>Competency Requests and AI Suggested Categories</strong> give admins approval queues for agent skill changes and AI-discovered category ideas with counters, search, filters, bulk actions, merge, reject, and approve workflows.' },
+      { type: 'improved', html: '<strong>Assignment Review prompts</strong> now carry richer category and subcategory context, ticket notes, rejection signals, and five-level competency guidance so AI recommendations align with the current skills model.' },
+      { type: 'improved', html: '<strong>Daily Review recommendation backlog</strong> now uses a staged workflow: pending review, approve or reject, consolidate grouped items, then mark recommendations ready to apply.' },
+      { type: 'improved', html: '<strong>Workshop engagement</strong> adds smoother drag-and-drop feedback, collapsible sidebars, better toasts, live voter stats, countdown details, and extendable voting windows.' },
+      { type: 'fixed', html: '<strong>Mobile voting and competency request UX</strong> fixes stuck priority sheets, clearer request feedback, top-level skill requests when no subcategory exists, and visible guidance when approval is required.' },
+      { type: 'fixed', html: '<strong>Authentication payload size</strong> was reduced by keeping large agent photos out of auth tokens, preventing oversized SSO sessions and SSE failures.' },
+      { type: 'security', html: '<strong>Agent self-service access</strong> is limited to users with a matched technician profile; non-admin agents can edit only their own competencies while viewing team context read-only.' },
+      { type: 'security', html: '<strong>Approval controls</strong> keep competency increases, new skill requests, AI-suggested categories, and public summit voting behind scoped workflows instead of direct unrestricted changes.' },
+      { type: 'database', html: '<strong>Database updates</strong> added summit workshop persistence, live voting state, competency change requests, request audit history, and AI-suggested category review support.' },
+    ],
+  },
   {
     version: '2.15',
     date: 'May 2, 2026',

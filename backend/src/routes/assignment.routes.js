@@ -1375,23 +1375,8 @@ router.post('/daily-review', requireAdmin, asyncHandler(async (req, res) => {
 // 1-2 seconds during an active run.
 router.get('/daily-review/runs/:id/progress', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id, 10);
-  const row = await prisma.assignmentDailyReviewRun.findUnique({
-    where: { id: runId },
-    select: {
-      id: true,
-      workspaceId: true,
-      status: true,
-      progress: true,
-      progressUpdatedAt: true,
-      errorMessage: true,
-      completedAt: true,
-      totalDurationMs: true,
-    },
-  });
+  const row = await assignmentDailyReviewService.getRunProgress(runId, req.workspaceId);
   if (!row) return res.status(404).json({ success: false, message: 'Run not found' });
-  if (row.workspaceId !== req.workspaceId) {
-    return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
-  }
   res.json({ success: true, data: row });
 }));
 
