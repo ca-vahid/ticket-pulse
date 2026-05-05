@@ -1090,10 +1090,47 @@ router.post('/competencies/merge', requireAdmin, asyncHandler(async (req, res) =
 // ─── Competency Categories ──────────────────────────────────────────────
 
 router.get('/competencies', requireAdmin, asyncHandler(async (req, res) => {
-  const categories = await competencyRepository.getCategories(req.workspaceId);
+  const categories = await competencyRepository.getActiveCategories(req.workspaceId);
   const categoryTree = competencyRepository.buildCategoryTree(categories);
-  const mappings = await competencyRepository.getAllCompetenciesForWorkspace(req.workspaceId);
-  res.json({ success: true, data: { categories, categoryTree, mappings } });
+  const [mappings, suggestedCategories] = await Promise.all([
+    competencyRepository.getAllCompetenciesForWorkspace(req.workspaceId),
+    competencyRepository.getSystemSuggestedCategories(req.workspaceId),
+  ]);
+  res.json({
+    success: true,
+    data: {
+      categories,
+      categoryTree,
+      mappings,
+      suggestedCategories,
+      suggestedCategoryCount: suggestedCategories.length,
+    },
+  });
+}));
+
+router.get('/competencies/category-suggestions', requireAdmin, asyncHandler(async (req, res) => {
+  const categories = await competencyRepository.getSystemSuggestedCategories(req.workspaceId);
+  res.json({ success: true, data: categories, count: categories.length });
+}));
+
+router.post('/competencies/category-suggestions/:id/review', requireAdmin, asyncHandler(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { action, name, description, parentId, targetCategoryId } = req.body || {};
+  const result = await competencyRepository.reviewSystemSuggestedCategory(req.workspaceId, id, action, {
+    name,
+    description,
+    parentId,
+    targetCategoryId,
+  });
+  logger.info('AI-suggested competency category reviewed', {
+    workspaceId: req.workspaceId,
+    id,
+    action,
+    actorEmail: req.session?.user?.email,
+    targetCategoryId,
+  });
+  const categories = await competencyRepository.getSystemSuggestedCategories(req.workspaceId);
+  res.json({ success: true, data: result, suggestions: categories, count: categories.length });
 }));
 
 router.post('/competencies/categories', requireAdmin, asyncHandler(async (req, res) => {

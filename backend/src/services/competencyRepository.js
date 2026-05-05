@@ -53,6 +53,26 @@ class CompetencyRepository {
     }
   }
 
+  async getSystemSuggestedCategories(workspaceId) {
+    try {
+      return await prisma.competencyCategory.findMany({
+        where: { workspaceId, isActive: false, isSystemSuggested: true },
+        include: {
+          parent: { select: { id: true, name: true, isActive: true } },
+          subcategories: {
+            where: { isActive: false, isSystemSuggested: true },
+            select: { id: true, name: true, description: true, createdAt: true },
+            orderBy: categoryOrder(),
+          },
+        },
+        orderBy: categoryOrder(),
+      });
+    } catch (error) {
+      logger.error('Error fetching system-suggested competency categories:', error);
+      throw new DatabaseError('Failed to fetch suggested competency categories', error);
+    }
+  }
+
   buildCategoryTree(categories) {
     return buildCategoryTree(categories);
   }
@@ -155,6 +175,87 @@ class CompetencyRepository {
     } catch (error) {
       logger.error('Error deleting competency category:', error);
       throw new DatabaseError('Failed to delete competency category', error);
+    }
+  }
+
+  async reviewSystemSuggestedCategory(workspaceId, id, action, data = {}) {
+    try {
+      const categoryId = Number(id);
+      if (!Number.isInteger(categoryId)) throw new ValidationError('Category id is required');
+      const current = await prisma.competencyCategory.findUnique({
+        where: { id: categoryId },
+        include: { subcategories: { select: { id: true, isActive: true, isSystemSuggested: true } } },
+      });
+      if (!current || current.workspaceId !== workspaceId) {
+        throw new NotFoundError(`Suggested category ${id} not found`);
+      }
+      if (current.isActive || !current.isSystemSuggested) {
+        throw new ValidationError('Only inactive AI-suggested categories can be reviewed here');
+      }
+
+      if (action === 'approve') {
+        return await this.updateCategory(categoryId, {
+          name: data.name?.trim() || current.name,
+          description: data.description !== undefined ? data.description : current.description,
+          parentId: data.parentId !== undefined ? data.parentId : current.parentId,
+          isActive: true,
+          isSystemSuggested: false,
+          source: 'technician_analysis_approved',
+        });
+      }
+
+      if (action === 'reject') {
+        return await prisma.$transaction(async (tx) => {
+          const childIds = current.subcategories
+            .filter((child) => !child.isActive && child.isSystemSuggested)
+            .map((child) => child.id);
+          if (childIds.length > 0) {
+            await tx.competencyCategory.deleteMany({
+              where: { workspaceId, id: { in: childIds }, isActive: false, isSystemSuggested: true },
+            });
+          }
+          await tx.competencyCategory.delete({ where: { id: categoryId } });
+          return { id: categoryId, action: 'rejected', deletedChildren: childIds.length };
+        });
+      }
+
+      if (action === 'merge') {
+        const targetId = Number(data.targetCategoryId);
+        if (!Number.isInteger(targetId)) throw new ValidationError('targetCategoryId is required for merge');
+        if (targetId === categoryId) throw new ValidationError('Suggested category cannot be merged into itself');
+        const target = await prisma.competencyCategory.findUnique({ where: { id: targetId } });
+        if (!target || target.workspaceId !== workspaceId || !target.isActive) {
+          throw new ValidationError('Merge target must be an active category in this workspace');
+        }
+        const childIds = current.subcategories
+          .filter((child) => !child.isActive && child.isSystemSuggested)
+          .map((child) => child.id);
+        if (childIds.length > 0 && target.parentId) {
+          throw new ValidationError('A suggested category with subcategories can only merge into a top-level category');
+        }
+
+        return await prisma.$transaction(async (tx) => {
+          if (childIds.length > 0) {
+            await tx.competencyCategory.updateMany({
+              where: { workspaceId, id: { in: childIds }, isActive: false, isSystemSuggested: true },
+              data: { parentId: target.id },
+            });
+          }
+          await tx.competencyCategory.delete({ where: { id: categoryId } });
+          return {
+            id: categoryId,
+            action: 'merged',
+            targetCategoryId: target.id,
+            movedChildren: childIds.length,
+          };
+        });
+      }
+
+      throw new ValidationError('action must be approve, reject, or merge');
+    } catch (error) {
+      if (error instanceof NotFoundError || error instanceof ValidationError) throw error;
+      logger.error('Error reviewing system-suggested competency category:', error);
+      throw new DatabaseError('Failed to review suggested competency category', error);
     }
   }
 
