@@ -7,7 +7,7 @@ import {
   CalendarDays, FileText, Settings2, Award, ChevronRight, StopCircle,
   ArrowLeft, ExternalLink, Sparkles, Copy, ThumbsUp, AlertTriangle,
   Eye, MessageCircle, TrendingUp, ChevronUp, ChevronDown, Undo2, Trash2,
-  Tags,
+  Tags, Search, Filter, ArrowUpDown, MoreHorizontal, Clock3, Layers, CheckCheck,
 } from 'lucide-react';
 
 function StatusBadge({ status }) {
@@ -1131,6 +1131,34 @@ function RecommendationMeta({ item, workspaceTimezone }) {
   );
 }
 
+function getRecommendationTimestamp(item) {
+  return new Date(item.reviewedAt || item.createdAt || item.reviewDate || 0).getTime();
+}
+
+function getSeverityRank(severity) {
+  return { high: 3, medium: 2, low: 1 }[severity] || 0;
+}
+
+function filterAndSortRecommendations(items = [], search = '', sort = 'newest') {
+  const normalizedSearch = search.trim().toLowerCase();
+  const filtered = normalizedSearch
+    ? items.filter((item) => [
+      item.title,
+      item.rationale,
+      item.suggestedAction,
+      item.kind,
+      ...(Array.isArray(item.skillsAffected) ? item.skillsAffected : []),
+    ].filter(Boolean).join(' ').toLowerCase().includes(normalizedSearch))
+    : items;
+
+  return [...filtered].sort((a, b) => {
+    if (sort === 'oldest') return getRecommendationTimestamp(a) - getRecommendationTimestamp(b);
+    if (sort === 'severity') return getSeverityRank(b.severity) - getSeverityRank(a.severity) || getRecommendationTimestamp(b) - getRecommendationTimestamp(a);
+    if (sort === 'title') return String(a.title || '').localeCompare(String(b.title || ''));
+    return getRecommendationTimestamp(b) - getRecommendationTimestamp(a);
+  });
+}
+
 function BacklogRecommendationRow({
   item,
   workspaceTimezone,
@@ -1140,6 +1168,9 @@ function BacklogRecommendationRow({
   hideTitle = false,
   motionState = null,
   readOnly = false,
+  selectable = false,
+  selected = false,
+  onToggleSelected,
 }) {
   const [expanded, setExpanded] = useState(false);
   const [notes, setNotes] = useState(item.reviewNotes || '');
@@ -1151,25 +1182,48 @@ function BacklogRecommendationRow({
   }, [item.id, item.reviewNotes]);
 
   return (
-    <div className={`overflow-hidden rounded-lg border border-slate-200 bg-white transition-all duration-300 ease-out ${getRecommendationMotionClass(motionState)}`}>
-      <div className="grid grid-cols-[auto,1fr] gap-x-2 gap-y-2 px-3 py-2.5 sm:flex sm:items-start">
+    <div className={`overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md ${
+      selected ? 'ring-2 ring-indigo-200' : ''
+    } ${getRecommendationMotionClass(motionState)}`}>
+      <div className="grid grid-cols-[auto,auto,1fr] gap-x-3 gap-y-2 px-3 py-3 sm:grid-cols-[auto,auto,1fr,auto] sm:items-start">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelected?.(item.id)}
+            className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+            aria-label={`Select ${item.title}`}
+          />
+        )}
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
-          className="mt-0.5 self-start rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+          className="mt-0.5 self-start rounded-lg p-1 text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
           title={expanded ? 'Collapse details' : 'Expand details'}
         >
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
         <div className="min-w-0 flex-1">
           {!hideTitle && (
-            <div className="whitespace-normal break-words text-sm font-semibold leading-snug text-slate-800">
+            <div className="whitespace-normal break-words text-sm font-semibold leading-snug text-slate-900">
               {item.title}
             </div>
           )}
           <RecommendationMeta item={item} workspaceTimezone={workspaceTimezone} />
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700">
+              <TrendingUp className="h-3 w-3" />
+              {item.severity === 'high' ? 'High impact' : item.severity === 'medium' ? 'Medium impact' : 'Low impact'}
+            </span>
+            {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
+                <MessageCircle className="h-3 w-3" />
+                {supportTicketIds.length} ticket{supportTicketIds.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="col-span-2 mt-0.5 flex shrink-0 items-center justify-end gap-1 sm:col-span-1 sm:justify-start">
+        <div className="col-span-3 mt-0.5 grid shrink-0 grid-cols-2 gap-2 sm:col-span-1 sm:min-w-[118px] sm:grid-cols-1">
           {readOnly && (
             <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
               visibility
@@ -1180,18 +1234,20 @@ function BacklogRecommendationRow({
               <button
                 onClick={() => onRecommendationAction?.(item.id, 'approved', notes)}
                 disabled={isSaving}
-                className="rounded-lg border border-green-200 bg-green-50 p-1.5 text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                 title="Approve"
               >
                 <CheckCircle className="h-4 w-4" />
+                Approve
               </button>
               <button
                 onClick={() => onRecommendationAction?.(item.id, 'rejected', notes)}
                 disabled={isSaving}
-                className="rounded-lg border border-red-200 bg-red-50 p-1.5 text-red-600 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
                 title="Reject"
               >
                 <XCircle className="h-4 w-4" />
+                Reject
               </button>
             </>
           )}
@@ -3936,6 +3992,11 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   const [backlogStartDate, setBacklogStartDate] = useState('');
   const [backlogEndDate, setBacklogEndDate] = useState('');
   const [backlogRunFilter, setBacklogRunFilter] = useState('');
+  const [backlogSearch, setBacklogSearch] = useState('');
+  const [backlogSort, setBacklogSort] = useState('newest');
+  const [selectedBacklogIds, setSelectedBacklogIds] = useState([]);
+  const [bulkBacklogAction, setBulkBacklogAction] = useState(null);
+  const [showBacklogAdvancedFilters, setShowBacklogAdvancedFilters] = useState(false);
   const [consolidationRun, setConsolidationRun] = useState(null);
   const [loadingConsolidation, setLoadingConsolidation] = useState(false);
   const [loadingConsolidationQueue, setLoadingConsolidationQueue] = useState(false);
@@ -4260,6 +4321,53 @@ export default function DailyReviewManager({ workspaceTimezone }) {
       setSavingRecommendationId(null);
     }
   };
+
+  const visiblePendingBacklogItems = filterAndSortRecommendations(pendingBacklogItems, backlogSearch, backlogSort);
+  const visibleApprovedBacklogItems = filterAndSortRecommendations(approvedBacklogItems, backlogSearch, backlogSort);
+  const selectedPendingItems = visiblePendingBacklogItems.filter((item) => selectedBacklogIds.includes(item.id));
+  const allVisiblePendingSelected = visiblePendingBacklogItems.length > 0
+    && visiblePendingBacklogItems.every((item) => selectedBacklogIds.includes(item.id));
+  const readyToApplyCount = Array.isArray(consolidationRun?.items)
+    ? consolidationRun.items.filter((item) => item.status !== 'applied').length
+    : 0;
+
+  const toggleBacklogSelection = useCallback((id) => {
+    setSelectedBacklogIds((prev) => (
+      prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]
+    ));
+  }, []);
+
+  const toggleAllVisiblePending = useCallback(() => {
+    setSelectedBacklogIds((prev) => {
+      const visibleIds = visiblePendingBacklogItems.map((item) => item.id);
+      const visibleSet = new Set(visibleIds);
+      if (visibleIds.length > 0 && visibleIds.every((id) => prev.includes(id))) {
+        return prev.filter((id) => !visibleSet.has(id));
+      }
+      return Array.from(new Set([...prev, ...visibleIds]));
+    });
+  }, [visiblePendingBacklogItems]);
+
+  const runBulkBacklogAction = async (status) => {
+    const targets = selectedPendingItems;
+    if (targets.length === 0) return;
+    setBulkBacklogAction(status);
+    try {
+      for (const item of targets) {
+        // The backend stores review decisions one recommendation at a time;
+        // sequence the calls so the existing motion/count handling remains reliable.
+        await handleRecommendationAction(item.id, status, item.reviewNotes || '');
+      }
+      setSelectedBacklogIds((prev) => prev.filter((id) => !targets.some((item) => item.id === id)));
+    } finally {
+      setBulkBacklogAction(null);
+    }
+  };
+
+  useEffect(() => {
+    const pendingIds = new Set(pendingBacklogItems.map((item) => item.id));
+    setSelectedBacklogIds((prev) => prev.filter((id) => pendingIds.has(id)));
+  }, [pendingBacklogItems]);
 
   const handleStartConsolidation = async () => {
     setStartingConsolidation(true);
@@ -4676,24 +4784,50 @@ export default function DailyReviewManager({ workspaceTimezone }) {
       )}
 
       {activeTab === 'backlog' && (
-        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-base font-semibold text-slate-800">Recommendation Backlog</h3>
-              <p className="text-sm text-slate-500">
-                Review persisted recommendation items across runs and move them through pending, approved, rejected, and applied.
-              </p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-500/20">
+                <Sparkles className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold tracking-tight text-slate-900">Recommendation Review</h3>
+                <p className="text-sm text-slate-500">
+                  Review, approve, reject, and stage AI-generated recommendations for consolidation.
+                </p>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              {refreshingBacklog && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-600">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Updating
-                </span>
-              )}
-              <button onClick={loadBacklog} className="text-xs text-blue-600 hover:text-blue-800">
-                Refresh
-              </button>
+            <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[460px]">
+              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                  <Clock3 className="h-4 w-4" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pending</div>
+                  <div className="text-2xl font-bold leading-6 text-slate-900">{pendingBacklogTotal}</div>
+                  <div className="text-xs text-slate-500">Needs review</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                  <Layers className="h-4 w-4" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Staged</div>
+                  <div className="text-2xl font-bold leading-6 text-slate-900">{approvedBacklogTotal}</div>
+                  <div className="text-xs text-slate-500">For consolidation</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-50 text-violet-600">
+                  <CheckCheck className="h-4 w-4" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Ready to apply</div>
+                  <div className="text-2xl font-bold leading-6 text-slate-900">{readyToApplyCount}</div>
+                  <div className="text-xs text-slate-500">Grouped & ready</div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -4732,93 +4866,188 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
           </div>
 
-          <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:flex xl:items-end">
-            <div className="w-full xl:w-auto">
-              <label className="mb-1 block text-xs font-medium text-slate-600">View</label>
-              <select
-                value={backlogStatus}
-                onChange={(e) => setBacklogStatus(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              >
-                <option value="pending">Review queue</option>
-                <option value="rejected">Rejected</option>
-                <option value="applied">Applied</option>
-                <option value="all">All</option>
-              </select>
-            </div>
-            <div className="w-full xl:w-auto">
-              <label className="mb-1 block text-xs font-medium text-slate-600">Priority</label>
-              <select
-                value={backlogSeverity}
-                onChange={(e) => setBacklogSeverity(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              >
-                <option value="all">All</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
-            </div>
-            <div className="w-full xl:w-auto">
-              <label className="mb-1 block text-xs font-medium text-slate-600">Start Date</label>
-              <input
-                type="date"
-                value={backlogStartDate}
-                onChange={(e) => setBacklogStartDate(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="w-full xl:w-auto">
-              <label className="mb-1 block text-xs font-medium text-slate-600">End Date</label>
-              <input
-                type="date"
-                value={backlogEndDate}
-                onChange={(e) => setBacklogEndDate(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="w-full sm:col-span-2 xl:w-auto">
-              <label className="mb-1 block text-xs font-medium text-slate-600">Run</label>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-1">
-                <input
-                  type="text"
-                  list="daily-review-run-options"
-                  value={backlogRunFilter}
-                  onChange={(e) => setBacklogRunFilter(e.target.value)}
-                  placeholder="All runs"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm sm:w-56"
-                />
-                <datalist id="daily-review-run-options">
-                  {runs.map((run) => {
-                    const dateLabel = formatReviewRunDateLabel(run, workspaceTimezone);
-                    return (
-                      <option
-                        key={run.id}
-                        value={`Run #${run.id} — ${dateLabel}`}
-                      />
-                    );
-                  })}
-                </datalist>
-                {backlogRunFilter && (
+          <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+              <div className="flex flex-1 flex-col gap-2 lg:flex-row lg:items-center">
+                <label className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="search"
+                    value={backlogSearch}
+                    onChange={(e) => setBacklogSearch(e.target.value)}
+                    placeholder="Search recommendations..."
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex lg:items-center">
+                  <label className="relative">
+                    <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                    <select
+                      value={backlogSeverity}
+                      onChange={(e) => setBacklogSeverity(e.target.value)}
+                      className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
+                    >
+                      <option value="all">All priority</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </label>
+                  <label className="relative">
+                    <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                    <select
+                      value={backlogSort}
+                      onChange={(e) => setBacklogSort(e.target.value)}
+                      className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
+                    >
+                      <option value="newest">Newest</option>
+                      <option value="oldest">Oldest</option>
+                      <option value="severity">Priority</option>
+                      <option value="title">Title</option>
+                    </select>
+                  </label>
+                  <select
+                    value={backlogStatus}
+                    onChange={(e) => setBacklogStatus(e.target.value)}
+                    className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
+                  >
+                    <option value="pending">Review queue</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="applied">Applied</option>
+                    <option value="all">All</option>
+                  </select>
                   <button
                     type="button"
-                    onClick={() => setBacklogRunFilter('')}
-                    className="rounded-lg border border-slate-200 px-2 py-2 text-xs text-slate-500 hover:bg-slate-50"
-                    title="Show all runs"
+                    onClick={loadBacklog}
+                    disabled={loadingBacklog || refreshingBacklog}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    title="Refresh review queue"
                   >
-                    Clear
+                    <RefreshCw className={`h-4 w-4 ${refreshingBacklog ? 'animate-spin' : ''}`} />
+                    <span className="hidden sm:inline">{refreshingBacklog ? 'Refreshing' : 'Refresh'}</span>
                   </button>
-                )}
+                </div>
               </div>
+
+              {backlogStatus === 'pending' && backlogKind !== 'dev' && (
+                <div className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2 sm:flex-row sm:items-center">
+                  <label className="inline-flex h-10 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={allVisiblePendingSelected}
+                      onChange={toggleAllVisiblePending}
+                      disabled={visiblePendingBacklogItems.length === 0}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                    />
+                    Select all ({visiblePendingBacklogItems.length})
+                  </label>
+                  <span className="hidden h-6 w-px bg-slate-200 sm:block" />
+                  <span className="px-2 text-sm font-semibold text-slate-600">{selectedPendingItems.length} selected</span>
+                  <button
+                    type="button"
+                    onClick={() => runBulkBacklogAction('approved')}
+                    disabled={selectedPendingItems.length === 0 || Boolean(bulkBacklogAction)}
+                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {bulkBacklogAction === 'approved' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                    Approve selected
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => runBulkBacklogAction('rejected')}
+                    disabled={selectedPendingItems.length === 0 || Boolean(bulkBacklogAction)}
+                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {bulkBacklogAction === 'rejected' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                    Reject selected
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowBacklogAdvancedFilters((prev) => !prev)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50"
+                    title="More filters"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </div>
+
+            <SmoothCollapse open={showBacklogAdvancedFilters || backlogStatus !== 'pending' || Boolean(backlogRunFilter || backlogStartDate || backlogEndDate)}>
+              <div className="mt-3 grid gap-2 border-t border-slate-100 pt-3 sm:grid-cols-2 xl:grid-cols-4">
+                <input
+                  type="date"
+                  value={backlogStartDate}
+                  onChange={(e) => setBacklogStartDate(e.target.value)}
+                  className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  title="Start date"
+                />
+                <input
+                  type="date"
+                  value={backlogEndDate}
+                  onChange={(e) => setBacklogEndDate(e.target.value)}
+                  className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  title="End date"
+                />
+                <div className="flex gap-2 sm:col-span-2">
+                  <input
+                    type="text"
+                    list="daily-review-run-options"
+                    value={backlogRunFilter}
+                    onChange={(e) => setBacklogRunFilter(e.target.value)}
+                    placeholder="All runs"
+                    className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  />
+                  <datalist id="daily-review-run-options">
+                    {runs.map((run) => {
+                      const dateLabel = formatReviewRunDateLabel(run, workspaceTimezone);
+                      return (
+                        <option
+                          key={run.id}
+                          value={`Run #${run.id} — ${dateLabel}`}
+                        />
+                      );
+                    })}
+                  </datalist>
+                  {(backlogRunFilter || backlogStartDate || backlogEndDate) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBacklogRunFilter('');
+                        setBacklogStartDate('');
+                        setBacklogEndDate('');
+                      }}
+                      className="rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-500 transition hover:bg-slate-50"
+                      title="Clear date and run filters"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </SmoothCollapse>
           </div>
 
-          <div className="mb-3 text-xs text-slate-500">
-            {backlogKind === 'dev'
-              ? `${backlogTotal} dev visibility item(s) matched the current filters. These are not approvable from backlog.`
-              : backlogStatus === 'pending'
-                ? `Review queue: ${pendingBacklogTotal} pending item(s) on the left, ${approvedBacklogTotal} approved item(s) staged on the right.`
-                : `${backlogTotal} item(s) matched the current filters.`}
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700">
+              <Clock3 className="h-3.5 w-3.5" />
+              Queue
+            </span>
+            <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 font-semibold text-green-700">
+              <CheckCircle className="h-3.5 w-3.5" />
+              Approve or reject
+            </span>
+            <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
+              <Layers className="h-3.5 w-3.5" />
+              Stage for consolidation
+            </span>
+            <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 font-semibold text-violet-700">
+              <CheckCheck className="h-3.5 w-3.5" />
+              Ready to apply
+            </span>
           </div>
 
           {loadingBacklog ? (
@@ -4858,22 +5087,25 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   )}
                 </div>
               ) : backlogStatus === 'pending' ? (
-                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.12fr),minmax(360px,0.88fr)]">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),minmax(420px,1fr)]">
+                  <div className="min-w-0 rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-4 shadow-sm">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
-                        <h4 className="text-sm font-semibold text-slate-800">Pending Review Queue</h4>
-                        <p className="text-xs text-slate-500">Collapsed by default. Approve or reject directly from each row.</p>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-base font-bold text-slate-900">Pending Review Queue</h4>
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">{visiblePendingBacklogItems.length}</span>
+                        </div>
+                        <p className="text-xs text-slate-500">Review each recommendation and stage the useful ones.</p>
                       </div>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-500">{pendingBacklogTotal}</span>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-500">{pendingBacklogTotal} total</span>
                     </div>
-                    {pendingBacklogItems.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
-                    No pending recommendations matched the current filters.
+                    {visiblePendingBacklogItems.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-12 text-center text-sm text-slate-400">
+                        No pending recommendations matched the current filters.
                       </div>
                     ) : (
                       <div className="max-h-[680px] space-y-2 overflow-auto pr-1">
-                        {pendingBacklogItems.map((item) => (
+                        {visiblePendingBacklogItems.map((item) => (
                           <BacklogRecommendationRow
                             key={item.id}
                             item={item}
@@ -4882,27 +5114,57 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                             savingRecommendationId={savingRecommendationId}
                             mode="pending"
                             motionState={backlogMotionById[item.id]}
+                            selectable
+                            selected={selectedBacklogIds.includes(item.id)}
+                            onToggleSelected={toggleBacklogSelection}
                           />
                         ))}
+                        <div className="py-2 text-center text-xs text-slate-400">
+                          Showing {visiblePendingBacklogItems.length} of {pendingBacklogTotal} pending recommendations
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+                  <div className="min-w-0 rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50/70 to-white p-4 shadow-sm">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
-                        <h4 className="text-sm font-semibold text-slate-800">Approved for Consolidation</h4>
-                        <p className="text-xs text-slate-500">Grouped by title. Expand to inspect items or mark them applied.</p>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-base font-bold text-slate-900">Approved for Consolidation</h4>
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">{visibleApprovedBacklogItems.length}</span>
+                        </div>
+                        <p className="text-xs text-slate-500">Approved recommendations are grouped here for final review.</p>
                       </div>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-emerald-700">{approvedBacklogTotal}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm"
+                          title="Grouped by title"
+                        >
+                          <Layers className="h-3.5 w-3.5" />
+                          Group by title
+                        </button>
+                      </div>
                     </div>
-                    {approvedBacklogItems.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-emerald-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
-                    No approved recommendations are waiting under these filters.
+                    {visibleApprovedBacklogItems.length === 0 ? (
+                      <div className="flex min-h-[520px] items-center justify-center rounded-2xl border border-dashed border-emerald-200 bg-white/70 px-6 py-12 text-center">
+                        <div className="max-w-sm">
+                          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
+                            <Layers className="h-9 w-9" />
+                          </div>
+                          <h5 className="text-base font-bold text-slate-800">No approved recommendations yet</h5>
+                          <p className="mt-2 text-sm text-slate-500">
+                            Approve items from the queue and they will appear here grouped by title for consolidation.
+                          </p>
+                          <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            Approve items from the queue to get started
+                          </div>
+                        </div>
                       </div>
                     ) : (
                       <div className="max-h-[680px] space-y-2 overflow-auto pr-1">
-                        {groupRecommendationsByTitle(approvedBacklogItems).map((group) => (
+                        {groupRecommendationsByTitle(visibleApprovedBacklogItems).map((group) => (
                           <ApprovedBacklogGroup
                             key={group.title}
                             group={group}
@@ -4917,13 +5179,13 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   </div>
                 </div>
               ) : backlogStatus === 'approved' ? (
-                approvedBacklogItems.length === 0 ? (
+                visibleApprovedBacklogItems.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
                 No approved recommendation items matched the current backlog filters.
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {groupRecommendationsByTitle(approvedBacklogItems).map((group) => (
+                    {groupRecommendationsByTitle(visibleApprovedBacklogItems).map((group) => (
                       <ApprovedBacklogGroup
                         key={group.title}
                         group={group}
