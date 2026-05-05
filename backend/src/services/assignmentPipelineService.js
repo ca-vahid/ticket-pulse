@@ -22,6 +22,7 @@ import {
   getFreshServiceTicketQueueBlocker,
   getLocalTicketQueueBlocker,
 } from './assignmentQueueEligibility.js';
+import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
 
 const MAX_TURNS = 20;
 
@@ -144,6 +145,7 @@ class AssignmentPipelineService {
 
     // ── Create running run and execute ──────────────────────────────────
     const promptVersion = await promptRepository.getPublished(workspaceId);
+    const llmModel = normalizeAnthropicModel(assignmentConfig.llmModel);
     let run;
     try {
       run = await assignmentRepository.createPipelineRun({
@@ -151,7 +153,7 @@ class AssignmentPipelineService {
         workspaceId,
         status: 'running',
         triggerSource,
-        llmModel: assignmentConfig.llmModel,
+        llmModel,
         promptVersionId: promptVersion.id,
         reboundFrom,
       });
@@ -463,9 +465,10 @@ class AssignmentPipelineService {
     }
 
     // Ensure run is in running state (may already be if created as running)
+    const llmModel = normalizeAnthropicModel(assignmentConfig?.llmModel);
     await assignmentRepository.updatePipelineRun(runId, {
       status: 'running',
-      llmModel: assignmentConfig?.llmModel || 'claude-sonnet-4-6-20260217',
+      llmModel,
       promptVersionId: promptVersion.id,
     });
 
@@ -539,7 +542,7 @@ class AssignmentPipelineService {
         emit({ type: 'turn_start', turn: stepCounter });
 
         const stream = client.messages.stream({
-          model: assignmentConfig?.llmModel || 'claude-sonnet-4-6-20260217',
+          model: llmModel,
           max_tokens: 4096,
           system: systemPrompt,
           tools,

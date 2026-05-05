@@ -109,7 +109,7 @@ export default {
   // Anthropic (assignment pipeline)
   anthropic: {
     apiKey: config.ANTHROPIC_API_KEY,
-    defaultModel: 'claude-sonnet-4-6-20260217',
+    defaultModel: 'claude-sonnet-4-6',
     calendarModel: config.ANTHROPIC_CALENDAR_MODEL || 'claude-haiku-4-5-20251001',
   },
 

@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
+import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
 
 const STALE_RUNNING_MINUTES = 30;
 
@@ -107,9 +108,14 @@ class AssignmentRepository {
 
   async getConfig(workspaceId) {
     try {
-      return await prisma.assignmentConfig.findUnique({
+      const config = await prisma.assignmentConfig.findUnique({
         where: { workspaceId },
       });
+      if (!config) return null;
+      return {
+        ...config,
+        llmModel: normalizeAnthropicModel(config.llmModel),
+      };
     } catch (error) {
       logger.error('Error fetching assignment config:', error);
       throw new DatabaseError('Failed to fetch assignment config', error);
@@ -118,10 +124,13 @@ class AssignmentRepository {
 
   async upsertConfig(workspaceId, data) {
     try {
+      const normalizedData = data.llmModel !== undefined
+        ? { ...data, llmModel: normalizeAnthropicModel(data.llmModel) }
+        : data;
       return await prisma.assignmentConfig.upsert({
         where: { workspaceId },
-        create: { workspaceId, ...data },
-        update: data,
+        create: { workspaceId, ...normalizedData },
+        update: normalizedData,
       });
     } catch (error) {
       logger.error('Error upserting assignment config:', error);

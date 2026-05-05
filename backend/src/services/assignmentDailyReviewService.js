@@ -19,6 +19,7 @@ import {
   transformTicketConversationEntries,
 } from '../integrations/freshserviceTransformer.js';
 import { runJobsInPool } from '../utils/parallelPool.js';
+import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const STALE_RUNNING_MS = 30 * 60 * 1000;
@@ -2305,7 +2306,7 @@ Rules:
 
       const client = new Anthropic({ apiKey });
       const response = await client.messages.create({
-        model: llmModel || 'claude-sonnet-4-6-20260217',
+        model: normalizeAnthropicModel(llmModel),
         max_tokens: 4096,
         system: systemPrompt,
         tools: [TOOL],
@@ -2459,7 +2460,7 @@ Rules:
         triggerSource: options.triggerSource || 'manual',
         status: 'collecting',
         triggeredBy,
-        llmModel: config?.llmModel || 'claude-sonnet-4-6-20260217',
+        llmModel: normalizeAnthropicModel(config?.llmModel),
         progress: sanitizeJsonForPostgres({
           phase: 'collecting',
           percent: 2,
@@ -3126,7 +3127,7 @@ Hard rules:
 
     const userMessage = `Daily review dataset for the meeting briefing:\n\n${JSON.stringify(briefingInput, null, 2)}\n\nSubmit the briefing using the tool.`;
 
-    const llmModel = run.llmModel || 'claude-sonnet-4-6-20260217';
+    const llmModel = normalizeAnthropicModel(run.llmModel);
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: llmModel,

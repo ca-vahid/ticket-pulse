@@ -21,6 +21,7 @@ import settingsRepository from '../services/settingsRepository.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { analyzeTicketActivities } from '../integrations/freshserviceTransformer.js';
 import { convertToTimezone } from '../utils/timezone.js';
+import { DEFAULT_ANTHROPIC_MODEL, normalizeAnthropicModel } from '../utils/anthropicModels.js';
 import { requireReviewer, requireAdmin } from '../middleware/auth.js';
 import appConfig from '../config/index.js';
 import prisma from '../services/prisma.js';
@@ -44,7 +45,7 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
     data: config || {
       isEnabled: false,
       autoAssign: false,
-      llmModel: 'claude-sonnet-4-6-20260217',
+      llmModel: DEFAULT_ANTHROPIC_MODEL,
       maxRecommendations: 3,
       scoringWeights: null,
       pollForUnassigned: true,
@@ -80,7 +81,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   const data = {};
   if (isEnabled !== undefined) data.isEnabled = isEnabled;
   if (autoAssign !== undefined) data.autoAssign = autoAssign;
-  if (llmModel !== undefined) data.llmModel = llmModel;
+  if (llmModel !== undefined) data.llmModel = normalizeAnthropicModel(llmModel);
   if (maxRecommendations !== undefined) data.maxRecommendations = maxRecommendations;
   if (scoringWeights !== undefined) data.scoringWeights = scoringWeights;
   if (classificationPrompt !== undefined) data.classificationPrompt = classificationPrompt;

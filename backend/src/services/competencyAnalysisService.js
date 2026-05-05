@@ -5,6 +5,7 @@ import competencyRepository from './competencyRepository.js';
 import { COMPETENCY_TOOL_SCHEMAS, executeCompetencyTool } from './competencyTools.js';
 import prisma from './prisma.js';
 import { findBestCategoryMatch } from '../utils/categoryMatcher.js';
+import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
 import logger from '../utils/logger.js';
 
 const MAX_TURNS = 15;
@@ -61,7 +62,7 @@ class CompetencyAnalysisService {
       where: { workspaceId },
       select: { llmModel: true },
     });
-    const llmModel = assignmentConfig?.llmModel || 'claude-sonnet-4-6-20260217';
+    const llmModel = normalizeAnthropicModel(assignmentConfig?.llmModel);
 
     const beforeSnapshot = await this._captureSnapshot(technicianId, workspaceId);
 

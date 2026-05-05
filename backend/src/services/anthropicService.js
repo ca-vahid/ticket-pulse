@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import config from '../config/index.js';
+import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
 import logger from '../utils/logger.js';
 
 const MAX_RETRIES = 3;
@@ -33,7 +34,7 @@ class AnthropicService {
    */
   async sendMessage({ systemPrompt, userMessage, model, maxTokens = 2048, temperature = 0.3 }) {
     const client = this._getClient();
-    const selectedModel = model || config.anthropic.defaultModel;
+    const selectedModel = normalizeAnthropicModel(model || config.anthropic.defaultModel);
 
     let lastError;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
