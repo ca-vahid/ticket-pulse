@@ -8,6 +8,8 @@ import {
   Plus, Trash2, Loader2, Brain, CheckCircle, XCircle, RotateCcw,
   ChevronDown, ChevronRight, Wrench, AlertTriangle,
   Search, Clock, Save, Upload, FileText, X, MapPin, History,
+  Sparkles, MoreHorizontal, ArrowUpDown, SlidersHorizontal, CalendarDays,
+  Folder, GitMerge, CheckSquare, Square,
 } from 'lucide-react';
 import {
   CopyBadge, ToolCallCard, StreamContent,
@@ -334,11 +336,156 @@ function ParentCategoryPicker({ value, categories, onChange }) {
   );
 }
 
-function SuggestedCategoryReview({ suggestions, activeCategories, onChanged }) {
+function normalizeSuggestionText(value = '') {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token && !['and', 'or', 'the', 'for', 'with', 'to', 'of', 'in'].includes(token))
+    .join(' ');
+}
+
+function similarityScore(a, b) {
+  const left = new Set(normalizeSuggestionText(a).split(' ').filter(Boolean));
+  const right = new Set(normalizeSuggestionText(b).split(' ').filter(Boolean));
+  if (!left.size || !right.size) return 0;
+  const intersection = [...left].filter((token) => right.has(token)).length;
+  return intersection / Math.max(left.size, right.size);
+}
+
+function getSuggestionSignals(suggestion, activeCategories) {
+  const descriptionLength = suggestion.description?.length || 0;
+  const duplicateTarget = activeCategories.find((category) => (
+    normalizeSuggestionText(category.name) === normalizeSuggestionText(suggestion.name)
+      || similarityScore(category.name, suggestion.name) >= 0.58
+  ));
+  const hasParent = Boolean(suggestion.parentId || suggestion.parent?.id);
+  const confidence = hasParent && descriptionLength >= 35 ? 'high' : descriptionLength >= 20 ? 'medium' : 'low';
+  return { confidence, duplicateTarget };
+}
+
+function AddCategoryModal({ open, activeCategories, onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [parentId, setParentId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName('');
+    setDescription('');
+    setParentId('');
+    setError(null);
+  }, [open]);
+
+  if (!open) return null;
+
+  const create = async () => {
+    if (!name.trim()) {
+      setError('Category name is required');
+      return;
+    }
+    try {
+      setSaving(true);
+      setError(null);
+      await assignmentAPI.createCategory({
+        name: name.trim(),
+        description: description.trim() || null,
+        parentId: parentId ? Number(parentId) : null,
+      });
+      await onCreated?.();
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Could not add category');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+      <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="flex items-center gap-2 text-lg font-bold text-slate-950">
+              <Plus className="h-5 w-5 text-purple-600" />
+              Add Category
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">Create a category directly when an AI suggestion is close but not quite right.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-5 grid gap-3">
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold outline-none transition focus:border-purple-300 focus:ring-2 focus:ring-purple-100"
+            placeholder="Category name"
+          />
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            className="min-h-[88px] rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-purple-300 focus:ring-2 focus:ring-purple-100"
+            placeholder="Description (optional)"
+          />
+          <ParentCategoryPicker
+            value={parentId}
+            categories={activeCategories.filter((category) => !category.parentId)}
+            onChange={setParentId}
+          />
+        </div>
+        {error && <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+            Cancel
+          </button>
+          <button type="button" onClick={create} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-purple-700 disabled:opacity-50">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Add Category
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategorySuggestionsTab({ onCountChange }) {
+  const PAGE_SIZE = 4;
+  const [suggestions, setSuggestions] = useState([]);
+  const [activeCategories, setActiveCategories] = useState([]);
   const [drafts, setDrafts] = useState({});
-  const [mergeTargets, setMergeTargets] = useState({});
-  const [actingId, setActingId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [sort, setSort] = useState('newest');
+  const [page, setPage] = useState(1);
+  const [bulkMergeTarget, setBulkMergeTarget] = useState('');
+  const [actingIds, setActingIds] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(null);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [moreActionsOpen, setMoreActionsOpen] = useState(false);
+  const [expandedDescriptions, setExpandedDescriptions] = useState([]);
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await assignmentAPI.getCompetencies();
+      const payload = res?.data || {};
+      setSuggestions(payload.suggestedCategories || []);
+      setActiveCategories(payload.categories || []);
+      onCountChange?.(payload.suggestedCategories?.length || 0);
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Could not load category suggestions' });
+    } finally {
+      setLoading(false);
+    }
+  }, [onCountChange]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   useEffect(() => {
     setDrafts((prev) => {
@@ -356,26 +503,86 @@ function SuggestedCategoryReview({ suggestions, activeCategories, onChanged }) {
     });
   }, [suggestions]);
 
-  const topLevelCategories = activeCategories.filter((category) => !category.parentId);
+  useEffect(() => { setPage(1); }, [query, filter, sort]);
+
+  const enrichedSuggestions = suggestions.map((suggestion) => ({
+    ...suggestion,
+    signals: getSuggestionSignals(suggestion, activeCategories),
+  }));
+
+  const filteredSuggestions = enrichedSuggestions
+    .filter((suggestion) => {
+      const needle = query.trim().toLowerCase();
+      if (needle) {
+        const haystack = [suggestion.name, suggestion.description, suggestion.parent?.name, suggestion.source]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(needle)) return false;
+      }
+      if (filter === 'high') return suggestion.signals.confidence === 'high';
+      if (filter === 'medium') return suggestion.signals.confidence === 'medium';
+      if (filter === 'duplicates') return Boolean(suggestion.signals.duplicateTarget);
+      if (filter === 'top') return !suggestion.parentId;
+      if (filter === 'sub') return Boolean(suggestion.parentId);
+      return true;
+    })
+    .sort((a, b) => {
+      if (sort === 'oldest') return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+      if (sort === 'name') return a.name.localeCompare(b.name);
+      if (sort === 'confidence') {
+        const order = { high: 0, medium: 1, low: 2 };
+        return order[a.signals.confidence] - order[b.signals.confidence];
+      }
+      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    });
+
+  const totalPages = Math.max(1, Math.ceil(filteredSuggestions.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageItems = filteredSuggestions.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const selectedSet = new Set(selectedIds);
+  const selectedSuggestions = suggestions.filter((suggestion) => selectedSet.has(suggestion.id));
+  const allFilteredSelected = filteredSuggestions.length > 0 && filteredSuggestions.every((suggestion) => selectedSet.has(suggestion.id));
   const targetOptions = activeCategories;
+  const showingStart = filteredSuggestions.length ? ((safePage - 1) * PAGE_SIZE) + 1 : 0;
+  const showingEnd = Math.min(safePage * PAGE_SIZE, filteredSuggestions.length);
 
   const updateDraft = (id, patch) => {
     setDrafts((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
   };
 
-  const review = async (suggestion, action) => {
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((candidate) => candidate !== id) : [...prev, id]));
+  };
+
+  const toggleAllFiltered = () => {
+    setSelectedIds((prev) => {
+      if (allFilteredSelected) {
+        const filteredIds = new Set(filteredSuggestions.map((suggestion) => suggestion.id));
+        return prev.filter((id) => !filteredIds.has(id));
+      }
+      return [...new Set([...prev, ...filteredSuggestions.map((suggestion) => suggestion.id)])];
+    });
+  };
+
+  const toggleDescription = (id) => {
+    setExpandedDescriptions((prev) => (
+      prev.includes(id) ? prev.filter((candidate) => candidate !== id) : [...prev, id]
+    ));
+  };
+
+  const reviewOne = async (suggestion, action, targetCategoryId = null) => {
     const draft = drafts[suggestion.id] || {};
-    const targetCategoryId = mergeTargets[suggestion.id];
     if (action === 'approve' && !draft.name?.trim()) {
       setMessage({ type: 'error', text: 'A category name is required before approval.' });
       return;
     }
     if (action === 'merge' && !targetCategoryId) {
-      setMessage({ type: 'error', text: 'Choose an active category to merge into.' });
+      setMessage({ type: 'error', text: 'Choose a category before merging.' });
       return;
     }
 
-    setActingId(suggestion.id);
+    setActingIds((prev) => [...new Set([...prev, suggestion.id])]);
     setMessage(null);
     try {
       const payload = action === 'merge'
@@ -387,176 +594,238 @@ function SuggestedCategoryReview({ suggestions, activeCategories, onChanged }) {
           parentId: draft.parentId ? Number(draft.parentId) : null,
         };
       await assignmentAPI.reviewCategorySuggestion(suggestion.id, payload);
-      setMessage({
-        type: 'success',
-        text: action === 'approve'
-          ? `${draft.name || suggestion.name} is now active.`
-          : action === 'merge'
-            ? `${suggestion.name} was merged into the selected category.`
-            : `${suggestion.name} was rejected.`,
-      });
-      await onChanged?.();
+      setSelectedIds((prev) => prev.filter((id) => id !== suggestion.id));
+      setMessage({ type: 'success', text: `${suggestion.name} ${action === 'approve' ? 'approved' : action === 'merge' ? 'merged' : 'rejected'}.` });
+      await fetchData();
     } catch (err) {
       setMessage({ type: 'error', text: err.message || 'Could not review category suggestion' });
     } finally {
-      setActingId(null);
+      setActingIds((prev) => prev.filter((id) => id !== suggestion.id));
     }
   };
 
-  if (!suggestions.length) {
-    return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-        <div className="flex items-center gap-2 font-semibold">
-          <CheckCircle className="h-4 w-4" />
-          No AI-suggested categories waiting for review
-        </div>
-        <p className="mt-1 text-xs text-emerald-700">New suggestions from one-agent competency analysis will appear here before they become usable skills.</p>
-      </div>
-    );
-  }
+  const reviewSelected = async (action) => {
+    if (!selectedSuggestions.length) return;
+    if (action === 'merge' && !bulkMergeTarget) {
+      setMessage({ type: 'error', text: 'Choose a merge target before merging selected suggestions.' });
+      return;
+    }
+    if (action === 'reject' && !confirm(`Reject ${selectedSuggestions.length} selected suggestion${selectedSuggestions.length === 1 ? '' : 's'}?`)) return;
+    setActingIds(selectedSuggestions.map((suggestion) => suggestion.id));
+    setMessage(null);
+    try {
+      for (const suggestion of selectedSuggestions) {
+        const draft = drafts[suggestion.id] || {};
+        const payload = action === 'merge'
+          ? { action, targetCategoryId: Number(bulkMergeTarget) }
+          : {
+            action,
+            name: draft.name?.trim() || suggestion.name,
+            description: draft.description || null,
+            parentId: draft.parentId ? Number(draft.parentId) : null,
+          };
+        await assignmentAPI.reviewCategorySuggestion(suggestion.id, payload);
+      }
+      setMessage({ type: 'success', text: `${selectedSuggestions.length} suggestion${selectedSuggestions.length === 1 ? '' : 's'} ${action === 'approve' ? 'approved' : action === 'merge' ? 'merged' : 'rejected'}.` });
+      setSelectedIds([]);
+      setMoreActionsOpen(false);
+      setBulkMergeTarget('');
+      await fetchData();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Bulk review failed' });
+    } finally {
+      setActingIds([]);
+    }
+  };
 
   return (
-    <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
-            <Brain className="h-4 w-4 text-amber-600" />
-            AI Suggested Categories
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{suggestions.length}</span>
-          </h3>
-          <p className="mt-1 text-xs text-slate-600">
-            These came from competency analysis and are inactive until an admin approves, merges, or rejects them.
-          </p>
-        </div>
-        {message && (
-          <div className={`flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
-            message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'
-          }`}>
-            {message.type === 'error' ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5" /> : <CheckCircle className="mt-0.5 h-3.5 w-3.5" />}
-            <span>{message.text}</span>
-            <button type="button" onClick={() => setMessage(null)} className="ml-1 rounded p-0.5 hover:bg-white/70">
-              <X className="h-3 w-3" />
-            </button>
+    <div className="space-y-4">
+      <AddCategoryModal open={showAddCategory} activeCategories={activeCategories} onClose={() => setShowAddCategory(false)} onCreated={fetchData} />
+
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-50 text-purple-600">
+            <Sparkles className="h-7 w-7" />
           </div>
-        )}
+          <div>
+            <h2 className="flex items-center gap-2 text-2xl font-bold text-slate-950">
+              AI Suggested Categories
+              <span className="rounded-full bg-purple-100 px-2.5 py-1 text-sm font-bold text-purple-700">{suggestions.length}</span>
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">AI analyzed competencies and found potential new categories. Review and take action.</p>
+          </div>
+        </div>
+        <button type="button" onClick={() => setShowAddCategory(true)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-purple-200 bg-white px-4 py-2.5 text-sm font-bold text-purple-700 shadow-sm transition hover:bg-purple-50">
+          <Plus className="h-4 w-4" />
+          Add Category
+        </button>
       </div>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {suggestions.map((suggestion) => {
-          const draft = drafts[suggestion.id] || {
-            name: suggestion.name || '',
-            description: suggestion.description || '',
-            parentId: suggestion.parentId ? String(suggestion.parentId) : '',
-          };
-          const childCount = suggestion.subcategories?.length || 0;
-          return (
-            <div key={suggestion.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-purple-50 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
-                      {suggestion.source || 'technician_analysis'}
-                    </span>
-                    {suggestion.parent?.name && (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                        under {suggestion.parent.name}
-                      </span>
-                    )}
-                    {childCount > 0 && (
-                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                        {childCount} child suggestion{childCount === 1 ? '' : 's'}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Suggested {suggestion.createdAt ? new Date(suggestion.createdAt).toLocaleString() : 'recently'}
-                  </p>
-                </div>
-                {actingId === suggestion.id && <Loader2 className="h-4 w-4 animate-spin text-amber-600" />}
-              </div>
+      {message && (
+        <div className={`flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm ${message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+          <div className="flex items-center gap-2">
+            {message.type === 'error' ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
+            <span>{message.text}</span>
+          </div>
+          <button type="button" onClick={() => setMessage(null)} className="rounded-lg p-1 hover:bg-white/70"><X className="h-4 w-4" /></button>
+        </div>
+      )}
 
-              <div className="grid gap-2">
-                <input
-                  type="text"
-                  value={draft.name}
-                  onChange={(event) => updateDraft(suggestion.id, { name: event.target.value })}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
-                  placeholder="Category name"
-                />
-                <textarea
-                  value={draft.description || ''}
-                  onChange={(event) => updateDraft(suggestion.id, { description: event.target.value })}
-                  className="min-h-[64px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
-                  placeholder="Description or why this should exist"
-                />
-                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                  <ParentCategoryPicker
-                    value={draft.parentId || ''}
-                    categories={topLevelCategories}
-                    onChange={(value) => updateDraft(suggestion.id, { parentId: value })}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => review(suggestion, 'approve')}
-                    disabled={actingId === suggestion.id}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
-                  >
-                    <CheckCircle className="h-3.5 w-3.5" />
-                    Approve
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="min-w-[86px] text-sm font-bold text-slate-600">{selectedIds.length} selected</span>
+            <span className="hidden h-7 w-px bg-slate-200 sm:block" />
+            <button type="button" onClick={toggleAllFiltered} className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+              {allFilteredSelected ? <CheckSquare className="h-4 w-4 text-purple-600" /> : <Square className="h-4 w-4 text-slate-400" />}
+              Select all
+            </button>
+            <button type="button" onClick={() => reviewSelected('approve')} disabled={!selectedIds.length || actingIds.length > 0} className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-40">
+              <CheckCircle className="h-4 w-4" />
+              Approve selected
+            </button>
+            <select value={bulkMergeTarget} onChange={(event) => setBulkMergeTarget(event.target.value)} disabled={!selectedIds.length} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none disabled:opacity-40">
+              <option value="">Merge target...</option>
+              {targetOptions.map((category) => <option key={category.id} value={category.id}>{category.parentId ? 'Sub: ' : 'Top: '}{category.name}</option>)}
+            </select>
+            <button type="button" onClick={() => reviewSelected('merge')} disabled={!selectedIds.length || !bulkMergeTarget || actingIds.length > 0} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700 transition hover:bg-blue-100 disabled:opacity-40">
+              <GitMerge className="h-4 w-4" />
+              Merge selected
+            </button>
+            <button type="button" onClick={() => reviewSelected('reject')} disabled={!selectedIds.length || actingIds.length > 0} className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:opacity-40">
+              <XCircle className="h-4 w-4" />
+              Reject selected
+            </button>
+            <div className="relative">
+              <button type="button" onClick={() => setMoreActionsOpen((prev) => !prev)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-50">
+                <MoreHorizontal className="h-4 w-4" />
+                More actions
+                <ChevronDown className="h-4 w-4" />
+              </button>
+              {moreActionsOpen && (
+                <div className="absolute left-0 z-20 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+                  <button type="button" onClick={() => { setSelectedIds([]); setMoreActionsOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                    <X className="h-4 w-4" />
+                    Clear selection
+                  </button>
+                  <button type="button" onClick={() => { setQuery(''); setFilter('all'); setSort('newest'); setMoreActionsOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                    <RotateCcw className="h-4 w-4" />
+                    Reset view
+                  </button>
+                  <button type="button" onClick={() => { fetchData(); setMoreActionsOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                    <Upload className="h-4 w-4" />
+                    Refresh suggestions
                   </button>
                 </div>
-              </div>
-
-              <div className="mt-3 grid gap-2 border-t border-slate-100 pt-3 sm:grid-cols-[1fr_auto_auto]">
-                <select
-                  value={mergeTargets[suggestion.id] || ''}
-                  onChange={(event) => setMergeTargets((prev) => ({ ...prev, [suggestion.id]: event.target.value }))}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                >
-                  <option value="">Merge into existing...</option>
-                  {targetOptions.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.parentId ? 'Sub: ' : 'Top: '}
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => review(suggestion, 'merge')}
-                  disabled={actingId === suggestion.id || !mergeTargets[suggestion.id]}
-                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
-                >
-                  Merge
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (confirm(`Reject "${suggestion.name}"? This removes the inactive suggestion${childCount ? ' and its child suggestions' : ''}.`)) {
-                      review(suggestion, 'reject');
-                    }
-                  }}
-                  disabled={actingId === suggestion.id}
-                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 transition hover:bg-red-100 disabled:opacity-50"
-                >
-                  <XCircle className="h-3.5 w-3.5" />
-                  Reject
-                </button>
-              </div>
+              )}
             </div>
-          );
-        })}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} className="h-10 w-72 rounded-lg border border-slate-200 pl-9 pr-3 text-sm outline-none transition focus:border-purple-300 focus:ring-2 focus:ring-purple-100" placeholder="Search suggestions..." />
+            </div>
+            <div className="relative">
+              <SlidersHorizontal className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <select value={filter} onChange={(event) => setFilter(event.target.value)} className="h-10 appearance-none rounded-lg border border-slate-200 bg-white pl-9 pr-8 text-sm font-semibold text-slate-700 outline-none">
+                <option value="all">Filters</option>
+                <option value="high">High confidence</option>
+                <option value="medium">Medium confidence</option>
+                <option value="duplicates">Potential duplicates</option>
+                <option value="top">Top-level only</option>
+                <option value="sub">Subcategories only</option>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            </div>
+            <div className="relative">
+              <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-10 appearance-none rounded-lg border border-slate-200 bg-white pl-9 pr-8 text-sm font-semibold text-slate-700 outline-none">
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="name">Name</option>
+                <option value="confidence">Confidence</option>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {loading && <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-purple-600" /></div>}
+          {!loading && pageItems.map((suggestion) => {
+            const draft = drafts[suggestion.id] || { name: suggestion.name || '', description: suggestion.description || '', parentId: suggestion.parentId ? String(suggestion.parentId) : '' };
+            const isSelected = selectedSet.has(suggestion.id);
+            const isActing = actingIds.includes(suggestion.id);
+            const confidence = suggestion.signals.confidence;
+            const duplicateTarget = suggestion.signals.duplicateTarget;
+            const description = draft.description || '';
+            const descriptionExpanded = expandedDescriptions.includes(suggestion.id);
+            const canExpandDescription = description.length > 140;
+            return (
+              <div key={suggestion.id} className={`grid gap-4 rounded-xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md xl:grid-cols-[36px_minmax(320px,1fr)_260px_360px_170px] ${isSelected ? 'border-purple-300 bg-purple-50/40 shadow-sm' : 'border-slate-200 bg-white'}`}>
+                <button type="button" onClick={() => toggleSelected(suggestion.id)} className="mt-1 flex h-6 w-6 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-400 transition hover:border-purple-300 hover:text-purple-600">
+                  {isSelected ? <CheckSquare className="h-4 w-4 text-purple-600" /> : <Square className="h-4 w-4" />}
+                </button>
+                <div className="min-w-0">
+                  <input value={draft.name} onChange={(event) => updateDraft(suggestion.id, { name: event.target.value })} className="w-full rounded-lg border border-transparent bg-transparent px-1 py-1 text-base font-bold text-slate-950 outline-none transition focus:border-purple-200 focus:bg-white" />
+                  <div className="mt-1 flex items-center gap-2 text-sm font-medium text-slate-500"><Folder className="h-4 w-4" /><span>{suggestion.parent?.name || 'Create new parent category'}</span></div>
+                  <textarea value={description} onChange={(event) => updateDraft(suggestion.id, { description: event.target.value })} className={`mt-2 w-full resize-none rounded-lg border border-transparent bg-transparent px-1 py-1 text-sm leading-6 text-slate-600 outline-none transition focus:border-purple-200 focus:bg-white ${descriptionExpanded ? 'min-h-[118px]' : 'h-[62px]'}`} placeholder="Description or evidence" />
+                  {canExpandDescription && (
+                    <button type="button" onClick={() => toggleDescription(suggestion.id)} className="mt-1 text-xs font-bold text-purple-600 transition hover:text-purple-700">
+                      {descriptionExpanded ? 'Show less' : 'Show more'}
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-2 border-slate-100 xl:border-l xl:pl-5">
+                  <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold ${confidence === 'high' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : confidence === 'medium' ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200' : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200'}`}>
+                    <ArrowUpDown className="h-3.5 w-3.5" />
+                    {confidence === 'high' ? 'High' : confidence === 'medium' ? 'Medium' : 'Low'} confidence
+                  </span>
+                  {duplicateTarget && <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-200"><AlertTriangle className="h-3.5 w-3.5" />Potential duplicate</span>}
+                  <div className="flex items-center gap-2 text-xs font-medium text-slate-500"><CalendarDays className="h-3.5 w-3.5" />{suggestion.createdAt ? new Date(suggestion.createdAt).toLocaleString() : 'No date'}</div>
+                  <div className="text-xs text-slate-400">{suggestion.source || 'technician_analysis'}</div>
+                </div>
+                <div className="space-y-2 border-slate-100 xl:border-l xl:pl-5">
+                  <label className="text-xs font-bold uppercase text-slate-500">Assign to category</label>
+                  <select value={draft.parentId || ''} onChange={(event) => updateDraft(suggestion.id, { parentId: event.target.value })} className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-purple-300 focus:ring-2 focus:ring-purple-100">
+                    <option value="">Create new parent category</option>
+                    {activeCategories.filter((category) => !category.parentId).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                  </select>
+                  <button type="button" onClick={() => updateDraft(suggestion.id, { parentId: '' })} className="inline-flex items-center gap-1 text-sm font-bold text-purple-600 transition hover:text-purple-700"><Plus className="h-4 w-4" />Create new parent category</button>
+                </div>
+                <div className="grid gap-2">
+                  {isActing ? <div className="flex items-center justify-center rounded-xl bg-slate-50 py-8"><Loader2 className="h-5 w-5 animate-spin text-purple-600" /></div> : <>
+                    <button type="button" onClick={() => reviewOne(suggestion, 'approve')} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"><CheckCircle className="h-4 w-4" />Approve</button>
+                    <button type="button" onClick={() => reviewOne(suggestion, 'merge', draft.parentId || duplicateTarget?.id)} disabled={!draft.parentId && !duplicateTarget?.id} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"><GitMerge className="h-4 w-4" />Merge</button>
+                    <button type="button" onClick={() => reviewOne(suggestion, 'reject')} className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-bold text-red-700 transition hover:bg-red-100"><XCircle className="h-4 w-4" />Reject</button>
+                  </>}
+                </div>
+              </div>
+            );
+          })}
+          {!loading && filteredSuggestions.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 py-14 text-center"><CheckCircle className="mx-auto h-8 w-8 text-emerald-500" /><p className="mt-3 text-sm font-semibold text-slate-700">No matching suggestions</p><p className="mt-1 text-sm text-slate-400">{suggestions.length ? 'Try clearing search or filters.' : 'New AI suggestions will appear here after competency analysis.'}</p></div>}
+        </div>
+
+        <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-medium text-slate-500">Showing {showingStart} to {showingEnd} of {filteredSuggestions.length} suggestion{filteredSuggestions.length === 1 ? '' : 's'}</p>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={safePage <= 1} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-500 transition hover:bg-slate-50 disabled:opacity-40"><ChevronRight className="h-4 w-4 rotate-180" /></button>
+            {Array.from({ length: totalPages }).map((_, index) => {
+              const pageNumber = index + 1;
+              return <button key={pageNumber} type="button" onClick={() => setPage(pageNumber)} className={`rounded-lg border px-3 py-2 text-sm font-bold transition ${safePage === pageNumber ? 'border-purple-300 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{pageNumber}</button>;
+            })}
+            <button type="button" onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={safePage >= totalPages} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-500 transition hover:bg-slate-50 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
-
 // ─── Matrix Tab (Overview + Editor) ──────────────────────────────────────
 
 function MatrixTab({ onAnalyze }) {
   const [categories, setCategories] = useState([]);
   const [categoryTree, setCategoryTree] = useState([]);
-  const [suggestedCategories, setSuggestedCategories] = useState([]);
   const [technicians, setTechnicians] = useState([]);
   const [mappings, setMappings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -577,7 +846,6 @@ function MatrixTab({ onAnalyze }) {
       const payload = compRes?.data || {};
       setCategories(payload.categories || []);
       setCategoryTree(payload.categoryTree || []);
-      setSuggestedCategories(payload.suggestedCategories || []);
       setMappings(payload.mappings || []);
       setTechnicians(techRes?.data || []);
     } catch (err) {
@@ -634,12 +902,6 @@ function MatrixTab({ onAnalyze }) {
       )}
 
       <DuplicateDetector onMerged={fetchData} />
-
-      <SuggestedCategoryReview
-        suggestions={suggestedCategories}
-        activeCategories={categories}
-        onChanged={fetchData}
-      />
 
       {/* Swapped-axis matrix: categories as rows, technicians as columns */}
       {technicians.length > 0 && (
@@ -1270,6 +1532,7 @@ function CompetencyPromptTab() {
 
 const COMPETENCY_TABS = [
   { id: 'matrix', label: 'Skill Matrix', icon: Search },
+  { id: 'suggestions', label: 'AI Suggestions', icon: Sparkles },
   { id: 'history', label: 'Run History', icon: Clock },
   { id: 'prompt', label: 'Prompt', icon: FileText },
 ];
@@ -1278,9 +1541,16 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState('matrix');
+  const [suggestionCount, setSuggestionCount] = useState(0);
 
   const isLiveAnalysis = !!deepAnalyzeTechId;
   const forceNew = searchParams.get('force') === 'true';
+
+  useEffect(() => {
+    assignmentAPI.getCategorySuggestions()
+      .then((res) => setSuggestionCount(res?.count || res?.data?.length || 0))
+      .catch(() => setSuggestionCount(0));
+  }, []);
 
   if (isLiveAnalysis) {
     return (
@@ -1309,12 +1579,20 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
           return (
             <button key={tab.id} onClick={() => { setActiveTab(tab.id); if (deepRunId) navigate('/assignments/competencies'); }} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${effectiveTab === tab.id ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               <Icon className="w-4 h-4" /> {tab.label}
+              {tab.id === 'suggestions' && suggestionCount > 0 && (
+                <span className={`ml-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                  effectiveTab === tab.id ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {suggestionCount}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
 
       {effectiveTab === 'matrix' && <MatrixTab onAnalyze={(id) => handleAnalyze(id)} />}
+      {effectiveTab === 'suggestions' && <CategorySuggestionsTab onCountChange={setSuggestionCount} />}
       {effectiveTab === 'history' && <RunHistoryTab deepRunId={deepRunId} workspaceTimezone={workspaceTimezone} />}
       {effectiveTab === 'prompt' && <CompetencyPromptTab />}
     </div>
