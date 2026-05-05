@@ -15,6 +15,13 @@ describe('competency prompt default', () => {
     expect(DEFAULT_COMPETENCY_PROMPT).toContain('expert');
   });
 
+  test('instructs model to review assignment-agent category suggestions', () => {
+    expect(DEFAULT_COMPETENCY_PROMPT).toContain('taxonomySuggestionBreakdown');
+    expect(DEFAULT_COMPETENCY_PROMPT).toContain('taxonomyFit.suggestedCategoryName');
+    expect(DEFAULT_COMPETENCY_PROMPT).toContain('taxonomyFit.suggestedSubcategoryName');
+    expect(DEFAULT_COMPETENCY_PROMPT).toContain('categoryAction "create_new"');
+  });
+
   test('instructs to reuse existing taxonomy entries', () => {
     expect(DEFAULT_COMPETENCY_PROMPT).toContain('Reuse existing category/subcategory IDs whenever they fit');
     expect(DEFAULT_COMPETENCY_PROMPT).toContain('parent categories and subcategories');

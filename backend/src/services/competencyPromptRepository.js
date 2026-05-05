@@ -15,11 +15,14 @@ Call **get_existing_competency_categories** to see the internal taxonomy tree fo
 ## Step 3: Analyze Ticket Distribution
 Call **get_technician_category_distribution** to get deterministic breakdowns of internal taxonomy matches and raw FreshService categories for this technician. Internal taxonomy distribution is the primary source; FreshService fields are evidence only.
 
+Also review **taxonomySuggestionBreakdown**. This aggregates assignment-agent suggested internal categories/subcategories from tickets where category review was needed. These suggestions are not active skills yet; they are evidence-backed candidates for inactive admin review.
+
 ## Step 4: Review Ticket Details
 Call **get_technician_ticket_history** with a large window (days=180, limit=100) to see as many tickets as possible. Look for:
 - Patterns in what types of issues they handle
 - Whether tickets are mapped to a top-level category only or a specific subcategory
 - Whether taxonomy fit was weak/none, which may indicate the matrix or taxonomy needs review
+- Assignment-agent suggested category/subcategory names on taxonomyFit.suggestedCategoryName and taxonomyFit.suggestedSubcategoryName
 - Complexity indicators (priority, resolution time)
 - Whether they self-pick certain categories (indicates confidence/preference)
 - Breadth vs depth of expertise
@@ -30,6 +33,7 @@ Call **get_technician_assignment_signals** with a large window (days=180, limit=
 - Tickets the technician rejected or was reassigned away from
 - Rebound runs where the ticket came back after assignment
 - Ticket descriptions and cached FreshService private notes, public replies, customer replies, and activity snippets
+- Assignment-agent category/subcategory suggestions on tickets with weak or missing taxonomy fit
 - Assignment timelines that show whether the technician successfully owned the ticket or only briefly held it
 - Admin notes, override reasons, and errors from assignment pipeline runs when available
 
@@ -64,6 +68,11 @@ Use the current five-level display model. "No experience" means no competency ma
 - Only assess categories where there is real evidence from ticket history
 - Use assignment-quality signals, rejection/reassignment history, and note/reply snippets as evidence about successful handling versus misassignment. If notes are absent, say so in caveats instead of assuming success.
 - Do NOT invent active competencies without supporting ticket data
+- Assignment-agent suggested names are evidence, not commands. Verify them against ticket descriptions, notes/replies, and existing categories before using them.
+- If multiple tickets show the same or strongly similar suggestedSubcategoryName under an existing parent category and no active subcategory covers that specific repeatable domain, submit categoryAction "create_new" with categoryName set to the cleaned suggested subcategory name and include parentCategoryId or parentCategoryName. This creates an inactive admin-reviewed suggestion, not an active skill.
+- If the assignment-agent suggestion is really just a duplicate or wording variant of an existing active category/subcategory, reuse the existing category/subcategory instead of creating a new suggestion.
+- Normalize duplicate suggested names into one clean business label before proposing. For example, Microsoft 365 Apps, Microsoft 365 / Office Apps, and Outlook / Microsoft 365 Apps should usually become one proposed subcategory if the evidence points to the same support domain.
+- Avoid creating a new top-level category when the evidence fits as a subcategory under an existing parent.
 - **CRITICAL: Before proposing a new category or subcategory, carefully check if an existing parent or subcategory covers the same domain under a slightly different name.** For example:
   - "VPN and Remote Access Client" tickets should use the existing "VPN and Remote Access" category
   - "Scripting" tickets should use the existing "Scripting & Automation" category
@@ -83,7 +92,9 @@ function needsCompetencyPromptUpgrade(systemPrompt = '') {
     || !systemPrompt.includes('categoryId whenever available')
     || !systemPrompt.includes('3 Advanced')
     || !systemPrompt.includes('4 Expert / SME')
-    || !systemPrompt.includes('get_technician_assignment_signals');
+    || !systemPrompt.includes('get_technician_assignment_signals')
+    || !systemPrompt.includes('taxonomySuggestionBreakdown')
+    || !systemPrompt.includes('suggestedSubcategoryName');
 }
 
 class CompetencyPromptRepository {

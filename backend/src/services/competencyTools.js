@@ -54,6 +54,42 @@ function summarizeInternalTaxonomyRows(rows = [], totalTickets = 0) {
     .sort((a, b) => b.count - a.count || a.categoryName.localeCompare(b.categoryName));
 }
 
+function summarizeTaxonomySuggestionRows(rows = [], totalTickets = 0) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const suggestedCategoryName = row.suggestedInternalCategoryName || null;
+    const suggestedSubcategoryName = row.suggestedInternalSubcategoryName || null;
+    const suggestedName = suggestedSubcategoryName || suggestedCategoryName;
+    if (!suggestedName) continue;
+
+    const parentCategory = row.internalCategory || null;
+    const key = `${parentCategory?.id || 'no-parent'}:${suggestedName.toLowerCase()}`;
+    const existing = byKey.get(key) || {
+      suggestedName,
+      suggestionType: suggestedSubcategoryName ? 'subcategory' : 'category',
+      parentCategoryId: parentCategory?.id || null,
+      parentCategoryName: parentCategory?.name || null,
+      count: 0,
+      lastSeen: null,
+      exampleFreshserviceTicketIds: [],
+    };
+    existing.count += 1;
+    const seen = row.createdAt?.toISOString()?.slice(0, 10) || null;
+    if (seen && (!existing.lastSeen || seen > existing.lastSeen)) existing.lastSeen = seen;
+    if (existing.exampleFreshserviceTicketIds.length < 5 && row.freshserviceTicketId) {
+      existing.exampleFreshserviceTicketIds.push(Number(row.freshserviceTicketId));
+    }
+    byKey.set(key, existing);
+  }
+
+  return Array.from(byKey.values())
+    .map((item) => ({
+      ...item,
+      percentage: totalTickets > 0 ? Math.round((item.count / totalTickets) * 100) : 0,
+    }))
+    .sort((a, b) => b.count - a.count || a.suggestedName.localeCompare(b.suggestedName));
+}
+
 function clampInteger(value, defaultValue, maxValue) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return defaultValue;
@@ -289,6 +325,8 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params = {}
       internalCategoryFit: true,
       internalSubcategoryFit: true,
       taxonomyReviewNeeded: true,
+      suggestedInternalCategoryName: true,
+      suggestedInternalSubcategoryName: true,
       rejectionCount: true,
       createdAt: true, resolvedAt: true,
       isSelfPicked: true, resolutionTimeSeconds: true,
@@ -326,6 +364,8 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params = {}
         categoryFit: t.internalCategoryFit,
         subcategoryFit: t.internalSubcategoryFit,
         reviewNeeded: t.taxonomyReviewNeeded,
+        suggestedCategoryName: t.suggestedInternalCategoryName,
+        suggestedSubcategoryName: t.suggestedInternalSubcategoryName,
       },
       assignmentSignals: {
         rejectionCount: t.rejectionCount || 0,
@@ -386,7 +426,31 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
       internalCategory: { select: { id: true, name: true } },
       internalSubcategory: { select: { id: true, name: true, parentId: true } },
       createdAt: true,
+      freshserviceTicketId: true,
+      suggestedInternalCategoryName: true,
+      suggestedInternalSubcategoryName: true,
     },
+  });
+
+  const suggestionRows = await prisma.ticket.findMany({
+    where: {
+      workspaceId,
+      assignedTechId: technicianId,
+      createdAt: { gte: since },
+      OR: [
+        { suggestedInternalCategoryName: { not: null } },
+        { suggestedInternalSubcategoryName: { not: null } },
+      ],
+    },
+    select: {
+      freshserviceTicketId: true,
+      createdAt: true,
+      suggestedInternalCategoryName: true,
+      suggestedInternalSubcategoryName: true,
+      internalCategory: { select: { id: true, name: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
   });
 
   // Pick whichever category field has more data
@@ -431,6 +495,7 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
       rejectionRatePerHandledTicket: total > 0 ? Number(((rejectedEpisodes / total) * 100).toFixed(1)) : 0,
     },
     internalTaxonomyBreakdown: summarizeInternalTaxonomyRows(internalRows, total),
+    taxonomySuggestionBreakdown: summarizeTaxonomySuggestionRows(suggestionRows, total),
     categoryBreakdown: byCategory.map((c) => ({
       category: c.category,
       count: c._count,
@@ -498,6 +563,8 @@ async function getTechnicianAssignmentSignals(workspaceId, technicianId, params 
       internalCategoryFit: true,
       internalSubcategoryFit: true,
       taxonomyReviewNeeded: true,
+      suggestedInternalCategoryName: true,
+      suggestedInternalSubcategoryName: true,
       rejectionCount: true,
       createdAt: true,
       resolvedAt: true,
@@ -605,6 +672,8 @@ async function getTechnicianAssignmentSignals(workspaceId, technicianId, params 
         categoryFit: ticket.internalCategoryFit,
         subcategoryFit: ticket.internalSubcategoryFit,
         reviewNeeded: ticket.taxonomyReviewNeeded,
+        suggestedCategoryName: ticket.suggestedInternalCategoryName,
+        suggestedSubcategoryName: ticket.suggestedInternalSubcategoryName,
       },
       currentAssignedTo: ticket.assignedTech ? { id: ticket.assignedTech.id, name: ticket.assignedTech.name } : null,
       createdAt: toIsoDate(ticket.createdAt),
@@ -717,6 +786,11 @@ async function searchWorkspaceTickets(workspaceId, params = {}) {
       rejectionCount: true,
       internalCategory: { select: { id: true, name: true } },
       internalSubcategory: { select: { id: true, name: true, parentId: true } },
+      internalCategoryFit: true,
+      internalSubcategoryFit: true,
+      taxonomyReviewNeeded: true,
+      suggestedInternalCategoryName: true,
+      suggestedInternalSubcategoryName: true,
       createdAt: true, resolvedAt: true,
       assignedTech: { select: { id: true, name: true } },
       _count: { select: { threadEntries: true, assignmentEpisodes: true } },
@@ -742,6 +816,13 @@ async function searchWorkspaceTickets(workspaceId, params = {}) {
           subcategory: t.internalSubcategory ? { id: t.internalSubcategory.id, name: t.internalSubcategory.name } : null,
         }
         : null,
+      taxonomyFit: {
+        categoryFit: t.internalCategoryFit,
+        subcategoryFit: t.internalSubcategoryFit,
+        reviewNeeded: t.taxonomyReviewNeeded,
+        suggestedCategoryName: t.suggestedInternalCategoryName,
+        suggestedSubcategoryName: t.suggestedInternalSubcategoryName,
+      },
       assignmentSignals: {
         rejectionCount: t.rejectionCount || 0,
         assignmentEpisodeCount: t._count.assignmentEpisodes,
