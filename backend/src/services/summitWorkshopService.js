@@ -801,6 +801,17 @@ export async function getPublicWorkshop(token, participantKey = null) {
   };
 }
 
+export async function getPublicReport(token) {
+  const session = await prisma.summitWorkshopSession.findUnique({ where: { voteToken: token } });
+  if (!session) throw new NotFoundError('Summit report not found');
+  return {
+    session: publicSession(session),
+    votes: await getVoteSummary(session.id),
+    feedback: await getFeedbackSummary(session.id),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 export async function joinPublicWorkshop(token, displayName, participantKey = null) {
   const session = await getSessionByVoteToken(token);
   const safeName = String(displayName || '').trim().slice(0, 120);
@@ -1302,6 +1313,7 @@ export default {
   deleteFeedbackItem,
   deleteFeedbackComment,
   resetFeedback,
+  getPublicReport,
   submitAuthenticatedFeedbackItem,
   voteAuthenticatedFeedbackItem,
   commentAuthenticatedFeedbackItem,

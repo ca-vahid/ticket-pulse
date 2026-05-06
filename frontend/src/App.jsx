@@ -15,6 +15,7 @@ import AssignmentReview from './pages/AssignmentReview';
 import Analytics from './pages/Analytics';
 import SummitTaxonomyWorkshop from './pages/SummitTaxonomyWorkshop';
 import SummitVote from './pages/SummitVote';
+import SummitReport from './pages/SummitReport';
 import MyCompetencies from './pages/MyCompetencies';
 import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
@@ -175,6 +176,11 @@ function App() {
                 <Route
                   path="/summit/vote/:token"
                   element={<SummitVote />}
+                />
+
+                <Route
+                  path="/summit/report/:token"
+                  element={<SummitReport />}
                 />
 
                 <Route

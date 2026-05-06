@@ -1215,6 +1215,7 @@ export default function SummitTaxonomyWorkshop() {
   };
 
   const voteUrl = session?.voteToken ? `${window.location.origin}/summit/vote/${session.voteToken}` : '';
+  const reportUrl = session?.voteToken ? `${window.location.origin}/summit/report/${session.voteToken}` : '';
   const effectiveCountdownMs = session?.voteExpiresAt
     ? Math.max(0, countdownMs || new Date(session.voteExpiresAt).getTime() - Date.now())
     : 0;
@@ -1734,6 +1735,31 @@ export default function SummitTaxonomyWorkshop() {
             <button onClick={redo} disabled={!future.length} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title="Redo"><Icons.Redo2 className="h-4 w-4" /></button>
             <button onClick={manualSave} className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 font-semibold text-slate-950 transition hover:bg-cyan-300" title="Save"><Icons.Save className="h-4 w-4" /></button>
             <button onClick={exportExcel} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white font-semibold text-slate-900 transition hover:bg-slate-100" title="Export Excel"><Icons.FileSpreadsheet className="h-4 w-4" /></button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!reportUrl) {
+                  pushToast({
+                    title: 'Report link unavailable',
+                    message: 'Open voting first to create a shareable report token.',
+                    icon: 'AlertTriangle',
+                    tone: 'amber',
+                  });
+                  return;
+                }
+                navigator.clipboard.writeText(reportUrl);
+                pushToast({
+                  title: 'Report link copied',
+                  message: 'Read-only summit report link copied to clipboard.',
+                  icon: 'FileText',
+                  tone: 'cyan',
+                });
+              }}
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/15 hover:shadow-md"
+              title="Copy read-only report link"
+            >
+              <Icons.FileText className="h-4 w-4" />
+            </button>
             <span className="mx-1 hidden h-6 w-px bg-white/20 sm:block" />
             {voteUrl ? (
               <>

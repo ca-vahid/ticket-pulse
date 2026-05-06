@@ -677,6 +677,7 @@ export const summitAPI = {
   getPublicWorkshop: (token, participantKey = null) => api.get(`/summit/public/${token}`, {
     params: participantKey ? { participantKey } : undefined,
   }),
+  getPublicReport: (token) => api.get(`/summit/public/${token}/report`),
   joinPublicWorkshop: (token, data) => api.post(`/summit/public/${token}/join`, data),
   submitVote: (token, data) => api.post(`/summit/public/${token}/votes`, data),
   submitPublicFeedback: (token, data) => api.post(`/summit/public/${token}/feedback/items`, data),

@@ -10,6 +10,11 @@ summitPublicRouter.get('/:token', asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
+summitPublicRouter.get('/:token/report', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.getPublicReport(req.params.token);
+  res.json({ success: true, ...result });
+}));
+
 summitPublicRouter.get('/:token/events', asyncHandler(async (req, res) => {
   await summitWorkshopService.streamPublicWorkshop(req.params.token, res);
 }));
