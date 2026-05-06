@@ -443,6 +443,19 @@ async function getFeedbackSummary(sessionId, participantId = null) {
   };
 }
 
+async function getParticipantCategoryVoteMap(sessionId, participantId) {
+  if (!participantId) return {};
+  const rows = await prisma.summitWorkshopVote.findMany({
+    where: {
+      sessionId,
+      participantId,
+      voteType: { notIn: ['merge_suggestion', 'new_category_suggestion', ...FEEDBACK_VOTE_TYPES] },
+    },
+    select: { itemId: true },
+  });
+  return Object.fromEntries(rows.map((row) => [row.itemId, true]));
+}
+
 function publicSession(session) {
   const now = Date.now();
   const expiresAt = session.voteExpiresAt ? new Date(session.voteExpiresAt).getTime() : 0;
@@ -759,6 +772,17 @@ export async function getAuthenticatedFeedback(workspaceId, user) {
   };
 }
 
+export async function getAuthenticatedWorkshop(workspaceId, user) {
+  const { session, participant } = await getOrCreateAuthenticatedSummitParticipant(workspaceId, user);
+  return {
+    session: publicSession(session),
+    participant,
+    votes: await getVoteSummary(session.id),
+    myVotes: await getParticipantCategoryVoteMap(session.id, participant.id),
+    feedback: await getFeedbackSummary(session.id, participant.id),
+  };
+}
+
 export async function getWorkshopFeedback(workspaceId) {
   assertItWorkspace(workspaceId);
   const session = await findActiveSession(workspaceId) || await createSession(workspaceId, null);
@@ -1040,7 +1064,10 @@ export async function submitVote(token, body) {
   const participantKey = String(body.participantKey || '');
   const participant = await prisma.summitWorkshopParticipant.findUnique({ where: { participantKey } });
   if (!participant || participant.sessionId !== session.id) throw new AuthorizationError('Join the workshop before voting');
+  return submitVoteForParticipant(session, participant, body);
+}
 
+async function submitVoteForParticipant(session, participant, body = {}) {
   const voteType = String(body.voteType || 'support').slice(0, 40);
   const itemLabel = String(body.itemLabel || 'Workshop item').slice(0, 255);
   const itemType = String(body.itemType || 'category').slice(0, 30);
@@ -1085,7 +1112,15 @@ export async function submitVote(token, body) {
   });
   const votes = await getVoteSummary(session.id);
   broadcast(session.id, 'votes', votes);
-  return { votes };
+  return {
+    votes,
+    myVotes: await getParticipantCategoryVoteMap(session.id, participant.id),
+  };
+}
+
+export async function submitAuthenticatedVote(workspaceId, user, body = {}) {
+  const { session, participant } = await getOrCreateAuthenticatedSummitParticipant(workspaceId, user);
+  return submitVoteForParticipant(session, participant, body);
 }
 
 export async function streamPublicWorkshop(token, res) {
@@ -1144,6 +1179,26 @@ export async function streamAuthenticatedFeedback(workspaceId, user, res) {
   }, 25000);
 }
 
+export async function streamAuthenticatedWorkshop(workspaceId, user, res) {
+  const { session, participant } = await getOrCreateAuthenticatedSummitParticipant(workspaceId, user);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  let keepAlive = null;
+  const cleanup = attachSseClient(session.id, res, () => {
+    if (keepAlive) clearInterval(keepAlive);
+  });
+  if (!writeSse(session.id, res, `event: state\ndata: ${JSON.stringify(publicSession(session))}\n\n`)) return cleanup();
+  if (!writeSse(session.id, res, `event: votes\ndata: ${JSON.stringify(await getVoteSummary(session.id))}\n\n`)) return cleanup();
+  if (!writeSse(session.id, res, `event: my-votes\ndata: ${JSON.stringify(await getParticipantCategoryVoteMap(session.id, participant.id))}\n\n`)) return cleanup();
+  if (!writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id, participant.id))}\n\n`)) return cleanup();
+  keepAlive = setInterval(() => {
+    if (!writeSse(session.id, res, ': keepalive\n\n')) cleanup();
+  }, 25000);
+}
+
 export default {
   getOrCreateWorkshop,
   saveWorkshopState,
@@ -1155,6 +1210,7 @@ export default {
   joinPublicWorkshop,
   submitVote,
   getAuthenticatedFeedback,
+  getAuthenticatedWorkshop,
   getWorkshopFeedback,
   updateFeedbackItem,
   deleteFeedbackItem,
@@ -1163,10 +1219,12 @@ export default {
   submitAuthenticatedFeedbackItem,
   voteAuthenticatedFeedbackItem,
   commentAuthenticatedFeedbackItem,
+  submitAuthenticatedVote,
   submitPublicFeedbackItem,
   votePublicFeedbackItem,
   commentPublicFeedbackItem,
   streamPublicWorkshop,
   streamWorkshopByWorkspace,
   streamAuthenticatedFeedback,
+  streamAuthenticatedWorkshop,
 };

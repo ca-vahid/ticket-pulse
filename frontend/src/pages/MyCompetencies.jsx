@@ -7,6 +7,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { agentAPI } from '../services/api';
 import ItSummitFeedbackPanel from '../components/ItSummitFeedbackPanel';
+import ItSummitCategoriesPanel from '../components/ItSummitCategoriesPanel';
 
 const LEVELS = [
   { value: '', label: 'No experience', short: '-', rank: 0, className: 'bg-slate-100 text-slate-400 border-slate-200' },
@@ -58,6 +59,7 @@ export default function MyCompetencies() {
   const [highlightCategoryId, setHighlightCategoryId] = useState(null);
   const [cancellingRequestId, setCancellingRequestId] = useState(null);
   const [activeTab, setActiveTab] = useState('summit');
+  const [activeSummitTab, setActiveSummitTab] = useState('feedback');
 
   const fetchData = async (targetWorkspaceId = workspaceId) => {
     try {
@@ -475,7 +477,37 @@ export default function MyCompetencies() {
         )}
 
         {activeTab === 'summit' && showSummitTab && (
-          <ItSummitFeedbackPanel mode="participant" />
+          <div className="space-y-4">
+            <section className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveSummitTab('feedback')}
+                  className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                    activeSummitTab === 'feedback' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  What Works / Needs Attention
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSummitTab('categories')}
+                  className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                    activeSummitTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  Categories & Skills
+                </button>
+              </div>
+            </section>
+            {activeSummitTab === 'feedback' ? (
+              <ItSummitFeedbackPanel mode="participant" />
+            ) : (
+              <ItSummitCategoriesPanel />
+            )}
+          </div>
         )}
 
         {loading && (!showSummitTab || activeTab === 'competencies') && (

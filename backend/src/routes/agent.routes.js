@@ -34,8 +34,22 @@ router.get('/summit-2026/feedback', asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
+router.get('/summit-2026/workshop', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.getAuthenticatedWorkshop(1, req.session?.user || {});
+  res.json({ success: true, ...result });
+}));
+
 router.get('/summit-2026/events', asyncHandler(async (req, res) => {
   await summitWorkshopService.streamAuthenticatedFeedback(1, req.session?.user || {}, res);
+}));
+
+router.get('/summit-2026/workshop/events', asyncHandler(async (req, res) => {
+  await summitWorkshopService.streamAuthenticatedWorkshop(1, req.session?.user || {}, res);
+}));
+
+router.post('/summit-2026/votes', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.submitAuthenticatedVote(1, req.session?.user || {}, req.body || {});
+  res.json({ success: true, ...result });
 }));
 
 router.post('/summit-2026/feedback/items', asyncHandler(async (req, res) => {
