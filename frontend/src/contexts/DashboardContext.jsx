@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { dashboardAPI, getWorkspaceId } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { dataCache, cacheKeys, policyForDate, TECH_POLICY, CSAT_POLICY, TTL } from '../services/dataCache';
@@ -38,6 +39,7 @@ function peekCachedDashboard(type) {
 }
 
 export function DashboardProvider({ children }) {
+  const location = useLocation();
   // --- Shared state for all view modes ---
   // Initialize from sessionStorage cache to prevent loading flash on back-nav / F5
   const [dashboardData, setDashboardData] = useState(() => {
@@ -485,8 +487,16 @@ export function DashboardProvider({ children }) {
     // No additional logging needed here.
   }, []);
 
+  const dashboardSseEnabled = autoRefresh && [
+    '/dashboard',
+    '/technician',
+    '/timeline',
+    '/analytics',
+    '/visuals',
+  ].some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`));
+
   const { isConnected: sseConnected, connectionStatus: sseConnectionStatus } = useSSE({
-    enabled: autoRefresh,
+    enabled: dashboardSseEnabled,
     onSyncCompleted: handleSyncCompleted,
     onConnected: handleConnected,
     onError: handleError,

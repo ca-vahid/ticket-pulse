@@ -25,6 +25,10 @@ function makeId(prefix, name) {
   return `${prefix}_${slug || crypto.randomBytes(4).toString('hex')}`;
 }
 
+function uniqueRuntimeId(prefix) {
+  return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+}
+
 function sub(name, icon = 'Tag', evidence = '') {
   return {
     id: makeId('sub', name),
@@ -211,6 +215,10 @@ function room(sessionId) {
 }
 
 function writeSse(sessionId, res, data) {
+  if (res.destroyed || res.writableEnded) {
+    room(sessionId).delete(res);
+    return false;
+  }
   try {
     res.write(data);
     return true;
@@ -225,9 +233,27 @@ function writeSse(sessionId, res, data) {
   }
 }
 
+function attachSseClient(sessionId, res, onCleanup = () => {}) {
+  const clientRoom = room(sessionId);
+  let cleaned = false;
+
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    clientRoom.delete(res);
+    onCleanup();
+  };
+
+  clientRoom.add(res);
+  res.on('close', cleanup);
+  res.on('finish', cleanup);
+  res.on('error', cleanup);
+  return cleanup;
+}
+
 function broadcast(sessionId, event, payload = {}) {
   const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
-  for (const res of room(sessionId)) {
+  for (const res of [...room(sessionId)]) {
     writeSse(sessionId, res, data);
   }
 }
@@ -868,7 +894,7 @@ async function createFeedbackItemForParticipant(session, participant, body = {})
   const title = validateFeedbackTitle(body.title);
   const section = normalizeFeedbackSection(body.section);
   const note = String(body.note || '').trim().slice(0, 1500);
-  const itemId = `summit_feedback_${section}_${participant.id}_${Date.now()}`;
+  const itemId = uniqueRuntimeId(`summit_feedback_${section}_${participant.id}`);
   await prisma.summitWorkshopVote.create({
     data: {
       sessionId: session.id,
@@ -946,7 +972,7 @@ async function commentFeedbackForParticipant(session, participant, itemId, body 
     data: {
       sessionId: session.id,
       participantId: participant.id,
-      itemId: `summit_feedback_comment_${participant.id}_${Date.now()}`,
+      itemId: uniqueRuntimeId(`summit_feedback_comment_${participant.id}`),
       itemType: 'summit_feedback_comment',
       itemLabel: item.itemLabel,
       voteType: FEEDBACK_COMMENT_VOTE_TYPE,
@@ -1018,7 +1044,7 @@ export async function submitVote(token, body) {
   const itemLabel = String(body.itemLabel || 'Workshop item').slice(0, 255);
   const itemType = String(body.itemType || 'category').slice(0, 30);
   const itemId = ['merge_suggestion', 'new_category_suggestion'].includes(voteType)
-    ? `${voteType.replace('_suggestion', '')}_${participant.id}_${Date.now()}`
+    ? uniqueRuntimeId(`${voteType.replace('_suggestion', '')}_${participant.id}`)
     : String(body.itemId || '').slice(0, 120);
   if (!itemId) throw new ValidationError('itemId is required');
 
@@ -1066,18 +1092,18 @@ export async function streamPublicWorkshop(token, res) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
-  room(session.id).add(res);
-  writeSse(session.id, res, `event: state\ndata: ${JSON.stringify(publicSession(session))}\n\n`);
-  writeSse(session.id, res, `event: votes\ndata: ${JSON.stringify(await getVoteSummary(session.id))}\n\n`);
-  writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id))}\n\n`);
-  const keepAlive = setInterval(() => {
-    writeSse(session.id, res, ': keepalive\n\n');
-  }, 25000);
-  res.on('close', () => {
-    clearInterval(keepAlive);
-    room(session.id).delete(res);
+  let keepAlive = null;
+  const cleanup = attachSseClient(session.id, res, () => {
+    if (keepAlive) clearInterval(keepAlive);
   });
+  if (!writeSse(session.id, res, `event: state\ndata: ${JSON.stringify(publicSession(session))}\n\n`)) return cleanup();
+  if (!writeSse(session.id, res, `event: votes\ndata: ${JSON.stringify(await getVoteSummary(session.id))}\n\n`)) return cleanup();
+  if (!writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id))}\n\n`)) return cleanup();
+  keepAlive = setInterval(() => {
+    if (!writeSse(session.id, res, ': keepalive\n\n')) cleanup();
+  }, 25000);
 }
 
 export async function streamWorkshopByWorkspace(workspaceId, res) {
@@ -1086,18 +1112,18 @@ export async function streamWorkshopByWorkspace(workspaceId, res) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
-  room(session.id).add(res);
-  writeSse(session.id, res, `event: state\ndata: ${JSON.stringify(publicSession(session))}\n\n`);
-  writeSse(session.id, res, `event: votes\ndata: ${JSON.stringify(await getVoteSummary(session.id))}\n\n`);
-  writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id))}\n\n`);
-  const keepAlive = setInterval(() => {
-    writeSse(session.id, res, ': keepalive\n\n');
-  }, 25000);
-  res.on('close', () => {
-    clearInterval(keepAlive);
-    room(session.id).delete(res);
+  let keepAlive = null;
+  const cleanup = attachSseClient(session.id, res, () => {
+    if (keepAlive) clearInterval(keepAlive);
   });
+  if (!writeSse(session.id, res, `event: state\ndata: ${JSON.stringify(publicSession(session))}\n\n`)) return cleanup();
+  if (!writeSse(session.id, res, `event: votes\ndata: ${JSON.stringify(await getVoteSummary(session.id))}\n\n`)) return cleanup();
+  if (!writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id))}\n\n`)) return cleanup();
+  keepAlive = setInterval(() => {
+    if (!writeSse(session.id, res, ': keepalive\n\n')) cleanup();
+  }, 25000);
 }
 
 export async function streamAuthenticatedFeedback(workspaceId, user, res) {
@@ -1105,16 +1131,16 @@ export async function streamAuthenticatedFeedback(workspaceId, user, res) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
-  room(session.id).add(res);
-  writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id, participant.id))}\n\n`);
-  const keepAlive = setInterval(() => {
-    writeSse(session.id, res, ': keepalive\n\n');
-  }, 25000);
-  res.on('close', () => {
-    clearInterval(keepAlive);
-    room(session.id).delete(res);
+  let keepAlive = null;
+  const cleanup = attachSseClient(session.id, res, () => {
+    if (keepAlive) clearInterval(keepAlive);
   });
+  if (!writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id, participant.id))}\n\n`)) return cleanup();
+  keepAlive = setInterval(() => {
+    if (!writeSse(session.id, res, ': keepalive\n\n')) cleanup();
+  }, 25000);
 }
 
 export default {

@@ -37,6 +37,10 @@ function normalizeFeedback(feedback) {
   };
 }
 
+function feedbackItemKey(section, title) {
+  return `${section === 'attention' ? 'attention' : 'working'}:${String(title || '').trim().toLowerCase()}`;
+}
+
 function Toast({ toast, onClose }) {
   return (
     <div className="animate-[summitFeedbackToast_.18s_ease-out] overflow-hidden rounded-xl border border-blue-200 bg-white shadow-2xl">
@@ -228,7 +232,9 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
   const previousItemIds = useRef(new Set((initialFeedback?.items || []).map((item) => item.itemId)));
   const hasLoadedFeedback = useRef(Boolean(initialFeedback));
   const refreshTimer = useRef(null);
+  const refreshInFlight = useRef(false);
   const toastSeq = useRef(0);
+  const suppressedLiveItemKeys = useRef(new Set());
 
   const pushToast = useCallback((titleText, message) => {
     const id = `${Date.now()}_${toastSeq.current += 1}`;
@@ -254,6 +260,11 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
       next.items.forEach((item) => {
         if (!oldIds.has(item.itemId)) {
           markHighlight(item.itemId);
+          const itemKey = feedbackItemKey(item.section, item.title);
+          if (suppressedLiveItemKeys.current.has(itemKey)) {
+            suppressedLiveItemKeys.current.delete(itemKey);
+            return;
+          }
           pushToast(item.section === 'working' ? 'New working-well item' : 'New needs-attention item', `${item.title} by ${item.participantName}`);
         }
       });
@@ -264,6 +275,8 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
   }, [markHighlight, pushToast]);
 
   const refresh = useCallback(async (silent = false, { showLoading = !silent } = {}) => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     setError('');
     if (showLoading) setLoading(true);
     try {
@@ -276,6 +289,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
     } catch (err) {
       setError(err.message || 'Could not load IT Summit 2026 feedback');
     } finally {
+      refreshInFlight.current = false;
       if (showLoading) setLoading(false);
     }
   }, [apiClient, applyFeedback, isFacilitator, isPublic, participantKey, token]);
@@ -293,17 +307,29 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
   }, [initialFeedback, refresh]);
 
   useEffect(() => {
-    const source = isPublic
-      ? (token ? summitAPI.getPublicEventSource(token) : null)
-      : isFacilitator
-        ? apiClient.getWorkshopEventSource?.()
-        : apiClient.getSummitEventSource?.();
+    if (!isPublic) {
+      const refreshMs = isFacilitator ? 10000 : 12000;
+      const timer = window.setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          refresh(true, { showLoading: false });
+        }
+      }, refreshMs);
+      return () => {
+        if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
+        window.clearInterval(timer);
+      };
+    }
+
+    const source = token ? summitAPI.getPublicEventSource(token) : null;
     if (!source) return undefined;
     source.addEventListener('feedback', (event) => {
       try {
-        const incoming = JSON.parse(event.data);
-        if (isFacilitator) applyFeedback(incoming);
-        else scheduleLiveRefresh();
+        if (isPublic) {
+          scheduleLiveRefresh();
+        } else {
+          const incoming = JSON.parse(event.data);
+          applyFeedback(incoming);
+        }
       } catch {
         // Ignore malformed SSE payloads.
       }
@@ -315,7 +341,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
       source.close();
     };
-  }, [apiClient, applyFeedback, isFacilitator, isPublic, scheduleLiveRefresh, token]);
+  }, [apiClient, applyFeedback, isFacilitator, isPublic, refresh, scheduleLiveRefresh, token]);
 
   const itemsBySection = useMemo(() => {
     const grouped = { working: [], attention: [] };
@@ -329,17 +355,21 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
     if (!title.trim()) return;
     setSaving(true);
     setError('');
+    const submittedItemKey = feedbackItemKey(activeSection, title);
+    suppressedLiveItemKeys.current.add(submittedItemKey);
     try {
       const res = isPublic
         ? await summitAPI.submitPublicFeedback(token, { section: activeSection, title, note, participantKey })
         : isFacilitator
           ? await apiClient.submitFeedback({ section: activeSection, title, note })
           : await apiClient.submitSummitFeedback({ section: activeSection, title, note });
-      applyFeedback(res.feedback);
+      applyFeedback(res.feedback, { silent: true });
+      suppressedLiveItemKeys.current.delete(submittedItemKey);
       setTitle('');
       setNote('');
       pushToast('Submitted', activeSection === 'working' ? 'Added to Working Well.' : 'Added to Needs Attention.');
     } catch (err) {
+      suppressedLiveItemKeys.current.delete(submittedItemKey);
       setError(err.message || 'Could not submit item');
     } finally {
       setSaving(false);

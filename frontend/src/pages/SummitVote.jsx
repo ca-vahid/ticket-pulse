@@ -68,7 +68,7 @@ function DragHandle({ item, itemType, label }) {
         ref={setActivatorNodeRef}
         {...listeners}
         {...attributes}
-        className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:scale-[0.96] [touch-action:none]"
+        className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/10 hover:text-cyan-200 active:scale-[0.96] [touch-action:none]"
         title={`Drag ${label} to priorities`}
       >
         <Icons.GripVertical className="h-4 w-4" />
@@ -108,7 +108,7 @@ export default function SummitVote() {
   const [showMobileActions, setShowMobileActions] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
-  const [activeRoomTab, setActiveRoomTab] = useState('categories');
+  const [activeRoomTab, setActiveRoomTab] = useState('feedback');
   const [query, setQuery] = useState('');
   const [mergeFrom, setMergeFrom] = useState('');
   const [mergeTo, setMergeTo] = useState('');
@@ -596,7 +596,7 @@ export default function SummitVote() {
                 <div className="text-xs font-medium uppercase">Participants</div>
                 <div className="text-2xl font-semibold">{votes.participantCount || 0}</div>
               </div>
-              <div className={`rounded-lg bg-white px-3 py-3 transition-all duration-300 ${highlightIds.votes ? 'vote-soft-pulse scale-[1.02]' : ''}`}>
+              <div className={`rounded-lg border border-white/10 bg-slate-900 px-3 py-3 text-white transition-all duration-300 ${highlightIds.votes ? 'vote-soft-pulse scale-[1.02]' : ''}`}>
                 <div className="text-xs font-medium uppercase">Votes</div>
                 <div className="text-2xl font-semibold">{totalVoteCount(votes)}</div>
               </div>
@@ -609,14 +609,14 @@ export default function SummitVote() {
         </header>
 
         {!isJoined ? (
-          <form onSubmit={join} className="mx-auto max-w-md rounded-lg border border-white/10 bg-white p-5 text-slate-900 shadow-xl">
+          <form onSubmit={join} className="mx-auto max-w-md rounded-lg border border-white/10 bg-slate-900 p-5 text-white shadow-xl shadow-black/30">
             <h2 className="text-lg font-semibold">Join the session</h2>
-            <p className="mt-1 text-sm text-slate-500">Enter your name once. Refreshing the page will keep your votes.</p>
-            <label className="mt-4 block text-sm font-medium text-slate-700">Your name</label>
+            <p className="mt-1 text-sm text-slate-400">Enter your name once. Refreshing the page will keep your votes.</p>
+            <label className="mt-4 block text-sm font-medium text-slate-300">Your name</label>
             <input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-slate-900"
+              className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               autoFocus
             />
             {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -627,7 +627,7 @@ export default function SummitVote() {
               type="button"
               disabled={joining}
               onClick={joinAnonymous}
-              className="mt-2 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]"
+              className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/10 active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]"
             >
               Continue anonymously
             </button>
@@ -637,16 +637,6 @@ export default function SummitVote() {
             <div className="mb-4 grid gap-2 rounded-lg border border-white/10 bg-white/5 p-2 shadow-xl sm:inline-grid sm:grid-cols-2">
               <button
                 type="button"
-                onClick={() => setActiveRoomTab('categories')}
-                className={`flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition duration-200 hover:-translate-y-0.5 active:scale-[0.98] ${
-                  activeRoomTab === 'categories' ? 'bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-950/20' : 'text-slate-300 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <Icons.Tags className="h-4 w-4" />
-              Categories
-              </button>
-              <button
-                type="button"
                 onClick={() => setActiveRoomTab('feedback')}
                 className={`flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition duration-200 hover:-translate-y-0.5 active:scale-[0.98] ${
                   activeRoomTab === 'feedback' ? 'bg-white text-slate-950 shadow-lg shadow-slate-950/20' : 'text-slate-300 hover:bg-white/10 hover:text-white'
@@ -654,6 +644,16 @@ export default function SummitVote() {
               >
                 <Icons.Sparkles className="h-4 w-4" />
               Working / Attention
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveRoomTab('categories')}
+                className={`flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition duration-200 hover:-translate-y-0.5 active:scale-[0.98] ${
+                  activeRoomTab === 'categories' ? 'bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-950/20' : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <Icons.Tags className="h-4 w-4" />
+              Categories
               </button>
             </div>
 
@@ -677,12 +677,12 @@ export default function SummitVote() {
                       </div>
                       <PriorityDropZone collapsed={false} id="desktop-priority-tray">
                         {activePriorityItems.map((item, index) => (
-                          <div key={item.id} className="flex items-center gap-2 rounded-lg bg-white px-2 py-2 text-slate-900 shadow-sm">
+                          <div key={item.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/80 px-2 py-2 text-white shadow-sm">
                             <span className="flex h-7 w-7 items-center justify-center rounded text-white" style={{ backgroundColor: item.color }}>
                               <Icon name={item.icon} className="h-3.5 w-3.5" />
                             </span>
                             <span className="min-w-0 flex-1 truncate text-sm font-medium">{index + 1}. {item.name}</span>
-                            <button onClick={() => removePriority(item)} className="flex min-h-9 min-w-9 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
+                            <button onClick={() => removePriority(item)} className="flex min-h-9 min-w-9 items-center justify-center rounded text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
                               <Icons.X className="h-4 w-4" />
                             </button>
                           </div>
@@ -703,7 +703,7 @@ export default function SummitVote() {
                             <input
                               value={nameDraft}
                               onChange={(event) => setNameDraft(event.target.value)}
-                              className="min-h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-white px-3 py-2 text-base text-slate-900 outline-none focus:border-cyan-300 lg:min-h-0 lg:text-sm"
+                              className="min-h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-base text-white outline-none placeholder:text-slate-500 focus:border-cyan-300 lg:min-h-0 lg:text-sm"
                             />
                             <button disabled={!nameDraft.trim()} className="rounded-lg bg-cyan-400 px-3 py-2 font-semibold text-slate-950 disabled:opacity-50">Save</button>
                           </div>
@@ -747,9 +747,9 @@ export default function SummitVote() {
                             key={cat.id}
                             draggable
                             onDragStart={() => setDragItem({ ...cat, itemType: 'category' })}
-                            className={`rounded-lg border bg-white p-3 text-slate-900 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl sm:p-4 ${
+                            className={`rounded-lg border bg-slate-900/95 p-3 text-white shadow-xl shadow-black/20 transition-all duration-300 hover:-translate-y-0.5 hover:border-cyan-300/40 hover:bg-slate-900 sm:p-4 ${
                               highlightIds[`category-${cat.id}`] || highlightIds[`vote-${cat.id}`]
-                                ? 'vote-soft-pulse border-cyan-300 ring-2 ring-cyan-200'
+                                ? 'vote-soft-pulse border-cyan-300 ring-2 ring-cyan-300/30'
                                 : 'border-white/10'
                             }`}
                           >
@@ -760,19 +760,19 @@ export default function SummitVote() {
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <h2 className="break-words text-base font-semibold leading-snug sm:text-lg">{cat.name}</h2>
-                                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{subcategories.length} subcategories</span>
+                                  <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-300">{subcategories.length} subcategories</span>
                                   {!!subcategorySuggestions.length && (
-                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{subcategorySuggestions.length} ideas</span>
+                                    <span className="rounded-full bg-amber-300/15 px-2 py-0.5 text-xs font-semibold text-amber-100">{subcategorySuggestions.length} ideas</span>
                                   )}
                                 </div>
-                                <p className="mt-1 text-sm text-slate-500">{compactText(cat.description)}</p>
+                                <p className="mt-1 text-sm text-slate-400">{compactText(cat.description)}</p>
                               </div>
                               <button
                                 aria-pressed={Boolean(myVotes[cat.id])}
                                 onClick={() => toggleVote(cat, 'category')}
                                 className={`min-h-11 shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-all active:scale-[0.96] [touch-action:manipulation] ${
                                   highlightIds[`vote-${cat.id}`] ? 'scale-[1.05]' : ''
-                                } ${myVotes[cat.id] ? 'bg-cyan-600 text-white shadow-md ring-2 ring-cyan-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                                } ${myVotes[cat.id] ? 'bg-cyan-400 text-slate-950 shadow-md ring-2 ring-cyan-300/30' : 'bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
                               >
                                 <Icons.ThumbsUp className="mr-1 inline h-4 w-4" />
                                 {voteCount(votes, cat.id)}
@@ -785,7 +785,7 @@ export default function SummitVote() {
                                   key={sub.id}
                                   className={`flex min-h-[52px] items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.985] [touch-action:manipulation] ${
                                     highlightIds[`vote-${sub.id}`] ? 'vote-soft-pulse scale-[1.01]' : ''
-                                  } ${myVotes[sub.id] ? 'border-cyan-500 bg-cyan-50 text-cyan-900 shadow-sm ring-1 ring-cyan-200' : 'border-slate-200 bg-slate-50 text-slate-650 hover:border-slate-300 hover:bg-white'}`}
+                                  } ${myVotes[sub.id] ? 'border-cyan-300 bg-cyan-400/15 text-cyan-50 shadow-sm ring-1 ring-cyan-300/30' : 'border-white/10 bg-slate-950/70 text-slate-200 hover:border-cyan-300/40 hover:bg-slate-900'}`}
                                 >
                                   <DragHandle item={{ ...sub, color: cat.color }} itemType="subcategory" label={sub.name} />
                                   <button
@@ -794,9 +794,9 @@ export default function SummitVote() {
                                     onClick={() => toggleVote({ ...sub, color: cat.color }, 'subcategory')}
                                     className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md text-left transition active:scale-[0.99] [touch-action:manipulation]"
                                   >
-                                    <Icon name={sub.icon || 'Tag'} className="h-4 w-4 shrink-0 text-slate-500" />
+                                    <Icon name={sub.icon || 'Tag'} className="h-4 w-4 shrink-0 text-slate-400" />
                                     <span className="min-w-0 flex-1 break-words leading-snug">{sub.name}</span>
-                                    <span className={`flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold ${myVotes[sub.id] ? 'bg-cyan-600 text-white' : 'bg-white text-slate-500'}`}>
+                                    <span className={`flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold ${myVotes[sub.id] ? 'bg-cyan-400 text-slate-950' : 'bg-white/10 text-slate-300'}`}>
                                       {voteCount(votes, sub.id) || <Icons.ThumbsUp className="h-3.5 w-3.5" />}
                                     </span>
                                   </button>
@@ -809,7 +809,7 @@ export default function SummitVote() {
                                     key={suggestion.id}
                                     className={`flex min-h-[64px] items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.985] [touch-action:manipulation] ${
                                       highlightIds[`idea-${item.id}`] || highlightIds[`vote-${item.id}`] ? 'vote-soft-pulse scale-[1.01]' : ''
-                                    } ${myVotes[item.id] ? 'border-amber-400 bg-amber-50 text-amber-950 shadow-sm ring-1 ring-amber-200' : 'border-amber-200 bg-amber-50/70 text-slate-800 hover:border-amber-300 hover:bg-amber-50'}`}
+                                    } ${myVotes[item.id] ? 'border-amber-300 bg-amber-300/20 text-amber-50 shadow-sm ring-1 ring-amber-300/30' : 'border-amber-300/25 bg-amber-950/25 text-amber-50 hover:border-amber-300/50 hover:bg-amber-950/35'}`}
                                   >
                                     <DragHandle item={item} itemType="suggestion" label={item.name} />
                                     <button
@@ -818,14 +818,14 @@ export default function SummitVote() {
                                       onClick={() => toggleVote(item, 'suggestion')}
                                       className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md text-left transition active:scale-[0.99] [touch-action:manipulation]"
                                     >
-                                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-amber-700">
+                                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-300 text-slate-950">
                                         <Icons.Tag className="h-4 w-4" />
                                       </span>
                                       <span className="min-w-0 flex-1">
                                         <span className="block break-words font-semibold leading-snug">{suggestion.itemLabel}</span>
-                                        <span className="mt-0.5 block text-xs text-amber-800/80">Suggested by {suggestion.participantName}</span>
+                                        <span className="mt-0.5 block text-xs text-amber-100/75">Suggested by {suggestion.participantName}</span>
                                       </span>
-                                      <span className={`flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold ${myVotes[item.id] ? 'bg-amber-500 text-white' : 'bg-white text-slate-600'}`}>
+                                      <span className={`flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold ${myVotes[item.id] ? 'bg-amber-300 text-slate-950' : 'bg-white/10 text-amber-100'}`}>
                                         {voteCount(votes, item.id) || <Icons.ThumbsUp className="h-3.5 w-3.5" />}
                                       </span>
                                     </button>
@@ -834,14 +834,14 @@ export default function SummitVote() {
                               })}
                               <form
                                 onSubmit={(event) => submitQuickSubcategory(event, cat)}
-                                className="grid gap-2 rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 sm:flex sm:items-center sm:px-3 sm:py-2"
+                                className="grid gap-2 rounded-lg border border-dashed border-amber-300/40 bg-amber-300/10 p-3 sm:flex sm:items-center sm:px-3 sm:py-2"
                               >
                                 <div className="flex min-w-0 flex-1 items-center gap-2">
-                                  <Icons.Plus className="h-4 w-4 shrink-0 text-amber-700" />
+                                  <Icons.Plus className="h-4 w-4 shrink-0 text-amber-200" />
                                   <input
                                     value={quickSubcategoryNames[cat.id] || ''}
                                     onChange={(event) => setQuickSubcategoryNames(prev => ({ ...prev, [cat.id]: event.target.value }))}
-                                    className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-slate-900 outline-none placeholder:text-amber-700/70 sm:min-h-0 sm:text-sm"
+                                    className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-white outline-none placeholder:text-amber-100/55 sm:min-h-0 sm:text-sm"
                                     placeholder="Suggest another subcategory"
                                   />
                                 </div>
@@ -856,7 +856,7 @@ export default function SummitVote() {
                             {subcategories.length > 4 && (
                               <button
                                 onClick={() => setExpanded(prev => ({ ...prev, [cat.id]: !isExpanded }))}
-                                className="mt-3 min-h-10 rounded-lg px-1 text-sm font-semibold text-cyan-700 transition active:scale-[0.98] hover:text-cyan-900 [touch-action:manipulation]"
+                                className="mt-3 min-h-10 rounded-lg px-1 text-sm font-semibold text-cyan-200 transition active:scale-[0.98] hover:text-cyan-100 [touch-action:manipulation]"
                               >
                                 {isExpanded ? 'Show fewer subcategories' : `Show ${subcategories.length - 4} more subcategories`}
                               </button>
@@ -868,7 +868,7 @@ export default function SummitVote() {
                   </main>
 
                   <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-                    <form ref={suggestRef} onSubmit={submitIdea} className="scroll-mt-20 rounded-lg border border-amber-300/30 bg-amber-300/10 p-4 shadow-xl">
+                    <form ref={suggestRef} onSubmit={submitIdea} className="scroll-mt-20 rounded-lg border border-amber-300/30 bg-amber-950/25 p-4 shadow-xl shadow-black/20">
                       <div className="flex items-center gap-2">
                         <Icons.Lightbulb className="h-5 w-5 text-amber-200" />
                         <div>
@@ -879,17 +879,17 @@ export default function SummitVote() {
                       <input
                         value={ideaName}
                         onChange={(event) => setIdeaName(event.target.value)}
-                        className="mt-3 min-h-11 w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-base text-slate-900 outline-none focus:border-amber-300 lg:min-h-0 lg:text-sm"
+                        className="mt-3 min-h-11 w-full rounded-lg border border-amber-300/20 bg-slate-950 px-3 py-2 text-base text-white outline-none placeholder:text-slate-500 transition focus:border-amber-300 focus:ring-2 focus:ring-amber-400/20 lg:min-h-0 lg:text-sm"
                         placeholder="New top category name"
                       />
                       <textarea
                         value={ideaReason}
                         onChange={(event) => setIdeaReason(event.target.value)}
-                        className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-white px-3 py-2 text-base text-slate-900 outline-none focus:border-amber-300 lg:text-sm"
+                        className="mt-2 w-full resize-none rounded-lg border border-amber-300/20 bg-slate-950 px-3 py-2 text-base text-white outline-none placeholder:text-slate-500 transition focus:border-amber-300 focus:ring-2 focus:ring-amber-400/20 lg:text-sm"
                         rows={3}
                         placeholder="Why should we consider it?"
                       />
-                      <button disabled={!ideaName.trim()} className="mt-3 min-h-11 w-full rounded-lg bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 transition active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]">
+                      <button disabled={!ideaName.trim()} className="mt-3 min-h-11 w-full rounded-lg bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]">
                   Submit idea
                       </button>
                     </form>
@@ -919,40 +919,40 @@ export default function SummitVote() {
                           return (
                             <div
                               key={suggestion.id}
-                              className={`rounded-lg border bg-white p-3 text-slate-900 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
-                                highlightIds[`idea-${item.id}`] || highlightIds[`vote-${item.id}`] ? 'vote-soft-pulse scale-[1.01] ring-2 ring-amber-200' : ''
-                              } ${isSubcategoryIdea ? 'border-amber-200' : 'border-slate-200'}`}
+                              className={`rounded-lg border bg-slate-900/95 p-3 text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-cyan-300/40 hover:shadow-md ${
+                                highlightIds[`idea-${item.id}`] || highlightIds[`vote-${item.id}`] ? 'vote-soft-pulse scale-[1.01] ring-2 ring-amber-300/30' : ''
+                              } ${isSubcategoryIdea ? 'border-amber-300/25' : 'border-white/10'}`}
                             >
                               <div className="flex items-start gap-3">
-                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${isSubcategoryIdea ? 'bg-amber-50 text-amber-700' : 'bg-cyan-50 text-cyan-700'}`}>
+                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${isSubcategoryIdea ? 'bg-amber-300 text-slate-950' : 'bg-cyan-400 text-slate-950'}`}>
                                   <Icon name={item.icon} className="h-5 w-5" />
                                 </span>
                                 <div className="min-w-0 flex-1">
                                   <div className="break-words text-base font-semibold leading-tight">{suggestion.itemLabel}</div>
                                   <div className="mt-2 flex flex-wrap gap-1.5">
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1 text-xs font-semibold text-slate-200">
                                       <Icons.UserRound className="h-3.5 w-3.5" />
                                       {suggestion.participantName}
                                     </span>
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-300/15 px-2 py-1 text-xs font-semibold text-amber-100">
                                       <Icons.Tags className="h-3.5 w-3.5" />
                                       {isSubcategoryIdea ? 'Subcategory' : 'Top category'}
                                     </span>
                                     {suggestion.value?.parentName && (
-                                      <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800">
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-cyan-400/15 px-2 py-1 text-xs font-semibold text-cyan-100">
                                         <Icons.FolderTree className="h-3.5 w-3.5" />
                                         {suggestion.value.parentName}
                                       </span>
                                     )}
                                   </div>
-                                  {suggestion.value?.reason && <p className="mt-2 rounded-md bg-slate-50 px-2 py-1.5 text-sm text-slate-600">{suggestion.value.reason}</p>}
+                                  {suggestion.value?.reason && <p className="mt-2 rounded-md bg-slate-950/80 px-2 py-1.5 text-sm text-slate-300">{suggestion.value.reason}</p>}
                                 </div>
                                 <button
                                   aria-pressed={Boolean(myVotes[item.id])}
                                   onClick={() => toggleVote(item, 'suggestion')}
                                   className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition active:scale-[0.96] [touch-action:manipulation] ${
                                     highlightIds[`vote-${item.id}`] ? 'scale-[1.05]' : ''
-                                  } ${myVotes[item.id] ? 'bg-cyan-600 text-white shadow-md ring-2 ring-cyan-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                                  } ${myVotes[item.id] ? 'bg-cyan-400 text-slate-950 shadow-md ring-2 ring-cyan-300/30' : 'bg-white/10 text-slate-200 hover:bg-white/15'}`}
                                 >
                                   <Icons.ThumbsUp className="mr-1 inline h-4 w-4" />
                                   {voteCount(votes, item.id)}
@@ -971,15 +971,15 @@ export default function SummitVote() {
                         <h2 className="font-semibold text-white">Suggest a merge</h2>
                       </div>
                       <div className="mt-3 space-y-2">
-                        <select value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900">
+                        <select value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300">
                           <option value="">First category</option>
                           {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
-                        <select value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900">
+                        <select value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300">
                           <option value="">Second category</option>
                           {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
-                        <input value={mergeReason} onChange={(e) => setMergeReason(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white px-3 py-2 text-sm text-slate-900" placeholder="Optional reason" />
+                        <input value={mergeReason} onChange={(e) => setMergeReason(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-300" placeholder="Optional reason" />
                       </div>
                       <button disabled={!mergeFrom || !mergeTo || mergeFrom === mergeTo} className="mt-3 w-full rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">
                   Submit merge suggestion
@@ -1012,7 +1012,7 @@ export default function SummitVote() {
                     <button
                       type="button"
                       onClick={() => scrollToSection(suggestionsRef)}
-                      className="flex min-h-12 items-center gap-2 rounded-full border border-white/20 bg-slate-100 px-4 text-sm font-semibold text-slate-950 shadow-xl transition active:scale-[0.97] [touch-action:manipulation]"
+                      className="flex min-h-12 items-center gap-2 rounded-full border border-white/20 bg-slate-900 px-4 text-sm font-semibold text-white shadow-xl transition active:scale-[0.97] [touch-action:manipulation]"
                     >
                       <Icons.MessageSquareText className="h-4 w-4" />
                   Room ideas
@@ -1021,7 +1021,7 @@ export default function SummitVote() {
                   <button
                     type="button"
                     onClick={() => setShowMobileActions(prev => !prev)}
-                    className="flex min-h-14 min-w-14 items-center justify-center rounded-full bg-white text-slate-950 shadow-2xl ring-1 ring-white/20 transition active:scale-[0.96] [touch-action:manipulation]"
+                    className="flex min-h-14 min-w-14 items-center justify-center rounded-full bg-cyan-400 text-slate-950 shadow-2xl ring-1 ring-cyan-200/30 transition active:scale-[0.96] [touch-action:manipulation]"
                     title="Workshop actions"
                   >
                     {showMobileActions ? <Icons.X className="h-6 w-6" /> : <Icons.Plus className="h-6 w-6" />}
@@ -1064,12 +1064,12 @@ export default function SummitVote() {
                       <div className="max-h-[58dvh] overflow-auto px-4 pb-4">
                         <PriorityDropZone collapsed={false}>
                           {activePriorityItems.map((item, index) => (
-                            <div key={item.id} className="flex items-center gap-2 rounded-lg bg-white px-3 py-3 text-slate-900 shadow-sm">
+                            <div key={item.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-900 px-3 py-3 text-white shadow-sm">
                               <span className="flex h-9 w-9 items-center justify-center rounded text-white" style={{ backgroundColor: item.color }}>
                                 <Icon name={item.icon} className="h-4 w-4" />
                               </span>
                               <span className="min-w-0 flex-1 break-words text-sm font-medium leading-snug">{index + 1}. {item.name}</span>
-                              <button onClick={() => removePriority(item)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
+                              <button onClick={() => removePriority(item)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
                                 <Icons.X className="h-4 w-4" />
                               </button>
                             </div>

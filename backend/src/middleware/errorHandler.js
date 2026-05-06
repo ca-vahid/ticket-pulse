@@ -20,6 +20,20 @@ export function errorHandler(err, req, res, _next) {
   // Determine status code
   const statusCode = err.statusCode || 500;
 
+  if (res.headersSent) {
+    logger.error('Error occurred after response headers were sent; closing response', {
+      message: err.message,
+      path: req.path,
+      method: req.method,
+    });
+    try {
+      res.end();
+    } catch {
+      // Response is already closed.
+    }
+    return;
+  }
+
   // Format error response
   const response = formatErrorResponse(err);
 

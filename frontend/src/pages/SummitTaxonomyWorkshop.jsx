@@ -219,20 +219,21 @@ function CardActionsMenu({
   onRemove,
   extraActions = null,
   label = 'Card actions',
+  compact = false,
 }) {
   return (
     <div className="relative">
       <button
         type="button"
         onClick={onToggle}
-        className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-md"
+        className={`${compact ? 'h-8 w-8 rounded-md' : 'h-10 w-10 rounded-lg shadow-sm'} flex items-center justify-center border border-slate-200 bg-white text-slate-500 transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-md`}
         title={label}
         aria-label={label}
       >
-        <Icons.EllipsisVertical className="h-5 w-5" />
+        <Icons.EllipsisVertical className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
       </button>
       {isOpen && (
-        <div className="absolute right-0 top-12 z-[120] w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-2xl">
+        <div className={`absolute right-0 z-[120] w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-2xl ${compact ? 'top-10' : 'top-12'}`}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
             <button type="button" onClick={onToggle} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
@@ -328,7 +329,7 @@ export default function SummitTaxonomyWorkshop() {
   const [error, setError] = useState('');
   const [showDeleted, setShowDeleted] = useState(false);
   const [topCategoriesCollapsed, setTopCategoriesCollapsed] = useState(false);
-  const [workshopTab, setWorkshopTab] = useState('categories');
+  const [workshopTab, setWorkshopTab] = useState('working');
   const [showVotes, setShowVotes] = useState(true);
   const [showRegenerateLinkConfirm, setShowRegenerateLinkConfirm] = useState(false);
   const [showVotingShare, setShowVotingShare] = useState(false);
@@ -637,7 +638,7 @@ export default function SummitTaxonomyWorkshop() {
   }, [applyVotes]);
 
   useEffect(() => {
-    if (!session?.voteToken) return undefined;
+    if (!session?.voteToken || workshopTab !== 'categories') return undefined;
     let source;
     try {
       source = summitAPI.getPublicEventSource(session.voteToken);
@@ -656,7 +657,7 @@ export default function SummitTaxonomyWorkshop() {
       return undefined;
     }
     return () => source?.close();
-  }, [applyVotes, session?.voteToken]);
+  }, [applyVotes, session?.voteToken, workshopTab]);
 
   useEffect(() => {
     if (!session?.voteExpiresAt) {
@@ -1683,16 +1684,6 @@ export default function SummitTaxonomyWorkshop() {
         <div className="flex flex-wrap gap-2 border-b border-slate-200 px-4 py-2">
           <button
             type="button"
-            onClick={() => setWorkshopTab('categories')}
-            className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-              workshopTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Icons.Tags className="h-4 w-4" />
-            Categories & Skills
-          </button>
-          <button
-            type="button"
             onClick={() => setWorkshopTab('working')}
             className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
               workshopTab === 'working' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -1700,6 +1691,16 @@ export default function SummitTaxonomyWorkshop() {
           >
             <Icons.Sparkles className="h-4 w-4" />
             Working Well / Needs Attention
+          </button>
+          <button
+            type="button"
+            onClick={() => setWorkshopTab('categories')}
+            className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+              workshopTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Icons.Tags className="h-4 w-4" />
+            Categories & Skills
           </button>
         </div>
 
@@ -1748,21 +1749,21 @@ export default function SummitTaxonomyWorkshop() {
       ) : (
         <div
           className="grid gap-4 transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--summit-workshop-grid)]"
-          style={{ '--summit-workshop-grid': topCategoriesCollapsed ? '72px minmax(0,1fr) 320px' : '360px minmax(0,1fr) 320px' }}
+          style={{ '--summit-workshop-grid': topCategoriesCollapsed ? '72px minmax(0,1fr) 320px' : '390px minmax(0,1fr) 320px' }}
         >
           <aside className={`relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-out ${topCategoriesCollapsed ? 'p-2' : 'p-3'}`}>
             <div className={`transition-all duration-300 ease-out ${
               topCategoriesCollapsed ? 'pointer-events-none absolute inset-0 -translate-x-4 opacity-0' : 'relative translate-x-0 opacity-100'
             }`}>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="truncate text-sm font-semibold text-slate-900">Top Categories</h2>
-                <div className="flex shrink-0 items-center gap-2">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="truncate text-base font-semibold text-slate-950">Top Categories</h2>
+                <div className="flex shrink-0 items-center gap-1.5">
                   {selectedForMerge.length > 0 && (
                     <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">
                       {selectedForMerge.length} selected
                     </span>
                   )}
-                  <span className="text-xs text-slate-500">Grip to reorder</span>
+                  <span className="whitespace-nowrap text-xs text-slate-500">Grip to reorder</span>
                   <button
                     type="button"
                     onClick={() => setTopCategoriesCollapsed(true)}
@@ -1774,7 +1775,7 @@ export default function SummitTaxonomyWorkshop() {
                   </button>
                 </div>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {visibleCategories.map((cat) => (
                   <div
                     key={cat.id}
@@ -1792,7 +1793,7 @@ export default function SummitTaxonomyWorkshop() {
                       dropCategory(event, cat);
                     }}
                     onClick={() => setSelectedCategoryId(cat.id)}
-                    className={`relative w-full rounded-lg border p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
+                    className={`relative min-h-[72px] w-full rounded-lg border px-2.5 py-2.5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
                       dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id
                         ? 'scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
                         : dragItem?.type === 'category' && dragItem.id === cat.id
@@ -1806,7 +1807,7 @@ export default function SummitTaxonomyWorkshop() {
                                 : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                     }`}
                   >
-                    <div className="flex items-start gap-3">
+                    <div className="flex items-start gap-2">
                       <button
                         type="button"
                         draggable
@@ -1814,45 +1815,45 @@ export default function SummitTaxonomyWorkshop() {
                         onDrag={(event) => updateDragPosition(event)}
                         onDragEnd={finishDrag}
                         onClick={(event) => event.stopPropagation()}
-                        className="flex h-9 w-7 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
+                        className="flex h-10 w-5 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
                         title="Drag to reorder"
                       >
                         <Icons.GripVertical className="h-4 w-4" />
                       </button>
-                      <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: cat.color }}>
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: cat.color }}>
                         <Icon name={cat.icon} className="h-5 w-5" />
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block break-words text-sm font-semibold leading-snug text-slate-900">
+                      <span className="min-w-0 flex-1 pr-1">
+                        <span className="block break-words pr-1 text-[15px] font-semibold leading-tight text-slate-950">
                           <HighlightText text={cat.name} query={searchNeedle} />
                         </span>
-                        <span className="mt-1 block text-xs text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
+                        <span className="mt-0.5 block whitespace-nowrap text-xs font-medium text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
                         {!!(subcategorySuggestionsByParent.get(cat.id)?.length || 0) && (
-                          <span className="mt-1 inline-flex rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                          <span className="mt-0.5 inline-flex rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
                             {subcategorySuggestionsByParent.get(cat.id).length} ideas
                           </span>
                         )}
                       </span>
-                      <div className="flex shrink-0 items-center gap-1.5">
+                      <div className="absolute bottom-2 right-2 flex shrink-0 items-center gap-1">
                         <button
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
                             toggleSelectedForMerge(cat.id);
                           }}
-                          className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 ${
+                          className={`flex h-8 w-8 items-center justify-center rounded-md border transition-all duration-200 ${
                             selectedForMerge.includes(cat.id)
                               ? 'border-cyan-300 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-100'
                               : 'border-slate-200 bg-white text-slate-400 hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700'
                           }`}
                           title={selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
                         >
-                          {selectedForMerge.includes(cat.id) ? <Icons.Check className="h-4 w-4" /> : <Icons.Square className="h-4 w-4" />}
+                          {selectedForMerge.includes(cat.id) ? <Icons.Check className="h-3.5 w-3.5" /> : <Icons.Square className="h-3.5 w-3.5" />}
                         </button>
-                        <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
+                        <span className={`flex h-8 items-center rounded-md px-2 text-xs font-bold transition-all duration-300 ${
                           linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
                         }`}>
-                          <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                          <Icons.ThumbsUp className="mr-1 h-3.5 w-3.5" />
                           {linkedVoteCount(votes, cat)}
                         </span>
                         <div onClick={(event) => event.stopPropagation()}>
@@ -1869,6 +1870,7 @@ export default function SummitTaxonomyWorkshop() {
                             onColorSelect={(color) => updateCategory(cat.id, { color })}
                             onRemove={() => softDeleteCategory(cat.id)}
                             label="Category options"
+                            compact
                           />
                         </div>
                       </div>
