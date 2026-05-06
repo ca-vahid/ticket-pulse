@@ -887,6 +887,7 @@ export async function resetFeedback(workspaceId) {
 
   const feedback = await getFeedbackSummary(session.id);
   broadcast(session.id, 'feedback', feedback);
+  broadcast(session.id, 'feedback-reset', feedback);
   return { feedback };
 }
 

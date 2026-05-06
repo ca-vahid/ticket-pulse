@@ -356,6 +356,19 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
         // Ignore malformed SSE payloads.
       }
     });
+    source.addEventListener('feedback-reset', (event) => {
+      try {
+        const incoming = JSON.parse(event.data);
+        previousItemIds.current = new Set();
+        previousItemStats.current = feedbackStats([]);
+        applyFeedback(incoming, { silent: true });
+        markHighlight('section-working');
+        markHighlight('section-attention');
+        if (!isFacilitator) pushToast('Feedback reset', 'The facilitator cleared the Working / Attention board.');
+      } catch {
+        // Ignore malformed SSE payloads.
+      }
+    });
     source.onerror = () => {
       // Let EventSource use its built-in retry after transient backend restarts.
     };
