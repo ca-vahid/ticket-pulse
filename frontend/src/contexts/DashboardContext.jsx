@@ -8,6 +8,12 @@ import { formatDateLocal } from '../utils/dateHelpers';
 const DashboardContext = createContext(null);
 
 const TZ = 'America/Los_Angeles';
+const DASHBOARD_REFRESH_SSE_ROUTES = ['/dashboard', '/technician', '/timeline', '/analytics', '/visuals'];
+const APP_LIVE_SSE_ROUTES = [...DASHBOARD_REFRESH_SSE_ROUTES, '/assignments', '/summit-taxonomy'];
+
+function matchesRoute(pathname, routes) {
+  return routes.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
 
 // Try to restore dashboard state from cache on mount (avoids loading flash on back-nav / F5)
 function peekCachedDashboard(type) {
@@ -460,6 +466,8 @@ export function DashboardProvider({ children }) {
   // SSE sync-completed handler with targeted invalidation
   // ------------------------------------------------------------------
   const handleSyncCompleted = useCallback((_data) => {
+    if (!matchesRoute(location.pathname, DASHBOARD_REFRESH_SSE_ROUTES)) return;
+
     // Invalidate cache and refresh after sync completion
 
     // Invalidate today + current week + current month
@@ -476,7 +484,7 @@ export function DashboardProvider({ children }) {
     } else if (viewMode === 'monthly') {
       fetchMonthlyDashboard(monthStart, TZ);
     }
-  }, [invalidateToday, invalidateCurrentWeek, invalidateCurrentMonth, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard]);
+  }, [location.pathname, invalidateToday, invalidateCurrentWeek, invalidateCurrentMonth, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard]);
 
   const handleConnected = useCallback(() => {
     // SSE connection established
@@ -487,13 +495,7 @@ export function DashboardProvider({ children }) {
     // No additional logging needed here.
   }, []);
 
-  const dashboardSseEnabled = autoRefresh && [
-    '/dashboard',
-    '/technician',
-    '/timeline',
-    '/analytics',
-    '/visuals',
-  ].some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`));
+  const dashboardSseEnabled = autoRefresh && matchesRoute(location.pathname, APP_LIVE_SSE_ROUTES);
 
   const { isConnected: sseConnected, connectionStatus: sseConnectionStatus } = useSSE({
     enabled: dashboardSseEnabled,
