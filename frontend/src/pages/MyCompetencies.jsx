@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { agentAPI } from '../services/api';
+import ItSummitFeedbackPanel from '../components/ItSummitFeedbackPanel';
 
 const LEVELS = [
   { value: '', label: 'No experience', short: '-', rank: 0, className: 'bg-slate-100 text-slate-400 border-slate-200' },
@@ -56,6 +57,7 @@ export default function MyCompetencies() {
   const [requestForm, setRequestForm] = useState({ categoryId: '', requestedLevel: 'basic', note: '' });
   const [highlightCategoryId, setHighlightCategoryId] = useState(null);
   const [cancellingRequestId, setCancellingRequestId] = useState(null);
+  const [activeTab, setActiveTab] = useState('summit');
 
   const fetchData = async (targetWorkspaceId = workspaceId) => {
     try {
@@ -119,6 +121,17 @@ export default function MyCompetencies() {
   const myTechId = data?.technician?.id;
   const myMappedCount = Object.keys(mappingMap[myTechId] || {}).length;
   const pendingCount = (data?.requests || []).filter((request) => request.status === 'pending').length;
+  const userProfiles = user?.agentProfiles || (user?.agentProfile ? [user.agentProfile] : []);
+  const userHasItWorkspace = Number(user?.workspaceId) === 1
+    || Number(user?.workspace?.id) === 1
+    || userProfiles.some((profile) => Number(profile?.workspaceId || profile?.workspace?.id) === 1);
+  const showSummitTab = userHasItWorkspace || Number(data?.technician?.workspaceId) === 1;
+
+  useEffect(() => {
+    if (!loading && !showSummitTab && activeTab === 'summit') {
+      setActiveTab('competencies');
+    }
+  }, [activeTab, loading, showSummitTab]);
 
   useEffect(() => {
     if (!message?.autoClose) return undefined;
@@ -419,7 +432,7 @@ export default function MyCompetencies() {
             <div className="hidden h-8 w-px bg-slate-200 sm:block" />
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-slate-900">My Competencies</div>
-              <div className="truncate text-xs text-slate-500">Review the matrix and request updates to your own skills.</div>
+              <div className="truncate text-xs text-slate-500">Review your skills and participate in IT Summit 2026.</div>
             </div>
           </div>
           <button
@@ -434,13 +447,44 @@ export default function MyCompetencies() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        {loading && (
+        {showSummitTab && (
+          <section className="mb-4 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab('summit')}
+                className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                  activeTab === 'summit' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <Sparkles className="h-4 w-4" />
+                IT Summit 2026
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('competencies')}
+                className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                  activeTab === 'competencies' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                My Competencies
+              </button>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'summit' && showSummitTab && (
+          <ItSummitFeedbackPanel mode="participant" />
+        )}
+
+        {loading && (!showSummitTab || activeTab === 'competencies') && (
           <div className="flex min-h-[50vh] items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
           </div>
         )}
 
-        {!loading && error && (
+        {!loading && error && activeTab === 'competencies' && (
           <div className="mx-auto max-w-xl rounded-xl border border-amber-200 bg-white p-6 text-center shadow-sm">
             <AlertCircle className="mx-auto mb-3 h-10 w-10 text-amber-500" />
             <h1 className="text-lg font-semibold text-slate-900">Technician profile not linked</h1>
@@ -449,7 +493,7 @@ export default function MyCompetencies() {
           </div>
         )}
 
-        {!loading && data && (
+        {!loading && data && activeTab === 'competencies' && (
           <div className="space-y-4">
             <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -500,174 +544,176 @@ export default function MyCompetencies() {
               </div>
             </section>
 
-            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="relative min-w-0 flex-1">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search categories and subcategories"
-                    className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => openRequestModal()}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm shadow-blue-100 transition hover:-translate-y-0.5 hover:bg-blue-700"
-                >
-                  <PlusCircle className="h-4 w-4" />
+            <>
+              <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Search categories and subcategories"
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openRequestModal()}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm shadow-blue-100 transition hover:-translate-y-0.5 hover:bg-blue-700"
+                  >
+                    <PlusCircle className="h-4 w-4" />
                   Request skill
-                </button>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  {LEVELS.map((level) => (
-                    <span key={level.value || 'none'} className={`rounded-md border px-2 py-1 font-semibold ${level.className}`}>
-                      {level.short} {level.label}
-                    </span>
-                  ))}
+                  </button>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    {LEVELS.map((level) => (
+                      <span key={level.value || 'none'} className={`rounded-md border px-2 py-1 font-semibold ${level.className}`}>
+                        {level.short} {level.label}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <textarea
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                placeholder="Optional note for your next request"
-                className="mt-3 min-h-[48px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
-              />
-              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                <Sparkles className="h-4 w-4" />
+                <textarea
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  placeholder="Optional note for your next request"
+                  className="mt-3 min-h-[48px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                />
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                  <Sparkles className="h-4 w-4" />
                 Additions and level increases are sent for admin approval. Decreases/removals save immediately. Pending requests can be cancelled below.
-              </div>
-            </section>
+                </div>
+              </section>
 
-            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse text-sm">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="sticky left-0 z-20 min-w-[240px] bg-slate-50 px-3 py-3 text-left text-xs font-semibold uppercase text-slate-500">Category / subcategory</th>
-                      {data.technicians.map((tech) => {
-                        const isMe = tech.id === myTechId;
-                        return (
-                          <th key={tech.id} className={`min-w-[74px] px-2 py-2 text-center ${isMe ? 'bg-blue-50' : ''}`}>
-                            <div className="flex flex-col items-center gap-1">
-                              {tech.photoUrl ? (
-                                <img src={tech.photoUrl} alt="" className={`h-8 w-8 rounded-full object-cover ${isMe ? 'ring-2 ring-blue-500' : ''}`} />
-                              ) : (
-                                <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white ring-2 ring-blue-200' : 'bg-slate-200 text-slate-500'}`}>
-                                  {initials(tech.name)}
-                                </span>
-                              )}
-                              <span className={`max-w-[64px] truncate text-[10px] font-semibold ${isMe ? 'text-blue-700' : 'text-slate-500'}`}>
-                                {isMe ? 'You' : tech.name.split(' ')[0]}
-                              </span>
-                            </div>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {categories.map((category) => {
-                      const pending = pendingByCategory[category.id];
-                      const isHighlighted = highlightCategoryId === category.id;
-                      return (
-                        <tr key={category.id} className={`border-t border-slate-100 transition-colors duration-300 ${isHighlighted ? 'animate-[pulseOnce_1.8s_ease-out]' : ''} ${category.depth === 0 ? 'bg-slate-50/70' : 'hover:bg-slate-50'}`}>
-                          <td className={`sticky left-0 z-10 px-3 py-2 transition-colors duration-300 ${isHighlighted ? 'bg-blue-50' : category.depth === 0 ? 'bg-slate-50' : 'bg-white'} ${category.depth === 0 ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
-                            <div className="flex items-center gap-2">
-                              {category.depth === 1 && <span className="ml-3 h-px w-4 bg-slate-300" />}
-                              <span>{category.name}</span>
-                              {category.depth === 1 && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">sub</span>}
-                              {pending && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">pending</span>}
-                            </div>
-                          </td>
-                          {data.technicians.map((tech) => {
-                            const isMe = tech.id === myTechId;
-                            const level = mappingMap[tech.id]?.[category.id] || '';
-                            const levelInfo = levelByValue[level] || levelByValue[''];
-                            return (
-                              <td key={tech.id} className={`px-1 py-1 text-center transition-colors duration-300 ${isHighlighted && isMe ? 'bg-blue-100/80' : isMe ? 'bg-blue-50/50' : ''}`}>
-                                {isMe ? (
-                                  <select
-                                    value={pending?.requestedLevel ?? level}
-                                    disabled={savingCell === category.id}
-                                    onChange={(event) => handleChange(category, event.target.value)}
-                                    className={`h-8 w-16 rounded-lg border text-center text-xs font-bold outline-none transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus:ring-2 focus:ring-blue-100 ${pending ? 'border-amber-300 bg-amber-50 text-amber-800 ring-1 ring-amber-100' : levelInfo.className}`}
-                                    title={pending ? `Pending: ${formatRequest(pending)}` : `${category.name}: ${levelInfo.label}`}
-                                  >
-                                    {LEVELS.map((option) => (
-                                      <option key={option.value || 'none'} value={option.value}>{option.short}</option>
-                                    ))}
-                                  </select>
+              <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="sticky left-0 z-20 min-w-[240px] bg-slate-50 px-3 py-3 text-left text-xs font-semibold uppercase text-slate-500">Category / subcategory</th>
+                        {data.technicians.map((tech) => {
+                          const isMe = tech.id === myTechId;
+                          return (
+                            <th key={tech.id} className={`min-w-[74px] px-2 py-2 text-center ${isMe ? 'bg-blue-50' : ''}`}>
+                              <div className="flex flex-col items-center gap-1">
+                                {tech.photoUrl ? (
+                                  <img src={tech.photoUrl} alt="" className={`h-8 w-8 rounded-full object-cover ${isMe ? 'ring-2 ring-blue-500' : ''}`} />
                                 ) : (
-                                  <span className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs font-bold ${levelInfo.className}`}>
-                                    {levelInfo.short}
+                                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white ring-2 ring-blue-200' : 'bg-slate-200 text-slate-500'}`}>
+                                    {initials(tech.name)}
                                   </span>
                                 )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                    {categories.length === 0 && (
-                      <tr>
-                        <td colSpan={(data.technicians?.length || 0) + 1} className="px-4 py-10 text-center text-sm text-slate-400">
-                          No matching categories.
-                        </td>
+                                <span className={`max-w-[64px] truncate text-[10px] font-semibold ${isMe ? 'text-blue-700' : 'text-slate-500'}`}>
+                                  {isMe ? 'You' : tech.name.split(' ')[0]}
+                                </span>
+                              </div>
+                            </th>
+                          );
+                        })}
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                    </thead>
+                    <tbody>
+                      {categories.map((category) => {
+                        const pending = pendingByCategory[category.id];
+                        const isHighlighted = highlightCategoryId === category.id;
+                        return (
+                          <tr key={category.id} className={`border-t border-slate-100 transition-colors duration-300 ${isHighlighted ? 'animate-[pulseOnce_1.8s_ease-out]' : ''} ${category.depth === 0 ? 'bg-slate-50/70' : 'hover:bg-slate-50'}`}>
+                            <td className={`sticky left-0 z-10 px-3 py-2 transition-colors duration-300 ${isHighlighted ? 'bg-blue-50' : category.depth === 0 ? 'bg-slate-50' : 'bg-white'} ${category.depth === 0 ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
+                              <div className="flex items-center gap-2">
+                                {category.depth === 1 && <span className="ml-3 h-px w-4 bg-slate-300" />}
+                                <span>{category.name}</span>
+                                {category.depth === 1 && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">sub</span>}
+                                {pending && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">pending</span>}
+                              </div>
+                            </td>
+                            {data.technicians.map((tech) => {
+                              const isMe = tech.id === myTechId;
+                              const level = mappingMap[tech.id]?.[category.id] || '';
+                              const levelInfo = levelByValue[level] || levelByValue[''];
+                              return (
+                                <td key={tech.id} className={`px-1 py-1 text-center transition-colors duration-300 ${isHighlighted && isMe ? 'bg-blue-100/80' : isMe ? 'bg-blue-50/50' : ''}`}>
+                                  {isMe ? (
+                                    <select
+                                      value={pending?.requestedLevel ?? level}
+                                      disabled={savingCell === category.id}
+                                      onChange={(event) => handleChange(category, event.target.value)}
+                                      className={`h-8 w-16 rounded-lg border text-center text-xs font-bold outline-none transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus:ring-2 focus:ring-blue-100 ${pending ? 'border-amber-300 bg-amber-50 text-amber-800 ring-1 ring-amber-100' : levelInfo.className}`}
+                                      title={pending ? `Pending: ${formatRequest(pending)}` : `${category.name}: ${levelInfo.label}`}
+                                    >
+                                      {LEVELS.map((option) => (
+                                        <option key={option.value || 'none'} value={option.value}>{option.short}</option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs font-bold ${levelInfo.className}`}>
+                                      {levelInfo.short}
+                                    </span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                      {categories.length === 0 && (
+                        <tr>
+                          <td colSpan={(data.technicians?.length || 0) + 1} className="px-4 py-10 text-center text-sm text-slate-400">
+                          No matching categories.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
 
-            <section className="grid gap-3 lg:grid-cols-2">
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="h-4 w-4 text-amber-500" /> Pending Requests</h2>
-                <div className="mt-3 space-y-2">
-                  {(data.requests || []).filter((request) => request.status === 'pending').map((request) => (
-                    <div key={request.id} className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm transition hover:border-amber-300 hover:shadow-sm">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
-                        <div className="text-xs text-amber-800">{formatRequest(request)}</div>
-                        {request.note && <div className="mt-1 text-xs text-slate-500">{request.note}</div>}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => cancelRequest(request)}
-                        disabled={cancellingRequestId === request.id}
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:border-amber-300 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
-                        title="Cancel this pending request"
-                      >
-                        {cancellingRequestId === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
+              <section className="grid gap-3 lg:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="h-4 w-4 text-amber-500" /> Pending Requests</h2>
+                  <div className="mt-3 space-y-2">
+                    {(data.requests || []).filter((request) => request.status === 'pending').map((request) => (
+                      <div key={request.id} className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm transition hover:border-amber-300 hover:shadow-sm">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
+                          <div className="text-xs text-amber-800">{formatRequest(request)}</div>
+                          {request.note && <div className="mt-1 text-xs text-slate-500">{request.note}</div>}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => cancelRequest(request)}
+                          disabled={cancellingRequestId === request.id}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:border-amber-300 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                          title="Cancel this pending request"
+                        >
+                          {cancellingRequestId === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
                         Cancel
-                      </button>
-                    </div>
-                  ))}
-                  {pendingCount === 0 && <p className="text-sm text-slate-500">No pending changes.</p>}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Recent History</h2>
-                <div className="mt-3 space-y-2">
-                  {(data.requests || []).filter((request) => request.status !== 'pending').slice(0, 8).map((request) => (
-                    <div key={request.id} className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                      {request.status === 'rejected'
-                        ? <XCircle className="mt-0.5 h-4 w-4 text-red-500" />
-                        : request.status === 'cancelled'
-                          ? <Undo2 className="mt-0.5 h-4 w-4 text-amber-500" />
-                          : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />}
-                      <div>
-                        <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
-                        <div className="text-xs text-slate-500">{request.status.replace('_', ' ')} - {formatRequest(request)}</div>
+                        </button>
                       </div>
-                    </div>
-                  ))}
-                  {!(data.requests || []).some((request) => request.status !== 'pending') && <p className="text-sm text-slate-500">No history yet.</p>}
+                    ))}
+                    {pendingCount === 0 && <p className="text-sm text-slate-500">No pending changes.</p>}
+                  </div>
                 </div>
-              </div>
-            </section>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Recent History</h2>
+                  <div className="mt-3 space-y-2">
+                    {(data.requests || []).filter((request) => request.status !== 'pending').slice(0, 8).map((request) => (
+                      <div key={request.id} className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                        {request.status === 'rejected'
+                          ? <XCircle className="mt-0.5 h-4 w-4 text-red-500" />
+                          : request.status === 'cancelled'
+                            ? <Undo2 className="mt-0.5 h-4 w-4 text-amber-500" />
+                            : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />}
+                        <div>
+                          <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
+                          <div className="text-xs text-slate-500">{request.status.replace('_', ' ')} - {formatRequest(request)}</div>
+                        </div>
+                      </div>
+                    ))}
+                    {!(data.requests || []).some((request) => request.status !== 'pending') && <p className="text-sm text-slate-500">No history yet.</p>}
+                  </div>
+                </div>
+              </section>
+            </>
           </div>
         )}
       </main>

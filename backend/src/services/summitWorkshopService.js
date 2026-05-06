@@ -4,6 +4,14 @@ import { AuthorizationError, NotFoundError, ValidationError } from '../utils/err
 
 const IT_WORKSPACE_ID = 1;
 const DEFAULT_DURATION_MINUTES = 120;
+const FEEDBACK_ITEM_VOTE_TYPE = 'summit_feedback_item';
+const FEEDBACK_SUPPORT_VOTE_TYPE = 'summit_feedback_support';
+const FEEDBACK_COMMENT_VOTE_TYPE = 'summit_feedback_comment';
+const FEEDBACK_VOTE_TYPES = [
+  FEEDBACK_ITEM_VOTE_TYPE,
+  FEEDBACK_SUPPORT_VOTE_TYPE,
+  FEEDBACK_COMMENT_VOTE_TYPE,
+];
 
 const clients = new Map();
 
@@ -202,14 +210,25 @@ function room(sessionId) {
   return clients.get(key);
 }
 
+function writeSse(sessionId, res, data) {
+  try {
+    res.write(data);
+    return true;
+  } catch {
+    room(sessionId).delete(res);
+    try {
+      res.end();
+    } catch {
+      // Connection is already closed.
+    }
+    return false;
+  }
+}
+
 function broadcast(sessionId, event, payload = {}) {
   const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
   for (const res of room(sessionId)) {
-    try {
-      res.write(data);
-    } catch {
-      room(sessionId).delete(res);
-    }
+    writeSse(sessionId, res, data);
   }
 }
 
@@ -252,7 +271,7 @@ async function getVoteSummary(sessionId) {
     }),
     prisma.summitWorkshopVote.groupBy({
       by: ['itemId', 'itemType', 'itemLabel', 'voteType'],
-      where: { sessionId, voteType: { notIn: ['merge_suggestion', 'new_category_suggestion'] } },
+      where: { sessionId, voteType: { notIn: ['merge_suggestion', 'new_category_suggestion', ...FEEDBACK_VOTE_TYPES] } },
       _count: { _all: true },
       orderBy: { _count: { itemId: 'desc' } },
     }),
@@ -323,6 +342,81 @@ async function getVoteSummary(sessionId) {
   };
 }
 
+async function getFeedbackSummary(sessionId, participantId = null) {
+  const [items, supportRows, comments, mySupports] = await Promise.all([
+    prisma.summitWorkshopVote.findMany({
+      where: { sessionId, voteType: FEEDBACK_ITEM_VOTE_TYPE },
+      include: { participant: { select: { id: true, displayName: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 250,
+    }),
+    prisma.summitWorkshopVote.groupBy({
+      by: ['itemId'],
+      where: { sessionId, voteType: FEEDBACK_SUPPORT_VOTE_TYPE },
+      _count: { _all: true },
+    }),
+    prisma.summitWorkshopVote.findMany({
+      where: { sessionId, voteType: FEEDBACK_COMMENT_VOTE_TYPE },
+      include: { participant: { select: { id: true, displayName: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: 500,
+    }),
+    participantId
+      ? prisma.summitWorkshopVote.findMany({
+        where: { sessionId, participantId, voteType: FEEDBACK_SUPPORT_VOTE_TYPE },
+        select: { itemId: true },
+      })
+      : Promise.resolve([]),
+  ]);
+
+  const supportByItem = new Map(supportRows.map((row) => [row.itemId, row._count._all]));
+  const mySupportSet = new Set(mySupports.map((vote) => vote.itemId));
+  const commentsByItem = new Map();
+  for (const comment of comments) {
+    const parentItemId = comment.value?.parentItemId;
+    if (!parentItemId) continue;
+    if (!commentsByItem.has(parentItemId)) commentsByItem.set(parentItemId, []);
+    commentsByItem.get(parentItemId).push({
+      id: comment.id,
+      itemId: comment.itemId,
+      text: comment.value?.text || '',
+      participantId: comment.participantId,
+      participantName: comment.participant.displayName,
+      createdAt: comment.createdAt,
+    });
+  }
+
+  const normalizedItems = items.map((item) => {
+    const itemComments = commentsByItem.get(item.itemId) || [];
+    return {
+      id: item.id,
+      itemId: item.itemId,
+      itemType: item.itemType,
+      title: item.itemLabel,
+      section: item.value?.section === 'attention' ? 'attention' : 'working',
+      note: item.value?.note || '',
+      status: item.value?.status || 'active',
+      participantId: item.participantId,
+      participantName: item.participant.displayName,
+      createdAt: item.createdAt,
+      supportCount: supportByItem.get(item.itemId) || 0,
+      isSupportedByMe: mySupportSet.has(item.itemId),
+      commentCount: itemComments.length,
+      comments: itemComments,
+    };
+  });
+
+  return {
+    items: normalizedItems,
+    counts: {
+      working: normalizedItems.filter((item) => item.section === 'working').length,
+      attention: normalizedItems.filter((item) => item.section === 'attention').length,
+      votes: supportRows.reduce((sum, row) => sum + row._count._all, 0),
+      comments: comments.length,
+    },
+  };
+}
+
 function publicSession(session) {
   const now = Date.now();
   const expiresAt = session.voteExpiresAt ? new Date(session.voteExpiresAt).getTime() : 0;
@@ -349,7 +443,7 @@ function withVotingState(state, patch) {
 }
 
 async function serialize(session) {
-  const [snapshots, votes] = await Promise.all([
+  const [snapshots, votes, feedback] = await Promise.all([
     prisma.summitWorkshopSnapshot.findMany({
       where: { sessionId: session.id },
       orderBy: { createdAt: 'desc' },
@@ -357,12 +451,14 @@ async function serialize(session) {
       select: { id: true, version: true, label: true, snapshotType: true, createdBy: true, createdAt: true },
     }),
     getVoteSummary(session.id),
+    getFeedbackSummary(session.id),
   ]);
 
   return {
     session,
     snapshots,
     votes,
+    feedback,
   };
 }
 
@@ -466,8 +562,18 @@ export async function configureVoting(workspaceId, durationMinutes = DEFAULT_DUR
       message: 'The facilitator regenerated the voting link. Please use the new link.',
     });
     await prisma.$transaction([
-      prisma.summitWorkshopVote.deleteMany({ where: { sessionId: existing.id } }),
-      prisma.summitWorkshopParticipant.deleteMany({ where: { sessionId: existing.id } }),
+      prisma.summitWorkshopVote.deleteMany({
+        where: {
+          sessionId: existing.id,
+          voteType: { notIn: FEEDBACK_VOTE_TYPES },
+        },
+      }),
+      prisma.summitWorkshopParticipant.deleteMany({
+        where: {
+          sessionId: existing.id,
+          votes: { none: { voteType: { in: FEEDBACK_VOTE_TYPES } } },
+        },
+      }),
     ]);
   }
   const session = await prisma.summitWorkshopSession.update({
@@ -530,7 +636,12 @@ export async function resetParticipantVotes(workspaceId, participantId) {
   });
   if (!participant || participant.sessionId !== existing.id) throw new NotFoundError('Participant not found');
 
-  await prisma.summitWorkshopVote.deleteMany({ where: { participantId: participant.id } });
+  await prisma.summitWorkshopVote.deleteMany({
+    where: {
+      participantId: participant.id,
+      voteType: { notIn: FEEDBACK_VOTE_TYPES },
+    },
+  });
 
   const votes = await getVoteSummary(existing.id);
   broadcast(existing.id, 'participant-reset', {
@@ -551,11 +662,18 @@ export async function getSessionByVoteToken(token) {
   return session;
 }
 
-export async function getPublicWorkshop(token) {
+export async function getPublicWorkshop(token, participantKey = null) {
   const session = await getSessionByVoteToken(token);
+  const participant = participantKey
+    ? await prisma.summitWorkshopParticipant.findFirst({
+      where: { sessionId: session.id, participantKey: String(participantKey) },
+      select: { id: true },
+    })
+    : null;
   return {
     session: publicSession(session),
     votes: await getVoteSummary(session.id),
+    feedback: await getFeedbackSummary(session.id, participant?.id || null),
   };
 }
 
@@ -572,6 +690,322 @@ export async function joinPublicWorkshop(token, displayName, participantKey = nu
   const votes = await getVoteSummary(session.id);
   broadcast(session.id, 'votes', votes);
   return { participant, session: publicSession(session), votes };
+}
+
+function normalizeFeedbackSection(section) {
+  return String(section || '').toLowerCase() === 'attention' ? 'attention' : 'working';
+}
+
+function validateFeedbackTitle(title) {
+  const safeTitle = String(title || '').trim().replace(/\s+/g, ' ').slice(0, 180);
+  if (!safeTitle) throw new ValidationError('A short title is required');
+  return safeTitle;
+}
+
+async function getOrCreateAuthenticatedSummitParticipant(workspaceId, user = {}) {
+  assertItWorkspace(workspaceId);
+  const email = String(user.email || '').trim().toLowerCase();
+  if (!email) throw new AuthorizationError('Sign in is required');
+
+  const isAdmin = user.role === 'admin';
+  const profile = (user.agentProfiles || []).find((candidate) => Number(candidate.workspaceId) === IT_WORKSPACE_ID);
+  if (!isAdmin && !profile) {
+    throw new AuthorizationError('IT Summit 2026 is currently available only to matched IT workspace agents');
+  }
+
+  const session = await findActiveSession(workspaceId) || await createSession(workspaceId, email);
+  const participantKey = `auth_${session.id}_${crypto.createHash('sha256').update(email).digest('hex').slice(0, 32)}`;
+  const displayName = String(profile?.name || user.name || email).trim().slice(0, 120);
+  const participant = await prisma.summitWorkshopParticipant.upsert({
+    where: { participantKey },
+    update: { displayName, lastSeenAt: new Date() },
+    create: { sessionId: session.id, participantKey, displayName },
+  });
+  return { session, participant };
+}
+
+export async function getAuthenticatedFeedback(workspaceId, user) {
+  const { session, participant } = await getOrCreateAuthenticatedSummitParticipant(workspaceId, user);
+  return {
+    session: publicSession(session),
+    participant,
+    feedback: await getFeedbackSummary(session.id, participant.id),
+  };
+}
+
+export async function getWorkshopFeedback(workspaceId) {
+  assertItWorkspace(workspaceId);
+  const session = await findActiveSession(workspaceId) || await createSession(workspaceId, null);
+  return {
+    session: publicSession(session),
+    feedback: await getFeedbackSummary(session.id),
+  };
+}
+
+export async function updateFeedbackItem(workspaceId, itemId, body = {}) {
+  assertItWorkspace(workspaceId);
+  const session = await findActiveSession(workspaceId);
+  if (!session) throw new NotFoundError('Workshop session not found');
+
+  const item = await prisma.summitWorkshopVote.findFirst({
+    where: {
+      sessionId: session.id,
+      itemId: String(itemId || ''),
+      voteType: FEEDBACK_ITEM_VOTE_TYPE,
+    },
+  });
+  if (!item) throw new NotFoundError('Feedback item not found');
+
+  const title = validateFeedbackTitle(body.title ?? item.itemLabel);
+  const section = normalizeFeedbackSection(body.section ?? item.value?.section);
+  const note = String(body.note ?? item.value?.note ?? '').trim().slice(0, 1500);
+
+  await prisma.summitWorkshopVote.update({
+    where: { id: item.id },
+    data: {
+      itemLabel: title,
+      value: {
+        ...(item.value || {}),
+        section,
+        note,
+        status: 'active',
+        editedAt: new Date().toISOString(),
+      },
+    },
+  });
+  await prisma.summitWorkshopVote.updateMany({
+    where: {
+      sessionId: session.id,
+      itemId: item.itemId,
+      voteType: FEEDBACK_SUPPORT_VOTE_TYPE,
+    },
+    data: { itemLabel: title },
+  });
+
+  const feedback = await getFeedbackSummary(session.id);
+  broadcast(session.id, 'feedback', feedback);
+  return { feedback };
+}
+
+export async function deleteFeedbackItem(workspaceId, itemId) {
+  assertItWorkspace(workspaceId);
+  const session = await findActiveSession(workspaceId);
+  if (!session) throw new NotFoundError('Workshop session not found');
+
+  const item = await prisma.summitWorkshopVote.findFirst({
+    where: {
+      sessionId: session.id,
+      itemId: String(itemId || ''),
+      voteType: FEEDBACK_ITEM_VOTE_TYPE,
+    },
+    select: { itemId: true },
+  });
+  if (!item) throw new NotFoundError('Feedback item not found');
+
+  const comments = await prisma.summitWorkshopVote.findMany({
+    where: { sessionId: session.id, voteType: FEEDBACK_COMMENT_VOTE_TYPE },
+    select: { id: true, value: true },
+  });
+  const commentIds = comments
+    .filter((comment) => comment.value?.parentItemId === item.itemId)
+    .map((comment) => comment.id);
+
+  await prisma.$transaction([
+    ...(commentIds.length
+      ? [prisma.summitWorkshopVote.deleteMany({ where: { id: { in: commentIds } } })]
+      : []),
+    prisma.summitWorkshopVote.deleteMany({
+      where: {
+        sessionId: session.id,
+        itemId: item.itemId,
+        voteType: { in: [FEEDBACK_ITEM_VOTE_TYPE, FEEDBACK_SUPPORT_VOTE_TYPE] },
+      },
+    }),
+  ]);
+
+  const feedback = await getFeedbackSummary(session.id);
+  broadcast(session.id, 'feedback', feedback);
+  return { feedback };
+}
+
+export async function deleteFeedbackComment(workspaceId, commentItemId) {
+  assertItWorkspace(workspaceId);
+  const session = await findActiveSession(workspaceId);
+  if (!session) throw new NotFoundError('Workshop session not found');
+
+  const result = await prisma.summitWorkshopVote.deleteMany({
+    where: {
+      sessionId: session.id,
+      itemId: String(commentItemId || ''),
+      voteType: FEEDBACK_COMMENT_VOTE_TYPE,
+    },
+  });
+  if (!result.count) throw new NotFoundError('Feedback comment not found');
+
+  const feedback = await getFeedbackSummary(session.id);
+  broadcast(session.id, 'feedback', feedback);
+  return { feedback };
+}
+
+export async function resetFeedback(workspaceId) {
+  assertItWorkspace(workspaceId);
+  const session = await findActiveSession(workspaceId);
+  if (!session) throw new NotFoundError('Workshop session not found');
+
+  await prisma.summitWorkshopVote.deleteMany({
+    where: {
+      sessionId: session.id,
+      voteType: { in: FEEDBACK_VOTE_TYPES },
+    },
+  });
+
+  const feedback = await getFeedbackSummary(session.id);
+  broadcast(session.id, 'feedback', feedback);
+  return { feedback };
+}
+
+async function createFeedbackItemForParticipant(session, participant, body = {}) {
+  const title = validateFeedbackTitle(body.title);
+  const section = normalizeFeedbackSection(body.section);
+  const note = String(body.note || '').trim().slice(0, 1500);
+  const itemId = `summit_feedback_${section}_${participant.id}_${Date.now()}`;
+  await prisma.summitWorkshopVote.create({
+    data: {
+      sessionId: session.id,
+      participantId: participant.id,
+      itemId,
+      itemType: 'summit_feedback',
+      itemLabel: title,
+      voteType: FEEDBACK_ITEM_VOTE_TYPE,
+      value: {
+        section,
+        note,
+        status: 'active',
+      },
+    },
+  });
+  await prisma.summitWorkshopParticipant.update({
+    where: { id: participant.id },
+    data: { lastSeenAt: new Date() },
+  });
+  const feedback = await getFeedbackSummary(session.id, participant.id);
+  broadcast(session.id, 'feedback', await getFeedbackSummary(session.id));
+  return { feedback };
+}
+
+async function voteFeedbackForParticipant(session, participant, itemId, active = true) {
+  const item = await prisma.summitWorkshopVote.findFirst({
+    where: { sessionId: session.id, itemId: String(itemId || ''), voteType: FEEDBACK_ITEM_VOTE_TYPE },
+    select: { itemId: true, itemLabel: true },
+  });
+  if (!item) throw new NotFoundError('Feedback item not found');
+
+  if (active === false) {
+    await prisma.summitWorkshopVote.deleteMany({
+      where: { participantId: participant.id, itemId: item.itemId, voteType: FEEDBACK_SUPPORT_VOTE_TYPE },
+    });
+  } else {
+    await prisma.summitWorkshopVote.upsert({
+      where: {
+        participantId_itemId_voteType: {
+          participantId: participant.id,
+          itemId: item.itemId,
+          voteType: FEEDBACK_SUPPORT_VOTE_TYPE,
+        },
+      },
+      update: { itemLabel: item.itemLabel },
+      create: {
+        sessionId: session.id,
+        participantId: participant.id,
+        itemId: item.itemId,
+        itemType: 'summit_feedback',
+        itemLabel: item.itemLabel,
+        voteType: FEEDBACK_SUPPORT_VOTE_TYPE,
+      },
+    });
+  }
+  await prisma.summitWorkshopParticipant.update({
+    where: { id: participant.id },
+    data: { lastSeenAt: new Date() },
+  });
+  const feedback = await getFeedbackSummary(session.id, participant.id);
+  broadcast(session.id, 'feedback', await getFeedbackSummary(session.id));
+  return { feedback };
+}
+
+async function commentFeedbackForParticipant(session, participant, itemId, body = {}) {
+  const item = await prisma.summitWorkshopVote.findFirst({
+    where: { sessionId: session.id, itemId: String(itemId || ''), voteType: FEEDBACK_ITEM_VOTE_TYPE },
+    select: { itemId: true, itemLabel: true, value: true },
+  });
+  if (!item) throw new NotFoundError('Feedback item not found');
+
+  const text = String(body.text || '').trim().slice(0, 1500);
+  if (!text) throw new ValidationError('Comment text is required');
+  await prisma.summitWorkshopVote.create({
+    data: {
+      sessionId: session.id,
+      participantId: participant.id,
+      itemId: `summit_feedback_comment_${participant.id}_${Date.now()}`,
+      itemType: 'summit_feedback_comment',
+      itemLabel: item.itemLabel,
+      voteType: FEEDBACK_COMMENT_VOTE_TYPE,
+      value: {
+        parentItemId: item.itemId,
+        section: normalizeFeedbackSection(item.value?.section),
+        text,
+      },
+    },
+  });
+  await prisma.summitWorkshopParticipant.update({
+    where: { id: participant.id },
+    data: { lastSeenAt: new Date() },
+  });
+  const feedback = await getFeedbackSummary(session.id, participant.id);
+  broadcast(session.id, 'feedback', await getFeedbackSummary(session.id));
+  return { feedback };
+}
+
+export async function submitAuthenticatedFeedbackItem(workspaceId, user, body) {
+  const { session, participant } = await getOrCreateAuthenticatedSummitParticipant(workspaceId, user);
+  return createFeedbackItemForParticipant(session, participant, body);
+}
+
+export async function voteAuthenticatedFeedbackItem(workspaceId, user, itemId, body = {}) {
+  const { session, participant } = await getOrCreateAuthenticatedSummitParticipant(workspaceId, user);
+  return voteFeedbackForParticipant(session, participant, itemId, body.active !== false);
+}
+
+export async function commentAuthenticatedFeedbackItem(workspaceId, user, itemId, body = {}) {
+  const { session, participant } = await getOrCreateAuthenticatedSummitParticipant(workspaceId, user);
+  return commentFeedbackForParticipant(session, participant, itemId, body);
+}
+
+export async function submitPublicFeedbackItem(token, body) {
+  const session = await getSessionByVoteToken(token);
+  const participant = await prisma.summitWorkshopParticipant.findUnique({
+    where: { participantKey: String(body?.participantKey || '') },
+  });
+  if (!participant || participant.sessionId !== session.id) throw new AuthorizationError('Join the workshop before submitting feedback');
+  return createFeedbackItemForParticipant(session, participant, body);
+}
+
+export async function votePublicFeedbackItem(token, itemId, body = {}) {
+  const session = await getSessionByVoteToken(token);
+  const participant = await prisma.summitWorkshopParticipant.findUnique({
+    where: { participantKey: String(body?.participantKey || '') },
+  });
+  if (!participant || participant.sessionId !== session.id) throw new AuthorizationError('Join the workshop before voting');
+  return voteFeedbackForParticipant(session, participant, itemId, body.active !== false);
+}
+
+export async function commentPublicFeedbackItem(token, itemId, body = {}) {
+  const session = await getSessionByVoteToken(token);
+  const participant = await prisma.summitWorkshopParticipant.findUnique({
+    where: { participantKey: String(body?.participantKey || '') },
+  });
+  if (!participant || participant.sessionId !== session.id) throw new AuthorizationError('Join the workshop before commenting');
+  return commentFeedbackForParticipant(session, participant, itemId, body);
 }
 
 export async function submitVote(token, body) {
@@ -634,10 +1068,48 @@ export async function streamPublicWorkshop(token, res) {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
   room(session.id).add(res);
-  res.write(`event: state\ndata: ${JSON.stringify(publicSession(session))}\n\n`);
-  res.write(`event: votes\ndata: ${JSON.stringify(await getVoteSummary(session.id))}\n\n`);
+  writeSse(session.id, res, `event: state\ndata: ${JSON.stringify(publicSession(session))}\n\n`);
+  writeSse(session.id, res, `event: votes\ndata: ${JSON.stringify(await getVoteSummary(session.id))}\n\n`);
+  writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id))}\n\n`);
   const keepAlive = setInterval(() => {
-    res.write(': keepalive\n\n');
+    writeSse(session.id, res, ': keepalive\n\n');
+  }, 25000);
+  res.on('close', () => {
+    clearInterval(keepAlive);
+    room(session.id).delete(res);
+  });
+}
+
+export async function streamWorkshopByWorkspace(workspaceId, res) {
+  assertItWorkspace(workspaceId);
+  const session = await findActiveSession(workspaceId) || await createSession(workspaceId, null);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+  room(session.id).add(res);
+  writeSse(session.id, res, `event: state\ndata: ${JSON.stringify(publicSession(session))}\n\n`);
+  writeSse(session.id, res, `event: votes\ndata: ${JSON.stringify(await getVoteSummary(session.id))}\n\n`);
+  writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id))}\n\n`);
+  const keepAlive = setInterval(() => {
+    writeSse(session.id, res, ': keepalive\n\n');
+  }, 25000);
+  res.on('close', () => {
+    clearInterval(keepAlive);
+    room(session.id).delete(res);
+  });
+}
+
+export async function streamAuthenticatedFeedback(workspaceId, user, res) {
+  const { session, participant } = await getOrCreateAuthenticatedSummitParticipant(workspaceId, user);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+  room(session.id).add(res);
+  writeSse(session.id, res, `event: feedback\ndata: ${JSON.stringify(await getFeedbackSummary(session.id, participant.id))}\n\n`);
+  const keepAlive = setInterval(() => {
+    writeSse(session.id, res, ': keepalive\n\n');
   }, 25000);
   res.on('close', () => {
     clearInterval(keepAlive);
@@ -655,5 +1127,19 @@ export default {
   getPublicWorkshop,
   joinPublicWorkshop,
   submitVote,
+  getAuthenticatedFeedback,
+  getWorkshopFeedback,
+  updateFeedbackItem,
+  deleteFeedbackItem,
+  deleteFeedbackComment,
+  resetFeedback,
+  submitAuthenticatedFeedbackItem,
+  voteAuthenticatedFeedbackItem,
+  commentAuthenticatedFeedbackItem,
+  submitPublicFeedbackItem,
+  votePublicFeedbackItem,
+  commentPublicFeedbackItem,
   streamPublicWorkshop,
+  streamWorkshopByWorkspace,
+  streamAuthenticatedFeedback,
 };

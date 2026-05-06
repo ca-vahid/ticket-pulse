@@ -1831,6 +1831,10 @@ class SyncService {
       // Sync tickets with options (including fullSync flag and workspaceId)
       const ticketsSynced = await this.syncTickets({ ...options, workspaceId });
 
+      this._pollForUnassignedTickets(workspaceId, { prevSyncCompletedAt }).catch((err) => {
+        logger.warn('Assignment polling failed after ticket sync (non-fatal)', { workspaceId, error: err.message });
+      });
+
       // Sync requesters (fetch requester details for tickets)
       const requestersSynced = await this.syncRequesters();
 
@@ -1898,9 +1902,11 @@ class SyncService {
         logger.error('Failed to broadcast SSE update:', error);
       }
 
-      // Assignment pipeline polling: check for unassigned tickets (fire-and-forget).
-      // Pass previous sync time so we can detect outage gaps and widen the lookback window
-      // automatically — otherwise tickets that arrived during downtime never get pipeline runs.
+      // Assignment pipeline polling fallback: the primary kick-off happens
+      // immediately after ticket upsert so auto-assign does not wait behind
+      // requester, CSAT, and other sync tail work. This second pass is safe
+      // because _pollForUnassignedTickets skips tickets with active/completed
+      // runs, and it can catch tickets that changed during the tail phase.
       this._pollForUnassignedTickets(workspaceId, { prevSyncCompletedAt }).catch((err) => {
         logger.warn('Assignment polling failed (non-fatal)', { workspaceId, error: err.message });
       });

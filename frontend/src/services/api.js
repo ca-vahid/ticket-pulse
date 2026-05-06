@@ -631,6 +631,11 @@ export const agentAPI = {
   getMyCompetencies: (params = {}) => api.get('/agent/competencies', { params }),
   submitCompetencyChange: (data) => api.post('/agent/competencies/changes', data),
   cancelCompetencyChange: (id) => api.delete(`/agent/competencies/changes/${id}`),
+  getSummitFeedback: () => api.get('/agent/summit-2026/feedback'),
+  submitSummitFeedback: (data) => api.post('/agent/summit-2026/feedback/items', data),
+  voteSummitFeedback: (itemId, data) => api.post(`/agent/summit-2026/feedback/items/${encodeURIComponent(itemId)}/vote`, data),
+  commentSummitFeedback: (itemId, data) => api.post(`/agent/summit-2026/feedback/items/${encodeURIComponent(itemId)}/comments`, data),
+  getSummitEventSource: () => new EventSource(`${API_BASE_URL}/agent/summit-2026/events${_authToken ? `?token=${encodeURIComponent(_authToken)}` : ''}`, { withCredentials: true }),
 };
 
 /**
@@ -650,15 +655,29 @@ export const analyticsAPI = {
  */
 export const summitAPI = {
   getWorkshop: () => api.get('/summit/workshop'),
+  getWorkshopEventSource: () => new EventSource(`${API_BASE_URL}/summit/workshop/events${_authToken ? `?token=${encodeURIComponent(_authToken)}` : ''}`, { withCredentials: true }),
+  getFeedback: () => api.get('/summit/workshop/feedback'),
+  submitFeedback: (data) => api.post('/summit/workshop/feedback/items', data),
+  voteFeedback: (itemId, data) => api.post(`/summit/workshop/feedback/items/${encodeURIComponent(itemId)}/vote`, data),
+  commentFeedback: (itemId, data) => api.post(`/summit/workshop/feedback/items/${encodeURIComponent(itemId)}/comments`, data),
+  updateFeedbackItem: (itemId, data) => api.put(`/summit/workshop/feedback/items/${encodeURIComponent(itemId)}`, data),
+  deleteFeedbackItem: (itemId) => api.delete(`/summit/workshop/feedback/items/${encodeURIComponent(itemId)}`),
+  deleteFeedbackComment: (commentItemId) => api.delete(`/summit/workshop/feedback/comments/${encodeURIComponent(commentItemId)}`),
+  resetFeedback: () => api.post('/summit/workshop/feedback/reset'),
   saveState: (state, { label = 'Manual save', snapshotType = 'manual' } = {}) =>
     api.put('/summit/workshop/state', { state, label, snapshotType }),
   restoreSnapshot: (id) => api.post(`/summit/workshop/snapshots/${id}/restore`),
   enableVoting: (durationMinutes = 120, regenerate = false) => api.post('/summit/workshop/voting', { durationMinutes, regenerate }),
   extendVoting: (extensionMinutes = 30) => api.post('/summit/workshop/voting/extend', { extensionMinutes }),
   resetParticipantVotes: (id) => api.post(`/summit/workshop/participants/${id}/reset`),
-  getPublicWorkshop: (token) => api.get(`/summit/public/${token}`),
+  getPublicWorkshop: (token, participantKey = null) => api.get(`/summit/public/${token}`, {
+    params: participantKey ? { participantKey } : undefined,
+  }),
   joinPublicWorkshop: (token, data) => api.post(`/summit/public/${token}/join`, data),
   submitVote: (token, data) => api.post(`/summit/public/${token}/votes`, data),
+  submitPublicFeedback: (token, data) => api.post(`/summit/public/${token}/feedback/items`, data),
+  votePublicFeedback: (token, itemId, data) => api.post(`/summit/public/${token}/feedback/items/${encodeURIComponent(itemId)}/vote`, data),
+  commentPublicFeedback: (token, itemId, data) => api.post(`/summit/public/${token}/feedback/items/${encodeURIComponent(itemId)}/comments`, data),
   getPublicEventSource: (token) => new EventSource(`${API_BASE_URL}/summit/public/${token}/events`, { withCredentials: true }),
 };
 

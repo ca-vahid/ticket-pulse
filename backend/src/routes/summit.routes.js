@@ -6,7 +6,7 @@ export const summitPublicRouter = express.Router();
 export const summitProtectedRouter = express.Router();
 
 summitPublicRouter.get('/:token', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.getPublicWorkshop(req.params.token);
+  const result = await summitWorkshopService.getPublicWorkshop(req.params.token, req.query?.participantKey);
   res.json({ success: true, ...result });
 }));
 
@@ -28,8 +28,67 @@ summitPublicRouter.post('/:token/votes', asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
+summitPublicRouter.post('/:token/feedback/items', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.submitPublicFeedbackItem(req.params.token, req.body || {});
+  res.json({ success: true, ...result });
+}));
+
+summitPublicRouter.post('/:token/feedback/items/:itemId/vote', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.votePublicFeedbackItem(req.params.token, req.params.itemId, req.body || {});
+  res.json({ success: true, ...result });
+}));
+
+summitPublicRouter.post('/:token/feedback/items/:itemId/comments', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.commentPublicFeedbackItem(req.params.token, req.params.itemId, req.body || {});
+  res.json({ success: true, ...result });
+}));
+
 summitProtectedRouter.get('/workshop', asyncHandler(async (req, res) => {
   const result = await summitWorkshopService.getOrCreateWorkshop(req.workspaceId, req.session?.user?.email);
+  res.json({ success: true, ...result });
+}));
+
+summitProtectedRouter.get('/workshop/events', asyncHandler(async (req, res) => {
+  await summitWorkshopService.streamWorkshopByWorkspace(req.workspaceId, res);
+}));
+
+summitProtectedRouter.get('/workshop/feedback', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.getWorkshopFeedback(req.workspaceId);
+  res.json({ success: true, ...result });
+}));
+
+summitProtectedRouter.post('/workshop/feedback/items', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.submitAuthenticatedFeedbackItem(req.workspaceId, req.session?.user || {}, req.body || {});
+  res.json({ success: true, ...result });
+}));
+
+summitProtectedRouter.post('/workshop/feedback/items/:itemId/vote', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.voteAuthenticatedFeedbackItem(req.workspaceId, req.session?.user || {}, req.params.itemId, req.body || {});
+  res.json({ success: true, ...result });
+}));
+
+summitProtectedRouter.post('/workshop/feedback/items/:itemId/comments', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.commentAuthenticatedFeedbackItem(req.workspaceId, req.session?.user || {}, req.params.itemId, req.body || {});
+  res.json({ success: true, ...result });
+}));
+
+summitProtectedRouter.put('/workshop/feedback/items/:itemId', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.updateFeedbackItem(req.workspaceId, req.params.itemId, req.body || {});
+  res.json({ success: true, ...result });
+}));
+
+summitProtectedRouter.delete('/workshop/feedback/items/:itemId', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.deleteFeedbackItem(req.workspaceId, req.params.itemId);
+  res.json({ success: true, ...result });
+}));
+
+summitProtectedRouter.delete('/workshop/feedback/comments/:commentItemId', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.deleteFeedbackComment(req.workspaceId, req.params.commentItemId);
+  res.json({ success: true, ...result });
+}));
+
+summitProtectedRouter.post('/workshop/feedback/reset', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.resetFeedback(req.workspaceId);
   res.json({ success: true, ...result });
 }));
 

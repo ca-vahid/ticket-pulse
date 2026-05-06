@@ -4,6 +4,7 @@ import * as Icons from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { QRCodeSVG } from 'qrcode.react';
 import AppShell from '../components/AppShell';
+import ItSummitFeedbackPanel from '../components/ItSummitFeedbackPanel';
 import { summitAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 
@@ -327,6 +328,7 @@ export default function SummitTaxonomyWorkshop() {
   const [error, setError] = useState('');
   const [showDeleted, setShowDeleted] = useState(false);
   const [topCategoriesCollapsed, setTopCategoriesCollapsed] = useState(false);
+  const [workshopTab, setWorkshopTab] = useState('categories');
   const [showVotes, setShowVotes] = useState(true);
   const [showRegenerateLinkConfirm, setShowRegenerateLinkConfirm] = useState(false);
   const [showVotingShare, setShowVotingShare] = useState(false);
@@ -1593,7 +1595,7 @@ export default function SummitTaxonomyWorkshop() {
               </span>
               <div className="min-w-0">
                 <div className="truncate text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">BGC Engineering IT Summit</div>
-                <h1 className="truncate text-xl font-semibold">Categories Workshop</h1>
+                <h1 className="truncate text-xl font-semibold">{workshopTab === 'categories' ? 'Categories Workshop' : 'Working Well / Needs Attention'}</h1>
               </div>
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
@@ -1611,6 +1613,25 @@ export default function SummitTaxonomyWorkshop() {
             <button onClick={redo} disabled={!future.length} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title="Redo"><Icons.Redo2 className="h-4 w-4" /></button>
             <button onClick={manualSave} className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 font-semibold text-slate-950 transition hover:bg-cyan-300" title="Save"><Icons.Save className="h-4 w-4" /></button>
             <button onClick={exportExcel} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white font-semibold text-slate-900 transition hover:bg-slate-100" title="Export Excel"><Icons.FileSpreadsheet className="h-4 w-4" /></button>
+            <span className="mx-1 hidden h-6 w-px bg-white/20 sm:block" />
+            {voteUrl ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowVotingDetails(true)}
+                  className={`flex h-9 items-center rounded-lg px-2.5 text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-md ${isVotingExpired ? 'bg-red-100 text-red-800 hover:bg-red-50' : 'bg-emerald-300 text-slate-950 hover:bg-emerald-200'}`}
+                  title={`Voting details. Ends ${new Date(session.voteExpiresAt).toLocaleTimeString()}`}
+                >
+                  <Icons.Clock3 className="mr-1 h-4 w-4" />
+                  {formatCountdown(effectiveCountdownMs)}
+                </button>
+                <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md" title="Copy public fallback link"><Icons.Link className="h-4 w-4" /></button>
+                <button onClick={() => setShowVotingShare(true)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white font-semibold text-slate-950 transition hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-md" title="Fullscreen QR"><Icons.QrCode className="h-4 w-4" /></button>
+                <button onClick={() => setShowRegenerateLinkConfirm(true)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-300 bg-amber-100 font-semibold text-amber-900 transition hover:-translate-y-0.5 hover:bg-amber-50 hover:shadow-md" title="Reset stats and regenerate link"><Icons.RefreshCcw className="h-4 w-4" /></button>
+              </>
+            ) : (
+              <button onClick={() => enableVoting(false)} className="flex h-9 items-center gap-1 rounded-lg bg-emerald-500 px-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-400 hover:shadow-md"><Icons.Radio className="h-4 w-4" /><span>Open vote</span></button>
+            )}
           </div>
         </div>
 
@@ -1659,664 +1680,675 @@ export default function SummitTaxonomyWorkshop() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 px-4 py-2 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-center">
-            <div className="relative min-w-0 flex-1">
-              <Icons.Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <input
-                value={taxonomySearch}
-                onChange={(event) => setTaxonomySearch(event.target.value)}
-                className="min-h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-9 py-1.5 text-sm text-slate-900 outline-none transition focus:border-cyan-300 focus:bg-white focus:ring-2 focus:ring-cyan-100"
-                placeholder="Search categories, subcategories, evidence, notes"
-              />
-              {taxonomySearch && (
-                <button
-                  type="button"
-                  onClick={() => setTaxonomySearch('')}
-                  className="absolute right-2 top-1.5 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                  title="Clear search"
-                >
-                  <Icons.X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-            <span className="rounded-lg bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-600">
-              {searchNeedle ? `${visibleCategories.length} cat / ${searchVisibleSubcategoryCount} sub` : 'Ready'}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5 text-sm">
-            <button onClick={addCategory} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition hover:bg-slate-50" title="Add top category"><Icons.FolderPlus className="h-4 w-4" /><span className="hidden sm:inline">Add</span></button>
-            <button onClick={() => setShowDeleted(!showDeleted)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Removed items"><Icons.ArchiveRestore className="h-4 w-4" /></button>
-            <button onClick={mergeSelectedCategories} disabled={selectedForMerge.length < 2} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition disabled:opacity-40 hover:bg-slate-50" title="Combine selected categories"><Icons.Merge className="h-4 w-4" /><span>{selectedForMerge.length || ''}</span></button>
-            <label className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Restore JSON">
-              <Icons.Upload className="h-4 w-4" />
-              <input type="file" accept="application/json" onChange={importJson} className="hidden" />
-            </label>
-            <button onClick={() => navigator.clipboard.writeText(JSON.stringify(state, null, 2))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Copy JSON"><Icons.Copy className="h-4 w-4" /></button>
-            {voteUrl ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setShowVotingDetails(true)}
-                  className={`flex h-9 items-center rounded-lg px-2.5 text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-md ${isVotingExpired ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
-                  title={`Voting details. Ends ${new Date(session.voteExpiresAt).toLocaleTimeString()}`}
-                >
-                  <Icons.Clock3 className="mr-1 h-4 w-4" />
-                  {formatCountdown(effectiveCountdownMs)}
-                </button>
-                <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md" title="Copy voting link"><Icons.Link className="h-4 w-4" /></button>
-                <button onClick={() => setShowVotingShare(true)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md" title="Fullscreen QR"><Icons.QrCode className="h-4 w-4" /></button>
-                <button onClick={() => setShowRegenerateLinkConfirm(true)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:bg-amber-100 hover:shadow-md" title="Reset stats and regenerate link"><Icons.RefreshCcw className="h-4 w-4" /></button>
-              </>
-            ) : (
-              <button onClick={() => enableVoting(false)} className="flex h-9 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md"><Icons.Radio className="h-4 w-4" /><span>Open vote</span></button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="grid gap-4 transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--summit-workshop-grid)]"
-        style={{ '--summit-workshop-grid': topCategoriesCollapsed ? '72px minmax(0,1fr) 320px' : '360px minmax(0,1fr) 320px' }}
-      >
-        <aside className={`relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-out ${topCategoriesCollapsed ? 'p-2' : 'p-3'}`}>
-          <div className={`transition-all duration-300 ease-out ${
-            topCategoriesCollapsed ? 'pointer-events-none absolute inset-0 -translate-x-4 opacity-0' : 'relative translate-x-0 opacity-100'
-          }`}>
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="truncate text-sm font-semibold text-slate-900">Top Categories</h2>
-              <div className="flex shrink-0 items-center gap-2">
-                {selectedForMerge.length > 0 && (
-                  <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">
-                    {selectedForMerge.length} selected
-                  </span>
-                )}
-                <span className="text-xs text-slate-500">Grip to reorder</span>
-                <button
-                  type="button"
-                  onClick={() => setTopCategoriesCollapsed(true)}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-sm"
-                  title="Collapse top categories"
-                  aria-label="Collapse top categories"
-                >
-                  <Icons.ChevronsLeft className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            <div className="space-y-2">
-              {visibleCategories.map((cat) => (
-                <div
-                  key={cat.id}
-                  onDragOver={(event) => setDropTarget(event, {
-                    type: 'category',
-                    id: cat.id,
-                    label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
-                  })}
-                  onDragEnter={(event) => setDropTarget(event, {
-                    type: 'category',
-                    id: cat.id,
-                    label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
-                  })}
-                  onDrop={(event) => {
-                    dropCategory(event, cat);
-                  }}
-                  onClick={() => setSelectedCategoryId(cat.id)}
-                  className={`relative w-full rounded-lg border p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
-                    dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id
-                      ? 'scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
-                      : dragItem?.type === 'category' && dragItem.id === cat.id
-                        ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
-                        : highlightIds[`move-category-${cat.id}`]
-                          ? 'summit-drop-land border-cyan-400 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                          : highlightIds[`vote-${cat.id}`]
-                            ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                            : selectedCategory?.id === cat.id
-                              ? 'border-slate-900 bg-slate-50 shadow-sm'
-                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <button
-                      type="button"
-                      draggable
-                      onDragStart={(event) => startDrag(event, { type: 'category', id: cat.id, name: cat.name, icon: cat.icon, color: cat.color })}
-                      onDrag={(event) => updateDragPosition(event)}
-                      onDragEnd={finishDrag}
-                      onClick={(event) => event.stopPropagation()}
-                      className="flex h-9 w-7 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
-                      title="Drag to reorder"
-                    >
-                      <Icons.GripVertical className="h-4 w-4" />
-                    </button>
-                    <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: cat.color }}>
-                      <Icon name={cat.icon} className="h-5 w-5" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block break-words text-sm font-semibold leading-snug text-slate-900">
-                        <HighlightText text={cat.name} query={searchNeedle} />
-                      </span>
-                      <span className="mt-1 block text-xs text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
-                      {!!(subcategorySuggestionsByParent.get(cat.id)?.length || 0) && (
-                        <span className="mt-1 inline-flex rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                          {subcategorySuggestionsByParent.get(cat.id).length} ideas
-                        </span>
-                      )}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleSelectedForMerge(cat.id);
-                        }}
-                        className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 ${
-                          selectedForMerge.includes(cat.id)
-                            ? 'border-cyan-300 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-100'
-                            : 'border-slate-200 bg-white text-slate-400 hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700'
-                        }`}
-                        title={selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
-                      >
-                        {selectedForMerge.includes(cat.id) ? <Icons.Check className="h-4 w-4" /> : <Icons.Square className="h-4 w-4" />}
-                      </button>
-                      <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
-                        linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
-                      }`}>
-                        <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                        {linkedVoteCount(votes, cat)}
-                      </span>
-                      <div onClick={(event) => event.stopPropagation()}>
-                        <CardActionsMenu
-                          value={cat.icon}
-                          color={cat.color}
-                          isOpen={iconPickerTarget?.type === 'category-list' && iconPickerTarget.id === cat.id}
-                          onToggle={() => setIconPickerTarget(prev => prev?.type === 'category-list' && prev.id === cat.id ? null : { type: 'category-list', id: cat.id })}
-                          onRename={() => openCategoryForEdit(cat.id)}
-                          onIconSelect={(iconName) => {
-                            updateCategory(cat.id, { icon: iconName });
-                            setIconPickerTarget(null);
-                          }}
-                          onColorSelect={(color) => updateCategory(cat.id, { color })}
-                          onRemove={() => softDeleteCategory(cat.id)}
-                          label="Category options"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  {dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id && (
-                    <div className="pointer-events-none absolute inset-x-3 -bottom-2 z-10 flex justify-center">
-                      <span className="rounded-full bg-cyan-600 px-2 py-0.5 text-[11px] font-semibold text-white shadow-lg">
-                      Drop here: {dragOverTarget.label}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {!visibleCategories.length && (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
-                No categories match this search.
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className={`flex flex-col items-center gap-3 p-2 transition-all duration-300 ease-out ${
-            topCategoriesCollapsed ? 'relative translate-x-0 opacity-100' : 'pointer-events-none absolute inset-0 translate-x-4 opacity-0'
-          }`}>
-            <button
-              type="button"
-              onClick={() => setTopCategoriesCollapsed(false)}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-950 text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"
-              title="Expand top categories"
-              aria-label="Expand top categories"
-            >
-              <Icons.ChevronsRight className="h-4 w-4" />
-            </button>
-            <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-2 text-slate-700">
-              <Icons.Folders className="h-4 w-4 text-slate-500" />
-              <span className="text-sm font-bold text-slate-950">{activeCategories.length}</span>
-            </div>
-            <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-cyan-100 bg-cyan-50 px-1.5 py-2 text-cyan-800">
-              <Icons.Check className="h-4 w-4" />
-              <span className="text-sm font-bold">{selectedForMerge.length}</span>
-            </div>
-            <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-slate-200 bg-white px-1.5 py-2 text-slate-600">
-              <Icons.ThumbsUp className="h-4 w-4 text-slate-500" />
-              <span className="text-sm font-bold">{activeCategories.reduce((sum, category) => sum + linkedVoteCount(votes, category), 0)}</span>
-            </div>
-          </div>
-        </aside>
-
-        {isSearchMode ? (
-          <section className="space-y-4">
-            {mainCategories.map(renderCategoryPanel)}
-            {!mainCategories.length && (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
-                No category or subcategory matches this search.
-              </div>
-            )}
-          </section>
-        ) : (
-          <section
-            onDragOver={(event) => {
-              if (selectedCategory && dragItem?.type === 'sub') {
-                setDropTarget(event, { type: 'selected-category', id: selectedCategory.id, label: `move to end of ${selectedCategory.name}` });
-              } else {
-                event.preventDefault();
-              }
-            }}
-            onDrop={(event) => dropIntoCategory(event, selectedCategory)}
-            className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
-              dragOverTarget?.type === 'selected-category' && selectedCategory?.id === dragOverTarget.id
-                ? 'border-cyan-300 ring-2 ring-cyan-100'
-                : selectedCategory && highlightIds[`move-category-${selectedCategory.id}`]
-                  ? 'summit-drop-land border-cyan-300 ring-2 ring-cyan-100'
-                  : 'border-slate-200'
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 px-4 py-2">
+          <button
+            type="button"
+            onClick={() => setWorkshopTab('categories')}
+            className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+              workshopTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
             }`}
           >
-            {selectedCategory && (
-              <>
-                <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
-                  <div className="flex min-w-0 flex-1 gap-3">
-                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: selectedCategory.color }}>
-                      <Icon name={selectedCategory.icon} className="h-6 w-6" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <input
-                          ref={categoryNameInputRef}
-                          value={selectedCategory.name}
-                          onChange={(e) => updateCategory(selectedCategory.id, { name: e.target.value })}
-                          className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300"
-                        />
-                        <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
-                          linkedVoteCount(votes, selectedCategory) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
-                        } ${highlightIds[`vote-${selectedCategory.id}`] ? 'scale-110 ring-2 ring-cyan-200' : ''}`}>
-                          <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                          {linkedVoteCount(votes, selectedCategory)} votes
-                        </span>
-                      </div>
-                      <textarea
-                        value={selectedCategory.description || ''}
-                        onChange={(e) => updateCategory(selectedCategory.id, { description: e.target.value })}
-                        rows={2}
-                        className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400"
-                        placeholder="Describe the category boundary"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-start gap-2">
-                    <button onClick={() => addSubcategory(selectedCategory.id)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
-                    <CardActionsMenu
-                      value={selectedCategory.icon}
-                      color={selectedCategory.color}
-                      isOpen={iconPickerTarget?.type === 'category' && iconPickerTarget.id === selectedCategory.id}
-                      onToggle={() => setIconPickerTarget(prev => prev?.type === 'category' && prev.id === selectedCategory.id ? null : { type: 'category', id: selectedCategory.id })}
-                      onRename={focusCategoryName}
-                      onIconSelect={(iconName) => {
-                        updateCategory(selectedCategory.id, { icon: iconName });
-                        setIconPickerTarget(null);
-                      }}
-                      onColorSelect={(color) => updateCategory(selectedCategory.id, { color })}
-                      onRemove={() => softDeleteCategory(selectedCategory.id)}
-                      label="Category options"
-                    />
-                  </div>
-                </div>
+            <Icons.Tags className="h-4 w-4" />
+            Categories & Skills
+          </button>
+          <button
+            type="button"
+            onClick={() => setWorkshopTab('working')}
+            className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+              workshopTab === 'working' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Icons.Sparkles className="h-4 w-4" />
+            Working Well / Needs Attention
+          </button>
+        </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {visibleSubcategories.map((subcat) => (
-                    <div
-                      key={subcat.id}
-                      onDragOver={(event) => {
-                        event.stopPropagation();
-                        if (dragItem?.type !== 'sub') {
-                          event.preventDefault();
-                          return;
-                        }
-                        setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
-                      }}
-                      onDragEnter={(event) => {
-                        event.stopPropagation();
-                        if (dragItem?.type !== 'sub') {
-                          event.preventDefault();
-                          return;
-                        }
-                        setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
-                      }}
-                      onDrop={(event) => dropSubcategory(event, subcat)}
-                      className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm ${
-                        iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id
-                          ? 'z-50 border-slate-300 bg-white shadow-xl'
-                          : dragOverTarget?.type === 'sub' && dragOverTarget.id === subcat.id
-                            ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
-                            : dragItem?.type === 'sub' && dragItem.id === subcat.id
-                              ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
-                              : highlightIds[`move-sub-${subcat.id}`]
-                                ? 'summit-drop-land border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                                : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
-                                  ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                                  : 'border-slate-200 bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        <button
-                          type="button"
-                          draggable
-                          onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: selectedCategory.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: selectedCategory.color })}
-                          onDrag={(event) => updateDragPosition(event)}
-                          onDragEnd={finishDrag}
-                          className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing"
-                          title="Drag subcategory"
-                        >
-                          <Icons.GripVertical className="h-4 w-4" />
-                        </button>
-                        <span className="mt-1 text-slate-500"><Icon name={subcat.icon || 'Tag'} /></span>
-                        <div className="min-w-0 flex-1">
-                          <input
-                            ref={(node) => {
-                              if (node) subcategoryNameInputRefs.current[subcat.id] = node;
-                              else delete subcategoryNameInputRefs.current[subcat.id];
-                            }}
-                            value={subcat.name}
-                            onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { name: e.target.value })}
-                            className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white"
-                          />
-                          <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white" placeholder="Evidence or discussion note" />
-                        </div>
-                        <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
-                          linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
-                        }`}>
-                          <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                          {linkedVoteCount(votes, subcat)}
-                        </span>
-                        <CardActionsMenu
-                          value={subcat.icon || 'Tag'}
-                          color={selectedCategory.color}
-                          isOpen={iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id}
-                          onToggle={() => setIconPickerTarget(prev => prev?.type === 'subcategory' && prev.id === subcat.id ? null : { type: 'subcategory', categoryId: selectedCategory.id, id: subcat.id })}
-                          onRename={() => focusSubcategoryName(subcat.id)}
-                          onIconSelect={(iconName) => {
-                            updateSubcategory(selectedCategory.id, subcat.id, { icon: iconName });
-                            setIconPickerTarget(null);
-                          }}
-                          onRemove={() => softDeleteSubcategory(selectedCategory.id, subcat.id)}
-                          extraActions={renderMoveSubcategoryAction(selectedCategory, subcat)}
-                          label="Subcategory options"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {!visibleSubcategories.length && (
-                    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2">
-                    No subcategories match this search in {selectedCategory.name}.
-                    </div>
-                  )}
-                </div>
-
-                {!!selectedCategorySuggestions.length && (
-                  <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <Icons.Lightbulb className="h-4 w-4 text-amber-700" />
-                      Suggested subcategories
-                      </div>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-800">{selectedCategorySuggestions.length}</span>
-                    </div>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {selectedCategorySuggestions.map((suggestion) => {
-                        const alreadyAdded = isSuggestionAlreadyInCategory(selectedCategory, suggestion);
-                        return (
-                          <div
-                            key={suggestion.id}
-                            className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
-                              highlightIds[`idea-${suggestion.id}`]
-                                ? 'border-amber-300 bg-white shadow-md ring-2 ring-amber-200'
-                                : 'border-amber-100 bg-white/90'
-                            }`}
-                          >
-                            <div className="flex items-start gap-2">
-                              <Icons.Tag className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-semibold text-slate-900">{suggestion.itemLabel}</div>
-                                <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
-                              </div>
-                              <span className={`rounded-lg px-2 py-1 text-xs font-bold ${voteCount(votes, suggestion.itemId) > 0 ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
-                                <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
-                                {voteCount(votes, suggestion.itemId)}
-                              </span>
-                            </div>
-                            {suggestion.value?.reason && <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-slate-600">{suggestion.value.reason}</div>}
-                            <button
-                              onClick={() => addSuggestedCategory(suggestion)}
-                              disabled={alreadyAdded}
-                              className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
-                            >
-                              <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />
-                              {alreadyAdded ? 'Already added' : 'Add subcategory'}
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+        {workshopTab === 'categories' && (
+          <div className="flex flex-col gap-2 px-4 py-2 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Icons.Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <input
+                  value={taxonomySearch}
+                  onChange={(event) => setTaxonomySearch(event.target.value)}
+                  className="min-h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-9 py-1.5 text-sm text-slate-900 outline-none transition focus:border-cyan-300 focus:bg-white focus:ring-2 focus:ring-cyan-100"
+                  placeholder="Search categories, subcategories, evidence, notes"
+                />
+                {taxonomySearch && (
+                  <button
+                    type="button"
+                    onClick={() => setTaxonomySearch('')}
+                    className="absolute right-2 top-1.5 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                    title="Clear search"
+                  >
+                    <Icons.X className="h-4 w-4" />
+                  </button>
                 )}
-
-                <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                    <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                      <Icons.Tag className="h-4 w-4 shrink-0 text-slate-500" />
-                      <input
-                        ref={subcategoryNameInputRef}
-                        value={newSubcategoryName}
-                        onChange={(e) => setNewSubcategoryName(e.target.value)}
-                        className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-900 outline-none"
-                        placeholder={`Add subcategory under ${selectedCategory.name}`}
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={!newSubcategoryName.trim()}
-                      className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
-                    >
-                      <Icons.Plus className="mr-1 inline h-4 w-4" />
-                    Add sub
-                    </button>
-                  </div>
-                  <input
-                    value={newSubcategoryEvidence}
-                    onChange={(e) => setNewSubcategoryEvidence(e.target.value)}
-                    className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-cyan-300"
-                    placeholder="Evidence or discussion note"
-                  />
-                </form>
-              </>
-            )}
-          </section>
-        )}
-
-        <aside className="space-y-4">
-          <div className="rounded-lg border border-cyan-100 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Icons.Radio className="h-4 w-4 text-cyan-700" />
-                <h2 className="text-sm font-semibold text-slate-900">Recent Activity</h2>
               </div>
-              <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800">live</span>
+              <span className="rounded-lg bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-600">
+                {searchNeedle ? `${visibleCategories.length} cat / ${searchVisibleSubcategoryCount} sub` : 'Ready'}
+              </span>
             </div>
-            <div className="max-h-80 space-y-2 overflow-auto pr-1">
-              {activityFeed.map(activity => (
-                <div key={activity.id} className="summit-toast flex gap-3 rounded-lg border border-slate-100 bg-slate-50 p-2 text-xs">
-                  <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${activityToneClasses(activity.tone)}`}>
-                    <Icon name={activity.icon} className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="truncate font-semibold text-slate-900">{activity.title}</div>
-                      <div className="shrink-0 text-[10px] text-slate-400">{new Date(activity.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</div>
-                    </div>
-                    <div className="mt-0.5 break-words text-slate-600">{activity.detail}</div>
-                    {activity.actor && <div className="mt-1 text-[11px] font-medium text-slate-500">by {activity.actor}</div>}
-                  </div>
-                </div>
-              ))}
-              {!activityFeed.length && (
-                <p className="text-sm text-slate-500">Live participant joins, votes, category ideas, and merge suggestions will appear here.</p>
-              )}
+            <div className="flex flex-wrap items-center gap-1.5 text-sm">
+              <button onClick={addCategory} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition hover:bg-slate-50" title="Add top category"><Icons.FolderPlus className="h-4 w-4" /><span className="hidden sm:inline">Add</span></button>
+              <button onClick={() => setShowDeleted(!showDeleted)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Removed items"><Icons.ArchiveRestore className="h-4 w-4" /></button>
+              <button onClick={mergeSelectedCategories} disabled={selectedForMerge.length < 2} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition disabled:opacity-40 hover:bg-slate-50" title="Combine selected categories"><Icons.Merge className="h-4 w-4" /><span>{selectedForMerge.length || ''}</span></button>
+              <label className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Restore JSON">
+                <Icons.Upload className="h-4 w-4" />
+                <input type="file" accept="application/json" onChange={importJson} className="hidden" />
+              </label>
+              <button onClick={() => navigator.clipboard.writeText(JSON.stringify(state, null, 2))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Copy JSON"><Icons.Copy className="h-4 w-4" /></button>
             </div>
           </div>
+        )}
+      </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-900">Live Feedback</h2>
-              <button onClick={() => setShowVotes(!showVotes)} className="text-xs text-slate-500 hover:text-slate-900">{showVotes ? 'Hide' : 'Show'}</button>
-            </div>
-            {showVotes && (
-              <div className="space-y-3">
-                {(votes.totals || []).slice(0, 8).map(v => (
-                  <div key={`${v.itemId}-${v.voteType}`}>
-                    <div className="flex justify-between text-xs">
-                      <span className="truncate font-medium text-slate-700">{v.itemLabel}</span>
-                      <span className="text-slate-500">{v.count}</span>
+      {workshopTab === 'working' ? (
+        <ItSummitFeedbackPanel mode="facilitator" />
+      ) : (
+        <div
+          className="grid gap-4 transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--summit-workshop-grid)]"
+          style={{ '--summit-workshop-grid': topCategoriesCollapsed ? '72px minmax(0,1fr) 320px' : '360px minmax(0,1fr) 320px' }}
+        >
+          <aside className={`relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-out ${topCategoriesCollapsed ? 'p-2' : 'p-3'}`}>
+            <div className={`transition-all duration-300 ease-out ${
+              topCategoriesCollapsed ? 'pointer-events-none absolute inset-0 -translate-x-4 opacity-0' : 'relative translate-x-0 opacity-100'
+            }`}>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="truncate text-sm font-semibold text-slate-900">Top Categories</h2>
+                <div className="flex shrink-0 items-center gap-2">
+                  {selectedForMerge.length > 0 && (
+                    <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">
+                      {selectedForMerge.length} selected
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-500">Grip to reorder</span>
+                  <button
+                    type="button"
+                    onClick={() => setTopCategoriesCollapsed(true)}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-sm"
+                    title="Collapse top categories"
+                    aria-label="Collapse top categories"
+                  >
+                    <Icons.ChevronsLeft className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {visibleCategories.map((cat) => (
+                  <div
+                    key={cat.id}
+                    onDragOver={(event) => setDropTarget(event, {
+                      type: 'category',
+                      id: cat.id,
+                      label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
+                    })}
+                    onDragEnter={(event) => setDropTarget(event, {
+                      type: 'category',
+                      id: cat.id,
+                      label: dragItem?.type === 'category' ? `place before ${cat.name}` : `move into ${cat.name}`,
+                    })}
+                    onDrop={(event) => {
+                      dropCategory(event, cat);
+                    }}
+                    onClick={() => setSelectedCategoryId(cat.id)}
+                    className={`relative w-full rounded-lg border p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
+                      dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id
+                        ? 'scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                        : dragItem?.type === 'category' && dragItem.id === cat.id
+                          ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                          : highlightIds[`move-category-${cat.id}`]
+                            ? 'summit-drop-land border-cyan-400 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                            : highlightIds[`vote-${cat.id}`]
+                              ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                              : selectedCategory?.id === cat.id
+                                ? 'border-slate-900 bg-slate-50 shadow-sm'
+                                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) => startDrag(event, { type: 'category', id: cat.id, name: cat.name, icon: cat.icon, color: cat.color })}
+                        onDrag={(event) => updateDragPosition(event)}
+                        onDragEnd={finishDrag}
+                        onClick={(event) => event.stopPropagation()}
+                        className="flex h-9 w-7 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
+                        title="Drag to reorder"
+                      >
+                        <Icons.GripVertical className="h-4 w-4" />
+                      </button>
+                      <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: cat.color }}>
+                        <Icon name={cat.icon} className="h-5 w-5" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block break-words text-sm font-semibold leading-snug text-slate-900">
+                          <HighlightText text={cat.name} query={searchNeedle} />
+                        </span>
+                        <span className="mt-1 block text-xs text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
+                        {!!(subcategorySuggestionsByParent.get(cat.id)?.length || 0) && (
+                          <span className="mt-1 inline-flex rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                            {subcategorySuggestionsByParent.get(cat.id).length} ideas
+                          </span>
+                        )}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleSelectedForMerge(cat.id);
+                          }}
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 ${
+                            selectedForMerge.includes(cat.id)
+                              ? 'border-cyan-300 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-100'
+                              : 'border-slate-200 bg-white text-slate-400 hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700'
+                          }`}
+                          title={selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
+                        >
+                          {selectedForMerge.includes(cat.id) ? <Icons.Check className="h-4 w-4" /> : <Icons.Square className="h-4 w-4" />}
+                        </button>
+                        <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
+                          linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                          {linkedVoteCount(votes, cat)}
+                        </span>
+                        <div onClick={(event) => event.stopPropagation()}>
+                          <CardActionsMenu
+                            value={cat.icon}
+                            color={cat.color}
+                            isOpen={iconPickerTarget?.type === 'category-list' && iconPickerTarget.id === cat.id}
+                            onToggle={() => setIconPickerTarget(prev => prev?.type === 'category-list' && prev.id === cat.id ? null : { type: 'category-list', id: cat.id })}
+                            onRename={() => openCategoryForEdit(cat.id)}
+                            onIconSelect={(iconName) => {
+                              updateCategory(cat.id, { icon: iconName });
+                              setIconPickerTarget(null);
+                            }}
+                            onColorSelect={(color) => updateCategory(cat.id, { color })}
+                            onRemove={() => softDeleteCategory(cat.id)}
+                            label="Category options"
+                          />
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-1 h-2 rounded bg-slate-100">
-                      <div className="h-2 rounded bg-cyan-500 transition-all" style={{ width: `${Math.min(100, v.count * 12)}%` }} />
+                    {dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id && (
+                      <div className="pointer-events-none absolute inset-x-3 -bottom-2 z-10 flex justify-center">
+                        <span className="rounded-full bg-cyan-600 px-2 py-0.5 text-[11px] font-semibold text-white shadow-lg">
+                      Drop here: {dragOverTarget.label}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {!visibleCategories.length && (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
+                No categories match this search.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className={`flex flex-col items-center gap-3 p-2 transition-all duration-300 ease-out ${
+              topCategoriesCollapsed ? 'relative translate-x-0 opacity-100' : 'pointer-events-none absolute inset-0 translate-x-4 opacity-0'
+            }`}>
+              <button
+                type="button"
+                onClick={() => setTopCategoriesCollapsed(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-950 text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"
+                title="Expand top categories"
+                aria-label="Expand top categories"
+              >
+                <Icons.ChevronsRight className="h-4 w-4" />
+              </button>
+              <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-2 text-slate-700">
+                <Icons.Folders className="h-4 w-4 text-slate-500" />
+                <span className="text-sm font-bold text-slate-950">{activeCategories.length}</span>
+              </div>
+              <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-cyan-100 bg-cyan-50 px-1.5 py-2 text-cyan-800">
+                <Icons.Check className="h-4 w-4" />
+                <span className="text-sm font-bold">{selectedForMerge.length}</span>
+              </div>
+              <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-slate-200 bg-white px-1.5 py-2 text-slate-600">
+                <Icons.ThumbsUp className="h-4 w-4 text-slate-500" />
+                <span className="text-sm font-bold">{activeCategories.reduce((sum, category) => sum + linkedVoteCount(votes, category), 0)}</span>
+              </div>
+            </div>
+          </aside>
+
+          {isSearchMode ? (
+            <section className="space-y-4">
+              {mainCategories.map(renderCategoryPanel)}
+              {!mainCategories.length && (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+                No category or subcategory matches this search.
+                </div>
+              )}
+            </section>
+          ) : (
+            <section
+              onDragOver={(event) => {
+                if (selectedCategory && dragItem?.type === 'sub') {
+                  setDropTarget(event, { type: 'selected-category', id: selectedCategory.id, label: `move to end of ${selectedCategory.name}` });
+                } else {
+                  event.preventDefault();
+                }
+              }}
+              onDrop={(event) => dropIntoCategory(event, selectedCategory)}
+              className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
+                dragOverTarget?.type === 'selected-category' && selectedCategory?.id === dragOverTarget.id
+                  ? 'border-cyan-300 ring-2 ring-cyan-100'
+                  : selectedCategory && highlightIds[`move-category-${selectedCategory.id}`]
+                    ? 'summit-drop-land border-cyan-300 ring-2 ring-cyan-100'
+                    : 'border-slate-200'
+              }`}
+            >
+              {selectedCategory && (
+                <>
+                  <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
+                    <div className="flex min-w-0 flex-1 gap-3">
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: selectedCategory.color }}>
+                        <Icon name={selectedCategory.icon} className="h-6 w-6" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <input
+                            ref={categoryNameInputRef}
+                            value={selectedCategory.name}
+                            onChange={(e) => updateCategory(selectedCategory.id, { name: e.target.value })}
+                            className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300"
+                          />
+                          <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
+                            linkedVoteCount(votes, selectedCategory) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
+                          } ${highlightIds[`vote-${selectedCategory.id}`] ? 'scale-110 ring-2 ring-cyan-200' : ''}`}>
+                            <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                            {linkedVoteCount(votes, selectedCategory)} votes
+                          </span>
+                        </div>
+                        <textarea
+                          value={selectedCategory.description || ''}
+                          onChange={(e) => updateCategory(selectedCategory.id, { description: e.target.value })}
+                          rows={2}
+                          className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400"
+                          placeholder="Describe the category boundary"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-start gap-2">
+                      <button onClick={() => addSubcategory(selectedCategory.id)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
+                      <CardActionsMenu
+                        value={selectedCategory.icon}
+                        color={selectedCategory.color}
+                        isOpen={iconPickerTarget?.type === 'category' && iconPickerTarget.id === selectedCategory.id}
+                        onToggle={() => setIconPickerTarget(prev => prev?.type === 'category' && prev.id === selectedCategory.id ? null : { type: 'category', id: selectedCategory.id })}
+                        onRename={focusCategoryName}
+                        onIconSelect={(iconName) => {
+                          updateCategory(selectedCategory.id, { icon: iconName });
+                          setIconPickerTarget(null);
+                        }}
+                        onColorSelect={(color) => updateCategory(selectedCategory.id, { color })}
+                        onRemove={() => softDeleteCategory(selectedCategory.id)}
+                        label="Category options"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {visibleSubcategories.map((subcat) => (
+                      <div
+                        key={subcat.id}
+                        onDragOver={(event) => {
+                          event.stopPropagation();
+                          if (dragItem?.type !== 'sub') {
+                            event.preventDefault();
+                            return;
+                          }
+                          setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
+                        }}
+                        onDragEnter={(event) => {
+                          event.stopPropagation();
+                          if (dragItem?.type !== 'sub') {
+                            event.preventDefault();
+                            return;
+                          }
+                          setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
+                        }}
+                        onDrop={(event) => dropSubcategory(event, subcat)}
+                        className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm ${
+                          iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id
+                            ? 'z-50 border-slate-300 bg-white shadow-xl'
+                            : dragOverTarget?.type === 'sub' && dragOverTarget.id === subcat.id
+                              ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                              : dragItem?.type === 'sub' && dragItem.id === subcat.id
+                                ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                                : highlightIds[`move-sub-${subcat.id}`]
+                                  ? 'summit-drop-land border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                                  : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
+                                    ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                                    : 'border-slate-200 bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <button
+                            type="button"
+                            draggable
+                            onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: selectedCategory.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: selectedCategory.color })}
+                            onDrag={(event) => updateDragPosition(event)}
+                            onDragEnd={finishDrag}
+                            className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing"
+                            title="Drag subcategory"
+                          >
+                            <Icons.GripVertical className="h-4 w-4" />
+                          </button>
+                          <span className="mt-1 text-slate-500"><Icon name={subcat.icon || 'Tag'} /></span>
+                          <div className="min-w-0 flex-1">
+                            <input
+                              ref={(node) => {
+                                if (node) subcategoryNameInputRefs.current[subcat.id] = node;
+                                else delete subcategoryNameInputRefs.current[subcat.id];
+                              }}
+                              value={subcat.name}
+                              onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { name: e.target.value })}
+                              className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white"
+                            />
+                            <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white" placeholder="Evidence or discussion note" />
+                          </div>
+                          <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
+                            linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
+                          }`}>
+                            <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                            {linkedVoteCount(votes, subcat)}
+                          </span>
+                          <CardActionsMenu
+                            value={subcat.icon || 'Tag'}
+                            color={selectedCategory.color}
+                            isOpen={iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id}
+                            onToggle={() => setIconPickerTarget(prev => prev?.type === 'subcategory' && prev.id === subcat.id ? null : { type: 'subcategory', categoryId: selectedCategory.id, id: subcat.id })}
+                            onRename={() => focusSubcategoryName(subcat.id)}
+                            onIconSelect={(iconName) => {
+                              updateSubcategory(selectedCategory.id, subcat.id, { icon: iconName });
+                              setIconPickerTarget(null);
+                            }}
+                            onRemove={() => softDeleteSubcategory(selectedCategory.id, subcat.id)}
+                            extraActions={renderMoveSubcategoryAction(selectedCategory, subcat)}
+                            label="Subcategory options"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    {!visibleSubcategories.length && (
+                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2">
+                    No subcategories match this search in {selectedCategory.name}.
+                      </div>
+                    )}
+                  </div>
+
+                  {!!selectedCategorySuggestions.length && (
+                    <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                          <Icons.Lightbulb className="h-4 w-4 text-amber-700" />
+                      Suggested subcategories
+                        </div>
+                        <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-800">{selectedCategorySuggestions.length}</span>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {selectedCategorySuggestions.map((suggestion) => {
+                          const alreadyAdded = isSuggestionAlreadyInCategory(selectedCategory, suggestion);
+                          return (
+                            <div
+                              key={suggestion.id}
+                              className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
+                                highlightIds[`idea-${suggestion.id}`]
+                                  ? 'border-amber-300 bg-white shadow-md ring-2 ring-amber-200'
+                                  : 'border-amber-100 bg-white/90'
+                              }`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <Icons.Tag className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-sm font-semibold text-slate-900">{suggestion.itemLabel}</div>
+                                  <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
+                                </div>
+                                <span className={`rounded-lg px-2 py-1 text-xs font-bold ${voteCount(votes, suggestion.itemId) > 0 ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                                  <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
+                                  {voteCount(votes, suggestion.itemId)}
+                                </span>
+                              </div>
+                              {suggestion.value?.reason && <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-slate-600">{suggestion.value.reason}</div>}
+                              <button
+                                onClick={() => addSuggestedCategory(suggestion)}
+                                disabled={alreadyAdded}
+                                className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                              >
+                                <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />
+                                {alreadyAdded ? 'Already added' : 'Add subcategory'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                      <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                        <Icons.Tag className="h-4 w-4 shrink-0 text-slate-500" />
+                        <input
+                          ref={subcategoryNameInputRef}
+                          value={newSubcategoryName}
+                          onChange={(e) => setNewSubcategoryName(e.target.value)}
+                          className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                          placeholder={`Add subcategory under ${selectedCategory.name}`}
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={!newSubcategoryName.trim()}
+                        className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                      >
+                        <Icons.Plus className="mr-1 inline h-4 w-4" />
+                    Add sub
+                      </button>
+                    </div>
+                    <input
+                      value={newSubcategoryEvidence}
+                      onChange={(e) => setNewSubcategoryEvidence(e.target.value)}
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-cyan-300"
+                      placeholder="Evidence or discussion note"
+                    />
+                  </form>
+                </>
+              )}
+            </section>
+          )}
+
+          <aside className="space-y-4">
+            <div className="rounded-lg border border-cyan-100 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Icons.Radio className="h-4 w-4 text-cyan-700" />
+                  <h2 className="text-sm font-semibold text-slate-900">Recent Activity</h2>
+                </div>
+                <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800">live</span>
+              </div>
+              <div className="max-h-80 space-y-2 overflow-auto pr-1">
+                {activityFeed.map(activity => (
+                  <div key={activity.id} className="summit-toast flex gap-3 rounded-lg border border-slate-100 bg-slate-50 p-2 text-xs">
+                    <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${activityToneClasses(activity.tone)}`}>
+                      <Icon name={activity.icon} className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="truncate font-semibold text-slate-900">{activity.title}</div>
+                        <div className="shrink-0 text-[10px] text-slate-400">{new Date(activity.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</div>
+                      </div>
+                      <div className="mt-0.5 break-words text-slate-600">{activity.detail}</div>
+                      {activity.actor && <div className="mt-1 text-[11px] font-medium text-slate-500">by {activity.actor}</div>}
                     </div>
                   </div>
                 ))}
-                {!(votes.totals || []).length && <p className="text-sm text-slate-500">Votes will appear here once participants join.</p>}
+                {!activityFeed.length && (
+                  <p className="text-sm text-slate-500">Live participant joins, votes, category ideas, and merge suggestions will appear here.</p>
+                )}
               </div>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-900">Voter Stats</h2>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{(votes.participantStats || []).length}</span>
             </div>
-            <div className="max-h-72 space-y-2 overflow-auto">
-              {(votes.participantStats || []).map(participant => (
-                <div key={participant.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-900">{participant.displayName}</div>
-                      <div className="mt-0.5 text-slate-500">
-                        Last activity {participant.lastActivityAt ? new Date(participant.lastActivityAt).toLocaleTimeString() : 'none yet'}
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-900">Live Feedback</h2>
+                <button onClick={() => setShowVotes(!showVotes)} className="text-xs text-slate-500 hover:text-slate-900">{showVotes ? 'Hide' : 'Show'}</button>
+              </div>
+              {showVotes && (
+                <div className="space-y-3">
+                  {(votes.totals || []).slice(0, 8).map(v => (
+                    <div key={`${v.itemId}-${v.voteType}`}>
+                      <div className="flex justify-between text-xs">
+                        <span className="truncate font-medium text-slate-700">{v.itemLabel}</span>
+                        <span className="text-slate-500">{v.count}</span>
+                      </div>
+                      <div className="mt-1 h-2 rounded bg-slate-100">
+                        <div className="h-2 rounded bg-cyan-500 transition-all" style={{ width: `${Math.min(100, v.count * 12)}%` }} />
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <span className="rounded-lg bg-white px-2 py-1 font-semibold text-slate-800">{participant.totalCount || 0} total</span>
-                      <button
-                        type="button"
-                        onClick={() => setParticipantResetTarget(participant)}
-                        className="rounded-lg border border-red-100 bg-white px-2 py-1 font-semibold text-red-600 transition hover:bg-red-50"
-                        title="Reset this voter"
-                      >
-                        <Icons.UserX className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-1 text-center">
-                    <div className="rounded-md bg-white px-2 py-1">
-                      <div className="font-semibold text-cyan-700">{participant.supportCount || 0}</div>
-                      <div className="text-[10px] uppercase text-slate-400">Votes</div>
-                    </div>
-                    <div className="rounded-md bg-white px-2 py-1">
-                      <div className="font-semibold text-amber-700">{participant.categorySuggestionCount || 0}</div>
-                      <div className="text-[10px] uppercase text-slate-400">Ideas</div>
-                    </div>
-                    <div className="rounded-md bg-white px-2 py-1">
-                      <div className="font-semibold text-violet-700">{participant.mergeSuggestionCount || 0}</div>
-                      <div className="text-[10px] uppercase text-slate-400">Merges</div>
-                    </div>
-                  </div>
-                  {!!participant.recentItems?.length && (
-                    <div className="mt-2 space-y-1">
-                      {participant.recentItems.slice(0, 2).map(item => (
-                        <div key={`${participant.id}-${item.itemId}-${item.voteType}-${item.createdAt}`} className="truncate text-[11px] text-slate-500">
-                          {item.voteType === 'support' ? 'Voted for' : item.voteType === 'merge_suggestion' ? 'Merge idea' : 'New idea'}: {item.itemLabel}
+                  ))}
+                  {!(votes.totals || []).length && <p className="text-sm text-slate-500">Votes will appear here once participants join.</p>}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-900">Voter Stats</h2>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{(votes.participantStats || []).length}</span>
+              </div>
+              <div className="max-h-72 space-y-2 overflow-auto">
+                {(votes.participantStats || []).map(participant => (
+                  <div key={participant.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-900">{participant.displayName}</div>
+                        <div className="mt-0.5 text-slate-500">
+                        Last activity {participant.lastActivityAt ? new Date(participant.lastActivityAt).toLocaleTimeString() : 'none yet'}
                         </div>
-                      ))}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <span className="rounded-lg bg-white px-2 py-1 font-semibold text-slate-800">{participant.totalCount || 0} total</span>
+                        <button
+                          type="button"
+                          onClick={() => setParticipantResetTarget(participant)}
+                          className="rounded-lg border border-red-100 bg-white px-2 py-1 font-semibold text-red-600 transition hover:bg-red-50"
+                          title="Reset this voter"
+                        >
+                          <Icons.UserX className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))}
-              {!(votes.participantStats || []).length && <p className="text-sm text-slate-500">Per-voter stats will appear after people join.</p>}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-900">Top-Level Ideas</h2>
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{topCategorySuggestions.length}</span>
-            </div>
-            <div className="max-h-72 space-y-2 overflow-auto">
-              {topCategorySuggestions.map(suggestion => (
-                <div
-                  key={suggestion.id}
-                  className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
-                    highlightIds[`idea-${suggestion.id}`]
-                      ? 'border-amber-300 bg-amber-50 shadow-md ring-2 ring-amber-200'
-                      : 'border-amber-100 bg-amber-50/60'
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    <Icons.Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-slate-900">{suggestion.itemLabel}</div>
-                      <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
+                    <div className="mt-2 grid grid-cols-3 gap-1 text-center">
+                      <div className="rounded-md bg-white px-2 py-1">
+                        <div className="font-semibold text-cyan-700">{participant.supportCount || 0}</div>
+                        <div className="text-[10px] uppercase text-slate-400">Votes</div>
+                      </div>
+                      <div className="rounded-md bg-white px-2 py-1">
+                        <div className="font-semibold text-amber-700">{participant.categorySuggestionCount || 0}</div>
+                        <div className="text-[10px] uppercase text-slate-400">Ideas</div>
+                      </div>
+                      <div className="rounded-md bg-white px-2 py-1">
+                        <div className="font-semibold text-violet-700">{participant.mergeSuggestionCount || 0}</div>
+                        <div className="text-[10px] uppercase text-slate-400">Merges</div>
+                      </div>
                     </div>
-                    <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-700">
-                      {voteCount(votes, suggestion.itemId)}
-                    </span>
+                    {!!participant.recentItems?.length && (
+                      <div className="mt-2 space-y-1">
+                        {participant.recentItems.slice(0, 2).map(item => (
+                          <div key={`${participant.id}-${item.itemId}-${item.voteType}-${item.createdAt}`} className="truncate text-[11px] text-slate-500">
+                            {item.voteType === 'support' ? 'Voted for' : item.voteType === 'merge_suggestion' ? 'Merge idea' : 'New idea'}: {item.itemLabel}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {suggestion.value?.reason && <div className="mt-2 text-slate-600">{suggestion.value.reason}</div>}
-                  <button
-                    onClick={() => addSuggestedCategory(suggestion)}
-                    className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800"
+                ))}
+                {!(votes.participantStats || []).length && <p className="text-sm text-slate-500">Per-voter stats will appear after people join.</p>}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-900">Top-Level Ideas</h2>
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{topCategorySuggestions.length}</span>
+              </div>
+              <div className="max-h-72 space-y-2 overflow-auto">
+                {topCategorySuggestions.map(suggestion => (
+                  <div
+                    key={suggestion.id}
+                    className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
+                      highlightIds[`idea-${suggestion.id}`]
+                        ? 'border-amber-300 bg-amber-50 shadow-md ring-2 ring-amber-200'
+                        : 'border-amber-100 bg-amber-50/60'
+                    }`}
                   >
-                    <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />Add to categories
-                  </button>
-                </div>
-              ))}
-              {!topCategorySuggestions.length && <p className="text-sm text-slate-500">Top-level suggestions will appear here. Subcategory suggestions show inside their parent category.</p>}
+                    <div className="flex items-start gap-2">
+                      <Icons.Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-slate-900">{suggestion.itemLabel}</div>
+                        <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
+                      </div>
+                      <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-700">
+                        {voteCount(votes, suggestion.itemId)}
+                      </span>
+                    </div>
+                    {suggestion.value?.reason && <div className="mt-2 text-slate-600">{suggestion.value.reason}</div>}
+                    <button
+                      onClick={() => addSuggestedCategory(suggestion)}
+                      className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800"
+                    >
+                      <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />Add to categories
+                    </button>
+                  </div>
+                ))}
+                {!topCategorySuggestions.length && <p className="text-sm text-slate-500">Top-level suggestions will appear here. Subcategory suggestions show inside their parent category.</p>}
+              </div>
             </div>
-          </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
-            <h2 className="mb-3 text-sm font-semibold text-slate-900">Merge Suggestions</h2>
-            <div className="max-h-64 space-y-2 overflow-auto">
-              {(votes.mergeSuggestions || []).map(s => (
-                <div
-                  key={s.id}
-                  className={`rounded-lg border p-2 text-xs transition-all duration-500 ${
-                    highlightIds[`merge-${s.id}`]
-                      ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-200'
-                      : 'border-slate-100 bg-slate-50'
-                  }`}
-                >
-                  <div className="font-semibold text-slate-800">{s.participantName}</div>
-                  <div className="mt-1 text-slate-600">{s.value?.from} + {s.value?.to}</div>
-                  {s.value?.reason && <div className="mt-1 text-slate-500">{s.value.reason}</div>}
-                </div>
-              ))}
-              {!(votes.mergeSuggestions || []).length && <p className="text-sm text-slate-500">No merge suggestions yet.</p>}
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+              <h2 className="mb-3 text-sm font-semibold text-slate-900">Merge Suggestions</h2>
+              <div className="max-h-64 space-y-2 overflow-auto">
+                {(votes.mergeSuggestions || []).map(s => (
+                  <div
+                    key={s.id}
+                    className={`rounded-lg border p-2 text-xs transition-all duration-500 ${
+                      highlightIds[`merge-${s.id}`]
+                        ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-200'
+                        : 'border-slate-100 bg-slate-50'
+                    }`}
+                  >
+                    <div className="font-semibold text-slate-800">{s.participantName}</div>
+                    <div className="mt-1 text-slate-600">{s.value?.from} + {s.value?.to}</div>
+                    {s.value?.reason && <div className="mt-1 text-slate-500">{s.value.reason}</div>}
+                  </div>
+                ))}
+                {!(votes.mergeSuggestions || []).length && <p className="text-sm text-slate-500">No merge suggestions yet.</p>}
+              </div>
             </div>
-          </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
-            <h2 className="mb-3 text-sm font-semibold text-slate-900">Backups</h2>
-            <div className="max-h-64 space-y-2 overflow-auto">
-              {snapshots.map(snapshot => (
-                <div key={snapshot.id} className="rounded-lg border border-slate-200 p-2">
-                  <div className="text-xs font-semibold text-slate-800">v{snapshot.version} / {snapshot.label}</div>
-                  <div className="text-[11px] text-slate-500">{new Date(snapshot.createdAt).toLocaleString()}</div>
-                  <button onClick={() => summitAPI.restoreSnapshot(snapshot.id).then(res => { setSession(res.session); setState(res.session.state); setSnapshots(res.snapshots || []); })} className="mt-2 text-xs font-semibold text-blue-700 hover:text-blue-900">Restore</button>
-                </div>
-              ))}
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+              <h2 className="mb-3 text-sm font-semibold text-slate-900">Backups</h2>
+              <div className="max-h-64 space-y-2 overflow-auto">
+                {snapshots.map(snapshot => (
+                  <div key={snapshot.id} className="rounded-lg border border-slate-200 p-2">
+                    <div className="text-xs font-semibold text-slate-800">v{snapshot.version} / {snapshot.label}</div>
+                    <div className="text-[11px] text-slate-500">{new Date(snapshot.createdAt).toLocaleString()}</div>
+                    <button onClick={() => summitAPI.restoreSnapshot(snapshot.id).then(res => { setSession(res.session); setState(res.session.state); setSnapshots(res.snapshots || []); })} className="mt-2 text-xs font-semibold text-blue-700 hover:text-blue-900">Restore</button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        </aside>
-      </div>
+          </aside>
+        </div>
+      )}
 
       {showDeleted && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
@@ -2342,7 +2374,7 @@ export default function SummitTaxonomyWorkshop() {
       )}
 
       {showVotingDetails && voteUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4">
           <div className="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-2xl">
             <div className={`border-b px-5 py-4 ${isVotingExpired ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
               <div className="flex items-start justify-between gap-4">
@@ -2433,7 +2465,7 @@ export default function SummitTaxonomyWorkshop() {
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Voting link</div>
+                  <div className="text-xs font-semibold uppercase text-slate-500">Public fallback link</div>
                   <button
                     type="button"
                     onClick={() => navigator.clipboard.writeText(voteUrl)}
@@ -2448,7 +2480,7 @@ export default function SummitTaxonomyWorkshop() {
             </div>
             <div className="flex flex-col gap-2 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs text-slate-500">
-                Extending keeps the same public link and current votes.
+                Extending keeps the same public fallback link, current votes, and Working / Attention feedback.
               </div>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setShowVotingDetails(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
@@ -2497,7 +2529,7 @@ export default function SummitTaxonomyWorkshop() {
               </div>
               <h2 className="mt-5 text-5xl font-semibold leading-tight lg:text-7xl">Join the category vote</h2>
               <p className="mt-5 max-w-3xl text-xl leading-relaxed text-slate-300">
-                Scan the QR code, enter your name, then vote for categories and suggest anything missing.
+                Scan the QR code, enter your name or continue anonymously, then vote on categories and the Working / Attention session.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3 text-base">
                 <span className={`rounded-lg px-4 py-3 font-semibold ${isVotingExpired ? 'bg-red-500/15 text-red-100' : 'bg-emerald-400 text-slate-950'}`}>
@@ -2526,7 +2558,7 @@ export default function SummitTaxonomyWorkshop() {
       )}
 
       {showRegenerateLinkConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4">
           <div className="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-2xl">
             <div className="border-b border-amber-200 bg-amber-50 px-5 py-4">
               <div className="flex items-center gap-3">
