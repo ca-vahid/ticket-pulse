@@ -41,6 +41,16 @@ function feedbackItemKey(section, title) {
   return `${section === 'attention' ? 'attention' : 'working'}:${String(title || '').trim().toLowerCase()}`;
 }
 
+function feedbackStats(items = []) {
+  return new Map(items.map((item) => [
+    item.itemId,
+    {
+      supportCount: Number(item.supportCount || 0),
+      commentCount: Number(item.commentCount || 0),
+    },
+  ]));
+}
+
 function Toast({ toast, onClose }) {
   return (
     <div className="animate-[summitFeedbackToast_.18s_ease-out] overflow-hidden rounded-xl border border-blue-200 bg-white shadow-2xl">
@@ -230,6 +240,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
   const [highlightIds, setHighlightIds] = useState({});
   const [toasts, setToasts] = useState([]);
   const previousItemIds = useRef(new Set((initialFeedback?.items || []).map((item) => item.itemId)));
+  const previousItemStats = useRef(feedbackStats(initialFeedback?.items || []));
   const hasLoadedFeedback = useRef(Boolean(initialFeedback));
   const refreshTimer = useRef(null);
   const refreshInFlight = useRef(false);
@@ -257,19 +268,38 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
     const next = normalizeFeedback(incoming);
     if (!silent && hasLoadedFeedback.current) {
       const oldIds = previousItemIds.current;
+      const oldStats = previousItemStats.current;
       next.items.forEach((item) => {
         if (!oldIds.has(item.itemId)) {
           markHighlight(item.itemId);
+          markHighlight(`section-${item.section === 'attention' ? 'attention' : 'working'}`);
           const itemKey = feedbackItemKey(item.section, item.title);
           if (suppressedLiveItemKeys.current.has(itemKey)) {
             suppressedLiveItemKeys.current.delete(itemKey);
             return;
           }
           pushToast(item.section === 'working' ? 'New working-well item' : 'New needs-attention item', `${item.title} by ${item.participantName}`);
+          return;
+        }
+
+        const previousStats = oldStats.get(item.itemId) || { supportCount: 0, commentCount: 0 };
+        const supportDelta = Number(item.supportCount || 0) - previousStats.supportCount;
+        const commentDelta = Number(item.commentCount || 0) - previousStats.commentCount;
+        if (supportDelta > 0) {
+          markHighlight(item.itemId);
+          markHighlight(`section-${item.section === 'attention' ? 'attention' : 'working'}`);
+          pushToast('New vote', `${item.title} now has ${item.supportCount} vote${item.supportCount === 1 ? '' : 's'}.`);
+        }
+        if (commentDelta > 0) {
+          markHighlight(item.itemId);
+          markHighlight(`section-${item.section === 'attention' ? 'attention' : 'working'}`);
+          const latestComment = [...(item.comments || [])].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
+          pushToast('New comment', latestComment?.participantName ? `${latestComment.participantName} commented on ${item.title}.` : item.title);
         }
       });
     }
     previousItemIds.current = new Set(next.items.map((item) => item.itemId));
+    previousItemStats.current = feedbackStats(next.items);
     hasLoadedFeedback.current = true;
     setFeedback(next);
   }, [markHighlight, pushToast]);
@@ -359,6 +389,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
       suppressedLiveItemKeys.current.delete(submittedItemKey);
       setTitle('');
       setNote('');
+      markHighlight(`section-${activeSection}`);
       pushToast('Submitted', activeSection === 'working' ? 'Added to Working Well.' : 'Added to Needs Attention.');
     } catch (err) {
       suppressedLiveItemKeys.current.delete(submittedItemKey);
@@ -377,6 +408,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
         : await apiClient.voteSummitFeedback(item.itemId, { active: nextActive });
     applyFeedback(res.feedback, { silent: true });
     markHighlight(item.itemId);
+    markHighlight(`section-${item.section === 'attention' ? 'attention' : 'working'}`);
   };
 
   const commentItem = async (item, text) => {
@@ -387,6 +419,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
         : await apiClient.commentSummitFeedback(item.itemId, { text });
     applyFeedback(res.feedback, { silent: true });
     markHighlight(item.itemId);
+    markHighlight(`section-${item.section === 'attention' ? 'attention' : 'working'}`);
     pushToast('Comment added', item.title);
   };
 
@@ -453,6 +486,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
     try {
       const res = await summitAPI.resetFeedback();
       previousItemIds.current = new Set();
+      previousItemStats.current = feedbackStats([]);
       applyFeedback(res.feedback, { silent: true });
       setConfirmResetOpen(false);
       pushToast('Feedback reset', 'All working-well, needs-attention, votes, and comments were cleared.');
@@ -639,7 +673,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
         <form onSubmit={submitItem} className={`mb-4 rounded-xl border p-4 shadow-sm ${
           darkMode ? 'border-white/10 bg-slate-900/95 shadow-xl shadow-black/20' : 'border-slate-200 bg-white'
         }`}>
-          <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)]">
+          <div className="grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
             <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
               {SECTIONS.map((section) => (
                 <button
@@ -662,8 +696,8 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
               <textarea
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
-                placeholder="Optional context"
-                className={`min-h-[72px] rounded-lg border py-2 text-sm ${fieldClass}`}
+                placeholder={activeSection === 'working' ? 'Add details, examples, or what should continue working this way' : 'Add context, examples, impact, or what needs to change'}
+                className={`min-h-[140px] resize-y rounded-lg border py-2 text-sm leading-6 ${fieldClass}`}
               />
               <div className="flex justify-end">
                 <button
@@ -702,7 +736,13 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
           {SECTIONS.map((section) => (
             <section
               key={section.id}
-              className={`rounded-xl border p-4 shadow-sm ${
+              className={`rounded-xl border p-4 shadow-sm transition-all duration-500 ${
+                highlightIds[`section-${section.id}`]
+                  ? darkMode
+                    ? 'animate-[summitFeedbackPulse_1.3s_ease-out] ring-2 ring-cyan-400/25'
+                    : 'animate-[summitFeedbackPulse_1.3s_ease-out] ring-2 ring-blue-100'
+                  : ''
+              } ${
                 darkMode
                   ? section.id === 'working'
                     ? 'border-emerald-300/30 bg-emerald-950/20 shadow-xl shadow-black/20'

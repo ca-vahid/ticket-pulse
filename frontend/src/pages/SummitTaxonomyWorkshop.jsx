@@ -638,10 +638,10 @@ export default function SummitTaxonomyWorkshop() {
   }, [applyVotes]);
 
   useEffect(() => {
-    if (!session?.voteToken || workshopTab !== 'categories') return undefined;
+    if (!session?.id) return undefined;
     let source;
     try {
-      source = summitAPI.getPublicEventSource(session.voteToken);
+      source = summitAPI.getWorkshopEventSource();
       source.addEventListener('votes', (event) => applyVotes(JSON.parse(event.data)));
       source.addEventListener('state', (event) => {
         const next = JSON.parse(event.data);
@@ -657,7 +657,7 @@ export default function SummitTaxonomyWorkshop() {
       return undefined;
     }
     return () => source?.close();
-  }, [applyVotes, session?.voteToken, workshopTab]);
+  }, [applyVotes, session?.id]);
 
   useEffect(() => {
     if (!session?.voteExpiresAt) {
