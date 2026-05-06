@@ -119,8 +119,10 @@ export default function SummitVote() {
   const [error, setError] = useState('');
   const [expiredMessage, setExpiredMessage] = useState('');
   const [joining, setJoining] = useState(false);
+  const [toastEnabled, setToastEnabled] = useState(true);
   const votesRef = useRef(normalizeVotes());
   const participantKeyRef = useRef('');
+  const toastEnabledRef = useRef(true);
   const toastIdRef = useRef(0);
   const suggestRef = useRef(null);
   const suggestionsRef = useRef(null);
@@ -173,7 +175,8 @@ export default function SummitVote() {
     setToasts(prev => prev.filter(toast => toast.id !== id));
   }, []);
 
-  const pushToast = useCallback(({ title, message, icon = 'Bell', tone = 'cyan', duration = 3200 }) => {
+  const pushToast = useCallback(({ title, message, icon = 'Bell', tone = 'cyan', duration = 3200, important = false }) => {
+    if (!important && !toastEnabledRef.current) return;
     const id = `${Date.now()}_${toastIdRef.current += 1}`;
     setToasts(prev => [{ id, title, message, icon, tone }, ...prev].slice(0, 3));
     window.setTimeout(() => {
@@ -237,6 +240,7 @@ export default function SummitVote() {
       icon: 'RotateCcw',
       tone: 'amber',
       duration: 5200,
+      important: true,
     });
   }, [pushToast, resetLocalVotingState]);
 
@@ -247,10 +251,18 @@ export default function SummitVote() {
       if (stored.participantKey) setParticipantKey(stored.participantKey);
       if (stored.myVotes) setMyVotes(stored.myVotes);
       if (stored.priorityItems) setPriorityItems(stored.priorityItems);
+      if (typeof stored.toastEnabled === 'boolean') {
+        toastEnabledRef.current = stored.toastEnabled;
+        setToastEnabled(stored.toastEnabled);
+      }
     } catch {
       // ignore bad local state
     }
   }, [storageKey]);
+
+  useEffect(() => {
+    toastEnabledRef.current = toastEnabled;
+  }, [toastEnabled]);
 
   useEffect(() => {
     participantKeyRef.current = participantKey;
@@ -272,16 +284,21 @@ export default function SummitVote() {
       try {
         const payload = JSON.parse(event.data);
         if (payload.participantKey !== participantKeyRef.current) return;
-        resetLocalVotingState();
-        setError('');
-        markHighlight('votes');
-        pushToast({
-          title: 'Your votes were reset',
-          message: 'The facilitator cleared your activity. You can keep voting now.',
-          icon: 'RotateCcw',
-          tone: 'amber',
-          duration: 5200,
-        });
+        if (payload.resetSession) {
+          resetStaleParticipantSession(payload.message || 'The facilitator reset your session. Rejoin to keep voting.');
+        } else {
+          resetLocalVotingState();
+          setError('');
+          markHighlight('votes');
+          pushToast({
+            title: 'Your votes were reset',
+            message: 'The facilitator cleared your activity. You can keep voting now.',
+            icon: 'RotateCcw',
+            tone: 'amber',
+            duration: 5200,
+            important: true,
+          });
+        }
       } catch {
         // ignore malformed SSE payloads
       }
@@ -304,8 +321,8 @@ export default function SummitVote() {
 
   useEffect(() => {
     if (!displayName && !participantKey) return;
-    localStorage.setItem(storageKey, JSON.stringify({ displayName, participantKey, myVotes, priorityItems }));
-  }, [displayName, participantKey, myVotes, priorityItems, storageKey]);
+    localStorage.setItem(storageKey, JSON.stringify({ displayName, participantKey, myVotes, priorityItems, toastEnabled }));
+  }, [displayName, participantKey, myVotes, priorityItems, storageKey, toastEnabled]);
 
   useEffect(() => {
     if (!showMobilePriorities) return undefined;
@@ -329,7 +346,7 @@ export default function SummitVote() {
       setParticipantKey(res.participant.participantKey);
       setDisplayName(res.participant.displayName);
       applyVotes(res.votes, { silent: true });
-      pushToast({ title: 'Joined', message: `Voting as ${res.participant.displayName}`, icon: 'UserCheck', tone: 'emerald' });
+      pushToast({ title: 'Joined', message: `Voting as ${res.participant.displayName}`, icon: 'UserCheck', tone: 'emerald', important: true });
     } catch (err) {
       setError(err.message || 'Could not join');
     } finally {
@@ -339,12 +356,7 @@ export default function SummitVote() {
 
   const join = async (event) => {
     event.preventDefault();
-    await joinWorkshop(displayName);
-  };
-
-  const joinAnonymous = async () => {
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    await joinWorkshop(`Anonymous ${randomSuffix}`);
+    await joinWorkshop(displayName.trim());
   };
 
   const toggleVote = async (item, itemType = 'category', forceActive = null) => {
@@ -423,7 +435,7 @@ export default function SummitVote() {
       setDisplayName(res.participant.displayName);
       applyVotes(res.votes, { silent: true });
       setEditingName(false);
-      pushToast({ title: 'Name updated', message: res.participant.displayName, icon: 'Pencil', tone: 'emerald' });
+      pushToast({ title: 'Name updated', message: res.participant.displayName, icon: 'Pencil', tone: 'emerald', important: true });
     } catch (err) {
       if (isJoinRequiredError(err)) {
         resetStaleParticipantSession();
@@ -559,23 +571,23 @@ export default function SummitVote() {
           .vote-toast, .vote-soft-pulse { animation: none; }
         }
       `}</style>
-      <div className="fixed left-3 right-3 top-3 z-[80] mx-auto grid max-w-md gap-2" aria-live="polite">
+      <div className="fixed left-3 right-3 top-3 z-[80] mx-auto grid max-w-sm gap-1.5" aria-live="polite">
         {toasts.map((toast) => (
-          <div key={toast.id} className={`vote-toast flex items-start gap-3 rounded-lg border px-3 py-2 shadow-2xl ${toastToneClasses(toast.tone)}`}>
-            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/75">
-              <Icon name={toast.icon} className="h-4 w-4" />
+          <div key={toast.id} className={`vote-toast flex items-start gap-2 rounded-lg border-l-4 px-2.5 py-2 shadow-xl ${toastToneClasses(toast.tone)}`}>
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/80">
+              <Icon name={toast.icon} className="h-3.5 w-3.5" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold">{toast.title}</div>
-              <div className="mt-0.5 break-words text-xs opacity-80">{toast.message}</div>
+              <div className="text-xs font-semibold">{toast.title}</div>
+              <div className="mt-0.5 break-words text-[11px] leading-snug opacity-80">{toast.message}</div>
             </div>
             <button
               type="button"
               onClick={() => dismissToast(toast.id)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition hover:bg-white/70 active:scale-95"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition hover:bg-white/70 active:scale-95"
               aria-label={`Dismiss ${toast.title}`}
             >
-              <Icons.X className="h-4 w-4" />
+              <Icons.X className="h-3.5 w-3.5" />
             </button>
           </div>
         ))}
@@ -619,17 +631,9 @@ export default function SummitVote() {
               className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               autoFocus
             />
-            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+            {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
             <button disabled={!displayName.trim() || joining} className="mt-4 min-h-12 w-full rounded-lg bg-slate-950 px-4 py-2 font-semibold text-white transition active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]">
               {joining ? 'Joining...' : 'Join workshop'}
-            </button>
-            <button
-              type="button"
-              disabled={joining}
-              onClick={joinAnonymous}
-              className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/10 active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]"
-            >
-              Continue anonymously
             </button>
           </form>
         ) : (
@@ -710,13 +714,31 @@ export default function SummitVote() {
                           <button type="button" onClick={() => setEditingName(false)} className="text-xs text-slate-400">Cancel</button>
                         </form>
                       ) : (
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                        Voting as <span className="font-semibold text-white">{displayName}</span>
-                            <div className="mt-1 text-xs text-slate-400">Link expires {session?.voteExpiresAt ? new Date(session.voteExpiresAt).toLocaleTimeString() : ''}</div>
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              Voting as <span className="font-semibold text-white">{displayName}</span>
+                              <div className="mt-1 text-xs text-slate-400">Link expires {session?.voteExpiresAt ? new Date(session.voteExpiresAt).toLocaleTimeString() : ''}</div>
+                            </div>
+                            <button onClick={startNameEdit} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-white/10 text-slate-200 transition hover:bg-white/10 active:scale-[0.98] [touch-action:manipulation]" title="Change name">
+                              <Icons.Pencil className="h-4 w-4" />
+                            </button>
                           </div>
-                          <button onClick={startNameEdit} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-white/10 text-slate-200 transition hover:bg-white/10 active:scale-[0.98] [touch-action:manipulation]" title="Change name">
-                            <Icons.Pencil className="h-4 w-4" />
+                          <button
+                            type="button"
+                            aria-pressed={toastEnabled}
+                            onClick={() => setToastEnabled((current) => !current)}
+                            className={`flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border px-3 text-xs font-semibold transition active:scale-[0.98] [touch-action:manipulation] ${
+                              toastEnabled
+                                ? 'border-cyan-300/40 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/15'
+                                : 'border-white/10 bg-slate-950/70 text-slate-400 hover:bg-white/5'
+                            }`}
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              {toastEnabled ? <Icons.Bell className="h-4 w-4" /> : <Icons.BellOff className="h-4 w-4" />}
+                              Vote notifications
+                            </span>
+                            <span>{toastEnabled ? 'On' : 'Off'}</span>
                           </button>
                         </div>
                       )}

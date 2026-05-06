@@ -136,4 +136,9 @@ summitProtectedRouter.post('/workshop/participants/:id/reset', asyncHandler(asyn
   res.json({ success: true, ...result });
 }));
 
+summitProtectedRouter.post('/workshop/participants/reset-stale', asyncHandler(async (req, res) => {
+  const result = await summitWorkshopService.resetStaleParticipants(req.workspaceId);
+  res.json({ success: true, ...result });
+}));
+
 export default summitProtectedRouter;

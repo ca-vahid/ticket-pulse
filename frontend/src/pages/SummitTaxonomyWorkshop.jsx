@@ -1091,10 +1091,23 @@ export default function SummitTaxonomyWorkshop() {
     applyVotes(res.votes, { silent: true });
     setParticipantResetTarget(null);
     pushToast({
-      title: 'Voter reset',
-      message: `${participantResetTarget.displayName}'s votes and suggestions were cleared. They can keep voting.`,
+      title: 'Voter session reset',
+      message: `${participantResetTarget.displayName} was removed from live stats and must rejoin to keep voting.`,
       icon: 'UserX',
       tone: 'amber',
+    });
+  };
+
+  const resetStaleParticipants = async () => {
+    const res = await summitAPI.resetStaleParticipants();
+    applyVotes(res.votes, { silent: true });
+    pushToast({
+      title: res.removedCount ? 'Stale sessions reset' : 'No stale sessions',
+      message: res.removedCount
+        ? `${res.removedCount} public ${res.removedCount === 1 ? 'session was' : 'sessions were'} removed. Logged-in users were kept.`
+        : 'No inactive public sessions needed cleanup.',
+      icon: 'UserX',
+      tone: res.removedCount ? 'amber' : 'cyan',
     });
   };
 
@@ -1510,40 +1523,40 @@ export default function SummitTaxonomyWorkshop() {
           .summit-toast, .summit-soft-pulse, .summit-qr-pulse, .summit-drop-land { animation: none; }
         }
       `}</style>
-      <div className="fixed right-4 top-20 z-[60] w-[min(420px,calc(100vw-2rem))] space-y-2" aria-live="polite">
+      <div className="fixed right-4 top-20 z-[60] w-[min(360px,calc(100vw-2rem))] space-y-1.5" aria-live="polite">
         {toasts.map((toast) => {
           const tone = toastToneClasses(toast.tone);
           return (
             <div
               key={toast.id}
-              className={`summit-toast overflow-hidden rounded-lg border bg-white shadow-xl transition-all duration-300 ${tone.border}`}
+              className={`summit-toast overflow-hidden rounded-lg border bg-white shadow-lg transition-all duration-300 ${tone.border}`}
             >
-              <div className={`h-1 ${tone.bar}`} />
-              <div className="p-3">
-                <div className="flex gap-3">
-                  <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tone.icon}`}>
-                    <Icon name={toast.icon} className="h-4 w-4" />
+              <div className={`h-0.5 ${tone.bar}`} />
+              <div className="p-2.5">
+                <div className="flex gap-2">
+                  <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${tone.icon}`}>
+                    <Icon name={toast.icon} className="h-3.5 w-3.5" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-slate-950">{toast.title}</div>
-                        <div className="mt-0.5 break-words text-sm text-slate-700">{toast.message}</div>
+                        <div className="text-xs font-semibold text-slate-950">{toast.title}</div>
+                        <div className="mt-0.5 break-words text-xs leading-snug text-slate-700">{toast.message}</div>
                       </div>
                       <button
                         type="button"
                         onClick={() => dismissToast(toast.id)}
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:scale-95"
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:scale-95"
                         aria-label={`Dismiss ${toast.title}`}
                         title="Dismiss"
                       >
-                        <Icons.X className="h-4 w-4" />
+                        <Icons.X className="h-3.5 w-3.5" />
                       </button>
                     </div>
                     {!!toast.details?.filter(Boolean).length && (
-                      <div className="mt-2 grid gap-1">
-                        {toast.details.filter(Boolean).slice(0, 3).map((detail) => (
-                          <div key={detail} className="rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                      <div className="mt-1.5 grid gap-1">
+                        {toast.details.filter(Boolean).slice(0, 2).map((detail) => (
+                          <div key={detail} className="rounded-md bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
                             {detail}
                           </div>
                         ))}
@@ -2224,7 +2237,18 @@ export default function SummitTaxonomyWorkshop() {
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-slate-900">Voter Stats</h2>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{(votes.participantStats || []).length}</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={resetStaleParticipants}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700"
+                    title="Remove inactive public sessions. Logged-in users stay connected."
+                  >
+                    <Icons.UserX className="h-3.5 w-3.5" />
+                    Stale
+                  </button>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{(votes.participantStats || []).length}</span>
+                </div>
               </div>
               <div className="max-h-72 space-y-2 overflow-auto">
                 {(votes.participantStats || []).map(participant => (
@@ -2603,7 +2627,7 @@ export default function SummitTaxonomyWorkshop() {
               </div>
             </div>
             <div className="px-5 py-4 text-sm text-slate-600">
-              This clears their votes, category ideas, merge suggestions, and priority selections. They stay connected and can keep voting.
+              This removes the voter from live stats, clears their category votes, ideas, merge suggestions, and related comments, then forces their voting page to rejoin with a name.
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
               <button onClick={() => setParticipantResetTarget(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">

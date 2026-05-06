@@ -673,6 +673,7 @@ export const summitAPI = {
   enableVoting: (durationMinutes = 120, regenerate = false) => api.post('/summit/workshop/voting', { durationMinutes, regenerate }),
   extendVoting: (extensionMinutes = 30) => api.post('/summit/workshop/voting/extend', { extensionMinutes }),
   resetParticipantVotes: (id) => api.post(`/summit/workshop/participants/${id}/reset`),
+  resetStaleParticipants: () => api.post('/summit/workshop/participants/reset-stale'),
   getPublicWorkshop: (token, participantKey = null) => api.get(`/summit/public/${token}`, {
     params: participantKey ? { participantKey } : undefined,
   }),

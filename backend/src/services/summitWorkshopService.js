@@ -368,6 +368,48 @@ async function getVoteSummary(sessionId) {
   };
 }
 
+async function deleteParticipantsAndRelatedVotes(sessionId, participants) {
+  if (!participants.length) return 0;
+  const participantIds = participants.map(participant => participant.id);
+  const participantVotes = await prisma.summitWorkshopVote.findMany({
+    where: { sessionId, participantId: { in: participantIds } },
+    select: { id: true, itemId: true, voteType: true },
+  });
+  const submittedItemIds = participantVotes
+    .filter(vote => [
+      'merge_suggestion',
+      'new_category_suggestion',
+      FEEDBACK_ITEM_VOTE_TYPE,
+    ].includes(vote.voteType))
+    .map(vote => vote.itemId);
+  const feedbackCommentIds = submittedItemIds.length
+    ? (await prisma.summitWorkshopVote.findMany({
+      where: { sessionId, voteType: FEEDBACK_COMMENT_VOTE_TYPE },
+      select: { id: true, value: true },
+    }))
+      .filter(vote => submittedItemIds.includes(String(vote.value?.parentItemId || '')))
+      .map(vote => vote.id)
+    : [];
+
+  await prisma.$transaction([
+    prisma.summitWorkshopVote.deleteMany({
+      where: {
+        sessionId,
+        OR: [
+          { participantId: { in: participantIds } },
+          ...(submittedItemIds.length ? [{ itemId: { in: submittedItemIds } }] : []),
+          ...(feedbackCommentIds.length ? [{ id: { in: feedbackCommentIds } }] : []),
+        ],
+      },
+    }),
+    prisma.summitWorkshopParticipant.deleteMany({
+      where: { id: { in: participantIds } },
+    }),
+  ]);
+
+  return participantIds.length;
+}
+
 async function getFeedbackSummary(sessionId, participantId = null) {
   const [items, supportRows, comments, mySupports] = await Promise.all([
     prisma.summitWorkshopVote.findMany({
@@ -675,21 +717,64 @@ export async function resetParticipantVotes(workspaceId, participantId) {
   });
   if (!participant || participant.sessionId !== existing.id) throw new NotFoundError('Participant not found');
 
-  await prisma.summitWorkshopVote.deleteMany({
-    where: {
-      participantId: participant.id,
-      voteType: { notIn: FEEDBACK_VOTE_TYPES },
-    },
-  });
+  await deleteParticipantsAndRelatedVotes(existing.id, [participant]);
 
   const votes = await getVoteSummary(existing.id);
+  const feedback = await getFeedbackSummary(existing.id);
   broadcast(existing.id, 'participant-reset', {
     participantId: participant.id,
     participantKey: participant.participantKey,
     displayName: participant.displayName,
+    resetSession: true,
+    message: 'The facilitator reset your voting session. Rejoin with your name to continue.',
   });
   broadcast(existing.id, 'votes', votes);
-  return { participant, votes };
+  broadcast(existing.id, 'feedback', feedback);
+  return { participant, votes, feedback };
+}
+
+export async function resetStaleParticipants(workspaceId) {
+  assertItWorkspace(workspaceId);
+  const existing = await findActiveSession(workspaceId);
+  if (!existing) throw new NotFoundError('Workshop session not found');
+
+  const isExpired = !existing.voteEnabled
+    || !existing.voteExpiresAt
+    || new Date(existing.voteExpiresAt).getTime() <= Date.now();
+  const publicParticipants = await prisma.summitWorkshopParticipant.findMany({
+    where: {
+      sessionId: existing.id,
+      participantKey: { not: { startsWith: 'auth_' } },
+    },
+    select: {
+      id: true,
+      participantKey: true,
+      displayName: true,
+      votes: { select: { id: true } },
+    },
+  });
+  const participantsToRemove = isExpired
+    ? publicParticipants
+    : publicParticipants.filter(participant => participant.votes.length === 0);
+
+  const removedCount = await deleteParticipantsAndRelatedVotes(existing.id, participantsToRemove);
+  const votes = await getVoteSummary(existing.id);
+  const feedback = await getFeedbackSummary(existing.id);
+
+  participantsToRemove.forEach((participant) => {
+    broadcast(existing.id, 'participant-reset', {
+      participantId: participant.id,
+      participantKey: participant.participantKey,
+      displayName: participant.displayName,
+      resetSession: true,
+      message: isExpired
+        ? 'The public voting link expired. Ask the facilitator for the current link.'
+        : 'The facilitator reset inactive public voting sessions. Rejoin with your name to continue.',
+    });
+  });
+  broadcast(existing.id, 'votes', votes);
+  broadcast(existing.id, 'feedback', feedback);
+  return { removedCount, expired: isExpired, votes, feedback };
 }
 
 export async function getSessionByVoteToken(token) {
@@ -1206,6 +1291,7 @@ export default {
   configureVoting,
   extendVoting,
   resetParticipantVotes,
+  resetStaleParticipants,
   getPublicWorkshop,
   joinPublicWorkshop,
   submitVote,
