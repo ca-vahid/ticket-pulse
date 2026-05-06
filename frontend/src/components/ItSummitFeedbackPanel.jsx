@@ -3,6 +3,7 @@ import {
   Edit3,
   AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare,
   Plus, RotateCcw, Send, Sparkles, ThumbsUp, Trash2, X,
+  BarChart3, MessageCircle, Trophy, UsersRound,
 } from 'lucide-react';
 import { agentAPI, summitAPI } from '../services/api';
 
@@ -51,6 +52,59 @@ function feedbackStats(items = []) {
   ]));
 }
 
+function itemScore(item) {
+  return Number(item.supportCount || 0) * 3 + Number(item.commentCount || 0);
+}
+
+function sortFeedbackItems(items = []) {
+  return [...items].sort((a, b) => (
+    itemScore(b) - itemScore(a)
+    || Number(b.supportCount || 0) - Number(a.supportCount || 0)
+    || new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+  ));
+}
+
+function buildFeedbackAnalytics(feedback) {
+  const items = Array.isArray(feedback?.items) ? feedback.items : [];
+  const workingItems = sortFeedbackItems(items.filter(item => item.section !== 'attention'));
+  const attentionItems = sortFeedbackItems(items.filter(item => item.section === 'attention'));
+  const allItems = sortFeedbackItems(items);
+  const comments = items.flatMap(item => (item.comments || []).map(comment => ({ ...comment, item })));
+  const submitters = new Map();
+
+  items.forEach((item) => {
+    const name = item.participantName || 'Unknown';
+    const current = submitters.get(name) || { name, items: 0, votes: 0, comments: 0 };
+    current.items += 1;
+    current.votes += Number(item.supportCount || 0);
+    current.comments += Number(item.commentCount || 0);
+    submitters.set(name, current);
+  });
+  comments.forEach((comment) => {
+    const name = comment.participantName || 'Unknown';
+    const current = submitters.get(name) || { name, items: 0, votes: 0, comments: 0 };
+    current.comments += 1;
+    submitters.set(name, current);
+  });
+
+  return {
+    workingItems,
+    attentionItems,
+    topOverall: allItems.slice(0, 5),
+    topWorking: workingItems[0] || null,
+    topAttention: attentionItems[0] || null,
+    mostDiscussed: [...items]
+      .filter(item => Number(item.commentCount || 0) > 0)
+      .sort((a, b) => (
+        Number(b.commentCount || 0) - Number(a.commentCount || 0)
+        || Number(b.supportCount || 0) - Number(a.supportCount || 0)
+      ))[0] || null,
+    submitters: [...submitters.values()]
+      .sort((a, b) => (b.items + b.comments) - (a.items + a.comments) || a.name.localeCompare(b.name))
+      .slice(0, 5),
+  };
+}
+
 function Toast({ toast, onClose }) {
   return (
     <div className="animate-[summitFeedbackToast_.18s_ease-out] overflow-hidden rounded-xl border border-blue-200 bg-white shadow-2xl">
@@ -68,6 +122,120 @@ function Toast({ toast, onClose }) {
         </button>
       </div>
     </div>
+  );
+}
+
+function SummaryMetric({ icon: Icon, label, item, emptyText, tone = 'blue' }) {
+  const toneClasses = {
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    amber: 'border-amber-200 bg-amber-50 text-amber-700',
+    blue: 'border-blue-200 bg-blue-50 text-blue-700',
+    violet: 'border-violet-200 bg-violet-50 text-violet-700',
+  }[tone];
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className={`flex h-8 w-8 items-center justify-center rounded-lg border ${toneClasses}`}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      </div>
+      {item ? (
+        <div className="mt-3">
+          <div className="line-clamp-2 text-sm font-bold text-slate-950">{item.title}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span>by {item.participantName || 'Unknown'}</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+              <ThumbsUp className="h-3 w-3" />
+              {item.supportCount || 0}
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+              <MessageCircle className="h-3 w-3" />
+              {item.commentCount || 0}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 text-sm font-medium text-slate-400">{emptyText}</div>
+      )}
+    </div>
+  );
+}
+
+function FeedbackSummary({ feedback }) {
+  const analytics = useMemo(() => buildFeedbackAnalytics(feedback), [feedback]);
+  const totalItems = feedback.counts.working + feedback.counts.attention;
+  const workingPercent = totalItems ? Math.round((feedback.counts.working / totalItems) * 100) : 0;
+
+  return (
+    <section className="mb-4 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-lg font-bold text-slate-950">
+            <BarChart3 className="h-5 w-5 text-blue-600" />
+            Summit Feedback Summary
+          </div>
+          <p className="mt-1 text-sm text-slate-500">Top selections, discussion hotspots, and participation from the live Working Well / Needs Attention board.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{feedback.counts.working} working</span>
+          <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">{feedback.counts.attention} attention</span>
+          <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">{feedback.counts.votes} votes</span>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{feedback.counts.comments} comments</span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <SummaryMetric icon={Trophy} label="Top Working Well" item={analytics.topWorking} emptyText="No working items yet" tone="emerald" />
+        <SummaryMetric icon={Trophy} label="Top Needs Attention" item={analytics.topAttention} emptyText="No attention items yet" tone="amber" />
+        <SummaryMetric icon={MessageCircle} label="Most Discussed" item={analytics.mostDiscussed} emptyText="No comments yet" tone="blue" />
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-700">
+              <UsersRound className="h-4 w-4" />
+            </span>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Top Contributors</div>
+          </div>
+          <div className="mt-3 space-y-2">
+            {analytics.submitters.length ? analytics.submitters.slice(0, 3).map((person) => (
+              <div key={person.name} className="flex items-center justify-between gap-2 text-sm">
+                <span className="min-w-0 truncate font-semibold text-slate-800">{person.name}</span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{person.items} items</span>
+              </div>
+            )) : <div className="text-sm font-medium text-slate-400">No contributors yet</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div>
+          <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <span>Working vs Attention Split</span>
+            <span>{totalItems || 0} total items</span>
+          </div>
+          <div className="h-3 overflow-hidden rounded-full bg-amber-100">
+            <div className="h-full rounded-full bg-emerald-500 transition-all duration-700" style={{ width: `${workingPercent}%` }} />
+          </div>
+          <div className="mt-2 flex justify-between text-xs text-slate-500">
+            <span>{workingPercent}% working</span>
+            <span>{100 - workingPercent}% attention</span>
+          </div>
+        </div>
+        <div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Top Selections</div>
+          <div className="space-y-1.5">
+            {analytics.topOverall.length ? analytics.topOverall.slice(0, 4).map((item, index) => (
+              <div key={item.itemId} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-sm">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-slate-600 shadow-sm">{index + 1}</span>
+                <span className="min-w-0 flex-1 truncate font-semibold text-slate-800">{item.title}</span>
+                <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700">{item.supportCount || 0}</span>
+              </div>
+            )) : <div className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-400">No selections yet.</div>}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -221,7 +389,7 @@ function FeedbackCard({
   );
 }
 
-export default function ItSummitFeedbackPanel({ mode = 'participant', initialFeedback = null, token = null, participantKey = null }) {
+export default function ItSummitFeedbackPanel({ mode = 'participant', initialFeedback = null, token = null, participantKey = null, onFeedbackChange = null }) {
   const isFacilitator = mode === 'facilitator';
   const isPublic = mode === 'public';
   const darkMode = isPublic;
@@ -302,7 +470,8 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
     previousItemStats.current = feedbackStats(next.items);
     hasLoadedFeedback.current = true;
     setFeedback(next);
-  }, [markHighlight, pushToast]);
+    onFeedbackChange?.(next);
+  }, [markHighlight, onFeedbackChange, pushToast]);
 
   const refresh = useCallback(async (silent = false, { showLoading = !silent } = {}) => {
     if (refreshInFlight.current) return;
@@ -737,6 +906,8 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
           {error}
         </div>
       )}
+
+      {isFacilitator && !loading && <FeedbackSummary feedback={feedback} />}
 
       {loading ? (
         <div className={`flex min-h-48 items-center justify-center rounded-xl border ${

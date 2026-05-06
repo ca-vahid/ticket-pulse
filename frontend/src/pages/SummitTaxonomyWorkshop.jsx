@@ -131,6 +131,98 @@ function flattenRows(state) {
   return rows;
 }
 
+function normalizeFeedbackExport(feedback) {
+  return {
+    items: Array.isArray(feedback?.items) ? feedback.items : [],
+    counts: {
+      working: Number(feedback?.counts?.working || 0),
+      attention: Number(feedback?.counts?.attention || 0),
+      votes: Number(feedback?.counts?.votes || 0),
+      comments: Number(feedback?.counts?.comments || 0),
+    },
+  };
+}
+
+function sectionLabel(section) {
+  return section === 'attention' ? 'Needs Attention' : 'Working Well';
+}
+
+function feedbackItemScore(item) {
+  return Number(item.supportCount || 0) * 3 + Number(item.commentCount || 0);
+}
+
+function sortFeedbackForExport(items = []) {
+  return [...items].sort((a, b) => (
+    feedbackItemScore(b) - feedbackItemScore(a)
+    || Number(b.supportCount || 0) - Number(a.supportCount || 0)
+    || new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+  ));
+}
+
+function flattenFeedbackItems(feedback) {
+  return sortFeedbackForExport(feedback.items).map((item, index) => ({
+    Rank: index + 1,
+    Section: sectionLabel(item.section),
+    Title: item.title || '',
+    Note: item.note || '',
+    SubmittedBy: item.participantName || '',
+    SubmittedAt: item.createdAt || '',
+    Votes: Number(item.supportCount || 0),
+    Comments: Number(item.commentCount || 0),
+    Score: feedbackItemScore(item),
+  }));
+}
+
+function flattenFeedbackComments(feedback) {
+  return sortFeedbackForExport(feedback.items).flatMap((item) => (item.comments || []).map((comment) => ({
+    Section: sectionLabel(item.section),
+    ItemTitle: item.title || '',
+    Comment: comment.text || '',
+    CommentBy: comment.participantName || '',
+    CommentAt: comment.createdAt || '',
+  })));
+}
+
+function summarizeFeedback(feedback) {
+  const workingItems = sortFeedbackForExport(feedback.items.filter(item => item.section !== 'attention'));
+  const attentionItems = sortFeedbackForExport(feedback.items.filter(item => item.section === 'attention'));
+  const discussed = [...feedback.items]
+    .filter(item => Number(item.commentCount || 0) > 0)
+    .sort((a, b) => Number(b.commentCount || 0) - Number(a.commentCount || 0))[0];
+  const contributors = new Map();
+  feedback.items.forEach((item) => {
+    const name = item.participantName || 'Unknown';
+    const current = contributors.get(name) || { items: 0, votesOnItems: 0, commentsOnItems: 0 };
+    current.items += 1;
+    current.votesOnItems += Number(item.supportCount || 0);
+    current.commentsOnItems += Number(item.commentCount || 0);
+    contributors.set(name, current);
+  });
+
+  return [
+    { Metric: 'Working Well Items', Value: feedback.counts.working },
+    { Metric: 'Needs Attention Items', Value: feedback.counts.attention },
+    { Metric: 'Total Votes', Value: feedback.counts.votes },
+    { Metric: 'Total Comments', Value: feedback.counts.comments },
+    { Metric: 'Top Working Well', Value: workingItems[0]?.title || '' },
+    { Metric: 'Top Working Well Votes', Value: workingItems[0]?.supportCount || 0 },
+    { Metric: 'Top Needs Attention', Value: attentionItems[0]?.title || '' },
+    { Metric: 'Top Needs Attention Votes', Value: attentionItems[0]?.supportCount || 0 },
+    { Metric: 'Most Discussed Item', Value: discussed?.title || '' },
+    { Metric: 'Most Discussed Comments', Value: discussed?.commentCount || 0 },
+    ...[...contributors.entries()]
+      .sort((a, b) => (b[1].items + b[1].commentsOnItems) - (a[1].items + a[1].commentsOnItems))
+      .slice(0, 10)
+      .map(([name, stats], index) => ({
+        Metric: `Contributor ${index + 1}`,
+        Value: name,
+        Items: stats.items,
+        VotesOnSubmittedItems: stats.votesOnItems,
+        CommentsOnSubmittedItems: stats.commentsOnItems,
+      })),
+  ];
+}
+
 function voteCount(votes, itemId, voteType = 'support') {
   return votes?.totals?.find(v => v.itemId === itemId && v.voteType === voteType)?.count || 0;
 }
@@ -317,6 +409,7 @@ export default function SummitTaxonomyWorkshop() {
   const [session, setSession] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
   const [votes, setVotes] = useState(() => normalizeVotes());
+  const [feedbackExport, setFeedbackExport] = useState(() => normalizeFeedbackExport());
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [selectedForMerge, setSelectedForMerge] = useState([]);
   const [history, setHistory] = useState([]);
@@ -448,6 +541,10 @@ export default function SummitTaxonomyWorkshop() {
 
   const dismissToast = useCallback((id) => {
     setToasts(prev => prev.filter(toast => toast.id !== id));
+  }, []);
+
+  const updateFeedbackExport = useCallback((nextFeedback) => {
+    setFeedbackExport(normalizeFeedbackExport(nextFeedback));
   }, []);
 
   const pushToast = useCallback(({ title, message, details = [], icon = 'Bell', tone = 'cyan', duration = 6500 }) => {
@@ -628,6 +725,7 @@ export default function SummitTaxonomyWorkshop() {
         setState(res.session.state);
         setSnapshots(res.snapshots || []);
         applyVotes(res.votes, { silent: true });
+        setFeedbackExport(normalizeFeedbackExport(res.feedback));
         setSelectedCategoryId(res.session.state?.categories?.find(c => !c.deleted)?.id || null);
         setSaveStatus('Saved');
         setLastSavedAt(res.session.updatedAt);
@@ -643,6 +741,8 @@ export default function SummitTaxonomyWorkshop() {
     try {
       source = summitAPI.getWorkshopEventSource();
       source.addEventListener('votes', (event) => applyVotes(JSON.parse(event.data)));
+      source.addEventListener('feedback', (event) => updateFeedbackExport(JSON.parse(event.data)));
+      source.addEventListener('feedback-reset', (event) => updateFeedbackExport(JSON.parse(event.data)));
       source.addEventListener('state', (event) => {
         const next = JSON.parse(event.data);
         setSession(prev => prev ? {
@@ -657,7 +757,7 @@ export default function SummitTaxonomyWorkshop() {
       return undefined;
     }
     return () => source?.close();
-  }, [applyVotes, session?.id]);
+  }, [applyVotes, session?.id, updateFeedbackExport]);
 
   useEffect(() => {
     if (!session?.voteExpiresAt) {
@@ -1133,12 +1233,16 @@ export default function SummitTaxonomyWorkshop() {
 
   const exportExcel = () => {
     const workbook = XLSX.utils.book_new();
+    const feedback = normalizeFeedbackExport(feedbackExport);
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(flattenRows(state)), 'Categories');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.totals || []), 'Votes');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.mergeSuggestions || []), 'Merge Suggestions');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.categorySuggestions || []), 'Category Ideas');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(votes.participantStats || []), 'Voter Stats');
-    XLSX.writeFile(workbook, 'BGC-IT-Summit-Categories.xlsx');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summarizeFeedback(feedback)), 'Feedback Summary');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(flattenFeedbackItems(feedback)), 'Feedback Items');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(flattenFeedbackComments(feedback)), 'Feedback Comments');
+    XLSX.writeFile(workbook, 'BGC-IT-Summit-2026-Workshop.xlsx');
   };
 
   const importJson = async (event) => {
@@ -1761,7 +1865,10 @@ export default function SummitTaxonomyWorkshop() {
       </div>
 
       {workshopTab === 'working' ? (
-        <ItSummitFeedbackPanel mode="facilitator" />
+        <ItSummitFeedbackPanel
+          mode="facilitator"
+          onFeedbackChange={updateFeedbackExport}
+        />
       ) : (
         <div
           className="grid gap-4 transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--summit-workshop-grid)]"
