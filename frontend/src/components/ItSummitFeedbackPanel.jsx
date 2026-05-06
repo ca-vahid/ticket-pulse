@@ -307,28 +307,20 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
   }, [initialFeedback, refresh]);
 
   useEffect(() => {
-    if (!isPublic) {
-      const refreshMs = isFacilitator ? 10000 : 12000;
-      const timer = window.setInterval(() => {
-        if (document.visibilityState === 'visible') {
-          refresh(true, { showLoading: false });
-        }
-      }, refreshMs);
-      return () => {
-        if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
-        window.clearInterval(timer);
-      };
-    }
-
-    const source = token ? summitAPI.getPublicEventSource(token) : null;
+    const source = isPublic
+      ? (token ? summitAPI.getPublicEventSource(token) : null)
+      : isFacilitator
+        ? apiClient.getWorkshopEventSource?.()
+        : apiClient.getSummitEventSource?.();
     if (!source) return undefined;
+
     source.addEventListener('feedback', (event) => {
       try {
-        if (isPublic) {
-          scheduleLiveRefresh();
-        } else {
+        if (isFacilitator) {
           const incoming = JSON.parse(event.data);
           applyFeedback(incoming);
+        } else {
+          scheduleLiveRefresh();
         }
       } catch {
         // Ignore malformed SSE payloads.
@@ -341,7 +333,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
       source.close();
     };
-  }, [apiClient, applyFeedback, isFacilitator, isPublic, refresh, scheduleLiveRefresh, token]);
+  }, [apiClient, applyFeedback, isFacilitator, isPublic, scheduleLiveRefresh, token]);
 
   const itemsBySection = useMemo(() => {
     const grouped = { working: [], attention: [] };
