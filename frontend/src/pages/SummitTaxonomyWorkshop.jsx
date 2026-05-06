@@ -1051,6 +1051,9 @@ export default function SummitTaxonomyWorkshop() {
     setSession(res.session);
     setSnapshots(res.snapshots || []);
     applyVotes(res.votes, { silent: true });
+    if (regenerate) {
+      setActivityFeed([]);
+    }
     setShowRegenerateLinkConfirm(false);
     pushToast({
       title: regenerate ? 'Voting link regenerated' : 'Voting link opened',
