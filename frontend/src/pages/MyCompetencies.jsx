@@ -233,6 +233,16 @@ export default function MyCompetencies() {
   const handleChange = async (category, nextLevel) => {
     const currentLevel = mappingMap[myTechId]?.[category.id] || '';
     if (nextLevel === currentLevel) return;
+    if (currentLevel && !nextLevel) {
+      flashCategory(category.id);
+      setMessage({
+        type: 'warning',
+        title: 'Skill cannot be removed',
+        text: 'You can downgrade your expertise level down to Basic, but active skills cannot be set back to No experience from this page.',
+        autoClose: 7000,
+      });
+      return;
+    }
     if (!currentLevel && nextLevel && !category.parentId) {
       if (!categoryHasChildren[category.id]) {
         openRequestModal(category, nextLevel);
@@ -612,7 +622,7 @@ export default function MyCompetencies() {
                 />
                 <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
                   <Sparkles className="h-4 w-4" />
-                Additions and level increases are sent for admin approval. Decreases/removals save immediately. Pending requests can be cancelled below.
+                Additions and level increases are sent for admin approval. Decreases save immediately. Active skills cannot be removed here; downgrade to Basic if needed.
                 </div>
               </section>
 
@@ -672,7 +682,13 @@ export default function MyCompetencies() {
                                       title={pending ? `Pending: ${formatRequest(pending)}` : `${category.name}: ${levelInfo.label}`}
                                     >
                                       {LEVELS.map((option) => (
-                                        <option key={option.value || 'none'} value={option.value}>{option.short}</option>
+                                        <option
+                                          key={option.value || 'none'}
+                                          value={option.value}
+                                          disabled={Boolean(level) && !option.value}
+                                        >
+                                          {option.short}
+                                        </option>
                                       ))}
                                     </select>
                                   ) : (

@@ -166,6 +166,9 @@ export async function submitMyCompetencyChange(email, body = {}) {
   if (currentRank === requestedRank) {
     return { changed: false, data: await getMyCompetencyMatrix(email, technician.workspaceId) };
   }
+  if (currentRank > 0 && requestedRank === 0) {
+    throw new ValidationError('You can downgrade a skill to Basic, but you cannot remove it completely');
+  }
 
   if (!currentLevel && requestedLevel && !category.parentId) {
     const childCount = await prisma.competencyCategory.count({
