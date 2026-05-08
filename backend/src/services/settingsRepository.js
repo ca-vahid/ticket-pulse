@@ -29,8 +29,8 @@ async function getFreshServiceConfigForWorkspace(workspaceId, settingsRepo) {
       defaultTimezone: workspace.defaultTimezone,
       syncIntervalMinutes: workspace.syncIntervalMinutes,
       categoryCustomField: workspace.categoryCustomField || 'security',
-      tpSkillCustomField: workspace.tpSkillCustomField || 'tp_skill',
-      tpSubskillCustomField: workspace.tpSubskillCustomField || 'tp_subskill',
+      tpSkillCustomField: workspace.tpSkillCustomField || 'lf_ticket_pulse_category',
+      tpSubskillCustomField: workspace.tpSubskillCustomField || 'lf_ticket_pulse_subcategory',
     };
   } catch (error) {
     if (error instanceof NotFoundError) throw error;

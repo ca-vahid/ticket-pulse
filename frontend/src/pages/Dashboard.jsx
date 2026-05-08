@@ -13,7 +13,7 @@ import SearchBox from '../components/SearchBox';
 import CategoryFilter from '../components/CategoryFilter';
 import LegendPopover from '../components/LegendPopover';
 import MonthlyCalendar from '../components/MonthlyCalendar';
-import { filterTickets } from '../utils/ticketFilter';
+import { filterTickets, getTicketCategoryLabel } from '../utils/ticketFilter';
 import { getHolidayTooltip, getHolidayInfo, registerDynamicHolidays } from '../utils/holidays';
 import api from '../services/api';
 import { usePrefetch } from '../hooks/usePrefetch';
@@ -909,8 +909,9 @@ export default function Dashboard() {
   const categorySet = new Set();
   visibleTechnicians.forEach(tech => {
     getTechTickets(tech).forEach(ticket => {
-      if (ticket.ticketCategory) {
-        categorySet.add(ticket.ticketCategory);
+      const categoryLabel = getTicketCategoryLabel(ticket);
+      if (categoryLabel) {
+        categorySet.add(categoryLabel);
       }
     });
   });

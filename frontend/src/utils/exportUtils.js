@@ -4,6 +4,7 @@
  */
 
 import * as XLSX from 'xlsx';
+import { getTicketCategoryLabel } from './ticketFilter';
 
 /**
  * Priority labels for display
@@ -105,7 +106,7 @@ export const formatTicketsForExport = (tickets, technicians = []) => {
       'Status': ticket.status || '',
       'Priority': PRIORITY_LABELS[ticket.priority] || ticket.priority || '',
       'Technician': techName,
-      'Category': ticket.ticketCategory || '',
+      'Category': getTicketCategoryLabel(ticket),
       'Location': ticket.department || '',
       'Created': formatDateTime(ticket.createdAt),
       'First Assigned': formatDateTime(ticket.firstAssignedAt),

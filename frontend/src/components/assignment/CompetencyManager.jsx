@@ -16,6 +16,7 @@ import {
   cleanTranscript, processStreamEvent,
 } from './StreamingComponents';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
+import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 const PROFICIENCY_LEVELS = [
   { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 text-yellow-800' },
@@ -178,6 +179,7 @@ function TechnicianEditor({ tech, categories, savedMappings, onClose, onSaved, o
                 {tech.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {tech.location}</span>}
                 <span>{mappedCount} skill{mappedCount !== 1 ? 's' : ''} mapped</span>
                 {latestRun?.decision === 'auto_applied' && <span className="text-green-600 font-medium">LLM analyzed</span>}
+                {latestRun?.decision === 'preserved_existing' && <span className="text-amber-600 font-medium">LLM preserved</span>}
               </div>
             </div>
           </div>
@@ -817,6 +819,10 @@ function SkillsMigrationPanel({ onPublished }) {
   const [warnings, setWarnings] = useState([]);
   const [mappings, setMappings] = useState([]);
   const [drift, setDrift] = useState(null);
+  const [reclassification, setReclassification] = useState(null);
+  const [reclassificationLimit, setReclassificationLimit] = useState(25);
+  const [reclassificationCursor, setReclassificationCursor] = useState(null);
+  const [reclassificationRuns, setReclassificationRuns] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
@@ -841,6 +847,17 @@ function SkillsMigrationPanel({ onPublished }) {
 
   useEffect(() => { loadDraft(); }, [loadDraft]);
 
+  const loadReclassificationRuns = useCallback(async () => {
+    try {
+      const res = await assignmentAPI.getReclassificationRuns({ limit: 5 });
+      setReclassificationRuns(res?.data || []);
+    } catch {
+      setReclassificationRuns([]);
+    }
+  }, []);
+
+  useEffect(() => { loadReclassificationRuns(); }, [loadReclassificationRuns]);
+
   const updateSkill = (index, patch) => {
     setSkills((prev) => prev.map((skill, i) => (i === index ? { ...skill, ...patch } : skill)));
   };
@@ -863,6 +880,43 @@ function SkillsMigrationPanel({ onPublished }) {
   const removeSubskill = (skillIndex, subIndex) => setSkills((prev) => prev.map((skill, i) => (i === skillIndex
     ? { ...skill, subskills: (skill.subskills || []).filter((_, j) => j !== subIndex) }
     : skill)));
+  const mappingTargetOptions = skills.flatMap((skill) => [
+    { id: skill.id, label: skill.name || '(unnamed skill)', level: 'skill', skillName: skill.name || '', subskillName: null },
+    ...(skill.subskills || []).map((subskill) => ({
+      id: subskill.id,
+      label: `${skill.name || '(unnamed skill)'} > ${subskill.name || '(unnamed subskill)'}`,
+      level: 'subskill',
+      skillName: skill.name || '',
+      subskillName: subskill.name || '',
+    })),
+  ]);
+
+  const updateMappingTarget = (mappingIndex, targetId) => {
+    const target = mappingTargetOptions.find((option) => option.id === targetId);
+    setMappings((prev) => prev.map((mapping, index) => {
+      if (index !== mappingIndex) return mapping;
+      if (!target) {
+        return {
+          ...mapping,
+          targetSkillTempId: null,
+          targetSubskillTempId: null,
+          targetSkillName: null,
+          targetSubskillName: null,
+          status: 'unmapped',
+          confidence: 'unmapped',
+        };
+      }
+      return {
+        ...mapping,
+        targetSkillTempId: target.level === 'skill' ? target.id : null,
+        targetSubskillTempId: target.level === 'subskill' ? target.id : null,
+        targetSkillName: target.skillName,
+        targetSubskillName: target.subskillName,
+        status: 'mapped',
+        confidence: mapping.confidence === 'exact' ? 'exact' : 'manual',
+      };
+    }));
+  };
 
   const saveDraft = async () => {
     try {
@@ -875,6 +929,22 @@ function SkillsMigrationPanel({ onPublished }) {
       setWarnings(saved?.warnings || []);
       setMappings(saved?.mappings || []);
       setMessage('Draft saved');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveMappings = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      const res = await assignmentAPI.updateSkillMappings(mappings);
+      const saved = res?.data;
+      setDraft(saved);
+      setMappings(saved?.mappings || []);
+      setMessage('Mappings saved');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -901,12 +971,12 @@ function SkillsMigrationPanel({ onPublished }) {
   };
 
   const publish = async () => {
-    if (!confirm('Publish this skill hierarchy and remap existing competencies/ticket classifications? No Freshservice ticket backfill will run.')) return;
+    if (!confirm('Publish this category hierarchy and remap existing competencies/ticket classifications? No Freshservice ticket backfill will run.')) return;
     try {
       setSaving(true);
       setError(null);
       const res = await assignmentAPI.publishSkillDraft();
-      setMessage(`Published ${res?.data?.skillCount || 0} skills and ${res?.data?.subskillCount || 0} subskills`);
+      setMessage(`Published ${res?.data?.skillCount || 0} categories and ${res?.data?.subskillCount || 0} subcategories`);
       setDraft(null);
       await loadDraft();
       onPublished?.();
@@ -920,6 +990,7 @@ function SkillsMigrationPanel({ onPublished }) {
   const loadDrift = async () => {
     try {
       setSaving(true);
+      setError(null);
       const res = await assignmentAPI.getFreshserviceSkillDrift();
       setDrift(res?.data || null);
     } catch (err) {
@@ -929,20 +1000,91 @@ function SkillsMigrationPanel({ onPublished }) {
     }
   };
 
-  const unmapped = mappings.filter((mapping) => mapping.status !== 'mapped').length;
+  const syncFreshserviceObjects = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      const res = await assignmentAPI.syncFreshserviceSkillObjects();
+      const created = res?.data?.created || {};
+      setMessage(`Freshservice objects synced. Created ${created.skills?.length || 0} categories and ${created.subskills?.length || 0} subcategories.`);
+      await loadDrift();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reclassifyTickets = async ({ apply = false, nextBatch = false } = {}) => {
+    if (apply && !confirm('Apply the current dry-run preview to these IT tickets? This updates Ticket Pulse only and does not write historical Freshservice tickets.')) return;
+    try {
+      setSaving(true);
+      setError(null);
+      const previewTicketIds = (reclassification?.results || [])
+        .map((result) => Number(result.ticketId))
+        .filter(Number.isInteger);
+      const res = await assignmentAPI.reclassifyTickets({
+        apply,
+        days: 180,
+        limit: Number(reclassificationLimit) || 25,
+        onlyNeedsReview: true,
+        ...(!apply && nextBatch && reclassificationCursor ? { createdBefore: reclassificationCursor } : {}),
+        ...(apply && previewTicketIds.length ? { ticketIds: previewTicketIds } : {}),
+      });
+      const data = res?.data || {};
+      setReclassification(data);
+      const oldestCreatedAt = (data.results || [])
+        .map((result) => result.createdAt)
+        .filter(Boolean)
+        .sort()[0] || null;
+      if (!apply && oldestCreatedAt) setReclassificationCursor(oldestCreatedAt);
+      setMessage(`${apply ? 'Applied' : 'Dry run complete'}: ${data.classified || 0} classified, ${data.reviewNeeded || 0} needing review, ${data.failed || 0} failed.`);
+      await loadReclassificationRuns();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const rollbackReclassificationRun = async (runId) => {
+    if (!confirm(`Rollback reclassification run #${runId}? This restores the saved pre-run Ticket Pulse category fields for the affected tickets.`)) return;
+    try {
+      setSaving(true);
+      setError(null);
+      const res = await assignmentAPI.rollbackReclassificationRun(runId);
+      setMessage(`Rolled back run #${runId}. Restored ${res?.data?.restoredCount || 0} tickets.`);
+      await loadReclassificationRuns();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const needsReviewMappings = mappings.filter((mapping) => mapping.status !== 'mapped' || (!mapping.targetSkillTempId && !mapping.targetSubskillTempId));
 
   return (
     <div className="border rounded-lg bg-white">
       <div className="border-b px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-800">Skills / Subskills Draft</h3>
-          <p className="text-xs text-slate-500">Ticket Pulse owns this hierarchy; Freshservice mirrors two dropdown values.</p>
+          <h3 className="text-sm font-semibold text-slate-800">Categories / Subcategories Draft</h3>
+          <p className="text-xs text-slate-500">Ticket Pulse owns this hierarchy; Freshservice mirrors the selected category values.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={importSummit} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Upload className="w-3.5 h-3.5" /> Import Summit</button>
           <button onClick={saveDraft} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Save className="w-3.5 h-3.5" /> Save Draft</button>
           <button onClick={publish} disabled={saving || !draft} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Publish</button>
+          <button onClick={syncFreshserviceObjects} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Upload className="w-3.5 h-3.5" /> Sync FS Objects</button>
           <button onClick={loadDrift} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> FS Drift</button>
+          <select value={reclassificationLimit} onChange={(event) => setReclassificationLimit(Number(event.target.value))} disabled={saving} className="rounded-lg border px-2 py-1.5 text-xs">
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+          <button onClick={() => { setReclassificationCursor(null); reclassifyTickets({ apply: false }); }} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Brain className="w-3.5 h-3.5" /> Dry Run Batch</button>
+          <button onClick={() => reclassifyTickets({ apply: false, nextBatch: true })} disabled={saving || !reclassificationCursor} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><ChevronRight className="w-3.5 h-3.5" /> Next Batch</button>
+          <button onClick={() => reclassifyTickets({ apply: true })} disabled={saving || !reclassification?.dryRun || !(reclassification?.results || []).length} className="px-3 py-1.5 border border-amber-200 bg-amber-50 text-amber-800 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1"><CheckSquare className="w-3.5 h-3.5" /> Apply Preview</button>
         </div>
       </div>
 
@@ -950,10 +1092,58 @@ function SkillsMigrationPanel({ onPublished }) {
         {loading && <div className="text-sm text-slate-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading draft</div>}
         {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
         {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{message}</div>}
-        {(warnings.length > 0 || unmapped > 0) && (
+        {reclassification && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 space-y-2">
+            <p>Internal reclassification run #{reclassification.id} {reclassification.dryRun ? 'dry run' : 'apply'} scanned {reclassification.scanned || 0} tickets. Freshservice ticket history was not modified.</p>
+            {(reclassification.results || []).length > 0 && (
+              <div className="max-h-48 overflow-y-auto rounded border border-slate-200 bg-white">
+                {(reclassification.results || []).slice(0, 12).map((result) => (
+                  <div key={result.ticketId} className="grid gap-1 border-b border-slate-100 px-2 py-1.5 last:border-b-0 md:grid-cols-[110px_1fr_220px]">
+                    <span className="font-mono text-slate-500">FS-{result.freshserviceTicketId}</span>
+                    <span className="truncate">{result.subject}</span>
+                    <span className={result.error ? 'text-red-600' : result.classification?.taxonomyReviewNeeded ? 'text-amber-700' : 'text-emerald-700'}>
+                      {result.error || `${result.classification?.categoryName || 'Unmapped'}${result.classification?.subcategoryName ? ` / ${result.classification.subcategoryName}` : ''}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {reclassificationRuns.length > 0 && (
+          <div className="rounded-lg border border-slate-200 bg-white">
+            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+              <h4 className="text-xs font-semibold text-slate-700">Recent Reclassification Runs</h4>
+              <button onClick={loadReclassificationRuns} disabled={saving} className="text-xs text-purple-600 hover:underline disabled:opacity-50">Refresh</button>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {reclassificationRuns.map((run) => (
+                <div key={run.id} className="grid gap-2 px-3 py-2 text-xs text-slate-600 md:grid-cols-[90px_90px_1fr_120px] md:items-center">
+                  <div className="font-mono">TR-{run.id}</div>
+                  <div className={run.status === 'completed' ? 'text-emerald-700' : run.status === 'failed' ? 'text-red-700' : 'text-amber-700'}>
+                    {run.mode} / {run.status}
+                  </div>
+                  <div>
+                    <span>{formatDateTimeInTimezone(run.createdAt, 'America/Los_Angeles')}</span>
+                    <span className="ml-2 text-slate-400">
+                      scanned {run.summary?.scanned || 0}, classified {run.summary?.classified || 0}, failed {run.summary?.failed || 0}
+                    </span>
+                    {run.rolledBackAt && <span className="ml-2 text-red-600">rolled back</span>}
+                  </div>
+                  <div className="flex justify-end">
+                    {run.mode === 'apply' && run.status === 'completed' && !run.rolledBackAt && (
+                      <button onClick={() => rollbackReclassificationRun(run.id)} disabled={saving} className="rounded border border-red-200 px-2 py-1 text-red-700 hover:bg-red-50 disabled:opacity-50">Rollback</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {(warnings.length > 0 || needsReviewMappings.length > 0) && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             {warnings.length > 0 && <span>{warnings.length} placeholder or duplicate rows were removed. </span>}
-            {unmapped > 0 && <span>{unmapped} legacy skill mappings need review before publish.</span>}
+            {needsReviewMappings.length > 0 && <span>{needsReviewMappings.length} legacy category mappings need review before publish.</span>}
           </div>
         )}
 
@@ -961,7 +1151,7 @@ function SkillsMigrationPanel({ onPublished }) {
           {skills.map((skill, skillIndex) => (
             <div key={skill.id || skillIndex} className="rounded-lg border border-slate-200">
               <div className="grid gap-2 p-3 md:grid-cols-[1fr_1fr_auto]">
-                <input value={skill.name || ''} onChange={(e) => updateSkill(skillIndex, { name: e.target.value })} placeholder="Skill" className="rounded-lg border px-3 py-2 text-sm" />
+                <input value={skill.name || ''} onChange={(e) => updateSkill(skillIndex, { name: e.target.value })} placeholder="Category" className="rounded-lg border px-3 py-2 text-sm" />
                 <input value={skill.description || ''} onChange={(e) => updateSkill(skillIndex, { description: e.target.value })} placeholder="Description" className="rounded-lg border px-3 py-2 text-sm" />
                 <button onClick={() => removeSkill(skillIndex)} className="rounded-lg border px-2 text-red-500 hover:bg-red-50"><Trash2 className="w-4 h-4" /></button>
               </div>
@@ -969,25 +1159,71 @@ function SkillsMigrationPanel({ onPublished }) {
                 {(skill.subskills || []).map((subskill, subIndex) => (
                   <div key={subskill.id || subIndex} className="grid gap-2 md:grid-cols-[24px_1fr_1fr_auto] items-center">
                     <span className="h-px bg-slate-300" />
-                    <input value={subskill.name || ''} onChange={(e) => updateSubskill(skillIndex, subIndex, { name: e.target.value })} placeholder="Subskill" className="rounded-lg border px-3 py-1.5 text-xs" />
+                    <input value={subskill.name || ''} onChange={(e) => updateSubskill(skillIndex, subIndex, { name: e.target.value })} placeholder="Subcategory" className="rounded-lg border px-3 py-1.5 text-xs" />
                     <input value={subskill.description || ''} onChange={(e) => updateSubskill(skillIndex, subIndex, { description: e.target.value })} placeholder="Description" className="rounded-lg border px-3 py-1.5 text-xs" />
                     <button onClick={() => removeSubskill(skillIndex, subIndex)} className="rounded-lg border px-2 py-1 text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 ))}
-                <button onClick={() => addSubskill(skillIndex)} className="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add subskill</button>
+                <button onClick={() => addSubskill(skillIndex)} className="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add subcategory</button>
               </div>
             </div>
           ))}
-          <button onClick={addSkill} className="px-3 py-2 border rounded-lg text-xs font-medium hover:bg-slate-50 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add skill</button>
+          <button onClick={addSkill} className="px-3 py-2 border rounded-lg text-xs font-medium hover:bg-slate-50 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add category</button>
         </div>
+
+        {mappings.length > 0 && (
+          <details className="rounded-lg border" open={needsReviewMappings.length > 0}>
+            <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+              Legacy mapping review ({needsReviewMappings.length} unresolved)
+            </summary>
+            <div className="border-t p-3 space-y-2">
+              <div className="max-h-80 overflow-y-auto rounded-lg border">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 text-left text-slate-500">
+                    <tr>
+                      <th className="px-2 py-2 font-semibold">Legacy skill</th>
+                      <th className="px-2 py-2 font-semibold">Target category/subcategory</th>
+                      <th className="px-2 py-2 font-semibold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mappings.map((mapping, index) => {
+                      const selectedTarget = mapping.targetSubskillTempId || mapping.targetSkillTempId || '';
+                      return (
+                        <tr key={mapping.legacyCategoryId || index} className="border-t">
+                          <td className="px-2 py-2 font-medium text-slate-700">{mapping.legacyName}</td>
+                          <td className="px-2 py-2">
+                            <select value={selectedTarget} onChange={(e) => updateMappingTarget(index, e.target.value)} className="w-full rounded-lg border px-2 py-1 text-xs">
+                              <option value="">Choose target</option>
+                              {mappingTargetOptions.map((option) => (
+                                <option key={option.id} value={option.id}>{option.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-2 py-2">
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${mapping.status === 'mapped' ? 'bg-emerald-100 text-emerald-700' : mapping.status === 'review' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                              {mapping.confidence || mapping.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <button onClick={saveMappings} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Save className="w-3.5 h-3.5" /> Save mappings</button>
+            </div>
+          </details>
+        )}
 
         {drift && (
           <div className="grid gap-3 lg:grid-cols-2">
             <div className="rounded-lg border p-3 text-xs">
-              <p className="font-semibold text-slate-700">Freshservice dropdown drift</p>
-              <p className="mt-1 text-slate-500">Skill field: {drift.configured?.tpSkillCustomField}; Subskill field: {drift.configured?.tpSubskillCustomField}</p>
-              <p className="mt-2 text-amber-700">Missing skills: {drift.skillDrift?.missing?.length || 0}; extra skills: {drift.skillDrift?.extra?.length || 0}</p>
-              <p className="text-amber-700">Missing subskills: {drift.subskillDrift?.missing?.length || 0}; extra subskills: {drift.subskillDrift?.extra?.length || 0}</p>
+              <p className="font-semibold text-slate-700">Freshservice lookup object drift</p>
+              <p className="mt-1 text-slate-500">Category field: {drift.configured?.tpSkillCustomField}; Subcategory field: {drift.configured?.tpSubskillCustomField}</p>
+              <p className="mt-1 text-slate-500">Object records: {drift.objectRecords?.skills || 0} categories; {drift.objectRecords?.subskills || 0} subcategories</p>
+              <p className="mt-2 text-amber-700">Missing categories: {drift.skillDrift?.missing?.length || 0}; extra categories: {drift.skillDrift?.extra?.length || 0}</p>
+              <p className="text-amber-700">Missing subcategories: {drift.subskillDrift?.missing?.length || 0}; extra subcategories: {drift.subskillDrift?.extra?.length || 0}</p>
             </div>
             <textarea readOnly value={drift.exports?.hierarchyText || ''} className="min-h-[140px] rounded-lg border p-3 font-mono text-xs text-slate-700" />
           </div>
@@ -999,7 +1235,7 @@ function SkillsMigrationPanel({ onPublished }) {
 
 // ─── Matrix Tab (Overview + Editor) ──────────────────────────────────────
 
-function MatrixTab({ onAnalyze }) {
+function MatrixTab({ onAnalyze, showMigrationControls = false }) {
   const [categories, setCategories] = useState([]);
   const [categoryTree, setCategoryTree] = useState([]);
   const [technicians, setTechnicians] = useState([]);
@@ -1050,7 +1286,7 @@ function MatrixTab({ onAnalyze }) {
   };
 
   const handleDeleteCategory = async (id) => {
-    if (!confirm('Delete this skill/subskill and all its mappings?')) return;
+    if (!confirm('Delete this category/subcategory and all its mappings?')) return;
     try { await assignmentAPI.deleteCategory(id); await fetchData(); } catch (err) { setError(err.message); }
   };
 
@@ -1077,7 +1313,7 @@ function MatrixTab({ onAnalyze }) {
         </div>
       )}
 
-      <SkillsMigrationPanel onPublished={fetchData} />
+      {showMigrationControls && <SkillsMigrationPanel onPublished={fetchData} />}
 
       <DuplicateDetector onMerged={fetchData} />
 
@@ -1087,7 +1323,7 @@ function MatrixTab({ onAnalyze }) {
           <table className="text-sm border-collapse">
             <thead className="bg-slate-50">
               <tr>
-                <th className="text-left px-3 py-3 font-medium text-slate-600 sticky left-0 bg-slate-50 z-10 min-w-[180px]">Skill / Subskill</th>
+                <th className="text-left px-3 py-3 font-medium text-slate-600 sticky left-0 bg-slate-50 z-10 min-w-[180px]">Category / Subcategory</th>
                 {technicians.map((tech) => {
                   const initials = tech.name.split(' ').map((n) => n[0]).join('').slice(0, 2);
                   const isSelected = selectedTechId === tech.id;
@@ -1110,17 +1346,16 @@ function MatrixTab({ onAnalyze }) {
               {categories.length === 0 && (
                 <tr>
                   <td colSpan={technicians.length + 1} className="px-4 py-8 text-center text-sm text-slate-400">
-                    No skills yet. Add skills below to start mapping technicians, or import the summit draft.
+                    No categories yet. Add categories below to start mapping technicians, or import the summit draft.
                   </td>
                 </tr>
               )}
               {displayCategories.map((cat) => (
-                <tr key={cat.id} className={`border-t hover:bg-slate-50 ${cat.depth === 0 ? 'bg-slate-50/70' : ''}`}>
-                  <td className={`px-3 py-2 sticky left-0 z-10 text-xs text-slate-700 ${cat.depth === 0 ? 'bg-slate-50 font-semibold' : 'bg-white font-medium'}`} title={cat.description || ''}>
+                <tr key={cat.id} className={`border-t hover:bg-slate-50 ${cat.depth === 0 ? 'bg-slate-100/70' : ''}`}>
+                  <td className={`px-3 sticky left-0 z-10 text-slate-700 ${cat.depth === 0 ? 'bg-slate-100/95 py-3 text-sm font-bold text-slate-800' : 'bg-white py-2 text-xs font-medium'}`} title={cat.description || ''}>
                     <div className="flex items-center gap-2">
-                      {cat.depth === 1 && <span className="ml-3 h-px w-4 bg-slate-300" />}
-                      <span>{cat.name}</span>
-                      {cat.depth === 1 && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">sub</span>}
+                      {cat.depth === 1 && <span className="ml-3 h-px w-5 bg-slate-300" />}
+                      <span className={cat.depth === 0 ? 'tracking-normal' : 'text-slate-600'}>{cat.name}</span>
                     </div>
                   </td>
                   {technicians.map((tech) => {
@@ -1199,7 +1434,7 @@ function MatrixTab({ onAnalyze }) {
       {/* Category management (collapsed by default) */}
       <details className="border rounded-lg">
         <summary className="px-4 py-2.5 text-sm font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none flex items-center gap-2">
-          <span>Manage Published Skills ({categories.length})</span>
+          <span>Manage Published Categories ({categories.length})</span>
         </summary>
         <div className="px-4 pb-4 pt-2 border-t space-y-3">
           {categories.length > 0 && (
@@ -1297,7 +1532,14 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew, work
         try {
           const runsRes = await assignmentAPI.getCompetencyRuns({ techId, limit: 1 });
           const latestRun = runsRes?.items?.[0];
-          if (latestRun && (latestRun.status === 'running' || (latestRun.status === 'completed' && latestRun.decision === 'auto_applied'))) {
+          if (latestRun?.status === 'running') {
+            setRunId(latestRun.id);
+            currentStatus = 'running';
+            setStatus('running');
+            setError(`Analysis already running for this technician (run #${latestRun.id}). Use Run History to cancel it if it is stuck.`);
+            return;
+          }
+          if (latestRun?.status === 'completed' && ['auto_applied', 'preserved_existing'].includes(latestRun.decision)) {
             const runRes = await assignmentAPI.getCompetencyRun(latestRun.id);
             if (runRes?.data) { setCompletedRun(runRes.data); setRunId(latestRun.id); currentStatus = 'completed'; setStatus('completed'); return; }
           }
@@ -1334,7 +1576,7 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew, work
     })();
 
     return () => { abortController.abort(); stopTimer(); };
-  }, [techId, scrollToBottom]);
+  }, [techId, forceNew, scrollToBottom]);
 
   const STATUS_MAP = {
     checking: { icon: Loader2, text: 'Checking for existing analysis...', color: 'text-gray-500', spin: true },
@@ -1344,14 +1586,30 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew, work
     error: { icon: XCircle, text: 'Analysis failed', color: 'text-red-600', spin: false },
   };
   const statusInfo = STATUS_MAP[status] || STATUS_MAP.connecting;
+  const submittedCompetencyCount = assessment
+    ? (assessment.competencies || []).length
+    : (completedRun?.structuredResult?.competencies || []).length;
+  const resultDecision = assessment?.applyResult?.preservedExisting
+    ? 'preserved_existing'
+    : (completedRun?.decision === 'auto_applied' && submittedCompetencyCount === 0 ? 'no_changes' : (completedRun?.decision || (assessment ? 'auto_applied' : null)));
+  const statusText = status === 'completed'
+    ? (resultDecision === 'preserved_existing'
+      ? 'Analysis complete — existing skills preserved'
+      : resultDecision === 'no_changes'
+        ? 'Analysis complete — no skill changes'
+        : statusInfo.text)
+    : statusInfo.text;
+  const statusColor = status === 'completed' && ['preserved_existing', 'no_changes'].includes(resultDecision)
+    ? 'text-amber-600'
+    : statusInfo.color;
   const StatusIcon = statusInfo.icon;
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <StatusIcon className={`w-5 h-5 ${statusInfo.color} ${statusInfo.spin ? 'animate-spin' : ''}`} />
-          <span className={`text-sm font-medium ${statusInfo.color}`}>{statusInfo.text}</span>
+          <StatusIcon className={`w-5 h-5 ${statusColor} ${statusInfo.spin ? 'animate-spin' : ''}`} />
+          <span className={`text-sm font-medium ${statusColor}`}>{statusText}</span>
           {runId && <CopyBadge label="CR" value={runId} />}
           <span className="text-sm text-gray-500">| {techName}</span>
         </div>
@@ -1363,6 +1621,14 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew, work
         {events.length === 0 && status === 'completed' && completedRun && (
           <div className="text-sm text-gray-600">
             <p className="mb-2 text-xs text-gray-400">Showing results from previous analysis (run CR-{completedRun.id}, {formatDateTimeInTimezone(completedRun.createdAt, workspaceTimezone)})</p>
+            {completedRun.decision === 'preserved_existing' && (
+              <p className="mb-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                Existing skills were preserved because clean canonical category evidence was too sparse.
+              </p>
+            )}
+            {(completedRun.structuredResult?.competencies || []).length === 0 && (
+              <p className="text-xs text-gray-500">No skill changes were submitted.</p>
+            )}
             {completedRun.structuredResult?.competencies?.map((comp, i) => (
               <div key={i} className="mb-1">
                 <span className="font-medium">{comp.categoryName}</span>
@@ -1386,7 +1652,18 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew, work
 
       {(assessment || completedRun) && (
         <div className="mt-4 border-t pt-4 space-y-4">
-          <h4 className="text-sm font-semibold text-gray-700">Assessment Result (Auto-Applied)</h4>
+          <h4 className="text-sm font-semibold text-gray-700">
+            {resultDecision === 'preserved_existing'
+              ? 'Assessment Result (Existing Skills Preserved)'
+              : resultDecision === 'no_changes'
+                ? 'Assessment Result (No Skill Changes)'
+                : 'Assessment Result (Auto-Applied)'}
+          </h4>
+          {resultDecision === 'preserved_existing' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
+              {assessment?.applyResult?.preserveReason || completedRun?.structuredResult?.applyResult?.preserveReason || 'Existing skills were preserved because the run did not have enough clean canonical Ticket Pulse category evidence.'}
+            </div>
+          )}
           {(assessment?.overallSummary || completedRun?.structuredResult?.overallSummary) && (
             <p className="text-sm text-gray-600 bg-purple-50 rounded-lg p-3">{assessment?.overallSummary || completedRun?.structuredResult?.overallSummary}</p>
           )}
@@ -1495,6 +1772,11 @@ function RunHistoryTab({ deepRunId, workspaceTimezone = 'America/Los_Angeles' })
   const [loading, setLoading] = useState(true);
   const [selectedRun, setSelectedRun] = useState(null);
   const [actionMsg, setActionMsg] = useState(null);
+  const DECISION_COLORS = {
+    auto_applied: 'bg-green-100 text-green-800',
+    preserved_existing: 'bg-amber-100 text-amber-800',
+    rolled_back: 'bg-red-100 text-red-800',
+  };
 
   const fetchRuns = useCallback(async () => {
     try { setLoading(true); const res = await assignmentAPI.getCompetencyRuns({ limit: 50 }); setRuns({ items: res?.items || [], total: res?.total || 0 }); } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -1520,7 +1802,6 @@ function RunHistoryTab({ deepRunId, workspaceTimezone = 'America/Los_Angeles' })
   };
 
   if (selectedRun) {
-    const DECISION_COLORS = { auto_applied: 'bg-green-100 text-green-800', rolled_back: 'bg-red-100 text-red-800' };
     return (
       <div>
         <button onClick={() => { setSelectedRun(null); navigate('/assignments/competencies'); }} className="text-sm text-blue-600 hover:underline mb-4 flex items-center gap-1">
@@ -1548,6 +1829,13 @@ function RunHistoryTab({ deepRunId, workspaceTimezone = 'America/Los_Angeles' })
               )}
             </div>
           </div>
+          {selectedRun.decision === 'preserved_existing' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="text-sm text-amber-900">
+                {selectedRun.structuredResult?.applyResult?.preserveReason || 'Existing skills were preserved because the run did not have enough clean canonical Ticket Pulse category evidence.'}
+              </p>
+            </div>
+          )}
           {selectedRun.structuredResult?.overallSummary && <div className="bg-purple-50 border border-purple-200 rounded-lg p-3"><p className="text-sm text-purple-900">{selectedRun.structuredResult.overallSummary}</p></div>}
           {selectedRun.beforeSnapshot && selectedRun.afterSnapshot && <CompetencyDiff before={selectedRun.beforeSnapshot.competencies || []} after={selectedRun.afterSnapshot?.competencies || []} />}
           {selectedRun.steps?.length > 0 && (
@@ -1587,7 +1875,7 @@ function RunHistoryTab({ deepRunId, workspaceTimezone = 'America/Los_Angeles' })
                   <p className="text-xs text-gray-500">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${run.decision === 'auto_applied' ? 'bg-green-100 text-green-800' : run.decision === 'rolled_back' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-600'}`}>
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${DECISION_COLORS[run.decision] || 'bg-gray-100 text-gray-600'}`}>
                     {(run.decision || run.status || '').replace(/_/g, ' ')}
                   </span>
                   <ChevronRight className="w-4 h-4 text-gray-400" />
@@ -1718,11 +2006,13 @@ const COMPETENCY_TABS = [
 export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, workspaceTimezone = 'America/Los_Angeles' }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { currentWorkspace } = useWorkspace();
   const [activeTab, setActiveTab] = useState('matrix');
   const [suggestionCount, setSuggestionCount] = useState(0);
 
   const isLiveAnalysis = !!deepAnalyzeTechId;
   const forceNew = searchParams.get('force') === 'true';
+  const isItWorkspace = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
 
   useEffect(() => {
     assignmentAPI.getCategorySuggestions()
@@ -1769,7 +2059,7 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
         })}
       </div>
 
-      {effectiveTab === 'matrix' && <MatrixTab onAnalyze={(id) => handleAnalyze(id)} />}
+      {effectiveTab === 'matrix' && <MatrixTab onAnalyze={(id) => handleAnalyze(id)} showMigrationControls={isItWorkspace} />}
       {effectiveTab === 'suggestions' && <CategorySuggestionsTab onCountChange={setSuggestionCount} />}
       {effectiveTab === 'history' && <RunHistoryTab deepRunId={deepRunId} workspaceTimezone={workspaceTimezone} />}
       {effectiveTab === 'prompt' && <CompetencyPromptTab />}

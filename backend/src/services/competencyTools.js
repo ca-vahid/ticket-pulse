@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import graphMailClient from '../integrations/graphMailClient.js';
+import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 
 function buildCategoryTree(categories = []) {
   const byId = new Map(categories.map((category) => [category.id, { ...category, subcategories: [] }]));
@@ -54,6 +55,88 @@ function summarizeInternalTaxonomyRows(rows = [], totalTickets = 0) {
     .sort((a, b) => b.count - a.count || a.categoryName.localeCompare(b.categoryName));
 }
 
+function canonicalEvidenceConfidence(row) {
+  if (!row.internalCategory) return 'none';
+  if (row.taxonomyReviewNeeded) return 'caution';
+  if (row.internalCategoryFit === 'weak' || row.internalCategoryFit === 'none') return 'caution';
+  if (row.internalSubcategory && (row.internalSubcategoryFit === 'weak' || row.internalSubcategoryFit === 'none')) return 'caution';
+  if (row.internalSubcategory) return 'clean_subcategory';
+  return 'clean_parent';
+}
+
+function summarizeCanonicalEvidenceRows(rows = [], totalTickets = 0) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const category = row.internalCategory;
+    if (!category) continue;
+    const subcategory = row.internalSubcategory || null;
+    const key = `${category.id}:${subcategory?.id || 'parent'}`;
+    const evidenceConfidence = canonicalEvidenceConfidence(row);
+    const existing = byKey.get(key) || {
+      categoryId: category.id,
+      categoryName: category.name,
+      subcategoryId: subcategory?.id || null,
+      subcategoryName: subcategory?.name || null,
+      evidenceLevel: subcategory ? 'subcategory' : 'parent',
+      totalTicketCount: 0,
+      cleanTicketCount: 0,
+      cautionTicketCount: 0,
+      resolvedCount: 0,
+      selfPickedCount: 0,
+      rejectedTicketCount: 0,
+      fitCounts: {},
+      suggestedNames: [],
+      exampleTickets: [],
+      lastSeen: null,
+    };
+    existing.totalTicketCount += 1;
+    if (evidenceConfidence === 'clean_subcategory' || evidenceConfidence === 'clean_parent') {
+      existing.cleanTicketCount += 1;
+    } else {
+      existing.cautionTicketCount += 1;
+    }
+    if (row.resolvedAt) existing.resolvedCount += 1;
+    if (row.isSelfPicked) existing.selfPickedCount += 1;
+    if ((row.rejectionCount || 0) > 0) existing.rejectedTicketCount += 1;
+
+    const fitKey = [
+      row.internalCategoryFit || 'unknown_category_fit',
+      row.internalSubcategoryFit || (subcategory ? 'unknown_subcategory_fit' : 'no_subcategory'),
+      row.taxonomyReviewNeeded ? 'review_needed' : 'no_review',
+    ].join('/');
+    existing.fitCounts[fitKey] = (existing.fitCounts[fitKey] || 0) + 1;
+
+    const suggestedName = row.suggestedInternalSubcategoryName || row.suggestedInternalCategoryName;
+    if (suggestedName && !existing.suggestedNames.includes(suggestedName) && existing.suggestedNames.length < 5) {
+      existing.suggestedNames.push(suggestedName);
+    }
+
+    if (existing.exampleTickets.length < 6) {
+      existing.exampleTickets.push({
+        freshserviceTicketId: Number(row.freshserviceTicketId),
+        subject: cleanSnippet(row.subject, 120),
+        confidence: evidenceConfidence,
+      });
+    }
+
+    const seen = row.createdAt?.toISOString()?.slice(0, 10) || null;
+    if (seen && (!existing.lastSeen || seen > existing.lastSeen)) existing.lastSeen = seen;
+    byKey.set(key, existing);
+  }
+
+  return Array.from(byKey.values())
+    .map((item) => ({
+      ...item,
+      percentageOfHandledTickets: totalTickets > 0 ? Math.round((item.totalTicketCount / totalTickets) * 100) : 0,
+      cleanEvidenceRatio: item.totalTicketCount > 0 ? Number((item.cleanTicketCount / item.totalTicketCount).toFixed(2)) : 0,
+    }))
+    .sort((a, b) => (
+      b.cleanTicketCount - a.cleanTicketCount
+      || b.totalTicketCount - a.totalTicketCount
+      || a.categoryName.localeCompare(b.categoryName)
+    ));
+}
+
 function summarizeTaxonomySuggestionRows(rows = [], totalTickets = 0) {
   const byKey = new Map();
   for (const row of rows) {
@@ -88,6 +171,31 @@ function summarizeTaxonomySuggestionRows(rows = [], totalTickets = 0) {
       percentage: totalTickets > 0 ? Math.round((item.count / totalTickets) * 100) : 0,
     }))
     .sort((a, b) => b.count - a.count || a.suggestedName.localeCompare(b.suggestedName));
+}
+
+function buildCanonicalCategoryPayload(ticket) {
+  const confidence = canonicalEvidenceConfidence(ticket);
+  return ticket.internalCategory
+    ? {
+      categoryId: ticket.internalCategory.id,
+      categoryName: ticket.internalCategory.name,
+      subcategoryId: ticket.internalSubcategory?.id || null,
+      subcategoryName: ticket.internalSubcategory?.name || null,
+      evidenceLevel: ticket.internalSubcategory ? 'subcategory' : 'parent',
+      confidence,
+      usableForSkill: confidence === 'clean_subcategory' || confidence === 'clean_parent',
+      caution: confidence === 'caution',
+    }
+    : null;
+}
+
+function buildLegacyFreshserviceEvidence(ticket) {
+  return {
+    useForSkillMapping: false,
+    category: ticket.category || null,
+    subCategory: ticket.subCategory || null,
+    ticketCategory: ticket.ticketCategory || null,
+  };
 }
 
 function clampInteger(value, defaultValue, maxValue) {
@@ -129,12 +237,23 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'get_existing_competency_categories',
-    description: 'Get the internal competency taxonomy tree currently defined in this workspace, with top-level categories and subcategories. Reuse existing category/subcategory IDs when they fit before proposing new ones.',
+    description: 'Get the active published category/subcategory hierarchy currently defined in this workspace. Reuse existing category/subcategory IDs; do not invent active categories.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
+    name: 'get_technician_canonical_category_evidence',
+    description: 'Get canonical Ticket Pulse category/subcategory evidence for this technician from internally classified tickets. This is the primary tool for skill assessment. It separates clean category/subcategory evidence from taxonomy-review caution rows and suggested taxonomy gaps.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        days: { type: 'integer', description: 'How many days of history (default 180, max 365)' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'get_technician_ticket_history',
-    description: 'Get recent tickets handled by this technician. Shows category, subcategory, priority, subject, created/resolved dates, self-picked flag, and rejection count. Use this to understand what work domains the technician covers.',
+    description: 'Get recent tickets handled by this technician. Shows canonical category/subcategory, taxonomy fit, legacy Freshservice fields as supporting evidence, priority, subject, dates, self-picked flag, and rejection count.',
     input_schema: {
       type: 'object',
       properties: {
@@ -146,7 +265,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'get_technician_category_distribution',
-    description: 'Get deterministic aggregate breakdown of ticket categories/subcategories for this technician: counts, recency, resolution rate, self-picks, and rejected assignment episodes. Best tool for understanding specialization patterns.',
+    description: 'Get deterministic aggregate breakdown of canonical category/subcategory evidence plus legacy Freshservice category distributions. Use canonical evidence for skills; legacy fields are supporting context only.',
     input_schema: {
       type: 'object',
       properties: {
@@ -170,12 +289,14 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'search_workspace_tickets',
-    description: 'Search tickets across the entire workspace by keyword, category, or technician. Returns short description snippets and assignment-quality counts for comparison and context.',
+    description: 'Search tickets across the workspace by keyword, canonical category/subcategory ID, legacy Freshservice category, or technician. Use canonical filters for skill evidence; legacy category is supporting context only.',
     input_schema: {
       type: 'object',
       properties: {
         keyword: { type: 'string', description: 'Search term for subject/description' },
-        category: { type: 'string', description: 'Filter by FreshService category' },
+        internalCategoryId: { type: 'integer', description: 'Filter by canonical Ticket Pulse category ID' },
+        internalSubcategoryId: { type: 'integer', description: 'Filter by canonical Ticket Pulse subcategory ID' },
+        category: { type: 'string', description: 'Legacy Freshservice category filter; supporting context only, not skill evidence' },
         assigned_tech_id: { type: 'integer', description: 'Filter by technician ID' },
         limit: { type: 'integer', description: 'Max results (default 15, max 25)' },
       },
@@ -184,7 +305,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'get_comparable_technicians',
-    description: 'Compare this technician\'s ticket category distribution with peers. Helps infer relative specialization vs generalist patterns.',
+    description: 'Compare this technician\'s canonical category/subcategory distribution with peers. Helps infer relative specialization vs generalist patterns without using raw Freshservice categories as skill evidence.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -205,11 +326,11 @@ export const COMPETENCY_TOOL_SCHEMAS = [
             type: 'object',
             properties: {
               categoryName: { type: 'string', description: 'Category name (use existing name if it fits, otherwise propose a new one)' },
-              categoryId: { type: 'integer', description: 'Existing category or subcategory ID when reusing an internal taxonomy entry' },
+              categoryId: { type: 'integer', description: 'Required existing canonical category or subcategory ID when categoryAction is reuse_existing. Name-only reuse will not be auto-applied.' },
               parentCategoryName: { type: 'string', description: 'Parent top-level category name when proposing a new subcategory' },
               parentCategoryId: { type: 'integer', description: 'Parent top-level category ID when proposing a new subcategory' },
               categoryDescription: { type: 'string', description: 'Brief description of what this category covers' },
-              categoryAction: { type: 'string', enum: ['reuse_existing', 'create_new'], description: 'Whether to use an existing category/subcategory or propose a new inactive taxonomy entry for admin review' },
+              categoryAction: { type: 'string', enum: ['reuse_existing', 'create_new'], description: 'reuse_existing updates technician skills only when categoryId is a valid active canonical ID. create_new creates only an inactive taxonomy-gap suggestion for admin review and is not mapped to the technician.' },
               proficiencyLevel: {
                 type: 'string',
                 enum: ['basic', 'intermediate', 'advanced', 'expert'],
@@ -238,6 +359,8 @@ export async function executeCompetencyTool(toolName, toolInput, context) {
     return await getTechnicianProfile(workspaceId, technicianId);
   case 'get_existing_competency_categories':
     return await getExistingCategories(workspaceId);
+  case 'get_technician_canonical_category_evidence':
+    return await getTechnicianCanonicalCategoryEvidence(workspaceId, technicianId, toolInput);
   case 'get_technician_ticket_history':
     return await getTechnicianTicketHistory(workspaceId, technicianId, toolInput);
   case 'get_technician_category_distribution':
@@ -304,13 +427,100 @@ async function getExistingCategories(workspaceId) {
       levelType: category.parentId ? 'subcategory' : 'category',
     })),
     categoryTree: buildCategoryTree(categories),
-    instruction: 'Reuse an existing internal category/subcategory ID whenever it fits. Prefer exact subcategory mappings for specific work domains; use parent-category mappings for broader/general competency. Only use categoryAction "create_new" when NO existing category or subcategory covers this work area; new entries are inactive suggestions until admin review.',
+    instruction: 'Use only these active category/subcategory IDs for competency mappings. Prefer exact subcategory IDs for specific repeatable work; use parent-category IDs only for broader/general capability when subcategory evidence is missing or weak. Suggested or legacy category names are taxonomy-review evidence, not active skill IDs.',
+  };
+}
+
+async function getTechnicianCanonicalCategoryEvidence(workspaceId, technicianId, params = {}) {
+  const days = clampInteger(params.days, 180, 365);
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  const [total, classifiedRows, suggestionRows] = await Promise.all([
+    prisma.ticket.count({
+      where: { workspaceId, assignedTechId: technicianId, createdAt: { gte: since } },
+    }),
+    prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        assignedTechId: technicianId,
+        createdAt: { gte: since },
+        internalCategoryId: { not: null },
+      },
+      select: {
+        freshserviceTicketId: true,
+        subject: true,
+        internalCategory: { select: { id: true, name: true } },
+        internalSubcategory: { select: { id: true, name: true, parentId: true } },
+        internalCategoryFit: true,
+        internalSubcategoryFit: true,
+        taxonomyReviewNeeded: true,
+        suggestedInternalCategoryName: true,
+        suggestedInternalSubcategoryName: true,
+        rejectionCount: true,
+        createdAt: true,
+        resolvedAt: true,
+        isSelfPicked: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    }),
+    prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        assignedTechId: technicianId,
+        createdAt: { gte: since },
+        OR: [
+          { suggestedInternalCategoryName: { not: null } },
+          { suggestedInternalSubcategoryName: { not: null } },
+        ],
+      },
+      select: {
+        freshserviceTicketId: true,
+        createdAt: true,
+        suggestedInternalCategoryName: true,
+        suggestedInternalSubcategoryName: true,
+        internalCategory: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+    }),
+  ]);
+
+  const canonicalEvidence = summarizeCanonicalEvidenceRows(classifiedRows, total);
+  const cleanEvidenceRows = classifiedRows.filter((row) => (
+    canonicalEvidenceConfidence(row) === 'clean_subcategory'
+    || canonicalEvidenceConfidence(row) === 'clean_parent'
+  ));
+
+  return {
+    technicianId,
+    period: `Last ${days} days`,
+    coverage: {
+      handledTickets: total,
+      classifiedTickets: classifiedRows.length,
+      cleanEvidenceTickets: cleanEvidenceRows.length,
+      cautionTickets: classifiedRows.length - cleanEvidenceRows.length,
+      unclassifiedTickets: Math.max(total - classifiedRows.length, 0),
+      classifiedCoveragePct: total > 0 ? Math.round((classifiedRows.length / total) * 100) : 0,
+      cleanEvidenceCoveragePct: total > 0 ? Math.round((cleanEvidenceRows.length / total) * 100) : 0,
+    },
+    canonicalEvidence,
+    taxonomyGaps: summarizeTaxonomySuggestionRows(suggestionRows, total),
+    instruction: [
+      'Use canonicalEvidence as the primary basis for skill mappings.',
+      'Prefer rows with evidenceLevel="subcategory" and cleanTicketCount > 0.',
+      'Rows with cautionTicketCount, weak/none fit, or taxonomyReviewNeeded are evidence to review, not clean proof of skill.',
+      'taxonomyGaps are suggested labels from prior ticket classification. Try to match those tickets to existing active category/subcategory IDs first; do not submit them as active skills unless an active ID exists.',
+      'If canonical coverage is sparse, keep the assessment conservative and preserve current mappings rather than inventing skills from legacy Freshservice categories.',
+    ],
   };
 }
 
 async function getTechnicianTicketHistory(workspaceId, technicianId, params = {}) {
   const days = clampInteger(params.days, 90, 180);
   const limit = clampInteger(params.limit, 50, 100);
+  const canonicalMode = isSkillHierarchyWorkspace(workspaceId);
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -344,43 +554,51 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params = {}
     period: `Last ${days} days`,
     totalTickets: total,
     returned: tickets.length,
-    tickets: tickets.map((t) => ({
-      id: t.id,
-      freshserviceTicketId: Number(t.freshserviceTicketId),
-      subject: t.subject,
-      status: t.status,
-      priority: t.priority,
-      category: t.category,
-      subCategory: t.subCategory,
-      ticketCategory: t.ticketCategory,
-      internalCategory: t.internalCategory
-        ? {
-          id: t.internalCategory.id,
-          name: t.internalCategory.name,
-          subcategory: t.internalSubcategory ? { id: t.internalSubcategory.id, name: t.internalSubcategory.name } : null,
-        }
-        : null,
-      taxonomyFit: {
-        categoryFit: t.internalCategoryFit,
-        subcategoryFit: t.internalSubcategoryFit,
-        reviewNeeded: t.taxonomyReviewNeeded,
-        suggestedCategoryName: t.suggestedInternalCategoryName,
-        suggestedSubcategoryName: t.suggestedInternalSubcategoryName,
-      },
-      assignmentSignals: {
-        rejectionCount: t.rejectionCount || 0,
-        hasRejectedEpisode: (t.rejectionCount || 0) > 0,
-      },
-      createdAt: toIsoDate(t.createdAt),
-      resolvedAt: toIsoDate(t.resolvedAt),
-      selfPicked: t.isSelfPicked,
-      resolutionMins: t.resolutionTimeSeconds ? Math.round(t.resolutionTimeSeconds / 60) : null,
-    })),
+    tickets: tickets.map((t) => {
+      const row = {
+        id: t.id,
+        freshserviceTicketId: Number(t.freshserviceTicketId),
+        subject: t.subject,
+        status: t.status,
+        priority: t.priority,
+        canonicalCategory: buildCanonicalCategoryPayload(t),
+        legacyFreshserviceEvidence: buildLegacyFreshserviceEvidence(t),
+        internalCategory: t.internalCategory
+          ? {
+            id: t.internalCategory.id,
+            name: t.internalCategory.name,
+            subcategory: t.internalSubcategory ? { id: t.internalSubcategory.id, name: t.internalSubcategory.name } : null,
+          }
+          : null,
+        taxonomyFit: {
+          categoryFit: t.internalCategoryFit,
+          subcategoryFit: t.internalSubcategoryFit,
+          reviewNeeded: t.taxonomyReviewNeeded,
+          suggestedCategoryName: t.suggestedInternalCategoryName,
+          suggestedSubcategoryName: t.suggestedInternalSubcategoryName,
+        },
+        assignmentSignals: {
+          rejectionCount: t.rejectionCount || 0,
+          hasRejectedEpisode: (t.rejectionCount || 0) > 0,
+        },
+        createdAt: toIsoDate(t.createdAt),
+        resolvedAt: toIsoDate(t.resolvedAt),
+        selfPicked: t.isSelfPicked,
+        resolutionMins: t.resolutionTimeSeconds ? Math.round(t.resolutionTimeSeconds / 60) : null,
+      };
+      if (!canonicalMode) {
+        row.category = t.category;
+        row.subCategory = t.subCategory;
+        row.ticketCategory = t.ticketCategory;
+      }
+      return row;
+    }),
   };
 }
 
 async function getTechnicianCategoryDistribution(workspaceId, technicianId, params = {}) {
   const days = clampInteger(params.days, 90, 180);
+  const canonicalMode = isSkillHierarchyWorkspace(workspaceId);
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -453,7 +671,8 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
     take: 200,
   });
 
-  // Pick whichever category field has more data
+  // Pick whichever legacy category field has more data. This remains context-only
+  // and is deliberately not exposed as a generic "categoryBreakdown" skill source.
   const byCategory = byFsCategory.length >= byTicketCategory.length
     ? byFsCategory
     : byTicketCategory.map((r) => ({ ...r, category: r.ticketCategory }));
@@ -482,7 +701,18 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
     recentByCategory[cat.category] = toIsoDate(latest?.createdAt);
   }
 
-  return {
+  const legacyBreakdown = byCategory.map((c) => ({
+    category: c.category,
+    count: c._count,
+    percentage: total > 0 ? Math.round((c._count / total) * 100) : 0,
+    lastSeen: recentByCategory[c.category] || null,
+    useForSkillMapping: !canonicalMode,
+    subCategories: bySub
+      .filter((s) => s.category === c.category)
+      .map((s) => ({ subCategory: s.subCategory, count: s._count })),
+  }));
+
+  const payload = {
     technicianId,
     period: `Last ${days} days`,
     summary: {
@@ -496,21 +726,21 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
     },
     internalTaxonomyBreakdown: summarizeInternalTaxonomyRows(internalRows, total),
     taxonomySuggestionBreakdown: summarizeTaxonomySuggestionRows(suggestionRows, total),
-    categoryBreakdown: byCategory.map((c) => ({
-      category: c.category,
-      count: c._count,
-      percentage: total > 0 ? Math.round((c._count / total) * 100) : 0,
-      lastSeen: recentByCategory[c.category] || null,
-      subCategories: bySub
-        .filter((s) => s.category === c.category)
-        .map((s) => ({ subCategory: s.subCategory, count: s._count })),
-    })),
+    legacyFreshserviceCategoryBreakdown: legacyBreakdown,
+    guidance: canonicalMode
+      ? 'Use internalTaxonomyBreakdown and canonical evidence for skills. legacyFreshserviceCategoryBreakdown comes from raw Freshservice fields and is supporting context only; never directly create or update technician skills from it.'
+      : 'Legacy category mode: categoryBreakdown reflects the current Freshservice-backed category system and can be used for skill assessment. Prefer canonical evidence if present, but do not require it in this workspace yet.',
   };
+  if (!canonicalMode) {
+    payload.categoryBreakdown = legacyBreakdown;
+  }
+  return payload;
 }
 
 async function getTechnicianAssignmentSignals(workspaceId, technicianId, params = {}) {
   const days = clampInteger(params.days, 180, 365);
   const limit = clampInteger(params.limit, 40, 80);
+  const canonicalMode = isSkillHierarchyWorkspace(workspaceId);
   const includeThreadSnippets = params.includeThreadSnippets !== false;
   const since = new Date();
   since.setDate(since.getDate() - days);
@@ -651,16 +881,15 @@ async function getTechnicianAssignmentSignals(workspaceId, technicianId, params 
         || rebound.previousTechName === technician.name;
     });
 
-    return {
+    const row = {
       id: ticket.id,
       freshserviceTicketId: Number(ticket.freshserviceTicketId),
       subject: ticket.subject,
       descriptionSnippet: cleanSnippet(ticket.descriptionText, 500),
       status: ticket.status,
       priority: ticket.priority,
-      category: ticket.category,
-      subCategory: ticket.subCategory,
-      ticketCategory: ticket.ticketCategory,
+      canonicalCategory: buildCanonicalCategoryPayload(ticket),
+      legacyFreshserviceEvidence: buildLegacyFreshserviceEvidence(ticket),
       internalCategory: ticket.internalCategory
         ? {
           id: ticket.internalCategory.id,
@@ -735,6 +964,12 @@ async function getTechnicianAssignmentSignals(workspaceId, technicianId, params 
         snippet: cleanSnippet(entry.bodyText, 650),
       })).filter((entry) => entry.snippet),
     };
+    if (!canonicalMode) {
+      row.category = ticket.category;
+      row.subCategory = ticket.subCategory;
+      row.ticketCategory = ticket.ticketCategory;
+    }
+    return row;
   });
 
   const totals = analyzedTickets.reduce((acc, ticket) => {
@@ -757,6 +992,9 @@ async function getTechnicianAssignmentSignals(workspaceId, technicianId, params 
     totals,
     interpretationGuidance: [
       'Use rejected/reassigned episodes and rebound runs as caution signals: they can indicate misassignment, insufficient skill fit, unavailable context, or process issues.',
+      canonicalMode
+        ? 'Use canonicalCategory as skill evidence. Legacy Freshservice category fields are context only and must not directly create or update skills.'
+        : 'Legacy category mode: raw category fields can still be used as skill evidence in this workspace. Prefer canonicalCategory when it exists, but do not require it yet.',
       'Do not raise proficiency on volume alone when the same category has repeated rejection/reassignment signals.',
       'Use thread snippets and ticket descriptions to understand why the assignment succeeded or failed; absence of snippets means the cache may not have notes for that ticket.',
     ],
@@ -766,8 +1004,11 @@ async function getTechnicianAssignmentSignals(workspaceId, technicianId, params 
 
 async function searchWorkspaceTickets(workspaceId, params = {}) {
   const limit = clampInteger(params.limit, 15, 25);
+  const canonicalMode = isSkillHierarchyWorkspace(workspaceId);
   const where = { workspaceId };
 
+  if (params.internalCategoryId) where.internalCategoryId = Number(params.internalCategoryId);
+  if (params.internalSubcategoryId) where.internalSubcategoryId = Number(params.internalSubcategoryId);
   if (params.category) where.category = params.category;
   if (params.assigned_tech_id) where.assignedTechId = params.assigned_tech_id;
   if (params.keyword) {
@@ -782,7 +1023,7 @@ async function searchWorkspaceTickets(workspaceId, params = {}) {
     select: {
       id: true, freshserviceTicketId: true, subject: true,
       descriptionText: true,
-      status: true, priority: true, category: true,
+      status: true, priority: true, category: true, subCategory: true, ticketCategory: true,
       rejectionCount: true,
       internalCategory: { select: { id: true, name: true } },
       internalSubcategory: { select: { id: true, name: true, parentId: true } },
@@ -801,37 +1042,46 @@ async function searchWorkspaceTickets(workspaceId, params = {}) {
 
   return {
     returned: tickets.length,
-    tickets: tickets.map((t) => ({
-      id: t.id,
-      freshserviceTicketId: Number(t.freshserviceTicketId),
-      subject: t.subject,
-      descriptionSnippet: cleanSnippet(t.descriptionText, 350),
-      status: t.status,
-      priority: t.priority,
-      category: t.category,
-      internalCategory: t.internalCategory
-        ? {
-          id: t.internalCategory.id,
-          name: t.internalCategory.name,
-          subcategory: t.internalSubcategory ? { id: t.internalSubcategory.id, name: t.internalSubcategory.name } : null,
-        }
-        : null,
-      taxonomyFit: {
-        categoryFit: t.internalCategoryFit,
-        subcategoryFit: t.internalSubcategoryFit,
-        reviewNeeded: t.taxonomyReviewNeeded,
-        suggestedCategoryName: t.suggestedInternalCategoryName,
-        suggestedSubcategoryName: t.suggestedInternalSubcategoryName,
-      },
-      assignmentSignals: {
-        rejectionCount: t.rejectionCount || 0,
-        assignmentEpisodeCount: t._count.assignmentEpisodes,
-        cachedThreadEntryCount: t._count.threadEntries,
-      },
-      createdAt: toIsoDate(t.createdAt),
-      resolvedAt: toIsoDate(t.resolvedAt),
-      assignedTo: t.assignedTech?.name || 'Unassigned',
-    })),
+    tickets: tickets.map((t) => {
+      const row = {
+        id: t.id,
+        freshserviceTicketId: Number(t.freshserviceTicketId),
+        subject: t.subject,
+        descriptionSnippet: cleanSnippet(t.descriptionText, 350),
+        status: t.status,
+        priority: t.priority,
+        canonicalCategory: buildCanonicalCategoryPayload(t),
+        legacyFreshserviceEvidence: buildLegacyFreshserviceEvidence(t),
+        internalCategory: t.internalCategory
+          ? {
+            id: t.internalCategory.id,
+            name: t.internalCategory.name,
+            subcategory: t.internalSubcategory ? { id: t.internalSubcategory.id, name: t.internalSubcategory.name } : null,
+          }
+          : null,
+        taxonomyFit: {
+          categoryFit: t.internalCategoryFit,
+          subcategoryFit: t.internalSubcategoryFit,
+          reviewNeeded: t.taxonomyReviewNeeded,
+          suggestedCategoryName: t.suggestedInternalCategoryName,
+          suggestedSubcategoryName: t.suggestedInternalSubcategoryName,
+        },
+        assignmentSignals: {
+          rejectionCount: t.rejectionCount || 0,
+          assignmentEpisodeCount: t._count.assignmentEpisodes,
+          cachedThreadEntryCount: t._count.threadEntries,
+        },
+        createdAt: toIsoDate(t.createdAt),
+        resolvedAt: toIsoDate(t.resolvedAt),
+        assignedTo: t.assignedTech?.name || 'Unassigned',
+      };
+      if (!canonicalMode) {
+        row.category = t.category;
+        row.subCategory = t.subCategory;
+        row.ticketCategory = t.ticketCategory;
+      }
+      return row;
+    }),
   };
 }
 
@@ -846,31 +1096,43 @@ async function getComparableTechnicians(workspaceId, technicianId) {
 
   const distributions = [];
   for (const tech of allTechs.slice(0, 15)) {
-    const cats = await prisma.ticket.groupBy({
-      by: ['category'],
-      where: { workspaceId, assignedTechId: tech.id, createdAt: { gte: since }, category: { not: null } },
-      _count: true,
-      orderBy: { _count: { category: 'desc' } },
-      take: 5,
+    const canonicalRows = await prisma.ticket.findMany({
+      where: { workspaceId, assignedTechId: tech.id, createdAt: { gte: since }, internalCategoryId: { not: null } },
+      select: {
+        internalCategory: { select: { id: true, name: true } },
+        internalSubcategory: { select: { id: true, name: true, parentId: true } },
+        internalCategoryFit: true,
+        internalSubcategoryFit: true,
+        taxonomyReviewNeeded: true,
+        createdAt: true,
+      },
+      take: 250,
     });
 
     const total = await prisma.ticket.count({
       where: { workspaceId, assignedTechId: tech.id, createdAt: { gte: since } },
     });
+    const topCanonicalCategories = summarizeCanonicalEvidenceRows(canonicalRows, total).slice(0, 5);
 
     distributions.push({
       techId: tech.id,
       techName: tech.name,
       isTargetTech: tech.id === technicianId,
       totalTickets: total,
-      topCategories: cats.map((c) => ({ category: c.category, count: c._count })),
+      topCanonicalCategories,
+      topCategories: topCanonicalCategories.map((category) => ({
+        category: category.subcategoryName || category.categoryName,
+        categoryId: category.subcategoryId || category.categoryId,
+        count: category.totalTicketCount,
+        cleanTicketCount: category.cleanTicketCount,
+      })),
     });
   }
 
   return {
     period: 'Last 90 days',
     technicians: distributions.sort((a, b) => b.totalTickets - a.totalTickets),
-    note: 'Compare the target technician\'s category distribution with peers to identify unique specializations.',
+    note: 'Compare canonical category/subcategory distributions with peers to identify unique specializations. topCategories is a compatibility alias for topCanonicalCategories; do not treat raw Freshservice categories as skill evidence.',
   };
 }
 

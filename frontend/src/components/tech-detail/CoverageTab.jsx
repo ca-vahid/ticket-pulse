@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Moon, Sunrise, ExternalLink, Layers } from 'lucide-react';
 import { getHolidayInfo, getHolidayTooltip } from '../../utils/holidays';
+import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 import { PRIORITY_STRIP_COLORS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from './constants';
 import { fmtWaitTime } from './utils';
 import FilterBar, { applyNotPickedFilters, applyPickedFilters } from './FilterBar';
@@ -17,6 +18,7 @@ function isOvernight(ticket) {
 function CoverageTicketRow({ ticket, showAssignee, onExcludeCategory }) {
   const overnight = isOvernight(ticket);
   const wait = fmtWaitTime(ticket);
+  const categoryLabel = getTicketCategoryLabel(ticket);
   return (
     <div className={`border rounded overflow-hidden hover:shadow-sm transition-all ${overnight ? 'bg-slate-50 border-slate-200' : 'bg-amber-50/30 border-amber-200'}`}>
       <div className="flex items-stretch">
@@ -38,13 +40,13 @@ function CoverageTicketRow({ ticket, showAssignee, onExcludeCategory }) {
           <span className={`${STATUS_COLORS[ticket.status] || 'bg-slate-100 text-slate-600'} px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0`}>
             {ticket.status}
           </span>
-          {ticket.ticketCategory && (
+          {categoryLabel && (
             <button
-              onClick={onExcludeCategory ? (e) => { e.stopPropagation(); onExcludeCategory(ticket.ticketCategory); } : undefined}
+              onClick={onExcludeCategory ? (e) => { e.stopPropagation(); onExcludeCategory(categoryLabel); } : undefined}
               className={`px-1.5 py-0.5 rounded text-[10px] flex-shrink-0 truncate max-w-[90px] ${onExcludeCategory ? 'bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600 hover:line-through cursor-pointer' : 'bg-slate-100 text-slate-500'}`}
-              title={onExcludeCategory ? `Click to exclude "${ticket.ticketCategory}"` : ticket.ticketCategory}
+              title={onExcludeCategory ? `Click to exclude "${categoryLabel}"` : categoryLabel}
             >
-              {ticket.ticketCategory}
+              {categoryLabel}
             </button>
           )}
           {showAssignee && ticket.assignedTechName && (
@@ -125,7 +127,7 @@ export default function CoverageTab({
 
   // All unique categories across both lists for the dropdowns
   const allCategories = [
-    ...new Set([...allPicked, ...allNotPicked].map((t) => t.ticketCategory).filter(Boolean)),
+    ...new Set([...allPicked, ...allNotPicked].map((t) => getTicketCategoryLabel(t)).filter(Boolean)),
   ].sort();
 
   return (

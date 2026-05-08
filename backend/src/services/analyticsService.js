@@ -197,7 +197,7 @@ function metadata(rangeInfo, extra = {}) {
     caveats: [
       'Resolution analytics use resolutionTimeSeconds because closedAt/resolvedAt are sparse in the local dataset.',
       'First-response analytics are intentionally omitted because firstPublicAgentReplyAt is not populated.',
-      'Category analytics use ticketCategory; category, subCategory, department, and internalCategoryId are sparse.',
+      'Category analytics use Ticket Pulse category/subcategory first, then Freshservice mirror fields, then legacy ticketCategory only for historical continuity.',
       'CSAT cards show sample size because survey coverage is low.',
     ],
     generatedAt: new Date().toISOString(),
@@ -280,15 +280,81 @@ function topFromMap(map, limit = 10) {
     .slice(0, limit);
 }
 
+function ticketPulseCategoryParts(ticket) {
+  const category = ticket?.internalCategory?.name || ticket?.tpSkill || null;
+  const subcategory = ticket?.internalSubcategory?.name || ticket?.tpSubskill || null;
+  if (category || subcategory) {
+    return {
+      category,
+      subcategory,
+      label: [category, subcategory].filter(Boolean).join(' / '),
+      source: 'canonical',
+      legacyCategory: ticket?.ticketCategory || null,
+    };
+  }
+  if (ticket?.ticketCategory) {
+    return {
+      category: null,
+      subcategory: null,
+      label: ticket.ticketCategory,
+      source: 'legacyFallback',
+      legacyCategory: ticket.ticketCategory,
+    };
+  }
+  return {
+    category: null,
+    subcategory: null,
+    label: 'Uncategorized',
+    source: 'unmapped',
+    legacyCategory: null,
+  };
+}
+
 function canonicalSkillLabel(ticket) {
-  const skill = ticket.internalCategory?.name || ticket.tpSkill || null;
-  const subskill = ticket.internalSubcategory?.name || ticket.tpSubskill || null;
-  if (skill && subskill) return `${skill} > ${subskill}`;
-  return subskill || skill || ticket.ticketCategory || 'Uncategorized';
+  return ticketPulseCategoryParts(ticket).label;
+}
+
+function categoryBreakdownFromTickets(tickets, limit = 10) {
+  const byLabel = new Map();
+  const coverage = {
+    canonical: 0,
+    legacyFallback: 0,
+    unmapped: 0,
+    total: tickets.length,
+  };
+  for (const ticket of tickets) {
+    const parts = ticketPulseCategoryParts(ticket);
+    coverage[parts.source] += 1;
+    const row = byLabel.get(parts.label) || {
+      name: parts.label,
+      count: 0,
+      canonicalCount: 0,
+      legacyFallbackCount: 0,
+      unmappedCount: 0,
+      source: parts.source,
+    };
+    row.count += 1;
+    if (parts.source === 'canonical') row.canonicalCount += 1;
+    if (parts.source === 'legacyFallback') row.legacyFallbackCount += 1;
+    if (parts.source === 'unmapped') row.unmappedCount += 1;
+    if (row.canonicalCount > 0) row.source = 'canonical';
+    else if (row.legacyFallbackCount > 0) row.source = 'legacyFallback';
+    else row.source = 'unmapped';
+    byLabel.set(parts.label, row);
+  }
+  const rows = Array.from(byLabel.values())
+    .sort((a, b) => b.count - a.count || String(a.name).localeCompare(String(b.name)))
+    .slice(0, limit)
+    .map((row) => ({
+      ...row,
+      pct: coverage.total ? Number(((row.count / coverage.total) * 100).toFixed(1)) : 0,
+    }));
+  return { rows, coverage };
 }
 
 function compactTicket(ticket) {
   if (!ticket) return null;
+  const categoryParts = ticketPulseCategoryParts(ticket);
   return {
     id: ticket.id,
     freshserviceTicketId: ticket.freshserviceTicketId ? String(ticket.freshserviceTicketId) : null,
@@ -296,9 +362,14 @@ function compactTicket(ticket) {
     status: ticket.status,
     priority: ticket.priority,
     ticketCategory: ticket.ticketCategory || null,
-    skill: ticket.internalCategory?.name || ticket.tpSkill || null,
-    subskill: ticket.internalSubcategory?.name || ticket.tpSubskill || null,
-    canonicalSkill: canonicalSkillLabel(ticket),
+    legacyCategory: categoryParts.legacyCategory,
+    category: categoryParts.category,
+    subcategory: categoryParts.subcategory,
+    canonicalCategory: categoryParts.label,
+    canonicalCategorySource: categoryParts.source,
+    skill: categoryParts.category,
+    subskill: categoryParts.subcategory,
+    canonicalSkill: categoryParts.label,
     createdAt: ticket.createdAt,
     firstAssignedAt: ticket.firstAssignedAt,
     dueBy: ticket.dueBy,
@@ -526,7 +597,6 @@ export async function getDemandFlow(workspaceId, query = {}) {
     const trendMap = new Map();
     const priorityMap = new Map();
     const sourceMap = new Map();
-    const categoryMap = new Map();
     const requesterMap = new Map();
     const heatmap = new Map();
     const noiseCount = createdTickets.filter((t) => t.isNoise).length;
@@ -539,7 +609,6 @@ export async function getDemandFlow(workspaceId, query = {}) {
       trendMap.set(key, row);
       increment(priorityMap, PRIORITY_LABELS[ticket.priority] || `P${ticket.priority || 'Unknown'}`);
       increment(sourceMap, SOURCE_LABELS[ticket.source] || `Source ${ticket.source || 'Unknown'}`);
-      increment(categoryMap, canonicalSkillLabel(ticket));
       increment(requesterMap, ticket.requester?.name || ticket.requester?.email || 'Unknown requester');
       const dow = formatInTimeZone(ticket.createdAt, rangeInfo.timezone, 'EEE');
       const hour = formatInTimeZone(ticket.createdAt, rangeInfo.timezone, 'HH');
@@ -554,6 +623,7 @@ export async function getDemandFlow(workspaceId, query = {}) {
       row.net -= 1;
       trendMap.set(key, row);
     }
+    const categoryBreakdown = categoryBreakdownFromTickets(createdTickets);
 
     return {
       metadata: metadata(rangeInfo, { excludeNoise }),
@@ -565,7 +635,8 @@ export async function getDemandFlow(workspaceId, query = {}) {
       breakdowns: {
         priority: topFromMap(priorityMap),
         source: topFromMap(sourceMap),
-        category: topFromMap(categoryMap),
+        category: categoryBreakdown.rows,
+        categoryCoverage: categoryBreakdown.coverage,
         requester: topFromMap(requesterMap),
         noiseShare: {
           count: noiseCount,
@@ -1193,7 +1264,7 @@ export async function getInsights(workspaceId, query = {}) {
         id: 'category-concentration',
         title: 'Demand is concentrated in one category',
         severity: 'info',
-        rule: 'Top ticketCategory has at least 10 tickets and at least 35% of created demand.',
+        rule: 'Top Ticket Pulse category/subcategory path has at least 10 tickets and at least 35% of created demand; legacy category is used only where canonical values are missing.',
         evidenceCount: demand.breakdowns.category[0].count,
         affected: [demand.breakdowns.category[0].name],
         drilldown: demand.breakdowns.category,

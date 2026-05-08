@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import SearchBox from '../components/SearchBox';
 import CategoryFilter from '../components/CategoryFilter';
-import { filterTickets } from '../utils/ticketFilter';
+import { filterTickets, getTicketCategoryLabel } from '../utils/ticketFilter';
 import ExportButton from '../components/ExportButton';
 import {
   ArrowLeft,
@@ -262,8 +262,9 @@ export default function TechnicianDetail() {
   const allTickets = [...selfPickedTickets, ...assignedTickets, ...closedTickets, ...openTickets];
   const categorySet = new Set();
   allTickets.forEach(ticket => {
-    if (ticket.ticketCategory) {
-      categorySet.add(ticket.ticketCategory);
+    const categoryLabel = getTicketCategoryLabel(ticket);
+    if (categoryLabel) {
+      categorySet.add(categoryLabel);
     }
   });
   const availableCategories = Array.from(categorySet).sort();
@@ -309,6 +310,7 @@ export default function TechnicianDetail() {
 
     // Check if ticket is self-assigned (same logic as dashboard)
     const isSelfAssigned = ticket.isSelfPicked || ticket.assignedBy === technician.name;
+    const categoryLabel = getTicketCategoryLabel(ticket);
 
     return (
       <div className={`border rounded-lg p-3 hover:shadow-md transition-shadow ${
@@ -347,10 +349,10 @@ export default function TechnicianDetail() {
         </div>
 
         {/* Category Row - Separate line for visibility */}
-        {ticket.ticketCategory && (
+        {categoryLabel && (
           <div className="mb-2">
             <span className="bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-xs font-medium border border-indigo-300 inline-block">
-              📂 {ticket.ticketCategory}
+              📂 {categoryLabel}
             </span>
           </div>
         )}

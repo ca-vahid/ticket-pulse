@@ -74,6 +74,7 @@ class SyncService {
     this.currentStep = null;
     this.progressByWorkspace = new Map();
     this._embeddedRequesterNames = new Map();
+    this._ticketPulseLookupCache = new Map();
     this.progress = {
       currentStep: null,
       techniciansSynced: 0,
@@ -130,6 +131,52 @@ class SyncService {
     }
     const config = await settingsRepository.getFreshServiceConfig();
     return { ...config, defaultTimezone: 'America/Los_Angeles', syncIntervalMinutes: 5 };
+  }
+
+  async _getTicketPulseLookupMaps(wsConfig) {
+    const categoryField = wsConfig?.tpSkillCustomField;
+    const subcategoryField = wsConfig?.tpSubskillCustomField;
+    if (!categoryField || !subcategoryField) return {};
+    const usesTicketPulseLookups = categoryField === 'lf_ticket_pulse_category'
+      && subcategoryField === 'lf_ticket_pulse_subcategory';
+    if (!usesTicketPulseLookups || !wsConfig.domain || !wsConfig.apiKey || !wsConfig.workspaceId) return {};
+
+    const cacheKey = `${wsConfig.domain}:${wsConfig.workspaceId}:${categoryField}:${subcategoryField}`;
+    const cached = this._ticketPulseLookupCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.maps;
+
+    try {
+      const client = createFreshServiceClient(wsConfig.domain, wsConfig.apiKey, {
+        priority: 'low',
+        source: 'ticket-pulse-lookup-map',
+      });
+      const objects = await client.listCustomObjects({ workspace_id: wsConfig.workspaceId });
+      const byTitle = new Map(objects.map((object) => [object.title, object]));
+      const categoryObject = byTitle.get('Ticket Pulse Skills');
+      const subcategoryObject = byTitle.get('Ticket Pulse Subskills');
+      if (!categoryObject || !subcategoryObject) return {};
+
+      const [categoryRecords, subcategoryRecords] = await Promise.all([
+        client.listCustomObjectRecords(categoryObject.id),
+        client.listCustomObjectRecords(subcategoryObject.id),
+      ]);
+      const toLookupMap = (records) => new Map(records
+        .map((record) => [record?.data?.bo_display_id ?? record?.bo_display_id ?? record?.id, record?.data?.name || record?.name])
+        .filter(([id, name]) => id !== undefined && id !== null && name)
+        .map(([id, name]) => [String(id), String(name)]));
+      const maps = {
+        tpSkillLookupMap: toLookupMap(categoryRecords),
+        tpSubskillLookupMap: toLookupMap(subcategoryRecords),
+      };
+      this._ticketPulseLookupCache.set(cacheKey, { maps, expiresAt: Date.now() + 5 * 60 * 1000 });
+      return maps;
+    } catch (error) {
+      logger.warn('Could not build Ticket Pulse lookup maps from FreshService custom objects', {
+        workspaceId: wsConfig.workspaceId,
+        error: error.message,
+      });
+      return {};
+    }
   }
 
   // ========================================
@@ -737,6 +784,7 @@ class SyncService {
       if (wsConfig.tpSubskillCustomField) {
         transformOptions.tpSubskillCustomField = wsConfig.tpSubskillCustomField;
       }
+      Object.assign(transformOptions, await this._getTicketPulseLookupMaps(wsConfig));
     }
 
     const transformedTickets = transformTickets(fsTickets, transformOptions);

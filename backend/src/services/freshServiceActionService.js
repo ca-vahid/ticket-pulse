@@ -4,6 +4,9 @@ import prisma from './prisma.js';
 import { shouldCloseNoiseDismissedRun } from './assignmentFlowGuards.js';
 import logger from '../utils/logger.js';
 
+const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
+const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
+
 function mapClosedStatus(status) {
   if (Number(status) === 5) return 'Closed';
   return 'Resolved';
@@ -20,6 +23,18 @@ function extractFreshServiceError(error) {
     || error.originalError?.response?.data
     || null;
   return status || body ? { status, body } : null;
+}
+
+function keyFor(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function recordName(record) {
+  return String(record?.data?.name || record?.name || '').trim();
+}
+
+function recordDisplayId(record) {
+  return record?.data?.bo_display_id ?? record?.bo_display_id ?? record?.id ?? null;
 }
 
 class FreshServiceActionService {
@@ -61,8 +76,8 @@ class FreshServiceActionService {
           type: 'update_custom_fields',
           ticketId: fsTicketId,
           customFields: {
-            [workspace?.tpSkillCustomField || 'tp_skill']: skillName,
-            [workspace?.tpSubskillCustomField || 'tp_subskill']: subskillName || null,
+            [workspace?.tpSkillCustomField || 'lf_ticket_pulse_category']: skillName,
+            [workspace?.tpSubskillCustomField || 'lf_ticket_pulse_subcategory']: subskillName || null,
           },
           localFields: {
             tpSkill: skillName,
@@ -135,7 +150,7 @@ class FreshServiceActionService {
 
     const preview = actions.map((a) => {
       if (a.type === 'assign') return `Assign ticket #${a.ticketId} to agent ${a.agentId}`;
-      if (a.type === 'update_custom_fields') return `Update Ticket Pulse skill fields on ticket #${a.ticketId}`;
+      if (a.type === 'update_custom_fields') return `Update Ticket Pulse category fields on ticket #${a.ticketId}`;
       if (a.type === 'close') return `Close ticket #${a.ticketId}`;
       if (a.type === 'note') return `Add private note to ticket #${a.ticketId}`;
       return `${a.type} on ticket #${a.ticketId}`;
@@ -273,7 +288,9 @@ class FreshServiceActionService {
           if (result?.alreadyClosed) { ticketGone = true; continue; }
           logger.info('FreshService: ticket assigned', { ticketId: action.ticketId, agentId: action.agentId, runId });
         } else if (action.type === 'update_custom_fields') {
-          const result = await client.updateTicketCustomFields(action.ticketId, action.customFields);
+          const customFields = await this._resolveTicketPulseLookupFields(client, action, fsConfig);
+          action.sentCustomFields = customFields;
+          const result = await client.updateTicketCustomFields(action.ticketId, customFields);
           if (result?.alreadyClosed) { ticketGone = true; continue; }
           await prisma.ticket.update({
             where: { id: run.ticketId },
@@ -337,6 +354,48 @@ class FreshServiceActionService {
       return { success: false, error: err.message, preview, freshserviceError };
     }
   }
+
+  async _resolveTicketPulseLookupFields(client, action, fsConfig) {
+    const categoryName = action.localFields?.tpSkill;
+    const subcategoryName = action.localFields?.tpSubskill;
+    const categoryField = fsConfig.tpSkillCustomField || 'lf_ticket_pulse_category';
+    const subcategoryField = fsConfig.tpSubskillCustomField || 'lf_ticket_pulse_subcategory';
+
+    if (!categoryName || (!action.customFields?.[categoryField] && !action.customFields?.[subcategoryField])) {
+      return action.customFields;
+    }
+
+    const objects = await client.listCustomObjects({ workspace_id: fsConfig.workspaceId });
+    const byTitle = new Map(objects.map((object) => [object.title, object]));
+    const categoryObject = byTitle.get(TP_SKILL_OBJECT_TITLE);
+    const subcategoryObject = byTitle.get(TP_SUBSKILL_OBJECT_TITLE);
+    if (!categoryObject || !subcategoryObject) {
+      return action.customFields;
+    }
+
+    const [categoryRecords, subcategoryRecords] = await Promise.all([
+      client.listCustomObjectRecords(categoryObject.id),
+      client.listCustomObjectRecords(subcategoryObject.id),
+    ]);
+    const categoriesByName = new Map(categoryRecords.map((record) => [keyFor(recordName(record)), recordDisplayId(record)]));
+    const subcategoriesByName = new Map(subcategoryRecords.map((record) => [keyFor(recordName(record)), recordDisplayId(record)]));
+    const categoryDisplayId = categoriesByName.get(keyFor(categoryName));
+    const subcategoryDisplayId = subcategoryName ? subcategoriesByName.get(keyFor(subcategoryName)) : null;
+
+    if (!categoryDisplayId) {
+      throw new Error(`FreshService lookup record not found for Ticket Pulse category "${categoryName}"`);
+    }
+    if (subcategoryName && !subcategoryDisplayId) {
+      throw new Error(`FreshService lookup record not found for Ticket Pulse subcategory "${subcategoryName}"`);
+    }
+
+    return {
+      ...action.customFields,
+      [categoryField]: categoryDisplayId,
+      [subcategoryField]: subcategoryDisplayId,
+    };
+  }
+
   /**
    * Pre-validate that the assignment will succeed before making the API call.
    * Returns null if OK, or { code, reason, details } if should abort.

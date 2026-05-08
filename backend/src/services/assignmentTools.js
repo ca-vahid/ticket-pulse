@@ -229,7 +229,7 @@ Length: under 300 characters.`,
         ticketClassification: { type: 'string', description: 'Human-readable internal classification from get_ticket_categories (e.g., "Software Support > OpenGround")' },
         internalCategoryId: { type: 'integer', description: 'Selected internal top-level category ID from get_ticket_categories' },
         internalSubcategoryId: { type: 'integer', description: 'Selected internal subcategory ID from get_ticket_categories, if applicable' },
-        classificationRationale: { type: 'string', description: 'Brief rationale for the selected internal category/subcategory. If the fit is weak, explain what is missing from the taxonomy.' },
+        classificationRationale: { type: 'string', description: 'Brief rationale for the selected internal category/subcategory. If the fit is weak, explain what is missing from the category/subcategory list.' },
         categoryFit: {
           type: 'string',
           enum: ['exact', 'weak', 'none'],
@@ -242,7 +242,7 @@ Length: under 300 characters.`,
         },
         taxonomyReviewNeeded: {
           type: 'boolean',
-          description: 'True when categoryFit or subcategoryFit is weak/none, or when this ticket suggests a new/moved/renamed category or subcategory should be reviewed later.',
+          description: 'True only when categoryFit or subcategoryFit is weak/none, or when this ticket suggests a new/moved/renamed category or subcategory should be reviewed later. Do not set true for missing technician competency coverage; that is an agent skill matrix gap.',
         },
         suggestedInternalCategoryName: {
           type: 'string',

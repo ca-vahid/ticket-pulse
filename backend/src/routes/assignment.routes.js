@@ -12,6 +12,7 @@ import assignmentDailyReviewService from '../services/assignmentDailyReviewServi
 import assignmentDailyReviewConsolidationService from '../services/assignmentDailyReviewConsolidationService.js';
 import assignmentCorrectionService from '../services/assignmentCorrectionService.js';
 import skillHierarchyService from '../services/skillHierarchyService.js';
+import ticketReclassificationService from '../services/ticketReclassificationService.js';
 import syncService from '../services/syncService.js';
 import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
@@ -1138,6 +1139,42 @@ router.get('/skills/freshservice-drift', requireAdmin, asyncHandler(async (req, 
   res.json({ success: true, data });
 }));
 
+router.post('/skills/freshservice-sync', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await skillHierarchyService.syncFreshserviceObjects(req.workspaceId, req.body || {});
+  res.json({ success: true, data });
+}));
+
+router.post('/tickets/reclassify', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await ticketReclassificationService.run(req.workspaceId, {
+    ...(req.body || {}),
+    actorEmail: req.session?.user?.email || 'admin',
+  });
+  logger.info('Internal ticket reclassification completed', {
+    workspaceId: req.workspaceId,
+    runId: data.id,
+    dryRun: data.dryRun,
+    scanned: data.scanned,
+    classified: data.classified,
+    failed: data.failed,
+    actorEmail: req.session?.user?.email,
+  });
+  res.json({ success: true, data });
+}));
+
+router.get('/tickets/reclassify/runs', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await ticketReclassificationService.listRuns(req.workspaceId, { limit: req.query.limit });
+  res.json({ success: true, data });
+}));
+
+router.post('/tickets/reclassify/runs/:id/rollback', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await ticketReclassificationService.rollback(
+    req.workspaceId,
+    req.params.id,
+    req.session?.user?.email || 'admin',
+  );
+  res.json({ success: true, data });
+}));
+
 // ─── Competency Categories ──────────────────────────────────────────────
 
 router.get('/competencies', requireAdmin, asyncHandler(async (req, res) => {
@@ -1155,7 +1192,7 @@ router.get('/competencies', requireAdmin, asyncHandler(async (req, res) => {
       mappings,
       suggestedCategories,
       suggestedCategoryCount: suggestedCategories.length,
-      terminology: { top: 'Skill', child: 'Subskill', topPlural: 'Skills', childPlural: 'Subskills' },
+      terminology: { top: 'Category', child: 'Subcategory', topPlural: 'Categories', childPlural: 'Subcategories' },
     },
   });
 }));

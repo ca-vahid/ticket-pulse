@@ -68,7 +68,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const REVIEW_RECOMMENDATION_TABS = [
   { key: 'prompt', label: 'Prompt', title: 'Prompt Recommendations', icon: FileText, tone: 'indigo', emptyText: 'No prompt changes recommended for this review.' },
   { key: 'process', label: 'Process', title: 'Process Recommendations', icon: Settings2, tone: 'sky', emptyText: 'No process changes recommended for this review.' },
-  { key: 'taxonomy', label: 'Taxonomy', title: 'Taxonomy Recommendations', icon: Tags, tone: 'emerald', emptyText: 'No category taxonomy changes recommended for this review.' },
+  { key: 'taxonomy', label: 'Categories', title: 'Category Recommendations', icon: Tags, tone: 'emerald', emptyText: 'No category/subcategory changes recommended for this review.' },
   { key: 'skill', label: 'Agent Skills', title: 'Agent Skill Recommendations', icon: Award, tone: 'violet', emptyText: 'No agent skill changes recommended for this review.' },
 ];
 
@@ -294,7 +294,7 @@ function RecommendationCard({
             <div className="mb-3 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
               <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
                 <Tags className="h-3.5 w-3.5" />
-                Taxonomy proposal
+                Category proposal
               </div>
               <div className="flex flex-wrap gap-1.5">
                 <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
@@ -424,7 +424,7 @@ function ReviewHighlights({ summary, warnings, promptRecommendations, processRec
       <RunSignalCard
         label="Recommendations"
         value={recommendationTotal}
-        detail={`${promptRecommendations.length} prompt · ${processRecommendations.length} process · ${taxonomyRecommendations.length} taxonomy · ${skillRecommendations.length} agent skill`}
+        detail={`${promptRecommendations.length} prompt · ${processRecommendations.length} process · ${taxonomyRecommendations.length} category · ${skillRecommendations.length} agent skill`}
         tone={recommendationTotal > 0 ? 'purple' : 'slate'}
         icon={Sparkles}
       />
@@ -557,7 +557,7 @@ function ReviewRecommendationCard({
           <div className="rounded-lg border border-emerald-100 bg-white/70 px-3 py-2">
             <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
               <Tags className="h-3.5 w-3.5" />
-              Taxonomy proposal
+              Category proposal
             </div>
             <div className="flex flex-wrap gap-1.5">
               <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
@@ -820,7 +820,7 @@ function TaxonomyRecommendationsTable({
       <div className="rounded-t-xl border-b border-emerald-100 bg-emerald-50/70 px-4 py-3">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div className="text-sm font-semibold text-emerald-950">Taxonomy Change List</div>
+            <div className="text-sm font-semibold text-emerald-950">Category Change List</div>
             <div className="text-xs text-emerald-700">Each row is one category or subcategory change proposed by the review.</div>
           </div>
           <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 shadow-sm">
@@ -908,7 +908,7 @@ function TaxonomyRecommendationsTable({
                           onClick={() => handleAction(item, 'approved')}
                           disabled={isSaving}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-green-600 text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
-                          aria-label="Approve taxonomy recommendation"
+                          aria-label="Approve category recommendation"
                           title="Approve"
                         >
                           <CheckCircle className="h-3.5 w-3.5" />
@@ -920,7 +920,7 @@ function TaxonomyRecommendationsTable({
                           onClick={() => handleAction(item, 'rejected')}
                           disabled={isSaving}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                          aria-label="Decline taxonomy recommendation"
+                          aria-label="Decline category recommendation"
                           title="Decline"
                         >
                           <XCircle className="h-3.5 w-3.5" />
@@ -932,7 +932,7 @@ function TaxonomyRecommendationsTable({
                           onClick={() => handleAction(item, 'applied')}
                           disabled={isSaving}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-white text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-                          aria-label="Mark taxonomy recommendation applied"
+                          aria-label="Mark category recommendation applied"
                           title="Mark applied"
                         >
                           <CheckCircle className="h-3.5 w-3.5" />
@@ -2168,7 +2168,7 @@ function SkillListCompactEditor({
             onChange={(e) => onFieldChange('description', e.target.value)}
             disabled={isApplied}
             rows={3}
-            placeholder="Describe what changes and why this taxonomy update is justified."
+            placeholder="Describe what changes and why this category update is justified."
             className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-700 disabled:opacity-60"
           />
           {needsParent && selectedParent && (
@@ -2386,7 +2386,7 @@ function ConsolidationPanel({
 
   const sections = [
     { key: 'prompt', label: 'Prompt Edits', icon: FileText, applyable: true },
-    { key: 'skills', label: 'Taxonomy Changes', icon: Tags, applyable: true },
+    { key: 'skills', label: 'Category Changes', icon: Tags, applyable: true },
     { key: 'technician_competencies', label: 'Agent Skill Changes', icon: Brain, applyable: true },
     { key: 'process', label: 'Process Changes', icon: Settings2, applyable: false },
   ];
@@ -3790,7 +3790,7 @@ const REVIEW_PAGE_TABS = [
 const BACKLOG_KIND_TABS = [
   { key: 'prompt', label: 'Prompt', icon: FileText },
   { key: 'process', label: 'Process', icon: Settings2 },
-  { key: 'taxonomy', label: 'Taxonomy', icon: Tags },
+  { key: 'taxonomy', label: 'Categories', icon: Tags },
   { key: 'skill', label: 'Agent Skills', icon: Award },
   { key: 'dev', label: 'Dev', icon: AlertTriangle, visibilityOnly: true },
 ];

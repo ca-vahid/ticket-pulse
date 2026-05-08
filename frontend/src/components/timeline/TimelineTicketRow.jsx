@@ -11,6 +11,7 @@ import {
 import { PRIORITY_STRIP_COLORS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from './constants';
 import { fmtWaitTime } from '../tech-detail/utils';
 import { isOvernight } from './timelineUtils';
+import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 
 /**
  * A single ticket row in the timeline.
@@ -27,6 +28,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
   const overnight = isOvernight(ticket);
   const wait = fmtWaitTime(ticket);
   const isExtended = ticket._section === 'after9am';
+  const categoryLabel = getTicketCategoryLabel(ticket);
 
   // In multi-tech mode tickets carry _techFirstName; single-tech falls back to defaultFirstName
   const pickerName = ticket._techFirstName || defaultFirstName || 'Tech';
@@ -180,13 +182,13 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
           </span>
 
           {/* Category (click to exclude) */}
-          {ticket.ticketCategory && (
+          {categoryLabel && (
             <button
-              onClick={() => onExcludeCategory?.(ticket.ticketCategory)}
+              onClick={() => onExcludeCategory?.(categoryLabel)}
               className="max-w-[150px] truncate rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-red-50 hover:text-red-600 hover:line-through cursor-pointer sm:max-w-[100px] flex-shrink-0"
-              title={`Click to hide "${ticket.ticketCategory}"`}
+              title={`Click to hide "${categoryLabel}"`}
             >
-              {ticket.ticketCategory}
+              {categoryLabel}
             </button>
           )}
 

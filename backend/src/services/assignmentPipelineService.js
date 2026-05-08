@@ -905,6 +905,14 @@ class AssignmentPipelineService {
         : category;
       const safeCategoryId = normalizedCategory?.id || normalizedSubcategory?.parentId || null;
       const safeSubcategoryId = normalizedSubcategory?.id || null;
+      const categoryFit = normalizeTaxonomyFit(recommendation?.categoryFit);
+      const subcategoryFit = normalizeTaxonomyFit(recommendation?.subcategoryFit);
+      const suggestedCategoryName = truncateTaxonomySuggestion(recommendation?.suggestedInternalCategoryName);
+      const suggestedSubcategoryName = truncateTaxonomySuggestion(recommendation?.suggestedInternalSubcategoryName);
+      const taxonomyReviewNeeded = ['weak', 'none'].includes(categoryFit)
+        || ['weak', 'none'].includes(subcategoryFit)
+        || Boolean(suggestedCategoryName)
+        || Boolean(suggestedSubcategoryName);
 
       await prisma.ticket.update({
         where: { id: ticketId },
@@ -913,13 +921,11 @@ class AssignmentPipelineService {
           internalSubcategoryId: safeSubcategoryId || null,
           internalCategoryConfidence: recommendation?.confidence || null,
           internalCategoryRationale: recommendation?.classificationRationale || recommendation?.ticketClassification || null,
-          internalCategoryFit: normalizeTaxonomyFit(recommendation?.categoryFit),
-          internalSubcategoryFit: normalizeTaxonomyFit(recommendation?.subcategoryFit),
-          taxonomyReviewNeeded: Boolean(recommendation?.taxonomyReviewNeeded)
-            || ['weak', 'none'].includes(normalizeTaxonomyFit(recommendation?.categoryFit))
-            || ['weak', 'none'].includes(normalizeTaxonomyFit(recommendation?.subcategoryFit)),
-          suggestedInternalCategoryName: truncateTaxonomySuggestion(recommendation?.suggestedInternalCategoryName),
-          suggestedInternalSubcategoryName: truncateTaxonomySuggestion(recommendation?.suggestedInternalSubcategoryName),
+          internalCategoryFit: categoryFit,
+          internalSubcategoryFit: subcategoryFit,
+          taxonomyReviewNeeded,
+          suggestedInternalCategoryName: suggestedCategoryName,
+          suggestedInternalSubcategoryName: suggestedSubcategoryName,
         },
       });
     } catch (err) {

@@ -69,6 +69,26 @@ function taxonomyFitLabel(value) {
   return value || null;
 }
 
+function ticketPulseCategoryLabel(ticket) {
+  if (!ticket) return null;
+  if (ticket.internalCategory?.name) {
+    return `${ticket.internalCategory.name}${ticket.internalSubcategory?.name ? ` / ${ticket.internalSubcategory.name}` : ''}`;
+  }
+  if (ticket.tpSkill || ticket.tpSubskill) {
+    return [ticket.tpSkill, ticket.tpSubskill].filter(Boolean).join(' / ');
+  }
+  return null;
+}
+
+function ticketCategoryReviewNeeded(ticket) {
+  if (!ticket) return false;
+  return Boolean(ticket.taxonomyReviewNeeded)
+    || ['weak', 'none'].includes(ticket.internalCategoryFit)
+    || ['weak', 'none'].includes(ticket.internalSubcategoryFit)
+    || Boolean(ticket.suggestedInternalCategoryName)
+    || Boolean(ticket.suggestedInternalSubcategoryName);
+}
+
 const STEP_ICONS = {
   classification: Brain,
   categorization: Award,
@@ -273,9 +293,7 @@ function TicketDetailsCard({ ticket }) {
   }, [useHtml, safeHtml]);
 
   if (!ticket) return null;
-  const taxonomyNeedsReview = ticket.taxonomyReviewNeeded
-    || ['weak', 'none'].includes(ticket.internalCategoryFit)
-    || ['weak', 'none'].includes(ticket.internalSubcategoryFit);
+  const taxonomyNeedsReview = ticketCategoryReviewNeeded(ticket);
   const taxonomyFitText = [
     ticket.internalCategoryFit ? `Category ${taxonomyFitLabel(ticket.internalCategoryFit)}` : null,
     ticket.internalSubcategoryFit ? `Subcategory ${taxonomyFitLabel(ticket.internalSubcategoryFit)}` : null,
@@ -289,6 +307,7 @@ function TicketDetailsCard({ ticket }) {
   ].filter((value, index, arr) => (
     value
     && arr.findIndex((candidate) => normalizeTaxonomyLabel(candidate) === normalizeTaxonomyLabel(value)) === index
+    && !assignedTaxonomyLabel
     && normalizeTaxonomyLabel(value) !== normalizeTaxonomyLabel(assignedTaxonomyLabel)
     && normalizeTaxonomyLabel(value) !== normalizeTaxonomyLabel(ticket.internalCategory?.name)
   ));
@@ -351,7 +370,7 @@ function TicketDetailsCard({ ticket }) {
                 <p className="text-[10px] text-slate-400 uppercase font-medium">Category</p>
                 {sourceCategoryLabels.length > 0 && (
                   <div className="mt-0.5">
-                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">FreshService current label</div>
+                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Legacy Freshservice evidence</div>
                     <div className="mt-0.5 flex flex-wrap gap-1">
                       {sourceCategoryLabels.map((label) => (
                         <span key={label} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
@@ -363,7 +382,7 @@ function TicketDetailsCard({ ticket }) {
                 )}
                 {assignedTaxonomyLabel && (
                   <div className="mt-1">
-                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Assignment agent internal match</div>
+                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Ticket Pulse category</div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-1">
                       <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
                         {assignedTaxonomyLabel}
@@ -378,7 +397,7 @@ function TicketDetailsCard({ ticket }) {
                 )}
                 {(taxonomyFitText || taxonomyNeedsReview) && (
                   <div className="mt-1">
-                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Internal taxonomy fit</div>
+                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Category fit</div>
                     <div className="mt-0.5 flex flex-wrap gap-1">
                       {ticket.internalCategoryFit && (
                         <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
@@ -394,7 +413,7 @@ function TicketDetailsCard({ ticket }) {
                       )}
                       {taxonomyNeedsReview && (
                         <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                          Needs taxonomy review
+                          Review category
                         </span>
                       )}
                     </div>
@@ -409,7 +428,7 @@ function TicketDetailsCard({ ticket }) {
                     <div className={`text-[9px] font-semibold uppercase tracking-wide ${
                       hasSuggestedCategory || hasSuggestedSubcategory ? 'text-emerald-700' : 'text-amber-700'
                     }`}>
-                      Proposed taxonomy change
+                      Suggested category update
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1">
                       {hasSuggestedCategory && (
@@ -931,6 +950,8 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
     (ticket.status && !['Open', 'open', '2', 'Pending', 'pending', '3'].includes(String(ticket.status))) ||
     (ticket.assignedTechId && ticket.assignedTech && isPending)
   );
+  const headerCategoryLabel = ticketPulseCategoryLabel(ticket);
+  const headerCategoryNeedsReview = ticketCategoryReviewNeeded(ticket);
 
   const handleRerun = async () => {
     if (rerunning) return;
@@ -954,7 +975,16 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${PRIORITY_PILL[ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
                 {PRIORITY_LABELS[ticket?.priority] || '—'}
               </span>
-              {ticket?.ticketCategory && <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{ticket.ticketCategory}</span>}
+              {headerCategoryLabel && (
+                <span className="max-w-full truncate rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                  {headerCategoryLabel}
+                </span>
+              )}
+              {headerCategoryNeedsReview && (
+                <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                  Review category
+                </span>
+              )}
             </div>
             <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
               {ticket?.subject || 'No subject'}

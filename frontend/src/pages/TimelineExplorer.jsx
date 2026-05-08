@@ -17,6 +17,7 @@ import {
 } from '../components/timeline/timelineUtils';
 import { TECH_ACCENT_COLORS } from '../components/timeline/constants';
 import { getInitials, formatDateLocal } from '../components/tech-detail/utils';
+import { getTicketCategoryLabel } from '../utils/ticketFilter';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -590,7 +591,7 @@ export default function TimelineExplorer() {
     const rawItems = buildTimeline(mergedDays, timelineInput, mergedViewMode, tcs);
     const items = collapseMarkers(rawItems);
 
-    const cats = [...new Set([...allPicked, ...allNotPicked].map((t) => t.ticketCategory).filter(Boolean))].sort();
+    const cats = [...new Set([...allPicked, ...allNotPicked].map((t) => getTicketCategoryLabel(t)).filter(Boolean))].sort();
 
     const pickedCount    = filtered.filter((t) => t._picked).length;
     const notPickedCount = filtered.filter((t) => !t._picked).length;

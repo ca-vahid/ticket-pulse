@@ -295,7 +295,7 @@ class AssignmentDailyReviewService {
   _taxonomyMetadataFromItem(item = {}) {
     const existing = item.metadata?.taxonomy || {};
     const parsed = {};
-    const proposalText = String(item.suggestedAction || '').match(/Taxonomy proposal:\s*([^\n]+)/i)?.[1] || '';
+    const proposalText = String(item.suggestedAction || '').match(/(?:Category|Taxonomy) proposal:\s*([^\n]+)/i)?.[1] || '';
     for (const part of proposalText.split(';')) {
       const [rawKey, ...rawValue] = part.split('=');
       const key = rawKey?.trim();
@@ -404,7 +404,7 @@ class AssignmentDailyReviewService {
           severity: String(item.severity || 'low'),
           rationale: String(item.rationale || ''),
           suggestedAction: taxonomyDetails
-            ? `${suggestedAction}\n\nTaxonomy proposal: ${taxonomyDetails}`
+            ? `${suggestedAction}\n\nCategory proposal: ${taxonomyDetails}`
             : suggestedAction,
           metadata: metadata ? sanitizeJsonForPostgres(metadata) : null,
           skillsAffected: toArray(item.skillsAffected),
@@ -758,7 +758,7 @@ class AssignmentDailyReviewService {
           : (proposedName || group.categoryName);
         const title = proposedName
           ? `Review ${proposedName} ${isSubcategory ? `under ${group.categoryName}` : 'as a category'}`
-          : `Review taxonomy coverage for ${group.categoryName}`;
+          : `Review category coverage for ${group.categoryName}`;
         const fitText = [
           group.categoryFit ? `categoryFit=${group.categoryFit}` : null,
           group.subcategoryFit ? `subcategoryFit=${group.subcategoryFit}` : null,
@@ -768,12 +768,12 @@ class AssignmentDailyReviewService {
           title,
           severity: group.cases.length >= 3 ? 'high' : 'medium',
           rationale: [
-            `${group.cases.length} assignment run${group.cases.length === 1 ? '' : 's'} flagged taxonomy review for ${group.categoryName}.`,
+            `${group.cases.length} assignment run${group.cases.length === 1 ? '' : 's'} flagged category review for ${group.categoryName}.`,
             fitText ? `Observed ${fitText}.` : null,
             group.rationales[0] || null,
           ].filter(Boolean).join(' '),
           suggestedAction: proposedName
-            ? `Review whether "${proposedName}" should be added or mapped in the category taxonomy, and adjust nearby category descriptions so future tickets route cleanly.`
+            ? `Review whether "${proposedName}" should be added or mapped in the Ticket Pulse category list, and adjust nearby category descriptions so future tickets route cleanly.`
             : `Review whether "${group.categoryName}" needs subcategories, description cleanup, or FreshService mapping guidance based on the supporting tickets.`,
           skillsAffected: [group.categoryName, proposedName].filter(Boolean),
           taxonomyAction,
@@ -1926,7 +1926,7 @@ class AssignmentDailyReviewService {
       taxonomyRecommendations.push({
         title: `Review skill coverage for ${topCategory.name}`,
         severity: topCategory.count >= 3 ? 'high' : 'medium',
-        rationale: 'The highest-friction category from this review day likely needs cleaner taxonomy coverage or better normalization in the category map.',
+        rationale: 'The highest-friction category from this review day likely needs cleaner category/subcategory coverage or better normalization in the category map.',
         suggestedAction: `Check whether "${topCategory.name}" should be added, split, merged, or mapped more explicitly to one or more technician competencies.`,
         taxonomyAction: 'update',
         categoryName: topCategory.name,
@@ -2286,15 +2286,15 @@ Strict scoping rules:
 Your job is to recommend improvements in exactly four areas:
 1. Prompt changes
 2. Process changes
-3. Taxonomy/category changes
+3. Category/subcategory changes
 4. Agent skill changes
 
 Rules:
 - Base every recommendation on evidence from the supplied cases and metrics.
-- Pay special attention to cases with taxonomyFit.reviewNeeded=true, weak/none categoryFit, weak/none subcategoryFit, or suggested internal category/subcategory names.
-- Treat assignment-agent taxonomy suggestions as evidence, not truth: compare them against ticket descriptions, thread excerpts, outcomes, and the full categoryTree before recommending taxonomy changes.
+- Pay special attention to cases with category review signals: taxonomyFit.reviewNeeded=true, weak/none categoryFit, weak/none subcategoryFit, or suggested internal category/subcategory names.
+- Treat assignment-agent category suggestions as evidence, not truth: compare them against ticket descriptions, thread excerpts, outcomes, and the full categoryTree before recommending category/subcategory changes.
 - taxonomyRecommendations may include adding, moving, renaming, merging, deprecating, remapping, or updating descriptions for internal top-level categories or subcategories when the evidence supports it.
-- For taxonomyRecommendations, populate taxonomyAction and the relevant categoryId/categoryName/parentCategoryId/parentCategoryName/newName fields so consolidation can turn them into precise admin-reviewed Taxonomy Changes.
+- For taxonomyRecommendations, populate taxonomyAction and the relevant categoryId/categoryName/parentCategoryId/parentCategoryName/newName fields so consolidation can turn them into precise admin-reviewed Category Changes.
 - skillRecommendations are only agent skill/technician competency changes: add, remove, or change a technician's competency mapping or proficiency. Do not put category/subcategory structure changes there.
 - Be conservative. Fewer strong recommendations are better than many weak ones.
 - Do not rewrite the prompt or mutate the competency matrix directly.
@@ -2603,7 +2603,7 @@ Rules:
       const analyzingPayload = {
         phase: 'analyzing',
         percent: 92,
-        message: 'Generating prompt, process, taxonomy, and agent-skill recommendations...',
+        message: 'Generating prompt, process, category, and agent-skill recommendations...',
         stats: dataset.summaryMetrics.totals || {},
       };
       emit({ type: 'phase_update', ...analyzingPayload });

@@ -6,9 +6,27 @@ import { COMPETENCY_TOOL_SCHEMAS, executeCompetencyTool } from './competencyTool
 import prisma from './prisma.js';
 import { findBestCategoryMatch } from '../utils/categoryMatcher.js';
 import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 
 const MAX_TURNS = 15;
+const LEVEL_RANK = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
+const RANK_LEVEL = { 1: 'basic', 2: 'intermediate', 3: 'advanced', 4: 'expert' };
+
+function maxLevelForCleanEvidence(cleanTicketCount) {
+  if (cleanTicketCount >= 6) return 'expert';
+  if (cleanTicketCount >= 3) return 'advanced';
+  if (cleanTicketCount >= 2) return 'intermediate';
+  if (cleanTicketCount >= 1) return 'basic';
+  return null;
+}
+
+function capProficiencyLevel(requestedLevel, maxLevel) {
+  if (!maxLevel) return null;
+  const requestedRank = LEVEL_RANK[requestedLevel] || LEVEL_RANK.intermediate;
+  const maxRank = LEVEL_RANK[maxLevel] || LEVEL_RANK.basic;
+  return RANK_LEVEL[Math.min(requestedRank, maxRank)] || 'basic';
+}
 
 function resolveSuggestedParentId(comp, categories) {
   if (comp.parentCategoryId) {
@@ -48,7 +66,7 @@ class CompetencyAnalysisService {
     });
 
     const existingRunning = await prisma.competencyAnalysisRun.findFirst({
-      where: { technicianId, status: 'running' },
+      where: { workspaceId, technicianId, status: 'running' },
       select: { id: true },
     });
     if (existingRunning) {
@@ -217,13 +235,16 @@ class CompetencyAnalysisService {
       // Auto-apply: create new categories and update competency mappings
       const applyResult = await this._applyAssessment(technicianId, workspaceId, assessment);
       const afterSnapshot = await this._captureSnapshot(technicianId, workspaceId);
+      const decision = applyResult.preservedExisting ? 'preserved_existing' : 'auto_applied';
+
+      const structuredResult = { ...assessment, applyResult };
 
       await prisma.competencyAnalysisRun.update({
         where: { id: run.id },
         data: {
           status: 'completed',
-          decision: 'auto_applied',
-          structuredResult: assessment,
+          decision,
+          structuredResult,
           afterSnapshot,
           fullTranscript,
           totalTokensUsed: totalTokens,
@@ -231,9 +252,10 @@ class CompetencyAnalysisService {
         },
       });
 
-      emit({ type: 'assessment', data: assessment, applyResult });
-      logger.info('Competency analysis completed and auto-applied', {
+      emit({ type: 'assessment', data: structuredResult, applyResult });
+      logger.info('Competency analysis completed', {
         runId: run.id, technicianId, techName: tech.name,
+        decision,
         categoriesApplied: applyResult.applied,
         newCategoriesCreated: applyResult.newCategories,
         durationMs: Date.now() - pipelineStart, totalTokens,
@@ -255,6 +277,236 @@ class CompetencyAnalysisService {
   }
 
   async _applyAssessment(technicianId, workspaceId, assessment) {
+    if (!isSkillHierarchyWorkspace(workspaceId)) {
+      return this._applyLegacyAssessment(technicianId, workspaceId, assessment);
+    }
+
+    const competencies = assessment.competencies || [];
+    let newCategories = 0;
+    let skippedMissingId = 0;
+    let skippedInvalidId = 0;
+    let skippedNameOnly = 0;
+    let skippedDuplicateSuggestion = 0;
+    let skippedInvalidSuggestionParent = 0;
+    let skippedNoCanonicalEvidence = 0;
+    let skippedInsufficientCleanEvidence = 0;
+    let skippedParentCoveredBySubskills = 0;
+    let cappedByCleanEvidence = 0;
+
+    const cleanEvidenceStats = await this._getCleanCanonicalEvidenceStats(technicianId, workspaceId);
+    const cleanEvidenceCategoryIds = new Set(cleanEvidenceStats.keys());
+    const activeExisting = await prisma.competencyCategory.findMany({
+      where: { workspaceId, isActive: true },
+      select: { id: true, name: true, parentId: true, isActive: true },
+    });
+    const activeById = new Map(activeExisting.map((category) => [category.id, category]));
+    const allExisting = await prisma.competencyCategory.findMany({
+      where: { workspaceId },
+      select: { id: true, name: true, parentId: true, isActive: true },
+    });
+    const allNames = new Set(allExisting.map((category) => category.name.trim().toLowerCase()));
+    const existingTechnicianCompetencies = await prisma.technicianCompetency.findMany({
+      where: { technicianId, workspaceId },
+      select: { competencyCategoryId: true, proficiencyLevel: true, notes: true },
+    });
+    const mappingsByCategoryId = new Map(existingTechnicianCompetencies.map((mapping) => [
+      mapping.competencyCategoryId,
+      {
+        competencyCategoryId: mapping.competencyCategoryId,
+        proficiencyLevel: mapping.proficiencyLevel,
+        notes: mapping.notes || null,
+      },
+    ]));
+    let changedMappings = 0;
+
+    for (const comp of competencies) {
+      const normalizedName = (comp.categoryName || '').trim().replace(/\s+/g, ' ');
+      const action = comp.categoryAction || 'reuse_existing';
+
+      if (action === 'create_new') {
+        if (!normalizedName) {
+          logger.warn('Skipping taxonomy-gap suggestion without categoryName', { technicianId, workspaceId });
+          continue;
+        }
+
+        if (allNames.has(normalizedName.toLowerCase())) {
+          skippedDuplicateSuggestion++;
+          logger.info('Skipped taxonomy-gap suggestion because a category with that name already exists', {
+            workspaceId, categoryName: normalizedName, technicianId,
+          });
+          continue;
+        }
+
+        const parentId = resolveSuggestedParentId(comp, activeExisting);
+        if (!parentId && (comp.parentCategoryId || comp.parentCategoryName)) {
+          skippedInvalidSuggestionParent++;
+          logger.warn('Skipped taxonomy-gap suggestion with invalid parent category', {
+            workspaceId,
+            categoryName: normalizedName,
+            parentCategoryId: comp.parentCategoryId || null,
+            parentCategoryName: comp.parentCategoryName || null,
+            technicianId,
+          });
+          continue;
+        }
+
+        await prisma.competencyCategory.create({
+          data: {
+            workspaceId,
+            name: normalizedName,
+            description: comp.categoryDescription || comp.evidenceSummary || null,
+            parentId,
+            isActive: false,
+            isSystemSuggested: true,
+            source: 'technician_analysis_gap',
+          },
+        });
+        allNames.add(normalizedName.toLowerCase());
+        newCategories++;
+        logger.info('Created inactive taxonomy-gap suggestion from competency analysis', {
+          workspaceId, categoryName: normalizedName, parentId, technicianId,
+        });
+        continue;
+      }
+
+      if (!comp.categoryId) {
+        skippedMissingId++;
+        skippedNameOnly += normalizedName ? 1 : 0;
+        logger.warn('Skipping competency assessment item without canonical categoryId', {
+          technicianId, workspaceId, categoryName: normalizedName || null,
+        });
+        continue;
+      }
+
+      const category = activeById.get(Number(comp.categoryId));
+      if (!category) {
+        skippedInvalidId++;
+        logger.warn('Skipping competency assessment item with inactive or invalid canonical categoryId', {
+          technicianId,
+          workspaceId,
+          categoryId: comp.categoryId,
+          categoryName: normalizedName || null,
+        });
+        continue;
+      }
+
+      const existing = mappingsByCategoryId.get(category.id);
+      if (!cleanEvidenceCategoryIds.has(category.id)) {
+        skippedNoCanonicalEvidence++;
+        logger.warn('Skipping competency assessment item without clean canonical ticket evidence', {
+          technicianId,
+          workspaceId,
+          categoryId: category.id,
+          categoryName: normalizedName || category.name,
+        });
+        continue;
+      }
+
+      if (!category.parentId) {
+        const hasCoveredChild = activeExisting.some((candidate) => (
+          candidate.parentId === category.id && mappingsByCategoryId.has(candidate.id)
+        ));
+        if (hasCoveredChild) {
+          skippedParentCoveredBySubskills++;
+          logger.info('Skipping parent competency because supported subcategory competency already exists', {
+            technicianId,
+            workspaceId,
+            categoryId: category.id,
+            categoryName: normalizedName || category.name,
+          });
+          continue;
+        }
+      }
+
+      const cleanTicketCount = cleanEvidenceStats.get(category.id)?.cleanTicketCount || 0;
+      const maxLevel = maxLevelForCleanEvidence(cleanTicketCount);
+      if (!maxLevel) {
+        skippedNoCanonicalEvidence++;
+        continue;
+      }
+      if (cleanTicketCount < 2 && !existing) {
+        skippedInsufficientCleanEvidence++;
+        logger.warn('Skipping new competency assessment item with only one clean canonical ticket', {
+          technicianId,
+          workspaceId,
+          categoryId: category.id,
+          categoryName: normalizedName || category.name,
+          cleanTicketCount,
+        });
+        continue;
+      }
+
+      const requestedLevel = comp.proficiencyLevel || 'intermediate';
+      const cappedLevel = capProficiencyLevel(requestedLevel, maxLevel);
+      const existingRank = existing ? (LEVEL_RANK[existing.proficiencyLevel] || 0) : 0;
+      const cappedRank = LEVEL_RANK[cappedLevel] || 0;
+      const preservingExistingDueToSparseEvidence = existing && existingRank > cappedRank;
+      const finalLevel = preservingExistingDueToSparseEvidence ? existing.proficiencyLevel : cappedLevel;
+      const finalNotes = preservingExistingDueToSparseEvidence
+        ? existing.notes
+        : (comp.evidenceSummary || existing?.notes || null);
+      if (finalLevel !== requestedLevel) cappedByCleanEvidence++;
+
+      const previous = mappingsByCategoryId.get(category.id);
+      if (!previous || previous.proficiencyLevel !== finalLevel || previous.notes !== finalNotes) {
+        changedMappings++;
+      }
+      mappingsByCategoryId.set(category.id, {
+        competencyCategoryId: category.id,
+        proficiencyLevel: finalLevel,
+        notes: finalNotes,
+      });
+    }
+
+    const mappings = Array.from(mappingsByCategoryId.values());
+    if (changedMappings === 0) {
+      logger.warn('No valid canonical competency mappings returned; preserving existing technician competencies', {
+        technicianId,
+        workspaceId,
+        submittedCount: competencies.length,
+        skippedMissingId,
+        skippedInvalidId,
+        skippedNoCanonicalEvidence,
+        newCategories,
+      });
+      return {
+        applied: 0,
+        newCategories,
+        skippedMissingId,
+        skippedInvalidId,
+        skippedNameOnly,
+        skippedDuplicateSuggestion,
+        skippedInvalidSuggestionParent,
+        skippedNoCanonicalEvidence,
+        skippedInsufficientCleanEvidence,
+        skippedParentCoveredBySubskills,
+        cappedByCleanEvidence,
+        changedMappings: 0,
+        preservedExisting: true,
+        preserveReason: 'No submitted skill changes had enough clean canonical Ticket Pulse ticket evidence. Existing technician skills were preserved.',
+      };
+    }
+
+    await competencyRepository.bulkUpdateTechnicianCompetencies(technicianId, workspaceId, mappings);
+
+    return {
+      applied: mappings.length,
+      newCategories,
+      skippedMissingId,
+      skippedInvalidId,
+      skippedNameOnly,
+      skippedDuplicateSuggestion,
+      skippedInvalidSuggestionParent,
+      skippedNoCanonicalEvidence,
+      skippedInsufficientCleanEvidence,
+      skippedParentCoveredBySubskills,
+      cappedByCleanEvidence,
+      changedMappings,
+      preservedExisting: false,
+    };
+  }
+
+  async _applyLegacyAssessment(technicianId, workspaceId, assessment) {
     const competencies = assessment.competencies || [];
     let newCategories = 0;
     let fuzzyMatches = 0;
@@ -269,42 +521,41 @@ class CompetencyAnalysisService {
       let category;
       const normalizedName = (comp.categoryName || '').trim().replace(/\s+/g, ' ');
       if (!comp.categoryId && !normalizedName) {
-        logger.warn('Skipping competency assessment item without categoryId or categoryName', { technicianId, workspaceId });
+        logger.warn('Skipping legacy competency assessment item without categoryId or categoryName', { technicianId, workspaceId });
         continue;
       }
 
-      // Step 1: Prefer explicit internal taxonomy IDs returned by the tool.
       if (comp.categoryId) {
         category = allExisting.find((c) => c.id === Number(comp.categoryId));
       }
 
-      // Step 2: Exact case-insensitive match
       if (!category) {
-        category = allExisting.find(
-          (c) => c.name.toLowerCase() === normalizedName.toLowerCase(),
-        );
+        category = allExisting.find((c) => c.name.toLowerCase() === normalizedName.toLowerCase());
       }
 
-      // Step 3: Fuzzy match if no exact match
       if (!category) {
         const { match, score, reason } = findBestCategoryMatch(normalizedName, allExisting);
         if (match) {
           category = match;
           fuzzyMatches++;
-          logger.info('Fuzzy-matched proposed category to existing', {
-            proposed: normalizedName, matched: match.name, score, reason, technicianId, workspaceId,
+          logger.info('Fuzzy-matched proposed legacy category to existing', {
+            proposed: normalizedName,
+            matched: match.name,
+            score,
+            reason,
+            technicianId,
+            workspaceId,
           });
         }
       }
 
-      // Step 4: Create inactive suggested taxonomy entry only if no match at all.
       if (!category) {
         const parentId = resolveSuggestedParentId(comp, allExisting);
         await prisma.competencyCategory.create({
           data: {
             workspaceId,
             name: normalizedName,
-            description: comp.categoryDescription || null,
+            description: comp.categoryDescription || comp.evidenceSummary || null,
             parentId,
             isActive: false,
             isSystemSuggested: true,
@@ -312,14 +563,14 @@ class CompetencyAnalysisService {
           },
         });
         newCategories++;
-        logger.info('Created inactive system-suggested competency category (admin approval required)', {
-          workspaceId, categoryName: normalizedName, technicianId,
+        logger.info('Created inactive system-suggested legacy competency category', {
+          workspaceId,
+          categoryName: normalizedName,
+          technicianId,
         });
         continue;
       }
 
-      // Deduplicate: if same category appears twice, keep the higher proficiency
-      const LEVEL_RANK = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
       const existing = mappings.find((m) => m.competencyCategoryId === category.id);
       if (existing) {
         const existingRank = LEVEL_RANK[existing.proficiencyLevel] || 0;
@@ -339,7 +590,51 @@ class CompetencyAnalysisService {
 
     await competencyRepository.bulkUpdateTechnicianCompetencies(technicianId, workspaceId, mappings);
 
-    return { applied: mappings.length, newCategories, fuzzyMatches };
+    return {
+      applied: mappings.length,
+      newCategories,
+      fuzzyMatches,
+      legacyCategoryMode: true,
+    };
+  }
+
+  async _getCleanCanonicalEvidenceStats(technicianId, workspaceId, days = 180) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const rows = await prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        assignedTechId: technicianId,
+        createdAt: { gte: since },
+        internalCategoryId: { not: null },
+      },
+      select: {
+        internalCategoryId: true,
+        internalSubcategoryId: true,
+        internalCategoryFit: true,
+        internalSubcategoryFit: true,
+        taxonomyReviewNeeded: true,
+      },
+      take: 1000,
+    });
+
+    const stats = new Map();
+    const addCleanTicket = (categoryId) => {
+      if (!categoryId) return;
+      const existing = stats.get(categoryId) || { cleanTicketCount: 0 };
+      existing.cleanTicketCount += 1;
+      stats.set(categoryId, existing);
+    };
+    for (const row of rows) {
+      if (row.taxonomyReviewNeeded) continue;
+      if (row.internalCategoryFit === 'weak' || row.internalCategoryFit === 'none') continue;
+      if (row.internalSubcategoryId && (row.internalSubcategoryFit === 'weak' || row.internalSubcategoryFit === 'none')) continue;
+
+      addCleanTicket(row.internalCategoryId);
+      addCleanTicket(row.internalSubcategoryId);
+    }
+    return stats;
   }
 
   async rollback(runId, rolledBackBy) {

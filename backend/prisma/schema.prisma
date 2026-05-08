@@ -19,8 +19,8 @@ model Workspace {
   defaultTimezone         String    @default("America/Los_Angeles") @db.VarChar(50) @map("default_timezone")
   syncIntervalMinutes     Int       @default(5) @map("sync_interval_minutes")
   categoryCustomField     String   @default("security") @db.VarChar(100) @map("category_custom_field")
-  tpSkillCustomField      String   @default("tp_skill") @db.VarChar(100) @map("tp_skill_custom_field")
-  tpSubskillCustomField   String   @default("tp_subskill") @db.VarChar(100) @map("tp_subskill_custom_field")
+  tpSkillCustomField      String   @default("lf_ticket_pulse_category") @db.VarChar(100) @map("tp_skill_custom_field")
+  tpSubskillCustomField   String   @default("lf_ticket_pulse_subcategory") @db.VarChar(100) @map("tp_subskill_custom_field")
   isActive                Boolean   @default(true) @map("is_active")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
@@ -61,6 +61,7 @@ model Workspace {
   assignmentCorrections  AssignmentCorrection[]
   summitWorkshopSessions SummitWorkshopSession[]
   skillHierarchyDrafts   SkillHierarchyDraft[]
+  ticketReclassificationRuns TicketReclassificationRun[]
 
   @@map("workspaces")
 }
@@ -838,6 +839,30 @@ model SkillHierarchyDraft {
   @@index([createdAt])
 }
 
+model TicketReclassificationRun {
+  id             Int       @id @default(autoincrement())
+  workspaceId    Int       @map("workspace_id")
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  status         String    @default("running") @db.VarChar(20)
+  mode           String    @db.VarChar(20) // dry_run | apply
+  actorEmail     String?   @db.VarChar(255) @map("actor_email")
+  request        Json
+  summary        Json?
+  results        Json?
+  beforeSnapshot Json?     @map("before_snapshot")
+  afterSnapshot  Json?     @map("after_snapshot")
+  errorMessage   String?   @db.Text @map("error_message")
+  rolledBackAt   DateTime? @map("rolled_back_at")
+  rolledBackBy   String?   @db.VarChar(255) @map("rolled_back_by")
+  rollbackResult Json?     @map("rollback_result")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("ticket_reclassification_runs")
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status])
+}
+
 model CompetencyChangeRequest {
   id                   Int                @id @default(autoincrement())
   workspaceId          Int                @map("workspace_id")
@@ -1018,7 +1043,7 @@ model CompetencyAnalysisRun {
   technicianId      Int        @map("technician_id")
   technician        Technician @relation(fields: [technicianId], references: [id])
   status            String     @default("running") @db.VarChar(20) // running | completed | failed | cancelled | rolled_back
-  decision          String?    @db.VarChar(20) // auto_applied | rolled_back
+  decision          String?    @db.VarChar(20) // auto_applied | preserved_existing | rolled_back
   promptVersionId   Int?       @map("prompt_version_id")
   promptVersion     CompetencyPromptVersion? @relation(fields: [promptVersionId], references: [id])
   llmModel          String?    @db.VarChar(100) @map("llm_model")

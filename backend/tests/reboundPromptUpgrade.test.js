@@ -31,6 +31,7 @@ describe('rebound prompt content', () => {
     expect(DEFAULT_SYSTEM_PROMPT).toContain('pendingReviewSuggestions');
     expect(DEFAULT_SYSTEM_PROMPT).toContain('competencyCoverage');
     expect(DEFAULT_SYSTEM_PROMPT).toContain('internal category/subcategory');
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('missing technician competency coverage');
   });
 });
 
@@ -81,12 +82,34 @@ submit_recommendation includes taxonomyReviewNeeded when internal taxonomy fit i
 
 get_ticket_categories can return pendingReviewSuggestions.
 find_matching_agents returns competencyCoverage.
-search_tickets can search internal category/subcategory.`;
+search_tickets can search internal category/subcategory.
+Do NOT set taxonomyReviewNeeded=true for missing technician competency coverage.`;
 
     // This passes ONLY because we explicitly added the marker — proves the
     // detector keys on the literal "Rebound Context" string, not on a regex
     // that would false-positive on similar text.
     expect(needsPromptUpgrade(upToDateWithCoverage)).toBe(false);
+  });
+
+  test('flags category-aware prompts that predate the competency-gap review rule', () => {
+    const beforeCompetencyGapRule = `You are an IT helpdesk ticket assignment assistant.
+
+## Step 1: Read the Ticket
+Call get_ticket_details and search_decision_notes.
+
+## Step 4: Find Matching Agents
+Call find_matching_agents. Use get_technician_ad_profile.
+
+## Step 8: Write the Agent-Facing Briefing
+agentBriefingHtml — public note. If a Rebound Context block was present in the user message, include a brief acknowledgement.
+
+get_ticket_categories can return pendingReviewSuggestions.
+find_matching_agents returns competencyCoverage.
+search_tickets can search internal category/subcategory.
+submit_recommendation includes taxonomyReviewNeeded when category fit is weak.`;
+
+    expect(needsPromptUpgrade(beforeCompetencyGapRule)).toBe(true);
+    expect(upgradeLegacyPrompt(beforeCompetencyGapRule)).toBe(DEFAULT_SYSTEM_PROMPT);
   });
 });
 

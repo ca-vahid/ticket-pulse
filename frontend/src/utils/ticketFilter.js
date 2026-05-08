@@ -45,6 +45,18 @@ export const parseSearchQuery = (searchTerm = '') => {
   return parsedQuery;
 };
 
+export const getTicketCategoryLabel = (ticket) => {
+  if (!ticket) return '';
+  if (ticket.canonicalCategory) return ticket.canonicalCategory;
+  if (ticket.canonicalSkill) return ticket.canonicalSkill;
+  if (ticket.internalCategory?.name || ticket.internalSubcategory?.name) {
+    return [ticket.internalCategory?.name, ticket.internalSubcategory?.name].filter(Boolean).join(' / ');
+  }
+  if (ticket.skill || ticket.subskill) return [ticket.skill, ticket.subskill].filter(Boolean).join(' / ');
+  if (ticket.tpSkill || ticket.tpSubskill) return [ticket.tpSkill, ticket.tpSubskill].filter(Boolean).join(' / ');
+  return ticket.ticketCategory || '';
+};
+
 /**
  * Check if a ticket matches the parsed query
  * @param {Object} ticket - Ticket object to check
@@ -61,6 +73,7 @@ export const ticketMatchesQuery = (ticket, parsedQuery, _originalSearchTerm = ''
   const searchableText = [
     ticket.subject || '',
     ticket.requesterName || '',
+    getTicketCategoryLabel(ticket),
     ticket.ticketCategory || '',
   ].join(' ').toLowerCase();
 
@@ -108,7 +121,7 @@ export const filterTickets = (tickets = [], searchTerm = '', selectedCategories 
   if (selectedCategories && selectedCategories.length > 0) {
     filtered = filtered.filter(ticket => {
       if (!ticket) return false;
-      return selectedCategories.includes(ticket.ticketCategory);
+      return selectedCategories.includes(getTicketCategoryLabel(ticket));
     });
   }
 
@@ -185,8 +198,9 @@ export const getAvailableCategories = (tickets = []) => {
 
   const categorySet = new Set();
   tickets.forEach(ticket => {
-    if (ticket && ticket.ticketCategory) {
-      categorySet.add(ticket.ticketCategory);
+    const categoryLabel = getTicketCategoryLabel(ticket);
+    if (categoryLabel) {
+      categorySet.add(categoryLabel);
     }
   });
 
@@ -211,6 +225,7 @@ export const calculateResultsCount = (technicians = [], isWeeklyView = false) =>
 
 export default {
   parseSearchQuery,
+  getTicketCategoryLabel,
   ticketMatchesQuery,
   filterTickets,
   filterTechnicianTickets,

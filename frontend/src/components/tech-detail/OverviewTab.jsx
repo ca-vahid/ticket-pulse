@@ -2,6 +2,7 @@ import {
   Hand, Send, CheckCircle2, TrendingUp, TrendingDown, Minus, Star,
   Inbox, Sparkles, Smartphone, RotateCcw, Activity,
 } from 'lucide-react';
+import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 import { STATUS_COLORS } from './constants';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,7 +207,7 @@ function CategoryRanked({ tickets }) {
   if (!tickets || tickets.length === 0) return null;
   const map = {};
   tickets.forEach((t) => {
-    const cat = t.ticketCategory || 'Uncategorized';
+    const cat = getTicketCategoryLabel(t) || 'Uncategorized';
     map[cat] = (map[cat] || 0) + 1;
   });
   const items = Object.entries(map)

@@ -697,6 +697,84 @@ class FreshServiceClient {
     }
   }
 
+  async listCustomObjects(filters = {}) {
+    try {
+      const params = {};
+      if (filters.workspace_id) params.workspace_id = filters.workspace_id;
+      const response = await this._get('/objects', { params });
+      return response.data?.custom_objects || [];
+    } catch (error) {
+      logger.error('Error listing FreshService custom objects:', {
+        status: getFreshServiceStatus(error),
+        detail: getFreshServiceDetail(error),
+        message: error.message,
+      });
+      throw error;
+    }
+  }
+
+  async getCustomObject(objectId) {
+    try {
+      const response = await this._get(`/objects/${objectId}`);
+      return response.data?.custom_object || null;
+    } catch (error) {
+      logger.error(`Error fetching FreshService custom object ${objectId}:`, {
+        status: getFreshServiceStatus(error),
+        detail: getFreshServiceDetail(error),
+        message: error.message,
+      });
+      throw error;
+    }
+  }
+
+  _extractNextLink(response) {
+    const linkHeader = response.headers?.link || response.headers?.Link;
+    if (!linkHeader) return null;
+    const match = String(linkHeader).match(/<([^>]+)>;\s*rel="next"/i);
+    if (!match) return null;
+    const nextUrl = new URL(match[1]);
+    const nextPath = `${nextUrl.pathname}${nextUrl.search}`;
+    return nextPath.replace(/^\/api\/v2(?=\/)/, '');
+  }
+
+  async listCustomObjectRecords(objectId, options = {}) {
+    try {
+      const pageSize = Math.min(Number(options.pageSize) || 100, 100);
+      let path = `/objects/${objectId}/records?page_size=${pageSize}`;
+      const records = [];
+      for (let page = 0; page < 100; page += 1) {
+        const response = await this._get(path);
+        records.push(...(response.data?.records || []));
+        const nextPath = this._extractNextLink(response);
+        if (!nextPath) break;
+        path = nextPath;
+      }
+      return records;
+    } catch (error) {
+      logger.error(`Error listing FreshService custom object records for ${objectId}:`, {
+        status: getFreshServiceStatus(error),
+        detail: getFreshServiceDetail(error),
+        message: error.message,
+      });
+      throw error;
+    }
+  }
+
+  async createCustomObjectRecord(objectId, data = {}) {
+    try {
+      const response = await this._post(`/objects/${objectId}/records`, { data });
+      return response.data?.custom_object || response.data?.record || response.data;
+    } catch (error) {
+      const detail = getFreshServiceDetail(error);
+      const status = getFreshServiceStatus(error);
+      logger.error(`Error creating FreshService custom object record for ${objectId}:`, { status, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = status;
+      throw wrapped;
+    }
+  }
+
   async _buildClosureRetryPayload(ticketId, status, validationDetail = null) {
     const ticket = await this.getTicket(ticketId).catch((error) => {
       logger.warn(`Could not fetch ticket ${ticketId} before closure retry`, { error: error.message });

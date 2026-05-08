@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { RotateCcw, ExternalLink, Clock, AlertTriangle, Loader2 } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
+import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 import { FRESHSERVICE_DOMAIN } from './constants';
 
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
@@ -225,6 +226,7 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
               const isSelfPick = row.startMethod === 'self_picked';
               const priLabel = PRIORITY_LABELS[ticket?.priority];
               const priClass = PRIORITY_PILL[ticket?.priority] || 'bg-slate-100 text-slate-500';
+              const categoryLabel = getTicketCategoryLabel(ticket);
 
               return (
                 <div
@@ -264,12 +266,12 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
 
                   {/* Category — subtle pill */}
                   <span className="min-w-0">
-                    {ticket?.ticketCategory ? (
+                    {categoryLabel ? (
                       <span
                         className="inline-block max-w-full truncate align-middle text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded"
-                        title={ticket.ticketCategory}
+                        title={categoryLabel}
                       >
-                        {ticket.ticketCategory}
+                        {categoryLabel}
                       </span>
                     ) : (
                       <span className="text-slate-300 text-[11px]">—</span>

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Filter, X, Check } from 'lucide-react';
+import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 
 // ── Debounced text input ──────────────────────────────────────────────────────
 
@@ -45,14 +46,15 @@ export function parseTerms(text) {
  */
 export function applyPickedFilters(ticket, { includeCats, includeText, excludeCats, excludeText } = {}) {
   const hay = (ticket.subject || '').toLowerCase();
+  const categoryLabel = getTicketCategoryLabel(ticket);
   const inTerms = parseTerms(includeText);
 
-  if (excludeCats?.size > 0 && excludeCats.has(ticket.ticketCategory)) return false;
+  if (excludeCats?.size > 0 && excludeCats.has(categoryLabel)) return false;
   if (excludeText) {
     const exTerms = parseTerms(excludeText);
     if (exTerms.length > 0 && exTerms.some((t) => hay.includes(t))) return false;
   }
-  if (includeCats.size > 0 && !includeCats.has(ticket.ticketCategory)) return false;
+  if (includeCats.size > 0 && !includeCats.has(categoryLabel)) return false;
   if (inTerms.length > 0 && !inTerms.some((t) => hay.includes(t))) return false;
   return true;
 }
@@ -67,12 +69,13 @@ export function applyPickedFilters(ticket, { includeCats, includeText, excludeCa
  */
 export function applyNotPickedFilters(ticket, { excludeCats, excludeText, includeCats, includeText }) {
   const hay = (ticket.subject || '').toLowerCase();
+  const categoryLabel = getTicketCategoryLabel(ticket);
   const exTerms = parseTerms(excludeText);
   const inTerms = parseTerms(includeText);
 
-  if (excludeCats.size > 0 && excludeCats.has(ticket.ticketCategory)) return false;
+  if (excludeCats.size > 0 && excludeCats.has(categoryLabel)) return false;
   if (exTerms.length > 0 && exTerms.some((t) => hay.includes(t))) return false;
-  if (includeCats.size > 0 && !includeCats.has(ticket.ticketCategory)) return false;
+  if (includeCats.size > 0 && !includeCats.has(categoryLabel)) return false;
   if (inTerms.length > 0 && !inTerms.some((t) => hay.includes(t))) return false;
   return true;
 }

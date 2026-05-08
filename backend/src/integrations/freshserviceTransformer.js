@@ -28,6 +28,27 @@ const PRIORITY_MAP = {
   4: 4, // Urgent
 };
 
+function normalizeCustomFieldValue(value, lookupMap = null) {
+  if (value === undefined || value === null || value === '') return null;
+  const candidates = [];
+  if (typeof value === 'object') {
+    candidates.push(value.id, value.value, value.name, value.label, value.bo_display_id);
+  } else {
+    candidates.push(value);
+  }
+
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null || candidate === '') continue;
+    const mapped = lookupMap?.get(String(candidate));
+    if (mapped) return mapped;
+  }
+
+  if (typeof value === 'object') {
+    return value.value || value.name || value.label || null;
+  }
+  return String(value);
+}
+
 /**
  * Transform FreshService ticket to our database format
  * @param {Object} fsTicket - FreshService ticket object
@@ -35,8 +56,10 @@ const PRIORITY_MAP = {
  */
 export function transformTicket(fsTicket, {
   categoryCustomField = 'security',
-  tpSkillCustomField = 'tp_skill',
-  tpSubskillCustomField = 'tp_subskill',
+  tpSkillCustomField = 'lf_ticket_pulse_category',
+  tpSubskillCustomField = 'lf_ticket_pulse_subcategory',
+  tpSkillLookupMap = null,
+  tpSubskillLookupMap = null,
 } = {}) {
   if (!fsTicket || !fsTicket.id) {
     logger.warn('Invalid FreshService ticket data');
@@ -76,8 +99,8 @@ export function transformTicket(fsTicket, {
       category: fsTicket.category || null,
       subCategory: fsTicket.sub_category || null,
       ticketCategory: fsTicket.custom_fields?.[categoryCustomField] || null,
-      tpSkill: fsTicket.custom_fields?.[tpSkillCustomField] || null,
-      tpSubskill: fsTicket.custom_fields?.[tpSubskillCustomField] || null,
+      tpSkill: normalizeCustomFieldValue(fsTicket.custom_fields?.[tpSkillCustomField], tpSkillLookupMap),
+      tpSubskill: normalizeCustomFieldValue(fsTicket.custom_fields?.[tpSubskillCustomField], tpSubskillLookupMap),
       department: fsTicket.department?.name || null,
       isEscalated: fsTicket.is_escalated || false,
       groupId: fsTicket.group_id ? BigInt(fsTicket.group_id) : null,

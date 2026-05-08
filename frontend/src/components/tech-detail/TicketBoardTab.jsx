@@ -1,5 +1,6 @@
 import { ExternalLink, CheckCircle2, Search, X } from 'lucide-react';
 import CategoryFilter from '../CategoryFilter';
+import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from './constants';
 import { formatResolutionTime, calculatePickupTime, calculateAgeSinceCreation } from './utils';
 
@@ -156,12 +157,13 @@ function TicketRow({ ticket, technicianName, activeView }) {
     </span>
   );
 
-  const categoryPill = ticket.ticketCategory ? (
+  const categoryLabel = getTicketCategoryLabel(ticket);
+  const categoryPill = categoryLabel ? (
     <span
       className="inline-block max-w-full truncate align-middle text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded"
-      title={ticket.ticketCategory}
+      title={categoryLabel}
     >
-      {ticket.ticketCategory}
+      {categoryLabel}
     </span>
   ) : (
     <span className="text-slate-300 text-[11px]">—</span>

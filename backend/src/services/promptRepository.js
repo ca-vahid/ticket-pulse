@@ -19,10 +19,11 @@ Call **get_ticket_categories** to get the internal taxonomy for this workspace. 
 
 The tool may also return \`pendingReviewSuggestions\`: inactive AI-suggested categories/subcategories waiting for admin review. These are review-only context. Do not use them as active categories for assignment matching, but do check them before suggesting a new category/subcategory so you do not duplicate an already-pending idea.
 
-Also assess taxonomy fit:
+Also assess category/subcategory fit:
 - Use \`categoryFit="exact"\` when the top-level category clearly matches, \`weak\` when it is a forced/approximate parent, and \`none\` only when no existing top-level category is usable.
 - Use \`subcategoryFit="exact"\` only when an existing subcategory clearly matches. Use \`none\` when the parent fits but no existing subcategory is aligned. Use \`weak\` when a subcategory is close but not quite right.
 - Set \`taxonomyReviewNeeded=true\` whenever either fit is weak/none or when the ticket suggests a category/subcategory should be added, moved, renamed, merged, or deprecated.
+- Do NOT set \`taxonomyReviewNeeded=true\` for missing technician competency coverage. If the selected category/subcategory is exact but no agents have that competency mapped, explain it as an agent skill matrix gap in \`overallReasoning\` only.
 - You may populate \`suggestedInternalCategoryName\` and/or \`suggestedInternalSubcategoryName\` as review notes only. These are not active categories and must not be used as if they already exist.
 
 ## Step 3: Check Agent Availability
@@ -54,7 +55,7 @@ Use **search_tickets** to find similar past tickets in the workspace — search 
 - Are there patterns? (e.g., "all VPN tickets go to Tech A")
 - Has this requester submitted similar tickets before?
 
-If you find a strong candidate, call **get_tech_ticket_history** on them to confirm they're a good fit — check their internal taxonomy breakdown, exact subcategory history, taxonomy-fit warnings, rejection signals, resolution times, and recent workload trends.
+If you find a strong candidate, call **get_tech_ticket_history** on them to confirm they're a good fit — check their internal category/subcategory breakdown, exact subcategory history, category-fit warnings, rejection signals, resolution times, and recent workload trends.
 
 You can make multiple search calls if needed — search by keyword, then by category, then check individual tech histories. Take the time to build a thorough understanding.
 
@@ -70,7 +71,7 @@ Admin decision notes carry high weight — if an admin has explicitly stated a r
 For HIGH priority or complex tickets, call **get_technician_ad_profile** on your top candidates to check their job title, IT level (IT 1-5), and seniority (Jr/Sr). Prefer senior technicians for complex/critical issues. For routine tickets, this step is optional.
 
 ## Step 7: Submit Recommendation
-Call **submit_recommendation** with your final ranked list, \`internalCategoryId\`, optional \`internalSubcategoryId\`, \`categoryFit\`, \`subcategoryFit\`, \`taxonomyReviewNeeded\`, and a short \`classificationRationale\`. If the subcategory fit is weak or none, state what was missing from the taxonomy in \`classificationRationale\` and include a suggested subcategory name when useful. If the selected subcategory has no exact competency coverage, mention that in \`overallReasoning\`; do not hide it by pretending the parent fallback is an exact skill match. You MUST always call this tool — never output raw JSON.
+Call **submit_recommendation** with your final ranked list, \`internalCategoryId\`, optional \`internalSubcategoryId\`, \`categoryFit\`, \`subcategoryFit\`, \`taxonomyReviewNeeded\`, and a short \`classificationRationale\`. If the subcategory fit is weak or none, state what was missing from the category/subcategory list in \`classificationRationale\` and include a suggested subcategory name when useful. If the selected subcategory has no exact competency coverage, mention that in \`overallReasoning\` as an agent skill matrix gap; do not set \`taxonomyReviewNeeded=true\` for that reason, and do not hide it by pretending the parent fallback is an exact skill match. You MUST always call this tool — never output raw JSON.
 
 If the ticket is noise/FYI, call submit_recommendation with an empty recommendations array and explain why.
 
@@ -165,6 +166,9 @@ function needsPromptUpgrade(systemPrompt = '') {
   if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('internal category/subcategory')) {
     return true;
   }
+  if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('missing technician competency coverage')) {
+    return true;
+  }
   return false;
 }
 
@@ -251,6 +255,7 @@ function finishPromptUpgrade(prompt) {
     || !prompt.includes('pendingReviewSuggestions')
     || !prompt.includes('competencyCoverage')
     || !prompt.includes('internal category/subcategory')
+    || !prompt.includes('missing technician competency coverage')
   )) {
     return DEFAULT_SYSTEM_PROMPT;
   }

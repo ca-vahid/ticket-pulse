@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Hand, CheckSquare, Star, ExternalLink } from 'lucide-react';
+import { getTicketCategoryLabel } from '../utils/ticketFilter';
 
 const PRIORITY_DOT_COLORS = {
   1: 'bg-blue-400',
@@ -38,6 +39,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily' })
   const statusClass = STATUS_COLORS[ticket.status] || 'bg-gray-100 text-gray-600';
   const isSelf = ticket.isSelfPicked || ticket.assignedBy === techName;
   const isClosed = ticket.status === 'Closed' || ticket.status === 'Resolved';
+  const categoryLabel = getTicketCategoryLabel(ticket);
 
   const isMuted = variant === 'active' && isClosed;
   const includeDate = viewMode !== 'daily';
@@ -66,9 +68,9 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily' })
       <span className={`${statusClass} px-1 py-0.5 rounded text-[9px] font-medium flex-shrink-0`}>
         {ticket.status}
       </span>
-      {ticket.ticketCategory && (
+      {categoryLabel && (
         <span className="bg-blue-50 text-blue-600 px-1 py-0.5 rounded text-[9px] flex-shrink-0 max-w-[100px] truncate">
-          {ticket.ticketCategory}
+          {categoryLabel}
         </span>
       )}
       {isSelf && variant !== 'closed' && (

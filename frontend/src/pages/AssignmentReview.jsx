@@ -57,6 +57,36 @@ function queueSubViewSearch(subView) {
   return urlValue && urlValue !== QUEUE_SUBVIEW_TO_URL.pending ? `?queue=${urlValue}` : '';
 }
 
+function fitNeedsReview(value) {
+  return value === 'weak' || value === 'none';
+}
+
+function getTicketPulseCategoryLabel(ticket, recommendation = null) {
+  if (ticket?.internalCategory?.name) {
+    return `${ticket.internalCategory.name}${ticket.internalSubcategory?.name ? ` / ${ticket.internalSubcategory.name}` : ''}`;
+  }
+  if (ticket?.tpSkill || ticket?.tpSubskill) {
+    return [ticket.tpSkill, ticket.tpSubskill].filter(Boolean).join(' / ');
+  }
+  if (recommendation?.internalCategoryName || recommendation?.internalSubcategoryName) {
+    return [recommendation.internalCategoryName, recommendation.internalSubcategoryName].filter(Boolean).join(' / ');
+  }
+  return null;
+}
+
+function getSuggestedCategoryLabel(ticket, recommendation = null) {
+  const category = ticket?.suggestedInternalCategoryName || recommendation?.suggestedInternalCategoryName;
+  const subcategory = ticket?.suggestedInternalSubcategoryName || recommendation?.suggestedInternalSubcategoryName;
+  return [category, subcategory].filter(Boolean).join(' / ') || null;
+}
+
+function needsCategoryReview(ticket, recommendation = null) {
+  return Boolean(ticket?.taxonomyReviewNeeded || recommendation?.taxonomyReviewNeeded)
+    || fitNeedsReview(ticket?.internalCategoryFit || recommendation?.categoryFit)
+    || fitNeedsReview(ticket?.internalSubcategoryFit || recommendation?.subcategoryFit)
+    || Boolean(getSuggestedCategoryLabel(ticket, recommendation));
+}
+
 function getPacificDayStartISOString(reference = new Date()) {
   const ptDate = formatInTimeZone(reference, PACIFIC_TIMEZONE, 'yyyy-MM-dd');
   return formatInTimeZone(
@@ -2116,6 +2146,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const recs = run.recommendation?.recommendations || [];
     const priLabel = PRIORITY_LABELS[run.ticket?.priority];
     const priPill = PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500';
+    const categoryLabel = getTicketPulseCategoryLabel(run.ticket, run.recommendation);
+    const suggestedCategoryLabel = getSuggestedCategoryLabel(run.ticket, run.recommendation);
+    const categoryNeedsReview = needsCategoryReview(run.ticket, run.recommendation);
     const rowBg = flag === 'deleted' ? 'opacity-40 bg-red-50/30' : flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
     const isNew = newIds.has(run.id);
     const cardBorder = isNew
@@ -2135,7 +2168,19 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         <div className="flex min-w-0 items-center gap-1.5 flex-wrap">
           <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${priPill}`}>{priLabel || '—'}</span>
           <span className="text-slate-400 font-mono text-[11px]">#{run.ticket?.freshserviceTicketId}</span>
-          {run.ticket?.ticketCategory && <span className="max-w-full truncate text-[10px] text-slate-400 bg-slate-100 rounded px-1 py-0.5">{run.ticket.ticketCategory}</span>}
+          {categoryLabel && (
+            <span className="max-w-full truncate rounded bg-blue-50 px-1 py-0.5 text-[10px] font-semibold text-blue-700" title={categoryLabel}>
+              {categoryLabel}
+            </span>
+          )}
+          {categoryNeedsReview && (
+            <span
+              className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-semibold text-amber-700"
+              title={suggestedCategoryLabel ? `Suggested: ${suggestedCategoryLabel}` : 'Category/subcategory fit should be reviewed'}
+            >
+              Review category
+            </span>
+          )}
           {(run.reboundFrom || run.ticket?.lastReboundContext)?.previousTechName && (() => {
             const ctx = run.reboundFrom || run.ticket.lastReboundContext;
             return (
@@ -2757,6 +2802,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                             || (subView !== 'pending' ? run.assignedTech : null);
                           const statusLabel = getStatusLabel(run.ticket?.status);
                           const dd = showDecision ? getDisplayDecision(run) : null;
+                          const categoryLabel = getTicketPulseCategoryLabel(run.ticket, run.recommendation);
+                          const suggestedCategoryLabel = getSuggestedCategoryLabel(run.ticket, run.recommendation);
+                          const categoryNeedsReview = needsCategoryReview(run.ticket, run.recommendation);
                           // Use a div role=button instead of a real <button> so the
                           // ⋮ action buttons inside can keep their own click behavior
                           // without needing nested <button> hacks.
@@ -2795,10 +2843,21 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 leading-none truncate">
                                   <span className="font-mono">#{run.ticket?.freshserviceTicketId}</span>
-                                  {run.ticket?.ticketCategory && (
+                                  {categoryLabel && (
                                     <>
                                       <span className="text-slate-300">·</span>
-                                      <span className="truncate">{run.ticket.ticketCategory}</span>
+                                      <span className="truncate font-medium text-blue-600" title={categoryLabel}>{categoryLabel}</span>
+                                    </>
+                                  )}
+                                  {categoryNeedsReview && (
+                                    <>
+                                      <span className="text-slate-300">·</span>
+                                      <span
+                                        className="shrink-0 font-semibold text-amber-700"
+                                        title={suggestedCategoryLabel ? `Suggested: ${suggestedCategoryLabel}` : 'Category/subcategory fit should be reviewed'}
+                                      >
+                                        review category
+                                      </span>
                                     </>
                                   )}
                                   {run._siblingCount > 0 && (

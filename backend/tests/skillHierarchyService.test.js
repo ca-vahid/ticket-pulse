@@ -46,13 +46,34 @@ describe('skill hierarchy migration helpers', () => {
       updated_at: '2026-05-01T12:05:00Z',
       custom_fields: {
         security: 'Legacy security',
-        tp_skill: 'Identity',
-        tp_subskill: 'MFA',
+        lf_ticket_pulse_category: 'Identity',
+        lf_ticket_pulse_subcategory: 'MFA',
       },
     });
 
     expect(ticket.ticketCategory).toBe('Legacy security');
     expect(ticket.tpSkill).toBe('Identity');
     expect(ticket.tpSubskill).toBe('MFA');
+  });
+
+  test('Freshservice transformer maps lookup display IDs back to category names', () => {
+    const ticket = transformTicket({
+      id: 124,
+      subject: 'Security review',
+      status: 2,
+      priority: 2,
+      created_at: '2026-05-01T12:00:00Z',
+      updated_at: '2026-05-01T12:05:00Z',
+      custom_fields: {
+        lf_ticket_pulse_category: 7,
+        lf_ticket_pulse_subcategory: 66,
+      },
+    }, {
+      tpSkillLookupMap: new Map([['7', 'Security']]),
+      tpSubskillLookupMap: new Map([['66', 'Threat Intelligence / Security Advisory']]),
+    });
+
+    expect(ticket.tpSkill).toBe('Security');
+    expect(ticket.tpSubskill).toBe('Threat Intelligence / Security Advisory');
   });
 });

@@ -2,10 +2,18 @@ import prisma from './prisma.js';
 import settingsRepository from './settingsRepository.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 
-const DEFAULT_TP_SKILL_FIELD = 'tp_skill';
-const DEFAULT_TP_SUBSKILL_FIELD = 'tp_subskill';
+const DEFAULT_TP_SKILL_FIELD = 'lf_ticket_pulse_category';
+const DEFAULT_TP_SUBSKILL_FIELD = 'lf_ticket_pulse_subcategory';
+const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
+const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
 const LEVEL_RANK = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
+function assertSkillHierarchyWorkspace(workspaceId) {
+  if (!isSkillHierarchyWorkspace(workspaceId)) {
+    throw new ValidationError('Category/Subcategory migration is only enabled for the IT workspace in this phase');
+  }
+}
 
 function normalizeName(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
@@ -180,12 +188,19 @@ function choiceNames(field) {
     .filter(Boolean);
 }
 
+function recordNames(records = []) {
+  return records
+    .map((record) => normalizeName(record?.data?.name || record?.name))
+    .filter(Boolean);
+}
+
 function fieldIdentity(field) {
   return field?.name || field?.field_name || field?.key || field?.label || null;
 }
 
 class SkillHierarchyService {
   async getDraft(workspaceId) {
+    assertSkillHierarchyWorkspace(workspaceId);
     const [draft, categories] = await Promise.all([
       prisma.skillHierarchyDraft.findFirst({
         where: { workspaceId, status: 'draft' },
@@ -202,13 +217,14 @@ class SkillHierarchyService {
     return {
       draft,
       published,
-      terminology: { top: 'Skill', child: 'Subskill', topPlural: 'Skills', childPlural: 'Subskills' },
+      terminology: { top: 'Category', child: 'Subcategory', topPlural: 'Categories', childPlural: 'Subcategories' },
     };
   }
 
   async saveDraft(workspaceId, payload = {}, userEmail = null) {
+    assertSkillHierarchyWorkspace(workspaceId);
     const { state, warnings } = normalizeSkillState(payload.state || payload);
-    if (state.skills.length === 0) throw new ValidationError('Draft must include at least one skill');
+    if (state.skills.length === 0) throw new ValidationError('Draft must include at least one category');
 
     const existingCategories = await prisma.competencyCategory.findMany({ where: { workspaceId, isActive: true } });
     const mappings = Array.isArray(payload.mappings) ? payload.mappings : buildLegacyMappings(existingCategories, state);
@@ -231,6 +247,7 @@ class SkillHierarchyService {
   }
 
   async importSummit(workspaceId, userEmail = null) {
+    assertSkillHierarchyWorkspace(workspaceId);
     const session = await prisma.summitWorkshopSession.findFirst({
       where: { workspaceId },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
@@ -238,7 +255,7 @@ class SkillHierarchyService {
     if (!session) throw new NotFoundError('No summit workshop session found for this workspace');
 
     const { state, warnings } = normalizeSkillState(session.state);
-    if (state.skills.length === 0) throw new ValidationError('Summit session does not contain publishable skills');
+    if (state.skills.length === 0) throw new ValidationError('Summit session does not contain publishable categories');
 
     const existingCategories = await prisma.competencyCategory.findMany({ where: { workspaceId, isActive: true } });
     const mappings = buildLegacyMappings(existingCategories, state);
@@ -256,6 +273,7 @@ class SkillHierarchyService {
   }
 
   async getMappings(workspaceId) {
+    assertSkillHierarchyWorkspace(workspaceId);
     const draft = await prisma.skillHierarchyDraft.findFirst({
       where: { workspaceId, status: 'draft' },
       orderBy: { updatedAt: 'desc' },
@@ -265,6 +283,7 @@ class SkillHierarchyService {
   }
 
   async updateMappings(workspaceId, mappings = [], userEmail = null) {
+    assertSkillHierarchyWorkspace(workspaceId);
     if (!Array.isArray(mappings)) throw new ValidationError('mappings must be an array');
     const draft = await prisma.skillHierarchyDraft.findFirst({
       where: { workspaceId, status: 'draft' },
@@ -278,6 +297,7 @@ class SkillHierarchyService {
   }
 
   async publish(workspaceId, userEmail = null) {
+    assertSkillHierarchyWorkspace(workspaceId);
     const draft = await prisma.skillHierarchyDraft.findFirst({
       where: { workspaceId, status: 'draft' },
       orderBy: { updatedAt: 'desc' },
@@ -285,9 +305,17 @@ class SkillHierarchyService {
     if (!draft) throw new NotFoundError('No editable skill draft found');
 
     const { state, warnings } = normalizeSkillState(draft.state);
-    if (state.skills.length === 0) throw new ValidationError('Draft must include at least one skill');
+    if (state.skills.length === 0) throw new ValidationError('Draft must include at least one category');
 
     const mappings = Array.isArray(draft.mappings) ? draft.mappings : [];
+    const unresolvedMappings = mappings.filter((mapping) => (
+      mapping.status !== 'mapped'
+      || (!mapping.targetSkillTempId && !mapping.targetSubskillTempId)
+    ));
+    if (unresolvedMappings.length > 0) {
+      throw new ValidationError(`Resolve ${unresolvedMappings.length} legacy category mappings before publishing`);
+    }
+
     return prisma.$transaction(async (tx) => {
       const current = await tx.competencyCategory.findMany({
         where: { workspaceId },
@@ -425,30 +453,37 @@ class SkillHierarchyService {
   }
 
   async getFreshserviceFields(workspaceId) {
+    assertSkillHierarchyWorkspace(workspaceId);
     const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
     const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
       priority: 'normal',
       source: 'skill-field-discovery',
     });
     const fields = await client.listTicketFormFields({ workspace_id: fsConfig.workspaceId });
+    const objects = await client.listCustomObjects({ workspace_id: fsConfig.workspaceId });
     const configured = {
       legacyCategoryCustomField: fsConfig.categoryCustomField || 'security',
       tpSkillCustomField: fsConfig.tpSkillCustomField || DEFAULT_TP_SKILL_FIELD,
       tpSubskillCustomField: fsConfig.tpSubskillCustomField || DEFAULT_TP_SUBSKILL_FIELD,
     };
     const byName = new Map(fields.map((field) => [fieldIdentity(field), field]).filter(([name]) => name));
+    const byTitle = new Map(objects.map((object) => [object.title, object]));
     return {
       configured,
       fields,
+      objects,
       found: {
         legacyCategory: byName.get(configured.legacyCategoryCustomField) || null,
         skill: byName.get(configured.tpSkillCustomField) || null,
         subskill: byName.get(configured.tpSubskillCustomField) || null,
+        skillObject: byTitle.get(TP_SKILL_OBJECT_TITLE) || null,
+        subskillObject: byTitle.get(TP_SUBSKILL_OBJECT_TITLE) || null,
       },
     };
   }
 
   async getFreshserviceDrift(workspaceId) {
+    assertSkillHierarchyWorkspace(workspaceId);
     const [categories, fieldReport] = await Promise.all([
       prisma.competencyCategory.findMany({
         where: { workspaceId, isActive: true },
@@ -461,8 +496,21 @@ class SkillHierarchyService {
     const published = categoryTreeToDraftState(categories);
     const skillNames = published.skills.map((skill) => skill.name);
     const subskillNames = published.skills.flatMap((skill) => skill.subskills.map((subskill) => subskill.name));
-    const fsSkillNames = choiceNames(fieldReport.found.skill);
-    const fsSubskillNames = choiceNames(fieldReport.found.subskill);
+    const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+    const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+      priority: 'normal',
+      source: 'skill-field-drift',
+    });
+    const [skillRecords, subskillRecords] = await Promise.all([
+      fieldReport.found.skillObject?.id ? client.listCustomObjectRecords(fieldReport.found.skillObject.id) : Promise.resolve([]),
+      fieldReport.found.subskillObject?.id ? client.listCustomObjectRecords(fieldReport.found.subskillObject.id) : Promise.resolve([]),
+    ]);
+    const fsSkillNames = fieldReport.found.skill?.field_type === 'custom_lookup'
+      ? recordNames(skillRecords)
+      : choiceNames(fieldReport.found.skill);
+    const fsSubskillNames = fieldReport.found.subskill?.field_type === 'custom_lookup'
+      ? recordNames(subskillRecords)
+      : choiceNames(fieldReport.found.subskill);
     const compare = (source, mirror) => {
       const sourceSet = new Set(source.map(keyFor));
       const mirrorSet = new Set(mirror.map(keyFor));
@@ -478,6 +526,10 @@ class SkillHierarchyService {
     return {
       configured: fieldReport.configured,
       fieldsFound: fieldReport.found,
+      objectRecords: {
+        skills: skillRecords.length,
+        subskills: subskillRecords.length,
+      },
       published,
       skillDrift,
       subskillDrift,
@@ -490,6 +542,67 @@ class SkillHierarchyService {
           .map((skill) => [skill.name, ...skill.subskills.map((subskill) => `  - ${subskill.name}`)].join('\n'))
           .join('\n'),
       },
+    };
+  }
+
+  async syncFreshserviceObjects(workspaceId, options = {}) {
+    assertSkillHierarchyWorkspace(workspaceId);
+    const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+    const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+      priority: 'normal',
+      source: 'skill-object-sync',
+    });
+    const [categories, objects] = await Promise.all([
+      prisma.competencyCategory.findMany({
+        where: { workspaceId, isActive: true },
+        include: { subcategories: { where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } },
+        orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
+      }),
+      client.listCustomObjects({ workspace_id: fsConfig.workspaceId }),
+    ]);
+    const byTitle = new Map(objects.map((object) => [object.title, object]));
+    const skillObject = byTitle.get(TP_SKILL_OBJECT_TITLE);
+    const subskillObject = byTitle.get(TP_SUBSKILL_OBJECT_TITLE);
+    if (!skillObject || !subskillObject) {
+      throw new ValidationError('Ticket Pulse custom objects must exist in Freshservice before syncing records');
+    }
+
+    const published = categoryTreeToDraftState(categories);
+    const skillNames = published.skills.map((skill) => skill.name);
+    const subskillNames = published.skills.flatMap((skill) => skill.subskills.map((subskill) => subskill.name));
+    const [skillRecords, subskillRecords] = await Promise.all([
+      client.listCustomObjectRecords(skillObject.id),
+      client.listCustomObjectRecords(subskillObject.id),
+    ]);
+    const existingSkills = new Set(recordNames(skillRecords).map(keyFor));
+    const existingSubskills = new Set(recordNames(subskillRecords).map(keyFor));
+
+    const createdSkills = [];
+    for (const name of skillNames) {
+      if (!existingSkills.has(keyFor(name))) {
+        await client.createCustomObjectRecord(skillObject.id, { name });
+        existingSkills.add(keyFor(name));
+        createdSkills.push(name);
+      }
+    }
+
+    const createdSubskills = [];
+    for (const name of subskillNames) {
+      if (!existingSubskills.has(keyFor(name))) {
+        await client.createCustomObjectRecord(subskillObject.id, { name });
+        existingSubskills.add(keyFor(name));
+        createdSubskills.push(name);
+      }
+    }
+
+    return {
+      skillObject,
+      subskillObject,
+      expected: { skills: skillNames.length, subskills: subskillNames.length },
+      before: { skills: skillRecords.length, subskills: subskillRecords.length },
+      created: { skills: createdSkills, subskills: createdSubskills },
+      deleteExtra: Boolean(options.deleteExtra),
+      note: 'Sync creates missing custom object records only; extra records are reported by drift and not deleted automatically.',
     };
   }
 }

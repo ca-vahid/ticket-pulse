@@ -447,6 +447,16 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
                 <p className="min-w-0 truncate text-[11px] font-semibold leading-3 text-slate-900" title={row.name}>
                   {row.name}
                 </p>
+                {row.source === 'legacyFallback' && (
+                  <span className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-amber-700">
+                    Legacy
+                  </span>
+                )}
+                {row.source === 'unmapped' && (
+                  <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-slate-500">
+                    Unmapped
+                  </span>
+                )}
               </div>
               <div className="flex flex-none items-baseline gap-1.5">
                 <span className="text-[11px] font-bold leading-none text-slate-900">{formatNumber(count)}</span>
@@ -1162,7 +1172,10 @@ export default function Analytics() {
         </div>
       </Panel>
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="Category Hotspots" subtitle="Uses ticketCategory, the populated custom category field.">
+        <Panel
+          title="Category Hotspots"
+          subtitle={`Uses Ticket Pulse category/subcategory first. ${formatNumber(demand?.breakdowns?.categoryCoverage?.legacyFallback || 0)} legacy fallback · ${formatNumber(demand?.breakdowns?.categoryCoverage?.unmapped || 0)} unmapped.`}
+        >
           <HotspotRankedBars data={demand?.breakdowns?.category || []} compact />
         </Panel>
         <Panel title="Requester Hotspots">
