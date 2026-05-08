@@ -43,6 +43,7 @@ const RECLASSIFICATION_MODELS = [
 
 const RECLASSIFICATION_CONCURRENCY_OPTIONS = [5, 10, 20];
 const RECLASSIFICATION_BATCH_OPTIONS = [25, 50, 100, 200, 250, 500];
+const APPLY_PREVIEW_CHUNK_SIZE = 75;
 
 function mergeReclassificationResults(existing = [], incoming = []) {
   const byTicketId = new Map();
@@ -51,6 +52,14 @@ function mergeReclassificationResults(existing = [], incoming = []) {
     if (Number.isInteger(ticketId)) byTicketId.set(ticketId, result);
   });
   return [...byTicketId.values()];
+}
+
+function chunkArray(items = [], size = 75) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function getCategoryGroup(name) {
@@ -1153,24 +1162,76 @@ function SkillsMigrationPanel({ onPublished }) {
   const reclassifyTickets = async ({ apply = false, nextBatch = false } = {}) => {
     const selectedLimit = Number(reclassificationLimit) || 25;
     if (!apply && selectedLimit >= 250 && !confirm(`Dry run up to ${selectedLimit} tickets with ${reclassificationModelLabel}. This sends one LLM classification request per ticket and may take several minutes. Continue?`)) return;
-    const pendingCount = pendingReclassificationResults.filter((result) => result.classification && !result.error).length;
-    if (apply && !confirm(`Apply ${pendingCount} pending preview classification${pendingCount === 1 ? '' : 's'} to IT tickets? This saves the displayed preview queue to Ticket Pulse without calling the LLM again. Freshservice ticket history is not modified.`)) return;
+    const previewResults = pendingReclassificationResults
+      .filter((result) => result.classification && !result.error)
+      .map((result) => ({
+        ticketId: Number(result.ticketId),
+        freshserviceTicketId: result.freshserviceTicketId,
+        model: result.model || reclassification?.model || reclassificationModel,
+        classification: result.classification,
+      }))
+      .filter((result) => Number.isInteger(result.ticketId));
+    const pendingCount = previewResults.length;
+    const previewChunks = chunkArray(previewResults, APPLY_PREVIEW_CHUNK_SIZE);
+    if (apply && !confirm(`Apply ${pendingCount} pending preview classification${pendingCount === 1 ? '' : 's'} to IT tickets in ${previewChunks.length} request${previewChunks.length === 1 ? '' : 's'}? This saves the displayed preview queue to Ticket Pulse without calling the LLM again. Freshservice ticket history is not modified.`)) return;
     try {
       setSaving(true);
       setError(null);
       setMessage(`${apply ? 'Applying preview' : 'Dry run running'} with ${reclassificationModelLabel}, ${reclassificationConcurrency} parallel LLM call${reclassificationConcurrency === 1 ? '' : 's'}...`);
-      const previewResults = pendingReclassificationResults
-        .filter((result) => result.classification && !result.error)
-        .map((result) => ({
-          ticketId: Number(result.ticketId),
-          freshserviceTicketId: result.freshserviceTicketId,
-          model: result.model || reclassification.model || reclassificationModel,
-          classification: result.classification,
-        }))
-        .filter((result) => Number.isInteger(result.ticketId));
-      const previewTicketIds = previewResults
-        .map((result) => Number(result.ticketId))
-        .filter(Number.isInteger);
+
+      if (apply) {
+        const aggregate = {
+          scanned: 0,
+          classified: 0,
+          reviewNeeded: 0,
+          failed: 0,
+          results: [],
+          runIds: [],
+          dryRun: false,
+          model: reclassificationModel,
+          concurrency: Number(reclassificationConcurrency) || 10,
+        };
+        let latestRun = null;
+
+        for (const [index, chunk] of previewChunks.entries()) {
+          const previewTicketIds = chunk
+            .map((result) => Number(result.ticketId))
+            .filter(Number.isInteger);
+          setMessage(`Applying preview chunk ${index + 1}/${previewChunks.length}: ${chunk.length} tickets. No LLM calls are being made.`);
+          const res = await assignmentAPI.reclassifyTickets({
+            apply: true,
+            days: 180,
+            limit: chunk.length,
+            model: reclassificationModel,
+            concurrency: Number(reclassificationConcurrency) || 10,
+            onlyNeedsReview: true,
+            ticketIds: previewTicketIds,
+            previewResults: chunk,
+          });
+          const data = res?.data || {};
+          latestRun = data;
+          aggregate.scanned += data.scanned || 0;
+          aggregate.classified += data.classified || 0;
+          aggregate.reviewNeeded += data.reviewNeeded || 0;
+          aggregate.failed += data.failed || 0;
+          aggregate.results = mergeReclassificationResults(aggregate.results, data.results || []);
+          if (data.id) aggregate.runIds.push(data.id);
+          const appliedIds = new Set(previewTicketIds);
+          setPendingReclassificationResults((prev) => prev.filter((result) => !appliedIds.has(Number(result.ticketId))));
+        }
+
+        const appliedData = {
+          ...(latestRun || {}),
+          ...aggregate,
+          id: latestRun?.id,
+          chunkedApply: previewChunks.length > 1,
+        };
+        setReclassification(appliedData);
+        setMessage(`Applied preview in ${previewChunks.length} request${previewChunks.length === 1 ? '' : 's'}: ${aggregate.classified} local Ticket Pulse classifications saved, ${aggregate.reviewNeeded} marked for review, ${aggregate.failed} failed. No Freshservice tickets were modified and no extra LLM calls were made.`);
+        await loadReclassificationRuns();
+        return;
+      }
+
       const res = await assignmentAPI.reclassifyTickets({
         apply,
         days: 180,
@@ -1179,31 +1240,22 @@ function SkillsMigrationPanel({ onPublished }) {
         concurrency: Number(reclassificationConcurrency) || 10,
         onlyNeedsReview: true,
         ...(!apply && nextBatch && reclassificationCursor ? { createdBefore: reclassificationCursor } : {}),
-        ...(apply && previewTicketIds.length ? { ticketIds: previewTicketIds, previewResults } : {}),
       });
       const data = res?.data || {};
       setReclassification(data);
-      if (!apply) {
-        setPendingReclassificationResults((prev) => (nextBatch
-          ? mergeReclassificationResults(prev, data.results || [])
-          : (data.results || [])));
-      } else {
-        setPendingReclassificationResults([]);
-      }
+      setPendingReclassificationResults((prev) => (nextBatch
+        ? mergeReclassificationResults(prev, data.results || [])
+        : (data.results || [])));
       const oldestCreatedAt = (data.results || [])
         .map((result) => result.createdAt)
         .filter(Boolean)
         .sort()[0] || null;
       if (!apply && oldestCreatedAt) setReclassificationCursor(oldestCreatedAt);
       const usedModel = RECLASSIFICATION_MODELS.find((model) => model.value === data.model)?.label || data.model || reclassificationModelLabel;
-      if (apply) {
-        setMessage(`Applied preview: ${data.classified || 0} local Ticket Pulse classifications saved, ${data.reviewNeeded || 0} marked for review, ${data.failed || 0} failed. No Freshservice tickets were modified and no extra LLM calls were made.`);
-      } else {
-        const totalPending = nextBatch
-          ? mergeReclassificationResults(pendingReclassificationResults, data.results || []).length
-          : (data.results || []).length;
-        setMessage(`Dry run complete with ${usedModel}, ${data.concurrency || reclassificationConcurrency} parallel: ${data.classified || 0} classified, ${data.reviewNeeded || 0} needing review, ${data.failed || 0} failed. Pending preview queue: ${totalPending}.`);
-      }
+      const totalPending = nextBatch
+        ? mergeReclassificationResults(pendingReclassificationResults, data.results || []).length
+        : (data.results || []).length;
+      setMessage(`Dry run complete with ${usedModel}, ${data.concurrency || reclassificationConcurrency} parallel: ${data.classified || 0} classified, ${data.reviewNeeded || 0} needing review, ${data.failed || 0} failed. Pending preview queue: ${totalPending}.`);
       await loadReclassificationRuns();
     } catch (err) {
       setError(err.message);
