@@ -6,7 +6,7 @@ import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import { ValidationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 
-const MAX_LIMIT = 200;
+const MAX_LIMIT = 500;
 const DEFAULT_LIMIT = 25;
 const DEFAULT_DAYS = 180;
 const DEFAULT_CONCURRENCY = 10;
@@ -108,11 +108,12 @@ class TicketReclassificationService {
     if (!isSkillHierarchyWorkspace(workspaceId)) {
       throw new ValidationError('Ticket reclassification is enabled only for the IT category/subcategory migration workspace');
     }
-    if (!config.anthropic.apiKey) {
+    const apply = options.apply === true;
+    const applyFromPreview = apply && Array.isArray(options.previewResults) && options.previewResults.length > 0;
+    if (!applyFromPreview && !config.anthropic.apiKey) {
       throw new ValidationError('ANTHROPIC_API_KEY not configured');
     }
 
-    const apply = options.apply === true;
     const days = clampInteger(options.days, DEFAULT_DAYS, 365);
     const limit = clampInteger(options.limit, DEFAULT_LIMIT, MAX_LIMIT);
     const model = normalizeAnthropicModel(
@@ -133,7 +134,13 @@ class TicketReclassificationService {
       throw new ValidationError('No active category hierarchy is published for this workspace');
     }
 
-    const ticketWhere = this._buildTicketWhere(workspaceId, since, options);
+    const previewByTicketId = new Map((options.previewResults || [])
+      .map((result) => [Number(result.ticketId), result])
+      .filter(([ticketId]) => Number.isInteger(ticketId)));
+    const effectiveOptions = applyFromPreview && previewByTicketId.size > 0
+      ? { ...options, ticketIds: [...previewByTicketId.keys()] }
+      : options;
+    const ticketWhere = this._buildTicketWhere(workspaceId, since, effectiveOptions);
     const tickets = await prisma.ticket.findMany({
       where: ticketWhere,
       select: {
@@ -175,6 +182,8 @@ class TicketReclassificationService {
       onlyNeedsReview: options.onlyNeedsReview !== false,
       createdBefore: options.createdBefore || null,
       ticketIds: Array.isArray(options.ticketIds) ? options.ticketIds.length : 0,
+      previewResults: applyFromPreview ? previewByTicketId.size : 0,
+      applyFromPreview,
     };
     const beforeSnapshot = tickets.map(snapshotTicketClassification);
     const auditRun = await prisma.ticketReclassificationRun.create({
@@ -189,49 +198,92 @@ class TicketReclassificationService {
       select: { id: true },
     });
 
-    const client = new Anthropic({ apiKey: config.anthropic.apiKey });
     const categoryTree = buildCategoryTree(categories);
     const byId = new Map(categories.map((category) => [category.id, category]));
     let results = [];
 
     try {
-      results = await mapWithConcurrency(tickets, concurrency, async (ticket) => {
-        const startedAt = Date.now();
-        try {
-          const recommendation = await this._classifyTicket(client, model, categoryTree, ticket);
-          const normalized = this._normalizeRecommendation(recommendation, byId);
-          if (apply) {
+      if (applyFromPreview) {
+        results = await mapWithConcurrency(tickets, concurrency, async (ticket) => {
+          const startedAt = Date.now();
+          const preview = previewByTicketId.get(ticket.id);
+          try {
+            if (!preview?.classification) {
+              throw new Error('No preview classification supplied for this ticket');
+            }
+            const normalized = this._normalizeRecommendation(preview.classification, byId);
             await this._persist(ticket.id, workspaceId, normalized);
+            return {
+              ticketId: ticket.id,
+              freshserviceTicketId: Number(ticket.freshserviceTicketId),
+              subject: ticket.subject,
+              createdAt: ticket.createdAt,
+              applied: true,
+              model: preview.model || model,
+              source: 'preview',
+              durationMs: Date.now() - startedAt,
+              classification: normalized,
+            };
+          } catch (error) {
+            logger.warn('Preview ticket reclassification apply failed for ticket', {
+              workspaceId,
+              ticketId: ticket.id,
+              freshserviceTicketId: String(ticket.freshserviceTicketId),
+              error: error.message,
+            });
+            return {
+              ticketId: ticket.id,
+              freshserviceTicketId: Number(ticket.freshserviceTicketId),
+              subject: ticket.subject,
+              createdAt: ticket.createdAt,
+              applied: false,
+              model: preview?.model || model,
+              source: 'preview',
+              durationMs: Date.now() - startedAt,
+              error: error.message,
+            };
           }
-          return {
-            ticketId: ticket.id,
-            freshserviceTicketId: Number(ticket.freshserviceTicketId),
-            subject: ticket.subject,
-            createdAt: ticket.createdAt,
-            applied: apply,
-            model,
-            durationMs: Date.now() - startedAt,
-            classification: normalized,
-          };
-        } catch (error) {
-          logger.warn('Ticket reclassification failed for ticket', {
-            workspaceId,
-            ticketId: ticket.id,
-            freshserviceTicketId: String(ticket.freshserviceTicketId),
-            error: error.message,
-          });
-          return {
-            ticketId: ticket.id,
-            freshserviceTicketId: Number(ticket.freshserviceTicketId),
-            subject: ticket.subject,
-            createdAt: ticket.createdAt,
-            applied: false,
-            model,
-            durationMs: Date.now() - startedAt,
-            error: error.message,
-          };
-        }
-      });
+        });
+      } else {
+        const client = new Anthropic({ apiKey: config.anthropic.apiKey });
+        results = await mapWithConcurrency(tickets, concurrency, async (ticket) => {
+          const startedAt = Date.now();
+          try {
+            const recommendation = await this._classifyTicket(client, model, categoryTree, ticket);
+            const normalized = this._normalizeRecommendation(recommendation, byId);
+            if (apply) {
+              await this._persist(ticket.id, workspaceId, normalized);
+            }
+            return {
+              ticketId: ticket.id,
+              freshserviceTicketId: Number(ticket.freshserviceTicketId),
+              subject: ticket.subject,
+              createdAt: ticket.createdAt,
+              applied: apply,
+              model,
+              durationMs: Date.now() - startedAt,
+              classification: normalized,
+            };
+          } catch (error) {
+            logger.warn('Ticket reclassification failed for ticket', {
+              workspaceId,
+              ticketId: ticket.id,
+              freshserviceTicketId: String(ticket.freshserviceTicketId),
+              error: error.message,
+            });
+            return {
+              ticketId: ticket.id,
+              freshserviceTicketId: Number(ticket.freshserviceTicketId),
+              subject: ticket.subject,
+              createdAt: ticket.createdAt,
+              applied: false,
+              model,
+              durationMs: Date.now() - startedAt,
+              error: error.message,
+            };
+          }
+        });
+      }
 
       const classified = results.filter((result) => result.classification?.internalCategoryId).length;
       const reviewNeeded = results.filter((result) => result.classification?.taxonomyReviewNeeded).length;
@@ -246,6 +298,7 @@ class TicketReclassificationService {
         failed,
         model,
         concurrency,
+        applyFromPreview,
       };
       await prisma.ticketReclassificationRun.update({
         where: { id: auditRun.id },

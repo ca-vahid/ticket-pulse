@@ -220,6 +220,70 @@ describe('ticketReclassificationService', () => {
     expect(prismaMock.ticket.update).not.toHaveBeenCalled();
   });
 
+  test('apply preview persists supplied classifications without calling the LLM', async () => {
+    prismaMock.competencyCategory.findMany.mockResolvedValue([
+      { id: 30, name: 'Software & Apps', description: null, parentId: null, sortOrder: 1 },
+      { id: 31, name: 'OpenGround', description: null, parentId: 30, sortOrder: 1 },
+    ]);
+    prismaMock.ticket.findMany.mockResolvedValue([{
+      id: 700,
+      freshserviceTicketId: 222001n,
+      subject: 'OpenGround project access',
+      descriptionText: 'Needs access.',
+      priority: 2,
+      status: 2,
+      category: null,
+      subCategory: null,
+      ticketCategory: null,
+      tpSkill: null,
+      tpSubskill: null,
+      internalCategoryId: null,
+      internalSubcategoryId: null,
+      internalCategoryFit: null,
+      internalSubcategoryFit: null,
+      taxonomyReviewNeeded: false,
+      createdAt: new Date('2026-05-03T12:00:00Z'),
+      assignedTech: null,
+    }]);
+
+    const result = await ticketReclassificationService.run(1, {
+      apply: true,
+      ticketIds: [700],
+      previewResults: [{
+        ticketId: 700,
+        classification: {
+          internalCategoryId: 30,
+          internalSubcategoryId: 31,
+          categoryFit: 'exact',
+          subcategoryFit: 'exact',
+          confidence: 'high',
+          classificationRationale: 'Previewed OpenGround access classification.',
+          taxonomyReviewNeeded: false,
+        },
+      }],
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.classified).toBe(1);
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+    expect(prismaMock.ticketReclassificationRun.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        request: expect.objectContaining({
+          applyFromPreview: true,
+          previewResults: 1,
+        }),
+      }),
+    }));
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith({
+      where: { id: 700 },
+      data: expect.objectContaining({
+        internalCategoryId: 30,
+        internalSubcategoryId: 31,
+        internalCategoryRationale: 'Previewed OpenGround access classification.',
+      }),
+    });
+  });
+
   test('rolls back an applied audit run from its before snapshot', async () => {
     prismaMock.ticketReclassificationRun.findFirst.mockResolvedValue({
       id: 900,

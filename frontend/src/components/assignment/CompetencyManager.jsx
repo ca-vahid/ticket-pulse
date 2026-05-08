@@ -42,6 +42,16 @@ const RECLASSIFICATION_MODELS = [
 ];
 
 const RECLASSIFICATION_CONCURRENCY_OPTIONS = [5, 10, 20];
+const RECLASSIFICATION_BATCH_OPTIONS = [25, 50, 100, 200, 250, 500];
+
+function mergeReclassificationResults(existing = [], incoming = []) {
+  const byTicketId = new Map();
+  [...existing, ...incoming].forEach((result) => {
+    const ticketId = Number(result?.ticketId);
+    if (Number.isInteger(ticketId)) byTicketId.set(ticketId, result);
+  });
+  return [...byTicketId.values()];
+}
 
 function getCategoryGroup(name) {
   const lower = name.toLowerCase();
@@ -869,14 +879,14 @@ function MigrationControlsHelpModal({ onClose }) {
       icon: ChevronRight,
       title: 'Next Batch',
       tone: 'text-cyan-700 bg-cyan-50 border-cyan-100',
-      body: 'Moves the dry-run cursor older than the last preview and analyzes the next set of matching tickets. Use it after reviewing or applying the current preview.',
-      safety: 'Dry-run only. It does not save classifications.',
+      body: 'Moves the dry-run cursor older than the last preview and analyzes the next set of matching tickets. The new results are added to the pending preview queue.',
+      safety: 'Dry-run only. It does not save classifications until Apply Preview is pressed.',
     },
     {
       icon: CheckSquare,
       title: 'Apply Preview',
       tone: 'text-orange-700 bg-orange-50 border-orange-100',
-      body: 'Saves the classifications from the currently displayed dry-run preview to Ticket Pulse local fields. This is what makes those tickets usable as canonical category/subcategory evidence.',
+      body: 'Saves the accumulated pending preview queue to Ticket Pulse local fields. This is what makes those tickets usable as canonical category/subcategory evidence.',
       safety: 'Ticket Pulse local fields only. It does not write historical category changes back to Freshservice.',
     },
     {
@@ -913,7 +923,7 @@ function MigrationControlsHelpModal({ onClose }) {
             <div className="rounded-lg border border-purple-100 bg-purple-50 p-4">
               <Gauge className="h-6 w-6 text-purple-700" />
               <p className="mt-2 text-sm font-bold text-purple-900">Batch vs parallel</p>
-              <p className="mt-1 text-xs leading-5 text-purple-800">Batch size is how many tickets are selected. Parallel is how many LLM calls run at the same time. Higher parallel is faster but can hit provider limits.</p>
+              <p className="mt-1 text-xs leading-5 text-purple-800">Batch size is how many tickets are selected. Parallel is how many LLM calls run at the same time. Larger batches cost more because every dry-run ticket is one LLM classification.</p>
             </div>
             <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
               <Zap className="h-6 w-6 text-blue-700" />
@@ -933,7 +943,7 @@ function MigrationControlsHelpModal({ onClose }) {
               <div className="font-semibold text-slate-800">2. Mirror options</div>
               <div className="col-span-3 text-slate-600">Run FS Drift to check Freshservice. Use Sync FS Objects only if drift shows missing lookup records.</div>
               <div className="font-semibold text-slate-800">3. Classify tickets</div>
-              <div className="col-span-3 text-slate-600">Run Dry Run Batch, review preview, then Apply Preview only for tickets you want to save locally.</div>
+              <div className="col-span-3 text-slate-600">Run Dry Run Batch, optionally add older tickets with Next Batch, review the pending preview queue, then Apply Preview. Apply Preview saves that queue without asking the LLM again.</div>
               <div className="font-semibold text-slate-800">4. Skill evidence</div>
               <div className="col-span-3 text-slate-600">After enough tickets have canonical categories/subcategories, competency analysis can safely update technician skills.</div>
             </div>
@@ -964,6 +974,7 @@ function SkillsMigrationPanel({ onPublished }) {
   const [mappings, setMappings] = useState([]);
   const [drift, setDrift] = useState(null);
   const [reclassification, setReclassification] = useState(null);
+  const [pendingReclassificationResults, setPendingReclassificationResults] = useState([]);
   const [reclassificationLimit, setReclassificationLimit] = useState(25);
   const [reclassificationModel, setReclassificationModel] = useState(RECLASSIFICATION_MODELS[0].value);
   const [reclassificationConcurrency, setReclassificationConcurrency] = useState(10);
@@ -1165,33 +1176,59 @@ function SkillsMigrationPanel({ onPublished }) {
   const reclassificationModelLabel = RECLASSIFICATION_MODELS.find((model) => model.value === reclassificationModel)?.label || reclassificationModel;
 
   const reclassifyTickets = async ({ apply = false, nextBatch = false } = {}) => {
-    if (apply && !confirm('Apply the current dry-run preview to these IT tickets? This updates Ticket Pulse only and does not write historical Freshservice tickets.')) return;
+    const selectedLimit = Number(reclassificationLimit) || 25;
+    if (!apply && selectedLimit >= 250 && !confirm(`Dry run up to ${selectedLimit} tickets with ${reclassificationModelLabel}. This sends one LLM classification request per ticket and may take several minutes. Continue?`)) return;
+    const pendingCount = pendingReclassificationResults.filter((result) => result.classification && !result.error).length;
+    if (apply && !confirm(`Apply ${pendingCount} pending preview classification${pendingCount === 1 ? '' : 's'} to IT tickets? This saves the displayed preview queue to Ticket Pulse without calling the LLM again. Freshservice ticket history is not modified.`)) return;
     try {
       setSaving(true);
       setError(null);
       setMessage(`${apply ? 'Applying preview' : 'Dry run running'} with ${reclassificationModelLabel}, ${reclassificationConcurrency} parallel LLM call${reclassificationConcurrency === 1 ? '' : 's'}...`);
-      const previewTicketIds = (reclassification?.results || [])
+      const previewResults = pendingReclassificationResults
+        .filter((result) => result.classification && !result.error)
+        .map((result) => ({
+          ticketId: Number(result.ticketId),
+          freshserviceTicketId: result.freshserviceTicketId,
+          model: result.model || reclassification.model || reclassificationModel,
+          classification: result.classification,
+        }))
+        .filter((result) => Number.isInteger(result.ticketId));
+      const previewTicketIds = previewResults
         .map((result) => Number(result.ticketId))
         .filter(Number.isInteger);
       const res = await assignmentAPI.reclassifyTickets({
         apply,
         days: 180,
-        limit: Number(reclassificationLimit) || 25,
+        limit: selectedLimit,
         model: reclassificationModel,
         concurrency: Number(reclassificationConcurrency) || 10,
         onlyNeedsReview: true,
         ...(!apply && nextBatch && reclassificationCursor ? { createdBefore: reclassificationCursor } : {}),
-        ...(apply && previewTicketIds.length ? { ticketIds: previewTicketIds } : {}),
+        ...(apply && previewTicketIds.length ? { ticketIds: previewTicketIds, previewResults } : {}),
       });
       const data = res?.data || {};
       setReclassification(data);
+      if (!apply) {
+        setPendingReclassificationResults((prev) => (nextBatch
+          ? mergeReclassificationResults(prev, data.results || [])
+          : (data.results || [])));
+      } else {
+        setPendingReclassificationResults([]);
+      }
       const oldestCreatedAt = (data.results || [])
         .map((result) => result.createdAt)
         .filter(Boolean)
         .sort()[0] || null;
       if (!apply && oldestCreatedAt) setReclassificationCursor(oldestCreatedAt);
       const usedModel = RECLASSIFICATION_MODELS.find((model) => model.value === data.model)?.label || data.model || reclassificationModelLabel;
-      setMessage(`${apply ? 'Applied' : 'Dry run complete'} with ${usedModel}, ${data.concurrency || reclassificationConcurrency} parallel: ${data.classified || 0} classified, ${data.reviewNeeded || 0} needing review, ${data.failed || 0} failed.`);
+      if (apply) {
+        setMessage(`Applied preview: ${data.classified || 0} local Ticket Pulse classifications saved, ${data.reviewNeeded || 0} marked for review, ${data.failed || 0} failed. No Freshservice tickets were modified and no extra LLM calls were made.`);
+      } else {
+        const totalPending = nextBatch
+          ? mergeReclassificationResults(pendingReclassificationResults, data.results || []).length
+          : (data.results || []).length;
+        setMessage(`Dry run complete with ${usedModel}, ${data.concurrency || reclassificationConcurrency} parallel: ${data.classified || 0} classified, ${data.reviewNeeded || 0} needing review, ${data.failed || 0} failed. Pending preview queue: ${totalPending}.`);
+      }
       await loadReclassificationRuns();
     } catch (err) {
       setError(err.message);
@@ -1216,6 +1253,12 @@ function SkillsMigrationPanel({ onPublished }) {
   };
 
   const needsReviewMappings = mappings.filter((mapping) => mapping.status !== 'mapped' || (!mapping.targetSkillTempId && !mapping.targetSubskillTempId));
+  const displayReclassificationResults = pendingReclassificationResults.length
+    ? pendingReclassificationResults
+    : (reclassification?.results || []);
+  const pendingClassifiableCount = pendingReclassificationResults.filter((result) => result.classification && !result.error).length;
+  const pendingReviewNeededCount = pendingReclassificationResults.filter((result) => result.classification?.taxonomyReviewNeeded).length;
+  const pendingFailedCount = pendingReclassificationResults.filter((result) => result.error).length;
 
   return (
     <div className="border rounded-lg bg-white">
@@ -1237,9 +1280,7 @@ function SkillsMigrationPanel({ onPublished }) {
           <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600">
             <span className="font-semibold">Batch</span>
             <select value={reclassificationLimit} onChange={(event) => setReclassificationLimit(Number(event.target.value))} disabled={saving} className="bg-transparent text-xs outline-none">
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
+              {RECLASSIFICATION_BATCH_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </label>
           <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600" title="Number of ticket classifications sent to the LLM at the same time.">
@@ -1256,7 +1297,7 @@ function SkillsMigrationPanel({ onPublished }) {
           </label>
           <button onClick={() => { setReclassificationCursor(null); reclassifyTickets({ apply: false }); }} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Brain className="w-3.5 h-3.5" /> Dry Run Batch</button>
           <button onClick={() => reclassifyTickets({ apply: false, nextBatch: true })} disabled={saving || !reclassificationCursor} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><ChevronRight className="w-3.5 h-3.5" /> Next Batch</button>
-          <button onClick={() => reclassifyTickets({ apply: true })} disabled={saving || !reclassification?.dryRun || !(reclassification?.results || []).length} className="px-3 py-1.5 border border-amber-200 bg-amber-50 text-amber-800 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1"><CheckSquare className="w-3.5 h-3.5" /> Apply Preview</button>
+          <button onClick={() => reclassifyTickets({ apply: true })} disabled={saving || !pendingClassifiableCount} className="px-3 py-1.5 border border-amber-200 bg-amber-50 text-amber-800 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1"><CheckSquare className="w-3.5 h-3.5" /> Apply Preview</button>
         </div>
       </div>
 
@@ -1264,6 +1305,11 @@ function SkillsMigrationPanel({ onPublished }) {
         {loading && <div className="text-sm text-slate-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading draft</div>}
         {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
         {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{message}</div>}
+        {reclassificationLimit >= 250 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Large batch selected. Dry run cost and time scale with ticket count. Apply Preview does not call the LLM again; it saves the displayed preview.
+          </div>
+        )}
         {reclassification && (
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 space-y-2">
             <p>
@@ -1271,9 +1317,25 @@ function SkillsMigrationPanel({ onPublished }) {
               {reclassification.model ? ` with ${RECLASSIFICATION_MODELS.find((model) => model.value === reclassification.model)?.label || reclassification.model}` : ''}
               {reclassification.concurrency ? ` at ${reclassification.concurrency} parallel calls` : ''}. Freshservice ticket history was not modified.
             </p>
-            {(reclassification.results || []).length > 0 && (
-              <div className="max-h-48 overflow-y-auto rounded border border-slate-200 bg-white">
-                {(reclassification.results || []).slice(0, 12).map((result) => (
+            {pendingReclassificationResults.length > 0 && (
+              <p className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1 font-semibold text-blue-800">
+                Pending preview queue: {pendingReclassificationResults.length} tickets ({pendingClassifiableCount} applyable, {pendingReviewNeededCount} review-needed, {pendingFailedCount} failed). Next Batch adds to this queue; Apply Preview saves the queue.
+              </p>
+            )}
+            <div className="grid gap-2 sm:grid-cols-4">
+              <div className="rounded-md bg-white px-2 py-1 ring-1 ring-slate-200"><span className="font-semibold">{reclassification.scanned || 0}</span> scanned</div>
+              <div className="rounded-md bg-white px-2 py-1 ring-1 ring-slate-200"><span className="font-semibold text-emerald-700">{reclassification.classified || 0}</span> classified</div>
+              <div className="rounded-md bg-white px-2 py-1 ring-1 ring-slate-200"><span className="font-semibold text-amber-700">{reclassification.reviewNeeded || 0}</span> review-needed</div>
+              <div className="rounded-md bg-white px-2 py-1 ring-1 ring-slate-200"><span className="font-semibold text-red-700">{reclassification.failed || 0}</span> failed</div>
+            </div>
+            {!reclassification.dryRun && (
+              <p className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-semibold text-emerald-800">
+                Saved to Ticket Pulse local category fields. This apply run can be rolled back from Recent Reclassification Runs.
+              </p>
+            )}
+            {displayReclassificationResults.length > 0 && (
+              <div className="max-h-96 overflow-y-auto rounded border border-slate-200 bg-white">
+                {displayReclassificationResults.map((result) => (
                   <div key={result.ticketId} className="grid gap-1 border-b border-slate-100 px-2 py-1.5 last:border-b-0 md:grid-cols-[110px_1fr_220px]">
                     <span className="font-mono text-slate-500">FS-{result.freshserviceTicketId}</span>
                     <span className="truncate">{result.subject}</span>
@@ -1305,6 +1367,7 @@ function SkillsMigrationPanel({ onPublished }) {
                       scanned {run.summary?.scanned || 0}, classified {run.summary?.classified || 0}, failed {run.summary?.failed || 0}
                       {run.summary?.model ? `, ${RECLASSIFICATION_MODELS.find((model) => model.value === run.summary.model)?.label || run.summary.model}` : ''}
                       {run.summary?.concurrency ? `, ${run.summary.concurrency} parallel` : ''}
+                      {run.summary?.applyFromPreview ? ', preview apply' : ''}
                     </span>
                     {run.rolledBackAt && <span className="ml-2 text-red-600">rolled back</span>}
                   </div>
