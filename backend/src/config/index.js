@@ -21,6 +21,7 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_CALENDAR_MODEL: z.string().optional(),
+  ANTHROPIC_RECLASSIFICATION_MODEL: z.string().optional(),
   AZURE_GRAPH_TENANT_ID: z.string().optional(),
   AZURE_GRAPH_CLIENT_ID: z.string().optional(),
   AZURE_GRAPH_CLIENT_SECRET: z.string().optional(),
@@ -111,6 +112,7 @@ export default {
     apiKey: config.ANTHROPIC_API_KEY,
     defaultModel: 'claude-sonnet-4-6',
     calendarModel: config.ANTHROPIC_CALENDAR_MODEL || 'claude-haiku-4-5-20251001',
+    reclassificationModel: config.ANTHROPIC_RECLASSIFICATION_MODEL || 'claude-haiku-4-5-20251001',
   },
 
   // Azure Graph API (email monitoring)

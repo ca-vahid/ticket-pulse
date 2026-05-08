@@ -118,11 +118,20 @@ describe('ticketReclassificationService', () => {
     expect(result.id).toBe(900);
     expect(result.scanned).toBe(1);
     expect(result.classified).toBe(1);
+    expect(result.model).toBe('claude-haiku-4-5-20251001');
+    expect(result.concurrency).toBe(10);
+    expect(mockMessagesCreate).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'claude-haiku-4-5-20251001',
+    }));
     expect(prismaMock.ticketReclassificationRun.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         workspaceId: 1,
         status: 'running',
         mode: 'apply',
+        request: expect.objectContaining({
+          model: 'claude-haiku-4-5-20251001',
+          concurrency: 10,
+        }),
         beforeSnapshot: expect.arrayContaining([expect.objectContaining({ id: 501 })]),
       }),
     }));
@@ -130,7 +139,13 @@ describe('ticketReclassificationService', () => {
       where: { id: 900 },
       data: expect.objectContaining({
         status: 'completed',
-        summary: expect.objectContaining({ scanned: 1, classified: 1, failed: 0 }),
+        summary: expect.objectContaining({
+          scanned: 1,
+          classified: 1,
+          failed: 0,
+          model: 'claude-haiku-4-5-20251001',
+          concurrency: 10,
+        }),
       }),
     }));
     expect(prismaMock.ticket.update).toHaveBeenCalledWith({
@@ -189,9 +204,15 @@ describe('ticketReclassificationService', () => {
       }],
     });
 
-    const result = await ticketReclassificationService.run(1, { limit: 1 });
+    const result = await ticketReclassificationService.run(1, {
+      limit: 1,
+      model: 'claude-sonnet-4-6',
+      concurrency: 20,
+    });
 
     expect(result.dryRun).toBe(true);
+    expect(result.model).toBe('claude-sonnet-4-6');
+    expect(result.concurrency).toBe(20);
     expect(result.reviewNeeded).toBe(1);
     expect(prismaMock.ticketReclassificationRun.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ mode: 'dry_run' }),

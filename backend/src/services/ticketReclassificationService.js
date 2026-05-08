@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import config from '../config/index.js';
 import prisma from './prisma.js';
-import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { DEFAULT_RECLASSIFICATION_MODEL, normalizeAnthropicModel } from '../utils/anthropicModels.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import { ValidationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
@@ -9,6 +9,8 @@ import logger from '../utils/logger.js';
 const MAX_LIMIT = 200;
 const DEFAULT_LIMIT = 25;
 const DEFAULT_DAYS = 180;
+const DEFAULT_CONCURRENCY = 10;
+const MAX_CONCURRENCY = 20;
 
 function clampInteger(value, defaultValue, maxValue) {
   const parsed = Number.parseInt(value, 10);
@@ -29,6 +31,21 @@ function cleanSnippet(value, maxLength = 3500) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return null;
   return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length || 1);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 function buildCategoryTree(categories = []) {
@@ -98,7 +115,11 @@ class TicketReclassificationService {
     const apply = options.apply === true;
     const days = clampInteger(options.days, DEFAULT_DAYS, 365);
     const limit = clampInteger(options.limit, DEFAULT_LIMIT, MAX_LIMIT);
-    const model = normalizeAnthropicModel(options.model);
+    const model = normalizeAnthropicModel(
+      options.model || config.anthropic.reclassificationModel,
+      DEFAULT_RECLASSIFICATION_MODEL,
+    );
+    const concurrency = clampInteger(options.concurrency, DEFAULT_CONCURRENCY, MAX_CONCURRENCY);
     const actorEmail = options.actorEmail || null;
     const since = new Date();
     since.setDate(since.getDate() - days);
@@ -148,6 +169,8 @@ class TicketReclassificationService {
     const requested = {
       days,
       limit,
+      model,
+      concurrency,
       technicianId: options.technicianId || null,
       onlyNeedsReview: options.onlyNeedsReview !== false,
       createdBefore: options.createdBefore || null,
@@ -169,10 +192,10 @@ class TicketReclassificationService {
     const client = new Anthropic({ apiKey: config.anthropic.apiKey });
     const categoryTree = buildCategoryTree(categories);
     const byId = new Map(categories.map((category) => [category.id, category]));
-    const results = [];
+    let results = [];
 
     try {
-      for (const ticket of tickets) {
+      results = await mapWithConcurrency(tickets, concurrency, async (ticket) => {
         const startedAt = Date.now();
         try {
           const recommendation = await this._classifyTicket(client, model, categoryTree, ticket);
@@ -180,15 +203,16 @@ class TicketReclassificationService {
           if (apply) {
             await this._persist(ticket.id, workspaceId, normalized);
           }
-          results.push({
+          return {
             ticketId: ticket.id,
             freshserviceTicketId: Number(ticket.freshserviceTicketId),
             subject: ticket.subject,
             createdAt: ticket.createdAt,
             applied: apply,
+            model,
             durationMs: Date.now() - startedAt,
             classification: normalized,
-          });
+          };
         } catch (error) {
           logger.warn('Ticket reclassification failed for ticket', {
             workspaceId,
@@ -196,17 +220,18 @@ class TicketReclassificationService {
             freshserviceTicketId: String(ticket.freshserviceTicketId),
             error: error.message,
           });
-          results.push({
+          return {
             ticketId: ticket.id,
             freshserviceTicketId: Number(ticket.freshserviceTicketId),
             subject: ticket.subject,
             createdAt: ticket.createdAt,
             applied: false,
+            model,
             durationMs: Date.now() - startedAt,
             error: error.message,
-          });
+          };
         }
-      }
+      });
 
       const classified = results.filter((result) => result.classification?.internalCategoryId).length;
       const reviewNeeded = results.filter((result) => result.classification?.taxonomyReviewNeeded).length;
@@ -219,6 +244,8 @@ class TicketReclassificationService {
         classified,
         reviewNeeded,
         failed,
+        model,
+        concurrency,
       };
       await prisma.ticketReclassificationRun.update({
         where: { id: auditRun.id },
@@ -236,6 +263,8 @@ class TicketReclassificationService {
         dryRun: !apply,
         applied: apply,
         requested,
+        model,
+        concurrency,
         scanned: tickets.length,
         classified,
         reviewNeeded,

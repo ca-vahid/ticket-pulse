@@ -9,7 +9,8 @@ import {
   ChevronDown, ChevronRight, Wrench, AlertTriangle,
   Search, Clock, Save, Upload, FileText, X, MapPin, History,
   Sparkles, ArrowUpDown, SlidersHorizontal, CalendarDays,
-  Folder, GitMerge, CheckSquare, Square,
+  Folder, GitMerge, CheckSquare, Square, HelpCircle, Database,
+  ShieldCheck, Gauge, Zap,
 } from 'lucide-react';
 import {
   CopyBadge, ToolCallCard, StreamContent,
@@ -34,6 +35,13 @@ const CATEGORY_GROUPS = [
   { label: 'Security', keywords: ['security', 'incident', 'beyondtrust', 'maintenance', 'compliance'] },
   { label: 'Automation', keywords: ['scripting', 'automation'] },
 ];
+
+const RECLASSIFICATION_MODELS = [
+  { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', detail: 'Default for bulk cleanup. Lower cost and fast enough for category matching.' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6', detail: 'Use only for spot checks or difficult tickets where reasoning quality matters more than cost.' },
+];
+
+const RECLASSIFICATION_CONCURRENCY_OPTIONS = [5, 10, 20];
 
 function getCategoryGroup(name) {
   const lower = name.toLowerCase();
@@ -813,6 +821,142 @@ function CategorySuggestionsTab({ onCountChange }) {
 }
 // ─── Skills Draft / Publish Panel ────────────────────────────────────────
 
+function MigrationControlsHelpModal({ onClose }) {
+  const controls = [
+    {
+      icon: Upload,
+      title: 'Import Summit',
+      tone: 'text-blue-700 bg-blue-50 border-blue-100',
+      body: 'Pulls the latest summit workshop output into an editable draft. This is for rebuilding the category/subcategory hierarchy from the workshop data before publishing.',
+      safety: 'Does not change Freshservice and does not classify tickets.',
+    },
+    {
+      icon: Save,
+      title: 'Save Draft',
+      tone: 'text-slate-700 bg-slate-50 border-slate-100',
+      body: 'Saves edits to the draft hierarchy and legacy mapping review. Use this while cleaning names, moving subcategories, or resolving old category mappings.',
+      safety: 'Draft-only. It does not affect assignment, analytics, Freshservice, or technician skills until publish.',
+    },
+    {
+      icon: CheckCircle,
+      title: 'Publish',
+      tone: 'text-emerald-700 bg-emerald-50 border-emerald-100',
+      body: 'Makes the current draft the active Ticket Pulse category/subcategory hierarchy for the IT workspace. It remaps internal technician competencies and existing local Ticket Pulse classifications using the reviewed mappings.',
+      safety: 'Ticket Pulse database change only. It does not backfill historical Freshservice tickets.',
+    },
+    {
+      icon: Database,
+      title: 'Sync FS Objects',
+      tone: 'text-indigo-700 bg-indigo-50 border-indigo-100',
+      body: 'Creates any missing Freshservice custom object records for the active Ticket Pulse categories and subcategories. This keeps the Freshservice lookup lists populated.',
+      safety: 'Updates Freshservice lookup object records only. It does not edit ticket history or assign tickets.',
+    },
+    {
+      icon: FileText,
+      title: 'FS Drift',
+      tone: 'text-amber-700 bg-amber-50 border-amber-100',
+      body: 'Compares the published Ticket Pulse hierarchy against Freshservice lookup object records. Missing means Freshservice lacks a value Ticket Pulse expects. Extra means Freshservice has a value Ticket Pulse no longer publishes.',
+      safety: 'Read-only check. Safe to press any time.',
+    },
+    {
+      icon: Brain,
+      title: 'Dry Run Batch',
+      tone: 'text-purple-700 bg-purple-50 border-purple-100',
+      body: 'Selects the next unclassified or review-needed IT tickets and asks the selected LLM model to map each ticket to the published Ticket Pulse category/subcategory list. It returns a preview.',
+      safety: 'No ticket fields are saved. No Freshservice ticket is modified.',
+    },
+    {
+      icon: ChevronRight,
+      title: 'Next Batch',
+      tone: 'text-cyan-700 bg-cyan-50 border-cyan-100',
+      body: 'Moves the dry-run cursor older than the last preview and analyzes the next set of matching tickets. Use it after reviewing or applying the current preview.',
+      safety: 'Dry-run only. It does not save classifications.',
+    },
+    {
+      icon: CheckSquare,
+      title: 'Apply Preview',
+      tone: 'text-orange-700 bg-orange-50 border-orange-100',
+      body: 'Saves the classifications from the currently displayed dry-run preview to Ticket Pulse local fields. This is what makes those tickets usable as canonical category/subcategory evidence.',
+      safety: 'Ticket Pulse local fields only. It does not write historical category changes back to Freshservice.',
+    },
+    {
+      icon: RotateCcw,
+      title: 'Rollback',
+      tone: 'text-red-700 bg-red-50 border-red-100',
+      body: 'Restores the saved pre-run Ticket Pulse category fields for an applied reclassification run.',
+      safety: 'Only available for completed apply runs that have not already been rolled back.',
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/50 px-4 py-8">
+      <div className="w-full max-w-5xl rounded-xl bg-white shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b bg-white px-5 py-4">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Category Migration Controls</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              These controls manage three separate things: the Ticket Pulse hierarchy, Freshservice lookup values, and local Ticket Pulse ticket reclassification.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50" aria-label="Close help">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-5 p-5">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+              <ShieldCheck className="h-6 w-6 text-emerald-700" />
+              <p className="mt-2 text-sm font-bold text-emerald-900">Safe boundary</p>
+              <p className="mt-1 text-xs leading-5 text-emerald-800">Reclassification updates Ticket Pulse local category fields only. Historical Freshservice tickets are not rewritten.</p>
+            </div>
+            <div className="rounded-lg border border-purple-100 bg-purple-50 p-4">
+              <Gauge className="h-6 w-6 text-purple-700" />
+              <p className="mt-2 text-sm font-bold text-purple-900">Batch vs parallel</p>
+              <p className="mt-1 text-xs leading-5 text-purple-800">Batch size is how many tickets are selected. Parallel is how many LLM calls run at the same time. Higher parallel is faster but can hit provider limits.</p>
+            </div>
+            <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
+              <Zap className="h-6 w-6 text-blue-700" />
+              <p className="mt-2 text-sm font-bold text-blue-900">Default model</p>
+              <p className="mt-1 text-xs leading-5 text-blue-800">Bulk reclassification defaults to Haiku 4.5. Sonnet is available only when you intentionally choose the higher-cost option.</p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200">
+            <div className="grid grid-cols-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-500">
+              <span>Flow</span>
+              <span className="col-span-3">What happens</span>
+            </div>
+            <div className="grid grid-cols-4 gap-3 px-4 py-4 text-sm">
+              <div className="font-semibold text-slate-800">1. Build hierarchy</div>
+              <div className="col-span-3 text-slate-600">Import Summit, edit categories/subcategories, save draft, resolve mappings, then publish.</div>
+              <div className="font-semibold text-slate-800">2. Mirror options</div>
+              <div className="col-span-3 text-slate-600">Run FS Drift to check Freshservice. Use Sync FS Objects only if drift shows missing lookup records.</div>
+              <div className="font-semibold text-slate-800">3. Classify tickets</div>
+              <div className="col-span-3 text-slate-600">Run Dry Run Batch, review preview, then Apply Preview only for tickets you want to save locally.</div>
+              <div className="font-semibold text-slate-800">4. Skill evidence</div>
+              <div className="col-span-3 text-slate-600">After enough tickets have canonical categories/subcategories, competency analysis can safely update technician skills.</div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            {controls.map(({ icon: Icon, title, tone, body, safety }) => (
+              <div key={title} className={`rounded-lg border p-4 ${tone}`}>
+                <div className="flex items-center gap-2">
+                  <Icon className="h-5 w-5" />
+                  <p className="text-sm font-bold">{title}</p>
+                </div>
+                <p className="mt-2 text-xs leading-5">{body}</p>
+                <p className="mt-2 rounded-md bg-white/70 px-2 py-1 text-[11px] font-semibold leading-5">{safety}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SkillsMigrationPanel({ onPublished }) {
   const [draft, setDraft] = useState(null);
   const [skills, setSkills] = useState([]);
@@ -821,8 +965,11 @@ function SkillsMigrationPanel({ onPublished }) {
   const [drift, setDrift] = useState(null);
   const [reclassification, setReclassification] = useState(null);
   const [reclassificationLimit, setReclassificationLimit] = useState(25);
+  const [reclassificationModel, setReclassificationModel] = useState(RECLASSIFICATION_MODELS[0].value);
+  const [reclassificationConcurrency, setReclassificationConcurrency] = useState(10);
   const [reclassificationCursor, setReclassificationCursor] = useState(null);
   const [reclassificationRuns, setReclassificationRuns] = useState([]);
+  const [showControlsHelp, setShowControlsHelp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
@@ -1015,11 +1162,14 @@ function SkillsMigrationPanel({ onPublished }) {
     }
   };
 
+  const reclassificationModelLabel = RECLASSIFICATION_MODELS.find((model) => model.value === reclassificationModel)?.label || reclassificationModel;
+
   const reclassifyTickets = async ({ apply = false, nextBatch = false } = {}) => {
     if (apply && !confirm('Apply the current dry-run preview to these IT tickets? This updates Ticket Pulse only and does not write historical Freshservice tickets.')) return;
     try {
       setSaving(true);
       setError(null);
+      setMessage(`${apply ? 'Applying preview' : 'Dry run running'} with ${reclassificationModelLabel}, ${reclassificationConcurrency} parallel LLM call${reclassificationConcurrency === 1 ? '' : 's'}...`);
       const previewTicketIds = (reclassification?.results || [])
         .map((result) => Number(result.ticketId))
         .filter(Number.isInteger);
@@ -1027,6 +1177,8 @@ function SkillsMigrationPanel({ onPublished }) {
         apply,
         days: 180,
         limit: Number(reclassificationLimit) || 25,
+        model: reclassificationModel,
+        concurrency: Number(reclassificationConcurrency) || 10,
         onlyNeedsReview: true,
         ...(!apply && nextBatch && reclassificationCursor ? { createdBefore: reclassificationCursor } : {}),
         ...(apply && previewTicketIds.length ? { ticketIds: previewTicketIds } : {}),
@@ -1038,7 +1190,8 @@ function SkillsMigrationPanel({ onPublished }) {
         .filter(Boolean)
         .sort()[0] || null;
       if (!apply && oldestCreatedAt) setReclassificationCursor(oldestCreatedAt);
-      setMessage(`${apply ? 'Applied' : 'Dry run complete'}: ${data.classified || 0} classified, ${data.reviewNeeded || 0} needing review, ${data.failed || 0} failed.`);
+      const usedModel = RECLASSIFICATION_MODELS.find((model) => model.value === data.model)?.label || data.model || reclassificationModelLabel;
+      setMessage(`${apply ? 'Applied' : 'Dry run complete'} with ${usedModel}, ${data.concurrency || reclassificationConcurrency} parallel: ${data.classified || 0} classified, ${data.reviewNeeded || 0} needing review, ${data.failed || 0} failed.`);
       await loadReclassificationRuns();
     } catch (err) {
       setError(err.message);
@@ -1066,22 +1219,41 @@ function SkillsMigrationPanel({ onPublished }) {
 
   return (
     <div className="border rounded-lg bg-white">
+      {showControlsHelp && <MigrationControlsHelpModal onClose={() => setShowControlsHelp(false)} />}
       <div className="border-b px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-slate-800">Categories / Subcategories Draft</h3>
           <p className="text-xs text-slate-500">Ticket Pulse owns this hierarchy; Freshservice mirrors the selected category values.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setShowControlsHelp(true)} className="px-3 py-1.5 border border-blue-200 bg-blue-50 text-blue-800 rounded-lg text-xs font-medium hover:bg-blue-100 flex items-center gap-1">
+            <HelpCircle className="w-3.5 h-3.5" /> Help
+          </button>
           <button onClick={importSummit} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Upload className="w-3.5 h-3.5" /> Import Summit</button>
           <button onClick={saveDraft} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Save className="w-3.5 h-3.5" /> Save Draft</button>
           <button onClick={publish} disabled={saving || !draft} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Publish</button>
           <button onClick={syncFreshserviceObjects} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Upload className="w-3.5 h-3.5" /> Sync FS Objects</button>
           <button onClick={loadDrift} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> FS Drift</button>
-          <select value={reclassificationLimit} onChange={(event) => setReclassificationLimit(Number(event.target.value))} disabled={saving} className="rounded-lg border px-2 py-1.5 text-xs">
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
+          <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600">
+            <span className="font-semibold">Batch</span>
+            <select value={reclassificationLimit} onChange={(event) => setReclassificationLimit(Number(event.target.value))} disabled={saving} className="bg-transparent text-xs outline-none">
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600" title="Number of ticket classifications sent to the LLM at the same time.">
+            <span className="font-semibold">Parallel</span>
+            <select value={reclassificationConcurrency} onChange={(event) => setReclassificationConcurrency(Number(event.target.value))} disabled={saving} className="bg-transparent text-xs outline-none">
+              {RECLASSIFICATION_CONCURRENCY_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600" title="Model used for dry-run/apply reclassification.">
+            <span className="font-semibold">Model</span>
+            <select value={reclassificationModel} onChange={(event) => setReclassificationModel(event.target.value)} disabled={saving} className="bg-transparent text-xs outline-none">
+              {RECLASSIFICATION_MODELS.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
+            </select>
+          </label>
           <button onClick={() => { setReclassificationCursor(null); reclassifyTickets({ apply: false }); }} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Brain className="w-3.5 h-3.5" /> Dry Run Batch</button>
           <button onClick={() => reclassifyTickets({ apply: false, nextBatch: true })} disabled={saving || !reclassificationCursor} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><ChevronRight className="w-3.5 h-3.5" /> Next Batch</button>
           <button onClick={() => reclassifyTickets({ apply: true })} disabled={saving || !reclassification?.dryRun || !(reclassification?.results || []).length} className="px-3 py-1.5 border border-amber-200 bg-amber-50 text-amber-800 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1"><CheckSquare className="w-3.5 h-3.5" /> Apply Preview</button>
@@ -1094,7 +1266,11 @@ function SkillsMigrationPanel({ onPublished }) {
         {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{message}</div>}
         {reclassification && (
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 space-y-2">
-            <p>Internal reclassification run #{reclassification.id} {reclassification.dryRun ? 'dry run' : 'apply'} scanned {reclassification.scanned || 0} tickets. Freshservice ticket history was not modified.</p>
+            <p>
+              Internal reclassification run #{reclassification.id} {reclassification.dryRun ? 'dry run' : 'apply'} scanned {reclassification.scanned || 0} tickets
+              {reclassification.model ? ` with ${RECLASSIFICATION_MODELS.find((model) => model.value === reclassification.model)?.label || reclassification.model}` : ''}
+              {reclassification.concurrency ? ` at ${reclassification.concurrency} parallel calls` : ''}. Freshservice ticket history was not modified.
+            </p>
             {(reclassification.results || []).length > 0 && (
               <div className="max-h-48 overflow-y-auto rounded border border-slate-200 bg-white">
                 {(reclassification.results || []).slice(0, 12).map((result) => (
@@ -1127,6 +1303,8 @@ function SkillsMigrationPanel({ onPublished }) {
                     <span>{formatDateTimeInTimezone(run.createdAt, 'America/Los_Angeles')}</span>
                     <span className="ml-2 text-slate-400">
                       scanned {run.summary?.scanned || 0}, classified {run.summary?.classified || 0}, failed {run.summary?.failed || 0}
+                      {run.summary?.model ? `, ${RECLASSIFICATION_MODELS.find((model) => model.value === run.summary.model)?.label || run.summary.model}` : ''}
+                      {run.summary?.concurrency ? `, ${run.summary.concurrency} parallel` : ''}
                     </span>
                     {run.rolledBackAt && <span className="ml-2 text-red-600">rolled back</span>}
                   </div>
