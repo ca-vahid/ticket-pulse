@@ -30,7 +30,15 @@ class FreshServiceActionService {
   async buildAction(run) {
     const ticket = run.ticket || await prisma.ticket.findUnique({
       where: { id: run.ticketId },
-      select: { freshserviceTicketId: true, subject: true, ticketCategory: true },
+      select: {
+        freshserviceTicketId: true,
+        subject: true,
+        ticketCategory: true,
+        tpSkill: true,
+        tpSubskill: true,
+        internalCategory: { select: { name: true } },
+        internalSubcategory: { select: { name: true } },
+      },
     });
 
     const fsTicketId = Number(ticket?.freshserviceTicketId);
@@ -42,6 +50,27 @@ class FreshServiceActionService {
     const actions = [];
 
     if (decision === 'approved' || decision === 'modified' || decision === 'auto_assigned') {
+      const skillName = ticket?.internalCategory?.name || null;
+      const subskillName = ticket?.internalSubcategory?.name || null;
+      if (skillName && (skillName !== ticket.tpSkill || (subskillName || null) !== (ticket.tpSubskill || null))) {
+        const workspace = await prisma.workspace.findUnique({
+          where: { id: run.workspaceId },
+          select: { tpSkillCustomField: true, tpSubskillCustomField: true },
+        });
+        actions.push({
+          type: 'update_custom_fields',
+          ticketId: fsTicketId,
+          customFields: {
+            [workspace?.tpSkillCustomField || 'tp_skill']: skillName,
+            [workspace?.tpSubskillCustomField || 'tp_subskill']: subskillName || null,
+          },
+          localFields: {
+            tpSkill: skillName,
+            tpSubskill: subskillName || null,
+          },
+        });
+      }
+
       const tech = run.assignedTechId
         ? await prisma.technician.findUnique({
           where: { id: run.assignedTechId },
@@ -106,6 +135,7 @@ class FreshServiceActionService {
 
     const preview = actions.map((a) => {
       if (a.type === 'assign') return `Assign ticket #${a.ticketId} to agent ${a.agentId}`;
+      if (a.type === 'update_custom_fields') return `Update Ticket Pulse skill fields on ticket #${a.ticketId}`;
       if (a.type === 'close') return `Close ticket #${a.ticketId}`;
       if (a.type === 'note') return `Add private note to ticket #${a.ticketId}`;
       return `${a.type} on ticket #${a.ticketId}`;
@@ -129,7 +159,18 @@ class FreshServiceActionService {
     const run = await prisma.assignmentPipelineRun.findUnique({
       where: { id: runId },
       include: {
-        ticket: { select: { id: true, freshserviceTicketId: true, subject: true, ticketCategory: true } },
+        ticket: {
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            subject: true,
+            ticketCategory: true,
+            tpSkill: true,
+            tpSubskill: true,
+            internalCategory: { select: { name: true } },
+            internalSubcategory: { select: { name: true } },
+          },
+        },
       },
     });
 
@@ -231,6 +272,21 @@ class FreshServiceActionService {
           const result = await client.assignTicket(action.ticketId, action.agentId);
           if (result?.alreadyClosed) { ticketGone = true; continue; }
           logger.info('FreshService: ticket assigned', { ticketId: action.ticketId, agentId: action.agentId, runId });
+        } else if (action.type === 'update_custom_fields') {
+          const result = await client.updateTicketCustomFields(action.ticketId, action.customFields);
+          if (result?.alreadyClosed) { ticketGone = true; continue; }
+          await prisma.ticket.update({
+            where: { id: run.ticketId },
+            data: action.localFields,
+          }).catch((updateError) => {
+            logger.warn('FreshService sync: custom fields updated but local mirror update failed', {
+              ticketId: run.ticketId,
+              freshserviceTicketId: action.ticketId,
+              runId,
+              error: updateError.message,
+            });
+          });
+          logger.info('FreshService: Ticket Pulse skill fields updated', { ticketId: action.ticketId, runId });
         } else if (action.type === 'close') {
           const result = await client.closeTicket(action.ticketId, action.status);
           if (result?.alreadyClosed) { ticketGone = true; }

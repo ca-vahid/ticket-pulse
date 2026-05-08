@@ -5,6 +5,8 @@ import * as Icons from 'lucide-react';
 import ItSummitFeedbackPanel from '../components/ItSummitFeedbackPanel';
 import { summitAPI } from '../services/api';
 
+const CATEGORY_RESULTS_LOCKED_MESSAGE = 'Categories & Skills is complete. Voting, suggestions, merge ideas, and subcategory ideas are closed; results remain available for review.';
+
 function Icon({ name, className = 'h-4 w-4' }) {
   const LucideIcon = Icons[name] || Icons.Tags;
   return <LucideIcon className={className} />;
@@ -52,7 +54,7 @@ function isJoinRequiredError(err) {
   return String(err?.message || err || '').toLowerCase().includes('join the workshop before voting');
 }
 
-function DragHandle({ item, itemType, label }) {
+function DragHandle({ item, itemType, label, disabled = false }) {
   const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, isDragging } = useDraggable({
     id: `${itemType}:${item.id}`,
     data: { item, itemType },
@@ -66,10 +68,11 @@ function DragHandle({ item, itemType, label }) {
       <button
         type="button"
         ref={setActivatorNodeRef}
-        {...listeners}
-        {...attributes}
-        className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/10 hover:text-cyan-200 active:scale-[0.96] [touch-action:none]"
-        title={`Drag ${label} to priorities`}
+        {...(disabled ? {} : listeners)}
+        {...(disabled ? {} : attributes)}
+        disabled={disabled}
+        className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/10 hover:text-cyan-200 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 [touch-action:none]"
+        title={disabled ? 'Results are read-only' : `Drag ${label} to priorities`}
       >
         <Icons.GripVertical className="h-4 w-4" />
       </button>
@@ -126,6 +129,7 @@ export default function SummitVote() {
   const toastIdRef = useRef(0);
   const suggestRef = useRef(null);
   const suggestionsRef = useRef(null);
+  const categoryResultsLocked = session?.state?.categoryResultsLocked !== false;
 
   const categories = useMemo(() => (session?.state?.categories || []).filter(c => !c.deleted), [session]);
   const acceptedSuggestionIds = useMemo(() => {
@@ -183,6 +187,17 @@ export default function SummitVote() {
       setToasts(prev => prev.filter(toast => toast.id !== id));
     }, duration);
   }, []);
+
+  const notifyCategoriesLocked = useCallback((message = 'The Categories & Skills section is complete and locked for review.') => {
+    pushToast({
+      title: 'Read-only results',
+      message,
+      icon: 'Lock',
+      tone: 'cyan',
+      duration: 4200,
+      important: true,
+    });
+  }, [pushToast]);
 
   const markHighlight = useCallback((id) => {
     setHighlightIds(prev => ({ ...prev, [id]: true }));
@@ -360,6 +375,10 @@ export default function SummitVote() {
   };
 
   const toggleVote = async (item, itemType = 'category', forceActive = null) => {
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('Voting is closed for Categories & Skills.');
+      return;
+    }
     if (!participantKey) return;
     const active = forceActive === null ? !myVotes[item.id] : forceActive;
     setMyVotes(prev => ({ ...prev, [item.id]: active }));
@@ -399,12 +418,21 @@ export default function SummitVote() {
 
   const dropVote = (event) => {
     event.preventDefault();
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('The priority tray is read-only now.');
+      setDragItem(null);
+      return;
+    }
     if (!dragItem) return;
     toggleVote(dragItem, dragItem.itemType, true);
     setDragItem(null);
   };
 
   const removePriority = (item) => {
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('Existing votes are locked for review.');
+      return;
+    }
     toggleVote(item, item.itemType, false);
   };
 
@@ -446,6 +474,10 @@ export default function SummitVote() {
   };
 
   const handleDragEnd = ({ active, over }) => {
+    if (categoryResultsLocked) {
+      setDragItem(null);
+      return;
+    }
     if (!['priority-tray', 'desktop-priority-tray'].includes(over?.id)) return;
     const data = active?.data?.current;
     if (!data?.item) return;
@@ -454,6 +486,10 @@ export default function SummitVote() {
 
   const submitMerge = async (event) => {
     event.preventDefault();
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('Merge suggestions are closed for Categories & Skills.');
+      return;
+    }
     if (!mergeFrom || !mergeTo || !participantKey) return;
     const from = categories.find(c => c.id === mergeFrom)?.name || mergeFrom;
     const to = categories.find(c => c.id === mergeTo)?.name || mergeTo;
@@ -480,6 +516,10 @@ export default function SummitVote() {
 
   const submitIdea = async (event) => {
     event.preventDefault();
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('New category ideas are closed for this section.');
+      return;
+    }
     const name = ideaName.trim();
     if (!name || !participantKey) return;
     try {
@@ -512,6 +552,10 @@ export default function SummitVote() {
 
   const submitQuickSubcategory = async (event, category) => {
     event.preventDefault();
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('Subcategory suggestions are closed for this section.');
+      return;
+    }
     const name = String(quickSubcategoryNames[category.id] || '').trim();
     if (!name || !participantKey) return;
     try {
@@ -601,7 +645,11 @@ export default function SummitVote() {
                 BGC Engineering IT Summit
               </div>
               <h1 className="mt-2 text-xl font-semibold sm:text-2xl">Category live voting</h1>
-              <p className="mt-1 text-sm text-slate-300">Tap to vote, suggest missing categories, and add subcategory ideas.</p>
+              <p className="mt-1 text-sm text-slate-300">
+                {categoryResultsLocked
+                  ? 'Review the completed category results and room ideas. Voting and suggestions are closed.'
+                  : 'Tap to vote, suggest missing categories, and add subcategory ideas.'}
+              </p>
             </div>
             <div className="grid grid-cols-3 gap-2 text-slate-950">
               <div className={`rounded-lg bg-cyan-400 px-3 py-3 transition-all duration-300 ${highlightIds.participants ? 'vote-soft-pulse scale-[1.02]' : ''}`}>
@@ -664,7 +712,26 @@ export default function SummitVote() {
             {activeRoomTab === 'feedback' ? (
               <ItSummitFeedbackPanel mode="public" token={token} participantKey={participantKey} />
             ) : (
-              <DndContext sensors={sensors} onDragStart={() => setShowMobilePriorities(true)} onDragEnd={handleDragEnd}>
+              <DndContext
+                sensors={sensors}
+                onDragStart={() => {
+                  if (!categoryResultsLocked) setShowMobilePriorities(true);
+                }}
+                onDragEnd={handleDragEnd}
+              >
+                {categoryResultsLocked && (
+                  <div className="mb-4 rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-50 shadow-xl">
+                    <div className="flex items-start gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-400/15 text-cyan-100">
+                        <Icons.Lock className="h-4 w-4" />
+                      </span>
+                      <div>
+                        <div className="font-semibold">Categories & Skills is complete</div>
+                        <div className="mt-0.5 text-cyan-100/80">{CATEGORY_RESULTS_LOCKED_MESSAGE}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="grid gap-3 lg:grid-cols-[290px_minmax(0,1fr)_360px] lg:gap-4">
                   <aside className="lg:sticky lg:top-4 lg:self-start">
                     <div
@@ -674,8 +741,10 @@ export default function SummitVote() {
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div>
-                          <h2 className="font-semibold text-white">My priorities</h2>
-                          <p className="mt-1 text-xs text-cyan-100">Drag categories or subcategories here to support them.</p>
+                          <h2 className="font-semibold text-white">{categoryResultsLocked ? 'Your previous votes' : 'My priorities'}</h2>
+                          <p className="mt-1 text-xs text-cyan-100">
+                            {categoryResultsLocked ? 'Previous selections are preserved for review.' : 'Drag categories or subcategories here to support them.'}
+                          </p>
                         </div>
                         <Icons.MousePointer2 className="h-5 w-5 text-cyan-200" />
                       </div>
@@ -686,14 +755,16 @@ export default function SummitVote() {
                               <Icon name={item.icon} className="h-3.5 w-3.5" />
                             </span>
                             <span className="min-w-0 flex-1 truncate text-sm font-medium">{index + 1}. {item.name}</span>
-                            <button onClick={() => removePriority(item)} className="flex min-h-9 min-w-9 items-center justify-center rounded text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
-                              <Icons.X className="h-4 w-4" />
-                            </button>
+                            {!categoryResultsLocked && (
+                              <button onClick={() => removePriority(item)} className="flex min-h-9 min-w-9 items-center justify-center rounded text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
+                                <Icons.X className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
                         ))}
                         {!activePriorityItems.length && (
                           <div className="flex min-h-24 items-center justify-center text-center text-sm text-cyan-100">
-                      Tap vote buttons to add priorities.
+                            {categoryResultsLocked ? 'No previous selections for this session.' : 'Tap vote buttons to add priorities.'}
                           </div>
                         )}
                       </PriorityDropZone>
@@ -791,15 +862,17 @@ export default function SummitVote() {
                               </div>
                               <button
                                 aria-pressed={Boolean(myVotes[cat.id])}
+                                disabled={categoryResultsLocked}
                                 onClick={() => toggleVote(cat, 'category')}
-                                className={`min-h-11 shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-all active:scale-[0.96] [touch-action:manipulation] ${
+                                title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this category'}
+                                className={`min-h-11 shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-all active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-75 [touch-action:manipulation] ${
                                   highlightIds[`vote-${cat.id}`] ? 'scale-[1.05]' : ''
                                 } ${myVotes[cat.id] ? 'bg-cyan-400 text-slate-950 shadow-md ring-2 ring-cyan-300/30' : 'bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
                               >
                                 <Icons.ThumbsUp className="mr-1 inline h-4 w-4" />
                                 {voteCount(votes, cat.id)}
                               </button>
-                              <DragHandle item={cat} itemType="category" label={cat.name} />
+                              <DragHandle item={cat} itemType="category" label={cat.name} disabled={categoryResultsLocked} />
                             </div>
                             <div className="mt-3 grid gap-2 sm:grid-cols-2">
                               {visibleSubcategories.map(sub => (
@@ -809,12 +882,14 @@ export default function SummitVote() {
                                     highlightIds[`vote-${sub.id}`] ? 'vote-soft-pulse scale-[1.01]' : ''
                                   } ${myVotes[sub.id] ? 'border-cyan-300 bg-cyan-400/15 text-cyan-50 shadow-sm ring-1 ring-cyan-300/30' : 'border-white/10 bg-slate-950/70 text-slate-200 hover:border-cyan-300/40 hover:bg-slate-900'}`}
                                 >
-                                  <DragHandle item={{ ...sub, color: cat.color }} itemType="subcategory" label={sub.name} />
+                                  <DragHandle item={{ ...sub, color: cat.color }} itemType="subcategory" label={sub.name} disabled={categoryResultsLocked} />
                                   <button
                                     type="button"
                                     aria-pressed={Boolean(myVotes[sub.id])}
+                                    disabled={categoryResultsLocked}
                                     onClick={() => toggleVote({ ...sub, color: cat.color }, 'subcategory')}
-                                    className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md text-left transition active:scale-[0.99] [touch-action:manipulation]"
+                                    title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this subcategory'}
+                                    className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md text-left transition active:scale-[0.99] disabled:cursor-default [touch-action:manipulation]"
                                   >
                                     <Icon name={sub.icon || 'Tag'} className="h-4 w-4 shrink-0 text-slate-400" />
                                     <span className="min-w-0 flex-1 break-words leading-snug">{sub.name}</span>
@@ -833,12 +908,14 @@ export default function SummitVote() {
                                       highlightIds[`idea-${item.id}`] || highlightIds[`vote-${item.id}`] ? 'vote-soft-pulse scale-[1.01]' : ''
                                     } ${myVotes[item.id] ? 'border-amber-300 bg-amber-300/20 text-amber-50 shadow-sm ring-1 ring-amber-300/30' : 'border-amber-300/25 bg-amber-950/25 text-amber-50 hover:border-amber-300/50 hover:bg-amber-950/35'}`}
                                   >
-                                    <DragHandle item={item} itemType="suggestion" label={item.name} />
+                                    <DragHandle item={item} itemType="suggestion" label={item.name} disabled={categoryResultsLocked} />
                                     <button
                                       type="button"
                                       aria-pressed={Boolean(myVotes[item.id])}
+                                      disabled={categoryResultsLocked}
                                       onClick={() => toggleVote(item, 'suggestion')}
-                                      className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md text-left transition active:scale-[0.99] [touch-action:manipulation]"
+                                      title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this suggestion'}
+                                      className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md text-left transition active:scale-[0.99] disabled:cursor-default [touch-action:manipulation]"
                                     >
                                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-300 text-slate-950">
                                         <Icons.Tag className="h-4 w-4" />
@@ -854,26 +931,28 @@ export default function SummitVote() {
                                   </div>
                                 );
                               })}
-                              <form
-                                onSubmit={(event) => submitQuickSubcategory(event, cat)}
-                                className="grid gap-2 rounded-lg border border-dashed border-amber-300/40 bg-amber-300/10 p-3 sm:flex sm:items-center sm:px-3 sm:py-2"
-                              >
-                                <div className="flex min-w-0 flex-1 items-center gap-2">
-                                  <Icons.Plus className="h-4 w-4 shrink-0 text-amber-200" />
-                                  <input
-                                    value={quickSubcategoryNames[cat.id] || ''}
-                                    onChange={(event) => setQuickSubcategoryNames(prev => ({ ...prev, [cat.id]: event.target.value }))}
-                                    className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-white outline-none placeholder:text-amber-100/55 sm:min-h-0 sm:text-sm"
-                                    placeholder="Suggest another subcategory"
-                                  />
-                                </div>
-                                <button
-                                  disabled={!String(quickSubcategoryNames[cat.id] || '').trim()}
-                                  className="min-h-11 rounded-md bg-amber-300 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 active:scale-[0.98] disabled:opacity-50 sm:min-h-0 sm:px-2 sm:py-1 sm:text-xs [touch-action:manipulation]"
+                              {!categoryResultsLocked && (
+                                <form
+                                  onSubmit={(event) => submitQuickSubcategory(event, cat)}
+                                  className="grid gap-2 rounded-lg border border-dashed border-amber-300/40 bg-amber-300/10 p-3 sm:flex sm:items-center sm:px-3 sm:py-2"
                                 >
-                            Add
-                                </button>
-                              </form>
+                                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                                    <Icons.Plus className="h-4 w-4 shrink-0 text-amber-200" />
+                                    <input
+                                      value={quickSubcategoryNames[cat.id] || ''}
+                                      onChange={(event) => setQuickSubcategoryNames(prev => ({ ...prev, [cat.id]: event.target.value }))}
+                                      className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-white outline-none placeholder:text-amber-100/55 sm:min-h-0 sm:text-sm"
+                                      placeholder="Suggest another subcategory"
+                                    />
+                                  </div>
+                                  <button
+                                    disabled={!String(quickSubcategoryNames[cat.id] || '').trim()}
+                                    className="min-h-11 rounded-md bg-amber-300 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 active:scale-[0.98] disabled:opacity-50 sm:min-h-0 sm:px-2 sm:py-1 sm:text-xs [touch-action:manipulation]"
+                                  >
+                              Add
+                                  </button>
+                                </form>
+                              )}
                             </div>
                             {subcategories.length > 4 && (
                               <button
@@ -890,37 +969,51 @@ export default function SummitVote() {
                   </main>
 
                   <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-                    <form ref={suggestRef} onSubmit={submitIdea} className="scroll-mt-20 rounded-lg border border-amber-300/30 bg-amber-950/25 p-4 shadow-xl shadow-black/20">
-                      <div className="flex items-center gap-2">
-                        <Icons.Lightbulb className="h-5 w-5 text-amber-200" />
-                        <div>
-                          <h2 className="font-semibold text-white">Suggest a new category</h2>
-                          <p className="mt-0.5 text-xs text-amber-100/80">Use the category cards to suggest subcategories.</p>
+                    {categoryResultsLocked ? (
+                      <section ref={suggestRef} className="scroll-mt-20 rounded-lg border border-cyan-300/30 bg-cyan-400/10 p-4 shadow-xl shadow-black/20">
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-400/15 text-cyan-100">
+                            <Icons.Lock className="h-4 w-4" />
+                          </span>
+                          <div>
+                            <h2 className="font-semibold text-white">Suggestions closed</h2>
+                            <p className="mt-1 text-sm text-cyan-100/80">The category results and room ideas remain available for review.</p>
+                          </div>
                         </div>
-                      </div>
-                      <input
-                        value={ideaName}
-                        onChange={(event) => setIdeaName(event.target.value)}
-                        className="mt-3 min-h-11 w-full rounded-lg border border-amber-300/20 bg-slate-950 px-3 py-2 text-base text-white outline-none placeholder:text-slate-500 transition focus:border-amber-300 focus:ring-2 focus:ring-amber-400/20 lg:min-h-0 lg:text-sm"
-                        placeholder="New top category name"
-                      />
-                      <textarea
-                        value={ideaReason}
-                        onChange={(event) => setIdeaReason(event.target.value)}
-                        className="mt-2 w-full resize-none rounded-lg border border-amber-300/20 bg-slate-950 px-3 py-2 text-base text-white outline-none placeholder:text-slate-500 transition focus:border-amber-300 focus:ring-2 focus:ring-amber-400/20 lg:text-sm"
-                        rows={3}
-                        placeholder="Why should we consider it?"
-                      />
-                      <button disabled={!ideaName.trim()} className="mt-3 min-h-11 w-full rounded-lg bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]">
-                  Submit idea
-                      </button>
-                    </form>
+                      </section>
+                    ) : (
+                      <form ref={suggestRef} onSubmit={submitIdea} className="scroll-mt-20 rounded-lg border border-amber-300/30 bg-amber-950/25 p-4 shadow-xl shadow-black/20">
+                        <div className="flex items-center gap-2">
+                          <Icons.Lightbulb className="h-5 w-5 text-amber-200" />
+                          <div>
+                            <h2 className="font-semibold text-white">Suggest a new category</h2>
+                            <p className="mt-0.5 text-xs text-amber-100/80">Use the category cards to suggest subcategories.</p>
+                          </div>
+                        </div>
+                        <input
+                          value={ideaName}
+                          onChange={(event) => setIdeaName(event.target.value)}
+                          className="mt-3 min-h-11 w-full rounded-lg border border-amber-300/20 bg-slate-950 px-3 py-2 text-base text-white outline-none placeholder:text-slate-500 transition focus:border-amber-300 focus:ring-2 focus:ring-amber-400/20 lg:min-h-0 lg:text-sm"
+                          placeholder="New top category name"
+                        />
+                        <textarea
+                          value={ideaReason}
+                          onChange={(event) => setIdeaReason(event.target.value)}
+                          className="mt-2 w-full resize-none rounded-lg border border-amber-300/20 bg-slate-950 px-3 py-2 text-base text-white outline-none placeholder:text-slate-500 transition focus:border-amber-300 focus:ring-2 focus:ring-amber-400/20 lg:text-sm"
+                          rows={3}
+                          placeholder="Why should we consider it?"
+                        />
+                        <button disabled={!ideaName.trim()} className="mt-3 min-h-11 w-full rounded-lg bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 active:scale-[0.99] disabled:opacity-50 [touch-action:manipulation]">
+                    Submit idea
+                        </button>
+                      </form>
+                    )}
 
                     <section ref={suggestionsRef} className="scroll-mt-20 rounded-lg border border-white/10 bg-white/5 p-4 shadow-xl">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <h2 className="font-semibold text-white">Room ideas</h2>
-                          <p className="mt-1 text-xs text-slate-400">Vote here or in the matching category card.</p>
+                          <p className="mt-1 text-xs text-slate-400">{categoryResultsLocked ? 'Review submitted ideas from the session.' : 'Vote here or in the matching category card.'}</p>
                         </div>
                         <span className="rounded-full bg-white/10 px-2 py-1 text-xs font-semibold text-white">{votes.categorySuggestions?.length || 0}</span>
                       </div>
@@ -971,8 +1064,10 @@ export default function SummitVote() {
                                 </div>
                                 <button
                                   aria-pressed={Boolean(myVotes[item.id])}
+                                  disabled={categoryResultsLocked}
                                   onClick={() => toggleVote(item, 'suggestion')}
-                                  className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition active:scale-[0.96] [touch-action:manipulation] ${
+                                  title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this room idea'}
+                                  className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-75 [touch-action:manipulation] ${
                                     highlightIds[`vote-${item.id}`] ? 'scale-[1.05]' : ''
                                   } ${myVotes[item.id] ? 'bg-cyan-400 text-slate-950 shadow-md ring-2 ring-cyan-300/30' : 'bg-white/10 text-slate-200 hover:bg-white/15'}`}
                                 >
@@ -983,30 +1078,32 @@ export default function SummitVote() {
                             </div>
                           );
                         })}
-                        {!(votes.categorySuggestions || []).length && <p className="text-sm text-slate-400">New category suggestions will appear here for everyone.</p>}
+                        {!(votes.categorySuggestions || []).length && <p className="text-sm text-slate-400">{categoryResultsLocked ? 'No room ideas were submitted.' : 'New category suggestions will appear here for everyone.'}</p>}
                       </div>
                     </section>
 
-                    <form onSubmit={submitMerge} className="rounded-lg border border-white/10 bg-white/5 p-4 shadow-xl">
-                      <div className="flex items-center gap-2">
-                        <Icons.Merge className="h-5 w-5 text-cyan-200" />
-                        <h2 className="font-semibold text-white">Suggest a merge</h2>
-                      </div>
-                      <div className="mt-3 space-y-2">
-                        <select value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300">
-                          <option value="">First category</option>
-                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                        <select value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300">
-                          <option value="">Second category</option>
-                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                        <input value={mergeReason} onChange={(e) => setMergeReason(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-300" placeholder="Optional reason" />
-                      </div>
-                      <button disabled={!mergeFrom || !mergeTo || mergeFrom === mergeTo} className="mt-3 w-full rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">
-                  Submit merge suggestion
-                      </button>
-                    </form>
+                    {!categoryResultsLocked && (
+                      <form onSubmit={submitMerge} className="rounded-lg border border-white/10 bg-white/5 p-4 shadow-xl">
+                        <div className="flex items-center gap-2">
+                          <Icons.Merge className="h-5 w-5 text-cyan-200" />
+                          <h2 className="font-semibold text-white">Suggest a merge</h2>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          <select value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300">
+                            <option value="">First category</option>
+                            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                          <select value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300">
+                            <option value="">Second category</option>
+                            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                          <input value={mergeReason} onChange={(e) => setMergeReason(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-300" placeholder="Optional reason" />
+                        </div>
+                        <button disabled={!mergeFrom || !mergeTo || mergeFrom === mergeTo} className="mt-3 w-full rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">
+                    Submit merge suggestion
+                        </button>
+                      </form>
+                    )}
                   </aside>
                 </div>
                 <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2 lg:hidden">
@@ -1066,8 +1163,10 @@ export default function SummitVote() {
                     <div className="max-h-[86dvh] w-full overflow-hidden rounded-t-2xl border border-cyan-200/20 bg-slate-950 shadow-2xl transition-all duration-200 animate-in slide-in-from-bottom-4">
                       <div className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
                         <div>
-                          <h2 id="mobile-priorities-title" className="text-base font-semibold text-white">My priorities</h2>
-                          <p className="mt-1 text-xs text-cyan-100">{activePriorityItems.length} selected. Tap an item X to remove a vote.</p>
+                          <h2 id="mobile-priorities-title" className="text-base font-semibold text-white">{categoryResultsLocked ? 'Your previous votes' : 'My priorities'}</h2>
+                          <p className="mt-1 text-xs text-cyan-100">
+                            {categoryResultsLocked ? `${activePriorityItems.length} previous selections.` : `${activePriorityItems.length} selected. Tap an item X to remove a vote.`}
+                          </p>
                         </div>
                         <button
                           type="button"
@@ -1091,14 +1190,16 @@ export default function SummitVote() {
                                 <Icon name={item.icon} className="h-4 w-4" />
                               </span>
                               <span className="min-w-0 flex-1 break-words text-sm font-medium leading-snug">{index + 1}. {item.name}</span>
-                              <button onClick={() => removePriority(item)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
-                                <Icons.X className="h-4 w-4" />
-                              </button>
+                              {!categoryResultsLocked && (
+                                <button onClick={() => removePriority(item)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-[0.95] [touch-action:manipulation]" title="Remove vote">
+                                  <Icons.X className="h-4 w-4" />
+                                </button>
+                              )}
                             </div>
                           ))}
                           {!activePriorityItems.length && (
                             <div className="flex min-h-28 items-center justify-center rounded-lg text-center text-sm text-cyan-100">
-                          Tap vote buttons or drag handles to add priorities.
+                              {categoryResultsLocked ? 'No previous selections for this session.' : 'Tap vote buttons or drag handles to add priorities.'}
                             </div>
                           )}
                         </PriorityDropZone>

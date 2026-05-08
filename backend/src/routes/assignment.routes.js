@@ -11,6 +11,7 @@ import competencyFeedbackService from '../services/competencyFeedbackService.js'
 import assignmentDailyReviewService from '../services/assignmentDailyReviewService.js';
 import assignmentDailyReviewConsolidationService from '../services/assignmentDailyReviewConsolidationService.js';
 import assignmentCorrectionService from '../services/assignmentCorrectionService.js';
+import skillHierarchyService from '../services/skillHierarchyService.js';
 import syncService from '../services/syncService.js';
 import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
@@ -1088,6 +1089,55 @@ router.post('/competencies/merge', requireAdmin, asyncHandler(async (req, res) =
   res.json({ success: true, data: result });
 }));
 
+// ─── Skills / Subskills Hierarchy Migration ─────────────────────────────
+
+router.get('/skills/draft', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await skillHierarchyService.getDraft(req.workspaceId);
+  res.json({ success: true, data });
+}));
+
+router.post('/skills/draft', requireAdmin, asyncHandler(async (req, res) => {
+  const draft = await skillHierarchyService.saveDraft(req.workspaceId, req.body || {}, req.session?.user?.email);
+  res.json({ success: true, data: draft });
+}));
+
+router.post('/skills/import-summit', requireAdmin, asyncHandler(async (req, res) => {
+  const draft = await skillHierarchyService.importSummit(req.workspaceId, req.session?.user?.email);
+  res.status(201).json({ success: true, data: draft });
+}));
+
+router.post('/skills/publish', requireAdmin, asyncHandler(async (req, res) => {
+  const result = await skillHierarchyService.publish(req.workspaceId, req.session?.user?.email);
+  logger.info('Skill hierarchy draft published', {
+    workspaceId: req.workspaceId,
+    actorEmail: req.session?.user?.email,
+    skillCount: result.skillCount,
+    subskillCount: result.subskillCount,
+    retiredCount: result.retiredCount,
+  });
+  res.json({ success: true, data: result });
+}));
+
+router.get('/skills/mappings', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await skillHierarchyService.getMappings(req.workspaceId);
+  res.json({ success: true, data });
+}));
+
+router.put('/skills/mappings', requireAdmin, asyncHandler(async (req, res) => {
+  const draft = await skillHierarchyService.updateMappings(req.workspaceId, req.body?.mappings || [], req.session?.user?.email);
+  res.json({ success: true, data: draft });
+}));
+
+router.get('/skills/freshservice-fields', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await skillHierarchyService.getFreshserviceFields(req.workspaceId);
+  res.json({ success: true, data });
+}));
+
+router.get('/skills/freshservice-drift', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await skillHierarchyService.getFreshserviceDrift(req.workspaceId);
+  res.json({ success: true, data });
+}));
+
 // ─── Competency Categories ──────────────────────────────────────────────
 
 router.get('/competencies', requireAdmin, asyncHandler(async (req, res) => {
@@ -1105,6 +1155,7 @@ router.get('/competencies', requireAdmin, asyncHandler(async (req, res) => {
       mappings,
       suggestedCategories,
       suggestedCategoryCount: suggestedCategories.length,
+      terminology: { top: 'Skill', child: 'Subskill', topPlural: 'Skills', childPlural: 'Subskills' },
     },
   });
 }));

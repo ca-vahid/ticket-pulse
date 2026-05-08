@@ -602,6 +602,24 @@ class FreshServiceClient {
     }
   }
 
+  async updateTicketCustomFields(ticketId, customFields = {}) {
+    try {
+      const payload = compactObject(customFields);
+      const response = await this._put(`/tickets/${ticketId}`, {
+        ticket: { custom_fields: payload },
+      });
+      return response.data.ticket;
+    } catch (error) {
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error(`Error updating custom fields for ticket ${ticketId}:`, { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
+    }
+  }
+
   async getTicket(ticketId) {
     try {
       const response = await this._fetchWithRetry(`/tickets/${ticketId}?include=stats`);
@@ -660,6 +678,22 @@ class FreshServiceClient {
     } catch (error) {
       logger.error('Error listing departments:', error);
       return [];
+    }
+  }
+
+  async listTicketFormFields(filters = {}) {
+    try {
+      const params = {};
+      if (filters.workspace_id) params.workspace_id = filters.workspace_id;
+      const response = await this._get('/ticket_form_fields', { params });
+      return response.data?.ticket_fields || response.data?.fields || [];
+    } catch (error) {
+      logger.error('Error listing FreshService ticket form fields:', {
+        status: getFreshServiceStatus(error),
+        detail: getFreshServiceDetail(error),
+        message: error.message,
+      });
+      throw error;
     }
   }
 

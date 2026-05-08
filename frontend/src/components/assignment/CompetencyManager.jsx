@@ -280,7 +280,7 @@ function ParentCategoryPicker({ value, categories, onChange }) {
         }}
         className="flex h-full min-h-[34px] w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
       >
-        <span className="truncate">{selected ? selected.name : 'Top-level category'}</span>
+        <span className="truncate">{selected ? selected.name : 'Top-level skill'}</span>
         <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
@@ -292,7 +292,7 @@ function ParentCategoryPicker({ value, categories, onChange }) {
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Filter parent categories..."
+              placeholder="Filter parent skills..."
               className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-8 pr-2 text-xs outline-none focus:border-blue-300 focus:bg-white"
             />
           </div>
@@ -307,7 +307,7 @@ function ParentCategoryPicker({ value, categories, onChange }) {
                 !value ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <span>Top-level category</span>
+              <span>Top-level skill</span>
               <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">none</span>
             </button>
             {filtered.map((category) => (
@@ -327,7 +327,7 @@ function ParentCategoryPicker({ value, categories, onChange }) {
               </button>
             ))}
             {filtered.length === 0 && (
-              <div className="px-2.5 py-4 text-center text-xs text-slate-400">No matching categories</div>
+              <div className="px-2.5 py-4 text-center text-xs text-slate-400">No matching skills</div>
             )}
           </div>
         </div>
@@ -809,6 +809,194 @@ function CategorySuggestionsTab({ onCountChange }) {
     </div>
   );
 }
+// ─── Skills Draft / Publish Panel ────────────────────────────────────────
+
+function SkillsMigrationPanel({ onPublished }) {
+  const [draft, setDraft] = useState(null);
+  const [skills, setSkills] = useState([]);
+  const [warnings, setWarnings] = useState([]);
+  const [mappings, setMappings] = useState([]);
+  const [drift, setDrift] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [error, setError] = useState(null);
+
+  const loadDraft = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await assignmentAPI.getSkillDraft();
+      const payload = res?.data || {};
+      const activeDraft = payload.draft;
+      setDraft(activeDraft || null);
+      setSkills(activeDraft?.state?.skills || payload.published?.skills || []);
+      setWarnings(activeDraft?.warnings || []);
+      setMappings(activeDraft?.mappings || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadDraft(); }, [loadDraft]);
+
+  const updateSkill = (index, patch) => {
+    setSkills((prev) => prev.map((skill, i) => (i === index ? { ...skill, ...patch } : skill)));
+  };
+
+  const updateSubskill = (skillIndex, subIndex, patch) => {
+    setSkills((prev) => prev.map((skill, i) => {
+      if (i !== skillIndex) return skill;
+      return {
+        ...skill,
+        subskills: (skill.subskills || []).map((sub, j) => (j === subIndex ? { ...sub, ...patch } : sub)),
+      };
+    }));
+  };
+
+  const addSkill = () => setSkills((prev) => [...prev, { id: `draft-skill-${Date.now()}`, name: '', description: '', subskills: [] }]);
+  const addSubskill = (skillIndex) => setSkills((prev) => prev.map((skill, i) => (i === skillIndex
+    ? { ...skill, subskills: [...(skill.subskills || []), { id: `draft-subskill-${Date.now()}`, name: '', description: '' }] }
+    : skill)));
+  const removeSkill = (skillIndex) => setSkills((prev) => prev.filter((_, i) => i !== skillIndex));
+  const removeSubskill = (skillIndex, subIndex) => setSkills((prev) => prev.map((skill, i) => (i === skillIndex
+    ? { ...skill, subskills: (skill.subskills || []).filter((_, j) => j !== subIndex) }
+    : skill)));
+
+  const saveDraft = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      const res = await assignmentAPI.saveSkillDraft({ state: { skills }, mappings, source: draft?.source || 'manual' });
+      const saved = res?.data;
+      setDraft(saved);
+      setSkills(saved?.state?.skills || []);
+      setWarnings(saved?.warnings || []);
+      setMappings(saved?.mappings || []);
+      setMessage('Draft saved');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const importSummit = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      const res = await assignmentAPI.importSummitSkills();
+      const imported = res?.data;
+      setDraft(imported);
+      setSkills(imported?.state?.skills || []);
+      setWarnings(imported?.warnings || []);
+      setMappings(imported?.mappings || []);
+      setMessage('Summit output imported as a draft');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const publish = async () => {
+    if (!confirm('Publish this skill hierarchy and remap existing competencies/ticket classifications? No Freshservice ticket backfill will run.')) return;
+    try {
+      setSaving(true);
+      setError(null);
+      const res = await assignmentAPI.publishSkillDraft();
+      setMessage(`Published ${res?.data?.skillCount || 0} skills and ${res?.data?.subskillCount || 0} subskills`);
+      setDraft(null);
+      await loadDraft();
+      onPublished?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const loadDrift = async () => {
+    try {
+      setSaving(true);
+      const res = await assignmentAPI.getFreshserviceSkillDrift();
+      setDrift(res?.data || null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const unmapped = mappings.filter((mapping) => mapping.status !== 'mapped').length;
+
+  return (
+    <div className="border rounded-lg bg-white">
+      <div className="border-b px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Skills / Subskills Draft</h3>
+          <p className="text-xs text-slate-500">Ticket Pulse owns this hierarchy; Freshservice mirrors two dropdown values.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={importSummit} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Upload className="w-3.5 h-3.5" /> Import Summit</button>
+          <button onClick={saveDraft} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Save className="w-3.5 h-3.5" /> Save Draft</button>
+          <button onClick={publish} disabled={saving || !draft} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Publish</button>
+          <button onClick={loadDrift} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> FS Drift</button>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-3">
+        {loading && <div className="text-sm text-slate-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading draft</div>}
+        {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
+        {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{message}</div>}
+        {(warnings.length > 0 || unmapped > 0) && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {warnings.length > 0 && <span>{warnings.length} placeholder or duplicate rows were removed. </span>}
+            {unmapped > 0 && <span>{unmapped} legacy skill mappings need review before publish.</span>}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {skills.map((skill, skillIndex) => (
+            <div key={skill.id || skillIndex} className="rounded-lg border border-slate-200">
+              <div className="grid gap-2 p-3 md:grid-cols-[1fr_1fr_auto]">
+                <input value={skill.name || ''} onChange={(e) => updateSkill(skillIndex, { name: e.target.value })} placeholder="Skill" className="rounded-lg border px-3 py-2 text-sm" />
+                <input value={skill.description || ''} onChange={(e) => updateSkill(skillIndex, { description: e.target.value })} placeholder="Description" className="rounded-lg border px-3 py-2 text-sm" />
+                <button onClick={() => removeSkill(skillIndex)} className="rounded-lg border px-2 text-red-500 hover:bg-red-50"><Trash2 className="w-4 h-4" /></button>
+              </div>
+              <div className="border-t bg-slate-50 px-3 py-2 space-y-2">
+                {(skill.subskills || []).map((subskill, subIndex) => (
+                  <div key={subskill.id || subIndex} className="grid gap-2 md:grid-cols-[24px_1fr_1fr_auto] items-center">
+                    <span className="h-px bg-slate-300" />
+                    <input value={subskill.name || ''} onChange={(e) => updateSubskill(skillIndex, subIndex, { name: e.target.value })} placeholder="Subskill" className="rounded-lg border px-3 py-1.5 text-xs" />
+                    <input value={subskill.description || ''} onChange={(e) => updateSubskill(skillIndex, subIndex, { description: e.target.value })} placeholder="Description" className="rounded-lg border px-3 py-1.5 text-xs" />
+                    <button onClick={() => removeSubskill(skillIndex, subIndex)} className="rounded-lg border px-2 py-1 text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                ))}
+                <button onClick={() => addSubskill(skillIndex)} className="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add subskill</button>
+              </div>
+            </div>
+          ))}
+          <button onClick={addSkill} className="px-3 py-2 border rounded-lg text-xs font-medium hover:bg-slate-50 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add skill</button>
+        </div>
+
+        {drift && (
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="rounded-lg border p-3 text-xs">
+              <p className="font-semibold text-slate-700">Freshservice dropdown drift</p>
+              <p className="mt-1 text-slate-500">Skill field: {drift.configured?.tpSkillCustomField}; Subskill field: {drift.configured?.tpSubskillCustomField}</p>
+              <p className="mt-2 text-amber-700">Missing skills: {drift.skillDrift?.missing?.length || 0}; extra skills: {drift.skillDrift?.extra?.length || 0}</p>
+              <p className="text-amber-700">Missing subskills: {drift.subskillDrift?.missing?.length || 0}; extra subskills: {drift.subskillDrift?.extra?.length || 0}</p>
+            </div>
+            <textarea readOnly value={drift.exports?.hierarchyText || ''} className="min-h-[140px] rounded-lg border p-3 font-mono text-xs text-slate-700" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Matrix Tab (Overview + Editor) ──────────────────────────────────────
 
 function MatrixTab({ onAnalyze }) {
@@ -862,7 +1050,7 @@ function MatrixTab({ onAnalyze }) {
   };
 
   const handleDeleteCategory = async (id) => {
-    if (!confirm('Delete this category and all its mappings?')) return;
+    if (!confirm('Delete this skill/subskill and all its mappings?')) return;
     try { await assignmentAPI.deleteCategory(id); await fetchData(); } catch (err) { setError(err.message); }
   };
 
@@ -889,6 +1077,8 @@ function MatrixTab({ onAnalyze }) {
         </div>
       )}
 
+      <SkillsMigrationPanel onPublished={fetchData} />
+
       <DuplicateDetector onMerged={fetchData} />
 
       {/* Swapped-axis matrix: categories as rows, technicians as columns */}
@@ -897,7 +1087,7 @@ function MatrixTab({ onAnalyze }) {
           <table className="text-sm border-collapse">
             <thead className="bg-slate-50">
               <tr>
-                <th className="text-left px-3 py-3 font-medium text-slate-600 sticky left-0 bg-slate-50 z-10 min-w-[180px]">Competency</th>
+                <th className="text-left px-3 py-3 font-medium text-slate-600 sticky left-0 bg-slate-50 z-10 min-w-[180px]">Skill / Subskill</th>
                 {technicians.map((tech) => {
                   const initials = tech.name.split(' ').map((n) => n[0]).join('').slice(0, 2);
                   const isSelected = selectedTechId === tech.id;
@@ -920,7 +1110,7 @@ function MatrixTab({ onAnalyze }) {
               {categories.length === 0 && (
                 <tr>
                   <td colSpan={technicians.length + 1} className="px-4 py-8 text-center text-sm text-slate-400">
-                    No competency categories yet. Add categories below to start mapping skills, or run LLM analysis on a technician to auto-generate them.
+                    No skills yet. Add skills below to start mapping technicians, or import the summit draft.
                   </td>
                 </tr>
               )}
@@ -1009,7 +1199,7 @@ function MatrixTab({ onAnalyze }) {
       {/* Category management (collapsed by default) */}
       <details className="border rounded-lg">
         <summary className="px-4 py-2.5 text-sm font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none flex items-center gap-2">
-          <span>Manage Categories ({categories.length})</span>
+          <span>Manage Published Skills ({categories.length})</span>
         </summary>
         <div className="px-4 pb-4 pt-2 border-t space-y-3">
           {categories.length > 0 && (
@@ -1023,7 +1213,7 @@ function MatrixTab({ onAnalyze }) {
             </div>
           )}
           <div className="grid gap-2 md:grid-cols-[1fr_1fr_220px_auto]">
-            <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Category name" className="flex-1 border rounded-lg px-3 py-1.5 text-xs" />
+            <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Skill or subskill name" className="flex-1 border rounded-lg px-3 py-1.5 text-xs" />
             <input type="text" value={newCatDesc} onChange={(e) => setNewCatDesc(e.target.value)} placeholder="Description (optional)" className="flex-1 border rounded-lg px-3 py-1.5 text-xs" />
             <ParentCategoryPicker
               value={newCatParentId}

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Icons from 'lucide-react';
 import { agentAPI } from '../services/api';
 
+const CATEGORY_RESULTS_LOCKED_MESSAGE = 'Categories & Skills is complete. Voting, suggestions, and edits are closed; results remain available for review.';
+
 function Icon({ name, className = 'h-4 w-4' }) {
   const LucideIcon = Icons[name] || Icons.Tags;
   return <LucideIcon className={className} />;
@@ -81,6 +83,7 @@ export default function ItSummitCategoriesPanel() {
   const [error, setError] = useState('');
   const votesRef = useRef(normalizeVotes());
   const myVotesRef = useRef({});
+  const categoryResultsLocked = session?.state?.categoryResultsLocked !== false;
 
   const categories = useMemo(() => activeCategories(session?.state), [session?.state]);
   const subcategorySuggestionsByParent = useMemo(() => {
@@ -199,6 +202,10 @@ export default function ItSummitCategoriesPanel() {
   }, [myVotes]);
 
   const submitVote = async (body, optimisticItemId = null) => {
+    if (categoryResultsLocked) {
+      pushToast('Read-only results', 'The Categories & Skills section is complete and locked for review.', 'cyan', 'Lock');
+      return;
+    }
     const res = await agentAPI.voteSummitCategory(body);
     applyVotes(res.votes, { silent: true });
     if (res.myVotes) {
@@ -209,6 +216,10 @@ export default function ItSummitCategoriesPanel() {
   };
 
   const toggleVote = async (item, itemType = 'category') => {
+    if (categoryResultsLocked) {
+      pushToast('Read-only results', 'Voting is closed for Categories & Skills.', 'cyan', 'Lock');
+      return;
+    }
     const active = !myVotesRef.current[item.id];
     setMyVotes((current) => ({ ...current, [item.id]: active }));
     try {
@@ -227,6 +238,10 @@ export default function ItSummitCategoriesPanel() {
 
   const submitTopIdea = async (event) => {
     event.preventDefault();
+    if (categoryResultsLocked) {
+      pushToast('Read-only results', 'New category ideas are closed for this section.', 'cyan', 'Lock');
+      return;
+    }
     const name = ideaName.trim();
     if (!name) return;
     try {
@@ -251,6 +266,10 @@ export default function ItSummitCategoriesPanel() {
 
   const submitQuickSubcategory = async (event, category) => {
     event.preventDefault();
+    if (categoryResultsLocked) {
+      pushToast('Read-only results', 'Subcategory suggestions are closed for this section.', 'cyan', 'Lock');
+      return;
+    }
     const name = String(quickSubcategoryNames[category.id] || '').trim();
     if (!name) return;
     try {
@@ -316,7 +335,11 @@ export default function ItSummitCategoriesPanel() {
             </span>
             <div className="min-w-0">
               <h2 className="text-2xl font-semibold text-slate-950">Categories & Skills</h2>
-              <p className="mt-1 text-sm text-slate-600">Vote on the proposed category list and suggest missing categories or subcategories.</p>
+              <p className="mt-1 text-sm text-slate-600">
+                {categoryResultsLocked
+                  ? 'Review the finalized category and skill results. This section is complete and read-only.'
+                  : 'Vote on the proposed category list and suggest missing categories or subcategories.'}
+              </p>
             </div>
           </div>
         </div>
@@ -335,6 +358,20 @@ export default function ItSummitCategoriesPanel() {
           </div>
         </div>
       </div>
+
+      {categoryResultsLocked && (
+        <div className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-950 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-cyan-700">
+              <Icons.Lock className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="font-semibold">Categories & Skills is complete</div>
+              <div className="mt-0.5 text-cyan-900/80">{CATEGORY_RESULTS_LOCKED_MESSAGE}</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-3">
@@ -374,8 +411,10 @@ export default function ItSummitCategoriesPanel() {
                   <button
                     type="button"
                     aria-pressed={Boolean(myVotes[category.id])}
+                    disabled={categoryResultsLocked}
                     onClick={() => toggleVote(category, 'category')}
-                    className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition active:scale-[0.97] ${
+                    title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this category'}
+                    className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-80 ${
                       myVotes[category.id] ? 'bg-cyan-100 text-cyan-900 ring-2 ring-cyan-200' : 'bg-slate-100 text-slate-600 hover:bg-cyan-50 hover:text-cyan-800'
                     }`}
                   >
@@ -390,8 +429,10 @@ export default function ItSummitCategoriesPanel() {
                       key={subcategory.id}
                       type="button"
                       aria-pressed={Boolean(myVotes[subcategory.id])}
+                      disabled={categoryResultsLocked}
                       onClick={() => toggleVote({ ...subcategory, color: category.color }, 'subcategory')}
-                      className={`flex min-h-[52px] items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.99] ${
+                      title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this subcategory'}
+                      className={`flex min-h-[52px] items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.99] disabled:cursor-default ${
                         highlightIds[`vote-${subcategory.id}`] ? 'summit-categories-pulse' : ''
                       } ${myVotes[subcategory.id] ? 'border-cyan-300 bg-cyan-50 text-cyan-950 ring-1 ring-cyan-200' : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-cyan-200 hover:bg-white'}`}
                     >
@@ -410,8 +451,10 @@ export default function ItSummitCategoriesPanel() {
                         key={suggestion.id}
                         type="button"
                         aria-pressed={Boolean(myVotes[item.id])}
+                        disabled={categoryResultsLocked}
                         onClick={() => toggleVote(item, 'suggestion')}
-                        className={`flex min-h-[62px] items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.99] ${
+                        title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this suggestion'}
+                        className={`flex min-h-[62px] items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.99] disabled:cursor-default ${
                           highlightIds[`idea-${item.id}`] || highlightIds[`vote-${item.id}`] ? 'summit-categories-pulse' : ''
                         } ${myVotes[item.id] ? 'border-amber-300 bg-amber-50 text-amber-950 ring-1 ring-amber-200' : 'border-amber-200 bg-amber-50/70 text-slate-800 hover:border-amber-300 hover:bg-amber-50'}`}
                       >
@@ -429,22 +472,24 @@ export default function ItSummitCategoriesPanel() {
                     );
                   })}
 
-                  <form onSubmit={(event) => submitQuickSubcategory(event, category)} className="flex min-h-[52px] items-center gap-2 rounded-xl border border-dashed border-amber-300 bg-amber-50/50 px-3 py-2">
-                    <Icons.Plus className="h-4 w-4 shrink-0 text-amber-700" />
-                    <input
-                      value={quickSubcategoryNames[category.id] || ''}
-                      onChange={(event) => setQuickSubcategoryNames((current) => ({ ...current, [category.id]: event.target.value }))}
-                      placeholder={`Suggest subcategory under ${category.name}`}
-                      className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!String(quickSubcategoryNames[category.id] || '').trim()}
-                      className="rounded-lg bg-amber-200 px-3 py-2 text-xs font-semibold text-amber-950 transition hover:bg-amber-300 disabled:opacity-40"
-                    >
+                  {!categoryResultsLocked && (
+                    <form onSubmit={(event) => submitQuickSubcategory(event, category)} className="flex min-h-[52px] items-center gap-2 rounded-xl border border-dashed border-amber-300 bg-amber-50/50 px-3 py-2">
+                      <Icons.Plus className="h-4 w-4 shrink-0 text-amber-700" />
+                      <input
+                        value={quickSubcategoryNames[category.id] || ''}
+                        onChange={(event) => setQuickSubcategoryNames((current) => ({ ...current, [category.id]: event.target.value }))}
+                        placeholder={`Suggest subcategory under ${category.name}`}
+                        className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!String(quickSubcategoryNames[category.id] || '').trim()}
+                        className="rounded-lg bg-amber-200 px-3 py-2 text-xs font-semibold text-amber-950 transition hover:bg-amber-300 disabled:opacity-40"
+                      >
                       Add
-                    </button>
-                  </form>
+                      </button>
+                    </form>
+                  )}
                 </div>
               </article>
             );
@@ -452,32 +497,46 @@ export default function ItSummitCategoriesPanel() {
         </div>
 
         <aside className="space-y-4 xl:sticky xl:top-20 xl:self-start">
-          <form onSubmit={submitTopIdea} className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center gap-2">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
-                <Icons.Lightbulb className="h-5 w-5" />
-              </span>
-              <div>
-                <h3 className="font-semibold text-slate-950">Suggest a new category</h3>
-                <p className="text-xs text-slate-500">For subcategories, use the row inside each category.</p>
+          {categoryResultsLocked ? (
+            <section className="rounded-2xl border border-cyan-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700">
+                  <Icons.Lock className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="font-semibold text-slate-950">Suggestions closed</h3>
+                  <p className="mt-1 text-sm text-slate-600">The submitted room ideas remain visible below for review.</p>
+                </div>
               </div>
-            </div>
-            <input
-              value={ideaName}
-              onChange={(event) => setIdeaName(event.target.value)}
-              className="mt-3 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
-              placeholder="New top category name"
-            />
-            <textarea
-              value={ideaReason}
-              onChange={(event) => setIdeaReason(event.target.value)}
-              className="mt-2 min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
-              placeholder="Why should we consider it?"
-            />
-            <button disabled={!ideaName.trim()} className="mt-3 h-10 w-full rounded-lg bg-amber-300 px-4 text-sm font-semibold text-amber-950 transition hover:bg-amber-200 disabled:opacity-40">
+            </section>
+          ) : (
+            <form onSubmit={submitTopIdea} className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
+                  <Icons.Lightbulb className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="font-semibold text-slate-950">Suggest a new category</h3>
+                  <p className="text-xs text-slate-500">For subcategories, use the row inside each category.</p>
+                </div>
+              </div>
+              <input
+                value={ideaName}
+                onChange={(event) => setIdeaName(event.target.value)}
+                className="mt-3 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                placeholder="New top category name"
+              />
+              <textarea
+                value={ideaReason}
+                onChange={(event) => setIdeaReason(event.target.value)}
+                className="mt-2 min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                placeholder="Why should we consider it?"
+              />
+              <button disabled={!ideaName.trim()} className="mt-3 h-10 w-full rounded-lg bg-amber-300 px-4 text-sm font-semibold text-amber-950 transition hover:bg-amber-200 disabled:opacity-40">
               Submit idea
-            </button>
-          </form>
+              </button>
+            </form>
+          )}
 
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
@@ -519,8 +578,10 @@ export default function ItSummitCategoriesPanel() {
                       <button
                         type="button"
                         aria-pressed={Boolean(myVotes[item.id])}
+                        disabled={categoryResultsLocked}
                         onClick={() => toggleVote(item, 'suggestion')}
-                        className={`flex min-h-9 items-center gap-1 rounded-lg px-3 text-sm font-semibold transition active:scale-[0.97] ${myVotes[item.id] ? 'bg-cyan-100 text-cyan-900' : 'bg-white text-slate-600 hover:bg-cyan-50 hover:text-cyan-800'}`}
+                        title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this idea'}
+                        className={`flex min-h-9 items-center gap-1 rounded-lg px-3 text-sm font-semibold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-80 ${myVotes[item.id] ? 'bg-cyan-100 text-cyan-900' : 'bg-white text-slate-600 hover:bg-cyan-50 hover:text-cyan-800'}`}
                       >
                         <Icons.ThumbsUp className="h-4 w-4" />
                         {voteCount(votes, item.id)}

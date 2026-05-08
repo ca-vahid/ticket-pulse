@@ -33,7 +33,11 @@ const PRIORITY_MAP = {
  * @param {Object} fsTicket - FreshService ticket object
  * @returns {Object} Transformed ticket data
  */
-export function transformTicket(fsTicket, { categoryCustomField = 'security' } = {}) {
+export function transformTicket(fsTicket, {
+  categoryCustomField = 'security',
+  tpSkillCustomField = 'tp_skill',
+  tpSubskillCustomField = 'tp_subskill',
+} = {}) {
   if (!fsTicket || !fsTicket.id) {
     logger.warn('Invalid FreshService ticket data');
     return null;
@@ -72,6 +76,8 @@ export function transformTicket(fsTicket, { categoryCustomField = 'security' } =
       category: fsTicket.category || null,
       subCategory: fsTicket.sub_category || null,
       ticketCategory: fsTicket.custom_fields?.[categoryCustomField] || null,
+      tpSkill: fsTicket.custom_fields?.[tpSkillCustomField] || null,
+      tpSubskill: fsTicket.custom_fields?.[tpSubskillCustomField] || null,
       department: fsTicket.department?.name || null,
       isEscalated: fsTicket.is_escalated || false,
       groupId: fsTicket.group_id ? BigInt(fsTicket.group_id) : null,

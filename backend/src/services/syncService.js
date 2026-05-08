@@ -731,6 +731,12 @@ class SyncService {
       if (wsConfig.categoryCustomField) {
         transformOptions.categoryCustomField = wsConfig.categoryCustomField;
       }
+      if (wsConfig.tpSkillCustomField) {
+        transformOptions.tpSkillCustomField = wsConfig.tpSkillCustomField;
+      }
+      if (wsConfig.tpSubskillCustomField) {
+        transformOptions.tpSubskillCustomField = wsConfig.tpSubskillCustomField;
+      }
     }
 
     const transformedTickets = transformTickets(fsTickets, transformOptions);

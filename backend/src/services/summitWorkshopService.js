@@ -12,6 +12,7 @@ const FEEDBACK_VOTE_TYPES = [
   FEEDBACK_SUPPORT_VOTE_TYPE,
   FEEDBACK_COMMENT_VOTE_TYPE,
 ];
+const CATEGORY_RESULTS_LOCKED_MESSAGE = 'Categories & Skills is complete and read-only.';
 
 const clients = new Map();
 
@@ -27,6 +28,27 @@ function makeId(prefix, name) {
 
 function uniqueRuntimeId(prefix) {
   return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+}
+
+function isCategoryResultsLocked(state) {
+  return state?.categoryResultsLocked !== false;
+}
+
+function comparableCategoryState(state) {
+  const copy = JSON.parse(JSON.stringify(state || {}));
+  delete copy.categoryResultsLocked;
+  delete copy.lastEditedAt;
+  return copy;
+}
+
+function isOnlyCategoryLockToggle(existingState, nextState) {
+  return JSON.stringify(comparableCategoryState(existingState)) === JSON.stringify(comparableCategoryState(nextState));
+}
+
+function assertCategoryResultsEditable(state) {
+  if (isCategoryResultsLocked(state)) {
+    throw new ValidationError(CATEGORY_RESULTS_LOCKED_MESSAGE);
+  }
 }
 
 function sub(name, icon = 'Tag', evidence = '') {
@@ -64,6 +86,7 @@ export function getInitialSummitState() {
     subtitle: 'IT ticket category workshop',
     lastEditedAt: now,
     workshopMode: 'facilitator',
+    categoryResultsLocked: true,
     categories: [
       category('Account & Access', 'KeyRound', '#0f4c81', 'Accounts, authentication, permissions, group membership, application access, and privileged access.', [
         sub('Password & MFA', 'ShieldCheck', '6 AI-classified tickets.'),
@@ -586,6 +609,9 @@ export async function saveWorkshopState(workspaceId, { state, label, snapshotTyp
   }
 
   const existing = await findActiveSession(workspaceId) || await createSession(workspaceId, userEmail);
+  if (isCategoryResultsLocked(existing.state) && !isOnlyCategoryLockToggle(existing.state, state)) {
+    throw new ValidationError(CATEGORY_RESULTS_LOCKED_MESSAGE);
+  }
   const nextVersion = existing.activeVersion + 1;
   const nextState = { ...state, lastEditedAt: new Date().toISOString() };
   if (existing.state?.voting && typeof existing.state.voting === 'object') {
@@ -1164,6 +1190,7 @@ export async function submitVote(token, body) {
 }
 
 async function submitVoteForParticipant(session, participant, body = {}) {
+  assertCategoryResultsEditable(session.state);
   const voteType = String(body.voteType || 'support').slice(0, 40);
   const itemLabel = String(body.itemLabel || 'Workshop item').slice(0, 255);
   const itemType = String(body.itemType || 'category').slice(0, 30);

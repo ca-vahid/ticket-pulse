@@ -87,6 +87,11 @@ const transformTicket = (ticket) => {
     ...ticket,
     requesterName: ticket.requester?.name || null,
     requesterEmail: ticket.requester?.email || null,
+    skill: ticket.internalCategory?.name || ticket.tpSkill || null,
+    subskill: ticket.internalSubcategory?.name || ticket.tpSubskill || null,
+    canonicalSkill: ticket.internalSubcategory?.name
+      ? `${ticket.internalCategory?.name || ticket.tpSkill || 'Uncategorized'} > ${ticket.internalSubcategory.name}`
+      : (ticket.internalCategory?.name || ticket.tpSkill || ticket.ticketCategory || null),
   };
 
   // Remove the nested requester object to avoid confusion
@@ -1179,6 +1184,10 @@ router.get(
             status: true,
             priority: true,
             ticketCategory: true,
+            tpSkill: true,
+            tpSubskill: true,
+            internalCategory: { select: { id: true, name: true } },
+            internalSubcategory: { select: { id: true, name: true, parentId: true } },
             assignedTechId: true,
             assignedTech: { select: { id: true, name: true, photoUrl: true } },
             requester: { select: { name: true, email: true } },

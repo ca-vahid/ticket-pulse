@@ -17,6 +17,7 @@ const ICONS = [
 
 const COLORS = ['#0f4c81', '#b42318', '#2563eb', '#7c3aed', '#0891b2', '#0f766e', '#4f46e5', '#c2410c', '#334155', '#16a34a', '#64748b'];
 const DEFAULT_VOTE_DURATION_MINUTES = 120;
+const CATEGORY_RESULTS_LOCKED_MESSAGE = 'Categories & Skills results are finalized. Editing, importing, merging, restoring, and category vote changes are locked for review.';
 
 function Icon({ name, className = 'h-4 w-4' }) {
   const LucideIcon = Icons[name] || Icons.Tags;
@@ -312,19 +313,21 @@ function CardActionsMenu({
   extraActions = null,
   label = 'Card actions',
   compact = false,
+  disabled = false,
 }) {
   return (
     <div className="relative">
       <button
         type="button"
-        onClick={onToggle}
-        className={`${compact ? 'h-8 w-8 rounded-md' : 'h-10 w-10 rounded-lg shadow-sm'} flex items-center justify-center border border-slate-200 bg-white text-slate-500 transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-md`}
-        title={label}
-        aria-label={label}
+        onClick={disabled ? undefined : onToggle}
+        disabled={disabled}
+        className={`${compact ? 'h-8 w-8 rounded-md' : 'h-10 w-10 rounded-lg shadow-sm'} flex items-center justify-center border border-slate-200 bg-white text-slate-500 transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-none`}
+        title={disabled ? 'Results are read-only' : label}
+        aria-label={disabled ? 'Results are read-only' : label}
       >
         <Icons.EllipsisVertical className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
       </button>
-      {isOpen && (
+      {isOpen && !disabled && (
         <div className={`absolute right-0 z-[120] w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-2xl ${compact ? 'top-10' : 'top-12'}`}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
@@ -446,6 +449,7 @@ export default function SummitTaxonomyWorkshop() {
   const subcategoryNameInputRef = useRef(null);
   const categoryNameInputRef = useRef(null);
   const subcategoryNameInputRefs = useRef({});
+  const categoryResultsLocked = state?.categoryResultsLocked !== false;
 
   const isItWorkspace = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
   const activeCategories = useMemo(() => (state?.categories || []).filter(c => !c.deleted), [state]);
@@ -554,6 +558,16 @@ export default function SummitTaxonomyWorkshop() {
       setToasts(prev => prev.filter(toast => toast.id !== id));
     }, duration);
   }, []);
+
+  const notifyCategoriesLocked = useCallback((message = CATEGORY_RESULTS_LOCKED_MESSAGE) => {
+    pushToast({
+      title: 'Categories locked',
+      message,
+      icon: 'Lock',
+      tone: 'cyan',
+      duration: 4200,
+    });
+  }, [pushToast]);
 
   const addActivity = useCallback(({ type, title, detail, actor, icon = 'Activity', tone = 'cyan', itemId = null }) => {
     const id = `${Date.now()}_${activityIdRef.current += 1}`;
@@ -727,7 +741,7 @@ export default function SummitTaxonomyWorkshop() {
         applyVotes(res.votes, { silent: true });
         setFeedbackExport(normalizeFeedbackExport(res.feedback));
         setSelectedCategoryId(res.session.state?.categories?.find(c => !c.deleted)?.id || null);
-        setSaveStatus('Saved');
+        setSaveStatus(res.session.state?.categoryResultsLocked === false ? 'Saved' : 'Read-only');
         setLastSavedAt(res.session.updatedAt);
         hydratedRef.current = true;
       })
@@ -745,6 +759,10 @@ export default function SummitTaxonomyWorkshop() {
       source.addEventListener('feedback-reset', (event) => updateFeedbackExport(JSON.parse(event.data)));
       source.addEventListener('state', (event) => {
         const next = JSON.parse(event.data);
+        if (next.state) {
+          setState(next.state);
+          setSaveStatus(next.state.categoryResultsLocked === false ? 'Saved' : 'Read-only');
+        }
         setSession(prev => prev ? {
           ...prev,
           state: next.state || prev.state,
@@ -772,6 +790,10 @@ export default function SummitTaxonomyWorkshop() {
 
   useEffect(() => {
     if (!hydratedRef.current || !state) return undefined;
+    if (categoryResultsLocked) {
+      setSaveStatus('Read-only');
+      return undefined;
+    }
     setSaveStatus('Autosaving...');
     window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
@@ -786,9 +808,13 @@ export default function SummitTaxonomyWorkshop() {
         .catch((err) => setSaveStatus(err.message || 'Autosave failed'));
     }, 1800);
     return () => window.clearTimeout(saveTimerRef.current);
-  }, [applyVotes, state]);
+  }, [applyVotes, categoryResultsLocked, state]);
 
   const commit = (updater) => {
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked();
+      return;
+    }
     setState((current) => {
       if (!current) return current;
       const before = cloneState(current);
@@ -801,6 +827,11 @@ export default function SummitTaxonomyWorkshop() {
 
   const manualSave = async () => {
     if (!state) return;
+    if (categoryResultsLocked) {
+      setSaveStatus('Read-only');
+      notifyCategoriesLocked();
+      return;
+    }
     setSaveStatus('Saving...');
     const res = await summitAPI.saveState(state, { label: 'Manual summit save', snapshotType: 'manual' });
     setSession(res.session);
@@ -808,6 +839,41 @@ export default function SummitTaxonomyWorkshop() {
     applyVotes(res.votes, { silent: true });
     setSaveStatus('Saved');
     setLastSavedAt(res.session.updatedAt);
+  };
+
+  const toggleCategoryResultsLock = async () => {
+    if (!state) return;
+    const nextLocked = !categoryResultsLocked;
+    const previousState = cloneState(state);
+    const nextState = { ...cloneState(state), categoryResultsLocked: nextLocked, lastEditedAt: new Date().toISOString() };
+    setState(nextState);
+    setSaveStatus(nextLocked ? 'Locking...' : 'Reopening...');
+    try {
+      const res = await summitAPI.saveState(nextState, {
+        label: nextLocked ? 'Lock Categories & Skills results' : 'Reopen Categories & Skills editing',
+        snapshotType: 'manual',
+      });
+      setSession(res.session);
+      setSnapshots(res.snapshots || []);
+      applyVotes(res.votes, { silent: true });
+      setSaveStatus(nextLocked ? 'Read-only' : 'Saved');
+      setLastSavedAt(res.session.updatedAt);
+      pushToast({
+        title: nextLocked ? 'Categories locked' : 'Categories reopened',
+        message: nextLocked ? CATEGORY_RESULTS_LOCKED_MESSAGE : 'Facilitator editing and category voting are enabled again.',
+        icon: nextLocked ? 'Lock' : 'Unlock',
+        tone: nextLocked ? 'cyan' : 'emerald',
+      });
+    } catch (err) {
+      setState(previousState);
+      setSaveStatus(err.message || 'Could not update lock');
+      pushToast({
+        title: 'Could not update lock',
+        message: err.message || 'Try again after refreshing the workshop.',
+        icon: 'AlertTriangle',
+        tone: 'red',
+      });
+    }
   };
 
   const undo = () => {
@@ -965,6 +1031,11 @@ export default function SummitTaxonomyWorkshop() {
   };
 
   const startDrag = (event, item) => {
+    if (categoryResultsLocked) {
+      event.preventDefault();
+      notifyCategoriesLocked('Categories & Skills ordering is locked for review.');
+      return;
+    }
     setDragItem(item);
     setDragPreview(item);
     updateDragPosition(event);
@@ -1086,10 +1157,18 @@ export default function SummitTaxonomyWorkshop() {
   });
 
   const toggleSelectedForMerge = (categoryId) => {
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('Combining categories is locked for review.');
+      return;
+    }
     setSelectedForMerge(prev => (prev.includes(categoryId) ? prev.filter(id => id !== categoryId) : [...prev, categoryId]));
   };
 
   const mergeSelectedCategories = () => {
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('Combining categories is locked for review.');
+      return;
+    }
     if (selectedForMerge.length < 2) return;
     const selected = activeCategories.filter(c => selectedForMerge.includes(c.id));
     const keeper = selected[0];
@@ -1107,6 +1186,10 @@ export default function SummitTaxonomyWorkshop() {
   };
 
   const addSuggestedCategory = (suggestion) => {
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('Accepting new category ideas is locked for review.');
+      return;
+    }
     const name = suggestion.itemLabel || suggestion.value?.name || 'Suggested Category';
     if (suggestion.value?.scope === 'subcategory' && suggestion.value?.parentId && activeCategories.some(category => category.id === suggestion.value.parentId)) {
       createSubcategory(suggestion.value.parentId, {
@@ -1247,6 +1330,11 @@ export default function SummitTaxonomyWorkshop() {
   };
 
   const importJson = async (event) => {
+    if (categoryResultsLocked) {
+      notifyCategoriesLocked('JSON restore is locked because Categories & Skills is finalized.');
+      event.target.value = '';
+      return;
+    }
     const file = event.target.files?.[0];
     if (!file) return;
     const text = await file.text();
@@ -1327,7 +1415,8 @@ export default function SummitTaxonomyWorkshop() {
                     ref={categoryNameInputRef}
                     value={category.name}
                     onChange={(e) => updateCategory(category.id, { name: e.target.value })}
-                    className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300"
+                    readOnly={categoryResultsLocked}
+                    className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300 read-only:cursor-default read-only:bg-transparent read-only:focus:border-transparent"
                   />
                 ) : (
                   <h2 className="min-w-0 flex-1 break-words text-xl font-semibold text-slate-950">
@@ -1345,8 +1434,9 @@ export default function SummitTaxonomyWorkshop() {
                 <textarea
                   value={category.description || ''}
                   onChange={(e) => updateCategory(category.id, { description: e.target.value })}
+                  readOnly={categoryResultsLocked}
                   rows={2}
-                  className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400"
+                  className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400 read-only:cursor-default read-only:bg-slate-50"
                   placeholder="Describe the category boundary"
                 />
               ) : (
@@ -1364,10 +1454,10 @@ export default function SummitTaxonomyWorkshop() {
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm"
               >
                 <Icons.Pencil className="mr-1 inline h-4 w-4" />
-                Open/edit
+                {categoryResultsLocked ? 'Open' : 'Open/edit'}
               </button>
             ) : (
-              <button onClick={() => addSubcategory(category.id)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
+              <button onClick={() => addSubcategory(category.id)} disabled={categoryResultsLocked} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:hover:translate-y-0 disabled:hover:shadow-none"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
             )}
             <CardActionsMenu
               value={category.icon}
@@ -1382,6 +1472,7 @@ export default function SummitTaxonomyWorkshop() {
               onColorSelect={(color) => updateCategory(category.id, { color })}
               onRemove={() => softDeleteCategory(category.id)}
               label="Category options"
+              disabled={categoryResultsLocked}
             />
           </div>
         </div>
@@ -1424,12 +1515,13 @@ export default function SummitTaxonomyWorkshop() {
               <div className="flex items-start gap-2">
                 <button
                   type="button"
-                  draggable
+                  draggable={!categoryResultsLocked}
+                  disabled={categoryResultsLocked}
                   onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: category.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: category.color })}
                   onDrag={(event) => updateDragPosition(event)}
                   onDragEnd={finishDrag}
-                  className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing"
-                  title="Drag subcategory"
+                  className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                  title={categoryResultsLocked ? 'Results are read-only' : 'Drag subcategory'}
                 >
                   <Icons.GripVertical className="h-4 w-4" />
                 </button>
@@ -1443,7 +1535,8 @@ export default function SummitTaxonomyWorkshop() {
                       }}
                       value={subcat.name}
                       onChange={(e) => updateSubcategory(category.id, subcat.id, { name: e.target.value })}
-                      className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white"
+                      readOnly={categoryResultsLocked}
+                      className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent"
                     />
                   ) : (
                     <div className="break-words text-sm font-semibold text-slate-900">
@@ -1451,7 +1544,7 @@ export default function SummitTaxonomyWorkshop() {
                     </div>
                   )}
                   {isFocusedEditor ? (
-                    <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(category.id, subcat.id, { evidence: e.target.value })} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white" placeholder="Evidence or discussion note" />
+                    <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(category.id, subcat.id, { evidence: e.target.value })} readOnly={categoryResultsLocked} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent" placeholder="Evidence or discussion note" />
                   ) : (
                     <div className="mt-1 break-words text-xs text-slate-500">
                       <HighlightText text={subcat.evidence || 'Evidence or discussion note'} query={searchNeedle} />
@@ -1477,6 +1570,7 @@ export default function SummitTaxonomyWorkshop() {
                   onRemove={() => softDeleteSubcategory(category.id, subcat.id)}
                   extraActions={renderMoveSubcategoryAction(category, subcat)}
                   label="Subcategory options"
+                  disabled={categoryResultsLocked}
                 />
               </div>
             </div>
@@ -1529,11 +1623,11 @@ export default function SummitTaxonomyWorkshop() {
                     )}
                     <button
                       onClick={() => addSuggestedCategory(suggestion)}
-                      disabled={alreadyAdded}
+                      disabled={categoryResultsLocked || alreadyAdded}
                       className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
                     >
                       <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />
-                      {alreadyAdded ? 'Already added' : 'Add subcategory'}
+                      {categoryResultsLocked ? 'Read-only' : alreadyAdded ? 'Already added' : 'Add subcategory'}
                     </button>
                   </div>
                 );
@@ -1542,7 +1636,7 @@ export default function SummitTaxonomyWorkshop() {
           </div>
         )}
 
-        {isFocusedEditor && (
+        {isFocusedEditor && !categoryResultsLocked && (
           <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
             <div className="flex flex-col gap-2 md:flex-row md:items-center">
               <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
@@ -1731,9 +1825,9 @@ export default function SummitTaxonomyWorkshop() {
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <button onClick={() => navigate('/dashboard')} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition hover:bg-white/10" title="Dashboard"><Icons.LayoutDashboard className="h-4 w-4" /></button>
-            <button onClick={undo} disabled={!history.length} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title="Undo"><Icons.Undo2 className="h-4 w-4" /></button>
-            <button onClick={redo} disabled={!future.length} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title="Redo"><Icons.Redo2 className="h-4 w-4" /></button>
-            <button onClick={manualSave} className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 font-semibold text-slate-950 transition hover:bg-cyan-300" title="Save"><Icons.Save className="h-4 w-4" /></button>
+            <button onClick={undo} disabled={!history.length || categoryResultsLocked} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title={categoryResultsLocked ? 'Read-only' : 'Undo'}><Icons.Undo2 className="h-4 w-4" /></button>
+            <button onClick={redo} disabled={!future.length || categoryResultsLocked} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title={categoryResultsLocked ? 'Read-only' : 'Redo'}><Icons.Redo2 className="h-4 w-4" /></button>
+            <button onClick={manualSave} className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 font-semibold text-slate-950 transition hover:bg-cyan-300" title={categoryResultsLocked ? 'Read-only' : 'Save'}><Icons.Save className="h-4 w-4" /></button>
             <button onClick={exportExcel} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white font-semibold text-slate-900 transition hover:bg-slate-100" title="Export Excel"><Icons.FileSpreadsheet className="h-4 w-4" /></button>
             <button
               type="button"
@@ -1877,18 +1971,53 @@ export default function SummitTaxonomyWorkshop() {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-sm">
-              <button onClick={addCategory} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition hover:bg-slate-50" title="Add top category"><Icons.FolderPlus className="h-4 w-4" /><span className="hidden sm:inline">Add</span></button>
+              <button onClick={addCategory} disabled={categoryResultsLocked} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45" title={categoryResultsLocked ? 'Results are read-only' : 'Add top category'}><Icons.FolderPlus className="h-4 w-4" /><span className="hidden sm:inline">Add</span></button>
               <button onClick={() => setShowDeleted(!showDeleted)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Removed items"><Icons.ArchiveRestore className="h-4 w-4" /></button>
-              <button onClick={mergeSelectedCategories} disabled={selectedForMerge.length < 2} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition disabled:opacity-40 hover:bg-slate-50" title="Combine selected categories"><Icons.Merge className="h-4 w-4" /><span>{selectedForMerge.length || ''}</span></button>
-              <label className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Restore JSON">
+              <button onClick={mergeSelectedCategories} disabled={categoryResultsLocked || selectedForMerge.length < 2} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition disabled:opacity-40 hover:bg-slate-50" title={categoryResultsLocked ? 'Results are read-only' : 'Combine selected categories'}><Icons.Merge className="h-4 w-4" /><span>{selectedForMerge.length || ''}</span></button>
+              <label className={`flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition ${categoryResultsLocked ? 'pointer-events-none opacity-45' : 'cursor-pointer hover:bg-slate-50'}`} title={categoryResultsLocked ? 'Results are read-only' : 'Restore JSON'}>
                 <Icons.Upload className="h-4 w-4" />
-                <input type="file" accept="application/json" onChange={importJson} className="hidden" />
+                <input type="file" accept="application/json" onChange={importJson} disabled={categoryResultsLocked} className="hidden" />
               </label>
               <button onClick={() => navigator.clipboard.writeText(JSON.stringify(state, null, 2))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Copy JSON"><Icons.Copy className="h-4 w-4" /></button>
+              <button
+                type="button"
+                onClick={toggleCategoryResultsLock}
+                className={`flex h-9 items-center gap-1 rounded-lg border px-2.5 font-semibold transition ${
+                  categoryResultsLocked
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                    : 'border-cyan-200 bg-cyan-50 text-cyan-800 hover:bg-cyan-100'
+                }`}
+                title={categoryResultsLocked ? 'Reopen facilitator editing and voting' : 'Lock Categories & Skills'}
+              >
+                {categoryResultsLocked ? <Icons.Unlock className="h-4 w-4" /> : <Icons.Lock className="h-4 w-4" />}
+                <span className="hidden sm:inline">{categoryResultsLocked ? 'Enable edits' : 'Lock results'}</span>
+              </button>
             </div>
           </div>
         )}
       </div>
+
+      {workshopTab === 'categories' && categoryResultsLocked && (
+        <div className="rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-950 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-cyan-700">
+              <Icons.Lock className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold">Categories & Skills is complete</div>
+              <div className="mt-0.5 text-cyan-900/80">{CATEGORY_RESULTS_LOCKED_MESSAGE}</div>
+            </div>
+            <button
+              type="button"
+              onClick={toggleCategoryResultsLock}
+              className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50"
+            >
+              <Icons.Unlock className="mr-1 inline h-3.5 w-3.5" />
+              Enable edits
+            </button>
+          </div>
+        </div>
+      )}
 
       {workshopTab === 'working' ? (
         <ItSummitFeedbackPanel
@@ -1959,13 +2088,14 @@ export default function SummitTaxonomyWorkshop() {
                     <div className="flex items-start gap-2">
                       <button
                         type="button"
-                        draggable
+                        draggable={!categoryResultsLocked}
+                        disabled={categoryResultsLocked}
                         onDragStart={(event) => startDrag(event, { type: 'category', id: cat.id, name: cat.name, icon: cat.icon, color: cat.color })}
                         onDrag={(event) => updateDragPosition(event)}
                         onDragEnd={finishDrag}
                         onClick={(event) => event.stopPropagation()}
-                        className="flex h-10 w-5 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
-                        title="Drag to reorder"
+                        className="flex h-10 w-5 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                        title={categoryResultsLocked ? 'Results are read-only' : 'Drag to reorder'}
                       >
                         <Icons.GripVertical className="h-4 w-4" />
                       </button>
@@ -1986,16 +2116,17 @@ export default function SummitTaxonomyWorkshop() {
                       <div className="absolute bottom-2 right-2 flex shrink-0 items-center gap-1">
                         <button
                           type="button"
+                          disabled={categoryResultsLocked}
                           onClick={(event) => {
                             event.stopPropagation();
                             toggleSelectedForMerge(cat.id);
                           }}
-                          className={`flex h-8 w-8 items-center justify-center rounded-md border transition-all duration-200 ${
+                          className={`flex h-8 w-8 items-center justify-center rounded-md border transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
                             selectedForMerge.includes(cat.id)
                               ? 'border-cyan-300 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-100'
                               : 'border-slate-200 bg-white text-slate-400 hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700'
                           }`}
-                          title={selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
+                          title={categoryResultsLocked ? 'Results are read-only' : selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
                         >
                           {selectedForMerge.includes(cat.id) ? <Icons.Check className="h-3.5 w-3.5" /> : <Icons.Square className="h-3.5 w-3.5" />}
                         </button>
@@ -2020,6 +2151,7 @@ export default function SummitTaxonomyWorkshop() {
                             onRemove={() => softDeleteCategory(cat.id)}
                             label="Category options"
                             compact
+                            disabled={categoryResultsLocked}
                           />
                         </div>
                       </div>
@@ -2108,7 +2240,8 @@ export default function SummitTaxonomyWorkshop() {
                             ref={categoryNameInputRef}
                             value={selectedCategory.name}
                             onChange={(e) => updateCategory(selectedCategory.id, { name: e.target.value })}
-                            className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300"
+                            readOnly={categoryResultsLocked}
+                            className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300 read-only:cursor-default read-only:bg-transparent read-only:focus:border-transparent"
                           />
                           <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
                             linkedVoteCount(votes, selectedCategory) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
@@ -2120,14 +2253,15 @@ export default function SummitTaxonomyWorkshop() {
                         <textarea
                           value={selectedCategory.description || ''}
                           onChange={(e) => updateCategory(selectedCategory.id, { description: e.target.value })}
+                          readOnly={categoryResultsLocked}
                           rows={2}
-                          className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400"
+                          className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400 read-only:cursor-default read-only:bg-slate-50"
                           placeholder="Describe the category boundary"
                         />
                       </div>
                     </div>
                     <div className="flex flex-wrap items-start gap-2">
-                      <button onClick={() => addSubcategory(selectedCategory.id)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
+                      <button onClick={() => addSubcategory(selectedCategory.id)} disabled={categoryResultsLocked} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:hover:translate-y-0 disabled:hover:shadow-none"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
                       <CardActionsMenu
                         value={selectedCategory.icon}
                         color={selectedCategory.color}
@@ -2141,6 +2275,7 @@ export default function SummitTaxonomyWorkshop() {
                         onColorSelect={(color) => updateCategory(selectedCategory.id, { color })}
                         onRemove={() => softDeleteCategory(selectedCategory.id)}
                         label="Category options"
+                        disabled={categoryResultsLocked}
                       />
                     </div>
                   </div>
@@ -2183,12 +2318,13 @@ export default function SummitTaxonomyWorkshop() {
                         <div className="flex items-start gap-2">
                           <button
                             type="button"
-                            draggable
+                            draggable={!categoryResultsLocked}
+                            disabled={categoryResultsLocked}
                             onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: selectedCategory.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: selectedCategory.color })}
                             onDrag={(event) => updateDragPosition(event)}
                             onDragEnd={finishDrag}
-                            className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing"
-                            title="Drag subcategory"
+                            className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                            title={categoryResultsLocked ? 'Results are read-only' : 'Drag subcategory'}
                           >
                             <Icons.GripVertical className="h-4 w-4" />
                           </button>
@@ -2201,9 +2337,10 @@ export default function SummitTaxonomyWorkshop() {
                               }}
                               value={subcat.name}
                               onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { name: e.target.value })}
-                              className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white"
+                              readOnly={categoryResultsLocked}
+                              className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent"
                             />
-                            <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white" placeholder="Evidence or discussion note" />
+                            <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} readOnly={categoryResultsLocked} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent" placeholder="Evidence or discussion note" />
                           </div>
                           <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
                             linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
@@ -2224,6 +2361,7 @@ export default function SummitTaxonomyWorkshop() {
                             onRemove={() => softDeleteSubcategory(selectedCategory.id, subcat.id)}
                             extraActions={renderMoveSubcategoryAction(selectedCategory, subcat)}
                             label="Subcategory options"
+                            disabled={categoryResultsLocked}
                           />
                         </div>
                       </div>
@@ -2270,11 +2408,11 @@ export default function SummitTaxonomyWorkshop() {
                               {suggestion.value?.reason && <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-slate-600">{suggestion.value.reason}</div>}
                               <button
                                 onClick={() => addSuggestedCategory(suggestion)}
-                                disabled={alreadyAdded}
+                                disabled={categoryResultsLocked || alreadyAdded}
                                 className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
                               >
                                 <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />
-                                {alreadyAdded ? 'Already added' : 'Add subcategory'}
+                                {categoryResultsLocked ? 'Read-only' : alreadyAdded ? 'Already added' : 'Add subcategory'}
                               </button>
                             </div>
                           );
@@ -2283,7 +2421,7 @@ export default function SummitTaxonomyWorkshop() {
                     </div>
                   )}
 
-                  <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
+                  {!categoryResultsLocked && <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
                     <div className="flex flex-col gap-2 md:flex-row md:items-center">
                       <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
                         <Icons.Tag className="h-4 w-4 shrink-0 text-slate-500" />
@@ -2310,7 +2448,7 @@ export default function SummitTaxonomyWorkshop() {
                       className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-cyan-300"
                       placeholder="Evidence or discussion note"
                     />
-                  </form>
+                  </form>}
                 </>
               )}
             </section>
@@ -2465,9 +2603,10 @@ export default function SummitTaxonomyWorkshop() {
                     {suggestion.value?.reason && <div className="mt-2 text-slate-600">{suggestion.value.reason}</div>}
                     <button
                       onClick={() => addSuggestedCategory(suggestion)}
-                      className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800"
+                      disabled={categoryResultsLocked}
+                      className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
                     >
-                      <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />Add to categories
+                      <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />{categoryResultsLocked ? 'Read-only' : 'Add to categories'}
                     </button>
                   </div>
                 ))}
@@ -2503,7 +2642,13 @@ export default function SummitTaxonomyWorkshop() {
                   <div key={snapshot.id} className="rounded-lg border border-slate-200 p-2">
                     <div className="text-xs font-semibold text-slate-800">v{snapshot.version} / {snapshot.label}</div>
                     <div className="text-[11px] text-slate-500">{new Date(snapshot.createdAt).toLocaleString()}</div>
-                    <button onClick={() => summitAPI.restoreSnapshot(snapshot.id).then(res => { setSession(res.session); setState(res.session.state); setSnapshots(res.snapshots || []); })} className="mt-2 text-xs font-semibold text-blue-700 hover:text-blue-900">Restore</button>
+                    <button
+                      onClick={() => summitAPI.restoreSnapshot(snapshot.id).then(res => { setSession(res.session); setState(res.session.state); setSnapshots(res.snapshots || []); })}
+                      disabled={categoryResultsLocked}
+                      className="mt-2 text-xs font-semibold text-blue-700 hover:text-blue-900 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      {categoryResultsLocked ? 'Read-only' : 'Restore'}
+                    </button>
                   </div>
                 ))}
               </div>
@@ -2526,7 +2671,7 @@ export default function SummitTaxonomyWorkshop() {
                     <div className="font-medium text-slate-900">{item.name}</div>
                     <div className="text-xs text-slate-500">{item.type}{item.parentName ? ` from ${item.parentName}` : ''}</div>
                   </div>
-                  <button onClick={() => restoreDeleted(item)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white">Restore</button>
+                  <button onClick={() => restoreDeleted(item)} disabled={categoryResultsLocked} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">{categoryResultsLocked ? 'Read-only' : 'Restore'}</button>
                 </div>
               ))}
               {!deletedItems.length && <p className="text-sm text-slate-500">Nothing removed yet.</p>}

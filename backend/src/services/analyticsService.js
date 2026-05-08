@@ -280,6 +280,13 @@ function topFromMap(map, limit = 10) {
     .slice(0, limit);
 }
 
+function canonicalSkillLabel(ticket) {
+  const skill = ticket.internalCategory?.name || ticket.tpSkill || null;
+  const subskill = ticket.internalSubcategory?.name || ticket.tpSubskill || null;
+  if (skill && subskill) return `${skill} > ${subskill}`;
+  return subskill || skill || ticket.ticketCategory || 'Uncategorized';
+}
+
 function compactTicket(ticket) {
   if (!ticket) return null;
   return {
@@ -289,6 +296,9 @@ function compactTicket(ticket) {
     status: ticket.status,
     priority: ticket.priority,
     ticketCategory: ticket.ticketCategory || null,
+    skill: ticket.internalCategory?.name || ticket.tpSkill || null,
+    subskill: ticket.internalSubcategory?.name || ticket.tpSubskill || null,
+    canonicalSkill: canonicalSkillLabel(ticket),
     createdAt: ticket.createdAt,
     firstAssignedAt: ticket.firstAssignedAt,
     dueBy: ticket.dueBy,
@@ -358,6 +368,10 @@ async function fetchRangeTickets(workspaceId, rangeInfo, excludeNoise) {
       assignedTechId: true,
       isSelfPicked: true,
       ticketCategory: true,
+      tpSkill: true,
+      tpSubskill: true,
+      internalCategory: { select: { id: true, name: true } },
+      internalSubcategory: { select: { id: true, name: true, parentId: true } },
       resolutionTimeSeconds: true,
       csatScore: true,
       csatTotalScore: true,
@@ -388,6 +402,10 @@ async function fetchOpenTickets(workspaceId, excludeNoise) {
       dueBy: true,
       frDueBy: true,
       ticketCategory: true,
+      tpSkill: true,
+      tpSubskill: true,
+      internalCategory: { select: { id: true, name: true } },
+      internalSubcategory: { select: { id: true, name: true, parentId: true } },
       assignedTech: { select: { id: true, name: true, photoUrl: true } },
       requester: { select: { name: true, email: true } },
     },
@@ -493,6 +511,10 @@ export async function getDemandFlow(workspaceId, query = {}) {
           createdAt: true,
           firstAssignedAt: true,
           ticketCategory: true,
+          tpSkill: true,
+          tpSubskill: true,
+          internalCategory: { select: { id: true, name: true } },
+          internalSubcategory: { select: { id: true, name: true, parentId: true } },
           isNoise: true,
           requester: { select: { name: true, email: true } },
           assignedTech: { select: { name: true } },
@@ -517,7 +539,7 @@ export async function getDemandFlow(workspaceId, query = {}) {
       trendMap.set(key, row);
       increment(priorityMap, PRIORITY_LABELS[ticket.priority] || `P${ticket.priority || 'Unknown'}`);
       increment(sourceMap, SOURCE_LABELS[ticket.source] || `Source ${ticket.source || 'Unknown'}`);
-      increment(categoryMap, ticket.ticketCategory || 'Uncategorized');
+      increment(categoryMap, canonicalSkillLabel(ticket));
       increment(requesterMap, ticket.requester?.name || ticket.requester?.email || 'Unknown requester');
       const dow = formatInTimeZone(ticket.createdAt, rangeInfo.timezone, 'EEE');
       const hour = formatInTimeZone(ticket.createdAt, rangeInfo.timezone, 'HH');
@@ -689,7 +711,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
         values.push(ticket.csatScore);
         csatByTech.set(ticket.assignedTechId, values);
       }
-      const category = ticket.ticketCategory || 'Uncategorized';
+      const category = canonicalSkillLabel(ticket);
       row.topCategories[category] = (row.topCategories[category] || 0) + 1;
     }
     for (const ticket of openTickets) {

@@ -19,6 +19,8 @@ model Workspace {
   defaultTimezone         String    @default("America/Los_Angeles") @db.VarChar(50) @map("default_timezone")
   syncIntervalMinutes     Int       @default(5) @map("sync_interval_minutes")
   categoryCustomField     String   @default("security") @db.VarChar(100) @map("category_custom_field")
+  tpSkillCustomField      String   @default("tp_skill") @db.VarChar(100) @map("tp_skill_custom_field")
+  tpSubskillCustomField   String   @default("tp_subskill") @db.VarChar(100) @map("tp_subskill_custom_field")
   isActive                Boolean   @default(true) @map("is_active")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
@@ -58,6 +60,7 @@ model Workspace {
   ticketThreadEntries    TicketThreadEntry[]
   assignmentCorrections  AssignmentCorrection[]
   summitWorkshopSessions SummitWorkshopSession[]
+  skillHierarchyDrafts   SkillHierarchyDraft[]
 
   @@map("workspaces")
 }
@@ -181,6 +184,8 @@ model Ticket {
   category              String?   @db.VarChar(255)
   subCategory           String?   @db.VarChar(255) @map("sub_category")
   ticketCategory        String?   @db.VarChar(100) @map("ticket_category") // Custom field: security (e.g., BST, GIS, etc.)
+  tpSkill               String?   @db.VarChar(120) @map("tp_skill")
+  tpSubskill            String?   @db.VarChar(120) @map("tp_subskill")
   internalCategoryId    Int?      @map("internal_category_id")
   internalCategory      CompetencyCategory? @relation("TicketInternalCategory", fields: [internalCategoryId], references: [id], onDelete: SetNull)
   internalSubcategoryId Int?      @map("internal_subcategory_id")
@@ -248,6 +253,8 @@ model Ticket {
   @@index([isNoise])
   @@index([freshserviceUpdatedAt])
   @@index([activitiesSyncFreshserviceUpdatedAt])
+  @@index([tpSkill])
+  @@index([tpSubskill])
   @@index([internalCategoryId])
   @@index([internalSubcategoryId])
   @@index([taxonomyReviewNeeded])
@@ -809,6 +816,26 @@ model TechnicianCompetency {
   @@index([workspaceId])
   @@index([technicianId])
   @@index([competencyCategoryId])
+}
+
+model SkillHierarchyDraft {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  status      String    @default("draft") @db.VarChar(20)
+  source      String    @default("manual") @db.VarChar(40)
+  state       Json
+  mappings    Json?
+  warnings    Json?
+  createdBy   String?   @db.VarChar(255) @map("created_by")
+  updatedBy   String?   @db.VarChar(255) @map("updated_by")
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("skill_hierarchy_drafts")
+  @@index([workspaceId, status])
+  @@index([createdAt])
 }
 
 model CompetencyChangeRequest {
