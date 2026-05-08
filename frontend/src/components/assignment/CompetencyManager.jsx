@@ -834,13 +834,6 @@ function CategorySuggestionsTab({ onCountChange }) {
 function MigrationControlsHelpModal({ onClose }) {
   const controls = [
     {
-      icon: Upload,
-      title: 'Import Summit',
-      tone: 'text-blue-700 bg-blue-50 border-blue-100',
-      body: 'Pulls the latest summit workshop output into an editable draft. This is for rebuilding the category/subcategory hierarchy from the workshop data before publishing.',
-      safety: 'Does not change Freshservice and does not classify tickets.',
-    },
-    {
       icon: Save,
       title: 'Save Draft',
       tone: 'text-slate-700 bg-slate-50 border-slate-100',
@@ -939,7 +932,7 @@ function MigrationControlsHelpModal({ onClose }) {
             </div>
             <div className="grid grid-cols-4 gap-3 px-4 py-4 text-sm">
               <div className="font-semibold text-slate-800">1. Build hierarchy</div>
-              <div className="col-span-3 text-slate-600">Import Summit, edit categories/subcategories, save draft, resolve mappings, then publish.</div>
+              <div className="col-span-3 text-slate-600">Edit categories/subcategories, save draft, resolve mappings, then publish. Summit import was a one-time setup step and is no longer shown in the main toolbar.</div>
               <div className="font-semibold text-slate-800">2. Mirror options</div>
               <div className="col-span-3 text-slate-600">Run FS Drift to check Freshservice. Use Sync FS Objects only if drift shows missing lookup records.</div>
               <div className="font-semibold text-slate-800">3. Classify tickets</div>
@@ -1110,24 +1103,6 @@ function SkillsMigrationPanel({ onPublished }) {
     }
   };
 
-  const importSummit = async () => {
-    try {
-      setSaving(true);
-      setError(null);
-      const res = await assignmentAPI.importSummitSkills();
-      const imported = res?.data;
-      setDraft(imported);
-      setSkills(imported?.state?.skills || []);
-      setWarnings(imported?.warnings || []);
-      setMappings(imported?.mappings || []);
-      setMessage('Summit output imported as a draft');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const publish = async () => {
     if (!confirm('Publish this category hierarchy and remap existing competencies/ticket classifications? No Freshservice ticket backfill will run.')) return;
     try {
@@ -1264,40 +1239,50 @@ function SkillsMigrationPanel({ onPublished }) {
     <div className="border rounded-lg bg-white">
       {showControlsHelp && <MigrationControlsHelpModal onClose={() => setShowControlsHelp(false)} />}
       <div className="border-b px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-800">Categories / Subcategories Draft</h3>
-          <p className="text-xs text-slate-500">Ticket Pulse owns this hierarchy; Freshservice mirrors the selected category values.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setShowControlsHelp(true)} className="px-3 py-1.5 border border-blue-200 bg-blue-50 text-blue-800 rounded-lg text-xs font-medium hover:bg-blue-100 flex items-center gap-1">
-            <HelpCircle className="w-3.5 h-3.5" /> Help
+        <div className="flex items-start gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Categories / Subcategories Draft</h3>
+            <p className="text-xs text-slate-500">Ticket Pulse owns this hierarchy; Freshservice mirrors the selected category values.</p>
+          </div>
+          <button type="button" onClick={() => setShowControlsHelp(true)} className="rounded-full border border-blue-200 bg-blue-50 p-1.5 text-blue-700 hover:bg-blue-100" aria-label="Category migration help" title="Category migration help">
+            <HelpCircle className="h-4 w-4" />
           </button>
-          <button onClick={importSummit} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Upload className="w-3.5 h-3.5" /> Import Summit</button>
-          <button onClick={saveDraft} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Save className="w-3.5 h-3.5" /> Save Draft</button>
-          <button onClick={publish} disabled={saving || !draft} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Publish</button>
-          <button onClick={syncFreshserviceObjects} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Upload className="w-3.5 h-3.5" /> Sync FS Objects</button>
-          <button onClick={loadDrift} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> FS Drift</button>
-          <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600">
-            <span className="font-semibold">Batch</span>
-            <select value={reclassificationLimit} onChange={(event) => setReclassificationLimit(Number(event.target.value))} disabled={saving} className="bg-transparent text-xs outline-none">
-              {RECLASSIFICATION_BATCH_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
-            </select>
-          </label>
-          <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600" title="Number of ticket classifications sent to the LLM at the same time.">
-            <span className="font-semibold">Parallel</span>
-            <select value={reclassificationConcurrency} onChange={(event) => setReclassificationConcurrency(Number(event.target.value))} disabled={saving} className="bg-transparent text-xs outline-none">
-              {RECLASSIFICATION_CONCURRENCY_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
-            </select>
-          </label>
-          <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600" title="Model used for dry-run/apply reclassification.">
-            <span className="font-semibold">Model</span>
-            <select value={reclassificationModel} onChange={(event) => setReclassificationModel(event.target.value)} disabled={saving} className="bg-transparent text-xs outline-none">
-              {RECLASSIFICATION_MODELS.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
-            </select>
-          </label>
-          <button onClick={() => { setReclassificationCursor(null); reclassifyTickets({ apply: false }); }} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Brain className="w-3.5 h-3.5" /> Dry Run Batch</button>
-          <button onClick={() => reclassifyTickets({ apply: false, nextBatch: true })} disabled={saving || !reclassificationCursor} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><ChevronRight className="w-3.5 h-3.5" /> Next Batch</button>
-          <button onClick={() => reclassifyTickets({ apply: true })} disabled={saving || !pendingClassifiableCount} className="px-3 py-1.5 border border-amber-200 bg-amber-50 text-amber-800 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1"><CheckSquare className="w-3.5 h-3.5" /> Apply Preview</button>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Draft</span>
+            <button onClick={saveDraft} disabled={saving} className="px-2.5 py-1.5 border bg-white rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Save className="w-3.5 h-3.5" /> Save</button>
+            <button onClick={publish} disabled={saving || !draft} className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Publish</button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Freshservice</span>
+            <button onClick={loadDrift} disabled={saving} className="px-2.5 py-1.5 border bg-white rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> Drift</button>
+            <button onClick={syncFreshserviceObjects} disabled={saving} className="px-2.5 py-1.5 border bg-white rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Upload className="w-3.5 h-3.5" /> Sync</button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-2 py-1.5">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-purple-700">Reclassify</span>
+            <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600">
+              <span className="font-semibold">Batch</span>
+              <select value={reclassificationLimit} onChange={(event) => setReclassificationLimit(Number(event.target.value))} disabled={saving} className="bg-transparent text-xs outline-none">
+                {RECLASSIFICATION_BATCH_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600" title="Number of ticket classifications sent to the LLM at the same time.">
+              <span className="font-semibold">Parallel</span>
+              <select value={reclassificationConcurrency} onChange={(event) => setReclassificationConcurrency(Number(event.target.value))} disabled={saving} className="bg-transparent text-xs outline-none">
+                {RECLASSIFICATION_CONCURRENCY_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs text-slate-600" title="Model used for dry-run/apply reclassification.">
+              <span className="font-semibold">Model</span>
+              <select value={reclassificationModel} onChange={(event) => setReclassificationModel(event.target.value)} disabled={saving} className="bg-transparent text-xs outline-none">
+                {RECLASSIFICATION_MODELS.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
+              </select>
+            </label>
+            <button onClick={() => { setReclassificationCursor(null); reclassifyTickets({ apply: false }); }} disabled={saving} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><Brain className="w-3.5 h-3.5" /> Dry Run Batch</button>
+            <button onClick={() => reclassifyTickets({ apply: false, nextBatch: true })} disabled={saving || !reclassificationCursor} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"><ChevronRight className="w-3.5 h-3.5" /> Next Batch</button>
+            <button onClick={() => reclassifyTickets({ apply: true })} disabled={saving || !pendingClassifiableCount} className="px-3 py-1.5 border border-amber-200 bg-amber-50 text-amber-800 rounded-lg text-xs font-medium hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1"><CheckSquare className="w-3.5 h-3.5" /> Apply Preview</button>
+          </div>
         </div>
       </div>
 
