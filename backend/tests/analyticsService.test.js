@@ -84,8 +84,10 @@ describe('analyticsService pure helpers', () => {
     expect(categoryFilterForQuery(1, { categoryIds: '10,11', subcategoryIds: '22' })).toMatchObject({
       mode: 'canonical',
       where: {
-        internalCategoryId: { in: [10, 11] },
-        internalSubcategoryId: { in: [22] },
+        OR: [
+          { internalCategoryId: { in: [10, 11] } },
+          { internalSubcategoryId: { in: [22] } },
+        ],
       },
     });
 

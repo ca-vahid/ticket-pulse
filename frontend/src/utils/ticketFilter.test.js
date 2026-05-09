@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { filterTickets, getTicketCategoryLabel } from './ticketFilter';
 
 describe('ticketFilter category modes', () => {
-  test('canonical filters match category and subcategory IDs', () => {
+  test('canonical filters match categories as branches and subcategories as exact leaves', () => {
     const tickets = [
       { id: 1, categoryMode: 'canonical', categoryId: 10, subcategoryId: 101, categoryLabel: 'Security / Advisory' },
       { id: 2, categoryMode: 'canonical', categoryId: 10, subcategoryId: 102, categoryLabel: 'Security / Audit' },
@@ -10,7 +10,7 @@ describe('ticketFilter category modes', () => {
     ];
 
     expect(filterTickets(tickets, '', { mode: 'canonical', categoryIds: [10], subcategoryIds: [] }).map((ticket) => ticket.id)).toEqual([1, 2]);
-    expect(filterTickets(tickets, '', { mode: 'canonical', categoryIds: [10], subcategoryIds: [102] }).map((ticket) => ticket.id)).toEqual([2]);
+    expect(filterTickets(tickets, '', { mode: 'canonical', categoryIds: [10], subcategoryIds: [201] }).map((ticket) => ticket.id)).toEqual([1, 2, 3]);
   });
 
   test('canonical subcategory-only filters match exact subcategory IDs', () => {

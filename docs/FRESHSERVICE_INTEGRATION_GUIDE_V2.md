@@ -57,6 +57,8 @@ The IT workspace no longer treats the old FreshService `custom_fields.security` 
 
 These are FreshService `custom_lookup` fields backed by the `Ticket Pulse Skills` and `Ticket Pulse Subskills` custom objects. `Ticket Pulse Subskills` also stores `parent_skill`, a lookup back to the parent `Ticket Pulse Skills` record. When writing values to FreshService, send the lookup record display IDs, not category/subcategory names. See [Section 14](#14-custom-fields---critical) and the standalone change notice at `docs/FRESHSERVICE_CATEGORY_SUBCATEGORY_CHANGE.md`.
 
+Ticket Pulse dashboard and Analytics filters are also workspace-aware: IT uses the new category/subcategory hierarchy, while other workspaces remain on legacy category filtering until their own migration. When multiple new filters are selected, top-level categories match their full branch and subcategories match exact leaves; the final result is the union of those selections.
+
 ### Simplest Possible Request (curl)
 
 ```bash

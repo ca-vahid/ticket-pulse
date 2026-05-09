@@ -224,12 +224,22 @@ export function categoryFilterForQuery(workspaceId, query = {}) {
   if (mode === 'canonical') {
     const categoryIds = parseCsvInts(query.categoryIds);
     const subcategoryIds = parseCsvInts(query.subcategoryIds);
+    let where = {};
+    if (categoryIds.length > 0 && subcategoryIds.length > 0) {
+      where = {
+        OR: [
+          { internalCategoryId: { in: categoryIds } },
+          { internalSubcategoryId: { in: subcategoryIds } },
+        ],
+      };
+    } else if (categoryIds.length > 0) {
+      where = { internalCategoryId: { in: categoryIds } };
+    } else if (subcategoryIds.length > 0) {
+      where = { internalSubcategoryId: { in: subcategoryIds } };
+    }
     return {
       mode,
-      where: {
-        ...(categoryIds.length > 0 ? { internalCategoryId: { in: categoryIds } } : {}),
-        ...(subcategoryIds.length > 0 ? { internalSubcategoryId: { in: subcategoryIds } } : {}),
-      },
+      where,
       selected: { categoryIds, subcategoryIds, legacyCategories: [] },
     };
   }
@@ -242,20 +252,33 @@ export function categoryFilterForQuery(workspaceId, query = {}) {
   };
 }
 
-function ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, dateField = 'createdAt', categoryWhere = {}) {
+function hasWhereClause(where = {}) {
+  return Object.keys(where || {}).length > 0;
+}
+
+function withCategoryWhere(baseWhere, categoryWhere = {}) {
+  if (!hasWhereClause(categoryWhere)) return baseWhere;
   return {
-    workspaceId,
-    ...(excludeNoise ? { isNoise: false } : {}),
-    ...categoryWhere,
-    [dateField]: { gte: rangeInfo.start, lte: rangeInfo.end },
+    ...baseWhere,
+    AND: [
+      ...(Array.isArray(baseWhere.AND) ? baseWhere.AND : baseWhere.AND ? [baseWhere.AND] : []),
+      categoryWhere,
+    ],
   };
 }
 
-function assignmentRangeWhere(workspaceId, rangeInfo, excludeNoise = false, categoryWhere = {}) {
-  return {
+function ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, dateField = 'createdAt', categoryWhere = {}) {
+  return withCategoryWhere({
     workspaceId,
     ...(excludeNoise ? { isNoise: false } : {}),
-    ...categoryWhere,
+    [dateField]: { gte: rangeInfo.start, lte: rangeInfo.end },
+  }, categoryWhere);
+}
+
+function assignmentRangeWhere(workspaceId, rangeInfo, excludeNoise = false, categoryWhere = {}) {
+  return withCategoryWhere({
+    workspaceId,
+    ...(excludeNoise ? { isNoise: false } : {}),
     OR: [
       { firstAssignedAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
       {
@@ -263,7 +286,7 @@ function assignmentRangeWhere(workspaceId, rangeInfo, excludeNoise = false, cate
         createdAt: { gte: rangeInfo.start, lte: rangeInfo.end },
       },
     ],
-  };
+  }, categoryWhere);
 }
 
 function dbDateRange(rangeInfo) {
@@ -500,12 +523,11 @@ async function fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryW
 
 async function fetchOpenTickets(workspaceId, excludeNoise, categoryWhere = {}) {
   return prisma.ticket.findMany({
-    where: {
+    where: withCategoryWhere({
       workspaceId,
       ...(excludeNoise ? { isNoise: false } : {}),
-      ...categoryWhere,
       status: { in: OPEN_STATUSES },
-    },
+    }, categoryWhere),
     select: {
       id: true,
       freshserviceTicketId: true,
@@ -543,13 +565,12 @@ async function periodCounts(workspaceId, rangeInfo, excludeNoise, period = 'curr
       select: { status: true, resolutionTimeSeconds: true },
     }),
     prisma.ticket.findMany({
-      where: {
+      where: withCategoryWhere({
         workspaceId,
         ...(excludeNoise ? { isNoise: false } : {}),
-        ...categoryWhere,
         csatScore: { not: null },
         csatSubmittedAt: { gte: target.start, lte: target.end },
-      },
+      }, categoryWhere),
       select: { csatScore: true, csatTotalScore: true },
     }),
   ]);
@@ -728,7 +749,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
       prisma.ticketAssignmentEpisode.findMany({
         where: {
           workspaceId,
-          ...(Object.keys(categoryFilter.where).length > 0 ? { ticket: { is: categoryFilter.where } } : {}),
+          ...(hasWhereClause(categoryFilter.where) ? { ticket: { is: categoryFilter.where } } : {}),
           OR: [
             { startedAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
             { endedAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
@@ -990,13 +1011,12 @@ export async function getQuality(workspaceId, query = {}) {
     const [tickets, csatTickets, openTickets] = await Promise.all([
       fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
       prisma.ticket.findMany({
-        where: {
+        where: withCategoryWhere({
           workspaceId,
           ...(excludeNoise ? { isNoise: false } : {}),
-          ...categoryFilter.where,
           csatScore: { not: null },
           csatSubmittedAt: { gte: rangeInfo.start, lte: rangeInfo.end },
-        },
+        }, categoryFilter.where),
         orderBy: { csatSubmittedAt: 'desc' },
         select: {
           id: true,
@@ -1087,9 +1107,18 @@ export async function getQuality(workspaceId, query = {}) {
 export async function getAutomationOps(workspaceId, query = {}) {
   return withCache(workspaceId, 'automation-ops', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
+    const categoryFilter = categoryFilterForQuery(workspaceId, query);
+    const pipelineTicketWhere = hasWhereClause(categoryFilter.where)
+      ? { ticket: { is: categoryFilter.where } }
+      : {};
+    const pipelineRunWhere = {
+      workspaceId,
+      createdAt: { gte: rangeInfo.start, lte: rangeInfo.end },
+      ...pipelineTicketWhere,
+    };
     const [runs, steps, syncLogs, backfillRuns, dailyReviewRuns, recommendationCounts] = await Promise.all([
       prisma.assignmentPipelineRun.findMany({
-        where: { workspaceId, createdAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
+        where: pipelineRunWhere,
         select: {
           id: true,
           status: true,
@@ -1104,7 +1133,7 @@ export async function getAutomationOps(workspaceId, query = {}) {
         },
       }),
       prisma.assignmentPipelineStep.findMany({
-        where: { pipelineRun: { workspaceId, createdAt: { gte: rangeInfo.start, lte: rangeInfo.end } } },
+        where: { pipelineRun: pipelineRunWhere },
         select: { stepName: true, status: true, durationMs: true, errorMessage: true },
       }),
       prisma.syncLog.findMany({
@@ -1178,7 +1207,7 @@ export async function getAutomationOps(workspaceId, query = {}) {
     const failedSyncs = syncLogs.filter((l) => l.status === 'failed').length;
 
     return {
-      metadata: metadata(rangeInfo),
+      metadata: metadata(rangeInfo, { categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       pipeline: {
         totalRuns: runs.length,
         funnel,
@@ -1240,6 +1269,7 @@ export async function getInsights(workspaceId, query = {}) {
   return withCache(workspaceId, 'insights', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
     const excludeNoise = query.excludeNoise === 'true';
+    const categoryFilter = categoryFilterForQuery(workspaceId, query);
     const [overview, demand, team, quality, ops] = await Promise.all([
       getOverview(workspaceId, query),
       getDemandFlow(workspaceId, query),
@@ -1350,7 +1380,7 @@ export async function getInsights(workspaceId, query = {}) {
     }
 
     return {
-      metadata: metadata(rangeInfo, { excludeNoise }),
+      metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       insights,
       emptyState: insights.length === 0
         ? 'No deterministic insight rules crossed their thresholds for this range.'

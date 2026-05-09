@@ -138,8 +138,14 @@ export const ticketMatchesCategoryFilters = (ticket, filterState = {}) => {
 
   if (normalized.mode === 'canonical') {
     const parts = getTicketCategoryParts(ticket, 'canonical');
-    if (normalized.categoryIds.length > 0 && !normalized.categoryIds.includes(Number(parts.categoryId))) return false;
-    if (normalized.subcategoryIds.length > 0 && !normalized.subcategoryIds.includes(Number(parts.subcategoryId))) return false;
+    const hasCategoryIds = normalized.categoryIds.length > 0;
+    const hasSubcategoryIds = normalized.subcategoryIds.length > 0;
+    const matchesCategory = hasCategoryIds && normalized.categoryIds.includes(Number(parts.categoryId));
+    const matchesSubcategory = hasSubcategoryIds && normalized.subcategoryIds.includes(Number(parts.subcategoryId));
+
+    if (hasCategoryIds && hasSubcategoryIds) return matchesCategory || matchesSubcategory;
+    if (hasCategoryIds) return matchesCategory;
+    if (hasSubcategoryIds) return matchesSubcategory;
     return true;
   }
 

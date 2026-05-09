@@ -176,6 +176,18 @@ Ticket Pulse now treats `parent_skill` as part of FreshService drift/sync for th
 
 Current live validation after backfill showed `101` subskill records, `0` missing parents, `0` wrong parents, and `0` unresolved parent mappings.
 
+## Dashboard and Analytics Filter Behavior
+
+Ticket Pulse dashboard and Analytics filters are workspace-aware:
+
+- IT workspace uses the new Ticket Pulse category/subcategory hierarchy.
+- Other workspaces continue using the legacy FreshService category behavior until they are explicitly migrated.
+- Selecting a top-level Ticket Pulse category includes all tickets under that category.
+- Selecting a specific subcategory includes only tickets with that exact subcategory.
+- Selecting categories and subcategories together is treated as a union: tickets can match any selected category branch or any selected subcategory leaf.
+
+Integrations that reproduce Ticket Pulse reporting should use the same rule. Do not apply category and subcategory filters as a strict intersection unless the user explicitly chose one category and narrowed it to one of that category's own subcategories.
+
 ## Compatibility Notes
 
 - This change is currently scoped to the IT workspace category/subcategory migration.
