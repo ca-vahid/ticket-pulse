@@ -1,4 +1,4 @@
-import { normalizeSkillState, buildLegacyMappings } from '../src/services/skillHierarchyService.js';
+import { normalizeSkillState, buildLegacyMappings, buildSubskillParentDrift } from '../src/services/skillHierarchyService.js';
 import { transformTicket } from '../src/integrations/freshserviceTransformer.js';
 
 describe('skill hierarchy migration helpers', () => {
@@ -75,5 +75,50 @@ describe('skill hierarchy migration helpers', () => {
 
     expect(ticket.tpSkill).toBe('Security');
     expect(ticket.tpSubskill).toBe('Threat Intelligence / Security Advisory');
+  });
+
+  test('Freshservice drift detects missing and wrong subskill parent lookup records', () => {
+    const drift = buildSubskillParentDrift({
+      skills: [
+        {
+          name: 'Identity',
+          subskills: [
+            { name: 'MFA' },
+            { name: 'Mailbox' },
+          ],
+        },
+        {
+          name: 'Security',
+          subskills: [
+            { name: 'Threat Advisory' },
+          ],
+        },
+      ],
+    }, [
+      { data: { name: 'Identity', bo_display_id: 10 } },
+      { data: { name: 'Security', bo_display_id: 20 } },
+    ], [
+      { data: { name: 'MFA', bo_display_id: 101, parent_skill: { id: {} } } },
+      { data: { name: 'Mailbox', bo_display_id: 102, parent_skill: { id: 20, value: 'Security' } } },
+      { data: { name: 'Threat Advisory', bo_display_id: 103, parent_skill: { id: 20, value: 'Security' } } },
+    ]);
+
+    expect(drift.missingParent).toEqual([
+      expect.objectContaining({
+        subskill: 'MFA',
+        expectedParent: 'Identity',
+        expectedParentDisplayId: 10,
+        subskillDisplayId: 101,
+      }),
+    ]);
+    expect(drift.wrongParent).toEqual([
+      expect.objectContaining({
+        subskill: 'Mailbox',
+        expectedParent: 'Identity',
+        actualParent: 'Security',
+        actualParentDisplayId: 20,
+      }),
+    ]);
+    expect(drift.unresolved).toEqual([]);
   });
 });

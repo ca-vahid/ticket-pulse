@@ -775,6 +775,21 @@ class FreshServiceClient {
     }
   }
 
+  async updateCustomObjectRecord(objectId, recordId, data = {}) {
+    try {
+      const response = await this._put(`/objects/${objectId}/records/${recordId}`, { data });
+      return response.data?.custom_object || response.data?.record || response.data;
+    } catch (error) {
+      const detail = getFreshServiceDetail(error);
+      const status = getFreshServiceStatus(error);
+      logger.error(`Error updating FreshService custom object record ${recordId} for ${objectId}:`, { status, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = status;
+      throw wrapped;
+    }
+  }
+
   async _buildClosureRetryPayload(ticketId, status, validationDetail = null) {
     const ticket = await this.getTicket(ticketId).catch((error) => {
       logger.warn(`Could not fetch ticket ${ticketId} before closure retry`, { error: error.message });

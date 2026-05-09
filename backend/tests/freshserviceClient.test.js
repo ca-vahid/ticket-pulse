@@ -64,3 +64,32 @@ describe('FreshServiceClient.closeTicket', () => {
     });
   });
 });
+
+describe('FreshServiceClient custom object records', () => {
+  test('updates custom object records with data payload', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._put = jest.fn().mockResolvedValue({
+      data: {
+        record: {
+          data: {
+            name: 'MFA',
+            parent_skill: { id: 10, value: 'Identity' },
+          },
+        },
+      },
+    });
+
+    const result = await client.updateCustomObjectRecord(1000000539, 101, {
+      name: 'MFA',
+      parent_skill: 10,
+    });
+
+    expect(client._put).toHaveBeenCalledWith('/objects/1000000539/records/101', {
+      data: {
+        name: 'MFA',
+        parent_skill: 10,
+      },
+    });
+    expect(result.data.parent_skill.value).toBe('Identity');
+  });
+});

@@ -1,7 +1,7 @@
 # FreshService Integration Guide
 
 **For: Development Teams Integrating with FreshService**
-**Last Updated**: 2026-02-16
+**Last Updated**: 2026-05-09
 **Status**: Production-Validated (based on Ticket Pulse production system)
 
 This document is a comprehensive blueprint for connecting to FreshService, querying tickets, creating/updating/deleting tickets, listing agents, syncing data, and understanding the data model. All patterns described here are battle-tested in production across multiple integration teams.
@@ -47,6 +47,15 @@ Auth:        Basic Auth (API key as username, "X" as password)
 Base URL:    https://efusion.freshservice.com/api/v2
 Workspace:   See Section 3 for workspace ID details
 ```
+
+### Current IT Category/Subcategory Change (May 2026)
+
+The IT workspace no longer treats the old FreshService `custom_fields.security` dropdown as the source of truth for operational ticket classification. Ticket Pulse now owns an internal category/subcategory hierarchy connected to technician skills, and mirrors that hierarchy into FreshService through two lookup custom fields:
+
+- `custom_fields.lf_ticket_pulse_category`
+- `custom_fields.lf_ticket_pulse_subcategory`
+
+These are FreshService `custom_lookup` fields backed by the `Ticket Pulse Skills` and `Ticket Pulse Subskills` custom objects. `Ticket Pulse Subskills` also stores `parent_skill`, a lookup back to the parent `Ticket Pulse Skills` record. When writing values to FreshService, send the lookup record display IDs, not category/subcategory names. See [Section 14](#14-custom-fields---critical) and the standalone change notice at `docs/FRESHSERVICE_CATEGORY_SUBCATEGORY_CHANGE.md`.
 
 ### Simplest Possible Request (curl)
 
@@ -346,7 +355,10 @@ const response = await client.post('/tickets', {
   priority: 1,  // Low
   status: 2,    // Open
   custom_fields: {
-    security: 'BST',  // This is the "ticket category" field - see Section 14
+    // Current IT category/subcategory fields. Resolve names to lookup
+    // record display IDs before sending; see Section 14.
+    lf_ticket_pulse_category: 7,
+    lf_ticket_pulse_subcategory: 66,
   },
 });
 ```
@@ -537,7 +549,8 @@ await client.put(`/tickets/${ticketId}`, {
 ```javascript
 await client.put(`/tickets/${ticketId}`, {
   custom_fields: {
-    security: 'GIS',  // Change our ticket category
+    lf_ticket_pulse_category: 7,
+    lf_ticket_pulse_subcategory: 66,
   },
 });
 ```
@@ -612,7 +625,8 @@ async function syncTicketToFreshService(localRecord) {
         status: mapStatus(localRecord.status),
         priority: mapPriority(localRecord.priority),
         custom_fields: {
-          security: localRecord.category,
+          lf_ticket_pulse_category: localRecord.categoryLookupDisplayId,
+          lf_ticket_pulse_subcategory: localRecord.subcategoryLookupDisplayId,
         },
       });
       return { action: 'updated', ticket: response.data.ticket };
@@ -1155,7 +1169,14 @@ const csatResponse = response.data.csat_response;
 
 ### The "Category" Trap
 
-**This is one of the most important things to know.** What we display as "ticket category" in our dashboard (values like **BST**, **GIS**, **Network**, etc.) is **NOT** the built-in FreshService `category` field. It is a **custom field** called `security`.
+**This is one of the most important things to know.** Ticket Pulse category/subcategory data is **NOT** the built-in FreshService `category` or `sub_category` field.
+
+There are now two category systems integrations may see:
+
+1. **Current IT system**: Ticket Pulse-owned categories/subcategories connected to skills. These are mirrored to FreshService lookup fields `lf_ticket_pulse_category` and `lf_ticket_pulse_subcategory`.
+2. **Legacy dropdown system**: The old FreshService custom dropdown `custom_fields.security` with values like `BST`, `GIS`, and `Network`. Treat this as legacy/backward-compatibility data for IT integrations unless your team has been explicitly told to keep using it.
+
+If you are building or updating an IT integration after May 2026, use the Ticket Pulse lookup fields below.
 
 ### Field Mapping
 
@@ -1163,7 +1184,50 @@ const csatResponse = response.data.csat_response;
 |---|---|---|---|
 | Category (built-in) | `ticket.category` | - | `ticket.category` |
 | Sub-category (built-in) | `ticket.sub_category` | - | `ticket.sub_category` |
-| **Ticket Category (ours)** | - | **`security`** | **`ticket.custom_fields.security`** |
+| **Ticket Pulse Category (current IT)** | - | **`lf_ticket_pulse_category`** | **`ticket.custom_fields.lf_ticket_pulse_category`** |
+| **Ticket Pulse Subcategory (current IT)** | - | **`lf_ticket_pulse_subcategory`** | **`ticket.custom_fields.lf_ticket_pulse_subcategory`** |
+| Legacy ticket category dropdown | - | `security` | `ticket.custom_fields.security` |
+
+### Current IT Category/Subcategory Model
+
+Ticket Pulse now owns the operational category hierarchy because categories are used by assignment review, competency/skill coverage, analytics, and technician skill matching. FreshService stores a mirrored copy so other systems can still read or write classification through the FreshService API.
+
+| Concept | FreshService location | Backing FreshService object | Value to send when writing |
+|---|---|---|---|
+| Ticket Pulse category | `custom_fields.lf_ticket_pulse_category` | `Ticket Pulse Skills` | Lookup record display ID |
+| Ticket Pulse subcategory | `custom_fields.lf_ticket_pulse_subcategory` | `Ticket Pulse Subskills` | Lookup record display ID |
+| Subcategory parent | `Ticket Pulse Subskills.data.parent_skill` | Lookup to `Ticket Pulse Skills` | Parent skill lookup record display ID |
+
+Known production field metadata at the time this guide was updated:
+
+| Field | API name | Type | Field ID |
+|---|---|---|---|
+| Ticket Pulse Category | `lf_ticket_pulse_category` | `custom_lookup` | `1000170004` |
+| Ticket Pulse Subcategory | `lf_ticket_pulse_subcategory` | `custom_lookup` | `1000170005` |
+
+> Field IDs and custom object IDs are FreshService-instance metadata. Verify them in your environment instead of hardcoding them as universal constants.
+
+### Custom Object Record Hierarchy
+
+The hierarchy is stored on FreshService custom object records:
+
+| Custom object | Required fields | Notes |
+|---|---|---|
+| `Ticket Pulse Skills` | `name` | `name` is the identity field. |
+| `Ticket Pulse Subskills` | `name`, `parent_skill` | `parent_skill` is a lookup to the parent `Ticket Pulse Skills` record and is required for constrained category/subcategory picker behavior. |
+
+When creating or updating a `Ticket Pulse Subskills` object record, include the parent lookup display ID:
+
+```javascript
+await client.put(`/objects/${subskillObjectId}/records/${subskillDisplayId}`, {
+  data: {
+    name: 'Password & MFA',
+    parent_skill: 1, // display ID for the parent Ticket Pulse Skills record
+  },
+});
+```
+
+Ticket Pulse's FreshService object sync now creates missing subskill records with `parent_skill` and fixes existing subskill records when the parent lookup is missing or points to the wrong skill. Drift checks validate all three dimensions: missing skills, missing subskills, and missing/wrong subskill parent lookups.
 
 ### How to Access Custom Fields
 
@@ -1176,13 +1240,21 @@ const ticket = response.data.ticket;
 const builtInCategory = ticket.category;        // e.g., "Hardware"
 const builtInSubCategory = ticket.sub_category; // e.g., "Laptop"
 
-// OUR ticket category (custom field named "security")
-const ticketCategory = ticket.custom_fields?.security;  // e.g., "BST", "GIS", "Network"
+// Current IT classification fields.
+// Depending on the endpoint/serializer, FreshService may return a lookup
+// display ID, object-like value, or already-resolved display value.
+const ticketPulseCategory = ticket.custom_fields?.lf_ticket_pulse_category;
+const ticketPulseSubcategory = ticket.custom_fields?.lf_ticket_pulse_subcategory;
+
+// Legacy dropdown. Do not use as the source of truth for new IT integrations.
+const legacyCategory = ticket.custom_fields?.security;  // e.g., "BST", "GIS", "Network"
 ```
 
 ### Why "security"?
 
-The custom field was named `security` in FreshService's admin configuration. Despite the misleading name, it contains the IT operational category (BST, GIS, Network, etc.), not security-related data. This is just how the field was originally set up in FreshService.
+The old custom field was named `security` in FreshService's admin configuration. Despite the misleading name, it contained the old IT operational category dropdown (BST, GIS, Network, etc.), not security-related data.
+
+That field is no longer the current IT category/subcategory source of truth. Keep reading it only if you must support older tickets or older integrations during the transition.
 
 ### Discovering Custom Fields via the Form Fields API
 
@@ -1193,14 +1265,25 @@ curl -u "YOUR_API_KEY:X" \
   "https://efusion.freshservice.com/api/v2/ticket_form_fields"
 ```
 
-This returns all fields on the ticket form, including both built-in and custom fields. To find the "Category" custom field programmatically:
+This returns all fields on the ticket form, including both built-in and custom fields. To find the current Ticket Pulse lookup fields programmatically:
 
 ```javascript
 const response = await client.get('/ticket_form_fields');
 const fields = response.data.ticket_fields || [];
 
-// Find the Category custom field
-// Known field ID in our instance: 1000158814
+const ticketPulseCategoryField = fields.find(
+  f => f.name === 'lf_ticket_pulse_category' || f.label === 'Ticket Pulse Category'
+);
+
+const ticketPulseSubcategoryField = fields.find(
+  f => f.name === 'lf_ticket_pulse_subcategory' || f.label === 'Ticket Pulse Subcategory'
+);
+```
+
+For legacy integrations only, the previous dropdown can still be discovered this way:
+
+```javascript
+// Legacy dropdown field. Do not use for new IT classification work.
 const categoryField = fields.find(
   f => f.id === 1000158814 || f.label === 'Category'
 );
@@ -1218,24 +1301,42 @@ if (categoryField) {
 }
 ```
 
-> **Important**: The category field ID (`1000158814`) is specific to our FreshService instance. If the FreshService form configuration is modified, this ID may change. Always verify the field ID by label as a fallback.
+> **Important**: The legacy category field ID (`1000158814`) and current Ticket Pulse lookup field IDs are specific to our FreshService instance. If the FreshService form configuration is modified, IDs may change. Always verify by API name or label.
 
-### Category Values Sent to API
+### Values Sent to API
 
-When setting the category on a ticket, send the **display value** (e.g., `"BST"`, `"GIS"`, `"Network"`) as `custom_fields.security`, **not** the choice ID:
+For the current Ticket Pulse lookup fields, send the FreshService lookup record display ID. Do **not** send the category/subcategory name directly; FreshService can return a successful response while failing to visibly persist a lookup value when the value shape is wrong.
 
 ```javascript
-// Correct: send the value string
+// Correct for current IT Ticket Pulse lookup fields:
+custom_fields: {
+  lf_ticket_pulse_category: 7,     // e.g., lookup record display ID for "Security"
+  lf_ticket_pulse_subcategory: 66, // e.g., lookup record display ID for "Threat Intelligence / Security Advisory"
+}
+
+// Incorrect for current IT lookup fields:
+custom_fields: {
+  lf_ticket_pulse_category: 'Security',
+  lf_ticket_pulse_subcategory: 'Threat Intelligence / Security Advisory',
+}
+```
+
+For the legacy `security` dropdown only, the old rule was the opposite: send the dropdown value string:
+
+```javascript
+// Legacy only: send the dropdown value string
 custom_fields: { security: 'BST' }
 
-// Incorrect: don't send the choice ID
+// Legacy only: don't send the old dropdown choice ID
 custom_fields: { security: 12345 }  // This will fail
 ```
 
 ### Setting Custom Fields When Creating/Updating Tickets
 
 ```javascript
-// Creating a ticket with custom fields
+// Creating a ticket with current Ticket Pulse category/subcategory lookup fields.
+// Resolve "Security" and "Threat Intelligence / Security Advisory" to their
+// FreshService custom object record display IDs before sending.
 await client.post('/tickets', {
   subject: 'Network outage in Building A',
   description: '<p>The network is down in Building A, 3rd floor.</p>',
@@ -1243,18 +1344,34 @@ await client.post('/tickets', {
   priority: 3,  // High
   status: 2,    // Open
   custom_fields: {
-    security: 'Network',  // Our "ticket category"
-    // ... other custom fields as needed
+    lf_ticket_pulse_category: 7,
+    lf_ticket_pulse_subcategory: 66,
   },
 });
 
 // Updating custom fields on an existing ticket
 await client.put(`/tickets/${ticketId}`, {
   custom_fields: {
-    security: 'BST',
+    lf_ticket_pulse_category: 7,
+    lf_ticket_pulse_subcategory: 66,
   },
 });
 ```
+
+### Migration Guidance for Other Integrations
+
+If your application previously read or wrote the old `custom_fields.security` dropdown for IT classification, update it to use `custom_fields.lf_ticket_pulse_category` and `custom_fields.lf_ticket_pulse_subcategory`.
+
+Recommended migration checklist:
+
+1. Stop treating `ticket.category` / `ticket.sub_category` / `custom_fields.security` as the current IT operational category.
+2. Read the new lookup fields from `ticket.custom_fields`.
+3. Resolve lookup display IDs back to names using the `Ticket Pulse Skills` and `Ticket Pulse Subskills` custom object records when your UI or reports need readable labels.
+4. When writing classification back to FreshService, resolve names to lookup record display IDs first.
+5. When creating/updating `Ticket Pulse Subskills` records, include `parent_skill` so subcategory pickers can be constrained by selected category.
+6. Keep legacy `security` reads only as a transition fallback for older tickets or older workspaces.
+
+For a standalone version of this change notice, share `docs/FRESHSERVICE_CATEGORY_SUBCATEGORY_CHANGE.md` with teams that do not need the full integration guide.
 
 ---
 
@@ -1286,7 +1403,9 @@ This table maps every FreshService API field to our internal database schema.
 | `source` | `source` | Int | Source code (see Section 17) |
 | `category` | `category` | VarChar(255) | FreshService built-in category |
 | `sub_category` | `sub_category` | VarChar(255) | FreshService built-in sub-category |
-| **`custom_fields.security`** | **`ticket_category`** | **VarChar(100)** | **Custom field - our operational category (BST, GIS, etc.)** |
+| `custom_fields.lf_ticket_pulse_category` | `tp_skill` | VarChar(120) | Current IT Ticket Pulse category lookup; sync resolves display IDs to names |
+| `custom_fields.lf_ticket_pulse_subcategory` | `tp_subskill` | VarChar(120) | Current IT Ticket Pulse subcategory lookup; sync resolves display IDs to names |
+| `custom_fields.security` | `ticket_category` | VarChar(100) | Legacy category dropdown (BST, GIS, etc.); not current IT source of truth |
 | `department.name` | `department` | VarChar(255) | Requester's department |
 | `is_escalated` | `is_escalated` | Boolean | Whether ticket is escalated |
 | `stats.resolution_time_in_secs` | `resolution_time_seconds` | Int | Time to resolution (requires `include=stats`) |
@@ -1979,7 +2098,8 @@ new_ticket = client.create_ticket({
     'priority': 2,
     'status': 2,
     'custom_fields': {
-        'security': 'BST',  # Our "ticket category"
+        'lf_ticket_pulse_category': 7,
+        'lf_ticket_pulse_subcategory': 66,
     },
 })
 ```
@@ -2055,6 +2175,8 @@ This is a representative FreshService ticket object as returned by the API (with
   "closed_at": null,
 
   "custom_fields": {
+    "lf_ticket_pulse_category": 7,
+    "lf_ticket_pulse_subcategory": 66,
     "security": "Network",
     "other_custom_field": "some_value"
   },
@@ -2098,8 +2220,11 @@ IT Workspace ID:   Configured via FRESHSERVICE_WORKSPACE_ID env var
 Max Per Page:      100
 Safe Rate:         1 request/second
 Retry On:          HTTP 429 (exponential backoff: 5s, 10s, 20s)
-Ticket Category:   custom_fields.security (NOT ticket.category!)
-Category Field ID: 1000158814 (instance-specific, verify via ticket_form_fields)
+IT Category:       custom_fields.lf_ticket_pulse_category (lookup display ID)
+IT Subcategory:    custom_fields.lf_ticket_pulse_subcategory (lookup display ID)
+Legacy Category:   custom_fields.security (old dropdown; not current IT source of truth)
+Lookup Objects:    Ticket Pulse Skills / Ticket Pulse Subskills
+Subskill Parent:   Ticket Pulse Subskills.parent_skill -> Ticket Pulse Skills
 Status Codes:      2=Open, 3=Pending, 4=Resolved, 5=Closed
 Priority Codes:    1=Low, 2=Medium, 3=High, 4=Urgent
 Agent Field:       responder_id (maps to agent.id)
@@ -2112,5 +2237,5 @@ Custom Source:     1001 = API integration (standard: 1-10)
 ---
 
 **Document Maintainer**: Ticket Pulse Development Team
-**Source of Truth**: Based on production code in `backend/src/integrations/freshservice.js` and `backend/src/integrations/freshserviceTransformer.js`
+**Source of Truth**: Based on production code in `backend/src/integrations/freshservice.js`, `backend/src/integrations/freshserviceTransformer.js`, `backend/src/services/freshServiceActionService.js`, `backend/src/services/skillHierarchyService.js`, and `backend/src/services/syncService.js`
 **FreshService API Docs**: https://api.freshservice.com/v2/

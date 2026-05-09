@@ -8,6 +8,7 @@ const DEFAULT_TP_SKILL_FIELD = 'lf_ticket_pulse_category';
 const DEFAULT_TP_SUBSKILL_FIELD = 'lf_ticket_pulse_subcategory';
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
+const TP_SUBSKILL_PARENT_FIELD = 'parent_skill';
 const LEVEL_RANK = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
 function assertSkillHierarchyWorkspace(workspaceId) {
   if (!isSkillHierarchyWorkspace(workspaceId)) {
@@ -188,10 +189,92 @@ function choiceNames(field) {
     .filter(Boolean);
 }
 
+function recordName(record) {
+  return normalizeName(record?.data?.name || record?.name);
+}
+
 function recordNames(records = []) {
   return records
-    .map((record) => normalizeName(record?.data?.name || record?.name))
+    .map((record) => recordName(record))
     .filter(Boolean);
+}
+
+function recordDisplayId(record) {
+  const value = record?.data?.bo_display_id ?? record?.bo_display_id ?? record?.display_id ?? record?.id ?? null;
+  return value === undefined || value === null || value === '' ? null : Number(value);
+}
+
+function lookupRecordId(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'object') {
+    const id = value.id;
+    if (id && typeof id === 'object' && Object.keys(id).length === 0) return null;
+    const candidate = id ?? value.bo_display_id ?? value.display_id ?? value.value ?? null;
+    return candidate === undefined || candidate === null || candidate === '' ? null : Number(candidate);
+  }
+  return Number(value);
+}
+
+function lookupRecordLabel(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'object') return value.value || value.name || value.label || null;
+  return String(value);
+}
+
+function recordsByName(records = []) {
+  return new Map(records
+    .map((record) => [keyFor(recordName(record)), record])
+    .filter(([name]) => name));
+}
+
+function expectedSubskillParents(published) {
+  const expectations = [];
+  for (const skill of asArray(published?.skills)) {
+    for (const subskill of asArray(skill.subskills)) {
+      expectations.push({
+        subskill: subskill.name,
+        parent: skill.name,
+      });
+    }
+  }
+  return expectations;
+}
+
+export function buildSubskillParentDrift(published, skillRecords = [], subskillRecords = []) {
+  const skillByName = recordsByName(skillRecords);
+  const subskillByName = recordsByName(subskillRecords);
+  const missingParent = [];
+  const wrongParent = [];
+  const unresolved = [];
+
+  for (const expected of expectedSubskillParents(published)) {
+    const subskillRecord = subskillByName.get(keyFor(expected.subskill));
+    const parentRecord = skillByName.get(keyFor(expected.parent));
+    if (!subskillRecord || !parentRecord) continue;
+
+    const expectedParentId = recordDisplayId(parentRecord);
+    if (!expectedParentId) {
+      unresolved.push({ subskill: expected.subskill, expectedParent: expected.parent, reason: 'parent_record_has_no_display_id' });
+      continue;
+    }
+
+    const currentParentId = lookupRecordId(subskillRecord?.data?.[TP_SUBSKILL_PARENT_FIELD]);
+    const item = {
+      subskill: expected.subskill,
+      expectedParent: expected.parent,
+      expectedParentDisplayId: expectedParentId,
+      actualParentDisplayId: currentParentId,
+      actualParent: lookupRecordLabel(subskillRecord?.data?.[TP_SUBSKILL_PARENT_FIELD]),
+      subskillDisplayId: recordDisplayId(subskillRecord),
+    };
+    if (!currentParentId) {
+      missingParent.push(item);
+    } else if (currentParentId !== expectedParentId) {
+      wrongParent.push(item);
+    }
+  }
+
+  return { missingParent, wrongParent, unresolved };
 }
 
 function fieldIdentity(field) {
@@ -521,6 +604,10 @@ class SkillHierarchyService {
     };
     const skillDrift = compare(skillNames, fsSkillNames);
     const subskillDrift = compare(subskillNames, fsSubskillNames);
+    const subskillParentDrift = fieldReport.found.skill?.field_type === 'custom_lookup'
+      && fieldReport.found.subskill?.field_type === 'custom_lookup'
+      ? buildSubskillParentDrift(published, skillRecords, subskillRecords)
+      : { missingParent: [], wrongParent: [], unresolved: [] };
     const csv = (names) => ['value', ...names.map((name) => `"${String(name).replace(/"/g, '""')}"`)].join('\n');
 
     return {
@@ -533,6 +620,7 @@ class SkillHierarchyService {
       published,
       skillDrift,
       subskillDrift,
+      subskillParentDrift,
       exports: {
         skillCsv: csv(skillNames),
         subskillCsv: csv(subskillNames),
@@ -569,13 +657,13 @@ class SkillHierarchyService {
 
     const published = categoryTreeToDraftState(categories);
     const skillNames = published.skills.map((skill) => skill.name);
-    const subskillNames = published.skills.flatMap((skill) => skill.subskills.map((subskill) => subskill.name));
-    const [skillRecords, subskillRecords] = await Promise.all([
+    const subskillTargets = expectedSubskillParents(published);
+    let [skillRecords, subskillRecords] = await Promise.all([
       client.listCustomObjectRecords(skillObject.id),
       client.listCustomObjectRecords(subskillObject.id),
     ]);
+    const beforeCounts = { skills: skillRecords.length, subskills: subskillRecords.length };
     const existingSkills = new Set(recordNames(skillRecords).map(keyFor));
-    const existingSubskills = new Set(recordNames(subskillRecords).map(keyFor));
 
     const createdSkills = [];
     for (const name of skillNames) {
@@ -586,23 +674,61 @@ class SkillHierarchyService {
       }
     }
 
+    if (createdSkills.length > 0) {
+      skillRecords = await client.listCustomObjectRecords(skillObject.id);
+    }
+
+    const skillByName = recordsByName(skillRecords);
+    const existingSubskills = new Set(recordNames(subskillRecords).map(keyFor));
     const createdSubskills = [];
-    for (const name of subskillNames) {
+    for (const { subskill: name, parent } of subskillTargets) {
       if (!existingSubskills.has(keyFor(name))) {
-        await client.createCustomObjectRecord(subskillObject.id, { name });
+        const parentRecord = skillByName.get(keyFor(parent));
+        const parentDisplayId = recordDisplayId(parentRecord);
+        if (!parentDisplayId) {
+          throw new ValidationError(`Freshservice parent skill lookup record not found for "${parent}"`);
+        }
+        await client.createCustomObjectRecord(subskillObject.id, {
+          name,
+          [TP_SUBSKILL_PARENT_FIELD]: parentDisplayId,
+        });
         existingSubskills.add(keyFor(name));
-        createdSubskills.push(name);
+        createdSubskills.push({ name, parent });
       }
+    }
+
+    if (createdSubskills.length > 0) {
+      subskillRecords = await client.listCustomObjectRecords(subskillObject.id);
+    }
+
+    const parentDrift = buildSubskillParentDrift(published, skillRecords, subskillRecords);
+    const updatedSubskillParents = [];
+    for (const item of [...parentDrift.missingParent, ...parentDrift.wrongParent]) {
+      await client.updateCustomObjectRecord(subskillObject.id, item.subskillDisplayId, {
+        name: item.subskill,
+        [TP_SUBSKILL_PARENT_FIELD]: item.expectedParentDisplayId,
+      });
+      updatedSubskillParents.push({
+        name: item.subskill,
+        parent: item.expectedParent,
+        previousParent: item.actualParent || item.actualParentDisplayId || null,
+      });
     }
 
     return {
       skillObject,
       subskillObject,
-      expected: { skills: skillNames.length, subskills: subskillNames.length },
-      before: { skills: skillRecords.length, subskills: subskillRecords.length },
+      expected: { skills: skillNames.length, subskills: subskillTargets.length },
+      before: beforeCounts,
       created: { skills: createdSkills, subskills: createdSubskills },
+      updated: { subskillParents: updatedSubskillParents },
+      parentDrift: {
+        unresolved: parentDrift.unresolved,
+        fixedMissingParent: parentDrift.missingParent.length,
+        fixedWrongParent: parentDrift.wrongParent.length,
+      },
       deleteExtra: Boolean(options.deleteExtra),
-      note: 'Sync creates missing custom object records only; extra records are reported by drift and not deleted automatically.',
+      note: 'Sync creates missing custom object records and fixes subskill parent lookups; extra records are reported by drift and not deleted automatically.',
     };
   }
 }
