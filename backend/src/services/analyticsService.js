@@ -1,6 +1,8 @@
 import { formatInTimeZone } from 'date-fns-tz';
 import prisma from './prisma.js';
+import competencyRepository from './competencyRepository.js';
 import { getTodayRange } from '../utils/timezone.js';
+import { getCategoryMode, normalizeTicketCategory } from '../utils/ticketCategoryNormalizer.js';
 
 const DEFAULT_TIMEZONE = 'America/Los_Angeles';
 const OPEN_STATUSES = ['Open', 'Pending', 'Waiting on Customer'];
@@ -205,18 +207,55 @@ function metadata(rangeInfo, extra = {}) {
   };
 }
 
-function ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, dateField = 'createdAt') {
+function parseCsvStrings(value) {
+  if (!value) return [];
+  const raw = Array.isArray(value) ? value : String(value).split(',');
+  return raw.map((item) => String(item).trim()).filter(Boolean);
+}
+
+function parseCsvInts(value) {
+  return parseCsvStrings(value)
+    .map((item) => Number(item))
+    .filter(Number.isInteger);
+}
+
+export function categoryFilterForQuery(workspaceId, query = {}) {
+  const mode = getCategoryMode(workspaceId);
+  if (mode === 'canonical') {
+    const categoryIds = parseCsvInts(query.categoryIds);
+    const subcategoryIds = parseCsvInts(query.subcategoryIds);
+    return {
+      mode,
+      where: {
+        ...(categoryIds.length > 0 ? { internalCategoryId: { in: categoryIds } } : {}),
+        ...(subcategoryIds.length > 0 ? { internalSubcategoryId: { in: subcategoryIds } } : {}),
+      },
+      selected: { categoryIds, subcategoryIds, legacyCategories: [] },
+    };
+  }
+
+  const legacyCategories = parseCsvStrings(query.legacyCategories);
+  return {
+    mode,
+    where: legacyCategories.length > 0 ? { ticketCategory: { in: legacyCategories } } : {},
+    selected: { categoryIds: [], subcategoryIds: [], legacyCategories },
+  };
+}
+
+function ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, dateField = 'createdAt', categoryWhere = {}) {
   return {
     workspaceId,
     ...(excludeNoise ? { isNoise: false } : {}),
+    ...categoryWhere,
     [dateField]: { gte: rangeInfo.start, lte: rangeInfo.end },
   };
 }
 
-function assignmentRangeWhere(workspaceId, rangeInfo, excludeNoise = false) {
+function assignmentRangeWhere(workspaceId, rangeInfo, excludeNoise = false, categoryWhere = {}) {
   return {
     workspaceId,
     ...(excludeNoise ? { isNoise: false } : {}),
+    ...categoryWhere,
     OR: [
       { firstAssignedAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
       {
@@ -280,65 +319,59 @@ function topFromMap(map, limit = 10) {
     .slice(0, limit);
 }
 
-function ticketPulseCategoryParts(ticket) {
-  const category = ticket?.internalCategory?.name || ticket?.tpSkill || null;
-  const subcategory = ticket?.internalSubcategory?.name || ticket?.tpSubskill || null;
-  if (category || subcategory) {
-    return {
-      category,
-      subcategory,
-      label: [category, subcategory].filter(Boolean).join(' / '),
-      source: 'canonical',
-      legacyCategory: ticket?.ticketCategory || null,
-    };
-  }
-  if (ticket?.ticketCategory) {
-    return {
-      category: null,
-      subcategory: null,
-      label: ticket.ticketCategory,
-      source: 'legacyFallback',
-      legacyCategory: ticket.ticketCategory,
-    };
-  }
+function ticketPulseCategoryParts(ticket, workspaceId) {
+  const normalized = normalizeTicketCategory(ticket, workspaceId);
   return {
-    category: null,
-    subcategory: null,
-    label: 'Uncategorized',
-    source: 'unmapped',
-    legacyCategory: null,
+    categoryId: normalized.categoryId,
+    subcategoryId: normalized.subcategoryId,
+    category: normalized.categoryName,
+    subcategory: normalized.subcategoryName,
+    label: normalized.categoryLabel || 'Uncategorized',
+    source: normalized.categorySource,
+    legacyCategory: normalized.legacyCategory,
+    reviewNeeded: normalized.taxonomyReviewNeeded,
   };
 }
 
-function canonicalSkillLabel(ticket) {
-  return ticketPulseCategoryParts(ticket).label;
+function canonicalSkillLabel(ticket, workspaceId) {
+  return ticketPulseCategoryParts(ticket, workspaceId).label;
 }
 
-function categoryBreakdownFromTickets(tickets, limit = 10) {
+export function categoryBreakdownFromTickets(tickets, limit = 10, workspaceId = null) {
   const byLabel = new Map();
   const coverage = {
     canonical: 0,
     legacyFallback: 0,
+    legacy: 0,
+    reviewNeeded: 0,
     unmapped: 0,
     total: tickets.length,
   };
   for (const ticket of tickets) {
-    const parts = ticketPulseCategoryParts(ticket);
+    const parts = ticketPulseCategoryParts(ticket, workspaceId);
     coverage[parts.source] += 1;
+    if (parts.reviewNeeded) coverage.reviewNeeded += 1;
     const row = byLabel.get(parts.label) || {
       name: parts.label,
       count: 0,
+      categoryId: parts.categoryId,
+      subcategoryId: parts.subcategoryId,
       canonicalCount: 0,
       legacyFallbackCount: 0,
+      legacyCount: 0,
       unmappedCount: 0,
+      reviewNeededCount: 0,
       source: parts.source,
     };
     row.count += 1;
     if (parts.source === 'canonical') row.canonicalCount += 1;
     if (parts.source === 'legacyFallback') row.legacyFallbackCount += 1;
+    if (parts.source === 'legacy') row.legacyCount += 1;
     if (parts.source === 'unmapped') row.unmappedCount += 1;
+    if (parts.reviewNeeded) row.reviewNeededCount += 1;
     if (row.canonicalCount > 0) row.source = 'canonical';
     else if (row.legacyFallbackCount > 0) row.source = 'legacyFallback';
+    else if (row.legacyCount > 0) row.source = 'legacy';
     else row.source = 'unmapped';
     byLabel.set(parts.label, row);
   }
@@ -352,9 +385,9 @@ function categoryBreakdownFromTickets(tickets, limit = 10) {
   return { rows, coverage };
 }
 
-function compactTicket(ticket) {
+function compactTicket(ticket, workspaceId) {
   if (!ticket) return null;
-  const categoryParts = ticketPulseCategoryParts(ticket);
+  const categoryParts = ticketPulseCategoryParts(ticket, workspaceId);
   return {
     id: ticket.id,
     freshserviceTicketId: ticket.freshserviceTicketId ? String(ticket.freshserviceTicketId) : null,
@@ -363,10 +396,15 @@ function compactTicket(ticket) {
     priority: ticket.priority,
     ticketCategory: ticket.ticketCategory || null,
     legacyCategory: categoryParts.legacyCategory,
+    categoryId: categoryParts.categoryId,
+    subcategoryId: categoryParts.subcategoryId,
     category: categoryParts.category,
     subcategory: categoryParts.subcategory,
     canonicalCategory: categoryParts.label,
     canonicalCategorySource: categoryParts.source,
+    categoryLabel: categoryParts.label,
+    categorySource: categoryParts.source,
+    taxonomyReviewNeeded: categoryParts.reviewNeeded,
     skill: categoryParts.category,
     subskill: categoryParts.subcategory,
     canonicalSkill: categoryParts.label,
@@ -380,8 +418,8 @@ function compactTicket(ticket) {
   };
 }
 
-function compactCsatTicket(ticket) {
-  const compact = compactTicket(ticket);
+function compactCsatTicket(ticket, workspaceId) {
+  const compact = compactTicket(ticket, workspaceId);
   if (!compact) return null;
   return {
     ...compact,
@@ -421,9 +459,9 @@ function assignmentSource(ticket, serviceAccountNames = []) {
   return 'unknown';
 }
 
-async function fetchRangeTickets(workspaceId, rangeInfo, excludeNoise) {
+async function fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryWhere = {}) {
   return prisma.ticket.findMany({
-    where: assignmentRangeWhere(workspaceId, rangeInfo, excludeNoise),
+    where: assignmentRangeWhere(workspaceId, rangeInfo, excludeNoise, categoryWhere),
     select: {
       id: true,
       freshserviceTicketId: true,
@@ -441,8 +479,13 @@ async function fetchRangeTickets(workspaceId, rangeInfo, excludeNoise) {
       ticketCategory: true,
       tpSkill: true,
       tpSubskill: true,
+      internalCategoryId: true,
       internalCategory: { select: { id: true, name: true } },
+      internalSubcategoryId: true,
       internalSubcategory: { select: { id: true, name: true, parentId: true } },
+      internalCategoryFit: true,
+      internalSubcategoryFit: true,
+      taxonomyReviewNeeded: true,
       resolutionTimeSeconds: true,
       csatScore: true,
       csatTotalScore: true,
@@ -455,11 +498,12 @@ async function fetchRangeTickets(workspaceId, rangeInfo, excludeNoise) {
   });
 }
 
-async function fetchOpenTickets(workspaceId, excludeNoise) {
+async function fetchOpenTickets(workspaceId, excludeNoise, categoryWhere = {}) {
   return prisma.ticket.findMany({
     where: {
       workspaceId,
       ...(excludeNoise ? { isNoise: false } : {}),
+      ...categoryWhere,
       status: { in: OPEN_STATUSES },
     },
     select: {
@@ -475,28 +519,34 @@ async function fetchOpenTickets(workspaceId, excludeNoise) {
       ticketCategory: true,
       tpSkill: true,
       tpSubskill: true,
+      internalCategoryId: true,
       internalCategory: { select: { id: true, name: true } },
+      internalSubcategoryId: true,
       internalSubcategory: { select: { id: true, name: true, parentId: true } },
+      internalCategoryFit: true,
+      internalSubcategoryFit: true,
+      taxonomyReviewNeeded: true,
       assignedTech: { select: { id: true, name: true, photoUrl: true } },
       requester: { select: { name: true, email: true } },
     },
   });
 }
 
-async function periodCounts(workspaceId, rangeInfo, excludeNoise, period = 'current') {
+async function periodCounts(workspaceId, rangeInfo, excludeNoise, period = 'current', categoryWhere = {}) {
   const target = period === 'previous'
     ? { ...rangeInfo, start: rangeInfo.previousStart, end: rangeInfo.previousEnd }
     : rangeInfo;
   const [created, assignedTickets, csatTickets] = await Promise.all([
-    prisma.ticket.count({ where: ticketBaseWhere(workspaceId, target, excludeNoise, 'createdAt') }),
+    prisma.ticket.count({ where: ticketBaseWhere(workspaceId, target, excludeNoise, 'createdAt', categoryWhere) }),
     prisma.ticket.findMany({
-      where: assignmentRangeWhere(workspaceId, target, excludeNoise),
+      where: assignmentRangeWhere(workspaceId, target, excludeNoise, categoryWhere),
       select: { status: true, resolutionTimeSeconds: true },
     }),
     prisma.ticket.findMany({
       where: {
         workspaceId,
         ...(excludeNoise ? { isNoise: false } : {}),
+        ...categoryWhere,
         csatScore: { not: null },
         csatSubmittedAt: { gte: target.start, lte: target.end },
       },
@@ -515,13 +565,15 @@ export async function getOverview(workspaceId, query = {}) {
   return withCache(workspaceId, 'overview', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
     const excludeNoise = query.excludeNoise === 'true';
+    const categoryFilter = categoryFilterForQuery(workspaceId, query);
     const [current, previous, rangeTickets, openTickets, serviceAccountNames] = await Promise.all([
-      periodCounts(workspaceId, rangeInfo, excludeNoise, 'current'),
-      rangeInfo.compare === 'none' ? Promise.resolve(null) : periodCounts(workspaceId, rangeInfo, excludeNoise, 'previous'),
-      fetchRangeTickets(workspaceId, rangeInfo, excludeNoise),
-      fetchOpenTickets(workspaceId, excludeNoise),
+      periodCounts(workspaceId, rangeInfo, excludeNoise, 'current', categoryFilter.where),
+      rangeInfo.compare === 'none' ? Promise.resolve(null) : periodCounts(workspaceId, rangeInfo, excludeNoise, 'previous', categoryFilter.where),
+      fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
+      fetchOpenTickets(workspaceId, excludeNoise, categoryFilter.where),
       getServiceAccountNames(),
     ]);
+    const categoryCoverage = categoryBreakdownFromTickets(rangeTickets, 10, workspaceId).coverage;
 
     const now = new Date();
     const overdueTickets = openTickets.filter((t) => t.dueBy && new Date(t.dueBy) < now);
@@ -532,14 +584,14 @@ export async function getOverview(workspaceId, query = {}) {
     }
 
     return {
-      metadata: metadata(rangeInfo, { excludeNoise }),
+      metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       cards: {
         created: rangeInfo.compare === 'none' ? { current: current.created } : calculateDelta(current.created, previous.created),
         resolved: rangeInfo.compare === 'none' ? { current: current.resolved } : calculateDelta(current.resolved, previous.resolved),
         netChange: rangeInfo.compare === 'none' ? { current: current.netChange } : calculateDelta(current.netChange, previous.netChange),
         openBacklog: { current: openTickets.length },
-        overdue: { current: overdueTickets.length, sample: overdueTickets.slice(0, 10).map(compactTicket) },
-        firstResponseRisk: { current: firstResponseRisk.length, sample: firstResponseRisk.slice(0, 10).map(compactTicket) },
+        overdue: { current: overdueTickets.length, sample: overdueTickets.slice(0, 10).map((ticket) => compactTicket(ticket, workspaceId)) },
+        firstResponseRisk: { current: firstResponseRisk.length, sample: firstResponseRisk.slice(0, 10).map((ticket) => compactTicket(ticket, workspaceId)) },
         avgResolutionHours: {
           current: current.resolutionSeconds.avg === null ? null : Number((current.resolutionSeconds.avg / 3600).toFixed(1)),
           previous: previous?.resolutionSeconds?.avg === null || !previous ? null : Number((previous.resolutionSeconds.avg / 3600).toFixed(1)),
@@ -560,6 +612,12 @@ export async function getOverview(workspaceId, query = {}) {
           : 0,
         csatSampleCount: current.csatCount,
         firstResponsePopulated: 0,
+        categoryMode: categoryFilter.mode,
+        categoryCoverage,
+        canonicalClassifiedCount: categoryCoverage.canonical,
+        legacyFallbackCount: categoryCoverage.legacyFallback + categoryCoverage.legacy,
+        categoryReviewNeededCount: categoryCoverage.reviewNeeded,
+        unclassifiedCount: categoryCoverage.unmapped,
       },
     };
   });
@@ -569,9 +627,10 @@ export async function getDemandFlow(workspaceId, query = {}) {
   return withCache(workspaceId, 'demand-flow', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
     const excludeNoise = query.excludeNoise === 'true';
+    const categoryFilter = categoryFilterForQuery(workspaceId, query);
     const [createdTickets, assignedTickets] = await Promise.all([
       prisma.ticket.findMany({
-        where: ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, 'createdAt'),
+        where: ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, 'createdAt', categoryFilter.where),
         select: {
           id: true,
           freshserviceTicketId: true,
@@ -584,14 +643,19 @@ export async function getDemandFlow(workspaceId, query = {}) {
           ticketCategory: true,
           tpSkill: true,
           tpSubskill: true,
+          internalCategoryId: true,
           internalCategory: { select: { id: true, name: true } },
+          internalSubcategoryId: true,
           internalSubcategory: { select: { id: true, name: true, parentId: true } },
+          internalCategoryFit: true,
+          internalSubcategoryFit: true,
+          taxonomyReviewNeeded: true,
           isNoise: true,
           requester: { select: { name: true, email: true } },
           assignedTech: { select: { name: true } },
         },
       }),
-      fetchRangeTickets(workspaceId, rangeInfo, excludeNoise),
+      fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
     ]);
 
     const trendMap = new Map();
@@ -623,10 +687,10 @@ export async function getDemandFlow(workspaceId, query = {}) {
       row.net -= 1;
       trendMap.set(key, row);
     }
-    const categoryBreakdown = categoryBreakdownFromTickets(createdTickets);
+    const categoryBreakdown = categoryBreakdownFromTickets(createdTickets, 10, workspaceId);
 
     return {
-      metadata: metadata(rangeInfo, { excludeNoise }),
+      metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       trend: Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
       heatmap: Array.from(heatmap.entries()).map(([key, count]) => {
         const [day, hour] = key.split('|');
@@ -643,7 +707,7 @@ export async function getDemandFlow(workspaceId, query = {}) {
           pct: createdTickets.length ? Number(((noiseCount / createdTickets.length) * 100).toFixed(1)) : 0,
         },
       },
-      drilldown: createdTickets.slice(0, 100).map(compactTicket),
+      drilldown: createdTickets.slice(0, 100).map((ticket) => compactTicket(ticket, workspaceId)),
     };
   });
 }
@@ -652,6 +716,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
   return withCache(workspaceId, 'team-balance', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
     const excludeNoise = query.excludeNoise === 'true';
+    const categoryFilter = categoryFilterForQuery(workspaceId, query);
     const rangeBusinessDays = businessDays(rangeInfo.startDate, rangeInfo.endDate);
     const [technicians, tickets, episodes, openTickets, leaves, serviceAccountNames] = await Promise.all([
       prisma.technician.findMany({
@@ -659,10 +724,11 @@ export async function getTeamBalance(workspaceId, query = {}) {
         select: { id: true, name: true, email: true, photoUrl: true, workStartTime: true, workEndTime: true },
         orderBy: { name: 'asc' },
       }),
-      fetchRangeTickets(workspaceId, rangeInfo, excludeNoise),
+      fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
       prisma.ticketAssignmentEpisode.findMany({
         where: {
           workspaceId,
+          ...(Object.keys(categoryFilter.where).length > 0 ? { ticket: { is: categoryFilter.where } } : {}),
           OR: [
             { startedAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
             { endedAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
@@ -670,7 +736,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
         },
         select: { technicianId: true, endMethod: true, startedAt: true, endedAt: true },
       }),
-      fetchOpenTickets(workspaceId, excludeNoise),
+      fetchOpenTickets(workspaceId, excludeNoise, categoryFilter.where),
       prisma.technicianLeave.findMany({
         where: {
           workspaceId,
@@ -782,7 +848,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
         values.push(ticket.csatScore);
         csatByTech.set(ticket.assignedTechId, values);
       }
-      const category = canonicalSkillLabel(ticket);
+      const category = canonicalSkillLabel(ticket, workspaceId);
       row.topCategories[category] = (row.topCategories[category] || 0) + 1;
     }
     for (const ticket of openTickets) {
@@ -886,7 +952,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
     }
 
     return {
-      metadata: metadata(rangeInfo, { excludeNoise }),
+      metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       summary: {
         activeTechnicians: technicians.length,
         rangeBusinessDays,
@@ -920,12 +986,14 @@ export async function getQuality(workspaceId, query = {}) {
   return withCache(workspaceId, 'quality', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
     const excludeNoise = query.excludeNoise === 'true';
+    const categoryFilter = categoryFilterForQuery(workspaceId, query);
     const [tickets, csatTickets, openTickets] = await Promise.all([
-      fetchRangeTickets(workspaceId, rangeInfo, excludeNoise),
+      fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
       prisma.ticket.findMany({
         where: {
           workspaceId,
           ...(excludeNoise ? { isNoise: false } : {}),
+          ...categoryFilter.where,
           csatScore: { not: null },
           csatSubmittedAt: { gte: rangeInfo.start, lte: rangeInfo.end },
         },
@@ -936,6 +1004,16 @@ export async function getQuality(workspaceId, query = {}) {
           subject: true,
           status: true,
           priority: true,
+          ticketCategory: true,
+          tpSkill: true,
+          tpSubskill: true,
+          internalCategoryId: true,
+          internalCategory: { select: { id: true, name: true } },
+          internalSubcategoryId: true,
+          internalSubcategory: { select: { id: true, name: true, parentId: true } },
+          internalCategoryFit: true,
+          internalSubcategoryFit: true,
+          taxonomyReviewNeeded: true,
           csatScore: true,
           csatTotalScore: true,
           csatRatingText: true,
@@ -945,7 +1023,7 @@ export async function getQuality(workspaceId, query = {}) {
           assignedTech: { select: { name: true } },
         },
       }),
-      fetchOpenTickets(workspaceId, excludeNoise),
+      fetchOpenTickets(workspaceId, excludeNoise, categoryFilter.where),
     ]);
 
     const resolution = summarizeNumeric(tickets.map((t) => t.resolutionTimeSeconds).filter((v) => v !== null));
@@ -981,7 +1059,7 @@ export async function getQuality(workspaceId, query = {}) {
     }
 
     return {
-      metadata: metadata(rangeInfo, { excludeNoise }),
+      metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       resolution: {
         seconds: resolution,
         hours: {
@@ -999,8 +1077,8 @@ export async function getQuality(workspaceId, query = {}) {
           : null,
         trend: Array.from(csatTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
         lowScoreCount: lowCsat.length,
-        lowScoreTickets: lowCsat.slice(0, 25).map(compactCsatTicket),
-        recentResponses: csatTickets.slice(0, 25).map(compactCsatTicket),
+        lowScoreTickets: lowCsat.slice(0, 25).map((ticket) => compactCsatTicket(ticket, workspaceId)),
+        recentResponses: csatTickets.slice(0, 25).map((ticket) => compactCsatTicket(ticket, workspaceId)),
       },
     };
   });
@@ -1281,15 +1359,50 @@ export async function getInsights(workspaceId, query = {}) {
   });
 }
 
+export async function getCategoryMetadata(workspaceId) {
+  return withCache(workspaceId, 'categories', {}, async () => {
+    const categoryMode = getCategoryMode(workspaceId);
+    if (categoryMode === 'canonical') {
+      const categories = await competencyRepository.getActiveCategories(workspaceId);
+      return {
+        categoryMode,
+        categories,
+        categoryTree: competencyRepository.buildCategoryTree(categories),
+        legacyCategories: [],
+      };
+    }
+
+    const rows = await prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        ticketCategory: { not: null },
+      },
+      distinct: ['ticketCategory'],
+      select: { ticketCategory: true },
+      orderBy: { ticketCategory: 'asc' },
+    });
+
+    return {
+      categoryMode,
+      categories: [],
+      categoryTree: [],
+      legacyCategories: rows.map((row) => row.ticketCategory).filter(Boolean),
+    };
+  });
+}
+
 export default {
   parseAnalyticsRange,
   calculateDelta,
   summarizeNumeric,
   buildInsight,
+  categoryFilterForQuery,
+  categoryBreakdownFromTickets,
   getOverview,
   getDemandFlow,
   getTeamBalance,
   getQuality,
   getAutomationOps,
   getInsights,
+  getCategoryMetadata,
 };

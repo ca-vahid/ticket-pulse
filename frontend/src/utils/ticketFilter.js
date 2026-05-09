@@ -45,8 +45,10 @@ export const parseSearchQuery = (searchTerm = '') => {
   return parsedQuery;
 };
 
-export const getTicketCategoryLabel = (ticket) => {
+export const getTicketCategoryLabel = (ticket, categoryMode = ticket?.categoryMode) => {
   if (!ticket) return '';
+  if (categoryMode === 'legacy') return ticket.ticketCategory || ticket.categoryLabel || '';
+  if (ticket.categoryLabel) return ticket.categoryLabel;
   if (ticket.canonicalCategory) return ticket.canonicalCategory;
   if (ticket.canonicalSkill) return ticket.canonicalSkill;
   if (ticket.internalCategory?.name || ticket.internalSubcategory?.name) {
@@ -57,6 +59,93 @@ export const getTicketCategoryLabel = (ticket) => {
   return ticket.ticketCategory || '';
 };
 
+export const getTicketCategoryParts = (ticket, categoryMode = ticket?.categoryMode) => {
+  if (!ticket) {
+    return {
+      categoryMode: categoryMode || 'legacy',
+      categoryId: null,
+      subcategoryId: null,
+      categoryName: null,
+      subcategoryName: null,
+      categoryLabel: '',
+      legacyCategory: null,
+    };
+  }
+
+  if (categoryMode === 'legacy') {
+    const label = ticket.ticketCategory || ticket.categoryLabel || '';
+    return {
+      categoryMode: 'legacy',
+      categoryId: null,
+      subcategoryId: null,
+      categoryName: label || null,
+      subcategoryName: null,
+      categoryLabel: label,
+      legacyCategory: label || null,
+    };
+  }
+
+  const categoryName = ticket.categoryName || ticket.internalCategory?.name || ticket.skill || ticket.tpSkill || null;
+  const subcategoryName = ticket.subcategoryName || ticket.internalSubcategory?.name || ticket.subskill || ticket.tpSubskill || null;
+  return {
+    categoryMode: 'canonical',
+    categoryId: ticket.categoryId ?? ticket.internalCategoryId ?? ticket.internalCategory?.id ?? null,
+    subcategoryId: ticket.subcategoryId ?? ticket.internalSubcategoryId ?? ticket.internalSubcategory?.id ?? null,
+    categoryName,
+    subcategoryName,
+    categoryLabel: ticket.categoryLabel || getTicketCategoryLabel(ticket, 'canonical'),
+    legacyCategory: ticket.legacyCategory || ticket.ticketCategory || null,
+  };
+};
+
+export const buildCategoryFilterState = ({
+  mode = 'legacy',
+  categoryIds = [],
+  subcategoryIds = [],
+  legacyCategories = [],
+} = {}) => ({
+  mode,
+  categoryIds: categoryIds.map(Number).filter(Number.isInteger),
+  subcategoryIds: subcategoryIds.map(Number).filter(Number.isInteger),
+  legacyCategories: legacyCategories.map(String).filter(Boolean),
+});
+
+export const normalizeCategoryFilterState = (selectedCategories = [], categoryMode = 'legacy') => {
+  if (selectedCategories && !Array.isArray(selectedCategories) && typeof selectedCategories === 'object') {
+    return buildCategoryFilterState({
+      mode: selectedCategories.mode || categoryMode,
+      categoryIds: selectedCategories.categoryIds || [],
+      subcategoryIds: selectedCategories.subcategoryIds || [],
+      legacyCategories: selectedCategories.legacyCategories || selectedCategories.categories || [],
+    });
+  }
+  return buildCategoryFilterState({
+    mode: categoryMode,
+    legacyCategories: Array.isArray(selectedCategories) ? selectedCategories : [],
+  });
+};
+
+export const hasCategoryFilters = (filterState = {}) => {
+  const normalized = normalizeCategoryFilterState(filterState, filterState?.mode || 'legacy');
+  return normalized.categoryIds.length > 0
+    || normalized.subcategoryIds.length > 0
+    || normalized.legacyCategories.length > 0;
+};
+
+export const ticketMatchesCategoryFilters = (ticket, filterState = {}) => {
+  const normalized = normalizeCategoryFilterState(filterState, filterState?.mode || ticket?.categoryMode || 'legacy');
+  if (!hasCategoryFilters(normalized)) return true;
+
+  if (normalized.mode === 'canonical') {
+    const parts = getTicketCategoryParts(ticket, 'canonical');
+    if (normalized.categoryIds.length > 0 && !normalized.categoryIds.includes(Number(parts.categoryId))) return false;
+    if (normalized.subcategoryIds.length > 0 && !normalized.subcategoryIds.includes(Number(parts.subcategoryId))) return false;
+    return true;
+  }
+
+  return normalized.legacyCategories.includes(getTicketCategoryLabel(ticket, 'legacy'));
+};
+
 /**
  * Check if a ticket matches the parsed query
  * @param {Object} ticket - Ticket object to check
@@ -64,7 +153,7 @@ export const getTicketCategoryLabel = (ticket) => {
  * @param {string} originalSearchTerm - Original search term (for ticket ID matching which is case-sensitive)
  * @returns {boolean} True if ticket matches any OR group (where all AND terms in that group match)
  */
-export const ticketMatchesQuery = (ticket, parsedQuery, _originalSearchTerm = '') => {
+export const ticketMatchesQuery = (ticket, parsedQuery, _originalSearchTerm = '', categoryMode = ticket?.categoryMode) => {
   if (!ticket || !parsedQuery || parsedQuery.length === 0) {
     return true; // No query = match all
   }
@@ -73,7 +162,7 @@ export const ticketMatchesQuery = (ticket, parsedQuery, _originalSearchTerm = ''
   const searchableText = [
     ticket.subject || '',
     ticket.requesterName || '',
-    getTicketCategoryLabel(ticket),
+    getTicketCategoryLabel(ticket, categoryMode),
     ticket.ticketCategory || '',
   ].join(' ').toLowerCase();
 
@@ -100,8 +189,10 @@ export const ticketMatchesQuery = (ticket, parsedQuery, _originalSearchTerm = ''
  * @param {Array} selectedCategories - Array of selected category names to filter by
  * @returns {Array} Filtered tickets matching all criteria
  */
-export const filterTickets = (tickets = [], searchTerm = '', selectedCategories = []) => {
+export const filterTickets = (tickets = [], searchTerm = '', selectedCategories = [], options = {}) => {
   if (!tickets || tickets.length === 0) return [];
+  const categoryMode = options.categoryMode || selectedCategories?.mode || tickets.find(Boolean)?.categoryMode || 'legacy';
+  const categoryFilterState = normalizeCategoryFilterState(selectedCategories, categoryMode);
 
   let filtered = [...tickets];
 
@@ -112,16 +203,16 @@ export const filterTickets = (tickets = [], searchTerm = '', selectedCategories 
     if (parsedQuery.length > 0) {
       filtered = filtered.filter(ticket => {
         if (!ticket) return false;
-        return ticketMatchesQuery(ticket, parsedQuery, searchTerm);
+        return ticketMatchesQuery(ticket, parsedQuery, searchTerm, categoryMode);
       });
     }
   }
 
   // Step 2: Apply category filter (AND logic - must match selected categories)
-  if (selectedCategories && selectedCategories.length > 0) {
+  if (hasCategoryFilters(categoryFilterState)) {
     filtered = filtered.filter(ticket => {
       if (!ticket) return false;
-      return selectedCategories.includes(getTicketCategoryLabel(ticket));
+      return ticketMatchesCategoryFilters(ticket, categoryFilterState);
     });
   }
 
@@ -193,12 +284,12 @@ export const calculateFilteredStats = (tickets = []) => {
  * @param {Array} tickets - Array of tickets
  * @returns {Array} Sorted unique category names
  */
-export const getAvailableCategories = (tickets = []) => {
+export const getAvailableCategories = (tickets = [], categoryMode = tickets.find(Boolean)?.categoryMode) => {
   if (!tickets || tickets.length === 0) return [];
 
   const categorySet = new Set();
   tickets.forEach(ticket => {
-    const categoryLabel = getTicketCategoryLabel(ticket);
+    const categoryLabel = getTicketCategoryLabel(ticket, categoryMode);
     if (categoryLabel) {
       categorySet.add(categoryLabel);
     }
@@ -226,6 +317,11 @@ export const calculateResultsCount = (technicians = [], isWeeklyView = false) =>
 export default {
   parseSearchQuery,
   getTicketCategoryLabel,
+  getTicketCategoryParts,
+  buildCategoryFilterState,
+  normalizeCategoryFilterState,
+  hasCategoryFilters,
+  ticketMatchesCategoryFilters,
   ticketMatchesQuery,
   filterTickets,
   filterTechnicianTickets,

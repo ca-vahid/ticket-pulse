@@ -36,6 +36,8 @@ import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 import * as XLSX from 'xlsx';
 import AppShell from '../components/AppShell';
+import CategoryFilter from '../components/CategoryFilter';
+import CanonicalCategoryFilter from '../components/CanonicalCategoryFilter';
 import { analyticsAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 
@@ -452,6 +454,11 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
                     Legacy
                   </span>
                 )}
+                {row.reviewNeededCount > 0 && (
+                  <span className="shrink-0 rounded bg-orange-50 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-orange-700">
+                    Review
+                  </span>
+                )}
                 {row.source === 'unmapped' && (
                   <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-slate-500">
                     Unmapped
@@ -529,6 +536,9 @@ export default function Analytics() {
   const [selectedTeamIds, setSelectedTeamIds] = useState([]);
   const [teamTimelineMetric, setTeamTimelineMetric] = useState('assigned');
   const [selectedInsightId, setSelectedInsightId] = useState(null);
+  const [categoryMetadata, setCategoryMetadata] = useState(null);
+  const [selectedLegacyCategories, setSelectedLegacyCategories] = useState([]);
+  const [selectedCanonicalCategories, setSelectedCanonicalCategories] = useState({ categoryIds: [], subcategoryIds: [] });
   const [payload, setPayload] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -545,8 +555,15 @@ export default function Analytics() {
       p.start = customStart;
       p.end = customEnd;
     }
+    const categoryMode = categoryMetadata?.categoryMode || (Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it' ? 'canonical' : 'legacy');
+    if (categoryMode === 'canonical') {
+      if (selectedCanonicalCategories.categoryIds?.length) p.categoryIds = selectedCanonicalCategories.categoryIds.join(',');
+      if (selectedCanonicalCategories.subcategoryIds?.length) p.subcategoryIds = selectedCanonicalCategories.subcategoryIds.join(',');
+    } else if (selectedLegacyCategories.length) {
+      p.legacyCategories = selectedLegacyCategories.join(',');
+    }
     return p;
-  }, [compare, currentWorkspace?.defaultTimezone, customEnd, customStart, excludeNoise, groupBy, range]);
+  }, [categoryMetadata?.categoryMode, compare, currentWorkspace?.defaultTimezone, currentWorkspace?.id, currentWorkspace?.slug, customEnd, customStart, excludeNoise, groupBy, range, selectedCanonicalCategories.categoryIds, selectedCanonicalCategories.subcategoryIds, selectedLegacyCategories]);
 
   const fetchAnalytics = useCallback(async () => {
     if (range === 'custom' && (!customStart || !customEnd)) return;
@@ -579,6 +596,18 @@ export default function Analytics() {
   useEffect(() => {
     fetchAnalytics();
   }, [fetchAnalytics]);
+
+  useEffect(() => {
+    let cancelled = false;
+    analyticsAPI.getCategories()
+      .then((res) => {
+        if (!cancelled) setCategoryMetadata(res?.data || res || null);
+      })
+      .catch(() => {
+        if (!cancelled) setCategoryMetadata(null);
+      });
+    return () => { cancelled = true; };
+  }, [currentWorkspace?.id]);
 
   const meta = payload.overview?.metadata || payload.demand?.metadata;
   const overview = payload.overview;
@@ -1147,6 +1176,10 @@ export default function Analytics() {
             <StatCard title="Resolution Coverage" value={`${overview?.dataQuality?.resolutionTimeCoverage ?? 0}%`} icon={Gauge} tone="green" />
             <StatCard title="CSAT Samples" value={formatNumber(overview?.dataQuality?.csatSampleCount)} icon={CheckCircle2} tone="purple" />
             <StatCard title="First Response Populated" value="0" subtitle="Omitted from v1 charts" icon={XCircle} tone="red" />
+            <StatCard title="Classified" value={formatNumber(overview?.dataQuality?.canonicalClassifiedCount || 0)} subtitle="Canonical category/subcategory" icon={CheckCircle2} tone="green" />
+            <StatCard title="Legacy Fallback" value={formatNumber(overview?.dataQuality?.legacyFallbackCount || 0)} subtitle="Using mirrored or legacy fields" icon={Info} tone="amber" />
+            <StatCard title="Review Needed" value={formatNumber(overview?.dataQuality?.categoryReviewNeededCount || 0)} subtitle="Weak or flagged category fit" icon={AlertTriangle} tone="amber" />
+            <StatCard title="Unclassified" value={formatNumber(overview?.dataQuality?.unclassifiedCount || 0)} subtitle="No usable category value" icon={XCircle} tone="red" />
           </div>
         </Panel>
       </div>
@@ -1173,8 +1206,10 @@ export default function Analytics() {
       </Panel>
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel
-          title="Category Hotspots"
-          subtitle={`Uses Ticket Pulse category/subcategory first. ${formatNumber(demand?.breakdowns?.categoryCoverage?.legacyFallback || 0)} legacy fallback · ${formatNumber(demand?.breakdowns?.categoryCoverage?.unmapped || 0)} unmapped.`}
+          title={(demand?.metadata?.categoryMode || categoryMetadata?.categoryMode) === 'canonical' ? 'Category Hotspots' : 'Legacy Category Hotspots'}
+          subtitle={(demand?.metadata?.categoryMode || categoryMetadata?.categoryMode) === 'canonical'
+            ? `Uses Ticket Pulse category/subcategory first. ${formatNumber(demand?.breakdowns?.categoryCoverage?.legacyFallback || 0)} legacy fallback · ${formatNumber(demand?.breakdowns?.categoryCoverage?.reviewNeeded || 0)} review-needed · ${formatNumber(demand?.breakdowns?.categoryCoverage?.unmapped || 0)} unmapped.`
+            : `Uses legacy Freshservice category. ${formatNumber(demand?.breakdowns?.categoryCoverage?.legacy || 0)} categorized · ${formatNumber(demand?.breakdowns?.categoryCoverage?.unmapped || 0)} uncategorized.`}
         >
           <HotspotRankedBars data={demand?.breakdowns?.category || []} compact />
         </Panel>
@@ -1815,6 +1850,26 @@ export default function Analytics() {
               <option value="previous">Compare previous</option>
               <option value="none">No comparison</option>
             </select>
+            {(categoryMetadata?.categoryMode || (Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it' ? 'canonical' : 'legacy')) === 'canonical' ? (
+              <div className="col-span-2 sm:col-span-1">
+                <CanonicalCategoryFilter
+                  categoryTree={categoryMetadata?.categoryTree || []}
+                  selectedCategoryIds={selectedCanonicalCategories.categoryIds || []}
+                  selectedSubcategoryIds={selectedCanonicalCategories.subcategoryIds || []}
+                  onChange={setSelectedCanonicalCategories}
+                />
+              </div>
+            ) : (
+              <div className="col-span-2 sm:col-span-1">
+                <CategoryFilter
+                  categories={categoryMetadata?.legacyCategories || []}
+                  selected={selectedLegacyCategories}
+                  onChange={setSelectedLegacyCategories}
+                  placeholder="Category"
+                  className="w-full"
+                />
+              </div>
+            )}
             <label className="inline-flex h-9 min-w-0 items-center justify-center gap-2 rounded-lg border border-slate-300 px-2 text-sm text-slate-700 sm:justify-start">
               <input
                 type="checkbox"

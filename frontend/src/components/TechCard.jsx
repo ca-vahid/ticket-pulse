@@ -67,7 +67,7 @@ const getInitials = (name) => {
   return '??';
 };
 
-export default function TechCard({ technician, onHide, rank, selectedDate, selectedWeek, selectedMonth, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [] }) {
+export default function TechCard({ technician, onHide, rank, selectedDate, selectedWeek, selectedMonth, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [], canonicalCategoryFilter = null }) {
   const navigate = useNavigate();
   const [showAssignersPopup, setShowAssignersPopup] = useState(false);
   const hoverTimerRef = useRef(null);
@@ -109,6 +109,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
         viewMode: viewMode,
         searchTerm: searchTerm,
         selectedCategories: selectedCategories,
+        canonicalCategoryFilter,
         techSummary: {
           id: technician.id,
           name: technician.name,
@@ -386,6 +387,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                       returnViewMode: 'weekly',
                       searchTerm: searchTerm,
                       selectedCategories: selectedCategories,
+                      canonicalCategoryFilter,
                     },
                   });
                 };

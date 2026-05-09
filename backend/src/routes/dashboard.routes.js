@@ -11,6 +11,7 @@ import { readCache } from '../services/dashboardReadCache.js';
 import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTechnicianAvoidanceDetail, computeTechnicianAvoidanceWeeklyDetail, computeTechnicianAvoidanceMonthlyDetail } from '../services/avoidanceAnalysisService.js';
 import vtService from '../services/vacationTrackerService.js';
 import settingsRepository from '../services/settingsRepository.js';
+import { buildTicketCategoryAliases, getCategoryMode } from '../utils/ticketCategoryNormalizer.js';
 
 const router = express.Router();
 
@@ -80,18 +81,14 @@ async function getRejectionCounts(workspaceId, periodStart = null, periodEnd = n
  * @param {Object} ticket - Ticket with nested requester object
  * @returns {Object} Ticket with flattened requester fields
  */
-const transformTicket = (ticket) => {
+const transformTicket = (ticket, workspaceId) => {
   if (!ticket) return ticket;
 
   const transformed = {
     ...ticket,
     requesterName: ticket.requester?.name || null,
     requesterEmail: ticket.requester?.email || null,
-    skill: ticket.internalCategory?.name || ticket.tpSkill || null,
-    subskill: ticket.internalSubcategory?.name || ticket.tpSubskill || null,
-    canonicalSkill: ticket.internalSubcategory?.name
-      ? `${ticket.internalCategory?.name || ticket.tpSkill || 'Uncategorized'} > ${ticket.internalSubcategory.name}`
-      : (ticket.internalCategory?.name || ticket.tpSkill || ticket.ticketCategory || null),
+    ...buildTicketCategoryAliases(ticket, workspaceId),
   };
 
   // Remove the nested requester object to avoid confusion
@@ -255,7 +252,7 @@ router.get(
     // Use ticketsToday for date-filtered view (tickets assigned on selected date)
     const techsWithTransformedTickets = dashboardData.technicians.map(tech => ({
       ...tech,
-      tickets: (tech.ticketsToday || []).map(transformTicket),
+      tickets: (tech.ticketsToday || []).map((ticket) => transformTicket(ticket, req.workspaceId)),
       avoidance: avoidanceMap[tech.id] || null,
       leaveInfo: leaveInfoMap[tech.id] || {},
       // Period-scoped count for the headline number on the card
@@ -277,6 +274,7 @@ router.get(
       data: {
         technicians: techsWithTransformedTickets,
         statistics: dashboardData.statistics,
+        categoryMode: getCategoryMode(req.workspaceId),
         serviceAccountNames,
         timestamp: new Date().toISOString(),
       },
@@ -453,7 +451,7 @@ router.get(
     // Transform technicians to include weeklyTickets array for frontend filtering
     const techsWithTickets = dashboardData.technicians.map(tech => ({
       ...tech,
-      weeklyTickets: (tech.weeklyTickets || []).map(transformTicket),
+      weeklyTickets: (tech.weeklyTickets || []).map((ticket) => transformTicket(ticket, req.workspaceId)),
       avoidance: avoidanceMap[tech.id] || null,
       leaveInfo: leaveInfoMap[tech.id] || {},
       rejectedThisPeriod: w_rejPeriod[tech.id] || 0,
@@ -469,6 +467,7 @@ router.get(
         weekEnd: formatDateInTimezone(weekEndDate, timezone),
         technicians: techsWithTickets,
         statistics: dashboardData.statistics,
+        categoryMode: getCategoryMode(req.workspaceId),
         serviceAccountNames,
         timestamp: new Date().toISOString(),
       },
@@ -556,13 +555,14 @@ router.get(
       success: true,
       data: {
         ...technicianData,
-        openTickets: technicianData.openTickets.map(transformTicket),
-        ticketsOnDate: technicianData.ticketsOnDate.map(transformTicket),
-        closedTicketsOnDate: technicianData.closedTicketsOnDate.map(transformTicket),
-        selfPickedTickets: technicianData.selfPickedTickets.map(transformTicket),
-        assignedTickets: technicianData.assignedTickets.map(transformTicket),
-        selfPickedOpenTickets: technicianData.selfPickedOpenTickets.map(transformTicket),
-        assignedOpenTickets: technicianData.assignedOpenTickets.map(transformTicket),
+        categoryMode: getCategoryMode(req.workspaceId),
+        openTickets: technicianData.openTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        ticketsOnDate: technicianData.ticketsOnDate.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        closedTicketsOnDate: technicianData.closedTicketsOnDate.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        selfPickedTickets: technicianData.selfPickedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        assignedTickets: technicianData.assignedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        selfPickedOpenTickets: technicianData.selfPickedOpenTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        assignedOpenTickets: technicianData.assignedOpenTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         avoidance,
         rejectedThisPeriod: rejPeriod[techId] || 0,
         rejected7d: rej7d[techId] || 0,
@@ -706,11 +706,12 @@ router.get(
 
         ...weeklyStats,
 
-        openTickets: openTickets.map(transformTicket),
-        weeklyTickets: weeklyTickets.map(transformTicket),
-        selfPickedTickets: selfPickedTickets.map(transformTicket),
-        assignedTickets: assignedTickets.map(transformTicket),
-        closedTickets: closedTickets.map(transformTicket),
+        categoryMode: getCategoryMode(req.workspaceId),
+        openTickets: openTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        weeklyTickets: weeklyTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        selfPickedTickets: selfPickedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        assignedTickets: assignedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        closedTickets: closedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         avoidance,
         rejectedThisPeriod: w_rP[techId] || 0,
         rejected7d: w_r7[techId] || 0,
@@ -835,11 +836,12 @@ router.get(
 
         ...monthlyStats,
 
-        openTickets: openTickets.map(transformTicket),
-        monthlyTickets: monthlyTickets.map(transformTicket),
-        selfPickedTickets: selfPickedTickets.map(transformTicket),
-        assignedTickets: assignedTickets.map(transformTicket),
-        closedTickets: closedTickets.map(transformTicket),
+        categoryMode: getCategoryMode(req.workspaceId),
+        openTickets: openTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        monthlyTickets: monthlyTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        selfPickedTickets: selfPickedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        assignedTickets: assignedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        closedTickets: closedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         avoidance,
         rejectedThisPeriod: m_rP[techId] || 0,
         rejected7d: m_r7[techId] || 0,
@@ -1057,7 +1059,8 @@ router.get(
         email: tech.email,
         photoUrl: tech.photoUrl,
         timezone: tech.timezone,
-        tickets: monthTickets.map(transformTicket),
+        categoryMode: getCategoryMode(req.workspaceId),
+        tickets: monthTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         monthlyCSATCount: csatCount,
         monthlyCSATAverage: csatAverage,
         leaveInfo: leaveInfoMap[tech.id] || {},
@@ -1122,7 +1125,8 @@ router.get(
         id: technician.id,
         name: technician.name,
         email: technician.email,
-        csatTickets: csatTickets.map(transformTicket),
+        categoryMode: getCategoryMode(req.workspaceId),
+        csatTickets: csatTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         totalCSAT: csatTickets.length,
         averageScore: csatTickets.length > 0
           ? (csatTickets.reduce((sum, t) => sum + (t.csatScore || 0), 0) / csatTickets.length).toFixed(2)
@@ -1186,8 +1190,11 @@ router.get(
             ticketCategory: true,
             tpSkill: true,
             tpSubskill: true,
+            internalCategoryId: true,
             internalCategory: { select: { id: true, name: true } },
+            internalSubcategoryId: true,
             internalSubcategory: { select: { id: true, name: true, parentId: true } },
+            taxonomyReviewNeeded: true,
             assignedTechId: true,
             assignedTech: { select: { id: true, name: true, photoUrl: true } },
             requester: { select: { name: true, email: true } },
@@ -1202,7 +1209,10 @@ router.get(
       endedAt: r.endedAt,
       startMethod: r.startMethod,
       endActorName: r.endActorName,
-      ticket: r.ticket ? { ...r.ticket, freshserviceTicketId: r.ticket.freshserviceTicketId?.toString() } : null,
+      ticket: r.ticket ? {
+        ...transformTicket(r.ticket, req.workspaceId),
+        freshserviceTicketId: r.ticket.freshserviceTicketId?.toString(),
+      } : null,
     }));
 
     res.json({

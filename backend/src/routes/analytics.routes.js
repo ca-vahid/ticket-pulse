@@ -4,6 +4,11 @@ import analyticsService from '../services/analyticsService.js';
 
 const router = express.Router();
 
+router.get('/categories', asyncHandler(async (req, res) => {
+  const data = await analyticsService.getCategoryMetadata(req.workspaceId);
+  res.json({ success: true, data });
+}));
+
 router.get('/overview', asyncHandler(async (req, res) => {
   const data = await analyticsService.getOverview(req.workspaceId, req.query);
   res.json({ success: true, data });

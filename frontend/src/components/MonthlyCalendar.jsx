@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { filterTickets } from '../utils/ticketFilter';
+import { filterTickets, hasCategoryFilters } from '../utils/ticketFilter';
 import { getHolidayTooltip, getDateStyling } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveCount, isHalfDayLeave } from '../utils/leaveInfo';
 import { formatDateLocal } from '../utils/dateHelpers';
@@ -53,7 +53,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
 
   // Clear technician selections when search/category filters are cleared
   useEffect(() => {
-    if (!searchTerm?.trim() && (!selectedCategories || selectedCategories.length === 0) && selectedTechnicianIds.length > 0) {
+    if (!searchTerm?.trim() && !hasCategoryFilters(selectedCategories) && selectedTechnicianIds.length > 0) {
       setSelectedTechnicianIds([]);
     }
   }, [searchTerm, selectedCategories]);
@@ -64,7 +64,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
 
   // Recalculate daily breakdown with filtered tickets if search/filter is active
   const dailyBreakdown = useMemo(() => {
-    const hasSearchOrFilter = searchTerm?.trim() || selectedCategories?.length > 0;
+    const hasSearchOrFilter = searchTerm?.trim() || hasCategoryFilters(selectedCategories);
     
     if (!hasSearchOrFilter) {
       return baseDailyBreakdown;

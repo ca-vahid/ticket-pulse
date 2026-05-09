@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
-import { syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
+import { analyticsAPI, syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import AppShell, { APP_BACKGROUND_CLASS, APP_BACKGROUND_STYLE } from '../components/AppShell';
 import DemoModeToggle from '../components/DemoModeToggle';
 import TechCard from '../components/TechCard';
@@ -11,9 +11,10 @@ import TechCompactHeader from '../components/TechCompactHeader';
 import { getSortValue } from '../components/compactLayout';
 import SearchBox from '../components/SearchBox';
 import CategoryFilter from '../components/CategoryFilter';
+import CanonicalCategoryFilter from '../components/CanonicalCategoryFilter';
 import LegendPopover from '../components/LegendPopover';
 import MonthlyCalendar from '../components/MonthlyCalendar';
-import { filterTickets, getTicketCategoryLabel } from '../utils/ticketFilter';
+import { filterTickets, getTicketCategoryLabel, hasCategoryFilters } from '../utils/ticketFilter';
 import { getHolidayTooltip, getHolidayInfo, registerDynamicHolidays } from '../utils/holidays';
 import api from '../services/api';
 import { usePrefetch } from '../hooks/usePrefetch';
@@ -69,6 +70,7 @@ export default function Dashboard() {
   const location = useLocation();
   const navigate = useNavigate();
   const showSummitWorkshop = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
+  const [categoryMetadata, setCategoryMetadata] = useState(null);
 
   const [refreshing, setRefreshing] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null); // null, 'syncing', 'success', 'error'
@@ -121,6 +123,12 @@ export default function Dashboard() {
 
     const stored = sessionStorage.getItem('dashboard_categories');
     return stored ? JSON.parse(stored) : [];
+  });
+  const [selectedCanonicalCategories, setSelectedCanonicalCategories] = useState(() => {
+    const nav = location.state?.canonicalCategoryFilter;
+    if (nav) return nav;
+    const stored = sessionStorage.getItem('dashboard_canonical_categories');
+    return stored ? JSON.parse(stored) : { categoryIds: [], subcategoryIds: [] };
   });
 
   // Noise filter
@@ -261,6 +269,21 @@ export default function Dashboard() {
   useEffect(() => {
     sessionStorage.setItem('dashboard_categories', JSON.stringify(selectedCategories));
   }, [selectedCategories]);
+  useEffect(() => {
+    sessionStorage.setItem('dashboard_canonical_categories', JSON.stringify(selectedCanonicalCategories));
+  }, [selectedCanonicalCategories]);
+
+  useEffect(() => {
+    let cancelled = false;
+    analyticsAPI.getCategories()
+      .then((res) => {
+        if (!cancelled) setCategoryMetadata(res?.data || res || null);
+      })
+      .catch(() => {
+        if (!cancelled) setCategoryMetadata(null);
+      });
+    return () => { cancelled = true; };
+  }, [currentWorkspace?.id]);
 
   // Helper function to format date as YYYY-MM-DD in local timezone
   const formatDateLocal = useCallback((date) => {
@@ -773,6 +796,27 @@ export default function Dashboard() {
     : viewMode === 'monthly'
       ? (monthlyData?.technicians || dashboardData?.technicians || [])
       : (dashboardData?.technicians || []);
+  const responseCategoryMode = viewMode === 'weekly'
+    ? weeklyData?.categoryMode
+    : viewMode === 'monthly'
+      ? monthlyData?.categoryMode
+      : dashboardData?.categoryMode;
+  const categoryMode = responseCategoryMode || categoryMetadata?.categoryMode || (showSummitWorkshop ? 'canonical' : 'legacy');
+  const isCanonicalCategoryMode = categoryMode === 'canonical';
+  const activeCategoryFilter = isCanonicalCategoryMode
+    ? {
+      mode: 'canonical',
+      categoryIds: selectedCanonicalCategories.categoryIds || [],
+      subcategoryIds: selectedCanonicalCategories.subcategoryIds || [],
+      legacyCategories: [],
+    }
+    : {
+      mode: 'legacy',
+      categoryIds: [],
+      subcategoryIds: [],
+      legacyCategories: selectedCategories,
+    };
+  const hasActiveCategoryFilter = hasCategoryFilters(activeCategoryFilter);
 
   // Service account names for identifying app-made assignments (from API response)
   const serviceAccountNames = (
@@ -909,7 +953,7 @@ export default function Dashboard() {
   const categorySet = new Set();
   visibleTechnicians.forEach(tech => {
     getTechTickets(tech).forEach(ticket => {
-      const categoryLabel = getTicketCategoryLabel(ticket);
+      const categoryLabel = getTicketCategoryLabel(ticket, categoryMode);
       if (categoryLabel) {
         categorySet.add(categoryLabel);
       }
@@ -918,11 +962,11 @@ export default function Dashboard() {
   const allCategories = Array.from(categorySet).sort();
 
   // Apply search and category filters using centralized filtering utility
-  const filteredTechnicians = (searchTerm || selectedCategories.length > 0)
+  const filteredTechnicians = (searchTerm || hasActiveCategoryFilter)
     ? visibleTechnicians.map(tech => {
       // Filter tickets using centralized filterTickets function
       const techTickets = getTechTickets(tech);
-      const matchingTickets = filterTickets(techTickets, searchTerm, selectedCategories);
+      const matchingTickets = filterTickets(techTickets, searchTerm, activeCategoryFilter, { categoryMode });
 
       // Recalculate stats based on filtered tickets
       const recalculatedStats = recalculateTechStats(tech, matchingTickets);
@@ -954,12 +998,12 @@ export default function Dashboard() {
     : visibleTechnicians;
 
   // Calculate results count
-  const searchResultsCount = searchTerm || selectedCategories.length > 0
+  const searchResultsCount = searchTerm || hasActiveCategoryFilter
     ? filteredTechnicians.reduce((sum, tech) => sum + (tech.matchingTicketCount || getTechTickets(tech).length || 0), 0)
     : 0;
 
   // Recalculate stats based on filtered tickets (if filters are active)
-  const displayStats = (searchTerm || selectedCategories.length > 0) ? (() => {
+  const displayStats = (searchTerm || hasActiveCategoryFilter) ? (() => {
     // Collect all filtered tickets
     const allFilteredTickets = filteredTechnicians.flatMap(tech => getTechTickets(tech));
 
@@ -1850,7 +1894,7 @@ export default function Dashboard() {
                 />
                 <h2 className="text-base sm:text-lg font-semibold">Team</h2>
                 <span className="text-xs text-gray-500">
-                  ({searchTerm || selectedCategories.length > 0 ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
+                  ({searchTerm || hasActiveCategoryFilter ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
                 </span>
               </div>
               <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-semibold text-gray-500 shadow-sm sm:hidden">
@@ -1923,22 +1967,33 @@ export default function Dashboard() {
               value={searchTerm}
               onChange={setSearchTerm}
               placeholder="Search tickets..."
-              resultsCount={searchTerm || selectedCategories.length > 0 ? searchResultsCount : null}
+              resultsCount={searchTerm || hasActiveCategoryFilter ? searchResultsCount : null}
               className="w-full sm:flex-1 sm:min-w-[200px] sm:max-w-md sm:ml-auto"
             />
-            <CategoryFilter
-              categories={allCategories}
-              selected={selectedCategories}
-              onChange={setSelectedCategories}
-              placeholder="Category"
-              className="w-full sm:w-auto"
-            />
-            {(searchTerm || selectedCategories.length > 0 || (viewMode === 'monthly' && monthlyData)) && (
+            {isCanonicalCategoryMode ? (
+              <CanonicalCategoryFilter
+                categoryTree={categoryMetadata?.categoryTree || []}
+                selectedCategoryIds={selectedCanonicalCategories.categoryIds || []}
+                selectedSubcategoryIds={selectedCanonicalCategories.subcategoryIds || []}
+                onChange={setSelectedCanonicalCategories}
+                className="w-full sm:w-auto"
+              />
+            ) : (
+              <CategoryFilter
+                categories={allCategories}
+                selected={selectedCategories}
+                onChange={setSelectedCategories}
+                placeholder="Category"
+                className="w-full sm:w-auto"
+              />
+            )}
+            {(searchTerm || hasActiveCategoryFilter || (viewMode === 'monthly' && monthlyData)) && (
               <button
                 type="button"
                 onClick={() => {
                   setSearchTerm('');
                   setSelectedCategories([]);
+                  setSelectedCanonicalCategories({ categoryIds: [], subcategoryIds: [] });
                 }}
                 className="px-2.5 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap flex-shrink-0"
                 title="Clear all filters"
@@ -1991,7 +2046,7 @@ export default function Dashboard() {
                 onMonthChange={setSelectedMonth}
                 technicians={visibleTechnicians}
                 searchTerm={searchTerm}
-                selectedCategories={selectedCategories}
+                selectedCategories={activeCategoryFilter}
                 onClearSelections={() => {
                   // This will be handled by the useEffect in MonthlyCalendar
                 }}
@@ -2013,16 +2068,18 @@ export default function Dashboard() {
                   className="w-16 h-16 mx-auto mb-3 opacity-70"
                 />
                 <p className="text-gray-700 font-medium">
-                  {searchTerm || selectedCategories.length > 0 ? 'No matching tickets found' : 'No technicians found'}
+                  {searchTerm || hasActiveCategoryFilter ? 'No matching tickets found' : 'No technicians found'}
                 </p>
                 <p className="text-sm text-gray-500 mt-2">
-                  {searchTerm || selectedCategories.length > 0
-                    ? 'Try adjusting your search or filters'
+                  {searchTerm || hasActiveCategoryFilter
+                    ? hasActiveCategoryFilter && !searchTerm
+                      ? 'This can be normal for exact subcategories that do not have tickets in the selected date range.'
+                      : 'Try adjusting your search or filters'
                     : technicians.length > 0
                       ? 'All technicians are hidden. Click "Show Hidden" to restore them.'
                       : 'Sync with FreshService to see technicians'}
                 </p>
-                {(searchTerm || selectedCategories.length > 0) && (
+                {(searchTerm || hasActiveCategoryFilter) && (
                   <div className="flex gap-2 justify-center mt-4">
                     {searchTerm && (
                       <button
@@ -2032,9 +2089,12 @@ export default function Dashboard() {
                         Clear Search
                       </button>
                     )}
-                    {selectedCategories.length > 0 && (
+                    {hasActiveCategoryFilter && (
                       <button
-                        onClick={() => setSelectedCategories([])}
+                        onClick={() => {
+                          setSelectedCategories([]);
+                          setSelectedCanonicalCategories({ categoryIds: [], subcategoryIds: [] });
+                        }}
                         className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
                       >
                         Clear Filters
@@ -2116,6 +2176,7 @@ export default function Dashboard() {
                             viewMode={viewMode}
                             searchTerm={searchTerm}
                             selectedCategories={selectedCategories}
+                            canonicalCategoryFilter={selectedCanonicalCategories}
                             forceExpand={expandAllOverride}
                           />
                         </div>
@@ -2140,6 +2201,7 @@ export default function Dashboard() {
                             viewMode={viewMode}
                             searchTerm={searchTerm}
                             selectedCategories={selectedCategories}
+                            canonicalCategoryFilter={selectedCanonicalCategories}
                           />
                         </div>
                       ))}
@@ -2166,6 +2228,7 @@ export default function Dashboard() {
                           viewMode={viewMode}
                           searchTerm={searchTerm}
                           selectedCategories={selectedCategories}
+                          canonicalCategoryFilter={selectedCanonicalCategories}
                         />
                       </div>
                     ))}

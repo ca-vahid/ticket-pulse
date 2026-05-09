@@ -1,5 +1,6 @@
 import { ExternalLink, CheckCircle2, Search, X } from 'lucide-react';
 import CategoryFilter from '../CategoryFilter';
+import CanonicalCategoryFilter from '../CanonicalCategoryFilter';
 import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from './constants';
 import { formatResolutionTime, calculatePickupTime, calculateAgeSinceCreation } from './utils';
@@ -18,6 +19,10 @@ function SearchBar({
   availableCategories,
   selectedCategories,
   onCategoryChange,
+  categoryMode = 'legacy',
+  categoryTree = [],
+  canonicalCategoryFilter = { categoryIds: [], subcategoryIds: [] },
+  onCanonicalCategoryChange,
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg p-1.5">
@@ -53,7 +58,14 @@ function SearchBar({
       )}
 
       {/* Category filter — right-aligned, only render when there are categories to filter on */}
-      {availableCategories.length > 0 && (
+      {categoryMode === 'canonical' ? (
+        <CanonicalCategoryFilter
+          categoryTree={categoryTree}
+          selectedCategoryIds={canonicalCategoryFilter.categoryIds || []}
+          selectedSubcategoryIds={canonicalCategoryFilter.subcategoryIds || []}
+          onChange={onCanonicalCategoryChange}
+        />
+      ) : availableCategories.length > 0 && (
         <CategoryFilter
           categories={availableCategories}
           selected={selectedCategories}
@@ -318,6 +330,10 @@ export default function TicketBoardTab({
   availableCategories,
   selectedCategories,
   onCategoryChange,
+  categoryMode = 'legacy',
+  categoryTree = [],
+  canonicalCategoryFilter,
+  onCanonicalCategoryChange,
 }) {
   return (
     <div className="space-y-3">
@@ -329,6 +345,10 @@ export default function TicketBoardTab({
         availableCategories={availableCategories}
         selectedCategories={selectedCategories}
         onCategoryChange={onCategoryChange}
+        categoryMode={categoryMode}
+        categoryTree={categoryTree}
+        canonicalCategoryFilter={canonicalCategoryFilter}
+        onCanonicalCategoryChange={onCanonicalCategoryChange}
       />
 
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">

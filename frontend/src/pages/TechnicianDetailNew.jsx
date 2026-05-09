@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
-import { dashboardAPI } from '../services/api';
-import { filterTickets, getAvailableCategories } from '../utils/ticketFilter';
+import { analyticsAPI, dashboardAPI } from '../services/api';
+import { filterTickets, getAvailableCategories, hasCategoryFilters } from '../utils/ticketFilter';
 import TechDetailHeader from '../components/tech-detail/TechDetailHeader';
 import MetricsRibbon from '../components/tech-detail/MetricsRibbon';
 import OverviewTab from '../components/tech-detail/OverviewTab';
@@ -68,6 +68,13 @@ export default function TechnicianDetailNew() {
     const stored = sessionStorage.getItem('techDetailNew_categories');
     return stored ? JSON.parse(stored) : [];
   });
+  const [selectedCanonicalCategories, setSelectedCanonicalCategories] = useState(() => {
+    const nav = location.state?.canonicalCategoryFilter;
+    if (nav) return nav;
+    const stored = sessionStorage.getItem('techDetailNew_canonical_categories');
+    return stored ? JSON.parse(stored) : { categoryIds: [], subcategoryIds: [] };
+  });
+  const [categoryMetadata, setCategoryMetadata] = useState(null);
 
   // Parse URL query params on mount — used as a deep-link bootstrap (e.g. when
   // the user clicks the Rej badge on the dashboard, which supplies
@@ -201,6 +208,19 @@ export default function TechnicianDetailNew() {
   // Persist search/filter
   useEffect(() => { sessionStorage.setItem('techDetailNew_search', searchTerm); }, [searchTerm]);
   useEffect(() => { sessionStorage.setItem('techDetailNew_categories', JSON.stringify(selectedCategories)); }, [selectedCategories]);
+  useEffect(() => { sessionStorage.setItem('techDetailNew_canonical_categories', JSON.stringify(selectedCanonicalCategories)); }, [selectedCanonicalCategories]);
+
+  useEffect(() => {
+    let cancelled = false;
+    analyticsAPI.getCategories()
+      .then((res) => {
+        if (!cancelled) setCategoryMetadata(res?.data || res || null);
+      })
+      .catch(() => {
+        if (!cancelled) setCategoryMetadata(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Navigation handlers ────────────────────────────────────────────────────
 
@@ -212,6 +232,7 @@ export default function TechnicianDetailNew() {
         returnWeek: selectedWeek ? formatDateLocal(selectedWeek) : null,
         searchTerm,
         selectedCategories,
+        canonicalCategoryFilter: selectedCanonicalCategories,
       },
     });
   };
@@ -356,14 +377,30 @@ export default function TechnicianDetailNew() {
     : (technician.closedTicketsOnDate || []);
   const allOpenTickets    = technician.openTickets || [];
 
-  const isFiltering = searchTerm || selectedCategories.length > 0;
+  const categoryMode = technician.categoryMode || categoryMetadata?.categoryMode || 'legacy';
+  const isCanonicalCategoryMode = categoryMode === 'canonical';
+  const activeCategoryFilter = isCanonicalCategoryMode
+    ? {
+      mode: 'canonical',
+      categoryIds: selectedCanonicalCategories.categoryIds || [],
+      subcategoryIds: selectedCanonicalCategories.subcategoryIds || [],
+      legacyCategories: [],
+    }
+    : {
+      mode: 'legacy',
+      legacyCategories: selectedCategories,
+      categoryIds: [],
+      subcategoryIds: [],
+    };
+  const hasActiveCategoryFilter = hasCategoryFilters(activeCategoryFilter);
+  const isFiltering = searchTerm || hasActiveCategoryFilter;
 
   let openCount, pendingCount, selfPickedCount, assignedCount, closedCount;
   if (isFiltering) {
-    const fOpen     = filterTickets(allOpenTickets, searchTerm, selectedCategories);
-    const fSelf     = filterTickets(selfPickedTickets, searchTerm, selectedCategories);
-    const fAssigned = filterTickets(assignedTickets, searchTerm, selectedCategories);
-    const fClosed   = filterTickets(closedTickets, searchTerm, selectedCategories);
+    const fOpen     = filterTickets(allOpenTickets, searchTerm, activeCategoryFilter, { categoryMode });
+    const fSelf     = filterTickets(selfPickedTickets, searchTerm, activeCategoryFilter, { categoryMode });
+    const fAssigned = filterTickets(assignedTickets, searchTerm, activeCategoryFilter, { categoryMode });
+    const fClosed   = filterTickets(closedTickets, searchTerm, activeCategoryFilter, { categoryMode });
     openCount      = fOpen.filter((t) => t.status === 'Open').length;
     pendingCount   = fOpen.filter((t) => t.status === 'Pending').length;
     selfPickedCount = fSelf.length;
@@ -398,12 +435,12 @@ export default function TechnicianDetailNew() {
     assigned: assignedTickets,
     closed:   closedTickets,
   };
-  const displayedTickets = filterTickets(boardSource[ticketView] || [], searchTerm, selectedCategories);
+  const displayedTickets = filterTickets(boardSource[ticketView] || [], searchTerm, activeCategoryFilter, { categoryMode });
 
   // All tickets for search category extraction + export
   const allTickets = [...selfPickedTickets, ...assignedTickets, ...closedTickets, ...allOpenTickets];
-  const availableCategories = getAvailableCategories(allTickets);
-  const searchResultsCount = isFiltering ? filterTickets(allTickets, searchTerm, selectedCategories).length : 0;
+  const availableCategories = getAvailableCategories(allTickets, categoryMode);
+  const searchResultsCount = isFiltering ? filterTickets(allTickets, searchTerm, activeCategoryFilter, { categoryMode }).length : 0;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -572,6 +609,10 @@ export default function TechnicianDetailNew() {
                   availableCategories={availableCategories}
                   selectedCategories={selectedCategories}
                   onCategoryChange={setSelectedCategories}
+                  categoryMode={categoryMode}
+                  categoryTree={categoryMetadata?.categoryTree || []}
+                  canonicalCategoryFilter={selectedCanonicalCategories}
+                  onCanonicalCategoryChange={setSelectedCanonicalCategories}
                 />
               </div>
             )}

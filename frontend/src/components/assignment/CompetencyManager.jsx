@@ -6,9 +6,9 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Plus, Trash2, Loader2, Brain, CheckCircle, XCircle, RotateCcw,
-  ChevronDown, ChevronRight, Wrench, AlertTriangle,
+  ChevronDown, ChevronLeft, ChevronRight, Wrench, AlertTriangle,
   Search, Clock, Save, Upload, FileText, X, MapPin, History,
-  Sparkles, ArrowUpDown, SlidersHorizontal, CalendarDays,
+  Sparkles, ArrowUpDown, ArrowUpRight, ArrowDownRight, SlidersHorizontal, CalendarDays,
   Folder, GitMerge, CheckSquare, Square, HelpCircle, Database,
   ShieldCheck, Gauge, Zap,
 } from 'lucide-react';
@@ -46,6 +46,12 @@ const RECLASSIFICATION_BATCH_OPTIONS = [25, 50, 100, 200, 250, 500, 1000, 1500, 
 const SERVER_RECLASSIFICATION_BATCH_SIZE = 500;
 const APPLY_PREVIEW_CHUNK_SIZE = 75;
 const DISPLAY_RECLASSIFICATION_RESULTS_LIMIT = 500;
+const MATRIX_CATEGORY_COL_WIDTH = 280;
+const MATRIX_TECH_COL_WIDTH = 74;
+
+function getTechnicianInitials(name = '') {
+  return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+}
 
 function mergeReclassificationResults(existing = [], incoming = []) {
   const byTicketId = new Map();
@@ -1702,7 +1708,16 @@ function MatrixTab({ onAnalyze }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedTechId, setSelectedTechId] = useState(null);
+  const [focusedTechId, setFocusedTechId] = useState(null);
+  const [hoveredTechId, setHoveredTechId] = useState(null);
+  const [showFocusedOnly, setShowFocusedOnly] = useState(false);
+  const [categorySearch, setCategorySearch] = useState('');
+  const [mappedOnly, setMappedOnly] = useState(false);
+  const [compactMode, setCompactMode] = useState(false);
+  const [matrixScrollLeft, setMatrixScrollLeft] = useState(0);
+  const [matrixMaxScrollLeft, setMatrixMaxScrollLeft] = useState(0);
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState(() => new Set());
+  const matrixScrollRef = useRef(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -1732,15 +1747,73 @@ function MatrixTab({ onAnalyze }) {
   }
 
   const selectedTech = technicians.find((t) => t.id === selectedTechId);
+  const focusedTech = technicians.find((t) => t.id === focusedTechId);
+  const activeColumnTechId = focusedTechId || hoveredTechId;
+  const visibleTechnicians = showFocusedOnly && focusedTech ? [focusedTech] : technicians;
   const topLevelCategories = categories.filter((category) => !category.parentId);
   const tree = categoryTree.length ? categoryTree : topLevelCategories;
+  const normalizedSearch = categorySearch.trim().toLowerCase();
+  const hasVisibleMapping = (categoryId) => visibleTechnicians.some((tech) => Boolean(mappingMap[tech.id]?.[categoryId]));
   const displayCategories = tree.flatMap((category) => {
-    const rows = [{ ...category, depth: 0, childCount: category.subcategories?.length || 0 }];
-    if (!collapsedCategoryIds.has(category.id)) {
-      rows.push(...(category.subcategories || []).map((subcategory) => ({ ...subcategory, depth: 1, parentName: category.name })));
+    const subcategories = category.subcategories || [];
+    const categoryText = `${category.name || ''} ${category.description || ''}`.toLowerCase();
+    const parentMatchesSearch = !normalizedSearch || categoryText.includes(normalizedSearch);
+    const childMatches = subcategories.filter((subcategory) => {
+      const subcategoryText = `${subcategory.name || ''} ${subcategory.description || ''} ${category.name || ''}`.toLowerCase();
+      const matchesSearch = !normalizedSearch || parentMatchesSearch || subcategoryText.includes(normalizedSearch);
+      const matchesMapping = !mappedOnly || hasVisibleMapping(subcategory.id);
+      return matchesSearch && matchesMapping;
+    });
+    const parentMatchesMapping = !mappedOnly || hasVisibleMapping(category.id) || childMatches.length > 0;
+    if (!parentMatchesSearch && childMatches.length === 0) return [];
+    if (!parentMatchesMapping) return [];
+
+    const rows = [{ ...category, depth: 0, childCount: subcategories.length, visibleChildCount: childMatches.length || subcategories.length }];
+    const forceExpandedForFilter = Boolean(normalizedSearch || mappedOnly);
+    if (forceExpandedForFilter || !collapsedCategoryIds.has(category.id)) {
+      rows.push(...childMatches.map((subcategory) => ({ ...subcategory, depth: 1, parentName: category.name })));
     }
     return rows;
   });
+  const matrixMinWidth = MATRIX_CATEGORY_COL_WIDTH + (visibleTechnicians.length * MATRIX_TECH_COL_WIDTH);
+  const canScrollMatrixLeft = matrixScrollLeft > 2;
+  const canScrollMatrixRight = matrixScrollLeft < matrixMaxScrollLeft - 2;
+
+  const updateMatrixScrollMetrics = useCallback(() => {
+    const node = matrixScrollRef.current;
+    if (!node) return;
+
+    const nextMaxScrollLeft = Math.max(0, node.scrollWidth - node.clientWidth);
+    setMatrixMaxScrollLeft(nextMaxScrollLeft);
+
+    if (node.scrollLeft > nextMaxScrollLeft) {
+      node.scrollLeft = nextMaxScrollLeft;
+      setMatrixScrollLeft(nextMaxScrollLeft);
+    } else {
+      setMatrixScrollLeft(node.scrollLeft);
+    }
+  }, []);
+
+  useEffect(() => {
+    updateMatrixScrollMetrics();
+    window.addEventListener('resize', updateMatrixScrollMetrics);
+    return () => window.removeEventListener('resize', updateMatrixScrollMetrics);
+  }, [matrixMinWidth, updateMatrixScrollMetrics]);
+
+  const handleMatrixScroll = (event) => {
+    const node = event.currentTarget;
+    setMatrixScrollLeft(node.scrollLeft);
+    setMatrixMaxScrollLeft(Math.max(0, node.scrollWidth - node.clientWidth));
+  };
+
+  const scrollMatrixBy = (direction) => {
+    const node = matrixScrollRef.current;
+    if (!node) return;
+    node.scrollBy({
+      left: direction * MATRIX_TECH_COL_WIDTH * 4,
+      behavior: 'smooth',
+    });
+  };
 
   const toggleCategoryCollapsed = (categoryId) => {
     setCollapsedCategoryIds((prev) => {
@@ -1770,105 +1843,285 @@ function MatrixTab({ onAnalyze }) {
       )}
 
       {categories.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-          <div className="text-xs text-slate-500">
-            Showing <span className="font-semibold text-slate-700">{displayCategories.length}</span> rows across <span className="font-semibold text-slate-700">{tree.length}</span> top categories and <span className="font-semibold text-slate-700">{categories.length - tree.length}</span> subcategories.
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-slate-500">
+              Showing <span className="font-semibold text-slate-700">{displayCategories.length}</span> rows across <span className="font-semibold text-slate-700">{tree.length}</span> top categories and <span className="font-semibold text-slate-700">{categories.length - tree.length}</span> subcategories.
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {focusedTech && (
+                <>
+                  <button type="button" onClick={() => setSelectedTechId(focusedTech.id)} className="rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1.5 text-xs font-semibold text-purple-700 transition-colors hover:bg-purple-100">Edit</button>
+                  <button type="button" onClick={() => { setFocusedTechId(null); setShowFocusedOnly(false); }} className="rounded-lg border border-purple-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-purple-700 transition-colors hover:bg-purple-50">Clear focus</button>
+                </>
+              )}
+              <button type="button" onClick={expandAllCategories} className="rounded-lg border px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50">Expand all</button>
+              <button type="button" onClick={collapseAllCategories} className="rounded-lg border px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50">Collapse all</button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={expandAllCategories} className="rounded-lg border px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Expand all</button>
-            <button type="button" onClick={collapseAllCategories} className="rounded-lg border px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Collapse all</button>
+
+          <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_220px_auto_auto_auto]">
+            <label className="relative block">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={categorySearch}
+                onChange={(event) => setCategorySearch(event.target.value)}
+                placeholder="Search categories or subcategories"
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-9 text-sm outline-none transition-colors focus:border-purple-300 focus:bg-white focus:ring-2 focus:ring-purple-100"
+              />
+              {categorySearch && (
+                <button type="button" onClick={() => setCategorySearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700" title="Clear search">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </label>
+            <select
+              value={focusedTechId || ''}
+              onChange={(event) => setFocusedTechId(event.target.value ? Number(event.target.value) : null)}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-purple-300 focus:ring-2 focus:ring-purple-100"
+              title="Highlight a technician column"
+            >
+              <option value="">Focus technician</option>
+              {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+            </select>
+            <button
+              type="button"
+              disabled={!focusedTech}
+              onClick={() => setShowFocusedOnly((value) => !value)}
+              className={`h-10 rounded-lg border px-3 text-xs font-semibold transition-all ${showFocusedOnly ? 'border-purple-300 bg-purple-50 text-purple-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'} disabled:cursor-not-allowed disabled:opacity-40`}
+              title="Show only the focused technician column"
+            >
+              {showFocusedOnly ? 'Showing one tech' : 'Show one tech'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMappedOnly((value) => !value)}
+              className={`h-10 rounded-lg border px-3 text-xs font-semibold transition-all ${mappedOnly ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+              title="Temporarily hide rows with no mapping in the visible technician columns"
+            >
+              {mappedOnly ? 'Mapped rows only' : 'All rows'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCompactMode((value) => !value)}
+              className={`h-10 rounded-lg border px-3 text-xs font-semibold transition-all ${compactMode ? 'border-slate-400 bg-slate-100 text-slate-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+              title="Toggle a denser matrix row height"
+            >
+              {compactMode ? 'Compact' : 'Comfortable'}
+            </button>
           </div>
         </div>
       )}
 
       {/* Swapped-axis matrix: categories as rows, technicians as columns */}
       {technicians.length > 0 && (
-        <div className="overflow-x-auto border rounded-lg">
-          <table className="text-sm border-collapse">
-            <thead className="sticky top-0 z-30 bg-slate-50 shadow-sm">
-              <tr>
-                <th className="text-left px-3 py-3 font-medium text-slate-600 sticky left-0 top-0 bg-slate-50 z-40 min-w-[240px]">Category / Subcategory</th>
-                {technicians.map((tech) => {
-                  const initials = tech.name.split(' ').map((n) => n[0]).join('').slice(0, 2);
-                  const isSelected = selectedTechId === tech.id;
-                  return (
-                    <th key={tech.id} className={`sticky top-0 z-30 px-2 py-2 min-w-[66px] text-center cursor-pointer transition-colors ${isSelected ? 'bg-purple-100' : 'bg-slate-50 hover:bg-slate-100'}`} onClick={() => setSelectedTechId(isSelected ? null : tech.id)} title={`${tech.name} — click to edit`}>
-                      <div className="flex flex-col items-center gap-1">
-                        {tech.photoUrl ? (
-                          <img src={tech.photoUrl} alt="" className={`w-8 h-8 rounded-full object-cover ${isSelected ? 'ring-2 ring-purple-500 shadow-md' : ''}`} />
-                        ) : (
-                          <span className={`w-8 h-8 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold flex items-center justify-center ${isSelected ? 'ring-2 ring-purple-500 shadow-md' : ''}`}>{initials}</span>
-                        )}
-                        <span className="text-[9px] text-slate-500 truncate max-w-[52px] block leading-tight font-medium">{tech.name.split(' ')[0]}</span>
-                      </div>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {categories.length === 0 && (
-                <tr>
-                  <td colSpan={technicians.length + 1} className="px-4 py-8 text-center text-sm text-slate-400">
-                    No categories yet. Add categories below to start mapping technicians, or import the summit draft.
-                  </td>
-                </tr>
-              )}
-              {displayCategories.map((cat) => (
-                <tr key={cat.id} className={`border-t hover:bg-slate-50 ${cat.depth === 0 ? 'bg-slate-100/70' : ''}`}>
-                  <td className={`px-3 sticky left-0 z-10 text-slate-700 ${cat.depth === 0 ? 'bg-slate-100/95 py-3 text-sm font-bold text-slate-800' : 'bg-white py-2 text-xs font-medium'}`} title={cat.description || ''}>
-                    <div className="flex items-center gap-2">
-                      {cat.depth === 0 && (
-                        <button type="button" onClick={() => toggleCategoryCollapsed(cat.id)} className="rounded p-0.5 text-slate-500 hover:bg-white hover:text-slate-800" title={collapsedCategoryIds.has(cat.id) ? 'Expand category' : 'Collapse category'}>
-                          {collapsedCategoryIds.has(cat.id) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                        </button>
-                      )}
-                      {cat.depth === 1 && <span className="ml-6 h-px w-5 bg-slate-300" />}
-                      <span className={cat.depth === 0 ? 'tracking-normal' : 'text-slate-600'}>{cat.name}</span>
-                      {cat.depth === 0 && cat.childCount > 0 && <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">{cat.childCount}</span>}
-                    </div>
-                  </td>
-                  {technicians.map((tech) => {
-                    const level = mappingMap[tech.id]?.[cat.id] || '';
-                    const levelInfo = PROFICIENCY_LEVELS.find((l) => l.value === level);
-                    const CYCLE = ['', 'basic', 'intermediate', 'advanced', 'expert'];
-                    const handleCycle = (e) => {
-                      e.stopPropagation();
-                      const currentIdx = CYCLE.indexOf(level);
-                      const nextLevel = CYCLE[(currentIdx + 1) % CYCLE.length];
-
-                      setMappings((prev) => {
-                        const filtered = prev.filter((m) => !(m.technicianId === tech.id && m.competencyCategoryId === cat.id));
-                        if (nextLevel) {
-                          filtered.push({ technicianId: tech.id, competencyCategoryId: cat.id, proficiencyLevel: nextLevel });
-                        }
-                        return filtered;
-                      });
-
-                      const techMappings = { ...(mappingMap[tech.id] || {}) };
-                      if (nextLevel === '') delete techMappings[cat.id];
-                      else techMappings[cat.id] = nextLevel;
-                      const arr = Object.entries(techMappings).map(([catId, lv]) => ({ competencyCategoryId: parseInt(catId), proficiencyLevel: lv }));
-                      assignmentAPI.updateTechCompetencies(tech.id, arr).catch(() => fetchData());
-                    };
+        <div className="space-y-2">
+          <div className="sticky top-[57px] z-50 overflow-hidden rounded-xl border border-slate-200 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
+            <div className="flex">
+              <div
+                className="flex shrink-0 items-center justify-between gap-3 border-r border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700"
+                style={{ width: MATRIX_CATEGORY_COL_WIDTH }}
+              >
+                <span>Category / Subcategory</span>
+                <span className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => scrollMatrixBy(-1)}
+                    disabled={!canScrollMatrixLeft}
+                    className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
+                    aria-label="Scroll technicians left"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollMatrixBy(1)}
+                    disabled={!canScrollMatrixRight}
+                    className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
+                    aria-label="Scroll technicians right"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </span>
+              </div>
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <div
+                  className="flex transition-transform duration-100 ease-out"
+                  style={{ transform: `translateX(-${matrixScrollLeft}px)`, width: visibleTechnicians.length * MATRIX_TECH_COL_WIDTH }}
+                >
+                  {visibleTechnicians.map((tech) => {
+                    const initials = getTechnicianInitials(tech.name);
+                    const isFocused = focusedTechId === tech.id;
+                    const isHovered = hoveredTechId === tech.id && !focusedTechId;
                     return (
-                      <td key={tech.id} className="text-center px-1 py-1">
-                        <button
-                          onClick={handleCycle}
-                          className={`w-7 h-7 rounded-lg text-[10px] font-bold leading-7 text-center transition-all hover:scale-110 hover:shadow-sm ${
-                            levelInfo ? levelInfo.color : 'text-slate-200 hover:bg-slate-100'
-                          }`}
-                          title={`${cat.depth === 1 ? `${cat.parentName} > ` : ''}${cat.name} × ${tech.name}: ${level || 'not set'} (click to cycle)`}
-                        >
-                          {levelInfo ? levelInfo.num : '·'}
-                        </button>
-                      </td>
+                      <button
+                        type="button"
+                        key={tech.id}
+                        onClick={() => {
+                          setFocusedTechId(isFocused ? null : tech.id);
+                          if (isFocused) setShowFocusedOnly(false);
+                        }}
+                        onDoubleClick={() => setSelectedTechId(tech.id)}
+                        onMouseEnter={() => setHoveredTechId(tech.id)}
+                        onMouseLeave={() => setHoveredTechId(null)}
+                        className={`relative flex h-[74px] shrink-0 flex-col items-center justify-center gap-1 border-r px-1 text-center transition-all duration-150 ${
+                          isFocused
+                            ? 'border-purple-200 bg-purple-100 text-purple-800 shadow-[inset_0_-3px_0_rgba(147,51,234,0.8)]'
+                            : isHovered
+                              ? 'border-blue-200 bg-blue-50 text-blue-800 shadow-[inset_0_-3px_0_rgba(37,99,235,0.45)]'
+                              : 'border-slate-100 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                        style={{ width: MATRIX_TECH_COL_WIDTH }}
+                      >
+                        {tech.photoUrl ? (
+                          <img src={tech.photoUrl} alt="" className={`h-9 w-9 rounded-full object-cover transition-all ${isFocused ? 'scale-105 ring-2 ring-purple-500 shadow-md' : isHovered ? 'ring-2 ring-blue-400 shadow-sm' : ''}`} />
+                        ) : (
+                          <span className={`flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-[10px] font-bold text-gray-500 transition-all ${isFocused ? 'scale-105 ring-2 ring-purple-500 shadow-md' : isHovered ? 'ring-2 ring-blue-400 shadow-sm' : ''}`}>{initials}</span>
+                        )}
+                        <span className={`block max-w-[58px] truncate text-[10px] leading-tight ${isFocused || isHovered ? 'font-extrabold' : 'font-semibold'}`}>{tech.name.split(' ')[0]}</span>
+                        {isFocused && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-purple-500 shadow-sm" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            ref={matrixScrollRef}
+            onScroll={handleMatrixScroll}
+            className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm [scrollbar-gutter:stable]"
+          >
+            <table className="text-sm border-collapse" style={{ minWidth: matrixMinWidth }}>
+              <thead className="sr-only">
+                <tr>
+                  <th
+                    className="sticky left-0 z-30 bg-slate-50 px-3 py-3 text-left font-medium text-slate-600"
+                    style={{ width: MATRIX_CATEGORY_COL_WIDTH, minWidth: MATRIX_CATEGORY_COL_WIDTH }}
+                  >
+                  Category / Subcategory
+                  </th>
+                  {visibleTechnicians.map((tech) => {
+                    const initials = getTechnicianInitials(tech.name);
+                    const isFocused = focusedTechId === tech.id;
+                    const isHovered = hoveredTechId === tech.id && !focusedTechId;
+                    return (
+                      <th
+                        key={tech.id}
+                        className={`cursor-pointer px-2 py-2 text-center transition-colors ${isFocused ? 'bg-purple-100' : isHovered ? 'bg-blue-50' : 'bg-slate-50 hover:bg-slate-100'}`}
+                        style={{ width: MATRIX_TECH_COL_WIDTH, minWidth: MATRIX_TECH_COL_WIDTH }}
+                        onClick={() => {
+                          setFocusedTechId(isFocused ? null : tech.id);
+                          if (isFocused) setShowFocusedOnly(false);
+                        }}
+                        onDoubleClick={() => setSelectedTechId(tech.id)}
+                      >
+                        <div className="flex flex-col items-center gap-1">
+                          {tech.photoUrl ? (
+                            <img src={tech.photoUrl} alt="" className={`w-8 h-8 rounded-full object-cover transition-all ${isFocused ? 'ring-2 ring-purple-500 shadow-md' : ''}`} />
+                          ) : (
+                            <span className={`w-8 h-8 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold flex items-center justify-center transition-all ${isFocused ? 'ring-2 ring-purple-500 shadow-md' : ''}`}>{initials}</span>
+                          )}
+                          <span className="text-[9px] text-slate-500 truncate max-w-[52px] block leading-tight font-medium">{tech.name.split(' ')[0]}</span>
+                        </div>
+                      </th>
                     );
                   })}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {categories.length === 0 && (
+                  <tr>
+                    <td colSpan={visibleTechnicians.length + 1} className="px-4 py-8 text-center text-sm text-slate-400">
+                    No categories yet. Add categories below to start mapping technicians, or import the summit draft.
+                    </td>
+                  </tr>
+                )}
+                {displayCategories.map((cat) => (
+                  <tr key={cat.id} className={`border-t transition-colors duration-200 hover:bg-slate-50 ${cat.depth === 0 ? 'bg-slate-100/70' : ''}`}>
+                    <td
+                      className={`sticky left-0 z-40 px-3 text-slate-700 shadow-[1px_0_0_rgba(226,232,240,0.8)] ${cat.depth === 0 ? 'bg-slate-100 py-3 text-[15px] font-extrabold text-slate-800' : `${compactMode ? 'py-1.5' : 'py-2'} bg-white text-xs font-medium`}`}
+                      style={{ width: MATRIX_CATEGORY_COL_WIDTH, minWidth: MATRIX_CATEGORY_COL_WIDTH }}
+                      title={cat.description || ''}
+                    >
+                      <div className="flex items-center gap-2">
+                        {cat.depth === 0 && (
+                          <button type="button" onClick={() => toggleCategoryCollapsed(cat.id)} className="rounded p-0.5 text-slate-500 transition-all duration-200 hover:bg-white hover:text-slate-800" title={collapsedCategoryIds.has(cat.id) ? 'Expand category' : 'Collapse category'}>
+                            {collapsedCategoryIds.has(cat.id) ? <ChevronRight className="h-4 w-4 transition-transform duration-200" /> : <ChevronDown className="h-4 w-4 transition-transform duration-200" />}
+                          </button>
+                        )}
+                        {cat.depth === 1 && <span className="ml-6 h-px w-5 bg-slate-300" />}
+                        <span className={cat.depth === 0 ? 'tracking-normal' : 'text-slate-600'}>{cat.name}</span>
+                        {cat.depth === 0 && cat.childCount > 0 && <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">{collapsedCategoryIds.has(cat.id) && !normalizedSearch && !mappedOnly ? `${cat.childCount} hidden` : cat.childCount}</span>}
+                      </div>
+                    </td>
+                    {visibleTechnicians.map((tech) => {
+                      const level = mappingMap[tech.id]?.[cat.id] || '';
+                      const levelInfo = PROFICIENCY_LEVELS.find((l) => l.value === level);
+                      const isFocused = focusedTechId === tech.id;
+                      const isHovered = hoveredTechId === tech.id && !focusedTechId;
+                      const isActiveColumn = activeColumnTechId === tech.id;
+                      const CYCLE = ['', 'basic', 'intermediate', 'advanced', 'expert'];
+                      const handleCycle = (e) => {
+                        e.stopPropagation();
+                        const currentIdx = CYCLE.indexOf(level);
+                        const nextLevel = CYCLE[(currentIdx + 1) % CYCLE.length];
+
+                        setMappings((prev) => {
+                          const filtered = prev.filter((m) => !(m.technicianId === tech.id && m.competencyCategoryId === cat.id));
+                          if (nextLevel) {
+                            filtered.push({ technicianId: tech.id, competencyCategoryId: cat.id, proficiencyLevel: nextLevel });
+                          }
+                          return filtered;
+                        });
+
+                        const techMappings = { ...(mappingMap[tech.id] || {}) };
+                        if (nextLevel === '') delete techMappings[cat.id];
+                        else techMappings[cat.id] = nextLevel;
+                        const arr = Object.entries(techMappings).map(([catId, lv]) => ({ competencyCategoryId: parseInt(catId), proficiencyLevel: lv }));
+                        assignmentAPI.updateTechCompetencies(tech.id, arr).catch(() => fetchData());
+                      };
+                      return (
+                        <td
+                          key={tech.id}
+                          className={`relative px-1 text-center ${compactMode ? 'py-0.5' : 'py-1'} transition-all duration-150 ${
+                            isFocused
+                              ? 'bg-purple-100/80 shadow-[inset_2px_0_0_rgba(147,51,234,0.35),inset_-2px_0_0_rgba(147,51,234,0.35)]'
+                              : isHovered
+                                ? 'bg-blue-50/80 shadow-[inset_1px_0_0_rgba(37,99,235,0.22),inset_-1px_0_0_rgba(37,99,235,0.22)]'
+                                : ''
+                          }`}
+                        >
+                          {isFocused && <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-purple-300/70" />}
+                          <button
+                            onClick={handleCycle}
+                            className={`relative z-10 h-7 w-7 rounded-lg text-center text-[10px] font-bold leading-7 transition-all hover:scale-110 hover:shadow-sm ${
+                              levelInfo
+                                ? `${levelInfo.color} ${isActiveColumn ? 'ring-2 ring-white shadow-md' : ''}`
+                                : isActiveColumn
+                                  ? 'bg-white/75 text-slate-300 ring-1 ring-purple-200'
+                                  : 'text-slate-200 hover:bg-slate-100'
+                            }`}
+                            title={`${cat.depth === 1 ? `${cat.parentName} > ` : ''}${cat.name} × ${tech.name}: ${level || 'not set'} (click to cycle)`}
+                          >
+                            {levelInfo ? levelInfo.num : '·'}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+                {displayCategories.length === 0 && categories.length > 0 && (
+                  <tr>
+                    <td colSpan={visibleTechnicians.length + 1} className="px-4 py-8 text-center text-sm text-slate-400">
+                    No rows match the current matrix filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -1880,7 +2133,7 @@ function MatrixTab({ onAnalyze }) {
           <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">2 = Comfortable</span>
           <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">3 = Advanced</span>
           <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800">4 = Expert / SME</span>
-          <span className="ml-2 text-slate-400">Click cell to cycle · Click avatar to edit</span>
+          <span className="ml-2 text-slate-400">Click cell to cycle · Click agent header to spotlight column · Double-click header to edit</span>
         </div>
       )}
 
@@ -2141,11 +2394,17 @@ function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew, work
 // ─── Diff View ───────────────────────────────────────────────────────────
 
 function CompetencyDiff({ before, after }) {
+  const [viewMode, setViewMode] = useState('audit');
+  const [rowFilter, setRowFilter] = useState('changed');
   const beforeMap = {};
   for (const c of before) beforeMap[c.categoryName] = c.proficiencyLevel;
   const afterMap = {};
   for (const c of after) afterMap[c.categoryName] = c.proficiencyLevel;
   const allCategories = [...new Set([...before.map((c) => c.categoryName), ...after.map((c) => c.categoryName)])].sort();
+  const levelRank = PROFICIENCY_LEVELS.reduce((acc, level, index) => {
+    acc[level.value] = index + 1;
+    return acc;
+  }, {});
 
   const rows = allCategories.map((name) => {
     const bLevel = beforeMap[name] || null;
@@ -2153,53 +2412,309 @@ function CompetencyDiff({ before, after }) {
     let changeType = 'unchanged';
     if (!bLevel && aLevel) changeType = 'added';
     else if (bLevel && !aLevel) changeType = 'removed';
-    else if (bLevel !== aLevel) changeType = 'changed';
-    return { name, bLevel, aLevel, changeType };
+    else if (bLevel !== aLevel) {
+      const beforeRank = levelRank[bLevel] || 0;
+      const afterRank = levelRank[aLevel] || 0;
+      changeType = afterRank > beforeRank ? 'increased' : afterRank < beforeRank ? 'decreased' : 'changed';
+    }
+    const beforeRank = levelRank[bLevel] || 0;
+    const afterRank = levelRank[aLevel] || 0;
+    return { name, bLevel, aLevel, changeType, beforeRank, afterRank, delta: afterRank - beforeRank };
   });
 
   const getLevelBadge = (level) => {
-    if (!level) return <span className="text-gray-300 text-xs">--</span>;
+    if (!level) return <span className="inline-flex min-w-[92px] justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-300">none</span>;
     const info = PROFICIENCY_LEVELS.find((l) => l.value === level);
-    return <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${info?.color || ''}`}>{level}</span>;
+    return <span className={`inline-flex min-w-[92px] justify-center rounded-md px-2 py-1 text-xs font-bold ${info?.color || ''}`}>{level}</span>;
   };
-  const ROW_STYLES = { added: 'bg-green-50', removed: 'bg-red-50 line-through opacity-60', changed: 'bg-yellow-50', unchanged: '' };
+  const ROW_STYLES = {
+    added: 'bg-emerald-50/85 border-emerald-100 hover:bg-emerald-100/70',
+    removed: 'bg-rose-50/85 border-rose-100 hover:bg-rose-100/70',
+    increased: 'bg-blue-50/85 border-blue-100 hover:bg-blue-100/70',
+    decreased: 'bg-orange-50/85 border-orange-100 hover:bg-orange-100/70',
+    changed: 'bg-violet-50/85 border-violet-100 hover:bg-violet-100/70',
+    unchanged: 'bg-white border-slate-100 hover:bg-slate-50',
+  };
   const CHANGE_LABELS = {
-    added: <span className="text-[10px] font-semibold text-green-700 bg-green-100 px-1 rounded">NEW</span>,
-    removed: <span className="text-[10px] font-semibold text-red-700 bg-red-100 px-1 rounded">REMOVED</span>,
-    changed: <span className="text-[10px] font-semibold text-yellow-700 bg-yellow-100 px-1 rounded">CHANGED</span>,
+    added: <span className="inline-flex min-w-[76px] justify-center rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-emerald-800">Added</span>,
+    removed: <span className="inline-flex min-w-[76px] justify-center rounded-full bg-rose-100 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-rose-800">Removed</span>,
+    increased: <span className="inline-flex min-w-[76px] justify-center rounded-full bg-blue-100 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-blue-800">Up</span>,
+    decreased: <span className="inline-flex min-w-[76px] justify-center rounded-full bg-orange-100 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-orange-800">Down</span>,
+    changed: <span className="inline-flex min-w-[76px] justify-center rounded-full bg-violet-100 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-violet-800">Changed</span>,
     unchanged: null,
   };
   const changedCount = rows.filter((r) => r.changeType !== 'unchanged').length;
+  const countByType = rows.reduce((acc, row) => {
+    acc[row.changeType] = (acc[row.changeType] || 0) + 1;
+    return acc;
+  }, {});
+  const filterOptions = [
+    { key: 'changed', label: 'Changed', count: changedCount },
+    { key: 'added', label: 'Added', count: countByType.added || 0 },
+    { key: 'increased', label: 'Up', count: countByType.increased || 0 },
+    { key: 'decreased', label: 'Down', count: countByType.decreased || 0 },
+    { key: 'removed', label: 'Removed', count: countByType.removed || 0 },
+    { key: 'unchanged', label: 'Same', count: countByType.unchanged || 0 },
+    { key: 'all', label: 'All', count: rows.length },
+  ];
+  const filteredRows = rows.filter((row) => {
+    if (rowFilter === 'all') return true;
+    if (rowFilter === 'changed') return row.changeType !== 'unchanged';
+    return row.changeType === rowFilter;
+  });
+  const groupedRows = [
+    {
+      key: 'added',
+      title: 'Added Skills',
+      subtitle: 'New mappings created by this run',
+      rows: rows.filter((row) => row.changeType === 'added'),
+      className: 'border-emerald-200 bg-emerald-50',
+      badgeClassName: 'bg-emerald-100 text-emerald-800',
+    },
+    {
+      key: 'increased',
+      title: 'Moved Up',
+      subtitle: 'Existing skills raised to a stronger level',
+      rows: rows.filter((row) => row.changeType === 'increased'),
+      className: 'border-blue-200 bg-blue-50',
+      badgeClassName: 'bg-blue-100 text-blue-800',
+    },
+    {
+      key: 'decreased',
+      title: 'Moved Down',
+      subtitle: 'Existing skills lowered by the run',
+      rows: rows.filter((row) => row.changeType === 'decreased'),
+      className: 'border-orange-200 bg-orange-50',
+      badgeClassName: 'bg-orange-100 text-orange-800',
+    },
+    {
+      key: 'removed',
+      title: 'Removed Skills',
+      subtitle: 'Mappings removed from the technician',
+      rows: rows.filter((row) => row.changeType === 'removed'),
+      className: 'border-rose-200 bg-rose-50',
+      badgeClassName: 'bg-rose-100 text-rose-800',
+    },
+  ];
+
+  const MOVE_STYLES = {
+    added: {
+      label: 'Added',
+      detail: 'new skill',
+      icon: Plus,
+      shell: 'border-emerald-200 bg-emerald-100 text-emerald-800 shadow-emerald-100',
+      line: 'from-emerald-400 to-emerald-600',
+      marker: 'bg-emerald-600',
+    },
+    increased: {
+      label: 'Up',
+      detail: 'increased',
+      icon: ArrowUpRight,
+      shell: 'border-blue-200 bg-blue-100 text-blue-800 shadow-blue-100',
+      line: 'from-blue-400 to-blue-600',
+      marker: 'bg-blue-600',
+    },
+    decreased: {
+      label: 'Down',
+      detail: 'lowered',
+      icon: ArrowDownRight,
+      shell: 'border-orange-200 bg-orange-100 text-orange-800 shadow-orange-100',
+      line: 'from-orange-400 to-orange-600',
+      marker: 'bg-orange-600',
+    },
+    removed: {
+      label: 'Removed',
+      detail: 'removed',
+      icon: X,
+      shell: 'border-rose-200 bg-rose-100 text-rose-800 shadow-rose-100',
+      line: 'from-rose-500 to-rose-700',
+      marker: 'bg-rose-700',
+    },
+    changed: {
+      label: 'Changed',
+      detail: 'changed',
+      icon: ArrowUpDown,
+      shell: 'border-violet-200 bg-violet-100 text-violet-800 shadow-violet-100',
+      line: 'from-violet-400 to-violet-600',
+      marker: 'bg-violet-600',
+    },
+    unchanged: {
+      label: 'Same',
+      detail: 'no change',
+      icon: null,
+      shell: 'border-slate-200 bg-white text-slate-400',
+      line: 'from-slate-200 to-slate-300',
+      marker: 'bg-slate-300',
+    },
+  };
+
+  const DirectionIcon = ({ row }) => {
+    const meta = MOVE_STYLES[row.changeType] || MOVE_STYLES.unchanged;
+    const Icon = meta.icon;
+    if (!Icon) return <span className="h-px w-8 rounded bg-slate-300" />;
+    return <Icon className="h-4 w-4" />;
+  };
+
+  const MovementIndicator = ({ row }) => {
+    const meta = MOVE_STYLES[row.changeType] || MOVE_STYLES.unchanged;
+    return (
+      <div className="flex min-w-[132px] flex-col items-center gap-1">
+        <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-extrabold uppercase tracking-wide shadow-sm ${meta.shell}`}>
+          <DirectionIcon row={row} />
+          {meta.label}
+          {row.delta !== 0 && <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px]">{row.delta > 0 ? `+${row.delta}` : row.delta}</span>}
+        </span>
+        <div className="flex w-full items-center justify-center gap-1 px-2">
+          <span className={`h-1.5 w-1.5 rounded-full ${meta.marker}`} />
+          <span className={`h-0.5 flex-1 rounded bg-gradient-to-r ${meta.line}`} />
+          <span className={`h-1.5 w-1.5 rounded-full ${meta.marker}`} />
+        </div>
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{meta.detail}</span>
+      </div>
+    );
+  };
+
+  const DiffMiniRow = ({ row }) => (
+    <div className="rounded-lg border border-white/70 bg-white/80 p-2 shadow-sm">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0 font-semibold text-slate-900">{row.name}</div>
+        {CHANGE_LABELS[row.changeType]}
+      </div>
+      <div className="flex items-center gap-2">
+        {getLevelBadge(row.bLevel)}
+        <DirectionIcon row={row} />
+        {getLevelBadge(row.aLevel)}
+        {row.delta !== 0 && (
+          <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold ${row.delta > 0 ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+            {row.delta > 0 ? `+${row.delta}` : row.delta}
+          </span>
+        )}
+      </div>
+    </div>
+  );
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="text-sm font-semibold text-gray-700">Before / After Comparison</h4>
-        <span className="text-xs text-gray-400">{changedCount} change{changedCount !== 1 ? 's' : ''}</span>
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-bold text-slate-800">Before / After Comparison</h4>
+          <p className="mt-1 text-xs text-slate-500">
+            {changedCount} change{changedCount !== 1 ? 's' : ''}: {countByType.added || 0} added, {countByType.increased || 0} up, {countByType.decreased || 0} down, {countByType.removed || 0} removed.
+          </p>
+        </div>
+        <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+          <button
+            type="button"
+            onClick={() => setViewMode('impact')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${viewMode === 'impact' ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            Option A: Impact
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('audit')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${viewMode === 'audit' ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            Option B: Audit
+          </button>
+        </div>
       </div>
-      <div className="border rounded-lg overflow-hidden">
-        <table className="w-full text-xs">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="text-left px-3 py-1.5 font-medium text-gray-600">Category</th>
-              <th className="text-center px-3 py-1.5 font-medium text-gray-600 w-28">Before</th>
-              <th className="text-center px-1 py-1.5 w-6"></th>
-              <th className="text-center px-3 py-1.5 font-medium text-gray-600 w-28">After</th>
-              <th className="text-center px-2 py-1.5 w-20"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.name} className={`border-t ${ROW_STYLES[row.changeType]}`}>
-                <td className="px-3 py-1.5 font-medium">{row.name}</td>
-                <td className="text-center px-3 py-1.5">{getLevelBadge(row.bLevel)}</td>
-                <td className="text-center px-1 py-1.5 text-gray-300">{row.changeType !== 'unchanged' ? '→' : ''}</td>
-                <td className="text-center px-3 py-1.5">{getLevelBadge(row.aLevel)}</td>
-                <td className="text-center px-2 py-1.5">{CHANGE_LABELS[row.changeType]}</td>
-              </tr>
+
+      <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-5">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Total changes</div>
+          <div className="mt-1 text-2xl font-extrabold text-slate-900">{changedCount}</div>
+        </div>
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Added</div>
+          <div className="mt-1 text-2xl font-extrabold text-emerald-800">{countByType.added || 0}</div>
+        </div>
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-blue-700">Moved up</div>
+          <div className="mt-1 text-2xl font-extrabold text-blue-800">{countByType.increased || 0}</div>
+        </div>
+        <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-orange-700">Moved down</div>
+          <div className="mt-1 text-2xl font-extrabold text-orange-800">{countByType.decreased || 0}</div>
+        </div>
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-rose-700">Removed</div>
+          <div className="mt-1 text-2xl font-extrabold text-rose-800">{countByType.removed || 0}</div>
+        </div>
+      </div>
+
+      {viewMode === 'impact' ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {groupedRows.map((group) => (
+            <section key={group.key} className={`rounded-xl border p-3 ${group.className}`}>
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-sm font-extrabold text-slate-900">{group.title}</div>
+                  <div className="text-xs text-slate-600">{group.subtitle}</div>
+                </div>
+                <span className={`rounded-full px-2 py-1 text-xs font-extrabold ${group.badgeClassName}`}>{group.rows.length}</span>
+              </div>
+              <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                {group.rows.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-white/80 bg-white/50 px-3 py-5 text-center text-xs font-medium text-slate-500">No items</div>
+                ) : group.rows.map((row) => <DiffMiniRow key={row.name} row={row} />)}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div>
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {filterOptions.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setRowFilter(option.key)}
+                className={`rounded-full border px-2.5 py-1 text-xs font-bold transition-colors ${rowFilter === option.key ? 'border-purple-300 bg-purple-50 text-purple-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
+              >
+                {option.label} <span className="ml-1 text-[10px] opacity-70">{option.count}</span>
+              </button>
             ))}
-          </tbody>
-        </table>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="w-[40%] px-4 py-2 text-right font-bold uppercase tracking-wide text-slate-500">Skill</th>
+                  <th className="w-32 px-3 py-2 text-center font-bold uppercase tracking-wide text-slate-500">Before</th>
+                  <th className="w-40 px-2 py-2 text-center font-bold uppercase tracking-wide text-slate-500">Movement</th>
+                  <th className="w-32 px-3 py-2 text-center font-bold uppercase tracking-wide text-slate-500">After</th>
+                  <th className="w-24 px-2 py-2 text-center font-bold uppercase tracking-wide text-slate-500">Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((row) => (
+                  <tr key={row.name} className={`border-t transition-colors ${ROW_STYLES[row.changeType]}`}>
+                    <td className="px-4 py-3 text-right">
+                      <div className="ml-auto max-w-[620px] text-base font-extrabold leading-snug text-slate-950">
+                        {row.name}
+                      </div>
+                      {row.changeType === 'unchanged' && <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">unchanged reference row</div>}
+                    </td>
+                    <td className="px-3 py-3 text-center">{getLevelBadge(row.bLevel)}</td>
+                    <td className="px-2 py-3 text-center"><MovementIndicator row={row} /></td>
+                    <td className="px-3 py-3 text-center">{getLevelBadge(row.aLevel)}</td>
+                    <td className="px-2 py-3 text-center">{CHANGE_LABELS[row.changeType] || <span className="inline-flex min-w-[76px] justify-center rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Same</span>}</td>
+                  </tr>
+                ))}
+                {filteredRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-400">No rows match this filter.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <span className="font-bold text-slate-800">Option A</span> groups impact for fast approval. <span className="font-bold text-slate-800">Option B</span> keeps the audit table when you need exact row-by-row review.
       </div>
     </div>
   );

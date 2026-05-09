@@ -2,6 +2,12 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
 
+const ticketCategoryInclude = {
+  requester: true,
+  internalCategory: { select: { id: true, name: true } },
+  internalSubcategory: { select: { id: true, name: true, parentId: true } },
+};
+
 /**
  * Repository for Technician operations
  */
@@ -20,9 +26,7 @@ class TechnicianRepository {
         where,
         include: lite ? undefined : {
           tickets: {
-            include: {
-              requester: true,
-            },
+            include: ticketCategoryInclude,
           },
         },
         orderBy: { name: 'asc' },
@@ -46,9 +50,7 @@ class TechnicianRepository {
         where,
         include: {
           tickets: {
-            include: {
-              requester: true,
-            },
+            include: ticketCategoryInclude,
           },
         },
         orderBy: { name: 'asc' },
@@ -92,7 +94,7 @@ class TechnicianRepository {
         include: {
           tickets: {
             where: ticketWhere,
-            include: { requester: true },
+            include: ticketCategoryInclude,
           },
         },
         orderBy: { name: 'asc' },
@@ -122,9 +124,7 @@ class TechnicianRepository {
         include: {
           tickets: {
             where: Object.keys(ticketWhere).length > 0 ? ticketWhere : undefined,
-            include: {
-              requester: true,
-            },
+            include: ticketCategoryInclude,
           },
         },
       });

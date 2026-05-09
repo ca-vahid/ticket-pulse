@@ -1,5 +1,7 @@
 import {
   buildInsight,
+  categoryBreakdownFromTickets,
+  categoryFilterForQuery,
   calculateDelta,
   parseAnalyticsRange,
   summarizeNumeric,
@@ -76,5 +78,55 @@ describe('analyticsService pure helpers', () => {
       drilldown: [{ id: 1 }],
     });
     expect(insight.rule).toContain('dueBy');
+  });
+
+  test('categoryFilterForQuery gates canonical filters to IT workspace', () => {
+    expect(categoryFilterForQuery(1, { categoryIds: '10,11', subcategoryIds: '22' })).toMatchObject({
+      mode: 'canonical',
+      where: {
+        internalCategoryId: { in: [10, 11] },
+        internalSubcategoryId: { in: [22] },
+      },
+    });
+
+    expect(categoryFilterForQuery(2, { categoryIds: '10', legacyCategories: 'BST,GIS' })).toMatchObject({
+      mode: 'legacy',
+      where: { ticketCategory: { in: ['BST', 'GIS'] } },
+    });
+  });
+
+  test('categoryBreakdownFromTickets reports canonical, fallback, review-needed, and unmapped coverage', () => {
+    const result = categoryBreakdownFromTickets([
+      {
+        internalCategoryId: 1,
+        internalCategory: { id: 1, name: 'Security' },
+        internalSubcategoryId: 2,
+        internalSubcategory: { id: 2, name: 'Advisory' },
+        taxonomyReviewNeeded: false,
+      },
+      {
+        tpSkill: 'Endpoint',
+        tpSubskill: 'Laptop',
+        ticketCategory: 'Legacy endpoint',
+        taxonomyReviewNeeded: true,
+      },
+      {
+        ticketCategory: null,
+        taxonomyReviewNeeded: false,
+      },
+    ], 10, 1);
+
+    expect(result.coverage).toMatchObject({
+      canonical: 1,
+      legacyFallback: 1,
+      reviewNeeded: 1,
+      unmapped: 1,
+      total: 3,
+    });
+    expect(result.rows.map((row) => row.name)).toEqual(expect.arrayContaining([
+      'Security / Advisory',
+      'Endpoint / Laptop',
+      'Uncategorized',
+    ]));
   });
 });
