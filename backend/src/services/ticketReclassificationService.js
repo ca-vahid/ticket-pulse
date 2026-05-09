@@ -180,6 +180,7 @@ class TicketReclassificationService {
       concurrency,
       technicianId: options.technicianId || null,
       onlyNeedsReview: options.onlyNeedsReview !== false,
+      unclassifiedOnly: options.unclassifiedOnly === true,
       createdBefore: options.createdBefore || null,
       ticketIds: Array.isArray(options.ticketIds) ? options.ticketIds.length : 0,
       previewResults: applyFromPreview ? previewByTicketId.size : 0,
@@ -349,6 +350,10 @@ class TicketReclassificationService {
     if (options.technicianId) where.assignedTechId = Number(options.technicianId);
     if (Array.isArray(options.ticketIds) && options.ticketIds.length > 0) {
       where.id = { in: options.ticketIds.map((id) => Number(id)).filter(Number.isInteger) };
+    }
+    if (options.unclassifiedOnly === true && !where.id) {
+      where.internalCategoryId = null;
+      return where;
     }
     if (options.onlyNeedsReview !== false && !where.id) {
       where.OR = [

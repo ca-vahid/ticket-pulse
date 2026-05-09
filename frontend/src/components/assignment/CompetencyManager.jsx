@@ -1215,6 +1215,7 @@ function SkillsMigrationPanel({ onPublished }) {
             model: reclassificationModel,
             concurrency: Number(reclassificationConcurrency) || 10,
             onlyNeedsReview: true,
+            unclassifiedOnly: true,
             ticketIds: previewTicketIds,
             previewResults: chunk,
           });
@@ -1270,6 +1271,7 @@ function SkillsMigrationPanel({ onPublished }) {
             model: reclassificationModel,
             concurrency: Number(reclassificationConcurrency) || 10,
             onlyNeedsReview: true,
+            unclassifiedOnly: true,
             ...(localCursor ? { createdBefore: localCursor } : {}),
           });
           const data = res?.data || {};
@@ -1315,6 +1317,7 @@ function SkillsMigrationPanel({ onPublished }) {
         model: reclassificationModel,
         concurrency: Number(reclassificationConcurrency) || 10,
         onlyNeedsReview: true,
+        unclassifiedOnly: true,
         ...(!apply && nextBatch && reclassificationCursor ? { createdBefore: reclassificationCursor } : {}),
       });
       const data = res?.data || {};
