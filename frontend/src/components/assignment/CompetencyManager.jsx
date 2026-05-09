@@ -42,8 +42,10 @@ const RECLASSIFICATION_MODELS = [
 ];
 
 const RECLASSIFICATION_CONCURRENCY_OPTIONS = [5, 10, 20];
-const RECLASSIFICATION_BATCH_OPTIONS = [25, 50, 100, 200, 250, 500];
+const RECLASSIFICATION_BATCH_OPTIONS = [25, 50, 100, 200, 250, 500, 1000, 1500, 2500];
+const SERVER_RECLASSIFICATION_BATCH_SIZE = 500;
 const APPLY_PREVIEW_CHUNK_SIZE = 75;
+const DISPLAY_RECLASSIFICATION_RESULTS_LIMIT = 500;
 
 function mergeReclassificationResults(existing = [], incoming = []) {
   const byTicketId = new Map();
@@ -60,6 +62,13 @@ function chunkArray(items = [], size = 75) {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
+}
+
+function getOldestCreatedAt(results = []) {
+  return results
+    .map((result) => result.createdAt)
+    .filter(Boolean)
+    .sort()[0] || null;
 }
 
 function getCategoryGroup(name) {
@@ -1161,7 +1170,8 @@ function SkillsMigrationPanel({ onPublished }) {
 
   const reclassifyTickets = async ({ apply = false, nextBatch = false } = {}) => {
     const selectedLimit = Number(reclassificationLimit) || 25;
-    if (!apply && selectedLimit >= 250 && !confirm(`Dry run up to ${selectedLimit} tickets with ${reclassificationModelLabel}. This sends one LLM classification request per ticket and may take several minutes. Continue?`)) return;
+    const serverChunks = chunkArray(Array.from({ length: selectedLimit }), SERVER_RECLASSIFICATION_BATCH_SIZE);
+    if (!apply && selectedLimit >= 250 && !confirm(`Dry run up to ${selectedLimit} tickets with ${reclassificationModelLabel} in ${serverChunks.length} server batch${serverChunks.length === 1 ? '' : 'es'}. This sends one LLM classification request per ticket and may take several minutes. Continue?`)) return;
     const previewResults = pendingReclassificationResults
       .filter((result) => result.classification && !result.error)
       .map((result) => ({
@@ -1232,6 +1242,72 @@ function SkillsMigrationPanel({ onPublished }) {
         return;
       }
 
+      if (selectedLimit > SERVER_RECLASSIFICATION_BATCH_SIZE) {
+        const aggregate = {
+          dryRun: true,
+          applied: false,
+          scanned: 0,
+          classified: 0,
+          reviewNeeded: 0,
+          failed: 0,
+          results: [],
+          runIds: [],
+          model: reclassificationModel,
+          concurrency: Number(reclassificationConcurrency) || 10,
+        };
+        let localCursor = nextBatch ? reclassificationCursor : null;
+        let latestRun = null;
+        let remaining = selectedLimit;
+        const totalChunks = Math.ceil(selectedLimit / SERVER_RECLASSIFICATION_BATCH_SIZE);
+
+        for (let chunkIndex = 0; chunkIndex < totalChunks && remaining > 0; chunkIndex += 1) {
+          const chunkLimit = Math.min(SERVER_RECLASSIFICATION_BATCH_SIZE, remaining);
+          setMessage(`Dry run server batch ${chunkIndex + 1}/${totalChunks}: analyzing up to ${chunkLimit} tickets with ${reclassificationModelLabel}, ${reclassificationConcurrency} parallel LLM calls...`);
+          const res = await assignmentAPI.reclassifyTickets({
+            apply: false,
+            days: 180,
+            limit: chunkLimit,
+            model: reclassificationModel,
+            concurrency: Number(reclassificationConcurrency) || 10,
+            onlyNeedsReview: true,
+            ...(localCursor ? { createdBefore: localCursor } : {}),
+          });
+          const data = res?.data || {};
+          latestRun = data;
+          aggregate.scanned += data.scanned || 0;
+          aggregate.classified += data.classified || 0;
+          aggregate.reviewNeeded += data.reviewNeeded || 0;
+          aggregate.failed += data.failed || 0;
+          aggregate.results = mergeReclassificationResults(aggregate.results, data.results || []);
+          if (data.id) aggregate.runIds.push(data.id);
+          remaining -= chunkLimit;
+          localCursor = getOldestCreatedAt(data.results || []) || localCursor;
+          const pendingSoFar = nextBatch
+            ? mergeReclassificationResults(pendingReclassificationResults, aggregate.results).length
+            : aggregate.results.length;
+          setPendingReclassificationResults((prev) => (nextBatch
+            ? mergeReclassificationResults(prev, data.results || [])
+            : mergeReclassificationResults(aggregate.results, [])));
+          setMessage(`Dry run server batch ${chunkIndex + 1}/${totalChunks} complete. Pending preview queue: ${pendingSoFar}.`);
+          if ((data.scanned || 0) < chunkLimit) break;
+        }
+
+        const aggregateData = {
+          ...(latestRun || {}),
+          ...aggregate,
+          id: latestRun?.id,
+          chunkedDryRun: true,
+        };
+        setReclassification(aggregateData);
+        if (localCursor) setReclassificationCursor(localCursor);
+        const totalPending = nextBatch
+          ? mergeReclassificationResults(pendingReclassificationResults, aggregate.results).length
+          : aggregate.results.length;
+        setMessage(`Dry run complete with ${reclassificationModelLabel}, ${aggregate.concurrency} parallel: ${aggregate.classified} classified, ${aggregate.reviewNeeded} needing review, ${aggregate.failed} failed across ${aggregate.runIds.length} server batch${aggregate.runIds.length === 1 ? '' : 'es'}. Pending preview queue: ${totalPending}.`);
+        await loadReclassificationRuns();
+        return;
+      }
+
       const res = await assignmentAPI.reclassifyTickets({
         apply,
         days: 180,
@@ -1246,10 +1322,7 @@ function SkillsMigrationPanel({ onPublished }) {
       setPendingReclassificationResults((prev) => (nextBatch
         ? mergeReclassificationResults(prev, data.results || [])
         : (data.results || [])));
-      const oldestCreatedAt = (data.results || [])
-        .map((result) => result.createdAt)
-        .filter(Boolean)
-        .sort()[0] || null;
+      const oldestCreatedAt = getOldestCreatedAt(data.results || []);
       if (!apply && oldestCreatedAt) setReclassificationCursor(oldestCreatedAt);
       const usedModel = RECLASSIFICATION_MODELS.find((model) => model.value === data.model)?.label || data.model || reclassificationModelLabel;
       const totalPending = nextBatch
@@ -1283,6 +1356,8 @@ function SkillsMigrationPanel({ onPublished }) {
   const displayReclassificationResults = pendingReclassificationResults.length
     ? pendingReclassificationResults
     : (reclassification?.results || []);
+  const visibleReclassificationResults = displayReclassificationResults.slice(0, DISPLAY_RECLASSIFICATION_RESULTS_LIMIT);
+  const hiddenReclassificationResultCount = Math.max(0, displayReclassificationResults.length - visibleReclassificationResults.length);
   const pendingClassifiableCount = pendingReclassificationResults.filter((result) => result.classification && !result.error).length;
   const pendingReviewNeededCount = pendingReclassificationResults.filter((result) => result.classification?.taxonomyReviewNeeded).length;
   const pendingFailedCount = pendingReclassificationResults.filter((result) => result.error).length;
@@ -1344,7 +1419,7 @@ function SkillsMigrationPanel({ onPublished }) {
         {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{message}</div>}
         {reclassificationLimit >= 250 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Large batch selected. Dry run cost and time scale with ticket count. Apply Preview does not call the LLM again; it saves the displayed preview.
+            Large batch selected. Dry run cost and time scale with ticket count. Values above 500 run as multiple 500-ticket server batches, then accumulate into one pending preview queue. Apply Preview does not call the LLM again.
           </div>
         )}
         {reclassification && (
@@ -1372,7 +1447,12 @@ function SkillsMigrationPanel({ onPublished }) {
             )}
             {displayReclassificationResults.length > 0 && (
               <div className="max-h-96 overflow-y-auto rounded border border-slate-200 bg-white">
-                {displayReclassificationResults.map((result) => (
+                {hiddenReclassificationResultCount > 0 && (
+                  <div className="border-b border-blue-100 bg-blue-50 px-2 py-1.5 text-blue-800">
+                    Showing first {DISPLAY_RECLASSIFICATION_RESULTS_LIMIT} of {displayReclassificationResults.length} preview rows. Apply Preview still saves the full pending queue.
+                  </div>
+                )}
+                {visibleReclassificationResults.map((result) => (
                   <div key={result.ticketId} className="grid gap-1 border-b border-slate-100 px-2 py-1.5 last:border-b-0 md:grid-cols-[110px_1fr_220px]">
                     <span className="font-mono text-slate-500">FS-{result.freshserviceTicketId}</span>
                     <span className="truncate">{result.subject}</span>
