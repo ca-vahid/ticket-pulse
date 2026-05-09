@@ -34,6 +34,42 @@ const SOURCE_LABELS = {
   1002: 'Workflow',
 };
 
+const CATEGORY_OTHER_KEY = 'other';
+
+const CATEGORY_TICKET_SELECT = {
+  id: true,
+  freshserviceTicketId: true,
+  subject: true,
+  status: true,
+  priority: true,
+  source: true,
+  createdAt: true,
+  firstAssignedAt: true,
+  dueBy: true,
+  frDueBy: true,
+  assignedBy: true,
+  assignedTechId: true,
+  isSelfPicked: true,
+  ticketCategory: true,
+  tpSkill: true,
+  tpSubskill: true,
+  internalCategoryId: true,
+  internalCategory: { select: { id: true, name: true } },
+  internalSubcategoryId: true,
+  internalSubcategory: { select: { id: true, name: true, parentId: true } },
+  internalCategoryFit: true,
+  internalSubcategoryFit: true,
+  taxonomyReviewNeeded: true,
+  resolutionTimeSeconds: true,
+  csatScore: true,
+  csatTotalScore: true,
+  csatSubmittedAt: true,
+  isNoise: true,
+  rejectionCount: true,
+  requester: { select: { name: true, email: true } },
+  assignedTech: { select: { id: true, name: true, photoUrl: true } },
+};
+
 function dateKeyToUtcNoon(dateKey) {
   return new Date(`${dateKey}T12:00:00Z`);
 }
@@ -267,6 +303,11 @@ function withCategoryWhere(baseWhere, categoryWhere = {}) {
   };
 }
 
+function ticketRelationWhere(excludeNoise, categoryWhere = {}) {
+  const base = excludeNoise ? { isNoise: false } : {};
+  return withCategoryWhere(base, categoryWhere);
+}
+
 function ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, dateField = 'createdAt', categoryWhere = {}) {
   return withCategoryWhere({
     workspaceId,
@@ -408,6 +449,327 @@ export function categoryBreakdownFromTickets(tickets, limit = 10, workspaceId = 
   return { rows, coverage };
 }
 
+function categoryIdentity(ticket, workspaceId) {
+  const parts = ticketPulseCategoryParts(ticket, workspaceId);
+  const categoryId = parts.categoryId ?? null;
+  const subcategoryId = parts.subcategoryId ?? null;
+  const categoryName = parts.category || (parts.source === 'legacy' ? parts.label : null);
+  const subcategoryName = parts.subcategory || null;
+  const isCanonical = getCategoryMode(workspaceId) === 'canonical';
+  const categoryKey = isCanonical && categoryId
+    ? `category:${categoryId}`
+    : `category-label:${categoryName || parts.label || 'Uncategorized'}`;
+  const leafKey = isCanonical && subcategoryId
+    ? `subcategory:${subcategoryId}`
+    : categoryKey;
+  const label = subcategoryName && categoryName
+    ? `${categoryName} / ${subcategoryName}`
+    : (categoryName || parts.label || 'Uncategorized');
+
+  return {
+    ...parts,
+    categoryKey,
+    leafKey,
+    categoryName: categoryName || 'Uncategorized',
+    subcategoryName,
+    label,
+    isSubcategory: leafKey !== categoryKey,
+  };
+}
+
+function emptyCategoryRow(identity, source = 'canonical') {
+  return {
+    key: identity.leafKey,
+    categoryKey: identity.categoryKey,
+    name: identity.label,
+    categoryName: identity.categoryName,
+    subcategoryName: identity.subcategoryName,
+    categoryId: identity.categoryId,
+    subcategoryId: identity.subcategoryId,
+    source: identity.source || source,
+    created: 0,
+    assigned: 0,
+    open: 0,
+    overdue: 0,
+    reviewNeeded: 0,
+    unmapped: 0,
+    reviewTicketIds: new Set(),
+    unmappedTicketIds: new Set(),
+    selfPicked: 0,
+    coordinatorAssigned: 0,
+    appAssigned: 0,
+    unknown: 0,
+    csatResponses: 0,
+    csatTotal: 0,
+    resolutionValues: [],
+    recentTickets: [],
+    automationRuns: 0,
+    automationFailures: 0,
+    automationRebounds: 0,
+  };
+}
+
+function mergeOtherCategoryRows(rows, keepCount = 8) {
+  if (rows.length <= keepCount) return rows;
+  const kept = rows.slice(0, keepCount);
+  const merged = rows.slice(keepCount).reduce((acc, row) => {
+    acc.created += row.created || 0;
+    acc.assigned += row.assigned || 0;
+    acc.open += row.open || 0;
+    acc.overdue += row.overdue || 0;
+    acc.reviewNeeded += row.reviewNeeded || 0;
+    acc.unmapped += row.unmapped || 0;
+    for (const id of row.reviewTicketIds || []) acc.reviewTicketIds.add(id);
+    for (const id of row.unmappedTicketIds || []) acc.unmappedTicketIds.add(id);
+    acc.selfPicked += row.selfPicked || 0;
+    acc.coordinatorAssigned += row.coordinatorAssigned || 0;
+    acc.appAssigned += row.appAssigned || 0;
+    acc.unknown += row.unknown || 0;
+    acc.csatResponses += row.csatResponses || 0;
+    acc.csatTotal += row.csatTotal || 0;
+    acc.resolutionValues.push(...(row.resolutionValues || []));
+    acc.recentTickets.push(...(row.recentTickets || []));
+    acc.automationRuns += row.automationRuns || 0;
+    acc.automationFailures += row.automationFailures || 0;
+    acc.automationRebounds += row.automationRebounds || 0;
+    return acc;
+  }, emptyCategoryRow({
+    leafKey: CATEGORY_OTHER_KEY,
+    categoryKey: CATEGORY_OTHER_KEY,
+    label: 'Other categories',
+    categoryName: 'Other categories',
+    subcategoryName: null,
+    categoryId: null,
+    subcategoryId: null,
+    source: 'rolledUp',
+  }, 'rolledUp'));
+  merged.recentTickets = merged.recentTickets
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 15);
+  return [...kept, merged];
+}
+
+function finalizeCategoryRow(row, totalCreated = 0) {
+  const resolution = summarizeNumeric(row.resolutionValues || []);
+  const reviewNeeded = row.reviewTicketIds?.size || row.reviewNeeded || 0;
+  const unmapped = row.unmappedTicketIds?.size || row.unmapped || 0;
+  return {
+    key: row.key,
+    categoryKey: row.categoryKey,
+    name: row.name,
+    categoryName: row.categoryName,
+    subcategoryName: row.subcategoryName,
+    categoryId: row.categoryId,
+    subcategoryId: row.subcategoryId,
+    source: row.source,
+    created: row.created,
+    assigned: row.assigned,
+    open: row.open,
+    overdue: row.overdue,
+    reviewNeeded,
+    unmapped,
+    createdPct: totalCreated ? Number(((row.created / totalCreated) * 100).toFixed(1)) : 0,
+    assignmentMix: {
+      selfPicked: row.selfPicked,
+      coordinatorAssigned: row.coordinatorAssigned,
+      appAssigned: row.appAssigned,
+      unknown: row.unknown,
+    },
+    csatAverage: row.csatResponses ? Number((row.csatTotal / row.csatResponses).toFixed(2)) : null,
+    csatResponses: row.csatResponses,
+    resolutionSample: resolution.count,
+    medianResolutionHours: resolution.median === null ? null : Number((resolution.median / 3600).toFixed(1)),
+    p90ResolutionHours: resolution.p90 === null ? null : Number((resolution.p90 / 3600).toFixed(1)),
+    automationRuns: row.automationRuns,
+    automationFailures: row.automationFailures,
+    automationFailureRatePct: row.automationRuns ? Number(((row.automationFailures / row.automationRuns) * 100).toFixed(1)) : 0,
+    automationRebounds: row.automationRebounds,
+    pressureScore: (row.open * 2) + (row.overdue * 4) + reviewNeeded + row.automationFailures,
+    recentTickets: row.recentTickets.slice(0, 15),
+  };
+}
+
+function buildCategoryHierarchy(rows, mode) {
+  const rootId = 'root';
+  const nodes = [{ id: rootId, name: mode === 'canonical' ? 'Categories' : 'Legacy categories' }];
+  const categoryNodes = new Map();
+  for (const row of rows) {
+    if (!categoryNodes.has(row.categoryKey)) {
+      categoryNodes.set(row.categoryKey, {
+        id: row.categoryKey,
+        parent: rootId,
+        name: row.categoryName || row.name,
+        value: 0,
+        colorValue: 0,
+      });
+    }
+    const parent = categoryNodes.get(row.categoryKey);
+    parent.value += row.created || 0;
+    parent.colorValue = Math.max(parent.colorValue || 0, row.pressureScore || 0);
+    if (row.key !== row.categoryKey) {
+      nodes.push({
+        id: row.key,
+        parent: row.categoryKey,
+        name: row.subcategoryName || row.name,
+        value: row.created,
+        colorValue: row.pressureScore,
+        custom: row,
+      });
+    }
+  }
+
+  return [
+    ...nodes,
+    ...Array.from(categoryNodes.values()).map((node) => ({
+      ...node,
+      custom: rows.find((row) => row.categoryKey === node.id) || null,
+    })),
+  ];
+}
+
+function addTrendCount(map, key, label, period, amount = 1) {
+  const mapKey = `${key}:${period}`;
+  const row = map.get(mapKey) || { key, name: label, period, count: 0 };
+  row.count += amount;
+  map.set(mapKey, row);
+}
+
+export function buildCategoryIntelligence({
+  workspaceId,
+  rangeInfo,
+  categoryMode,
+  createdTickets = [],
+  assignedTickets = [],
+  openTickets = [],
+  previousCreatedTickets = [],
+  pipelineRuns = [],
+  serviceAccountNames = [],
+}) {
+  const rowsByKey = new Map();
+  const previousByKey = new Map();
+  const trendMap = new Map();
+  const now = new Date();
+
+  const ensureRow = (identity) => {
+    if (!rowsByKey.has(identity.leafKey)) rowsByKey.set(identity.leafKey, emptyCategoryRow(identity, categoryMode));
+    return rowsByKey.get(identity.leafKey);
+  };
+
+  for (const ticket of createdTickets) {
+    const identity = categoryIdentity(ticket, workspaceId);
+    const row = ensureRow(identity);
+    row.created += 1;
+    if (identity.reviewNeeded) row.reviewTicketIds.add(ticket.id);
+    if (identity.source === 'unmapped') row.unmappedTicketIds.add(ticket.id);
+    if (row.recentTickets.length < 20) row.recentTickets.push(compactTicket(ticket, workspaceId));
+    addTrendCount(trendMap, identity.leafKey, identity.label, groupKey(ticket.createdAt, rangeInfo));
+  }
+
+  for (const ticket of previousCreatedTickets) {
+    const identity = categoryIdentity(ticket, workspaceId);
+    const row = previousByKey.get(identity.leafKey) || { key: identity.leafKey, name: identity.label, count: 0 };
+    row.count += 1;
+    previousByKey.set(identity.leafKey, row);
+  }
+
+  for (const ticket of assignedTickets) {
+    const identity = categoryIdentity(ticket, workspaceId);
+    const row = ensureRow(identity);
+    row.assigned += 1;
+    row[assignmentSource(ticket, serviceAccountNames)] += 1;
+    if (Number.isFinite(ticket.resolutionTimeSeconds)) row.resolutionValues.push(ticket.resolutionTimeSeconds);
+    if (ticket.csatScore !== null && ticket.csatScore !== undefined) {
+      row.csatResponses += 1;
+      row.csatTotal += ticket.csatScore || 0;
+    }
+    if (identity.reviewNeeded) row.reviewTicketIds.add(ticket.id);
+  }
+
+  for (const ticket of openTickets) {
+    const identity = categoryIdentity(ticket, workspaceId);
+    const row = ensureRow(identity);
+    row.open += 1;
+    if (ticket.dueBy && new Date(ticket.dueBy) < now) row.overdue += 1;
+    if (identity.reviewNeeded) row.reviewTicketIds.add(ticket.id);
+  }
+
+  for (const run of pipelineRuns) {
+    if (!run.ticket) continue;
+    const identity = categoryIdentity(run.ticket, workspaceId);
+    const row = ensureRow(identity);
+    row.automationRuns += 1;
+    if (run.status === 'failed' || run.errorMessage || run.syncStatus === 'failed') row.automationFailures += 1;
+    if (run.reboundFrom || ['rebound', 'rebound_exhausted'].includes(run.triggerSource)) row.automationRebounds += 1;
+  }
+
+  const allRows = Array.from(rowsByKey.values())
+    .sort((a, b) => b.created - a.created || b.open - a.open || String(a.name).localeCompare(String(b.name)));
+  const rolledRows = mergeOtherCategoryRows(allRows, 8);
+  const totalCreated = createdTickets.length;
+  const rows = rolledRows.map((row) => finalizeCategoryRow(row, totalCreated));
+  const visibleKeys = new Set(rows.map((row) => row.key));
+  const trend = Array.from(trendMap.values())
+    .filter((row) => visibleKeys.has(row.key))
+    .sort((a, b) => a.period.localeCompare(b.period) || String(a.name).localeCompare(String(b.name)));
+
+  const assignmentFlow = [];
+  for (const row of rows) {
+    for (const [source, count] of Object.entries(row.assignmentMix)) {
+      if (count > 0) assignmentFlow.push({ from: labelFromAssignmentSource(source), to: row.name, weight: count });
+    }
+    if (row.automationRuns > 0) {
+      const successful = Math.max(0, row.automationRuns - row.automationFailures);
+      if (successful > 0) assignmentFlow.push({ from: row.name, to: 'Automation succeeded', weight: successful });
+      if (row.automationFailures > 0) assignmentFlow.push({ from: row.name, to: 'Automation failed', weight: row.automationFailures });
+      if (row.automationRebounds > 0) assignmentFlow.push({ from: row.name, to: 'Rebound', weight: row.automationRebounds });
+    }
+  }
+
+  const previousRows = Array.from(previousByKey.values())
+    .sort((a, b) => b.count - a.count || String(a.name).localeCompare(String(b.name)))
+    .slice(0, 8);
+
+  return {
+    summary: {
+      categoryMode,
+      totalCreated,
+      totalAssigned: assignedTickets.length,
+      open: openTickets.length,
+      overdue: openTickets.filter((ticket) => ticket.dueBy && new Date(ticket.dueBy) < now).length,
+      reviewNeeded: rows.reduce((sum, row) => sum + (row.reviewNeeded || 0), 0),
+      unmapped: rows.reduce((sum, row) => sum + (row.unmapped || 0), 0),
+      automationRuns: rows.reduce((sum, row) => sum + (row.automationRuns || 0), 0),
+      automationFailures: rows.reduce((sum, row) => sum + (row.automationFailures || 0), 0),
+    },
+    rows,
+    hierarchy: buildCategoryHierarchy(rows, categoryMode),
+    trend,
+    pressure: rows.map((row) => ({
+      key: row.key,
+      name: row.name,
+      x: row.created,
+      y: row.p90ResolutionHours ?? row.medianResolutionHours ?? 0,
+      z: Math.max(1, row.open || 0),
+      open: row.open,
+      overdue: row.overdue,
+      reviewNeeded: row.reviewNeeded,
+      automationFailureRatePct: row.automationFailureRatePct,
+      resolutionSample: row.resolutionSample,
+    })),
+    assignmentFlow,
+    previousRows,
+  };
+}
+
+function labelFromAssignmentSource(source) {
+  return {
+    appAssigned: 'Ticket Pulse assigned',
+    coordinatorAssigned: 'Coordinator assigned',
+    selfPicked: 'Self-picked',
+    unknown: 'Source unavailable',
+  }[source] || 'Source unavailable';
+}
+
 function compactTicket(ticket, workspaceId) {
   if (!ticket) return null;
   const categoryParts = ticketPulseCategoryParts(ticket, workspaceId);
@@ -485,39 +847,14 @@ function assignmentSource(ticket, serviceAccountNames = []) {
 async function fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryWhere = {}) {
   return prisma.ticket.findMany({
     where: assignmentRangeWhere(workspaceId, rangeInfo, excludeNoise, categoryWhere),
-    select: {
-      id: true,
-      freshserviceTicketId: true,
-      subject: true,
-      status: true,
-      priority: true,
-      source: true,
-      createdAt: true,
-      firstAssignedAt: true,
-      dueBy: true,
-      frDueBy: true,
-      assignedBy: true,
-      assignedTechId: true,
-      isSelfPicked: true,
-      ticketCategory: true,
-      tpSkill: true,
-      tpSubskill: true,
-      internalCategoryId: true,
-      internalCategory: { select: { id: true, name: true } },
-      internalSubcategoryId: true,
-      internalSubcategory: { select: { id: true, name: true, parentId: true } },
-      internalCategoryFit: true,
-      internalSubcategoryFit: true,
-      taxonomyReviewNeeded: true,
-      resolutionTimeSeconds: true,
-      csatScore: true,
-      csatTotalScore: true,
-      csatSubmittedAt: true,
-      isNoise: true,
-      rejectionCount: true,
-      requester: { select: { name: true, email: true } },
-      assignedTech: { select: { id: true, name: true, photoUrl: true } },
-    },
+    select: CATEGORY_TICKET_SELECT,
+  });
+}
+
+async function fetchCreatedTickets(workspaceId, rangeInfo, excludeNoise, categoryWhere = {}) {
+  return prisma.ticket.findMany({
+    where: ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, 'createdAt', categoryWhere),
+    select: CATEGORY_TICKET_SELECT,
   });
 }
 
@@ -729,6 +1066,75 @@ export async function getDemandFlow(workspaceId, query = {}) {
         },
       },
       drilldown: createdTickets.slice(0, 100).map((ticket) => compactTicket(ticket, workspaceId)),
+    };
+  });
+}
+
+export async function getCategoryIntelligence(workspaceId, query = {}) {
+  return withCache(workspaceId, 'category-intelligence', query, async () => {
+    const rangeInfo = parseAnalyticsRange(query);
+    const excludeNoise = query.excludeNoise === 'true';
+    const categoryFilter = categoryFilterForQuery(workspaceId, query);
+    const previousRange = {
+      ...rangeInfo,
+      start: rangeInfo.previousStart,
+      end: rangeInfo.previousEnd,
+      startDate: rangeInfo.previousStartDate,
+      endDate: rangeInfo.previousEndDate,
+    };
+    const relationWhere = ticketRelationWhere(excludeNoise, categoryFilter.where);
+    const pipelineTicketWhere = hasWhereClause(relationWhere) ? { ticket: { is: relationWhere } } : {};
+    const [
+      createdTickets,
+      assignedTickets,
+      openTickets,
+      previousCreatedTickets,
+      pipelineRuns,
+      serviceAccountNames,
+    ] = await Promise.all([
+      fetchCreatedTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
+      fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
+      fetchOpenTickets(workspaceId, excludeNoise, categoryFilter.where),
+      rangeInfo.compare === 'none'
+        ? Promise.resolve([])
+        : fetchCreatedTickets(workspaceId, previousRange, excludeNoise, categoryFilter.where),
+      prisma.assignmentPipelineRun.findMany({
+        where: {
+          workspaceId,
+          createdAt: { gte: rangeInfo.start, lte: rangeInfo.end },
+          ...pipelineTicketWhere,
+        },
+        select: {
+          status: true,
+          decision: true,
+          triggerSource: true,
+          reboundFrom: true,
+          errorMessage: true,
+          syncStatus: true,
+          ticket: { select: CATEGORY_TICKET_SELECT },
+        },
+      }),
+      getServiceAccountNames(),
+    ]);
+
+    const categoryData = buildCategoryIntelligence({
+      workspaceId,
+      rangeInfo,
+      categoryMode: categoryFilter.mode,
+      createdTickets,
+      assignedTickets,
+      openTickets,
+      previousCreatedTickets,
+      pipelineRuns,
+      serviceAccountNames,
+    });
+
+    return {
+      metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
+      ...categoryData,
+      notes: categoryFilter.mode === 'canonical'
+        ? ['Canonical category/subcategory metrics use Ticket Pulse hierarchy fields and fall back only where historical tickets are not migrated.']
+        : ['This workspace is still on legacy category filtering, so subcategory intelligence is intentionally hidden until migration.'],
     };
   });
 }
@@ -1107,9 +1513,11 @@ export async function getQuality(workspaceId, query = {}) {
 export async function getAutomationOps(workspaceId, query = {}) {
   return withCache(workspaceId, 'automation-ops', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
+    const excludeNoise = query.excludeNoise === 'true';
     const categoryFilter = categoryFilterForQuery(workspaceId, query);
-    const pipelineTicketWhere = hasWhereClause(categoryFilter.where)
-      ? { ticket: { is: categoryFilter.where } }
+    const relationWhere = ticketRelationWhere(excludeNoise, categoryFilter.where);
+    const pipelineTicketWhere = hasWhereClause(relationWhere)
+      ? { ticket: { is: relationWhere } }
       : {};
     const pipelineRunWhere = {
       workspaceId,
@@ -1207,7 +1615,7 @@ export async function getAutomationOps(workspaceId, query = {}) {
     const failedSyncs = syncLogs.filter((l) => l.status === 'failed').length;
 
     return {
-      metadata: metadata(rangeInfo, { categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
+      metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       pipeline: {
         totalRuns: runs.length,
         funnel,
@@ -1270,12 +1678,13 @@ export async function getInsights(workspaceId, query = {}) {
     const rangeInfo = parseAnalyticsRange(query);
     const excludeNoise = query.excludeNoise === 'true';
     const categoryFilter = categoryFilterForQuery(workspaceId, query);
-    const [overview, demand, team, quality, ops] = await Promise.all([
+    const [overview, demand, team, quality, ops, categories] = await Promise.all([
       getOverview(workspaceId, query),
       getDemandFlow(workspaceId, query),
       getTeamBalance(workspaceId, query),
       getQuality(workspaceId, query),
       getAutomationOps(workspaceId, query),
+      getCategoryIntelligence(workspaceId, query),
     ]);
 
     const insights = [];
@@ -1378,6 +1787,78 @@ export async function getInsights(workspaceId, query = {}) {
         drilldown: demand.breakdowns.category,
       }));
     }
+    const fastRiser = categories.rows
+      .map((row) => {
+        const previous = categories.previousRows.find((item) => item.key === row.key)?.count || 0;
+        return {
+          ...row,
+          previous,
+          change: row.created - previous,
+          pct: previous === 0 ? null : Number((((row.created - previous) / previous) * 100).toFixed(1)),
+        };
+      })
+      .filter((row) => row.created >= 5 && (row.change >= 5 || row.pct >= 50))
+      .sort((a, b) => b.change - a.change)[0];
+    if (fastRiser) {
+      insights.push(buildInsight({
+        id: 'category-rising',
+        title: 'A category is rising quickly',
+        severity: fastRiser.change >= 10 ? 'warning' : 'info',
+        rule: 'Category created-ticket volume increased materially versus the previous comparable period.',
+        evidenceCount: fastRiser.created,
+        affected: [fastRiser.name, `Change: +${fastRiser.change}`],
+        drilldown: fastRiser.recentTickets || [],
+      }));
+    }
+    const slowCategory = categories.rows
+      .filter((row) => row.resolutionSample >= 5 && row.p90ResolutionHours !== null)
+      .sort((a, b) => b.p90ResolutionHours - a.p90ResolutionHours)[0];
+    if (slowCategory && slowCategory.p90ResolutionHours >= 72) {
+      insights.push(buildInsight({
+        id: 'category-slow-resolution',
+        title: 'A category has slow resolution outcomes',
+        severity: slowCategory.p90ResolutionHours >= 120 ? 'warning' : 'info',
+        rule: 'Category p90 resolution is at least 72 hours with at least five resolved samples.',
+        evidenceCount: slowCategory.resolutionSample,
+        affected: [slowCategory.name, `P90: ${slowCategory.p90ResolutionHours}h`],
+        drilldown: categories.rows,
+      }));
+    }
+    const reviewSpike = categories.rows.find((row) => row.reviewNeeded >= 5);
+    if (reviewSpike) {
+      insights.push(buildInsight({
+        id: 'category-review-needed',
+        title: 'Category classification needs review',
+        severity: reviewSpike.reviewNeeded >= 10 ? 'warning' : 'info',
+        rule: 'One category/subcategory has at least five tickets flagged for taxonomy review.',
+        evidenceCount: reviewSpike.reviewNeeded,
+        affected: [reviewSpike.name],
+        drilldown: categories.rows,
+      }));
+    }
+    if (categories.summary.unmapped >= 5) {
+      insights.push(buildInsight({
+        id: 'category-unmapped-drift',
+        title: 'Some tickets are not classified',
+        severity: categories.summary.unmapped >= 15 ? 'warning' : 'info',
+        rule: 'The selected range includes at least five tickets with no usable category value.',
+        evidenceCount: categories.summary.unmapped,
+        affected: ['Category data quality'],
+        drilldown: categories.rows.filter((row) => row.unmapped > 0),
+      }));
+    }
+    const automationMismatch = categories.rows.find((row) => row.automationRuns >= 5 && row.automationFailureRatePct >= 20);
+    if (automationMismatch) {
+      insights.push(buildInsight({
+        id: 'category-automation-mismatch',
+        title: 'Automation is struggling in one category',
+        severity: automationMismatch.automationFailureRatePct >= 40 ? 'warning' : 'info',
+        rule: 'A category has at least five assignment pipeline runs and a failure rate of at least 20%.',
+        evidenceCount: automationMismatch.automationFailures,
+        affected: [automationMismatch.name, `${automationMismatch.automationFailureRatePct}% failure rate`],
+        drilldown: categories.rows,
+      }));
+    }
 
     return {
       metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
@@ -1433,6 +1914,7 @@ export default {
   getTeamBalance,
   getQuality,
   getAutomationOps,
+  getCategoryIntelligence,
   getInsights,
   getCategoryMetadata,
 };

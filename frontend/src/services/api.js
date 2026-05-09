@@ -660,6 +660,7 @@ export const analyticsAPI = {
   getCategories: () => api.get('/analytics/categories'),
   getOverview: (params = {}) => api.get('/analytics/overview', { params }),
   getDemandFlow: (params = {}) => api.get('/analytics/demand-flow', { params }),
+  getCategoryIntelligence: (params = {}) => api.get('/analytics/category-intelligence', { params }),
   getTeamBalance: (params = {}) => api.get('/analytics/team-balance', { params }),
   getQuality: (params = {}) => api.get('/analytics/quality', { params }),
   getAutomationOps: (params = {}) => api.get('/analytics/automation-ops', { params }),

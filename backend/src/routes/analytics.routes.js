@@ -19,6 +19,11 @@ router.get('/demand-flow', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+router.get('/category-intelligence', asyncHandler(async (req, res) => {
+  const data = await analyticsService.getCategoryIntelligence(req.workspaceId, req.query);
+  res.json({ success: true, data });
+}));
+
 router.get('/team-balance', asyncHandler(async (req, res) => {
   const data = await analyticsService.getTeamBalance(req.workspaceId, req.query);
   res.json({ success: true, data });

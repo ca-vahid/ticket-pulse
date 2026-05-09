@@ -13,26 +13,16 @@ import {
   RefreshCw,
   ShieldAlert,
   Sparkles,
+  Tags,
   Users,
   XCircle,
 } from 'lucide-react';
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
 import Highcharts from 'highcharts';
+import 'highcharts/highcharts-more';
+import 'highcharts/modules/treemap';
+import 'highcharts/modules/heatmap';
+import 'highcharts/modules/sankey';
+import 'highcharts/modules/accessibility';
 import HighchartsReact from 'highcharts-react-official';
 import * as XLSX from 'xlsx';
 import AppShell from '../components/AppShell';
@@ -58,6 +48,7 @@ const GROUP_OPTIONS = [
 const TABS = [
   { id: 'overview', label: 'Overview', Icon: Gauge },
   { id: 'demand', label: 'Demand', Icon: BarChart3 },
+  { id: 'categories', label: 'Categories', Icon: Tags },
   { id: 'team', label: 'Team Balance', Icon: Users },
   { id: 'quality', label: 'Quality', Icon: CheckCircle2 },
   { id: 'ops', label: 'Automation Ops', Icon: RefreshCw },
@@ -198,11 +189,17 @@ function labelFromKey(value, labelMap = {}) {
 }
 
 function chartBase(type = 'column') {
+  const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   return {
-    chart: { type, backgroundColor: 'transparent', spacing: [8, 8, 8, 8] },
+    chart: { type, backgroundColor: 'transparent', spacing: [8, 8, 8, 8], animation: !reducedMotion },
     title: { text: null },
     credits: { enabled: false },
-    accessibility: { enabled: false },
+    accessibility: { enabled: true },
+    plotOptions: {
+      series: {
+        animation: !reducedMotion,
+      },
+    },
   };
 }
 
@@ -249,19 +246,6 @@ function Panel({ title, subtitle, children, actions }) {
       </div>
       {children}
     </section>
-  );
-}
-
-function AssignmentMixTooltip({ active, payload }) {
-  if (!active || !payload?.length) return null;
-  const item = payload[0]?.payload;
-  if (!item) return null;
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-lg">
-      <p className="font-semibold text-slate-900">{item.label}</p>
-      <p className="text-slate-600">{formatNumber(item.value)} tickets · {item.pct}%</p>
-      <p className="mt-1 max-w-64 text-xs text-slate-500">{item.description}</p>
-    </div>
   );
 }
 
@@ -394,10 +378,24 @@ function insightDrilldownColumns(insight) {
       { key: 'assignedTechName', label: 'Tech', render: (row) => row.assignedTechName || 'Unassigned' },
     ];
   case 'category-concentration':
+  case 'category-slow-resolution':
+  case 'category-review-needed':
+  case 'category-unmapped-drift':
+  case 'category-automation-mismatch':
     return [
       { key: 'name', label: 'Category' },
-      { key: 'count', label: 'Tickets', render: (row) => formatNumber(row.count || 0) },
-      { key: 'pct', label: 'Share', render: (row) => row.pct === undefined ? '—' : `${row.pct}%` },
+      { key: 'created', label: 'Created', render: (row) => formatNumber(row.created ?? row.count ?? 0) },
+      { key: 'open', label: 'Open', render: (row) => formatNumber(row.open || 0) },
+      { key: 'p90ResolutionHours', label: 'P90 Res.', render: (row) => row.p90ResolutionHours === null || row.p90ResolutionHours === undefined ? '—' : `${row.p90ResolutionHours}h` },
+      { key: 'automationFailureRatePct', label: 'Auto Fail', render: (row) => row.automationFailureRatePct === undefined ? '—' : `${row.automationFailureRatePct}%` },
+      { key: 'reviewNeeded', label: 'Review', render: (row) => formatNumber(row.reviewNeeded || 0) },
+    ];
+  case 'category-rising':
+    return [
+      { key: 'freshserviceTicketId', label: 'Ticket' },
+      { key: 'subject', label: 'Subject' },
+      { key: 'status', label: 'Status', render: (row) => row.status || '—' },
+      { key: 'assignedTechName', label: 'Owner', render: (row) => row.assignedTechName || 'Unassigned' },
     ];
   case 'demand-spike':
   case 'overdue-risk':
@@ -413,18 +411,30 @@ function insightDrilldownColumns(insight) {
 
 function CategoricalBars({ data, nameKey = 'name', valueKey = 'count', height = 260 }) {
   if (!data?.length) return <EmptyState />;
+  const options = {
+    ...chartBase('bar'),
+    colors: ['#2563eb'],
+    xAxis: {
+      categories: data.map((row) => row[nameKey]),
+      labels: { style: { color: '#475569', fontSize: '12px' } },
+    },
+    yAxis: {
+      min: 0,
+      allowDecimals: false,
+      title: { text: null },
+      gridLineDashStyle: 'Dash',
+      gridLineColor: '#e2e8f0',
+    },
+    legend: { enabled: false },
+    tooltip: { borderColor: '#cbd5e1', pointFormat: '<b>{point.y}</b>' },
+    plotOptions: {
+      ...chartBase('bar').plotOptions,
+      bar: { borderRadius: 5 },
+    },
+    series: [{ name: 'Count', data: data.map((row) => row[valueKey] || 0) }],
+  };
   return (
-    <div style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} layout="vertical" margin={{ left: 16, right: 24, top: 8, bottom: 8 }}>
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-          <XAxis type="number" allowDecimals={false} />
-          <YAxis type="category" dataKey={nameKey} width={120} tick={{ fontSize: 11 }} />
-          <Tooltip />
-          <Bar dataKey={valueKey} fill="#2563eb" radius={[0, 4, 4, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    <HighchartsBlock options={options} height={`${height}px`} />
   );
 }
 
@@ -508,7 +518,10 @@ function exportAnalyticsWorkbook(payload, activeTab) {
     value: JSON.stringify(value),
   })));
   addSheet('Demand Trend', payload.demand?.trend || []);
-  addSheet('Demand Categories', payload.demand?.breakdowns?.category || []);
+  addSheet('Category Summary', payload.categories?.rows || []);
+  addSheet('Category Trend', payload.categories?.trend || []);
+  addSheet('Category Flow', payload.categories?.assignmentFlow || []);
+  addSheet('Category Pressure', payload.categories?.pressure || []);
   addSheet('Team Balance', payload.team?.technicians || []);
   addSheet('Team Timeline', payload.team?.timeline || []);
   addSheet('CSAT Trend', payload.quality?.csat?.trend || []);
@@ -535,7 +548,9 @@ export default function Analytics() {
   const [teamSort, setTeamSort] = useState({ key: 'assigned', direction: 'desc' });
   const [selectedTeamIds, setSelectedTeamIds] = useState([]);
   const [teamTimelineMetric, setTeamTimelineMetric] = useState('assigned');
+  const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState(null);
   const [categoryMetadata, setCategoryMetadata] = useState(null);
   const [selectedLegacyCategories, setSelectedLegacyCategories] = useState([]);
   const [selectedCanonicalCategories, setSelectedCanonicalCategories] = useState({ categoryIds: [], subcategoryIds: [] });
@@ -570,9 +585,10 @@ export default function Analytics() {
     setLoading(true);
     setError(null);
     try {
-      const [overview, demand, team, quality, ops, insights] = await Promise.all([
+      const [overview, demand, categoryIntelligence, team, quality, ops, insights] = await Promise.all([
         analyticsAPI.getOverview(params),
         analyticsAPI.getDemandFlow(params),
+        analyticsAPI.getCategoryIntelligence(params),
         analyticsAPI.getTeamBalance(params),
         analyticsAPI.getQuality(params),
         analyticsAPI.getAutomationOps(params),
@@ -581,6 +597,7 @@ export default function Analytics() {
       setPayload({
         overview: overview.data,
         demand: demand.data,
+        categories: categoryIntelligence.data,
         team: team.data,
         quality: quality.data,
         ops: ops.data,
@@ -609,9 +626,21 @@ export default function Analytics() {
     return () => { cancelled = true; };
   }, [currentWorkspace?.id]);
 
+  useEffect(() => {
+    const categoryRows = payload.categories?.rows || [];
+    if (!categoryRows.length) {
+      setSelectedCategoryKey(null);
+      return;
+    }
+    if (!selectedCategoryKey || !categoryRows.some((row) => row.key === selectedCategoryKey)) {
+      setSelectedCategoryKey(categoryRows[0].key);
+    }
+  }, [payload.categories?.rows, selectedCategoryKey]);
+
   const meta = payload.overview?.metadata || payload.demand?.metadata;
   const overview = payload.overview;
   const demand = payload.demand;
+  const categories = payload.categories;
   const team = payload.team;
   const quality = payload.quality;
   const ops = payload.ops;
@@ -657,13 +686,265 @@ export default function Analytics() {
     ));
   }, []);
 
+  const selectedCategory = useMemo(() => (
+    categories?.rows?.find((row) => row.key === selectedCategoryKey) || categories?.rows?.[0] || null
+  ), [categories?.rows, selectedCategoryKey]);
+
+  const categoryHierarchyOptions = useMemo(() => {
+    const rows = categories?.hierarchy || [];
+    return {
+      ...chartBase('treemap'),
+      colorAxis: {
+        min: 0,
+        stops: [
+          [0, '#dbeafe'],
+          [0.45, '#fef3c7'],
+          [1, '#fecaca'],
+        ],
+      },
+      accessibility: {
+        enabled: true,
+        description: 'Category hierarchy treemap. Larger blocks mean more created tickets. Warmer colors mean more open, overdue, review-needed, or automation-failure pressure.',
+      },
+      tooltip: {
+        useHTML: true,
+        borderColor: '#cbd5e1',
+        pointFormatter() {
+          const row = this.custom || {};
+          return `<b>${this.name}</b><br/>${formatNumber(this.value || row.created || 0)} created<br/>${formatNumber(row.open || 0)} open · ${formatNumber(row.overdue || 0)} overdue<br/>${formatNumber(row.reviewNeeded || 0)} review-needed`;
+        },
+      },
+      plotOptions: {
+        ...chartBase('treemap').plotOptions,
+        treemap: {
+          allowTraversingTree: true,
+          layoutAlgorithm: 'squarified',
+          borderRadius: 4,
+          levels: [{
+            level: 1,
+            borderWidth: 3,
+            dataLabels: { enabled: true, style: { fontSize: '12px', fontWeight: '700', textOutline: 'none' } },
+          }, {
+            level: 2,
+            borderWidth: 1,
+            dataLabels: { enabled: true, style: { fontSize: '11px', textOutline: 'none' } },
+          }],
+          point: {
+            events: {
+              click() {
+                if (this.custom?.key) setSelectedCategoryKey(this.custom.key);
+              },
+            },
+          },
+        },
+      },
+      series: [{
+        type: 'treemap',
+        name: 'Categories',
+        data: rows,
+      }],
+    };
+  }, [categories?.hierarchy]);
+
+  const categoryTrendOptions = useMemo(() => {
+    const rows = categories?.trend || [];
+    const periods = Array.from(new Set(rows.map((row) => row.period))).sort((a, b) => a.localeCompare(b));
+    const names = Array.from(new Set(rows.map((row) => row.name))).slice(0, 8);
+    const data = rows
+      .filter((row) => names.includes(row.name))
+      .map((row) => [periods.indexOf(row.period), names.indexOf(row.name), row.count || 0]);
+    return {
+      ...chartBase('heatmap'),
+      accessibility: {
+        enabled: true,
+        description: 'Category demand heatmap. Darker cells show more created tickets for a category during a period.',
+      },
+      colorAxis: {
+        min: 0,
+        minColor: '#eff6ff',
+        maxColor: '#2563eb',
+      },
+      xAxis: {
+        categories: periods,
+        labels: { style: { color: '#64748b', fontSize: '11px' } },
+      },
+      yAxis: {
+        categories: names,
+        title: { text: null },
+        reversed: true,
+        labels: { style: { color: '#475569', fontSize: '11px' } },
+      },
+      legend: { align: 'right', layout: 'vertical', verticalAlign: 'middle' },
+      tooltip: {
+        borderColor: '#cbd5e1',
+        formatter() {
+          return `<b>${names[this.point.y]}</b><br/>${periods[this.point.x]}: <b>${formatNumber(this.point.value)}</b> created tickets`;
+        },
+      },
+      series: [{
+        type: 'heatmap',
+        name: 'Created tickets',
+        borderWidth: 1,
+        borderColor: '#ffffff',
+        data,
+        dataLabels: { enabled: periods.length <= 12 && names.length <= 8, color: '#0f172a', style: { textOutline: 'none', fontSize: '10px' } },
+      }],
+    };
+  }, [categories?.trend]);
+
+  const categoryPressureOptions = useMemo(() => ({
+    ...chartBase('bubble'),
+    accessibility: {
+      enabled: true,
+      description: 'Category pressure bubble chart. X axis is created tickets, Y axis is p90 resolution hours, and bubble size is current open backlog.',
+    },
+    xAxis: {
+      min: 0,
+      title: { text: 'Created tickets' },
+      gridLineDashStyle: 'Dash',
+      gridLineColor: '#e2e8f0',
+    },
+    yAxis: {
+      min: 0,
+      title: { text: 'P90 resolution hours' },
+      gridLineDashStyle: 'Dash',
+      gridLineColor: '#e2e8f0',
+    },
+    legend: { enabled: false },
+    tooltip: {
+      useHTML: true,
+      borderColor: '#cbd5e1',
+      pointFormatter() {
+        return `<b>${this.name}</b><br/>${formatNumber(this.x)} created<br/>${this.y || 0}h p90 resolution<br/>${formatNumber(this.z)} open tickets<br/>${formatNumber(this.reviewNeeded || 0)} review-needed`;
+      },
+    },
+    plotOptions: {
+      ...chartBase('bubble').plotOptions,
+      bubble: {
+        minSize: 10,
+        maxSize: 56,
+        color: '#2563eb',
+        marker: { fillOpacity: 0.55, lineColor: '#1d4ed8', lineWidth: 1 },
+        point: {
+          events: {
+            click() {
+              if (this.key) setSelectedCategoryKey(this.key);
+            },
+          },
+        },
+      },
+    },
+    series: [{
+      name: 'Category pressure',
+      data: (categories?.pressure || []).map((row) => ({
+        ...row,
+        color: row.overdue > 0 || row.automationFailureRatePct >= 20 ? '#dc2626' : row.reviewNeeded > 0 ? '#f59e0b' : '#2563eb',
+      })),
+    }],
+  }), [categories?.pressure]);
+
+  const categorySankeyOptions = useMemo(() => ({
+    ...chartBase('sankey'),
+    accessibility: {
+      enabled: true,
+      description: 'Assignment path flow from assignment source, through category, to automation outcome.',
+    },
+    tooltip: {
+      borderColor: '#cbd5e1',
+      pointFormat: '<b>{point.fromNode.name}</b> → <b>{point.toNode.name}</b>: {point.weight}',
+    },
+    plotOptions: {
+      ...chartBase('sankey').plotOptions,
+      sankey: {
+        nodeWidth: 18,
+        nodePadding: 10,
+        dataLabels: { style: { color: '#334155', fontSize: '11px', textOutline: 'none' } },
+      },
+    },
+    series: [{
+      type: 'sankey',
+      name: 'Assignment path',
+      data: (categories?.assignmentFlow || []).map((row) => [row.from, row.to, row.weight]),
+    }],
+  }), [categories?.assignmentFlow]);
+
+  const assignmentMixOptions = useMemo(() => {
+    const rows = buildAssignmentMixRows(overview?.assignmentMix);
+    return {
+      ...chartBase('pie'),
+      colors: rows.map((row) => row.color),
+      accessibility: {
+        enabled: true,
+        description: 'Assignment source mix for tickets assigned in the selected range.',
+      },
+      tooltip: {
+        useHTML: true,
+        borderColor: '#cbd5e1',
+        pointFormatter() {
+          return `<b>${this.name}</b><br/>${formatNumber(this.y)} tickets · ${this.percentage.toFixed(1)}%`;
+        },
+      },
+      plotOptions: {
+        ...chartBase('pie').plotOptions,
+        pie: {
+          innerSize: '62%',
+          borderWidth: 2,
+          dataLabels: {
+            enabled: true,
+            distance: 12,
+            style: { color: '#334155', fontSize: '11px', textOutline: 'none' },
+            format: '{point.name}: {point.y}',
+          },
+        },
+      },
+      series: [{
+        name: 'Assignment mix',
+        data: rows.map((row) => ({ name: row.label, y: row.value, custom: row })),
+      }],
+    };
+  }, [overview?.assignmentMix]);
+
+  const demandTrendOptions = useMemo(() => {
+    const rows = demand?.trend || [];
+    return {
+      ...chartBase('area'),
+      accessibility: {
+        enabled: true,
+        description: 'Created, closed or resolved, and net ticket flow over the selected range.',
+      },
+      xAxis: {
+        categories: rows.map((row) => row.date),
+        labels: { style: { color: '#64748b', fontSize: '11px' } },
+      },
+      yAxis: {
+        min: 0,
+        allowDecimals: false,
+        title: { text: null },
+        gridLineDashStyle: 'Dash',
+        gridLineColor: '#e2e8f0',
+      },
+      legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
+      tooltip: { shared: true, borderColor: '#cbd5e1' },
+      plotOptions: {
+        ...chartBase('area').plotOptions,
+        area: { fillOpacity: 0.18, marker: { enabled: rows.length <= 45, radius: 3 } },
+        line: { marker: { enabled: rows.length <= 45, radius: 3 }, lineWidth: 2 },
+      },
+      series: [
+        { type: 'area', name: 'Created', data: rows.map((row) => row.created || 0), color: '#2563eb' },
+        { type: 'area', name: 'Closed / Resolved', data: rows.map((row) => row.resolved || 0), color: '#059669' },
+        { type: 'line', name: 'Net', data: rows.map((row) => row.net || 0), color: '#f59e0b' },
+      ],
+    };
+  }, [demand?.trend]);
+
   const teamTimelineMetricLabel = TEAM_TIMELINE_METRICS.find((metric) => metric.key === teamTimelineMetric)?.label || 'Tickets';
 
   const workloadChartOptions = useMemo(() => ({
     chart: { type: 'bar', backgroundColor: 'transparent', spacing: [8, 8, 8, 8] },
     title: { text: null },
     credits: { enabled: false },
-    accessibility: { enabled: false },
+    accessibility: { enabled: true },
     colors: ['#2563eb', '#f59e0b', '#059669'],
     xAxis: {
       categories: teamRows.map((row) => row.name),
@@ -709,7 +990,7 @@ export default function Analytics() {
     chart: { type: 'bar', backgroundColor: 'transparent', spacing: [8, 8, 8, 8] },
     title: { text: null },
     credits: { enabled: false },
-    accessibility: { enabled: false },
+    accessibility: { enabled: true },
     colors: ['#f59e0b', '#059669', '#2563eb', '#64748b'],
     xAxis: {
       categories: teamRows.map((row) => row.name),
@@ -776,7 +1057,7 @@ export default function Analytics() {
       chart: { type: 'line', backgroundColor: 'transparent', spacing: [8, 8, 8, 8], zoomType: 'x' },
       title: { text: null },
       credits: { enabled: false },
-      accessibility: { enabled: false },
+      accessibility: { enabled: true },
       xAxis: {
         categories: periods,
         labels: { style: { color: '#64748b', fontSize: '11px' } },
@@ -1123,23 +1404,7 @@ export default function Analytics() {
         <Panel title="Assignment Mix" subtitle="How assigned tickets entered a technician's queue in the selected range.">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
             <div className="relative h-64 min-w-0 sm:h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={buildAssignmentMixRows(overview?.assignmentMix)}
-                    dataKey="value"
-                    nameKey="label"
-                    innerRadius={68}
-                    outerRadius={112}
-                    paddingAngle={2}
-                    label={false}
-                    labelLine={false}
-                  >
-                    {buildAssignmentMixRows(overview?.assignmentMix).map((row) => <Cell key={row.key} fill={row.color} />)}
-                  </Pie>
-                  <Tooltip content={<AssignmentMixTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
+              <HighchartsBlock options={assignmentMixOptions} height="100%" />
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
                   <p className="text-2xl font-bold text-slate-900">
@@ -1175,12 +1440,14 @@ export default function Analytics() {
             <StatCard title="Range Tickets" value={formatNumber(overview?.dataQuality?.rangeTicketCount)} icon={Info} tone="slate" />
             <StatCard title="Resolution Coverage" value={`${overview?.dataQuality?.resolutionTimeCoverage ?? 0}%`} icon={Gauge} tone="green" />
             <StatCard title="CSAT Samples" value={formatNumber(overview?.dataQuality?.csatSampleCount)} icon={CheckCircle2} tone="purple" />
-            <StatCard title="First Response Populated" value="0" subtitle="Omitted from v1 charts" icon={XCircle} tone="red" />
             <StatCard title="Classified" value={formatNumber(overview?.dataQuality?.canonicalClassifiedCount || 0)} subtitle="Canonical category/subcategory" icon={CheckCircle2} tone="green" />
             <StatCard title="Legacy Fallback" value={formatNumber(overview?.dataQuality?.legacyFallbackCount || 0)} subtitle="Using mirrored or legacy fields" icon={Info} tone="amber" />
             <StatCard title="Review Needed" value={formatNumber(overview?.dataQuality?.categoryReviewNeededCount || 0)} subtitle="Weak or flagged category fit" icon={AlertTriangle} tone="amber" />
             <StatCard title="Unclassified" value={formatNumber(overview?.dataQuality?.unclassifiedCount || 0)} subtitle="No usable category value" icon={XCircle} tone="red" />
           </div>
+          <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            First-response analytics are hidden until the source field is populated enough to avoid misleading zero-value charts.
+          </p>
         </Panel>
       </div>
     </div>
@@ -1190,29 +1457,10 @@ export default function Analytics() {
     <div className="space-y-4">
       <Panel title="Created vs Closed / Resolved" subtitle="Resolved count uses tickets assigned in the same period because historical closedAt/resolvedAt coverage is sparse.">
         <div className="h-64 sm:h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={demand?.trend || []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-              <YAxis allowDecimals={false} />
-              <Tooltip />
-              <Legend />
-              <Area type="monotone" dataKey="created" stroke="#2563eb" fill="#dbeafe" />
-              <Area type="monotone" dataKey="resolved" stroke="#059669" fill="#d1fae5" />
-              <Line type="monotone" dataKey="net" stroke="#f59e0b" />
-            </AreaChart>
-          </ResponsiveContainer>
+          <HighchartsBlock options={demandTrendOptions} height="100%" />
         </div>
       </Panel>
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel
-          title={(demand?.metadata?.categoryMode || categoryMetadata?.categoryMode) === 'canonical' ? 'Category Hotspots' : 'Legacy Category Hotspots'}
-          subtitle={(demand?.metadata?.categoryMode || categoryMetadata?.categoryMode) === 'canonical'
-            ? `Uses Ticket Pulse category/subcategory first. ${formatNumber(demand?.breakdowns?.categoryCoverage?.legacyFallback || 0)} legacy fallback · ${formatNumber(demand?.breakdowns?.categoryCoverage?.reviewNeeded || 0)} review-needed · ${formatNumber(demand?.breakdowns?.categoryCoverage?.unmapped || 0)} unmapped.`
-            : `Uses legacy Freshservice category. ${formatNumber(demand?.breakdowns?.categoryCoverage?.legacy || 0)} categorized · ${formatNumber(demand?.breakdowns?.categoryCoverage?.unmapped || 0)} uncategorized.`}
-        >
-          <HotspotRankedBars data={demand?.breakdowns?.category || []} compact />
-        </Panel>
         <Panel title="Requester Hotspots">
           <HotspotRankedBars data={demand?.breakdowns?.requester || []} compact />
         </Panel>
@@ -1225,6 +1473,133 @@ export default function Analytics() {
       </div>
     </div>
   );
+
+  const renderCategories = () => {
+    const mode = categories?.metadata?.categoryMode || categoryMetadata?.categoryMode;
+    const legacyMode = mode === 'legacy';
+    const selectedRows = selectedCategory?.recentTickets || [];
+
+    return (
+      <div className="space-y-4">
+        {legacyMode && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            This workspace is still using legacy Freshservice category values. Subcategory hierarchy and canonical coverage metrics stay hidden until this workspace is migrated.
+          </div>
+        )}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard title="Created Demand" value={formatNumber(categories?.summary?.totalCreated)} subtitle="Tickets created in range" icon={Tags} />
+          <StatCard title="Open in Categories" value={formatNumber(categories?.summary?.open)} subtitle={`${formatNumber(categories?.summary?.overdue || 0)} overdue`} icon={Clock} tone={(categories?.summary?.overdue || 0) > 0 ? 'amber' : 'green'} />
+          <StatCard title="Review Needed" value={formatNumber(categories?.summary?.reviewNeeded)} subtitle="Taxonomy fit or migration review" icon={AlertTriangle} tone={(categories?.summary?.reviewNeeded || 0) > 0 ? 'amber' : 'green'} />
+          <StatCard title="Automation Failures" value={formatNumber(categories?.summary?.automationFailures)} subtitle={`${formatNumber(categories?.summary?.automationRuns || 0)} category-linked runs`} icon={RefreshCw} tone={(categories?.summary?.automationFailures || 0) > 0 ? 'red' : 'green'} />
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(22rem,0.65fr)]">
+          <Panel
+            title={legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map'}
+            subtitle="Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures."
+          >
+            {(categories?.hierarchy || []).length > 1
+              ? <HighchartsBlock options={categoryHierarchyOptions} height={isMobile ? '22rem' : '31rem'} />
+              : <EmptyState />}
+          </Panel>
+          <Panel title="Selected Category" subtitle="Operational detail for the selected block or bubble.">
+            {selectedCategory ? (
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">{selectedCategory.name}</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {formatNumber(selectedCategory.created)} created · {formatNumber(selectedCategory.open)} open · {formatNumber(selectedCategory.overdue)} overdue
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  {[
+                    ['Created share', `${selectedCategory.createdPct}%`],
+                    ['Median resolution', selectedCategory.medianResolutionHours === null ? '—' : `${selectedCategory.medianResolutionHours}h`],
+                    ['P90 resolution', selectedCategory.p90ResolutionHours === null ? '—' : `${selectedCategory.p90ResolutionHours}h`],
+                    ['Resolution sample', formatNumber(selectedCategory.resolutionSample)],
+                    ['CSAT', selectedCategory.csatAverage === null ? '—' : `${selectedCategory.csatAverage} (${selectedCategory.csatResponses})`],
+                    ['Review needed', formatNumber(selectedCategory.reviewNeeded)],
+                    ['Automation failure', `${selectedCategory.automationFailureRatePct}%`],
+                    ['Rebounds', formatNumber(selectedCategory.automationRebounds)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                      <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">{label}</p>
+                      <p className="mt-1 font-bold text-slate-900">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">Assignment Mix</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                    <span>Ticket Pulse: <b>{formatNumber(selectedCategory.assignmentMix?.appAssigned || 0)}</b></span>
+                    <span>Coordinator: <b>{formatNumber(selectedCategory.assignmentMix?.coordinatorAssigned || 0)}</b></span>
+                    <span>Self-picked: <b>{formatNumber(selectedCategory.assignmentMix?.selfPicked || 0)}</b></span>
+                    <span>Unavailable: <b>{formatNumber(selectedCategory.assignmentMix?.unknown || 0)}</b></span>
+                  </div>
+                </div>
+              </div>
+            ) : <EmptyState />}
+          </Panel>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Panel title="Demand Heatmap" subtitle="Top category/subcategory paths by selected time resolution.">
+            {(categories?.trend || []).length ? <HighchartsBlock options={categoryTrendOptions} height={isMobile ? '20rem' : '24rem'} /> : <EmptyState />}
+          </Panel>
+          <Panel title="Pressure Map" subtitle="Created demand vs. resolution tail; bubble size is current open backlog.">
+            {(categories?.pressure || []).length ? <HighchartsBlock options={categoryPressureOptions} height={isMobile ? '20rem' : '24rem'} /> : <EmptyState />}
+          </Panel>
+        </div>
+
+        <Panel title="Assignment Path" subtitle="Flow from assignment source through category into automation outcome. Technician names are intentionally omitted.">
+          {(categories?.assignmentFlow || []).length ? <HighchartsBlock options={categorySankeyOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState />}
+        </Panel>
+
+        <Panel title="Category Drilldown" subtitle="Click a row to focus the charts and selected-category panel.">
+          <SimpleTable
+            rows={categories?.rows || []}
+            maxHeight="max-h-[30rem]"
+            columns={[
+              {
+                key: 'name',
+                label: 'Category',
+                render: (row) => (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategoryKey(row.key)}
+                    className={`text-left font-semibold ${selectedCategory?.key === row.key ? 'text-blue-700' : 'text-slate-800 hover:text-blue-700'}`}
+                  >
+                    {row.name}
+                  </button>
+                ),
+              },
+              { key: 'created', label: 'Created', render: (row) => formatNumber(row.created) },
+              { key: 'open', label: 'Open', render: (row) => formatNumber(row.open) },
+              { key: 'overdue', label: 'Overdue', render: (row) => formatNumber(row.overdue) },
+              { key: 'p90ResolutionHours', label: 'P90 Res.', render: (row) => row.p90ResolutionHours === null ? '—' : `${row.p90ResolutionHours}h (${row.resolutionSample})` },
+              { key: 'csatAverage', label: 'CSAT', render: (row) => row.csatAverage === null ? '—' : `${row.csatAverage} (${row.csatResponses})` },
+              { key: 'automationFailureRatePct', label: 'Auto Fail', render: (row) => `${row.automationFailureRatePct}%` },
+              { key: 'reviewNeeded', label: 'Review', render: (row) => formatNumber(row.reviewNeeded) },
+            ]}
+          />
+        </Panel>
+
+        <Panel title="Recent Tickets in Selected Category">
+          <SimpleTable
+            rows={selectedRows}
+            columns={[
+              { key: 'freshserviceTicketId', label: 'Ticket' },
+              { key: 'subject', label: 'Subject' },
+              { key: 'status', label: 'Status' },
+              { key: 'assignedTechName', label: 'Owner', render: (row) => row.assignedTechName || 'Unassigned' },
+              { key: 'requesterName', label: 'Requester', render: (row) => row.requesterName || row.requesterEmail || 'Unknown' },
+              { key: 'createdAt', label: 'Created', render: (row) => formatDateTime(row.createdAt) },
+            ]}
+          />
+        </Panel>
+      </div>
+    );
+  };
 
   const renderTeam = () => (
     <div className="space-y-4">
@@ -1445,55 +1820,71 @@ export default function Analytics() {
         </div>
       </Panel>
 
-      <Panel title="Agent Detail Cards" subtitle="Per-agent coaching context: load, throughput, source mix, quality, rejections, leave, and top categories.">
-        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {teamRows.map((row) => (
-            <div key={row.technicianId} className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="truncate text-sm font-bold text-slate-900">{row.name}</h3>
-                  <p className="text-xs text-slate-500">
-                    {row.assigned} assigned · {row.openNow} open · {row.closed} closed
+      <Panel
+        title="Focused Agent Detail"
+        subtitle="Optional coaching context. Hidden by default so Team Balance stays a comparison surface, not a leaderboard."
+        actions={(
+          <button
+            type="button"
+            onClick={() => setShowAgentDetails((value) => !value)}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            {showAgentDetails ? 'Hide details' : 'Show details'}
+          </button>
+        )}
+      >
+        {showAgentDetails ? (
+          <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+            {teamRows.map((row) => (
+              <div key={row.technicianId} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-bold text-slate-900">{row.name}</h3>
+                    <p className="text-xs text-slate-500">
+                      {row.assigned} assigned · {row.openNow} open · {row.closed} closed
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    row.openNow >= 30 ? 'bg-red-50 text-red-700'
+                      : row.openNow >= 15 ? 'bg-amber-50 text-amber-700'
+                        : 'bg-emerald-50 text-emerald-700'
+                  }`}>
+                    {row.openNow >= 30 ? 'High load' : row.openNow >= 15 ? 'Watch' : 'Normal'}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded bg-slate-50 p-2">
+                    <p className="text-xs text-slate-500">Self</p>
+                    <p className="text-sm font-bold text-slate-900">{row.selfPickRatePct}%</p>
+                  </div>
+                  <div className="rounded bg-slate-50 p-2">
+                    <p className="text-xs text-slate-500">Close</p>
+                    <p className="text-sm font-bold text-slate-900">{row.closeRatePct}%</p>
+                  </div>
+                  <div className="rounded bg-slate-50 p-2">
+                    <p className="text-xs text-slate-500">Avg Res.</p>
+                    <p className="text-sm font-bold text-slate-900">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</p>
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-2 text-xs text-slate-600">
+                  <p><span className="font-semibold text-slate-800">Sources:</span> {row.selfPicked} self, {row.coordinatorAssigned} coordinator, {row.appAssigned} app</p>
+                  <p><span className="font-semibold text-slate-800">Rejected:</span> {row.rejected} ({row.rejectionRatePct}%)</p>
+                  <p><span className="font-semibold text-slate-800">Available:</span> {row.availableDays} days, {row.assignedPerAvailableDay ?? '—'} assigned / available day</p>
+                  <p><span className="font-semibold text-slate-800">Leave:</span> {row.leaveDays} days{row.leaveHalfDays ? ` (${row.leaveHalfDays} half-day records)` : ''}</p>
+                  <p><span className="font-semibold text-slate-800">WFH:</span> {row.wfhDays || 0} days</p>
+                  <p>
+                    <span className="font-semibold text-slate-800">Top categories:</span>{' '}
+                    {row.topCategories?.length ? row.topCategories.map((cat) => `${cat.name} (${cat.count})`).join(', ') : 'None in range'}
                   </p>
                 </div>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                  row.openNow >= 30 ? 'bg-red-50 text-red-700'
-                    : row.openNow >= 15 ? 'bg-amber-50 text-amber-700'
-                      : 'bg-emerald-50 text-emerald-700'
-                }`}>
-                  {row.openNow >= 30 ? 'High load' : row.openNow >= 15 ? 'Watch' : 'Normal'}
-                </span>
               </div>
-
-              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-xs text-slate-500">Self</p>
-                  <p className="text-sm font-bold text-slate-900">{row.selfPickRatePct}%</p>
-                </div>
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-xs text-slate-500">Close</p>
-                  <p className="text-sm font-bold text-slate-900">{row.closeRatePct}%</p>
-                </div>
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-xs text-slate-500">Avg Res.</p>
-                  <p className="text-sm font-bold text-slate-900">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</p>
-                </div>
-              </div>
-
-              <div className="mt-3 space-y-2 text-xs text-slate-600">
-                <p><span className="font-semibold text-slate-800">Sources:</span> {row.selfPicked} self, {row.coordinatorAssigned} coordinator, {row.appAssigned} app</p>
-                <p><span className="font-semibold text-slate-800">Rejected:</span> {row.rejected} ({row.rejectionRatePct}%)</p>
-                <p><span className="font-semibold text-slate-800">Available:</span> {row.availableDays} days, {row.assignedPerAvailableDay ?? '—'} assigned / available day</p>
-                <p><span className="font-semibold text-slate-800">Leave:</span> {row.leaveDays} days{row.leaveHalfDays ? ` (${row.leaveHalfDays} half-day records)` : ''}</p>
-                <p><span className="font-semibold text-slate-800">WFH:</span> {row.wfhDays || 0} days</p>
-                <p>
-                  <span className="font-semibold text-slate-800">Top categories:</span>{' '}
-                  {row.topCategories?.length ? row.topCategories.map((cat) => `${cat.name} (${cat.count})`).join(', ') : 'None in range'}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text="Open focused detail only when coaching context is needed." />
+        )}
       </Panel>
     </div>
   );
@@ -1800,6 +2191,7 @@ export default function Analytics() {
     }
     switch (activeTab) {
     case 'demand': return renderDemand();
+    case 'categories': return renderCategories();
     case 'team': return renderTeam();
     case 'quality': return renderQuality();
     case 'ops': return renderOps();

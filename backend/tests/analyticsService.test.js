@@ -1,4 +1,5 @@
 import {
+  buildCategoryIntelligence,
   buildInsight,
   categoryBreakdownFromTickets,
   categoryFilterForQuery,
@@ -130,5 +131,113 @@ describe('analyticsService pure helpers', () => {
       'Endpoint / Laptop',
       'Uncategorized',
     ]));
+  });
+
+  test('buildCategoryIntelligence returns canonical category and subcategory metrics', () => {
+    const rangeInfo = parseAnalyticsRange(
+      { timezone: 'America/Los_Angeles', compare: 'previous' },
+      new Date('2026-04-26T19:00:00.000Z'),
+    );
+    const baseTicket = {
+      id: 1,
+      freshserviceTicketId: 1001n,
+      subject: 'MFA reset',
+      status: 'Closed',
+      priority: 2,
+      source: 1,
+      createdAt: new Date('2026-04-20T16:00:00.000Z'),
+      firstAssignedAt: new Date('2026-04-20T16:30:00.000Z'),
+      dueBy: new Date('2026-04-22T16:00:00.000Z'),
+      assignedBy: 'Ticket Pulse Bot',
+      assignedTech: { id: 9, name: 'Tech One' },
+      isSelfPicked: false,
+      internalCategoryId: 10,
+      internalCategory: { id: 10, name: 'Identity' },
+      internalSubcategoryId: 11,
+      internalSubcategory: { id: 11, name: 'MFA', parentId: 10 },
+      taxonomyReviewNeeded: true,
+      resolutionTimeSeconds: 7200,
+      csatScore: 4,
+      csatTotalScore: 4,
+      requester: { name: 'Requester', email: 'requester@example.test' },
+    };
+
+    const result = buildCategoryIntelligence({
+      workspaceId: 1,
+      rangeInfo,
+      categoryMode: 'canonical',
+      createdTickets: [baseTicket],
+      assignedTickets: [baseTicket],
+      openTickets: [{ ...baseTicket, status: 'Open', dueBy: new Date('2026-04-01T00:00:00.000Z') }],
+      previousCreatedTickets: [{ ...baseTicket, createdAt: new Date('2026-03-25T16:00:00.000Z') }],
+      pipelineRuns: [{ status: 'failed', errorMessage: 'sync failed', triggerSource: 'poll', ticket: baseTicket }],
+      serviceAccountNames: ['ticket pulse bot'],
+    });
+
+    expect(result.summary).toMatchObject({
+      categoryMode: 'canonical',
+      totalCreated: 1,
+      totalAssigned: 1,
+      open: 1,
+      overdue: 1,
+      automationFailures: 1,
+    });
+    expect(result.rows[0]).toMatchObject({
+      name: 'Identity / MFA',
+      categoryName: 'Identity',
+      subcategoryName: 'MFA',
+      created: 1,
+      assigned: 1,
+      open: 1,
+      p90ResolutionHours: 2,
+      csatAverage: 4,
+      automationFailureRatePct: 100,
+    });
+    expect(result.rows[0].assignmentMix.appAssigned).toBe(1);
+    expect(result.hierarchy.map((node) => node.name)).toEqual(expect.arrayContaining(['Categories', 'Identity', 'MFA']));
+    expect(result.assignmentFlow).toEqual(expect.arrayContaining([
+      { from: 'Ticket Pulse assigned', to: 'Identity / MFA', weight: 1 },
+      { from: 'Identity / MFA', to: 'Automation failed', weight: 1 },
+    ]));
+  });
+
+  test('buildCategoryIntelligence hides subcategory semantics for legacy workspaces', () => {
+    const rangeInfo = parseAnalyticsRange(
+      { timezone: 'America/Los_Angeles', compare: 'none' },
+      new Date('2026-04-26T19:00:00.000Z'),
+    );
+    const ticket = {
+      id: 2,
+      freshserviceTicketId: 1002n,
+      subject: 'Legacy category ticket',
+      status: 'Open',
+      createdAt: new Date('2026-04-21T16:00:00.000Z'),
+      firstAssignedAt: null,
+      ticketCategory: 'Hardware',
+      assignedTech: null,
+      taxonomyReviewNeeded: false,
+    };
+
+    const result = buildCategoryIntelligence({
+      workspaceId: 2,
+      rangeInfo,
+      categoryMode: 'legacy',
+      createdTickets: [ticket],
+      assignedTickets: [],
+      openTickets: [ticket],
+      previousCreatedTickets: [],
+      pipelineRuns: [],
+      serviceAccountNames: [],
+    });
+
+    expect(result.summary.categoryMode).toBe('legacy');
+    expect(result.rows[0]).toMatchObject({
+      name: 'Hardware',
+      categoryName: 'Hardware',
+      subcategoryName: null,
+      created: 1,
+      open: 1,
+    });
+    expect(result.hierarchy.some((node) => node.name === 'Legacy categories')).toBe(true);
   });
 });
