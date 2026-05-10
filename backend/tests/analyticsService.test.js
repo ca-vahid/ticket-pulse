@@ -194,7 +194,15 @@ describe('analyticsService pure helpers', () => {
       automationFailureRatePct: 100,
     });
     expect(result.rows[0].assignmentMix.appAssigned).toBe(1);
-    expect(result.hierarchy.map((node) => node.name)).toEqual(expect.arrayContaining(['Categories', 'Identity', 'MFA']));
+    expect(result.hierarchy.map((node) => node.name)).toEqual(expect.arrayContaining(['Identity', 'MFA']));
+    expect(result.hierarchy.some((node) => node.name === 'Categories')).toBe(false);
+    expect(result.hierarchy.find((node) => node.name === 'Identity')).toMatchObject({
+      custom: {
+        nodeType: 'category',
+        created: 1,
+        open: 1,
+      },
+    });
     expect(result.assignmentFlow).toEqual(expect.arrayContaining([
       { from: 'Ticket Pulse assigned', to: 'Identity / MFA', weight: 1 },
       { from: 'Identity / MFA', to: 'Automation failed', weight: 1 },
@@ -238,6 +246,14 @@ describe('analyticsService pure helpers', () => {
       created: 1,
       open: 1,
     });
-    expect(result.hierarchy.some((node) => node.name === 'Legacy categories')).toBe(true);
+    expect(result.hierarchy).toHaveLength(1);
+    expect(result.hierarchy[0]).toMatchObject({
+      name: 'Hardware',
+      custom: {
+        nodeType: 'category',
+        created: 1,
+        open: 1,
+      },
+    });
   });
 });

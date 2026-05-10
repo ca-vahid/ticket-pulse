@@ -548,22 +548,55 @@ function finalizeCategoryRow(row, totalCreated = 0) {
 }
 
 function buildCategoryHierarchy(rows, mode) {
-  const rootId = 'root';
-  const nodes = [{ id: rootId, name: mode === 'canonical' ? 'Categories' : 'Legacy categories' }];
+  const nodes = [];
   const categoryNodes = new Map();
+  const categoryTotals = new Map();
   for (const row of rows) {
     if (!categoryNodes.has(row.categoryKey)) {
+      const categoryName = row.categoryName || row.name;
       categoryNodes.set(row.categoryKey, {
         id: row.categoryKey,
-        parent: rootId,
-        name: row.categoryName || row.name,
+        name: mode === 'canonical' ? categoryName : (categoryName || 'Legacy category'),
         value: 0,
         colorValue: 0,
+        custom: {
+          key: row.categoryKey,
+          categoryKey: row.categoryKey,
+          name: categoryName,
+          categoryName,
+          subcategoryName: null,
+          categoryId: row.categoryId,
+          subcategoryId: null,
+          source: row.source,
+          created: 0,
+          assigned: 0,
+          open: 0,
+          overdue: 0,
+          reviewNeeded: 0,
+          unmapped: 0,
+          automationRuns: 0,
+          automationFailures: 0,
+          automationRebounds: 0,
+          pressureScore: 0,
+          nodeType: 'category',
+        },
       });
     }
     const parent = categoryNodes.get(row.categoryKey);
     parent.value += row.created || 0;
     parent.colorValue = Math.max(parent.colorValue || 0, row.pressureScore || 0);
+    const total = categoryTotals.get(row.categoryKey) || parent.custom;
+    total.created += row.created || 0;
+    total.assigned += row.assigned || 0;
+    total.open += row.open || 0;
+    total.overdue += row.overdue || 0;
+    total.reviewNeeded += row.reviewNeeded || 0;
+    total.unmapped += row.unmapped || 0;
+    total.automationRuns += row.automationRuns || 0;
+    total.automationFailures += row.automationFailures || 0;
+    total.automationRebounds += row.automationRebounds || 0;
+    total.pressureScore += row.pressureScore || 0;
+    categoryTotals.set(row.categoryKey, total);
     if (row.key !== row.categoryKey) {
       nodes.push({
         id: row.key,
@@ -571,17 +604,17 @@ function buildCategoryHierarchy(rows, mode) {
         name: row.subcategoryName || row.name,
         value: row.created,
         colorValue: row.pressureScore,
-        custom: row,
+        custom: { ...row, nodeType: 'subcategory' },
       });
     }
   }
 
   return [
-    ...nodes,
     ...Array.from(categoryNodes.values()).map((node) => ({
       ...node,
-      custom: rows.find((row) => row.categoryKey === node.id) || null,
+      custom: categoryTotals.get(node.id) || node.custom,
     })),
+    ...nodes,
   ];
 }
 

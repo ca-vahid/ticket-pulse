@@ -642,6 +642,8 @@ export default function Analytics() {
   const overview = payload.overview;
   const demand = payload.demand;
   const categories = payload.categories;
+  const categoryMode = categories?.metadata?.categoryMode || categoryMetadata?.categoryMode;
+  const legacyMode = categoryMode === 'legacy';
   const team = payload.team;
   const quality = payload.quality;
   const ops = payload.ops;
@@ -749,17 +751,49 @@ export default function Analytics() {
         },
         pointFormatter() {
           const row = this.custom || {};
-          return `<b>${this.name}</b><br/>${formatNumber(this.value || row.created || 0)} created<br/>${formatNumber(row.open || 0)} open · ${formatNumber(row.overdue || 0)} overdue<br/>${formatNumber(row.reviewNeeded || 0)} review-needed`;
+          const typeLabel = row.nodeType === 'category' ? 'Top category' : 'Subcategory';
+          return `<b>${this.name}</b><br/><span style="color:#64748b">${typeLabel}</span><br/>${formatNumber(this.value || row.created || 0)} created<br/>${formatNumber(row.open || 0)} open · ${formatNumber(row.overdue || 0)} overdue<br/>${formatNumber(row.reviewNeeded || 0)} review-needed`;
         },
+      },
+      breadcrumbs: {
+        showFullPath: true,
+        format: '{level.name}',
+        buttonTheme: {
+          fill: 'none',
+          padding: 2,
+          'stroke-width': 0,
+          style: {
+            color: '#2563eb',
+            fontSize: '12px',
+            fontWeight: '700',
+          },
+          states: {
+            hover: { fill: '#eff6ff' },
+            select: { fill: 'none', style: { color: '#0f172a', fontWeight: '800' } },
+          },
+        },
+        separator: { text: '/', style: { color: '#64748b', fontSize: '13px' } },
       },
       plotOptions: {
         ...chartBase('treemap').plotOptions,
         treemap: {
           allowTraversingTree: true,
+          interactByLeaf: true,
           layoutAlgorithm: 'squarified',
           borderRadius: 3,
           borderWidth: 2,
           borderColor: '#64748b',
+          states: {
+            hover: {
+              brightness: 0,
+              borderColor: '#1d4ed8',
+              borderWidth: 3,
+              opacity: 1,
+              halo: false,
+              shadow: false,
+            },
+            inactive: { opacity: 1 },
+          },
           dataLabels: {
             enabled: true,
             useHTML: true,
@@ -767,17 +801,19 @@ export default function Analytics() {
             crop: true,
             overflow: 'justify',
             formatter() {
-              if (this.point.id === 'root') return '';
               const shape = this.point.shapeArgs || {};
-              const rootNode = this.series.rootNode || 'root';
+              const rootNode = this.series.rootNode || '';
               if (rootNode !== 'root' && this.point.id === rootNode) return '';
-              if (rootNode !== 'root' && this.point.node?.children?.length) return '';
+              const isParent = this.point.node?.children?.length > 0;
+              if (isParent && rootNode !== '') return '';
               if (shape.width < 42 || shape.height < 20) return '';
               const rawName = this.point.name || '';
-              const maxChars = Math.max(8, Math.floor((shape.width || 80) / 5.2) * Math.max(1, Math.floor((shape.height || 24) / 14)));
+              const lineHeight = isParent ? 11 : 10;
+              const maxChars = Math.max(8, Math.floor((shape.width || 80) / 5.2) * Math.max(1, Math.floor((shape.height || 24) / (lineHeight + 3))));
               const name = rawName.length > maxChars ? `${rawName.slice(0, Math.max(5, maxChars - 1))}...` : rawName;
               const created = this.point.custom?.created ?? this.point.value;
-              return shape.height >= 44 && created ? `${name}<br/><span style="font-size:8px;font-weight:600">${formatNumber(created)} created</span>` : name;
+              const prefix = isParent ? '<span style="display:block;color:#334155;font-size:9px;text-transform:uppercase">Category</span>' : '';
+              return shape.height >= 44 && created ? `${prefix}${name}<br/><span style="font-size:8px;font-weight:600">${formatNumber(created)} created</span>` : `${prefix}${name}`;
             },
             style: {
               color: '#0f172a',
@@ -791,10 +827,25 @@ export default function Analytics() {
           levels: [{
             level: 1,
             borderWidth: 4,
-            borderColor: '#475569',
+            borderColor: '#334155',
+            groupPadding: 3,
+            dataLabels: {
+              enabled: true,
+              headers: true,
+              align: 'left',
+              verticalAlign: 'top',
+              padding: 5,
+              style: {
+                fontSize: '10px',
+                fontWeight: '800',
+                color: '#0f172a',
+                lineHeight: '12px',
+                textOutline: 'none',
+              },
+            },
           }, {
             level: 2,
-            borderWidth: 2,
+            borderWidth: 1.5,
             borderColor: '#94a3b8',
           }],
           point: {
@@ -808,11 +859,11 @@ export default function Analytics() {
       },
       series: [{
         type: 'treemap',
-        name: 'Categories',
+        name: legacyMode ? 'Legacy categories' : 'All categories',
         data: rows,
       }],
     };
-  }, [categories?.hierarchy]);
+  }, [categories?.hierarchy, legacyMode]);
 
   const categoryTrendOptions = useMemo(() => {
     const rows = categories?.trend || [];
@@ -1547,8 +1598,6 @@ export default function Analytics() {
   );
 
   const renderCategories = () => {
-    const mode = categories?.metadata?.categoryMode || categoryMetadata?.categoryMode;
-    const legacyMode = mode === 'legacy';
     const selectedRows = selectedCategory?.recentTickets || [];
 
     return (
@@ -1569,7 +1618,7 @@ export default function Analytics() {
           title={legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map'}
           subtitle="Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures."
         >
-          {(categories?.hierarchy || []).length > 1
+          {(categories?.hierarchy || []).length > 0
             ? <HighchartsBlock options={categoryHierarchyOptions} height={isMobile ? '24rem' : '38rem'} />
             : <EmptyState />}
           {selectedCategory && (
