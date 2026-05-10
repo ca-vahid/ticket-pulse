@@ -552,6 +552,7 @@ export default function Analytics() {
   const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(null);
+  const [hoveredCategory, setHoveredCategory] = useState(null);
   const [categoryMetadata, setCategoryMetadata] = useState(null);
   const [selectedLegacyCategories, setSelectedLegacyCategories] = useState([]);
   const [selectedCanonicalCategories, setSelectedCanonicalCategories] = useState({ categoryIds: [], subcategoryIds: [] });
@@ -717,8 +718,17 @@ export default function Analytics() {
   }, []);
 
   const selectedCategory = useMemo(() => (
-    categories?.rows?.find((row) => row.key === selectedCategoryKey) || categories?.rows?.[0] || null
+    categories?.rows?.find((row) => row.key === selectedCategoryKey)
+    || categories?.rows?.find((row) => row.categoryKey === selectedCategoryKey)
+    || categories?.rows?.[0]
+    || null
   ), [categories?.rows, selectedCategoryKey]);
+
+  const selectedHierarchyCategory = useMemo(() => (
+    categories?.hierarchy?.find((node) => node.custom?.key === selectedCategoryKey)?.custom || null
+  ), [categories?.hierarchy, selectedCategoryKey]);
+
+  const mapFocusCategory = hoveredCategory || selectedHierarchyCategory || selectedCategory;
 
   const categoryHierarchyOptions = useMemo(() => {
     const rows = categories?.hierarchy || [];
@@ -728,7 +738,9 @@ export default function Analytics() {
         min: 0,
         stops: [
           [0, '#dbeafe'],
-          [0.45, '#fef3c7'],
+          [0.22, '#d1fae5'],
+          [0.48, '#fef9c3'],
+          [0.74, '#fed7aa'],
           [1, '#fecaca'],
         ],
       },
@@ -736,25 +748,7 @@ export default function Analytics() {
         enabled: true,
         description: 'Category hierarchy treemap. Larger blocks mean more created tickets. Warmer colors mean more open, overdue, review-needed, or automation-failure pressure.',
       },
-      tooltip: {
-        useHTML: true,
-        outside: true,
-        followPointer: false,
-        hideDelay: 80,
-        borderColor: '#cbd5e1',
-        shadow: false,
-        positioner(labelWidth, _labelHeight) {
-          return {
-            x: Math.max(12, this.chart.plotLeft + this.chart.plotWidth - labelWidth - 16),
-            y: Math.max(12, this.chart.plotTop + 12),
-          };
-        },
-        pointFormatter() {
-          const row = this.custom || {};
-          const typeLabel = row.nodeType === 'category' ? 'Top category' : 'Subcategory';
-          return `<b>${this.name}</b><br/><span style="color:#64748b">${typeLabel}</span><br/>${formatNumber(this.value || row.created || 0)} created<br/>${formatNumber(row.open || 0)} open · ${formatNumber(row.overdue || 0)} overdue<br/>${formatNumber(row.reviewNeeded || 0)} review-needed`;
-        },
-      },
+      tooltip: { enabled: false },
       breadcrumbs: {
         showFullPath: true,
         format: '{level.name}',
@@ -812,8 +806,10 @@ export default function Analytics() {
               const maxChars = Math.max(8, Math.floor((shape.width || 80) / 5.2) * Math.max(1, Math.floor((shape.height || 24) / (lineHeight + 3))));
               const name = rawName.length > maxChars ? `${rawName.slice(0, Math.max(5, maxChars - 1))}...` : rawName;
               const created = this.point.custom?.created ?? this.point.value;
-              const prefix = isParent ? '<span style="display:block;color:#334155;font-size:9px;text-transform:uppercase">Category</span>' : '';
-              return shape.height >= 44 && created ? `${prefix}${name}<br/><span style="font-size:8px;font-weight:600">${formatNumber(created)} created</span>` : `${prefix}${name}`;
+              const nameStyle = isParent ? 'font-size:11px;font-weight:800;line-height:13px' : '';
+              return shape.height >= 44 && created
+                ? `<span style="${nameStyle}">${name}</span><br/><span style="font-size:8px;font-weight:600">${formatNumber(created)} created</span>`
+                : `<span style="${nameStyle}">${name}</span>`;
             },
             style: {
               color: '#0f172a',
@@ -850,6 +846,18 @@ export default function Analytics() {
           }],
           point: {
             events: {
+              mouseOver() {
+                if (this.custom?.key) {
+                  setHoveredCategory({
+                    ...this.custom,
+                    name: this.name || this.custom.name,
+                    created: this.value ?? this.custom.created ?? 0,
+                  });
+                }
+              },
+              mouseOut() {
+                setHoveredCategory(null);
+              },
               click() {
                 if (this.custom?.key) setSelectedCategoryKey(this.custom.key);
               },
@@ -1599,6 +1607,14 @@ export default function Analytics() {
 
   const renderCategories = () => {
     const selectedRows = selectedCategory?.recentTickets || [];
+    const mapFocusType = mapFocusCategory?.nodeType === 'category'
+      ? 'Top category'
+      : mapFocusCategory?.subcategoryName
+        ? 'Subcategory'
+        : 'Category';
+    const mapFocusAutoFailureRate = mapFocusCategory?.automationRuns
+      ? (mapFocusCategory.automationFailureRatePct ?? Math.round(((mapFocusCategory.automationFailures || 0) / mapFocusCategory.automationRuns) * 100))
+      : 0;
 
     return (
       <div className="space-y-4">
@@ -1618,6 +1634,33 @@ export default function Analytics() {
           title={legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map'}
           subtitle="Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures."
         >
+          {mapFocusCategory && (
+            <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900">{mapFocusCategory.name}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {hoveredCategory ? 'Hover focus' : 'Selected focus'} · {mapFocusType}
+                  </p>
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-center text-xs sm:grid-cols-6 lg:min-w-[32rem]">
+                  {[
+                    ['Created', formatNumber(mapFocusCategory.created)],
+                    ['Open', formatNumber(mapFocusCategory.open || 0)],
+                    ['Overdue', formatNumber(mapFocusCategory.overdue || 0)],
+                    ['Review', formatNumber(mapFocusCategory.reviewNeeded || 0)],
+                    ['Auto fail', `${mapFocusAutoFailureRate}%`],
+                    ['Rebounds', formatNumber(mapFocusCategory.automationRebounds || 0)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-md bg-slate-50 px-2 py-1 ring-1 ring-slate-200">
+                      <p className="font-bold text-slate-900">{value}</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-normal text-slate-500">{label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           {(categories?.hierarchy || []).length > 0
             ? <HighchartsBlock options={categoryHierarchyOptions} height={isMobile ? '24rem' : '38rem'} />
             : <EmptyState />}
