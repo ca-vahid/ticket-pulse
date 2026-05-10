@@ -704,7 +704,7 @@ export function buildCategoryIntelligence({
 
   const allRows = Array.from(rowsByKey.values())
     .sort((a, b) => b.created - a.created || b.open - a.open || String(a.name).localeCompare(String(b.name)));
-  const rolledRows = mergeOtherCategoryRows(allRows, 8);
+  const rolledRows = mergeOtherCategoryRows(allRows, 32);
   const totalCreated = createdTickets.length;
   const rows = rolledRows.map((row) => finalizeCategoryRow(row, totalCreated));
   const visibleKeys = new Set(rows.map((row) => row.key));
@@ -727,7 +727,7 @@ export function buildCategoryIntelligence({
 
   const previousRows = Array.from(previousByKey.values())
     .sort((a, b) => b.count - a.count || String(a.name).localeCompare(String(b.name)))
-    .slice(0, 8);
+    .slice(0, 16);
 
   return {
     summary: {

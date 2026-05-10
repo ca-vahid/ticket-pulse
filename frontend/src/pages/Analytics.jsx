@@ -548,6 +548,7 @@ export default function Analytics() {
   const [teamSort, setTeamSort] = useState({ key: 'assigned', direction: 'desc' });
   const [selectedTeamIds, setSelectedTeamIds] = useState([]);
   const [teamTimelineMetric, setTeamTimelineMetric] = useState('assigned');
+  const [showTeamPicker, setShowTeamPicker] = useState(false);
   const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(null);
@@ -671,12 +672,39 @@ export default function Analytics() {
     return rows;
   }, [selectedTeamIds, team?.technicians, teamFilter, teamSearch, teamSort]);
 
+  const teamPickerRows = useMemo(() => {
+    let rows = [...(team?.technicians || [])];
+    const q = teamSearch.trim().toLowerCase();
+    if (q) {
+      rows = rows.filter((row) => row.name?.toLowerCase().includes(q) || row.email?.toLowerCase().includes(q));
+    }
+    if (teamFilter === 'onLeave') rows = rows.filter((row) => (row.leaveDays || 0) > 0);
+    if (teamFilter === 'highOpen') rows = rows.filter((row) => (row.openNow || 0) >= 20);
+    if (teamFilter === 'highRejected') rows = rows.filter((row) => (row.rejected || 0) > 0);
+    return rows.sort((a, b) => (b.openNow || 0) - (a.openNow || 0) || (b.assigned || 0) - (a.assigned || 0) || a.name.localeCompare(b.name));
+  }, [team?.technicians, teamFilter, teamSearch]);
+
+  const selectedTeamRows = useMemo(() => {
+    const selected = new Set(selectedTeamIds);
+    return (team?.technicians || [])
+      .filter((row) => selected.has(row.technicianId))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [selectedTeamIds, team?.technicians]);
+
   const setTeamSortKey = (key) => {
     setTeamSort((current) => ({
       key,
       direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc',
     }));
   };
+
+  const focusTopAgents = useCallback((key) => {
+    const ids = [...(team?.technicians || [])]
+      .sort((a, b) => (Number(b[key]) || 0) - (Number(a[key]) || 0) || a.name.localeCompare(b.name))
+      .slice(0, 5)
+      .map((row) => row.technicianId);
+    setSelectedTeamIds(ids);
+  }, [team?.technicians]);
 
   const toggleTeamSelection = useCallback((technicianId) => {
     setSelectedTeamIds((current) => (
@@ -708,7 +736,17 @@ export default function Analytics() {
       },
       tooltip: {
         useHTML: true,
+        outside: true,
+        followPointer: false,
+        hideDelay: 80,
         borderColor: '#cbd5e1',
+        shadow: false,
+        positioner(labelWidth, _labelHeight) {
+          return {
+            x: Math.max(12, this.chart.plotLeft + this.chart.plotWidth - labelWidth - 16),
+            y: Math.max(12, this.chart.plotTop + 12),
+          };
+        },
         pointFormatter() {
           const row = this.custom || {};
           return `<b>${this.name}</b><br/>${formatNumber(this.value || row.created || 0)} created<br/>${formatNumber(row.open || 0)} open · ${formatNumber(row.overdue || 0)} overdue<br/>${formatNumber(row.reviewNeeded || 0)} review-needed`;
@@ -719,15 +757,39 @@ export default function Analytics() {
         treemap: {
           allowTraversingTree: true,
           layoutAlgorithm: 'squarified',
-          borderRadius: 4,
+          borderRadius: 3,
+          borderWidth: 2,
+          borderColor: '#64748b',
+          dataLabels: {
+            enabled: true,
+            allowOverlap: false,
+            crop: true,
+            overflow: 'justify',
+            formatter() {
+              if (this.point.id === 'root') return '';
+              const shape = this.point.shapeArgs || {};
+              const rootNode = this.series.rootNode || 'root';
+              if (rootNode !== 'root' && this.point.id === rootNode) return '';
+              if (shape.width < 104 || shape.height < 46) return '';
+              return this.point.name;
+            },
+            style: {
+              color: '#0f172a',
+              fontSize: '10px',
+              fontWeight: '700',
+              lineHeight: '13px',
+              textOutline: '1px contrast',
+              textOverflow: 'ellipsis',
+            },
+          },
           levels: [{
             level: 1,
-            borderWidth: 3,
-            dataLabels: { enabled: true, style: { fontSize: '12px', fontWeight: '700', textOutline: 'none' } },
+            borderWidth: 4,
+            borderColor: '#475569',
           }, {
             level: 2,
-            borderWidth: 1,
-            dataLabels: { enabled: true, style: { fontSize: '11px', textOutline: 'none' } },
+            borderWidth: 2,
+            borderColor: '#94a3b8',
           }],
           point: {
             events: {
@@ -872,6 +934,11 @@ export default function Analytics() {
     const rows = buildAssignmentMixRows(overview?.assignmentMix);
     return {
       ...chartBase('pie'),
+      chart: {
+        ...chartBase('pie').chart,
+        spacing: [0, 0, 0, 0],
+        margin: [0, 0, 0, 0],
+      },
       colors: rows.map((row) => row.color),
       accessibility: {
         enabled: true,
@@ -887,13 +954,12 @@ export default function Analytics() {
       plotOptions: {
         ...chartBase('pie').plotOptions,
         pie: {
-          innerSize: '62%',
+          size: '86%',
+          innerSize: '58%',
+          center: ['50%', '50%'],
           borderWidth: 2,
           dataLabels: {
-            enabled: true,
-            distance: 12,
-            style: { color: '#334155', fontSize: '11px', textOutline: 'none' },
-            format: '{point.name}: {point.y}',
+            enabled: false,
           },
         },
       },
@@ -1402,12 +1468,12 @@ export default function Analytics() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel title="Assignment Mix" subtitle="How assigned tickets entered a technician's queue in the selected range.">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-            <div className="relative h-64 min-w-0 sm:h-80">
+          <div className="grid gap-4 xl:grid-cols-[minmax(22rem,1fr)_minmax(18rem,24rem)]">
+            <div className="relative h-72 min-w-0 sm:h-80">
               <HighchartsBlock options={assignmentMixOptions} height="100%" />
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
-                  <p className="text-2xl font-bold text-slate-900">
+                  <p className="text-xl font-bold text-slate-900 sm:text-2xl">
                     {formatNumber(buildAssignmentMixRows(overview?.assignmentMix).reduce((sum, row) => sum + row.value, 0))}
                   </p>
                   <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">assigned tickets</p>
@@ -1657,34 +1723,115 @@ export default function Analytics() {
               </button>
             )}
           </div>
-          <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto pr-1">
-            {(team?.technicians || []).map((row) => {
-              const selected = selectedTeamIds.includes(row.technicianId);
-              return (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900">Agent focus</p>
+                <p className="text-xs text-slate-500">
+                  {selectedTeamIds.length
+                    ? `${selectedTeamIds.length} focused agent${selectedTeamIds.length === 1 ? '' : 's'} driving the charts and table.`
+                    : `${formatNumber(teamPickerRows.length)} matching active agents included.`}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
                 <button
-                  key={row.technicianId}
                   type="button"
-                  onClick={() => toggleTeamSelection(row.technicianId)}
-                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors ${
-                    selected
-                      ? 'border-blue-600 bg-blue-50 text-blue-700'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                  }`}
+                  onClick={() => focusTopAgents('openNow')}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                 >
-                  {row.name}
+                  Top open
                 </button>
-              );
-            })}
+                <button
+                  type="button"
+                  onClick={() => focusTopAgents('assignedPerAvailableDay')}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Top load rate
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTeamPicker((value) => !value)}
+                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                >
+                  {showTeamPicker ? 'Hide selector' : 'Choose agents'}
+                </button>
+              </div>
+            </div>
+
+            {selectedTeamRows.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {selectedTeamRows.map((row) => (
+                  <button
+                    key={row.technicianId}
+                    type="button"
+                    onClick={() => toggleTeamSelection(row.technicianId)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                    title={`Remove ${row.name} from focused agents`}
+                  >
+                    {row.name}
+                    <span className="text-blue-400">x</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {showTeamPicker && (
+              <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {teamPickerRows.map((row) => {
+                  const selected = selectedTeamIds.includes(row.technicianId);
+                  return (
+                    <button
+                      key={row.technicianId}
+                      type="button"
+                      onClick={() => toggleTeamSelection(row.technicianId)}
+                      className={`rounded-lg border p-3 text-left transition-colors ${
+                        selected
+                          ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100'
+                          : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-white'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-slate-900">{row.name}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">{row.assigned} assigned · {row.openNow} open</p>
+                        </div>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          row.openNow >= 30 ? 'bg-red-50 text-red-700'
+                            : row.openNow >= 15 ? 'bg-amber-50 text-amber-700'
+                              : 'bg-emerald-50 text-emerald-700'
+                        }`}>
+                          {row.openNow >= 30 ? 'High' : row.openNow >= 15 ? 'Watch' : 'OK'}
+                        </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-1 text-center text-[11px]">
+                        <div className="rounded bg-slate-100 px-1.5 py-1">
+                          <p className="font-bold text-slate-900">{row.assignedPerAvailableDay ?? '—'}</p>
+                          <p className="text-slate-500">rate</p>
+                        </div>
+                        <div className="rounded bg-slate-100 px-1.5 py-1">
+                          <p className="font-bold text-slate-900">{row.rejected}</p>
+                          <p className="text-slate-500">reject</p>
+                        </div>
+                        <div className="rounded bg-slate-100 px-1.5 py-1">
+                          <p className="font-bold text-slate-900">{row.leaveDays}</p>
+                          <p className="text-slate-500">leave</p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <p className="text-xs text-slate-500">
-            Click an agent chip or any chart bar/line point to add or remove that technician from the focused list.
+            Agent focus changes every chart and table below. Chart bars and lines can still be clicked to add or remove a technician.
           </p>
         </div>
       </Panel>
 
       <Panel
         title="Timeline by Agent"
-        subtitle={`${teamTimelineMetricLabel} over the selected date range. Use the agent chips above to compare specific technicians.`}
+        subtitle={`${teamTimelineMetricLabel} over the selected date range. Use Agent focus above to compare specific technicians.`}
       >
         {teamRows.length ? <HighchartsBlock options={timelineChartOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState text="No agents match the current filters." />}
       </Panel>
