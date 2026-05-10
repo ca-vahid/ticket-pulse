@@ -34,8 +34,6 @@ const SOURCE_LABELS = {
   1002: 'Workflow',
 };
 
-const CATEGORY_OTHER_KEY = 'other';
-
 const CATEGORY_TICKET_SELECT = {
   id: true,
   freshserviceTicketId: true,
@@ -509,46 +507,6 @@ function emptyCategoryRow(identity, source = 'canonical') {
   };
 }
 
-function mergeOtherCategoryRows(rows, keepCount = 8) {
-  if (rows.length <= keepCount) return rows;
-  const kept = rows.slice(0, keepCount);
-  const merged = rows.slice(keepCount).reduce((acc, row) => {
-    acc.created += row.created || 0;
-    acc.assigned += row.assigned || 0;
-    acc.open += row.open || 0;
-    acc.overdue += row.overdue || 0;
-    acc.reviewNeeded += row.reviewNeeded || 0;
-    acc.unmapped += row.unmapped || 0;
-    for (const id of row.reviewTicketIds || []) acc.reviewTicketIds.add(id);
-    for (const id of row.unmappedTicketIds || []) acc.unmappedTicketIds.add(id);
-    acc.selfPicked += row.selfPicked || 0;
-    acc.coordinatorAssigned += row.coordinatorAssigned || 0;
-    acc.appAssigned += row.appAssigned || 0;
-    acc.unknown += row.unknown || 0;
-    acc.csatResponses += row.csatResponses || 0;
-    acc.csatTotal += row.csatTotal || 0;
-    acc.resolutionValues.push(...(row.resolutionValues || []));
-    acc.recentTickets.push(...(row.recentTickets || []));
-    acc.automationRuns += row.automationRuns || 0;
-    acc.automationFailures += row.automationFailures || 0;
-    acc.automationRebounds += row.automationRebounds || 0;
-    return acc;
-  }, emptyCategoryRow({
-    leafKey: CATEGORY_OTHER_KEY,
-    categoryKey: CATEGORY_OTHER_KEY,
-    label: 'Other categories',
-    categoryName: 'Other categories',
-    subcategoryName: null,
-    categoryId: null,
-    subcategoryId: null,
-    source: 'rolledUp',
-  }, 'rolledUp'));
-  merged.recentTickets = merged.recentTickets
-    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-    .slice(0, 15);
-  return [...kept, merged];
-}
-
 function finalizeCategoryRow(row, totalCreated = 0) {
   const resolution = summarizeNumeric(row.resolutionValues || []);
   const reviewNeeded = row.reviewTicketIds?.size || row.reviewNeeded || 0;
@@ -704,12 +662,9 @@ export function buildCategoryIntelligence({
 
   const allRows = Array.from(rowsByKey.values())
     .sort((a, b) => b.created - a.created || b.open - a.open || String(a.name).localeCompare(String(b.name)));
-  const rolledRows = mergeOtherCategoryRows(allRows, 32);
   const totalCreated = createdTickets.length;
-  const rows = rolledRows.map((row) => finalizeCategoryRow(row, totalCreated));
-  const visibleKeys = new Set(rows.map((row) => row.key));
+  const rows = allRows.map((row) => finalizeCategoryRow(row, totalCreated));
   const trend = Array.from(trendMap.values())
-    .filter((row) => visibleKeys.has(row.key))
     .sort((a, b) => a.period.localeCompare(b.period) || String(a.name).localeCompare(String(b.name)));
 
   const assignmentFlow = [];

@@ -762,6 +762,7 @@ export default function Analytics() {
           borderColor: '#64748b',
           dataLabels: {
             enabled: true,
+            useHTML: true,
             allowOverlap: false,
             crop: true,
             overflow: 'justify',
@@ -770,14 +771,19 @@ export default function Analytics() {
               const shape = this.point.shapeArgs || {};
               const rootNode = this.series.rootNode || 'root';
               if (rootNode !== 'root' && this.point.id === rootNode) return '';
-              if (shape.width < 104 || shape.height < 46) return '';
-              return this.point.name;
+              if (rootNode !== 'root' && this.point.node?.children?.length) return '';
+              if (shape.width < 42 || shape.height < 20) return '';
+              const rawName = this.point.name || '';
+              const maxChars = Math.max(8, Math.floor((shape.width || 80) / 5.2) * Math.max(1, Math.floor((shape.height || 24) / 14)));
+              const name = rawName.length > maxChars ? `${rawName.slice(0, Math.max(5, maxChars - 1))}...` : rawName;
+              const created = this.point.custom?.created ?? this.point.value;
+              return shape.height >= 44 && created ? `${name}<br/><span style="font-size:8px;font-weight:600">${formatNumber(created)} created</span>` : name;
             },
             style: {
               color: '#0f172a',
-              fontSize: '10px',
+              fontSize: '8px',
               fontWeight: '700',
-              lineHeight: '13px',
+              lineHeight: '10px',
               textOutline: '1px contrast',
               textOverflow: 'ellipsis',
             },
@@ -1559,54 +1565,41 @@ export default function Analytics() {
           <StatCard title="Automation Failures" value={formatNumber(categories?.summary?.automationFailures)} subtitle={`${formatNumber(categories?.summary?.automationRuns || 0)} category-linked runs`} icon={RefreshCw} tone={(categories?.summary?.automationFailures || 0) > 0 ? 'red' : 'green'} />
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(22rem,0.65fr)]">
-          <Panel
-            title={legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map'}
-            subtitle="Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures."
-          >
-            {(categories?.hierarchy || []).length > 1
-              ? <HighchartsBlock options={categoryHierarchyOptions} height={isMobile ? '22rem' : '31rem'} />
-              : <EmptyState />}
-          </Panel>
-          <Panel title="Selected Category" subtitle="Operational detail for the selected block or bubble.">
-            {selectedCategory ? (
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">{selectedCategory.name}</h3>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {formatNumber(selectedCategory.created)} created · {formatNumber(selectedCategory.open)} open · {formatNumber(selectedCategory.overdue)} overdue
-                  </p>
+        <Panel
+          title={legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map'}
+          subtitle="Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures."
+        >
+          {(categories?.hierarchy || []).length > 1
+            ? <HighchartsBlock options={categoryHierarchyOptions} height={isMobile ? '24rem' : '38rem'} />
+            : <EmptyState />}
+          {selectedCategory && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900">{selectedCategory.name}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">Selected category from the map or pressure chart</p>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 xl:grid-cols-8">
                   {[
-                    ['Created share', `${selectedCategory.createdPct}%`],
-                    ['Median resolution', selectedCategory.medianResolutionHours === null ? '—' : `${selectedCategory.medianResolutionHours}h`],
-                    ['P90 resolution', selectedCategory.p90ResolutionHours === null ? '—' : `${selectedCategory.p90ResolutionHours}h`],
-                    ['Resolution sample', formatNumber(selectedCategory.resolutionSample)],
+                    ['Created', formatNumber(selectedCategory.created)],
+                    ['Open', formatNumber(selectedCategory.open)],
+                    ['Overdue', formatNumber(selectedCategory.overdue)],
+                    ['P90', selectedCategory.p90ResolutionHours === null ? '—' : `${selectedCategory.p90ResolutionHours}h`],
                     ['CSAT', selectedCategory.csatAverage === null ? '—' : `${selectedCategory.csatAverage} (${selectedCategory.csatResponses})`],
-                    ['Review needed', formatNumber(selectedCategory.reviewNeeded)],
-                    ['Automation failure', `${selectedCategory.automationFailureRatePct}%`],
+                    ['Review', formatNumber(selectedCategory.reviewNeeded)],
+                    ['Auto fail', `${selectedCategory.automationFailureRatePct}%`],
                     ['Rebounds', formatNumber(selectedCategory.automationRebounds)],
                   ].map(([label, value]) => (
-                    <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                      <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">{label}</p>
-                      <p className="mt-1 font-bold text-slate-900">{value}</p>
+                    <div key={label} className="rounded-md bg-white px-2 py-1.5 text-center shadow-sm ring-1 ring-slate-200">
+                      <p className="font-bold text-slate-900">{value}</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-normal text-slate-500">{label}</p>
                     </div>
                   ))}
                 </div>
-                <div className="rounded-lg border border-slate-200 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">Assignment Mix</p>
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
-                    <span>Ticket Pulse: <b>{formatNumber(selectedCategory.assignmentMix?.appAssigned || 0)}</b></span>
-                    <span>Coordinator: <b>{formatNumber(selectedCategory.assignmentMix?.coordinatorAssigned || 0)}</b></span>
-                    <span>Self-picked: <b>{formatNumber(selectedCategory.assignmentMix?.selfPicked || 0)}</b></span>
-                    <span>Unavailable: <b>{formatNumber(selectedCategory.assignmentMix?.unknown || 0)}</b></span>
-                  </div>
-                </div>
               </div>
-            ) : <EmptyState />}
-          </Panel>
-        </div>
+            </div>
+          )}
+        </Panel>
 
         <div className="grid gap-4 xl:grid-cols-2">
           <Panel title="Demand Heatmap" subtitle="Top category/subcategory paths by selected time resolution.">

@@ -1,6 +1,24 @@
-export const APP_VERSION = '2.2';
+export const APP_VERSION = '2.3';
 
 export const changelog = [
+  {
+    version: '2.3',
+    date: 'May 10, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>IT Category/Subcategory Migration</strong> moves the IT workspace onto Ticket Pulse-owned category and subcategory fields while keeping FreshService synchronized through lookup fields.' },
+      { type: 'new', html: '<mark>Major</mark> <strong>Category Intelligence Analytics</strong> adds a dedicated Categories tab with hierarchy maps, demand heatmaps, pressure bubbles, assignment-flow Sankey views, drilldowns, exports, and deterministic category insights.' },
+      { type: 'new', html: '<mark>Major</mark> <strong>Category Reclassification Tools</strong> add preview/apply batches, cumulative review, unclassified-ticket targeting, larger batch support, rollback-ready audit records, and parent lookup sync.' },
+      { type: 'improved', html: '<strong>Workspace-safe category filters</strong> now use the new category/subcategory model for migrated IT data while non-migrated workspaces stay on legacy category behavior.' },
+      { type: 'improved', html: '<strong>Analytics visual polish</strong> improves the category map, chart labels, map borders, tooltip placement, assignment mix sizing, exports, and the Team Balance agent-focus controls.' },
+      { type: 'improved', html: '<strong>Summit workshop follow-through</strong> adds the public summit report, feedback export and summary, logged-in category voting, better live feedback updates, reset handling, and cleaner facilitator controls.' },
+      { type: 'fixed', html: '<strong>FreshService lookup writeback</strong> now handles Ticket Pulse category and subcategory lookup values using the correct lookup identifiers and reverse mapping.' },
+      { type: 'fixed', html: '<strong>Category migration UX</strong> fixes cumulative preview batches, large apply requests, unclassified ticket targeting, toolbar clutter, and subcategory parent synchronization.' },
+      { type: 'fixed', html: '<strong>Summit live sessions</strong> are more stable after resets, participant refreshes, header live-state updates, and activity clearing.' },
+      { type: 'security', html: '<strong>Migration scope remains workspace-gated</strong>: IT uses the new hierarchy, future migrated workspaces can opt in, and legacy workspaces do not display subcategory intelligence prematurely.' },
+      { type: 'security', html: '<strong>Competency self-service safeguards</strong> prevent agents from removing their own skills outside the intended approval and review paths.' },
+      { type: 'database', html: '<strong>Database updates</strong> added Ticket Pulse skill/subskill fields, FreshService lookup-field defaults, skill hierarchy drafts, and ticket reclassification run audit storage.' },
+    ],
+  },
   {
     version: '2.2',
     date: 'May 4, 2026',

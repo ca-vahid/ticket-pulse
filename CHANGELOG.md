@@ -2,6 +2,42 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [2.3] - 2026-05-10
+
+### Major Features
+
+- **IT category/subcategory migration** moved the IT workspace onto Ticket Pulse-owned category and subcategory fields while keeping FreshService synchronized through custom lookup fields.
+- **Category Intelligence Analytics** added a dedicated Categories tab with hierarchy maps, demand heatmaps, operational pressure bubbles, assignment-flow Sankey charts, selected-category drilldowns, category exports, and deterministic category insight rules.
+- **Category reclassification tooling** added preview/apply batches, cumulative review, unclassified-ticket targeting, larger batch support, rollback-ready audit records, and safer category migration controls.
+- **Summit category workflow completion** added the public summit report, feedback export and summary, logged-in category voting, improved facilitator controls, and more stable live feedback sessions.
+
+### Improvements
+
+- **Workspace-aware category filters** now use the migrated category/subcategory model for IT while keeping non-migrated workspaces on legacy category-safe behavior.
+- **Analytics visuals** were tightened across the Categories and Team Balance tabs with a larger full-width category map, denser labels, stronger map borders, less intrusive tooltips, better assignment mix sizing, and compact agent-focus controls instead of a long chip wall.
+- **Category migration operations** now support cumulative preview batches, cleaner toolbars, chunked apply requests, larger reclassification batches, and targeted handling for unclassified tickets.
+- **FreshService category synchronization** now includes subcategory parent lookup synchronization and clearer docs for teams integrating with the new Ticket Pulse category fields.
+- **Anthropic model defaults** were normalized so assignment and review tooling use the intended model configuration consistently.
+
+### Fixes
+
+- **FreshService lookup writeback** now uses the correct lookup identifiers and reverse mapping for Ticket Pulse categories and subcategories instead of relying on display names alone.
+- **Category analytics filtering** now recognizes IT category filters correctly and avoids showing subcategory intelligence in legacy workspaces.
+- **Summit live sessions** fixed stale participant reset behavior, live header state, activity clearing, and feedback notification reliability.
+- **Competency self-service** prevents agents from removing their own skills through paths that should remain review-controlled.
+
+### Database
+
+- **Skill hierarchy migration support** added workspace-level Ticket Pulse category/subcategory custom-field settings, ticket-level `tp_skill` and `tp_subskill` fields, and skill hierarchy draft persistence.
+- **FreshService lookup defaults** changed the IT workspace to use `lf_ticket_pulse_category` and `lf_ticket_pulse_subcategory` for mirrored category values.
+- **Ticket reclassification audit storage** added `ticket_reclassification_runs` with request, result, snapshot, error, and rollback metadata.
+
+### Security
+
+- **Workspace-gated migration rollout** keeps the new hierarchy active for IT only until additional workspaces are explicitly migrated.
+- **Legacy workspace protection** prevents non-migrated workspaces from displaying subcategory claims or canonical hierarchy analytics prematurely.
+- **Analytics remains deterministic and read-only**: the new category intelligence views do not trigger FreshService writes, LLM summaries, or predictive actions.
+
 ## [2.2] - 2026-05-04
 
 ### Major Features
