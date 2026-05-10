@@ -734,6 +734,10 @@ export default function Analytics() {
     const rows = categories?.hierarchy || [];
     return {
       ...chartBase('treemap'),
+      chart: {
+        ...chartBase('treemap').chart,
+        animation: { duration: 160 },
+      },
       colorAxis: {
         min: 0,
         stops: [
@@ -773,6 +777,8 @@ export default function Analytics() {
         treemap: {
           allowTraversingTree: true,
           interactByLeaf: true,
+          animation: { duration: 160 },
+          animationLimit: 140,
           layoutAlgorithm: 'squarified',
           borderRadius: 3,
           borderWidth: 2,
@@ -970,30 +976,66 @@ export default function Analytics() {
     }],
   }), [categories?.pressure]);
 
-  const categorySankeyOptions = useMemo(() => ({
-    ...chartBase('sankey'),
-    accessibility: {
-      enabled: true,
-      description: 'Assignment path flow from assignment source, through category, to automation outcome.',
-    },
-    tooltip: {
-      borderColor: '#cbd5e1',
-      pointFormat: '<b>{point.fromNode.name}</b> → <b>{point.toNode.name}</b>: {point.weight}',
-    },
-    plotOptions: {
-      ...chartBase('sankey').plotOptions,
-      sankey: {
-        nodeWidth: 18,
-        nodePadding: 10,
-        dataLabels: { style: { color: '#334155', fontSize: '11px', textOutline: 'none' } },
+  const categorySankeyOptions = useMemo(() => {
+    const flowRows = categories?.assignmentFlow || [];
+    const categoryNames = new Set((categories?.rows || []).map((row) => row.categoryName || row.name));
+    const sourceNames = new Set(['Ticket Pulse assigned', 'Coordinator assigned', 'Self-picked', 'Source unavailable']);
+    const outcomeNames = new Set(['Automation succeeded', 'Automation failed', 'Rebound', 'No linked automation run']);
+    const nodeIds = Array.from(new Set(flowRows.flatMap((row) => [row.from, row.to])));
+    const nodes = nodeIds.map((id) => {
+      if (sourceNames.has(id)) return { id, color: '#dbeafe' };
+      if (outcomeNames.has(id)) {
+        const color = id === 'Automation failed' ? '#fecaca' : id === 'Rebound' ? '#fed7aa' : id === 'Automation succeeded' ? '#d1fae5' : '#e2e8f0';
+        return { id, color };
+      }
+      return { id, color: categoryNames.has(id) ? '#e0f2fe' : '#e2e8f0' };
+    });
+
+    return {
+      ...chartBase('sankey'),
+      chart: {
+        ...chartBase('sankey').chart,
+        spacing: [8, 20, 8, 20],
+        animation: { duration: 180 },
       },
-    },
-    series: [{
-      type: 'sankey',
-      name: 'Assignment path',
-      data: (categories?.assignmentFlow || []).map((row) => [row.from, row.to, row.weight]),
-    }],
-  }), [categories?.assignmentFlow]);
+      accessibility: {
+        enabled: true,
+        description: 'Assignment path flow from assignment source, through top category, to automation outcome.',
+      },
+      tooltip: {
+        borderColor: '#cbd5e1',
+        pointFormat: '<b>{point.fromNode.name}</b> → <b>{point.toNode.name}</b>: {point.weight}',
+      },
+      plotOptions: {
+        ...chartBase('sankey').plotOptions,
+        sankey: {
+          animation: { duration: 180 },
+          curveFactor: 0.42,
+          linkOpacity: 0.32,
+          minLinkWidth: 1,
+          nodeWidth: 14,
+          nodePadding: 18,
+          dataLabels: {
+            crop: false,
+            overflow: 'allow',
+            style: {
+              color: '#334155',
+              fontSize: '10px',
+              fontWeight: '700',
+              lineHeight: '12px',
+              textOutline: 'none',
+            },
+          },
+        },
+      },
+      series: [{
+        type: 'sankey',
+        name: 'Assignment path',
+        nodes,
+        data: flowRows.map((row) => [row.from, row.to, row.weight]),
+      }],
+    };
+  }, [categories?.assignmentFlow, categories?.rows]);
 
   const assignmentMixOptions = useMemo(() => {
     const rows = buildAssignmentMixRows(overview?.assignmentMix);

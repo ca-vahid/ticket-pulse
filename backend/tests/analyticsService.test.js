@@ -204,9 +204,10 @@ describe('analyticsService pure helpers', () => {
       },
     });
     expect(result.assignmentFlow).toEqual(expect.arrayContaining([
-      { from: 'Ticket Pulse assigned', to: 'Identity / MFA', weight: 1 },
-      { from: 'Identity / MFA', to: 'Automation failed', weight: 1 },
+      { from: 'Ticket Pulse assigned', to: 'Identity', weight: 1 },
+      { from: 'Identity', to: 'Automation failed', weight: 1 },
     ]));
+    expect(result.assignmentFlow.some((row) => row.to === 'Identity / MFA' || row.from === 'Identity / MFA')).toBe(false);
   });
 
   test('buildCategoryIntelligence hides subcategory semantics for legacy workspaces', () => {

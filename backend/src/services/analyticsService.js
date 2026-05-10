@@ -618,6 +618,58 @@ function buildCategoryHierarchy(rows, mode) {
   ];
 }
 
+function buildCategoryAssignmentFlow(rows) {
+  const byCategory = new Map();
+  for (const row of rows) {
+    const key = row.categoryKey || row.name;
+    const current = byCategory.get(key) || {
+      name: row.categoryName || row.name,
+      assigned: 0,
+      assignmentMix: { selfPicked: 0, coordinatorAssigned: 0, appAssigned: 0, unknown: 0 },
+      automationRuns: 0,
+      automationFailures: 0,
+      automationRebounds: 0,
+    };
+    current.assigned += row.assigned || 0;
+    for (const [source, count] of Object.entries(row.assignmentMix || {})) {
+      current.assignmentMix[source] = (current.assignmentMix[source] || 0) + (count || 0);
+    }
+    current.automationRuns += row.automationRuns || 0;
+    current.automationFailures += row.automationFailures || 0;
+    current.automationRebounds += row.automationRebounds || 0;
+    byCategory.set(key, current);
+  }
+
+  const flow = [];
+  for (const row of Array.from(byCategory.values()).sort((a, b) => b.assigned - a.assigned || a.name.localeCompare(b.name))) {
+    for (const [source, count] of Object.entries(row.assignmentMix)) {
+      if (count > 0) flow.push({ from: labelFromAssignmentSource(source), to: row.name, weight: count });
+    }
+
+    let remaining = row.assigned || 0;
+    const failed = Math.min(remaining, row.automationFailures || 0);
+    if (failed > 0) {
+      flow.push({ from: row.name, to: 'Automation failed', weight: failed });
+      remaining -= failed;
+    }
+
+    const rebounded = Math.min(remaining, row.automationRebounds || 0);
+    if (rebounded > 0) {
+      flow.push({ from: row.name, to: 'Rebound', weight: rebounded });
+      remaining -= rebounded;
+    }
+
+    const successful = Math.min(remaining, Math.max(0, (row.automationRuns || 0) - (row.automationFailures || 0)));
+    if (successful > 0) {
+      flow.push({ from: row.name, to: 'Automation succeeded', weight: successful });
+      remaining -= successful;
+    }
+
+    if (remaining > 0) flow.push({ from: row.name, to: 'No linked automation run', weight: remaining });
+  }
+  return flow;
+}
+
 function addTrendCount(map, key, label, period, amount = 1) {
   const mapKey = `${key}:${period}`;
   const row = map.get(mapKey) || { key, name: label, period, count: 0 };
@@ -700,18 +752,7 @@ export function buildCategoryIntelligence({
   const trend = Array.from(trendMap.values())
     .sort((a, b) => a.period.localeCompare(b.period) || String(a.name).localeCompare(String(b.name)));
 
-  const assignmentFlow = [];
-  for (const row of rows) {
-    for (const [source, count] of Object.entries(row.assignmentMix)) {
-      if (count > 0) assignmentFlow.push({ from: labelFromAssignmentSource(source), to: row.name, weight: count });
-    }
-    if (row.automationRuns > 0) {
-      const successful = Math.max(0, row.automationRuns - row.automationFailures);
-      if (successful > 0) assignmentFlow.push({ from: row.name, to: 'Automation succeeded', weight: successful });
-      if (row.automationFailures > 0) assignmentFlow.push({ from: row.name, to: 'Automation failed', weight: row.automationFailures });
-      if (row.automationRebounds > 0) assignmentFlow.push({ from: row.name, to: 'Rebound', weight: row.automationRebounds });
-    }
-  }
+  const assignmentFlow = buildCategoryAssignmentFlow(rows);
 
   const previousRows = Array.from(previousByKey.values())
     .sort((a, b) => b.count - a.count || String(a.name).localeCompare(String(b.name)))
