@@ -2307,7 +2307,7 @@ Rules:
 - taxonomyRecommendations may include adding a new subcategory under an existing parent category, or moving, renaming, merging, deprecating, remapping, or updating descriptions for existing categories/subcategories when the evidence supports it.
 - For taxonomyRecommendations with taxonomyAction="add", the proposal must be a subcategory and must include parentCategoryId or parentCategoryName for the existing top-level parent. Put the proposed subcategory name in newName.
 - If no existing top-level category fits, recommend category mapping/description review, not a new top-level category.
-- skillRecommendations are only agent skill/technician competency changes: add, remove, or change a technician's competency mapping or proficiency. Do not put category/subcategory structure changes there.
+- skillRecommendations are only agent skill/technician competency changes against existing active categories/subcategories from competencyCategories/categoryTree. Prefer subcategories when the evidence is specific. Do not put category/subcategory structure changes there, and do not use a missing category/subcategory as a skill recommendation; create a taxonomyRecommendation first.
 - Be conservative. Fewer strong recommendations are better than many weak ones.
 - Do not rewrite the prompt or mutate the competency matrix directly.
 - Focus on why the system missed and how to improve future assignments.

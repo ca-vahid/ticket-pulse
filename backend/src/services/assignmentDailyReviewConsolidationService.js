@@ -579,6 +579,7 @@ Rules:
 - Pay close attention to category-fit evidence from assignment runs. Treat weak/none fit and suggested category/subcategory names as leads, then validate them against ticket evidence and the current categoryTree before proposing changes.
 - The top-level category list is fixed for IT go-live. Do not propose or create a new top-level category. If a gap exists, choose the closest existing top-level parent and propose a new subcategory under it.
 - Skill list changes may create subcategories under an existing parent, move existing categories between top-level/subcategory positions, rename, update descriptions, merge duplicates, or deprecate stale entries.
+- Agent skill changes must use existing category/subcategory IDs from the current categoryTree. Prefer a specific subcategory ID when evidence is specific. Do not create a category from a technician competency change; if the right skill does not exist yet, propose a Category Change first.
 - Be conservative. Do not invent skills or competency changes without evidence from approved recommendations.
 - Preserve useful existing prompt content. Tighten only where findings justify it.
 - Prefer adding narrow guidance over broad rewrites.
@@ -775,8 +776,8 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
                 title: { type: 'string' },
                 technicianId: { type: ['number', 'null'] },
                 technicianName: { type: 'string' },
-                categoryId: { type: ['number', 'null'] },
-                categoryName: { type: 'string' },
+                categoryId: { type: ['number', 'null'], description: 'Existing category or subcategory ID from the current categoryTree. Required when applying skill changes in canonical IT mode.' },
+                categoryName: { type: 'string', description: 'Existing category or subcategory name from the current categoryTree.' },
                 proficiencyLevel: { type: 'string', enum: ['basic', 'intermediate', 'advanced', 'expert'] },
                 notes: { type: ['string', 'null'] },
                 rationale: { type: 'string' },
@@ -984,6 +985,9 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
         where: { workspaceId, name: { equals: payload.categoryName, mode: 'insensitive' } },
       });
       if (!category) {
+        if (isSkillHierarchyWorkspace(workspaceId)) {
+          throw new Error('IT technician competency changes must use an existing category/subcategory; approve or create the subcategory first');
+        }
         category = await competencyRepository.createCategory(workspaceId, {
           name: payload.categoryName,
           description: `Created by Daily Review consolidation for ${payload.technicianName || `technician #${technicianId}`}.`,

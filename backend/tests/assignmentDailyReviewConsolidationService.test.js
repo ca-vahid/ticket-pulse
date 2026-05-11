@@ -5,7 +5,11 @@ const mockCreateCategory = jest.fn();
 const mockUpdateCategory = jest.fn();
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
-  default: {},
+  default: {
+    competencyCategory: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+  },
 }));
 
 jest.unstable_mockModule('../src/services/promptRepository.js', () => ({
@@ -79,5 +83,19 @@ describe('assignmentDailyReviewConsolidationService category guards', () => {
       parentId: 10,
       source: 'daily_review_consolidation',
     }));
+  });
+
+  test('blocks technician competency changes that would create a missing IT category', async () => {
+    await expect(assignmentDailyReviewConsolidationService._applyTechnicianCompetencyItem(1, {
+      actionType: 'upsert_competency',
+      payload: {
+        technicianId: 56,
+        technicianName: 'Test Tech',
+        categoryName: 'Wearable Devices',
+        proficiencyLevel: 'intermediate',
+      },
+    })).rejects.toThrow('IT technician competency changes must use an existing category/subcategory');
+
+    expect(mockCreateCategory).not.toHaveBeenCalled();
   });
 });
