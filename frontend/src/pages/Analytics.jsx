@@ -575,6 +575,7 @@ export default function Analytics() {
   const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(null);
+  const [hoveredCategory, setHoveredCategory] = useState(null);
   const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState('all');
   const [categoryMetadata, setCategoryMetadata] = useState(null);
   const [selectedLegacyCategories, setSelectedLegacyCategories] = useState([]);
@@ -751,7 +752,7 @@ export default function Analytics() {
     categories?.hierarchy?.find((node) => node.custom?.key === selectedCategoryKey)?.custom || null
   ), [categories?.hierarchy, selectedCategoryKey]);
 
-  const mapFocusCategory = selectedHierarchyCategory || selectedCategory;
+  const mapFocusCategory = hoveredCategory || selectedHierarchyCategory || selectedCategory;
 
   const categoryAgentRows = useMemo(() => categories?.agentLens || [], [categories?.agentLens]);
 
@@ -884,7 +885,7 @@ export default function Analytics() {
         ...chartBase('treemap').plotOptions,
         treemap: {
           allowTraversingTree: true,
-          interactByLeaf: true,
+          interactByLeaf: false,
           animation: { duration: 160 },
           animationLimit: 140,
           layoutAlgorithm: 'squarified',
@@ -928,7 +929,7 @@ export default function Analytics() {
               const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 112 && shape.height >= 62)));
               const headerStyle = categoryShareHeaderStyle(selectedCategoryAgent ? agentShareOfNodePct : shareValue, Boolean(selectedCategoryAgent));
               const nameStyle = isParent
-                ? `display:inline-block;max-width:100%;background:${headerStyle.bg};border-left:4px solid ${headerStyle.border};border-radius:5px;padding:2px 5px;font-size:11px;font-weight:800;line-height:13px;box-shadow:0 0 0 1px rgba(15,23,42,0.08);`
+                ? `display:block;width:100%;box-sizing:border-box;background:${headerStyle.bg};border-left:5px solid ${headerStyle.border};border-bottom:1px solid rgba(15,23,42,0.12);border-radius:4px;padding:3px 6px;font-size:11px;font-weight:800;line-height:13px;box-shadow:0 1px 2px rgba(15,23,42,0.06);`
                 : '';
               const metricStyle = showShare
                 ? 'font-size:8px;font-weight:700;color:#334155'
@@ -947,6 +948,7 @@ export default function Analytics() {
               lineHeight: '10px',
               textOutline: '1px contrast',
               textOverflow: 'ellipsis',
+              pointerEvents: 'none',
             },
           },
           levels: [{
@@ -975,8 +977,24 @@ export default function Analytics() {
           }],
           point: {
             events: {
+              mouseOver() {
+                if (this.custom?.key) {
+                  setHoveredCategory({
+                    ...this.custom,
+                    name: this.name || this.custom.name,
+                    created: this.value ?? this.custom.created ?? 0,
+                  });
+                }
+              },
+              mouseOut() {
+                setHoveredCategory(null);
+              },
               click() {
                 if (this.custom?.key) setSelectedCategoryKey(this.custom.key);
+                const isParent = this.node?.children?.length > 0;
+                if (isParent && this.series?.setRootNode && this.id && this.series.rootNode !== this.id) {
+                  this.series.setRootNode(this.id, true, { trigger: 'category-click' });
+                }
               },
             },
           },
@@ -1771,9 +1789,11 @@ export default function Analytics() {
     const selectedRows = selectedCategory?.recentTickets || [];
     const mapFocusType = mapFocusCategory?.nodeType === 'category'
       ? 'Top category'
-      : mapFocusCategory?.subcategoryName
-        ? 'Subcategory'
-        : 'Category';
+      : mapFocusCategory?.nodeType === 'subcategoryGroup'
+        ? 'Small subcategory group'
+        : mapFocusCategory?.subcategoryName
+          ? 'Subcategory'
+          : 'Category';
     const mapFocusAutoFailureRate = mapFocusCategory?.automationRuns
       ? (mapFocusCategory.automationFailureRatePct ?? Math.round(((mapFocusCategory.automationFailures || 0) / mapFocusCategory.automationRuns) * 100))
       : 0;
@@ -1882,7 +1902,7 @@ export default function Analytics() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900">{mapFocusCategory.name}</p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    Selected focus · {mapFocusType}
+                    {hoveredCategory ? 'Map focus' : 'Selected focus'} · {mapFocusType}
                   </p>
                 </div>
                 <div className="grid grid-cols-4 gap-2 text-center text-xs sm:grid-cols-6 lg:min-w-[32rem]">

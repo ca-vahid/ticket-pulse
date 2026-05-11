@@ -551,6 +551,17 @@ function buildCategoryHierarchy(rows, mode) {
   const nodes = [];
   const categoryNodes = new Map();
   const categoryTotals = new Map();
+  const groupedSmallByCategory = new Map();
+  const smallNodeThreshold = mode === 'canonical' ? 5 : 0;
+  const smallChildCounts = new Map();
+  if (smallNodeThreshold > 0) {
+    for (const row of rows) {
+      if (row.key === row.categoryKey) continue;
+      if ((row.created || 0) > 0 && (row.created || 0) < smallNodeThreshold) {
+        smallChildCounts.set(row.categoryKey, (smallChildCounts.get(row.categoryKey) || 0) + 1);
+      }
+    }
+  }
   for (const row of rows) {
     if (!categoryNodes.has(row.categoryKey)) {
       const categoryName = row.categoryName || row.name;
@@ -598,6 +609,59 @@ function buildCategoryHierarchy(rows, mode) {
     total.pressureScore += row.pressureScore || 0;
     categoryTotals.set(row.categoryKey, total);
     if (row.key !== row.categoryKey) {
+      const shouldGroupSmallNode = smallNodeThreshold > 0
+        && (smallChildCounts.get(row.categoryKey) || 0) >= 2
+        && (row.created || 0) > 0
+        && (row.created || 0) < smallNodeThreshold;
+      if (shouldGroupSmallNode) {
+        const groupedKey = `${row.categoryKey}:other-small`;
+        const grouped = groupedSmallByCategory.get(row.categoryKey) || {
+          id: groupedKey,
+          parent: row.categoryKey,
+          name: 'Other subcategories',
+          value: 0,
+          colorValue: 0,
+          custom: {
+            key: groupedKey,
+            categoryKey: row.categoryKey,
+            name: 'Other subcategories',
+            categoryName: row.categoryName,
+            subcategoryName: 'Other subcategories',
+            categoryId: row.categoryId,
+            subcategoryId: null,
+            source: row.source,
+            created: 0,
+            assigned: 0,
+            open: 0,
+            overdue: 0,
+            reviewNeeded: 0,
+            unmapped: 0,
+            automationRuns: 0,
+            automationFailures: 0,
+            automationRebounds: 0,
+            pressureScore: 0,
+            nodeType: 'subcategoryGroup',
+            groupedCount: 0,
+            groupedNames: [],
+          },
+        };
+        grouped.value += row.created || 0;
+        grouped.colorValue = Math.max(grouped.colorValue || 0, row.pressureScore || 0);
+        grouped.custom.created += row.created || 0;
+        grouped.custom.assigned += row.assigned || 0;
+        grouped.custom.open += row.open || 0;
+        grouped.custom.overdue += row.overdue || 0;
+        grouped.custom.reviewNeeded += row.reviewNeeded || 0;
+        grouped.custom.unmapped += row.unmapped || 0;
+        grouped.custom.automationRuns += row.automationRuns || 0;
+        grouped.custom.automationFailures += row.automationFailures || 0;
+        grouped.custom.automationRebounds += row.automationRebounds || 0;
+        grouped.custom.pressureScore += row.pressureScore || 0;
+        grouped.custom.groupedCount += 1;
+        if (grouped.custom.groupedNames.length < 8) grouped.custom.groupedNames.push(row.subcategoryName || row.name);
+        groupedSmallByCategory.set(row.categoryKey, grouped);
+        continue;
+      }
       nodes.push({
         id: row.key,
         parent: row.categoryKey,
@@ -614,6 +678,7 @@ function buildCategoryHierarchy(rows, mode) {
       ...node,
       custom: categoryTotals.get(node.id) || node.custom,
     })),
+    ...Array.from(groupedSmallByCategory.values()),
     ...nodes,
   ];
 }

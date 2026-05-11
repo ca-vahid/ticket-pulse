@@ -265,4 +265,54 @@ describe('analyticsService pure helpers', () => {
       },
     });
   });
+
+  test('buildCategoryIntelligence groups tiny canonical treemap leaves', () => {
+    const rangeInfo = parseAnalyticsRange(
+      { timezone: 'America/Los_Angeles', compare: 'none' },
+      new Date('2026-04-26T19:00:00.000Z'),
+    );
+    const makeTicket = (id, subcategoryId, subcategoryName) => ({
+      id,
+      freshserviceTicketId: BigInt(2000 + id),
+      subject: subcategoryName,
+      status: 'Open',
+      createdAt: new Date('2026-04-21T16:00:00.000Z'),
+      internalCategoryId: 20,
+      internalCategory: { id: 20, name: 'Service Desk & Routing' },
+      internalSubcategoryId: subcategoryId,
+      internalSubcategory: { id: subcategoryId, name: subcategoryName, parentId: 20 },
+      assignedTech: null,
+      taxonomyReviewNeeded: false,
+    });
+
+    const result = buildCategoryIntelligence({
+      workspaceId: 1,
+      rangeInfo,
+      categoryMode: 'canonical',
+      createdTickets: [
+        makeTicket(1, 21, 'Tiny A'),
+        makeTicket(2, 22, 'Tiny B'),
+      ],
+      assignedTickets: [],
+      openTickets: [],
+      previousCreatedTickets: [],
+      pipelineRuns: [],
+      serviceAccountNames: [],
+    });
+
+    expect(result.hierarchy).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'category:20:other-small',
+        name: 'Other subcategories',
+        value: 2,
+        custom: expect.objectContaining({
+          nodeType: 'subcategoryGroup',
+          groupedCount: 2,
+          groupedNames: ['Tiny A', 'Tiny B'],
+        }),
+      }),
+    ]));
+    expect(result.hierarchy.some((node) => node.name === 'Tiny A')).toBe(false);
+    expect(result.hierarchy.some((node) => node.name === 'Tiny B')).toBe(false);
+  });
 });
