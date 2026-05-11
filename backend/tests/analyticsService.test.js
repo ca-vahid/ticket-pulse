@@ -203,6 +203,14 @@ describe('analyticsService pure helpers', () => {
         open: 1,
       },
     });
+    expect(result.agentLens[0]).toMatchObject({
+      technicianId: 9,
+      name: 'Tech One',
+      totalCreated: 1,
+      teamSharePct: 100,
+      topCategories: [{ key: 'category:10', name: 'Identity', count: 1 }],
+      categories: [{ key: 'subcategory:11', name: 'Identity / MFA', count: 1 }],
+    });
     expect(result.assignmentFlow).toEqual(expect.arrayContaining([
       { from: 'Ticket Pulse assigned', to: 'Identity', weight: 1 },
       { from: 'Identity', to: 'Automation failed', weight: 1 },

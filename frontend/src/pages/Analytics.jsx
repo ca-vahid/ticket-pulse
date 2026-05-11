@@ -271,6 +271,24 @@ function buildAssignmentMixRows(mix = {}) {
     .filter((row) => row.value > 0);
 }
 
+function categoryAgentKey(agent) {
+  if (!agent) return 'all';
+  return agent.technicianId ? String(agent.technicianId) : 'unassigned';
+}
+
+function categoryShareHeaderStyle(pct = 0, lensEnabled = false) {
+  if (lensEnabled) {
+    if (pct >= 35) return { bg: '#dbeafe', border: '#1d4ed8' };
+    if (pct >= 18) return { bg: '#eff6ff', border: '#2563eb' };
+    if (pct >= 8) return { bg: '#f8fafc', border: '#60a5fa' };
+    return { bg: '#ffffff', border: '#93c5fd' };
+  }
+  if (pct >= 18) return { bg: '#dcfce7', border: '#059669' };
+  if (pct >= 10) return { bg: '#dbeafe', border: '#2563eb' };
+  if (pct >= 5) return { bg: '#fef9c3', border: '#ca8a04' };
+  return { bg: '#f8fafc', border: '#64748b' };
+}
+
 function EmptyState({ text = 'No data for this range.' }) {
   return <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">{text}</div>;
 }
@@ -557,7 +575,7 @@ export default function Analytics() {
   const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(null);
-  const [hoveredCategory, setHoveredCategory] = useState(null);
+  const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState('all');
   const [categoryMetadata, setCategoryMetadata] = useState(null);
   const [selectedLegacyCategories, setSelectedLegacyCategories] = useState([]);
   const [selectedCanonicalCategories, setSelectedCanonicalCategories] = useState({ categoryIds: [], subcategoryIds: [] });
@@ -733,7 +751,53 @@ export default function Analytics() {
     categories?.hierarchy?.find((node) => node.custom?.key === selectedCategoryKey)?.custom || null
   ), [categories?.hierarchy, selectedCategoryKey]);
 
-  const mapFocusCategory = hoveredCategory || selectedHierarchyCategory || selectedCategory;
+  const mapFocusCategory = selectedHierarchyCategory || selectedCategory;
+
+  const categoryAgentRows = useMemo(() => categories?.agentLens || [], [categories?.agentLens]);
+
+  const selectedCategoryAgent = useMemo(() => (
+    categoryAgentRows.find((agent) => categoryAgentKey(agent) === selectedCategoryAgentId) || null
+  ), [categoryAgentRows, selectedCategoryAgentId]);
+
+  const selectedAgentCategoryCounts = useMemo(() => {
+    if (!selectedCategoryAgent) return { leaf: new Map(), top: new Map() };
+    return {
+      leaf: new Map((selectedCategoryAgent.categories || []).map((row) => [row.key, row])),
+      top: new Map((selectedCategoryAgent.topCategories || []).map((row) => [row.key, row])),
+    };
+  }, [selectedCategoryAgent]);
+
+  const selectedAgentTopCategories = useMemo(() => (
+    selectedCategoryAgent
+      ? (selectedCategoryAgent.topCategories || []).slice(0, 6)
+      : []
+  ), [selectedCategoryAgent]);
+
+  const supplementalCategoryRows = useMemo(() => {
+    const rows = categories?.rows || [];
+    const focusTopKey = mapFocusCategory?.nodeType === 'category'
+      ? mapFocusCategory.categoryKey
+      : mapFocusCategory?.categoryKey;
+    const scopedRows = focusTopKey
+      ? rows.filter((row) => row.categoryKey === focusTopKey && row.key !== focusTopKey)
+      : rows.filter((row) => (row.createdPct || 0) <= 1.2 || (row.created || 0) <= 8);
+
+    return scopedRows
+      .filter((row) => (row.created || 0) > 0)
+      .sort((a, b) => (b.created || 0) - (a.created || 0) || String(a.name).localeCompare(String(b.name)))
+      .slice(0, 12)
+      .map((row) => {
+        const agentRow = selectedAgentCategoryCounts.leaf.get(row.key);
+        const agentCount = agentRow?.count || 0;
+        return {
+          ...row,
+          agentCount,
+          agentSharePct: selectedCategoryAgent && row.created
+            ? Number(((agentCount / row.created) * 100).toFixed(1))
+            : null,
+        };
+      });
+  }, [categories?.rows, mapFocusCategory, selectedAgentCategoryCounts.leaf, selectedCategoryAgent]);
 
   const categoryHierarchyOptions = useMemo(() => {
     const rows = categories?.hierarchy || [];
@@ -741,6 +805,30 @@ export default function Analytics() {
       || rows
         .filter((row) => !row.parent)
         .reduce((sum, row) => sum + Number(row.custom?.created ?? row.value ?? 0), 0);
+    const lensEnabled = Boolean(selectedCategoryAgent);
+    const chartRows = rows.map((row) => {
+      const created = Number(row.custom?.created ?? row.value ?? 0);
+      const agentRow = row.parent
+        ? selectedAgentCategoryCounts.leaf.get(row.id)
+        : selectedAgentCategoryCounts.top.get(row.id);
+      const agentCreated = agentRow?.count || 0;
+      const agentShareOfNodePct = created > 0 ? Number(((agentCreated / created) * 100).toFixed(1)) : 0;
+      const agentPortfolioPct = selectedCategoryAgent?.totalCreated
+        ? Number(((agentCreated / selectedCategoryAgent.totalCreated) * 100).toFixed(1))
+        : 0;
+      return {
+        ...row,
+        colorValue: lensEnabled ? agentShareOfNodePct : row.colorValue,
+        borderWidth: row.parent && created <= 4 ? 0.75 : row.borderWidth,
+        custom: {
+          ...row.custom,
+          agentCreated,
+          agentShareOfNodePct,
+          agentPortfolioPct,
+          selectedAgentName: selectedCategoryAgent?.name || null,
+        },
+      };
+    });
     return {
       ...chartBase('treemap'),
       chart: {
@@ -749,17 +837,28 @@ export default function Analytics() {
       },
       colorAxis: {
         min: 0,
-        stops: [
-          [0, '#dbeafe'],
-          [0.22, '#d1fae5'],
-          [0.48, '#fef9c3'],
-          [0.74, '#fed7aa'],
-          [1, '#fecaca'],
-        ],
+        max: lensEnabled ? 100 : undefined,
+        stops: lensEnabled
+          ? [
+            [0, '#f8fafc'],
+            [0.18, '#dbeafe'],
+            [0.45, '#93c5fd'],
+            [0.72, '#3b82f6'],
+            [1, '#1d4ed8'],
+          ]
+          : [
+            [0, '#dbeafe'],
+            [0.22, '#d1fae5'],
+            [0.48, '#fef9c3'],
+            [0.74, '#fed7aa'],
+            [1, '#fecaca'],
+          ],
       },
       accessibility: {
         enabled: true,
-        description: 'Category hierarchy treemap. Larger blocks mean more created tickets. Warmer colors mean more open, overdue, review-needed, or automation-failure pressure.',
+        description: lensEnabled
+          ? 'Category hierarchy treemap with agent lens enabled. Larger blocks mean more created tickets. Darker blue means the selected agent owns a larger share of that category.'
+          : 'Category hierarchy treemap. Larger blocks mean more created tickets. Warmer colors mean more open, overdue, review-needed, or automation-failure pressure.',
       },
       tooltip: { enabled: false },
       breadcrumbs: {
@@ -790,7 +889,7 @@ export default function Analytics() {
           animationLimit: 140,
           layoutAlgorithm: 'squarified',
           borderRadius: 3,
-          borderWidth: 2,
+          borderWidth: 1,
           borderColor: '#64748b',
           states: {
             hover: {
@@ -821,13 +920,22 @@ export default function Analytics() {
               const maxChars = Math.max(8, Math.floor((shape.width || 80) / 5.2) * Math.max(1, Math.floor((shape.height || 24) / (lineHeight + 3))));
               const name = rawName.length > maxChars ? `${rawName.slice(0, Math.max(5, maxChars - 1))}...` : rawName;
               const created = Number(this.point.custom?.created ?? this.point.value ?? 0);
-              const sharePct = totalCreated > 0 && created > 0 ? formatSharePct((created / totalCreated) * 100) : null;
-              const showShare = Boolean(sharePct && (isParent || (shape.width >= 112 && shape.height >= 62)));
-              const nameStyle = isParent ? 'font-size:11px;font-weight:800;line-height:13px;' : '';
+              const shareValue = totalCreated > 0 && created > 0 ? (created / totalCreated) * 100 : 0;
+              const sharePct = shareValue > 0 ? formatSharePct(shareValue) : null;
+              const agentCreated = Number(this.point.custom?.agentCreated || 0);
+              const agentShareOfNodePct = Number(this.point.custom?.agentShareOfNodePct || 0);
+              const showAgentShare = Boolean(selectedCategoryAgent && agentCreated > 0 && (isParent || (shape.width >= 118 && shape.height >= 68)));
+              const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 112 && shape.height >= 62)));
+              const headerStyle = categoryShareHeaderStyle(selectedCategoryAgent ? agentShareOfNodePct : shareValue, Boolean(selectedCategoryAgent));
+              const nameStyle = isParent
+                ? `display:inline-block;max-width:100%;background:${headerStyle.bg};border-left:4px solid ${headerStyle.border};border-radius:5px;padding:2px 5px;font-size:11px;font-weight:800;line-height:13px;box-shadow:0 0 0 1px rgba(15,23,42,0.08);`
+                : '';
               const metricStyle = showShare
                 ? 'font-size:8px;font-weight:700;color:#334155'
                 : 'font-size:8px;font-weight:600';
-              const metric = `${formatNumber(created)} created${showShare ? ` · ${sharePct}` : ''}`;
+              const metric = showAgentShare
+                ? `${formatNumber(agentCreated)} by ${selectedCategoryAgent.name.split(' ')[0]} · ${formatSharePct(agentShareOfNodePct)}`
+                : `${formatNumber(created)} created${showShare ? ` · ${sharePct}` : ''}`;
               return shape.height >= 44 && created
                 ? `<span style="${nameStyle}">${name}</span><br/><span style="${metricStyle}">${metric}</span>`
                 : `<span style="${nameStyle}">${name}</span>`;
@@ -843,9 +951,9 @@ export default function Analytics() {
           },
           levels: [{
             level: 1,
-            borderWidth: 4,
+            borderWidth: 3,
             borderColor: '#334155',
-            groupPadding: 3,
+            groupPadding: 2,
             dataLabels: {
               enabled: true,
               headers: true,
@@ -867,18 +975,6 @@ export default function Analytics() {
           }],
           point: {
             events: {
-              mouseOver() {
-                if (this.custom?.key) {
-                  setHoveredCategory({
-                    ...this.custom,
-                    name: this.name || this.custom.name,
-                    created: this.value ?? this.custom.created ?? 0,
-                  });
-                }
-              },
-              mouseOut() {
-                setHoveredCategory(null);
-              },
               click() {
                 if (this.custom?.key) setSelectedCategoryKey(this.custom.key);
               },
@@ -888,11 +984,20 @@ export default function Analytics() {
       },
       series: [{
         type: 'treemap',
-        name: legacyMode ? 'Legacy categories' : 'All categories',
-        data: rows,
+        name: selectedCategoryAgent
+          ? `${selectedCategoryAgent.name} share`
+          : (legacyMode ? 'Legacy categories' : 'All categories'),
+        data: chartRows,
       }],
     };
-  }, [categories?.hierarchy, categories?.summary?.totalCreated, legacyMode]);
+  }, [
+    categories?.hierarchy,
+    categories?.summary?.totalCreated,
+    legacyMode,
+    selectedAgentCategoryCounts.leaf,
+    selectedAgentCategoryCounts.top,
+    selectedCategoryAgent,
+  ]);
 
   const categoryTrendOptions = useMemo(() => {
     const rows = categories?.trend || [];
@@ -1691,13 +1796,93 @@ export default function Analytics() {
           title={legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map'}
           subtitle="Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures."
         >
+          <div className="mb-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Agent Lens</p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Select an agent to recolor the map by that agent&apos;s share of each category.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategoryAgentId('all')}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+                    selectedCategoryAgentId === 'all'
+                      ? 'bg-slate-900 text-white ring-slate-900'
+                      : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  Team view
+                </button>
+              </div>
+              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                {categoryAgentRows.slice(0, 14).map((agent) => {
+                  const key = categoryAgentKey(agent);
+                  const selected = selectedCategoryAgentId === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setSelectedCategoryAgentId(key)}
+                      className={`min-w-[10rem] rounded-lg border px-3 py-2 text-left transition ${
+                        selected
+                          ? 'border-blue-300 bg-blue-50 shadow-sm'
+                          : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
+                      }`}
+                    >
+                      <p className="truncate text-sm font-bold text-slate-900">{agent.name}</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        {formatNumber(agent.totalCreated)} created · {formatSharePct(agent.teamSharePct)}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <p className="text-sm font-bold text-slate-900">
+                {selectedCategoryAgent ? selectedCategoryAgent.name : 'Team category mix'}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {selectedCategoryAgent
+                  ? `${formatNumber(selectedCategoryAgent.totalCreated)} created tickets in this range.`
+                  : 'Choose an agent to see their strongest top categories.'}
+              </p>
+              <div className="mt-3 space-y-2">
+                {(selectedCategoryAgent ? selectedAgentTopCategories : (categories?.hierarchy || []).filter((row) => !row.parent).slice(0, 5)).map((row) => {
+                  const count = selectedCategoryAgent ? row.count : (row.custom?.created ?? row.value ?? 0);
+                  const pct = selectedCategoryAgent
+                    ? (selectedCategoryAgent.totalCreated ? (count / selectedCategoryAgent.totalCreated) * 100 : 0)
+                    : (categories?.summary?.totalCreated ? (count / categories.summary.totalCreated) * 100 : 0);
+                  return (
+                    <button
+                      key={row.key || row.id}
+                      type="button"
+                      onClick={() => setSelectedCategoryKey(row.key || row.id)}
+                      className="w-full rounded-md bg-slate-50 px-2 py-1.5 text-left ring-1 ring-slate-200 hover:bg-blue-50 hover:ring-blue-200"
+                    >
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="truncate font-semibold text-slate-800">{row.name}</span>
+                        <span className="shrink-0 font-bold text-slate-900">{formatSharePct(pct)}</span>
+                      </div>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                        <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, pct)}%` }} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
           {mapFocusCategory && (
             <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
               <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900">{mapFocusCategory.name}</p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    {hoveredCategory ? 'Hover focus' : 'Selected focus'} · {mapFocusType}
+                    Selected focus · {mapFocusType}
                   </p>
                 </div>
                 <div className="grid grid-cols-4 gap-2 text-center text-xs sm:grid-cols-6 lg:min-w-[32rem]">
@@ -1721,6 +1906,48 @@ export default function Analytics() {
           {(categories?.hierarchy || []).length > 0
             ? <HighchartsBlock options={categoryHierarchyOptions} height={isMobile ? '24rem' : '38rem'} />
             : <EmptyState />}
+          {supplementalCategoryRows.length > 0 && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Small Subcategories</p>
+                  <p className="text-xs text-slate-500">
+                    Supplemental list for boxes that are too small or too crowded to read cleanly on the map.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {supplementalCategoryRows.map((row) => (
+                  <button
+                    key={row.key}
+                    type="button"
+                    onClick={() => setSelectedCategoryKey(row.key)}
+                    className={`rounded-lg border px-3 py-2 text-left transition ${
+                      selectedCategory?.key === row.key
+                        ? 'border-blue-300 bg-blue-50'
+                        : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{row.subcategoryName || row.name}</p>
+                        <p className="mt-0.5 truncate text-xs text-slate-500">{row.categoryName}</p>
+                      </div>
+                      <div className="shrink-0 text-right text-xs">
+                        <p className="font-bold text-slate-900">{formatNumber(row.created)}</p>
+                        <p className="font-semibold text-slate-500">{formatSharePct(row.createdPct || 0)}</p>
+                      </div>
+                    </div>
+                    {selectedCategoryAgent && (
+                      <p className="mt-2 rounded-md bg-slate-50 px-2 py-1 text-xs font-semibold text-blue-700 ring-1 ring-slate-200">
+                        {selectedCategoryAgent.name.split(' ')[0]}: {formatNumber(row.agentCount)} · {formatSharePct(row.agentSharePct || 0)} of this subcategory
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {selectedCategory && (
             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">

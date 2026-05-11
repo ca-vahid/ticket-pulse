@@ -618,6 +618,62 @@ function buildCategoryHierarchy(rows, mode) {
   ];
 }
 
+function buildCategoryAgentLens(createdTickets = [], workspaceId, totalCreated = 0) {
+  const byAgent = new Map();
+
+  const ensureAgent = (ticket) => {
+    const techId = ticket.assignedTechId || ticket.assignedTech?.id || null;
+    const key = techId ? `tech:${techId}` : 'unassigned';
+    if (!byAgent.has(key)) {
+      byAgent.set(key, {
+        technicianId: techId,
+        name: ticket.assignedTech?.name || 'Unassigned',
+        photoUrl: ticket.assignedTech?.photoUrl || null,
+        totalCreated: 0,
+        categories: new Map(),
+        topCategories: new Map(),
+      });
+    }
+    return byAgent.get(key);
+  };
+
+  for (const ticket of createdTickets) {
+    const identity = categoryIdentity(ticket, workspaceId);
+    const agent = ensureAgent(ticket);
+    agent.totalCreated += 1;
+
+    const leaf = agent.categories.get(identity.leafKey) || {
+      key: identity.leafKey,
+      categoryKey: identity.categoryKey,
+      name: identity.label,
+      categoryName: identity.categoryName,
+      subcategoryName: identity.subcategoryName,
+      count: 0,
+    };
+    leaf.count += 1;
+    agent.categories.set(identity.leafKey, leaf);
+
+    const top = agent.topCategories.get(identity.categoryKey) || {
+      key: identity.categoryKey,
+      name: identity.categoryName,
+      count: 0,
+    };
+    top.count += 1;
+    agent.topCategories.set(identity.categoryKey, top);
+  }
+
+  return Array.from(byAgent.values())
+    .map((agent) => ({
+      ...agent,
+      teamSharePct: totalCreated ? Number(((agent.totalCreated / totalCreated) * 100).toFixed(1)) : 0,
+      categories: Array.from(agent.categories.values())
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+      topCategories: Array.from(agent.topCategories.values())
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => b.totalCreated - a.totalCreated || a.name.localeCompare(b.name));
+}
+
 function buildCategoryAssignmentFlow(rows) {
   const byCategory = new Map();
   for (const row of rows) {
@@ -772,6 +828,7 @@ export function buildCategoryIntelligence({
     },
     rows,
     hierarchy: buildCategoryHierarchy(rows, categoryMode),
+    agentLens: buildCategoryAgentLens(createdTickets, workspaceId, totalCreated),
     trend,
     pressure: rows.map((row) => ({
       key: row.key,
