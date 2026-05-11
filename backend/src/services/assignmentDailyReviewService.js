@@ -20,6 +20,7 @@ import {
 } from '../integrations/freshserviceTransformer.js';
 import { runJobsInPool } from '../utils/parallelPool.js';
 import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const STALE_RUNNING_MS = 30 * 60 * 1000;
@@ -2285,6 +2286,16 @@ class AssignmentDailyReviewService {
         },
       };
 
+      const canonicalCategoryReviewRules = isSkillHierarchyWorkspace(dataset.workspaceId)
+        ? `- The top-level category list is fixed for this go-live. Do not recommend adding a new top-level category.
+- taxonomyRecommendations may include adding a new subcategory under an existing parent category, or moving, renaming, merging, deprecating, remapping, or updating descriptions for existing categories/subcategories when the evidence supports it.
+- For taxonomyRecommendations with taxonomyAction="add", the proposal must be a subcategory and must include parentCategoryId or parentCategoryName for the existing top-level parent. Put the proposed subcategory name in newName.
+- If no existing top-level category fits, recommend category mapping/description review, not a new top-level category.
+- skillRecommendations are only agent skill/technician competency changes against existing active categories/subcategories from competencyCategories/categoryTree. Prefer subcategories when the evidence is specific. Do not put category/subcategory structure changes there, and do not use a missing category/subcategory as a skill recommendation; create a taxonomyRecommendation first.`
+        : `- This workspace is still in legacy category mode. Preserve its current category behavior unless the evidence clearly supports a normal legacy category or skill cleanup recommendation.
+- taxonomyRecommendations may include adding, moving, renaming, merging, deprecating, remapping, or updating descriptions for existing categories according to this workspace's current legacy category workflow.
+- skillRecommendations are only agent skill/technician competency changes. Do not force the IT category/subcategory go-live rules onto this workspace.`;
+
       const systemPrompt = `You are reviewing one business day of auto-assignment outcomes for the "${workspaceLabel}" workspace ONLY.
 
 Strict scoping rules:
@@ -2303,11 +2314,7 @@ Rules:
 - Base every recommendation on evidence from the supplied cases and metrics.
 - Pay special attention to cases with category review signals: taxonomyFit.reviewNeeded=true, weak/none categoryFit, weak/none subcategoryFit, or suggested internal category/subcategory names.
 - Treat assignment-agent category suggestions as evidence, not truth: compare them against ticket descriptions, thread excerpts, outcomes, and the full categoryTree before recommending category/subcategory changes.
-- The top-level category list is fixed for this go-live. Do not recommend adding a new top-level category.
-- taxonomyRecommendations may include adding a new subcategory under an existing parent category, or moving, renaming, merging, deprecating, remapping, or updating descriptions for existing categories/subcategories when the evidence supports it.
-- For taxonomyRecommendations with taxonomyAction="add", the proposal must be a subcategory and must include parentCategoryId or parentCategoryName for the existing top-level parent. Put the proposed subcategory name in newName.
-- If no existing top-level category fits, recommend category mapping/description review, not a new top-level category.
-- skillRecommendations are only agent skill/technician competency changes against existing active categories/subcategories from competencyCategories/categoryTree. Prefer subcategories when the evidence is specific. Do not put category/subcategory structure changes there, and do not use a missing category/subcategory as a skill recommendation; create a taxonomyRecommendation first.
+${canonicalCategoryReviewRules}
 - Be conservative. Fewer strong recommendations are better than many weak ones.
 - Do not rewrite the prompt or mutate the competency matrix directly.
 - Focus on why the system missed and how to improve future assignments.
