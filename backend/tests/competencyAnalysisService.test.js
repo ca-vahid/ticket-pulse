@@ -234,6 +234,58 @@ describe('competencyAnalysisService apply guard', () => {
     }]);
   });
 
+  test('skips top-level taxonomy-gap suggestions in the skill hierarchy workspace', async () => {
+    const categories = [{ id: 10, name: 'Devices & Hardware', parentId: null, isActive: true }];
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    prismaMock.competencyCategory.findMany
+      .mockResolvedValueOnce(categories)
+      .mockResolvedValueOnce(categories);
+
+    const result = await competencyAnalysisService._applyAssessment(56, 1, {
+      competencies: [{
+        categoryAction: 'create_new',
+        categoryName: 'Wearable Devices',
+        proficiencyLevel: 'basic',
+        confidence: 'medium',
+        evidenceSummary: 'Repeated tickets but no parent category supplied.',
+      }],
+    });
+
+    expect(result.newCategories).toBe(0);
+    expect(result.skippedInvalidSuggestionParent).toBe(1);
+    expect(prismaMock.competencyCategory.create).not.toHaveBeenCalled();
+  });
+
+  test('allows subcategory taxonomy-gap suggestions under an existing parent in the skill hierarchy workspace', async () => {
+    const categories = [{ id: 10, name: 'Devices & Hardware', parentId: null, isActive: true }];
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    prismaMock.competencyCategory.findMany
+      .mockResolvedValueOnce(categories)
+      .mockResolvedValueOnce(categories);
+
+    const result = await competencyAnalysisService._applyAssessment(56, 1, {
+      competencies: [{
+        categoryAction: 'create_new',
+        categoryName: 'Wearable Devices',
+        parentCategoryId: 10,
+        proficiencyLevel: 'basic',
+        confidence: 'medium',
+        evidenceSummary: 'Repeated device tickets not covered by current subcategories.',
+      }],
+    });
+
+    expect(result.newCategories).toBe(1);
+    expect(prismaMock.competencyCategory.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        workspaceId: 1,
+        name: 'Wearable Devices',
+        parentId: 10,
+        isActive: false,
+        isSystemSuggested: true,
+      }),
+    });
+  });
+
   test('keeps legacy category matching behavior outside the skill hierarchy workspace', async () => {
     const categories = [{ id: 20, name: 'Security', parentId: null, isActive: true }];
     prismaMock.competencyCategory.findMany.mockResolvedValue(categories);

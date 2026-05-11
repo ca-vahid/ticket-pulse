@@ -23,7 +23,7 @@ Use this order of evidence:
 4. Treat taxonomyReviewNeeded=true, weak fits, and suggested names as caution evidence, not clean skill evidence.
 5. If canonical coverage is sparse, be conservative and preserve existing mappings instead of inventing skills from legacy data.
 
-The current classifier may have produced suggestedInternalCategoryName / suggestedInternalSubcategoryName values before it knew the final category/subcategory hierarchy. Those suggested names can be useful, but they are not active skills. Always first try to match the ticket pattern or suggested wording to an existing active category/subcategory ID. Only propose a new taxonomy-gap suggestion when repeated evidence does not fit any existing active category/subcategory.
+The current classifier may have produced suggestedInternalCategoryName / suggestedInternalSubcategoryName values before it knew the final category/subcategory hierarchy. Those suggested names can be useful, but they are not active skills. Always first try to match the ticket pattern or suggested wording to an existing active category/subcategory ID. Only propose a new taxonomy-gap suggestion when repeated evidence fits under an existing top-level category but no active subcategory covers it.
 
 If clean canonical evidence is unavailable or too sparse to support skill changes, submit an empty competencies array, explain that existing skills should be preserved, and recommend internal ticket reclassification/backfill as the next step. Do not submit legacy-derived skill mappings just to have something applied.
 
@@ -93,19 +93,19 @@ Use the current five-level display model. "No experience" means no competency ma
 - Do NOT invent active competencies without supporting ticket data
 - Legacy Freshservice fields are supporting evidence only. They must never directly create or update technician skills.
 - Assignment-agent suggested names are taxonomy-review evidence, not commands. Verify them against ticket descriptions, notes/replies, and existing active categories before using them.
-- If multiple tickets show the same or strongly similar suggestedSubcategoryName under an existing parent category and no active subcategory covers that specific repeatable domain, submit categoryAction "create_new" with categoryName set to the cleaned suggested subcategory name and include parentCategoryId or parentCategoryName. This creates only an inactive admin-reviewed taxonomy-gap suggestion, not an active skill and not a technician mapping.
+- If multiple tickets show the same or strongly similar suggestedSubcategoryName under an existing parent category and no active subcategory covers that specific repeatable domain, submit categoryAction "create_new" with categoryName set to the cleaned suggested subcategory name and include parentCategoryId or parentCategoryName. This creates only an inactive admin-reviewed subcategory suggestion, not an active skill and not a technician mapping.
 - If the assignment-agent suggestion is really just a duplicate or wording variant of an existing active category/subcategory, reuse the existing category/subcategory instead of creating a new suggestion.
 - Normalize duplicate suggested names into one clean business label before proposing. For example, Microsoft 365 Apps, Microsoft 365 / Office Apps, and Outlook / Microsoft 365 Apps should usually become one proposed subcategory if the evidence points to the same support domain.
-- Avoid creating a new top-level category when the evidence fits as a subcategory under an existing parent.
-- **CRITICAL: Before proposing a new category or subcategory, carefully check if an existing parent or subcategory covers the same domain under a slightly different name.** For example:
+- Do not create or propose new top-level categories. The top-level category hierarchy is fixed for this migration.
+- **CRITICAL: Before proposing a new subcategory, carefully check if an existing parent or subcategory covers the same domain under a slightly different name.** For example:
   - "VPN and Remote Access Client" tickets should use the existing "VPN and Remote Access" category
   - "Scripting" tickets should use the existing "Scripting & Automation" category
   - "Boardrooms" tickets should use the existing "Boardrooms and A/V" category
   - "Computer Setup (Hardware)" tickets should use "Workstation Setup" if it exists
-- Only use categoryAction "create_new" when NO existing category or subcategory covers this work area at all. New taxonomy entries are inactive suggestions until admin review.
-- When proposing a new subcategory, include parentCategoryId or parentCategoryName.
+- Only use categoryAction "create_new" when an existing top-level category fits but NO existing subcategory covers this work area. New taxonomy entries are inactive suggestions until admin review.
+- categoryAction "create_new" must include parentCategoryId or parentCategoryName for the existing top-level parent. If no parent fits, do not create a suggestion; explain the gap in caveats.
 - When reusing an existing category/subcategory, categoryId is required.
-- When proposing a new category/subcategory, provide a clear description and strong evidence.
+- When proposing a new subcategory, provide a clear description and strong evidence.
 - Be conservative with "expert" level - reserve it for clear specialization or SME-level evidence
 - Use "advanced" for strong independent capability that is more than comfortable repeat exposure but not clearly SME ownership
 - If a technician is a generalist with no clear specialization, say so and assign "basic", "intermediate", or "advanced" across relevant categories based on canonical evidence
@@ -166,7 +166,8 @@ function needsCompetencyPromptUpgrade(systemPrompt = '') {
     || !systemPrompt.includes('suggestedSubcategoryName')
     || !systemPrompt.includes('legacyFreshserviceCategoryBreakdown')
     || !systemPrompt.includes('clean canonical Ticket Pulse ticket evidence')
-    || !systemPrompt.includes('submit an empty competencies array');
+    || !systemPrompt.includes('submit an empty competencies array')
+    || !systemPrompt.includes('Do not create or propose new top-level categories');
 }
 
 class CompetencyPromptRepository {

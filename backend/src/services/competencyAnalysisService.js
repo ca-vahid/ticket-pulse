@@ -338,6 +338,18 @@ class CompetencyAnalysisService {
         }
 
         const parentId = resolveSuggestedParentId(comp, activeExisting);
+        if (isSkillHierarchyWorkspace(workspaceId) && !parentId) {
+          skippedInvalidSuggestionParent++;
+          logger.warn('Skipped top-level taxonomy-gap suggestion in canonical category workspace', {
+            workspaceId,
+            categoryName: normalizedName,
+            parentCategoryId: comp.parentCategoryId || null,
+            parentCategoryName: comp.parentCategoryName || null,
+            technicianId,
+          });
+          continue;
+        }
+
         if (!parentId && (comp.parentCategoryId || comp.parentCategoryName)) {
           skippedInvalidSuggestionParent++;
           logger.warn('Skipped taxonomy-gap suggestion with invalid parent category', {

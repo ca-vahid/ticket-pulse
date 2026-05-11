@@ -325,12 +325,12 @@ export const COMPETENCY_TOOL_SCHEMAS = [
           items: {
             type: 'object',
             properties: {
-              categoryName: { type: 'string', description: 'Category name (use existing name if it fits, otherwise propose a new one)' },
+              categoryName: { type: 'string', description: 'Category or subcategory name. Use an existing name when it fits; when categoryAction is create_new, this must be the proposed subcategory name, not a new top-level category.' },
               categoryId: { type: 'integer', description: 'Required existing canonical category or subcategory ID when categoryAction is reuse_existing. Name-only reuse will not be auto-applied.' },
               parentCategoryName: { type: 'string', description: 'Parent top-level category name when proposing a new subcategory' },
               parentCategoryId: { type: 'integer', description: 'Parent top-level category ID when proposing a new subcategory' },
               categoryDescription: { type: 'string', description: 'Brief description of what this category covers' },
-              categoryAction: { type: 'string', enum: ['reuse_existing', 'create_new'], description: 'reuse_existing updates technician skills only when categoryId is a valid active canonical ID. create_new creates only an inactive taxonomy-gap suggestion for admin review and is not mapped to the technician.' },
+              categoryAction: { type: 'string', enum: ['reuse_existing', 'create_new'], description: 'reuse_existing updates technician skills only when categoryId is a valid active canonical ID. create_new creates only an inactive subcategory suggestion for admin review, requires parentCategoryId or parentCategoryName, and is not mapped to the technician.' },
               proficiencyLevel: {
                 type: 'string',
                 enum: ['basic', 'intermediate', 'advanced', 'expert'],

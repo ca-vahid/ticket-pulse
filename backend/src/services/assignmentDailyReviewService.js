@@ -306,12 +306,24 @@ class AssignmentDailyReviewService {
       const numeric = Number(value);
       return Number.isInteger(numeric) ? numeric : null;
     };
-    const taxonomyAction = item.taxonomyAction || existing.taxonomyAction || parsed.taxonomyAction || null;
-    const categoryId = item.categoryId ?? existing.categoryId ?? toNumberOrNull(parsed.categoryId);
-    const categoryName = item.categoryName || existing.categoryName || parsed.categoryName || null;
-    const parentCategoryId = item.parentCategoryId ?? existing.parentCategoryId ?? toNumberOrNull(parsed.parentCategoryId);
-    const parentCategoryName = item.parentCategoryName || existing.parentCategoryName || parsed.parentCategoryName || null;
-    const newName = item.newName || existing.newName || parsed.newName || null;
+    let taxonomyAction = item.taxonomyAction || existing.taxonomyAction || parsed.taxonomyAction || null;
+    let categoryId = item.categoryId ?? existing.categoryId ?? toNumberOrNull(parsed.categoryId);
+    let categoryName = item.categoryName || existing.categoryName || parsed.categoryName || null;
+    let parentCategoryId = item.parentCategoryId ?? existing.parentCategoryId ?? toNumberOrNull(parsed.parentCategoryId);
+    let parentCategoryName = item.parentCategoryName || existing.parentCategoryName || parsed.parentCategoryName || null;
+    let newName = item.newName || existing.newName || parsed.newName || null;
+
+    if (taxonomyAction === 'add' && !parentCategoryId && !parentCategoryName) {
+      if (newName && categoryName && normalizeName(newName) !== normalizeName(categoryName)) {
+        parentCategoryId = categoryId ?? null;
+        parentCategoryName = categoryName;
+        categoryId = null;
+        categoryName = newName;
+      } else {
+        taxonomyAction = 'update';
+        newName = null;
+      }
+    }
 
     if (!taxonomyAction && !categoryId && !categoryName && !parentCategoryId && !parentCategoryName && !newName) {
       return item.metadata || null;
@@ -704,21 +716,19 @@ class AssignmentDailyReviewService {
       const fit = item.taxonomyFit || {};
       const category = item.internalCategory || {};
       const parentCategoryName = category.name || item.category || 'Uncategorized';
-      const suggestedCategoryName = fit.suggestedCategoryName || null;
+      const suggestedCategoryName = null;
       const suggestedSubcategoryName = fit.suggestedSubcategoryName || null;
       const issue = fit.categoryFit === 'none'
-        ? 'missing_category'
-        : suggestedCategoryName
-          ? 'suggested_category'
-          : suggestedSubcategoryName
-            ? 'suggested_subcategory'
-            : fit.categoryFit === 'weak'
-              ? 'category_cleanup'
-              : fit.subcategoryFit === 'none'
-                ? 'missing_subcategory'
-                : fit.subcategoryFit === 'weak'
-                  ? 'subcategory_cleanup'
-                  : 'taxonomy_review';
+        ? 'category_mapping_review'
+        : suggestedSubcategoryName
+          ? 'suggested_subcategory'
+          : fit.categoryFit === 'weak'
+            ? 'category_cleanup'
+            : fit.subcategoryFit === 'none'
+              ? 'missing_subcategory'
+              : fit.subcategoryFit === 'weak'
+                ? 'subcategory_cleanup'
+                : 'taxonomy_review';
       const key = [
         category.id || '',
         parentCategoryName,
@@ -747,8 +757,8 @@ class AssignmentDailyReviewService {
     return Array.from(groups.values())
       .sort((a, b) => b.cases.length - a.cases.length || a.categoryName.localeCompare(b.categoryName))
       .map((group) => {
-        const proposedName = group.suggestedSubcategoryName || group.suggestedCategoryName || null;
-        const isSubcategory = group.issue.includes('subcategory') || Boolean(group.suggestedSubcategoryName);
+        const proposedName = group.suggestedSubcategoryName || null;
+        const isSubcategory = Boolean(proposedName) || group.issue.includes('subcategory');
         const taxonomyAction = proposedName ? 'add' : 'update';
         const parentCategoryId = isSubcategory ? group.categoryId : null;
         const parentCategoryName = isSubcategory ? group.categoryName : null;
@@ -757,7 +767,7 @@ class AssignmentDailyReviewService {
           ? (proposedName || group.categoryName)
           : (proposedName || group.categoryName);
         const title = proposedName
-          ? `Review ${proposedName} ${isSubcategory ? `under ${group.categoryName}` : 'as a category'}`
+          ? `Review ${proposedName} under ${group.categoryName}`
           : `Review category coverage for ${group.categoryName}`;
         const fitText = [
           group.categoryFit ? `categoryFit=${group.categoryFit}` : null,
@@ -773,7 +783,7 @@ class AssignmentDailyReviewService {
             group.rationales[0] || null,
           ].filter(Boolean).join(' '),
           suggestedAction: proposedName
-            ? `Review whether "${proposedName}" should be added or mapped in the Ticket Pulse category list, and adjust nearby category descriptions so future tickets route cleanly.`
+            ? `Review whether "${proposedName}" should be added as a subcategory under "${group.categoryName}", and adjust nearby category descriptions so future tickets route cleanly.`
             : `Review whether "${group.categoryName}" needs subcategories, description cleanup, or FreshService mapping guidance based on the supporting tickets.`,
           skillsAffected: [group.categoryName, proposedName].filter(Boolean),
           taxonomyAction,
@@ -2231,12 +2241,12 @@ class AssignmentDailyReviewService {
                   rationale: { type: 'string' },
                   suggestedAction: { type: 'string' },
                   skillsAffected: { type: 'array', items: { type: 'string' } },
-                  taxonomyAction: { type: ['string', 'null'], enum: ['add', 'rename', 'update', 'move', 'merge', 'deprecate', null] },
-                  categoryId: { type: ['integer', 'null'] },
-                  categoryName: { type: ['string', 'null'] },
-                  parentCategoryId: { type: ['integer', 'null'] },
-                  parentCategoryName: { type: ['string', 'null'] },
-                  newName: { type: ['string', 'null'] },
+                  taxonomyAction: { type: ['string', 'null'], enum: ['add', 'rename', 'update', 'move', 'merge', 'deprecate', null], description: 'Use add only for a proposed subcategory under an existing parent category. Do not use add for a new top-level category.' },
+                  categoryId: { type: ['integer', 'null'], description: 'Existing category/subcategory being updated, moved, renamed, merged, or deprecated. For add, leave null unless referring to an existing subcategory being remapped.' },
+                  categoryName: { type: ['string', 'null'], description: 'Existing category/subcategory name, or the proposed subcategory name for add.' },
+                  parentCategoryId: { type: ['integer', 'null'], description: 'Required existing top-level parent category ID when taxonomyAction is add.' },
+                  parentCategoryName: { type: ['string', 'null'], description: 'Required existing top-level parent category name when taxonomyAction is add.' },
+                  newName: { type: ['string', 'null'], description: 'For add, the proposed subcategory name. For rename, the replacement name.' },
                   supportingTicketIds: { type: 'array', items: { type: 'integer' } },
                   supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
                 },
@@ -2293,8 +2303,10 @@ Rules:
 - Base every recommendation on evidence from the supplied cases and metrics.
 - Pay special attention to cases with category review signals: taxonomyFit.reviewNeeded=true, weak/none categoryFit, weak/none subcategoryFit, or suggested internal category/subcategory names.
 - Treat assignment-agent category suggestions as evidence, not truth: compare them against ticket descriptions, thread excerpts, outcomes, and the full categoryTree before recommending category/subcategory changes.
-- taxonomyRecommendations may include adding, moving, renaming, merging, deprecating, remapping, or updating descriptions for internal top-level categories or subcategories when the evidence supports it.
-- For taxonomyRecommendations, populate taxonomyAction and the relevant categoryId/categoryName/parentCategoryId/parentCategoryName/newName fields so consolidation can turn them into precise admin-reviewed Category Changes.
+- The top-level category list is fixed for this go-live. Do not recommend adding a new top-level category.
+- taxonomyRecommendations may include adding a new subcategory under an existing parent category, or moving, renaming, merging, deprecating, remapping, or updating descriptions for existing categories/subcategories when the evidence supports it.
+- For taxonomyRecommendations with taxonomyAction="add", the proposal must be a subcategory and must include parentCategoryId or parentCategoryName for the existing top-level parent. Put the proposed subcategory name in newName.
+- If no existing top-level category fits, recommend category mapping/description review, not a new top-level category.
 - skillRecommendations are only agent skill/technician competency changes: add, remove, or change a technician's competency mapping or proficiency. Do not put category/subcategory structure changes there.
 - Be conservative. Fewer strong recommendations are better than many weak ones.
 - Do not rewrite the prompt or mutate the competency matrix directly.

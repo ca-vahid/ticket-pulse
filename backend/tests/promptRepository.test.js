@@ -19,6 +19,16 @@ describe('prompt upgrade helpers', () => {
     expect(upgradeLegacyPrompt(legacyDefault)).toBe(DEFAULT_SYSTEM_PROMPT);
   });
 
+  test('upgrades prompts that predate fixed top-level category guidance', () => {
+    const stale = DEFAULT_SYSTEM_PROMPT.replace(
+      '- Do not propose new top-level categories. The top-level category list is fixed for this migration. When a gap exists, choose the closest existing top-level category and populate `suggestedInternalSubcategoryName` only. Leave `suggestedInternalCategoryName` null unless you are naming the existing parent category for context.',
+      '- You may populate `suggestedInternalCategoryName` and/or `suggestedInternalSubcategoryName` as review notes only. These are not active categories and must not be used as if they already exist.',
+    );
+
+    expect(needsPromptUpgrade(stale)).toBe(true);
+    expect(upgradeLegacyPrompt(stale)).toBe(DEFAULT_SYSTEM_PROMPT);
+  });
+
   test('removes deprecated tool references from custom prompts', () => {
     const custom = `
 ## Step 1: Check Business Hours

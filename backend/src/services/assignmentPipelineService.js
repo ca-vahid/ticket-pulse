@@ -907,11 +907,10 @@ class AssignmentPipelineService {
       const safeSubcategoryId = normalizedSubcategory?.id || null;
       const categoryFit = normalizeTaxonomyFit(recommendation?.categoryFit);
       const subcategoryFit = normalizeTaxonomyFit(recommendation?.subcategoryFit);
-      const suggestedCategoryName = truncateTaxonomySuggestion(recommendation?.suggestedInternalCategoryName);
+      const suggestedCategoryName = null;
       const suggestedSubcategoryName = truncateTaxonomySuggestion(recommendation?.suggestedInternalSubcategoryName);
       const taxonomyReviewNeeded = ['weak', 'none'].includes(categoryFit)
         || ['weak', 'none'].includes(subcategoryFit)
-        || Boolean(suggestedCategoryName)
         || Boolean(suggestedSubcategoryName);
 
       await prisma.ticket.update({

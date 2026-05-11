@@ -820,8 +820,8 @@ function TaxonomyRecommendationsTable({
       <div className="rounded-t-xl border-b border-emerald-100 bg-emerald-50/70 px-4 py-3">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div className="text-sm font-semibold text-emerald-950">Category Change List</div>
-            <div className="text-xs text-emerald-700">Each row is one category or subcategory change proposed by the review.</div>
+            <div className="text-sm font-semibold text-emerald-950">Subcategory & Category Cleanup List</div>
+            <div className="text-xs text-emerald-700">New entries should be subcategories under an existing parent; top-level category additions are not part of IT go-live.</div>
           </div>
           <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 shadow-sm">
             {items.length} proposed

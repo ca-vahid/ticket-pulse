@@ -4,6 +4,7 @@ import promptRepository from './promptRepository.js';
 import competencyRepository from './competencyRepository.js';
 import logger from '../utils/logger.js';
 import appConfig from '../config/index.js';
+import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 
 const ACTIVE_STATUSES = ['collecting', 'analyzing', 'saving'];
 const APPLYABLE_SECTIONS = ['prompt', 'skills', 'technician_competencies'];
@@ -568,15 +569,16 @@ You will receive approved Daily Review recommendations, the current assignment p
 
 Produce a consolidation plan with exactly four sections:
 1. Prompt edits: suggest a complete updated assignment prompt, but do not assume it will be applied automatically.
-2. Category changes: add, rename, update, move, merge, or deprecate internal categories/subcategories where evidence supports it.
+2. Category changes: add subcategories, or rename, update, move, merge, or deprecate existing internal categories/subcategories where evidence supports it.
 3. Agent skill changes: suggest technician competency level updates or mappings where evidence supports it.
 4. Process changes: operational or engineering work. These are visible but not directly applyable in the app.
 
 Rules:
 - The app has a two-level Ticket Pulse category model: top-level category plus optional subcategory. FreshService categories are evidence only.
-- Daily Review may propose new categories, subcategories, or moves, but they only become active after admin approval through Category Changes.
+- Daily Review may propose new subcategories under existing parents, or cleanup/moves for existing categories/subcategories, but they only become active after admin approval through Category Changes.
 - Pay close attention to category-fit evidence from assignment runs. Treat weak/none fit and suggested category/subcategory names as leads, then validate them against ticket evidence and the current categoryTree before proposing changes.
-- Skill list changes may create top-level categories, create subcategories under a parent, move categories between top-level/subcategory positions, rename, update descriptions, merge duplicates, or deprecate stale entries.
+- The top-level category list is fixed for IT go-live. Do not propose or create a new top-level category. If a gap exists, choose the closest existing top-level parent and propose a new subcategory under it.
+- Skill list changes may create subcategories under an existing parent, move existing categories between top-level/subcategory positions, rename, update descriptions, merge duplicates, or deprecate stale entries.
 - Be conservative. Do not invent skills or competency changes without evidence from approved recommendations.
 - Preserve useful existing prompt content. Tighten only where findings justify it.
 - Prefer adding narrow guidance over broad rewrites.
@@ -752,12 +754,12 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
               type: 'object',
               properties: {
                 title: { type: 'string' },
-                action: { type: 'string', enum: ['add', 'rename', 'update', 'move', 'merge', 'deprecate'] },
+                action: { type: 'string', enum: ['add', 'rename', 'update', 'move', 'merge', 'deprecate'], description: 'Use add only for a new subcategory under an existing parent category. Do not use add for a new top-level category.' },
                 categoryId: { type: ['number', 'null'] },
-                categoryName: { type: 'string' },
-                newName: { type: ['string', 'null'] },
-                parentCategoryId: { type: ['number', 'null'] },
-                parentCategoryName: { type: ['string', 'null'] },
+                categoryName: { type: 'string', description: 'Existing category/subcategory name, or the proposed subcategory name for add.' },
+                newName: { type: ['string', 'null'], description: 'For add, the proposed subcategory name when different from categoryName. For rename, the replacement name.' },
+                parentCategoryId: { type: ['number', 'null'], description: 'Required existing top-level parent category ID when action is add.' },
+                parentCategoryName: { type: ['string', 'null'], description: 'Required existing top-level parent category name when action is add.' },
                 description: { type: ['string', 'null'] },
                 rationale: { type: 'string' },
                 sourceRecommendationIds: { type: 'array', items: { type: 'number' } },
@@ -910,6 +912,9 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
         });
         return { action: 'updated_existing_skill', categoryId: updated.id };
       }
+      if (isSkillHierarchyWorkspace(workspaceId) && !parentId) {
+        throw new Error('IT category consolidation can add subcategories only; choose an existing parent category');
+      }
       const created = await competencyRepository.createCategory(workspaceId, {
         name: payload.newName || payload.categoryName,
         description: payload.description || null,
@@ -922,6 +927,9 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
 
     if (!existing) {
       const parentId = resolveParentId();
+      if (isSkillHierarchyWorkspace(workspaceId) && !parentId) {
+        throw new Error('IT category consolidation cannot create a new top-level category; choose an existing parent category');
+      }
       const created = await competencyRepository.createCategory(workspaceId, {
         name: payload.newName || payload.categoryName,
         description: payload.description || null,

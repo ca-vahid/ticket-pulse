@@ -133,4 +133,44 @@ describe('daily review LLM payload — context completeness', () => {
     // that flow into the LLM. Keep it on the public surface.
     expect(typeof assignmentDailyReviewService.collectDailyDataset).toBe('function');
   });
+
+  test('deterministic taxonomy recommendations propose subcategories, not new top-level categories', () => {
+    const recommendations = assignmentDailyReviewService._buildDeterministicTaxonomyRecommendations({
+      cases: [{
+        ticketId: 100,
+        freshserviceTicketId: 219995,
+        runId: 77,
+        category: 'Devices & Hardware',
+        internalCategory: { id: 10, name: 'Devices & Hardware' },
+        taxonomyFit: {
+          reviewNeeded: true,
+          categoryFit: 'exact',
+          subcategoryFit: 'none',
+          suggestedCategoryName: 'Wearable Devices',
+          suggestedSubcategoryName: 'Wearable Devices',
+          rationale: 'Smart glasses support does not fit existing subcategories.',
+        },
+      }],
+    });
+
+    expect(recommendations).toHaveLength(1);
+    expect(recommendations[0].taxonomyAction).toBe('add');
+    expect(recommendations[0].parentCategoryId).toBe(10);
+    expect(recommendations[0].parentCategoryName).toBe('Devices & Hardware');
+    expect(recommendations[0].newName).toBe('Wearable Devices');
+    expect(recommendations[0].metadata.taxonomy.categoryId).toBeNull();
+  });
+
+  test('top-level add proposals are normalized into review/update recommendations', () => {
+    const metadata = assignmentDailyReviewService._taxonomyMetadataFromItem({
+      taxonomyAction: 'add',
+      categoryName: 'New Top Category',
+      suggestedAction: 'Consider adding a top-level category.',
+    });
+
+    expect(metadata.taxonomy.taxonomyAction).toBe('update');
+    expect(metadata.taxonomy.parentCategoryId).toBeNull();
+    expect(metadata.taxonomy.parentCategoryName).toBeNull();
+    expect(metadata.taxonomy.newName).toBeNull();
+  });
 });

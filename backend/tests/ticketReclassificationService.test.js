@@ -164,6 +164,27 @@ describe('ticketReclassificationService', () => {
     });
   });
 
+  test('normalization suppresses new top-level category suggestions', () => {
+    const byId = new Map([
+      [10, { id: 10, name: 'Devices & Hardware', parentId: null }],
+    ]);
+
+    const result = ticketReclassificationService._normalizeRecommendation({
+      internalCategoryId: 10,
+      internalSubcategoryId: null,
+      categoryFit: 'exact',
+      subcategoryFit: 'none',
+      confidence: 'medium',
+      classificationRationale: 'Closest existing parent is Devices & Hardware.',
+      suggestedInternalCategoryName: 'Wearable Devices',
+      suggestedInternalSubcategoryName: 'Smart Glasses',
+    }, byId);
+
+    expect(result.suggestedInternalCategoryName).toBeNull();
+    expect(result.suggestedInternalSubcategoryName).toBe('Smart Glasses');
+    expect(result.taxonomyReviewNeeded).toBe(true);
+  });
+
   test('dry run classifies without persisting', async () => {
     prismaMock.competencyCategory.findMany.mockResolvedValue([
       { id: 20, name: 'Hardware', description: null, parentId: null, sortOrder: 1 },

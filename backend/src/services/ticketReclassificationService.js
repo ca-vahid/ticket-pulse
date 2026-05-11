@@ -378,7 +378,8 @@ Rules:
 - Prefer an exact subcategory when one clearly fits.
 - Use parent category only when no specific subcategory fits.
 - Freshservice category fields and old custom fields are raw evidence only.
-- If no existing category or subcategory fits cleanly, choose the closest usable parent if possible, set weak/none fit, and provide suggested names for admin review.
+- Do not propose new top-level categories. The top-level category list is fixed.
+- If no existing subcategory fits cleanly, choose the closest usable parent, set weak/none subcategory fit, and provide suggestedInternalSubcategoryName for admin review when useful.
 - Return JSON only. No markdown.`,
       messages: [{
         role: 'user',
@@ -414,7 +415,7 @@ Rules:
             subcategoryFit: 'exact|weak|none',
             confidence: 'low|medium|high',
             classificationRationale: 'short explanation',
-            suggestedInternalCategoryName: 'string|null',
+            suggestedInternalCategoryName: 'null',
             suggestedInternalSubcategoryName: 'string|null',
           },
         }),
@@ -444,11 +445,10 @@ Rules:
     const safeSubcategoryId = normalizedSubcategory?.id || null;
     const categoryFit = normalizeFit(recommendation?.categoryFit) || (safeCategoryId ? 'weak' : 'none');
     const subcategoryFit = normalizeFit(recommendation?.subcategoryFit) || (safeSubcategoryId ? 'weak' : 'none');
-    const suggestedInternalCategoryName = cleanSuggestion(recommendation?.suggestedInternalCategoryName);
+    const suggestedInternalCategoryName = null;
     const suggestedInternalSubcategoryName = cleanSuggestion(recommendation?.suggestedInternalSubcategoryName);
     const taxonomyReviewNeeded = ['weak', 'none'].includes(categoryFit)
       || ['weak', 'none'].includes(subcategoryFit)
-      || Boolean(suggestedInternalCategoryName)
       || Boolean(suggestedInternalSubcategoryName);
 
     return {

@@ -242,15 +242,15 @@ Length: under 300 characters.`,
         },
         taxonomyReviewNeeded: {
           type: 'boolean',
-          description: 'True only when categoryFit or subcategoryFit is weak/none, or when this ticket suggests a new/moved/renamed category or subcategory should be reviewed later. Do not set true for missing technician competency coverage; that is an agent skill matrix gap.',
+          description: 'True only when categoryFit or subcategoryFit is weak/none, when a new subcategory under an existing parent should be reviewed, or when an existing category/subcategory should be moved/renamed/merged/deprecated. Do not set true for missing technician competency coverage; that is an agent skill matrix gap.',
         },
         suggestedInternalCategoryName: {
           type: 'string',
-          description: 'Optional suggested top-level category name for Daily Review to consider. Do not invent an active category; this is only a review note.',
+          description: 'Do not use this to propose a new top-level category. Leave null except when naming the existing parent category for context.',
         },
         suggestedInternalSubcategoryName: {
           type: 'string',
-          description: 'Optional suggested subcategory name for Daily Review to consider. Do not invent an active subcategory; this is only a review note.',
+          description: 'Optional suggested subcategory name for Daily Review to consider under the selected existing parent category. Do not invent an active subcategory; this is only a review note.',
         },
         requiresPhysicalPresence: { type: 'boolean', description: 'Whether the ticket requires physical presence' },
         estimatedComplexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Estimated complexity of the ticket' },

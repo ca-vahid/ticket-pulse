@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError, ValidationError } from '../utils/errors.js';
+import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 
 function categoryOrder() {
   return [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }];
@@ -56,7 +57,12 @@ class CompetencyRepository {
   async getSystemSuggestedCategories(workspaceId) {
     try {
       return await prisma.competencyCategory.findMany({
-        where: { workspaceId, isActive: false, isSystemSuggested: true },
+        where: {
+          workspaceId,
+          isActive: false,
+          isSystemSuggested: true,
+          ...(isSkillHierarchyWorkspace(workspaceId) ? { parentId: { not: null } } : {}),
+        },
         include: {
           parent: { select: { id: true, name: true, isActive: true } },
           subcategories: {
@@ -194,10 +200,14 @@ class CompetencyRepository {
       }
 
       if (action === 'approve') {
+        const requestedParentId = data.parentId !== undefined ? data.parentId : current.parentId;
+        if (isSkillHierarchyWorkspace(workspaceId) && !requestedParentId) {
+          throw new ValidationError('IT category review can approve new subcategories only; choose an existing parent category');
+        }
         return await this.updateCategory(categoryId, {
           name: data.name?.trim() || current.name,
           description: data.description !== undefined ? data.description : current.description,
-          parentId: data.parentId !== undefined ? data.parentId : current.parentId,
+          parentId: requestedParentId,
           isActive: true,
           isSystemSuggested: false,
           source: 'technician_analysis_approved',

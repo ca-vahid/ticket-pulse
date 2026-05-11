@@ -428,7 +428,7 @@ function TicketDetailsCard({ ticket }) {
                     <div className={`text-[9px] font-semibold uppercase tracking-wide ${
                       hasSuggestedCategory || hasSuggestedSubcategory ? 'text-emerald-700' : 'text-amber-700'
                     }`}>
-                      Suggested category update
+                      Category review note
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1">
                       {hasSuggestedCategory && (
@@ -443,7 +443,7 @@ function TicketDetailsCard({ ticket }) {
                       )}
                       {!hasSuggestedCategory && !hasSuggestedSubcategory && (
                         <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                          No specific new category/subcategory name proposed in this run
+                          No specific subcategory or cleanup suggestion proposed in this run
                         </span>
                       )}
                     </div>
