@@ -147,6 +147,11 @@ function formatPct(value) {
   return `${prefix}${value}%`;
 }
 
+function formatSharePct(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+}
+
 function formatHours(value) {
   if (value === null || value === undefined) return '—';
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
@@ -732,6 +737,10 @@ export default function Analytics() {
 
   const categoryHierarchyOptions = useMemo(() => {
     const rows = categories?.hierarchy || [];
+    const totalCreated = Number(categories?.summary?.totalCreated)
+      || rows
+        .filter((row) => !row.parent)
+        .reduce((sum, row) => sum + Number(row.custom?.created ?? row.value ?? 0), 0);
     return {
       ...chartBase('treemap'),
       chart: {
@@ -811,10 +820,16 @@ export default function Analytics() {
               const lineHeight = isParent ? 11 : 10;
               const maxChars = Math.max(8, Math.floor((shape.width || 80) / 5.2) * Math.max(1, Math.floor((shape.height || 24) / (lineHeight + 3))));
               const name = rawName.length > maxChars ? `${rawName.slice(0, Math.max(5, maxChars - 1))}...` : rawName;
-              const created = this.point.custom?.created ?? this.point.value;
-              const nameStyle = isParent ? 'font-size:11px;font-weight:800;line-height:13px' : '';
+              const created = Number(this.point.custom?.created ?? this.point.value ?? 0);
+              const sharePct = totalCreated > 0 && created > 0 ? formatSharePct((created / totalCreated) * 100) : null;
+              const showShare = Boolean(sharePct && (isParent || (shape.width >= 112 && shape.height >= 62)));
+              const nameStyle = isParent ? 'font-size:11px;font-weight:800;line-height:13px;' : '';
+              const metricStyle = showShare
+                ? 'font-size:8px;font-weight:700;color:#334155'
+                : 'font-size:8px;font-weight:600';
+              const metric = `${formatNumber(created)} created${showShare ? ` · ${sharePct}` : ''}`;
               return shape.height >= 44 && created
-                ? `<span style="${nameStyle}">${name}</span><br/><span style="font-size:8px;font-weight:600">${formatNumber(created)} created</span>`
+                ? `<span style="${nameStyle}">${name}</span><br/><span style="${metricStyle}">${metric}</span>`
                 : `<span style="${nameStyle}">${name}</span>`;
             },
             style: {
@@ -877,7 +892,7 @@ export default function Analytics() {
         data: rows,
       }],
     };
-  }, [categories?.hierarchy, legacyMode]);
+  }, [categories?.hierarchy, categories?.summary?.totalCreated, legacyMode]);
 
   const categoryTrendOptions = useMemo(() => {
     const rows = categories?.trend || [];
