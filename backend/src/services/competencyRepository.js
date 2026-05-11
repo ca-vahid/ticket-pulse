@@ -27,6 +27,53 @@ function buildCategoryTree(categories = []) {
   return roots;
 }
 
+const LEVEL_RANK = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
+const RANK_LEVEL = { 1: 'basic', 2: 'intermediate', 3: 'advanced' };
+
+function normalizeCompetencyMapping(mapping = {}) {
+  const competencyCategoryId = Number(mapping.competencyCategoryId);
+  if (!Number.isInteger(competencyCategoryId)) return null;
+  const proficiencyLevel = LEVEL_RANK[mapping.proficiencyLevel] ? mapping.proficiencyLevel : 'intermediate';
+  return {
+    competencyCategoryId,
+    proficiencyLevel,
+    notes: mapping.notes || null,
+  };
+}
+
+function inferParentCompetenciesForSkillHierarchy(competencies = [], categories = []) {
+  const normalized = (competencies || [])
+    .map(normalizeCompetencyMapping)
+    .filter(Boolean);
+  const categoryById = new Map(categories.map((category) => [Number(category.id), category]));
+  const existingIds = new Set(normalized.map((mapping) => mapping.competencyCategoryId));
+  const childrenByParent = new Map();
+
+  for (const mapping of normalized) {
+    const category = categoryById.get(mapping.competencyCategoryId);
+    if (!category?.parentId) continue;
+    const parentId = Number(category.parentId);
+    if (!categoryById.has(parentId)) continue;
+    if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
+    childrenByParent.get(parentId).push(mapping);
+  }
+
+  const inferred = [];
+  for (const [parentId, childMappings] of childrenByParent.entries()) {
+    if (existingIds.has(parentId)) continue;
+    const level2OrHigher = childMappings.filter((mapping) => (LEVEL_RANK[mapping.proficiencyLevel] || 0) >= 2).length;
+    const level3OrHigher = childMappings.filter((mapping) => (LEVEL_RANK[mapping.proficiencyLevel] || 0) >= 3).length;
+    const inferredRank = level3OrHigher >= 2 ? 3 : level2OrHigher >= 2 ? 2 : 1;
+    inferred.push({
+      competencyCategoryId: parentId,
+      proficiencyLevel: RANK_LEVEL[inferredRank],
+      notes: 'Auto-inferred from subcategory competencies; facilitator override wins.',
+    });
+  }
+
+  return [...normalized, ...inferred];
+}
+
 class CompetencyRepository {
   // ─── Categories ───────────────────────────────────────────────────────
 
@@ -301,21 +348,51 @@ class CompetencyRepository {
 
   async upsertTechnicianCompetency(technicianId, workspaceId, competencyCategoryId, proficiencyLevel, notes) {
     try {
-      return await prisma.technicianCompetency.upsert({
-        where: {
-          technicianId_competencyCategoryId: { technicianId, competencyCategoryId },
-        },
-        create: {
-          technicianId,
-          workspaceId,
-          competencyCategoryId,
-          proficiencyLevel,
-          notes,
-        },
-        update: {
-          proficiencyLevel,
-          notes,
-        },
+      return await prisma.$transaction(async (tx) => {
+        const competency = await tx.technicianCompetency.upsert({
+          where: {
+            technicianId_competencyCategoryId: { technicianId, competencyCategoryId },
+          },
+          create: {
+            technicianId,
+            workspaceId,
+            competencyCategoryId,
+            proficiencyLevel,
+            notes,
+          },
+          update: {
+            proficiencyLevel,
+            notes,
+          },
+        });
+
+        if (isSkillHierarchyWorkspace(workspaceId)) {
+          const categories = await tx.competencyCategory.findMany({
+            where: { workspaceId, isActive: true },
+            select: { id: true, parentId: true },
+          });
+          const existing = await tx.technicianCompetency.findMany({
+            where: { technicianId, workspaceId, competencyCategory: { isActive: true } },
+            select: { competencyCategoryId: true, proficiencyLevel: true, notes: true },
+          });
+          const existingIds = new Set(existing.map((mapping) => mapping.competencyCategoryId));
+          const inferred = inferParentCompetenciesForSkillHierarchy(existing, categories)
+            .filter((mapping) => !existingIds.has(mapping.competencyCategoryId));
+          if (inferred.length > 0) {
+            await tx.technicianCompetency.createMany({
+              data: inferred.map((mapping) => ({
+                technicianId,
+                workspaceId,
+                competencyCategoryId: mapping.competencyCategoryId,
+                proficiencyLevel: mapping.proficiencyLevel,
+                notes: mapping.notes,
+              })),
+              skipDuplicates: true,
+            });
+          }
+        }
+
+        return competency;
       });
     } catch (error) {
       logger.error('Error upserting technician competency:', error);
@@ -329,14 +406,16 @@ class CompetencyRepository {
         const requestedCategoryIds = Array.from(new Set((competencies || [])
           .map((c) => Number(c.competencyCategoryId))
           .filter((id) => Number.isInteger(id))));
-        const activeCategories = requestedCategoryIds.length
-          ? await tx.competencyCategory.findMany({
-            where: { workspaceId, id: { in: requestedCategoryIds }, isActive: true },
-            select: { id: true },
-          })
-          : [];
+        const allActiveCategories = await tx.competencyCategory.findMany({
+          where: { workspaceId, isActive: true },
+          select: { id: true, parentId: true },
+        });
+        const activeCategories = allActiveCategories.filter((category) => requestedCategoryIds.includes(category.id));
         const activeIds = new Set(activeCategories.map((category) => category.id));
         const activeCompetencies = (competencies || []).filter((c) => activeIds.has(Number(c.competencyCategoryId)));
+        const competenciesToSave = isSkillHierarchyWorkspace(workspaceId)
+          ? inferParentCompetenciesForSkillHierarchy(activeCompetencies, allActiveCategories)
+          : activeCompetencies.map(normalizeCompetencyMapping).filter(Boolean);
         if (activeCompetencies.length !== (competencies || []).length) {
           logger.warn('Skipped inactive or cross-workspace competency mappings during bulk update', {
             technicianId,
@@ -348,10 +427,10 @@ class CompetencyRepository {
 
         await tx.technicianCompetency.deleteMany({ where: { technicianId, workspaceId } });
 
-        if (activeCompetencies.length === 0) return [];
+        if (competenciesToSave.length === 0) return [];
 
         return await tx.technicianCompetency.createMany({
-          data: activeCompetencies.map((c) => ({
+          data: competenciesToSave.map((c) => ({
             technicianId,
             workspaceId,
             competencyCategoryId: c.competencyCategoryId,
@@ -451,4 +530,5 @@ class CompetencyRepository {
   }
 }
 
+export { buildCategoryTree, inferParentCompetenciesForSkillHierarchy };
 export default new CompetencyRepository();
