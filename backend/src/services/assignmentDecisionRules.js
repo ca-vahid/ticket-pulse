@@ -38,5 +38,5 @@ export function isGroupExcluded(ticketGroupId, excludedGroupIds) {
  * @returns {boolean}
  */
 export function isPipelineFinalDecision(decision) {
-  return decision === 'auto_assigned' || decision === 'noise_dismissed';
+  return decision === 'auto_assigned' || decision === 'noise_dismissed' || decision === 'classified_only';
 }

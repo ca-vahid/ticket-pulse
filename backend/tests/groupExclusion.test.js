@@ -80,6 +80,12 @@ describe('isPipelineFinalDecision', () => {
     expect(isPipelineFinalDecision('noise_dismissed')).toBe(true);
   });
 
+  test('classified_only is a pipeline-final decision', () => {
+    // The pipeline has completed its only job: classify an already-assigned
+    // ticket and sync the Ticket Pulse category fields.
+    expect(isPipelineFinalDecision('classified_only')).toBe(true);
+  });
+
   test('pending_review is NOT a pipeline-final decision', () => {
     // The decision is still pending — admin will set decidedAt when they
     // approve/modify/reject. If we stamped decidedAt here, the run would

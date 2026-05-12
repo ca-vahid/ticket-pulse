@@ -1,6 +1,7 @@
 import {
   shouldCloseNoiseDismissedRun,
   shouldTriggerAssignmentForLatestRun,
+  shouldTriggerClassificationForLatestRun,
 } from '../src/services/assignmentFlowGuards.js';
 
 describe('assignment flow guards', () => {
@@ -29,5 +30,16 @@ describe('assignment flow guards', () => {
     expect(shouldTriggerAssignmentForLatestRun({ status: 'running' })).toBe(false);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'completed', decision: 'pending_review' })).toBe(false);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'completed', decision: 'approved' })).toBe(false);
+  });
+
+  test('allows classification polling only when the latest run is missing or retryable', () => {
+    expect(shouldTriggerClassificationForLatestRun(null)).toBe(true);
+    expect(shouldTriggerClassificationForLatestRun({ status: 'failed' })).toBe(true);
+    expect(shouldTriggerClassificationForLatestRun({ status: 'cancelled' })).toBe(true);
+
+    expect(shouldTriggerClassificationForLatestRun({ status: 'queued' })).toBe(false);
+    expect(shouldTriggerClassificationForLatestRun({ status: 'running' })).toBe(false);
+    expect(shouldTriggerClassificationForLatestRun({ status: 'completed', decision: 'classified_only' })).toBe(false);
+    expect(shouldTriggerClassificationForLatestRun({ status: 'completed', decision: 'auto_assigned' })).toBe(false);
   });
 });

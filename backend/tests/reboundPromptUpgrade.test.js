@@ -83,7 +83,8 @@ submit_recommendation includes taxonomyReviewNeeded when internal taxonomy fit i
 get_ticket_categories can return pendingReviewSuggestions.
 find_matching_agents returns competencyCoverage.
 search_tickets can search internal category/subcategory.
-Do NOT set taxonomyReviewNeeded=true for missing technician competency coverage.`;
+Do NOT set taxonomyReviewNeeded=true for missing technician competency coverage.
+Do not propose new top-level categories.`;
 
     // This passes ONLY because we explicitly added the marker — proves the
     // detector keys on the literal "Rebound Context" string, not on a regex

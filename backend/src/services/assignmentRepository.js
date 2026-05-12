@@ -674,8 +674,8 @@ class AssignmentRepository {
   }
 
   /**
-   * Find pipeline runs whose decision was finalized (auto_assigned or
-   * noise_dismissed) but whose FreshService sync never completed. This
+   * Find pipeline runs whose decision was finalized (auto_assigned,
+   * classified_only, or noise_dismissed) but whose FreshService sync never completed. This
    * catches the gap where the process restarted between "decision saved"
    * and "syncStatus updated" — the fire-and-forget execute() call dies
    * mid-flight and the run is left permanently stuck (decision saved in
@@ -696,7 +696,7 @@ class AssignmentRepository {
       const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
       const where = {
         status: 'completed',
-        decision: { in: ['auto_assigned', 'noise_dismissed'] },
+        decision: { in: ['auto_assigned', 'classified_only', 'noise_dismissed'] },
         OR: [
           { syncStatus: null },
           { syncStatus: 'pending' },

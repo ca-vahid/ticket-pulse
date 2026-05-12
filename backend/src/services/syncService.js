@@ -21,7 +21,10 @@ import noiseRuleService from './noiseRuleService.js';
 import assignmentRepository from './assignmentRepository.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
 import freshServiceActionService from './freshServiceActionService.js';
-import { shouldTriggerAssignmentForLatestRun } from './assignmentFlowGuards.js';
+import {
+  shouldTriggerAssignmentForLatestRun,
+  shouldTriggerClassificationForLatestRun,
+} from './assignmentFlowGuards.js';
 import { getActivityRefreshReason } from './activitySyncFreshness.js';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
@@ -1614,6 +1617,19 @@ class SyncService {
       waitForCompletion: false,
       settleAfterMs: 1000,
     });
+    const classification = await this._classifyAssignedTicketsMissingCategories(workspaceId, {
+      ticketIdsOverride: upsertedIds,
+      cutoffOverride: cutoff,
+      maxPerCycleOverride: maxPipelineRuns,
+      waitForCompletion: false,
+      settleAfterMs: 1000,
+    }).catch((err) => {
+      logger.warn('Assignment fast sync: classification-only polling failed', {
+        workspaceId,
+        error: err.message,
+      });
+      return { skipped: true, reason: 'classification_polling_failed', candidates: 0, triggered: 0, error: err.message };
+    });
     const noiseRecovery = await this._recoverOpenNoiseTickets(workspaceId, {
       waitForSync: true,
       limit: Math.max(10, maxTickets),
@@ -1636,6 +1652,7 @@ class SyncService {
       ticketsSynced: syncedCount,
       candidateTicketIds: upsertedIds,
       polling,
+      classification,
       noiseRecovery,
       timestamp: new Date(),
     };
@@ -1920,6 +1937,9 @@ class SyncService {
 
       this._pollForUnassignedTickets(workspaceId, { prevSyncCompletedAt }).catch((err) => {
         logger.warn('Assignment polling failed after ticket sync (non-fatal)', { workspaceId, error: err.message });
+      });
+      this._classifyAssignedTicketsMissingCategories(workspaceId, { prevSyncCompletedAt }).catch((err) => {
+        logger.warn('Classification-only polling failed after ticket sync (non-fatal)', { workspaceId, error: err.message });
       });
 
       // Sync requesters (fetch requester details for tickets)
@@ -3028,8 +3048,133 @@ class SyncService {
   }
 
   /**
+   * Assigned/self-picked tickets should not be auto-rerouted, but they still
+   * need Ticket Pulse taxonomy. This starts classification-only runs for
+   * recent assigned tickets that have not received internal categories yet.
+   */
+  async _classifyAssignedTicketsMissingCategories(workspaceId, opts = {}) {
+    const config = await assignmentRepository.getConfig(workspaceId);
+    if (!config?.isEnabled) {
+      return { skipped: true, reason: 'assignment_pipeline_disabled', candidates: 0, triggered: 0 };
+    }
+
+    const NORMAL_LOOKBACK_HOURS = 24;
+    const OUTAGE_THRESHOLD_MS = 30 * 60 * 1000;
+    const MAX_RECOVERY_LOOKBACK_DAYS = 7;
+    const RECOVERY_MAX_PER_CYCLE = 25;
+
+    let cutoff;
+    let maxPerCycle = opts.maxPerCycleOverride ?? (config.pollMaxPerCycle || 5);
+    let mode = 'normal';
+
+    if (opts.cutoffOverride instanceof Date) {
+      cutoff = opts.cutoffOverride;
+      mode = 'forced';
+    } else if (opts.prevSyncCompletedAt) {
+      const gapMs = Date.now() - new Date(opts.prevSyncCompletedAt).getTime();
+      if (gapMs > OUTAGE_THRESHOLD_MS) {
+        const lookbackMs = Math.min(
+          gapMs + 60 * 60 * 1000,
+          MAX_RECOVERY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+        );
+        cutoff = new Date(Date.now() - lookbackMs);
+        maxPerCycle = Math.max(maxPerCycle, RECOVERY_MAX_PER_CYCLE);
+        mode = 'recovery';
+      }
+    }
+
+    if (!cutoff) {
+      cutoff = new Date(Date.now() - NORMAL_LOOKBACK_HOURS * 60 * 60 * 1000);
+    }
+
+    const TERMINAL_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
+    const where = {
+      workspaceId,
+      assignedTechId: { not: null },
+      internalCategoryId: null,
+      isNoise: false,
+      status: { notIn: TERMINAL_STATUSES },
+    };
+    if (Array.isArray(opts.ticketIdsOverride) && opts.ticketIdsOverride.length > 0) {
+      where.id = { in: opts.ticketIdsOverride };
+    } else {
+      where.createdAt = { gte: cutoff };
+    }
+
+    const candidateTickets = await prisma.ticket.findMany({
+      where,
+      select: {
+        id: true,
+        freshserviceTicketId: true,
+        subject: true,
+        assignedTechId: true,
+        pipelineRuns: {
+          select: { id: true, status: true, decision: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.max(maxPerCycle * 3, maxPerCycle),
+    });
+
+    const ticketsToClassify = candidateTickets
+      .filter((ticket) => shouldTriggerClassificationForLatestRun(ticket.pipelineRuns?.[0] || null))
+      .slice(0, maxPerCycle)
+      .map(({ pipelineRuns: _pipelineRuns, ...ticket }) => ticket);
+
+    if (ticketsToClassify.length === 0) {
+      return { skipped: false, mode, candidates: candidateTickets.length, triggered: 0 };
+    }
+
+    logger.info('Classification-only polling found assigned tickets missing categories', {
+      workspaceId,
+      count: ticketsToClassify.length,
+      mode,
+      cutoff: cutoff.toISOString(),
+    });
+
+    const waitForCompletion = opts.waitForCompletion !== false;
+    const pipelinePromises = [];
+    let triggered = 0;
+
+    for (const ticket of ticketsToClassify) {
+      const run = assignmentPipelineService.runPipeline(ticket.id, workspaceId, 'classification_only')
+        .catch((err) => {
+          logger.warn('Classification-only polling: pipeline failed for ticket', {
+            ticketId: ticket.id,
+            error: err.message,
+          });
+          return { skipped: true, reason: 'pipeline_failed', error: err.message };
+        });
+      triggered++;
+      if (waitForCompletion) {
+        await run;
+      } else {
+        pipelinePromises.push(run);
+      }
+    }
+
+    if (!waitForCompletion && opts.settleAfterMs) {
+      await Promise.race([
+        Promise.allSettled(pipelinePromises),
+        new Promise((resolve) => setTimeout(resolve, opts.settleAfterMs)),
+      ]);
+    }
+
+    return {
+      skipped: false,
+      mode,
+      async: !waitForCompletion,
+      candidates: candidateTickets.length,
+      triggered,
+      ticketIds: ticketsToClassify.map(t => t.id),
+    };
+  }
+
+  /**
    * Recover orphaned syncs — runs whose decision was finalized
-   * (auto_assigned / noise_dismissed) but whose FreshService write never
+   * (auto_assigned / classified_only / noise_dismissed) but whose FreshService write never
    * completed (syncStatus is null or 'pending'). This happens when the
    * Node.js process restarts between the decisionAt-set DB update and the
    * fire-and-forget freshServiceActionService.execute() call dispatched

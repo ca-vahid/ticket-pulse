@@ -62,6 +62,7 @@ class AssignmentPipelineService {
     const pipelineStart = Date.now();
     const emit = (event) => { try { onEvent?.(event); } catch { /* SSE write errors are non-fatal */ } };
     const isManual = triggerSource === 'manual';
+    const isClassificationOnly = triggerSource === 'classification_only';
     // reboundFrom: { previousTechId, previousTechName, unassignedAt, unassignedByName, reboundCount }
     // Set when this run is being created because the ticket bounced back from
     // a prior assignee. Persisted on the run so the UI / LLM can show context.
@@ -96,7 +97,7 @@ class AssignmentPipelineService {
     }
 
     // ── Business hours gate (automatic triggers only) ───────────────────
-    if (!isManual) {
+    if (!isManual && !isClassificationOnly) {
       // Queue-time validation: never queue a ticket that is already closed,
       // deleted, or assigned. Without this guard the email poller floods the
       // queue with noise — security alerts, marketing emails, and FS tickets
@@ -452,6 +453,9 @@ class AssignmentPipelineService {
     }
 
     systemPrompt += '\n\n## Time Handling\nTreat the workspace current date/time supplied in the user message as the source of truth for what "today" means. Tool outputs expose ticket and decision timestamps in workspace-local time unless explicitly labeled as UTC. Agent availability includes each technician\'s own local date/time. Historical admin feedback may contain legacy UTC timestamps from older runs, so prefer current workspace-local timestamps when there is any ambiguity.';
+    if (triggerSource === 'classification_only') {
+      systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category and subcategory. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory is saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields.';
+    }
 
     const workspace = await prisma.workspace.findUnique({
       where: { id: workspaceId },
@@ -762,6 +766,8 @@ class AssignmentPipelineService {
       let decision;
       if (!recommendation) {
         decision = null;
+      } else if (triggerSource === 'classification_only') {
+        decision = 'classified_only';
       } else if (isNoise) {
         decision = 'noise_dismissed';
       } else if (llmIgnoredRebound) {
@@ -806,6 +812,7 @@ class AssignmentPipelineService {
       // failed don't trigger a sync attempt.
       const willTriggerSync =
         decision === 'auto_assigned'
+        || decision === 'classified_only'
         || (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise);
 
       if (recommendation) {
@@ -853,9 +860,9 @@ class AssignmentPipelineService {
       });
 
       // FreshService write-back — separate logic for assignments vs noise
-      if (decision === 'auto_assigned') {
+      if (decision === 'auto_assigned' || decision === 'classified_only') {
         freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true).catch((err) =>
-          logger.warn('FreshService auto-assign sync failed', { runId, error: err.message }),
+          logger.warn('FreshService pipeline sync failed', { runId, decision, error: err.message }),
         );
       } else if (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise) {
         freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true).catch((err) =>

@@ -25,3 +25,19 @@ export function shouldTriggerAssignmentForLatestRun(latestRun) {
 
   return RETRYABLE_PIPELINE_STATUSES.has(latestRun.status);
 }
+
+export function shouldTriggerClassificationForLatestRun(latestRun) {
+  if (!latestRun) {
+    return true;
+  }
+
+  if (latestRun.status === 'queued' || latestRun.status === 'running') {
+    return false;
+  }
+
+  if (latestRun.status === 'completed') {
+    return false;
+  }
+
+  return RETRYABLE_PIPELINE_STATUSES.has(latestRun.status);
+}

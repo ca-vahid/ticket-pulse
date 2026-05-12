@@ -95,6 +95,7 @@ jest.unstable_mockModule('../src/services/freshServiceActionService.js', () => (
 }));
 jest.unstable_mockModule('../src/services/assignmentFlowGuards.js', () => ({
   shouldTriggerAssignmentForLatestRun: () => false,
+  shouldTriggerClassificationForLatestRun: () => false,
 }));
 jest.unstable_mockModule('../src/services/dashboardReadCache.js', () => ({
   clearReadCache: () => {},
