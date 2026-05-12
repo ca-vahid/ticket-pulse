@@ -945,7 +945,7 @@ export default function Analytics() {
               const sharePct = shareValue > 0 ? formatSharePct(shareValue) : null;
               const agentCreated = Number(this.point.custom?.agentCreated || 0);
               const agentShareOfNodePct = Number(this.point.custom?.agentShareOfNodePct || 0);
-              const showAgentShare = Boolean(selectedCategoryAgent && agentCreated > 0 && (isParent || (shape.width >= 118 && shape.height >= 68)));
+              const showAgentShare = Boolean(selectedCategoryAgent && (isParent || (shape.width >= 118 && shape.height >= 68)));
               const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 112 && shape.height >= 62)));
               const headerStyle = categoryShareHeaderStyle(selectedCategoryAgent ? agentShareOfNodePct : shareValue, Boolean(selectedCategoryAgent));
               const nameStyle = isParent
@@ -958,7 +958,7 @@ export default function Analytics() {
                 ? `${formatNumber(agentCreated)} by ${selectedCategoryAgent.name.split(' ')[0]} · ${formatSharePct(agentShareOfNodePct)}`
                 : `${formatNumber(created)} created${showShare ? ` · ${sharePct}` : ''}`;
               if (isParent) {
-                const compactMetric = showAgentShare
+                const compactMetric = selectedCategoryAgent
                   ? `${formatNumber(agentCreated)} - ${formatSharePct(agentShareOfNodePct)}`
                   : `${formatNumber(created)} - ${sharePct || '0%'}`;
                 return `<span style="${nameStyle}">${name} <span style="font-size:9px;font-weight:800;color:#334155">(${compactMetric})</span></span>`;
@@ -1926,7 +1926,7 @@ export default function Analytics() {
                 })}
               </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="self-start overflow-hidden rounded-lg border border-slate-200 bg-white p-3 xl:max-h-[16.5rem]">
               <p className="text-sm font-bold text-slate-900">
                 {selectedCategoryAgent ? selectedCategoryAgent.name : 'Team category mix'}
               </p>
@@ -1935,7 +1935,7 @@ export default function Analytics() {
                   ? `${formatNumber(selectedCategoryAgent.totalCreated)} created tickets in this range.`
                   : 'Choose an agent to see their strongest top categories.'}
               </p>
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 max-h-[12.25rem] space-y-2 overflow-y-auto pr-1 [scrollbar-width:thin]">
                 {(selectedCategoryAgent ? selectedAgentTopCategories : (categories?.hierarchy || []).filter((row) => !row.parent).slice(0, 5)).map((row) => {
                   const count = selectedCategoryAgent ? row.count : (row.custom?.created ?? row.value ?? 0);
                   const pct = selectedCategoryAgent
