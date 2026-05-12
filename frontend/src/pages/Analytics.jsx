@@ -909,14 +909,12 @@ export default function Analytics() {
           borderColor: '#64748b',
           states: {
             hover: {
-              brightness: 0,
-              borderColor: '#1d4ed8',
-              borderWidth: 3,
-              opacity: 1,
-              halo: false,
-              shadow: false,
+              enabled: false,
             },
-            inactive: { opacity: 1 },
+            inactive: {
+              enabled: false,
+              opacity: 1,
+            },
           },
           dataLabels: {
             enabled: true,
