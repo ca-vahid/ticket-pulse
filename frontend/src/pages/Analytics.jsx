@@ -276,6 +276,21 @@ function categoryAgentKey(agent) {
   return agent.technicianId ? String(agent.technicianId) : 'unassigned';
 }
 
+function firstName(name) {
+  return String(name || 'Agent').trim().split(/\s+/)[0] || 'Agent';
+}
+
+function initials(name) {
+  return String(name || '?')
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || '?';
+}
+
 function categoryShareHeaderStyle(pct = 0, lensEnabled = false) {
   if (lensEnabled) {
     if (pct >= 35) return { bg: '#dbeafe', border: '#1d4ed8' };
@@ -1816,28 +1831,53 @@ export default function Analytics() {
           title={legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map'}
           subtitle="Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures."
         >
-          <div className="mb-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="mb-3 grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p className="text-sm font-bold text-slate-900">Agent Lens</p>
                   <p className="mt-0.5 text-xs text-slate-500">
                     Select an agent to recolor the map by that agent&apos;s share of each category.
                   </p>
                 </div>
+                {selectedCategoryAgent && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategoryAgentId('all')}
+                    className="rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
                 <button
                   type="button"
                   onClick={() => setSelectedCategoryAgentId('all')}
-                  className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+                  className={`flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-left transition ${
                     selectedCategoryAgentId === 'all'
-                      ? 'bg-slate-900 text-white ring-slate-900'
-                      : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-100'
+                      ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/50'
                   }`}
                 >
-                  Team view
+                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                    selectedCategoryAgentId === 'all'
+                      ? 'bg-white/15 text-white ring-1 ring-white/25'
+                      : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200'
+                  }`}
+                  >
+                    ALL
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-bold">Team</span>
+                    <span className={`block truncate text-[10px] font-semibold ${
+                      selectedCategoryAgentId === 'all' ? 'text-slate-200' : 'text-slate-500'
+                    }`}
+                    >
+                      Full map
+                    </span>
+                  </span>
                 </button>
-              </div>
-              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                 {categoryAgentRows.slice(0, 14).map((agent) => {
                   const key = categoryAgentKey(agent);
                   const selected = selectedCategoryAgentId === key;
@@ -1846,16 +1886,30 @@ export default function Analytics() {
                       key={key}
                       type="button"
                       onClick={() => setSelectedCategoryAgentId(key)}
-                      className={`min-w-[10rem] rounded-lg border px-3 py-2 text-left transition ${
+                      title={`${agent.name}: ${formatNumber(agent.totalCreated)} created, ${formatSharePct(agent.teamSharePct)}`}
+                      className={`flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-left transition ${
                         selected
                           ? 'border-blue-300 bg-blue-50 shadow-sm'
                           : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
                       }`}
                     >
-                      <p className="truncate text-sm font-bold text-slate-900">{agent.name}</p>
-                      <p className="mt-1 text-xs font-semibold text-slate-500">
-                        {formatNumber(agent.totalCreated)} created · {formatSharePct(agent.teamSharePct)}
-                      </p>
+                      <span className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-1 ring-slate-200">
+                        <span>{initials(agent.name)}</span>
+                        {agent.photoUrl ? (
+                          <img
+                            src={agent.photoUrl}
+                            alt=""
+                            className="absolute inset-0 h-full w-full object-cover"
+                            onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                          />
+                        ) : null}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-bold text-slate-900">{firstName(agent.name)}</span>
+                        <span className="block truncate text-[10px] font-semibold text-slate-500">
+                          {formatNumber(agent.totalCreated)} · {formatSharePct(agent.teamSharePct)}
+                        </span>
+                      </span>
                     </button>
                   );
                 })}
