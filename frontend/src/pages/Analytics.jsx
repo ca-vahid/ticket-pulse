@@ -589,6 +589,8 @@ export default function Analytics() {
   const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(null);
+  const [hoveredCategory, setHoveredCategory] = useState(null);
+  const [mapEffectsEnabled, setMapEffectsEnabled] = useState(true);
   const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState('all');
   const [categoryMetadata, setCategoryMetadata] = useState(null);
   const [selectedLegacyCategories, setSelectedLegacyCategories] = useState([]);
@@ -675,6 +677,10 @@ export default function Analytics() {
       setSelectedCategoryKey(categoryRows[0].key);
     }
   }, [payload.categories?.rows, selectedCategoryKey]);
+
+  useEffect(() => {
+    if (!mapEffectsEnabled) setHoveredCategory(null);
+  }, [mapEffectsEnabled]);
 
   const meta = payload.overview?.metadata || payload.demand?.metadata;
   const overview = payload.overview;
@@ -765,7 +771,7 @@ export default function Analytics() {
     categories?.hierarchy?.find((node) => node.custom?.key === selectedCategoryKey)?.custom || null
   ), [categories?.hierarchy, selectedCategoryKey]);
 
-  const mapFocusCategory = selectedHierarchyCategory || selectedCategory;
+  const mapFocusCategory = hoveredCategory || selectedHierarchyCategory || selectedCategory;
 
   const categoryAgentRows = useMemo(() => categories?.agentLens || [], [categories?.agentLens]);
 
@@ -847,7 +853,7 @@ export default function Analytics() {
       ...chartBase('treemap'),
       chart: {
         ...chartBase('treemap').chart,
-        animation: false,
+        animation: mapEffectsEnabled ? { duration: 180 } : false,
       },
       colorAxis: {
         min: 0,
@@ -899,8 +905,8 @@ export default function Analytics() {
         treemap: {
           allowTraversingTree: true,
           interactByLeaf: false,
-          animation: false,
-          animationLimit: 0,
+          animation: mapEffectsEnabled ? { duration: 180 } : false,
+          animationLimit: mapEffectsEnabled ? 180 : 0,
           layoutAlgorithm: 'squarified',
           nodeSizeBy: 'leaf',
           cluster: {
@@ -998,6 +1004,18 @@ export default function Analytics() {
           }],
           point: {
             events: {
+              mouseOver() {
+                if (!mapEffectsEnabled) return;
+                if (!this.custom?.key || !this.custom?.nodeType) return;
+                setHoveredCategory({
+                  ...this.custom,
+                  name: this.name || this.custom.name,
+                  created: this.value ?? this.custom.created ?? 0,
+                });
+              },
+              mouseOut() {
+                setHoveredCategory(null);
+              },
               click() {
                 if (this.custom?.key) setSelectedCategoryKey(this.custom.key);
                 const isParent = this.node?.children?.length > 0;
@@ -1021,6 +1039,7 @@ export default function Analytics() {
     categories?.hierarchy,
     categories?.summary?.totalCreated,
     legacyMode,
+    mapEffectsEnabled,
     selectedAgentCategoryCounts.leaf,
     selectedAgentCategoryCounts.top,
     selectedCategoryAgent,
@@ -1824,6 +1843,25 @@ export default function Analytics() {
         <Panel
           title={legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map'}
           subtitle="Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures."
+          actions={(
+            <div className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm">
+              <span>Live effects</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={mapEffectsEnabled}
+                onClick={() => setMapEffectsEnabled((enabled) => !enabled)}
+                className={`relative h-5 w-9 rounded-full transition ${
+                  mapEffectsEnabled ? 'bg-blue-600' : 'bg-slate-300'
+                }`}
+              >
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${
+                  mapEffectsEnabled ? 'left-4' : 'left-0.5'
+                }`}
+                />
+              </button>
+            </div>
+          )}
         >
           <div className="mb-3 grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -1950,7 +1988,7 @@ export default function Analytics() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900">{mapFocusCategory.name}</p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    Selected focus · {mapFocusType}
+                    {hoveredCategory ? 'Map focus' : 'Selected focus'} · {mapFocusType}
                   </p>
                 </div>
                 <div className="grid grid-cols-4 gap-2 text-center text-xs sm:grid-cols-6 lg:min-w-[32rem]">
