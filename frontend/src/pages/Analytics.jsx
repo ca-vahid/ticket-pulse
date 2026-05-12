@@ -589,7 +589,6 @@ export default function Analytics() {
   const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(null);
-  const [hoveredCategory, setHoveredCategory] = useState(null);
   const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState('all');
   const [categoryMetadata, setCategoryMetadata] = useState(null);
   const [selectedLegacyCategories, setSelectedLegacyCategories] = useState([]);
@@ -766,7 +765,7 @@ export default function Analytics() {
     categories?.hierarchy?.find((node) => node.custom?.key === selectedCategoryKey)?.custom || null
   ), [categories?.hierarchy, selectedCategoryKey]);
 
-  const mapFocusCategory = hoveredCategory || selectedHierarchyCategory || selectedCategory;
+  const mapFocusCategory = selectedHierarchyCategory || selectedCategory;
 
   const categoryAgentRows = useMemo(() => categories?.agentLens || [], [categories?.agentLens]);
 
@@ -848,7 +847,7 @@ export default function Analytics() {
       ...chartBase('treemap'),
       chart: {
         ...chartBase('treemap').chart,
-        animation: { duration: 160 },
+        animation: false,
       },
       colorAxis: {
         min: 0,
@@ -900,16 +899,12 @@ export default function Analytics() {
         treemap: {
           allowTraversingTree: true,
           interactByLeaf: false,
-          animation: { duration: 160 },
-          animationLimit: 140,
+          animation: false,
+          animationLimit: 0,
           layoutAlgorithm: 'squarified',
           nodeSizeBy: 'leaf',
           cluster: {
-            enabled: true,
-            pixelWidth: 34,
-            pixelHeight: 18,
-            minimumClusterSize: 3,
-            name: 'Other tiny items',
+            enabled: false,
           },
           borderRadius: 3,
           borderWidth: 1,
@@ -1003,18 +998,6 @@ export default function Analytics() {
           }],
           point: {
             events: {
-              mouseOver() {
-                if (this.custom?.key) {
-                  setHoveredCategory({
-                    ...this.custom,
-                    name: this.name || this.custom.name,
-                    created: this.value ?? this.custom.created ?? 0,
-                  });
-                }
-              },
-              mouseOut() {
-                setHoveredCategory(null);
-              },
               click() {
                 if (this.custom?.key) setSelectedCategoryKey(this.custom.key);
                 const isParent = this.node?.children?.length > 0;
@@ -1967,7 +1950,7 @@ export default function Analytics() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900">{mapFocusCategory.name}</p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    {hoveredCategory ? 'Map focus' : 'Selected focus'} · {mapFocusType}
+                    Selected focus · {mapFocusType}
                   </p>
                 </div>
                 <div className="grid grid-cols-4 gap-2 text-center text-xs sm:grid-cols-6 lg:min-w-[32rem]">
