@@ -2,6 +2,7 @@ import { createFreshServiceClient } from '../integrations/freshservice.js';
 import settingsRepository from './settingsRepository.js';
 import prisma from './prisma.js';
 import { shouldCloseNoiseDismissedRun } from './assignmentFlowGuards.js';
+import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
@@ -63,28 +64,38 @@ class FreshServiceActionService {
 
     const decision = run.decision;
     const actions = [];
+    const addTicketPulseCategoryAction = async () => {
+      if (!isSkillHierarchyWorkspace(run.workspaceId)) {
+        return;
+      }
 
-    if (decision === 'approved' || decision === 'modified' || decision === 'auto_assigned') {
       const skillName = ticket?.internalCategory?.name || null;
       const subskillName = ticket?.internalSubcategory?.name || null;
-      if (skillName && (skillName !== ticket.tpSkill || (subskillName || null) !== (ticket.tpSubskill || null))) {
-        const workspace = await prisma.workspace.findUnique({
-          where: { id: run.workspaceId },
-          select: { tpSkillCustomField: true, tpSubskillCustomField: true },
-        });
-        actions.push({
-          type: 'update_custom_fields',
-          ticketId: fsTicketId,
-          customFields: {
-            [workspace?.tpSkillCustomField || 'lf_ticket_pulse_category']: skillName,
-            [workspace?.tpSubskillCustomField || 'lf_ticket_pulse_subcategory']: subskillName || null,
-          },
-          localFields: {
-            tpSkill: skillName,
-            tpSubskill: subskillName || null,
-          },
-        });
+      if (!skillName || (skillName === ticket.tpSkill && (subskillName || null) === (ticket.tpSubskill || null))) {
+        return;
       }
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: run.workspaceId },
+        select: { tpSkillCustomField: true, tpSubskillCustomField: true },
+      });
+      actions.push({
+        type: 'update_custom_fields',
+        ticketId: fsTicketId,
+        customFields: {
+          [workspace?.tpSkillCustomField || 'lf_ticket_pulse_category']: skillName,
+          [workspace?.tpSubskillCustomField || 'lf_ticket_pulse_subcategory']: subskillName || null,
+        },
+        localFields: {
+          tpSkill: skillName,
+          tpSubskill: subskillName || null,
+        },
+      });
+    };
+
+    if (decision === 'classified_only') {
+      await addTicketPulseCategoryAction();
+    } else if (decision === 'approved' || decision === 'modified' || decision === 'auto_assigned') {
+      await addTicketPulseCategoryAction();
 
       const tech = run.assignedTechId
         ? await prisma.technician.findUnique({
@@ -148,25 +159,27 @@ class FreshServiceActionService {
       noteBody += `${messageHtml}<br>`;
       noteBody += `<b>Run ID:</b> ${run.id}`;
 
-      const workspace = await prisma.workspace.findUnique({
-        where: { id: run.workspaceId },
-        select: { tpSkillCustomField: true, tpSubskillCustomField: true },
-      });
-      const categoryField = workspace?.tpSkillCustomField || 'lf_ticket_pulse_category';
-      const subcategoryField = workspace?.tpSubskillCustomField || 'lf_ticket_pulse_subcategory';
+      if (isSkillHierarchyWorkspace(run.workspaceId)) {
+        const workspace = await prisma.workspace.findUnique({
+          where: { id: run.workspaceId },
+          select: { tpSkillCustomField: true, tpSubskillCustomField: true },
+        });
+        const categoryField = workspace?.tpSkillCustomField || 'lf_ticket_pulse_category';
+        const subcategoryField = workspace?.tpSubskillCustomField || 'lf_ticket_pulse_subcategory';
 
-      actions.push({
-        type: 'update_custom_fields',
-        ticketId: fsTicketId,
-        customFields: {
-          [categoryField]: 'Service Desk & Routing',
-          [subcategoryField]: 'Non-actionable Notifications',
-        },
-        localFields: {
-          tpSkill: 'Service Desk & Routing',
-          tpSubskill: 'Non-actionable Notifications',
-        },
-      });
+        actions.push({
+          type: 'update_custom_fields',
+          ticketId: fsTicketId,
+          customFields: {
+            [categoryField]: 'Service Desk & Routing',
+            [subcategoryField]: 'Non-actionable Notifications',
+          },
+          localFields: {
+            tpSkill: 'Service Desk & Routing',
+            tpSubskill: 'Non-actionable Notifications',
+          },
+        });
+      }
       actions.push({ type: 'note', ticketId: fsTicketId, body: noteBody, private: true });
       actions.push({ type: 'close', ticketId: fsTicketId, status: 4 });
     } else {
