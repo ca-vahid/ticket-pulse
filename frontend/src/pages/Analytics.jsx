@@ -32,17 +32,17 @@ import { analyticsAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../s
 import { useWorkspace } from '../contexts/WorkspaceContext';
 
 const RANGE_OPTIONS = [
-  { value: '7d', label: '7 days' },
-  { value: '30d', label: '30 days' },
-  { value: '90d', label: '90 days' },
-  { value: '12m', label: '12 months' },
-  { value: 'custom', label: 'Custom' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+  { value: '90d', label: 'Last 90 days' },
+  { value: '12m', label: 'Last 12 months' },
+  { value: 'custom', label: 'Date range' },
 ];
 
 const GROUP_OPTIONS = [
-  { value: 'day', label: 'Day' },
-  { value: 'week', label: 'Week' },
-  { value: 'month', label: 'Month' },
+  { value: 'day', label: 'Daily' },
+  { value: 'week', label: 'Weekly' },
+  { value: 'month', label: 'Monthly' },
 ];
 
 const TABS = [
@@ -293,15 +293,15 @@ function initials(name) {
 
 function categoryShareHeaderStyle(pct = 0, lensEnabled = false) {
   if (lensEnabled) {
-    if (pct >= 35) return { bg: '#dbeafe', border: '#1d4ed8' };
-    if (pct >= 18) return { bg: '#eff6ff', border: '#2563eb' };
-    if (pct >= 8) return { bg: '#f8fafc', border: '#60a5fa' };
-    return { bg: '#ffffff', border: '#93c5fd' };
+    if (pct >= 35) return { border: '#1d4ed8' };
+    if (pct >= 18) return { border: '#2563eb' };
+    if (pct >= 8) return { border: '#60a5fa' };
+    return { border: '#93c5fd' };
   }
-  if (pct >= 18) return { bg: '#dcfce7', border: '#059669' };
-  if (pct >= 10) return { bg: '#dbeafe', border: '#2563eb' };
-  if (pct >= 5) return { bg: '#fef9c3', border: '#ca8a04' };
-  return { bg: '#f8fafc', border: '#64748b' };
+  if (pct >= 18) return { border: '#059669' };
+  if (pct >= 10) return { border: '#2563eb' };
+  if (pct >= 5) return { border: '#ca8a04' };
+  return { border: '#64748b' };
 }
 
 function EmptyState({ text = 'No data for this range.' }) {
@@ -577,7 +577,6 @@ export default function Analytics() {
   const [activeTab, setActiveTab] = useState('overview');
   const [range, setRange] = useState('30d');
   const [groupBy, setGroupBy] = useState('day');
-  const [compare, setCompare] = useState('previous');
   const [excludeNoise, setExcludeNoise] = useState(() => getGlobalExcludeNoise());
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
@@ -603,7 +602,7 @@ export default function Analytics() {
     const p = {
       range,
       groupBy,
-      compare,
+      compare: 'none',
       excludeNoise: excludeNoise ? 'true' : 'false',
       timezone: currentWorkspace?.defaultTimezone || 'America/Los_Angeles',
     };
@@ -619,7 +618,7 @@ export default function Analytics() {
       p.legacyCategories = selectedLegacyCategories.join(',');
     }
     return p;
-  }, [categoryMetadata?.categoryMode, compare, currentWorkspace?.defaultTimezone, currentWorkspace?.id, currentWorkspace?.slug, customEnd, customStart, excludeNoise, groupBy, range, selectedCanonicalCategories.categoryIds, selectedCanonicalCategories.subcategoryIds, selectedLegacyCategories]);
+  }, [categoryMetadata?.categoryMode, currentWorkspace?.defaultTimezone, currentWorkspace?.id, currentWorkspace?.slug, customEnd, customStart, excludeNoise, groupBy, range, selectedCanonicalCategories.categoryIds, selectedCanonicalCategories.subcategoryIds, selectedLegacyCategories]);
 
   const fetchAnalytics = useCallback(async () => {
     if (range === 'custom' && (!customStart || !customEnd)) return;
@@ -950,7 +949,7 @@ export default function Analytics() {
               const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 112 && shape.height >= 62)));
               const headerStyle = categoryShareHeaderStyle(selectedCategoryAgent ? agentShareOfNodePct : shareValue, Boolean(selectedCategoryAgent));
               const nameStyle = isParent
-                ? `display:block;width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:${headerStyle.bg};border-left:5px solid ${headerStyle.border};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:800;line-height:13px;box-shadow:0 1px 2px rgba(15,23,42,0.06);`
+                ? `display:block;width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:transparent;border-left:5px solid ${headerStyle.border};padding:1px 6px;font-size:11px;font-weight:800;line-height:13px;`
                 : '';
               const metricStyle = showShare
                 ? 'font-size:8px;font-weight:700;color:#334155'
@@ -960,9 +959,9 @@ export default function Analytics() {
                 : `${formatNumber(created)} created${showShare ? ` · ${sharePct}` : ''}`;
               if (isParent) {
                 const compactMetric = showAgentShare
-                  ? `${formatNumber(agentCreated)} · ${formatSharePct(agentShareOfNodePct)}`
-                  : `${formatNumber(created)} · ${sharePct || '0%'}`;
-                return `<span style="${nameStyle}">${name} <span style="font-size:9px;font-weight:800;color:#334155">${compactMetric}</span></span>`;
+                  ? `${formatNumber(agentCreated)} - ${formatSharePct(agentShareOfNodePct)}`
+                  : `${formatNumber(created)} - ${sharePct || '0%'}`;
+                return `<span style="${nameStyle}">${name} <span style="font-size:9px;font-weight:800;color:#334155">(${compactMetric})</span></span>`;
               }
               return shape.height >= 44 && created
                 ? `<span style="${nameStyle}">${name}</span><br/><span style="${metricStyle}">${metric}</span>`
@@ -2828,22 +2827,30 @@ export default function Analytics() {
 
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
             <Filter className="hidden h-4 w-4 text-slate-400 sm:block" />
-            <select value={range} onChange={(e) => setRange(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
-              {RANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
+            <label className="min-w-0">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-normal text-slate-500">Range</span>
+              <select value={range} onChange={(e) => setRange(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
+                {RANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
             {range === 'custom' && (
               <>
-                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm sm:w-auto" />
-                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm sm:w-auto" />
+                <label className="min-w-0">
+                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-normal text-slate-500">From</span>
+                  <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm sm:w-auto" />
+                </label>
+                <label className="min-w-0">
+                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-normal text-slate-500">To</span>
+                  <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm sm:w-auto" />
+                </label>
               </>
             )}
-            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
-              {GROUP_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-            <select value={compare} onChange={(e) => setCompare(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
-              <option value="previous">Compare previous</option>
-              <option value="none">No comparison</option>
-            </select>
+            <label className="min-w-0">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-normal text-slate-500">Trend by</span>
+              <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
+                {GROUP_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
             {(categoryMetadata?.categoryMode || (Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it' ? 'canonical' : 'legacy')) === 'canonical' ? (
               <div className="col-span-2 sm:col-span-1">
                 <CanonicalCategoryFilter
