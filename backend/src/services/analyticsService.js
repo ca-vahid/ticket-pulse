@@ -561,7 +561,11 @@ function finalizeCategoryRow(row, totalCreated = 0) {
 }
 
 function buildCategoryHierarchy(rows, mode) {
-  const visibleRows = rows.filter((row) => (row.created || 0) > 0);
+  const visibleRows = rows.filter((row) => (
+    (row.created || 0) > 0
+    // Unmapped tickets remain in data-quality totals and insight rows; the treemap is taxonomy-only.
+    && !(mode === 'canonical' && row.source === 'unmapped')
+  ));
   const canonicalCategoryByName = new Map();
   if (mode === 'canonical') {
     for (const row of visibleRows) {

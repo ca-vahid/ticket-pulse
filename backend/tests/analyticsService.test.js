@@ -388,6 +388,68 @@ describe('analyticsService pure helpers', () => {
     ]));
   });
 
+  test('buildCategoryIntelligence keeps unmapped counts out of canonical treemap hierarchy', () => {
+    const rangeInfo = parseAnalyticsRange(
+      { timezone: 'America/Los_Angeles', compare: 'none' },
+      new Date('2026-04-26T19:00:00.000Z'),
+    );
+    const canonicalTicket = {
+      id: 15,
+      freshserviceTicketId: 1015n,
+      subject: 'MFA reset',
+      status: 'Open',
+      createdAt: new Date('2026-04-21T16:00:00.000Z'),
+      internalCategoryId: 10,
+      internalCategory: { id: 10, name: 'Identity' },
+      internalSubcategoryId: 11,
+      internalSubcategory: { id: 11, name: 'MFA', parentId: 10 },
+      assignedTech: null,
+      taxonomyReviewNeeded: false,
+    };
+    const unmappedTicket = {
+      id: 16,
+      freshserviceTicketId: 1016n,
+      subject: 'Missing category fields',
+      status: 'Open',
+      createdAt: new Date('2026-04-21T17:00:00.000Z'),
+      ticketCategory: null,
+      internalCategoryId: null,
+      internalCategory: null,
+      internalSubcategoryId: null,
+      internalSubcategory: null,
+      assignedTech: null,
+      taxonomyReviewNeeded: false,
+    };
+
+    const result = buildCategoryIntelligence({
+      workspaceId: 1,
+      rangeInfo,
+      categoryMode: 'canonical',
+      createdTickets: [canonicalTicket, unmappedTicket],
+      assignedTickets: [],
+      openTickets: [],
+      previousCreatedTickets: [],
+      pipelineRuns: [],
+      serviceAccountNames: [],
+    });
+
+    expect(result.summary.unmapped).toBe(1);
+    expect(result.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'category-label:Uncategorized',
+        name: 'Uncategorized',
+        source: 'unmapped',
+        created: 1,
+      }),
+    ]));
+    expect(result.hierarchy).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'category:10', name: 'Identity' }),
+      expect.objectContaining({ id: 'subcategory:11', parent: 'category:10', name: 'MFA' }),
+    ]));
+    expect(result.hierarchy.some((node) => node.id === 'category-label:Uncategorized')).toBe(false);
+    expect(result.hierarchy.some((node) => node.parent === 'category-label:Uncategorized')).toBe(false);
+  });
+
   test('buildCategoryIntelligence hides subcategory semantics for legacy workspaces', () => {
     const rangeInfo = parseAnalyticsRange(
       { timezone: 'America/Los_Angeles', compare: 'none' },
