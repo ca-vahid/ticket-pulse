@@ -315,4 +315,43 @@ describe('analyticsService pure helpers', () => {
     expect(result.hierarchy.some((node) => node.name === 'Tiny A')).toBe(false);
     expect(result.hierarchy.some((node) => node.name === 'Tiny B')).toBe(false);
   });
+
+  test('buildCategoryIntelligence excludes zero-created rows from treemap hierarchy', () => {
+    const rangeInfo = parseAnalyticsRange(
+      { timezone: 'America/Los_Angeles', compare: 'none' },
+      new Date('2026-04-26T19:00:00.000Z'),
+    );
+    const openOnlyTicket = {
+      id: 50,
+      freshserviceTicketId: 2050n,
+      subject: 'Open from earlier range',
+      status: 'Open',
+      createdAt: new Date('2026-03-01T16:00:00.000Z'),
+      internalCategoryId: 30,
+      internalCategory: { id: 30, name: 'Historical Open' },
+      internalSubcategoryId: 31,
+      internalSubcategory: { id: 31, name: 'No created demand', parentId: 30 },
+      assignedTech: null,
+      taxonomyReviewNeeded: false,
+    };
+
+    const result = buildCategoryIntelligence({
+      workspaceId: 1,
+      rangeInfo,
+      categoryMode: 'canonical',
+      createdTickets: [],
+      assignedTickets: [],
+      openTickets: [openOnlyTicket],
+      previousCreatedTickets: [],
+      pipelineRuns: [],
+      serviceAccountNames: [],
+    });
+
+    expect(result.rows[0]).toMatchObject({
+      name: 'Historical Open / No created demand',
+      created: 0,
+      open: 1,
+    });
+    expect(result.hierarchy).toHaveLength(0);
+  });
 });

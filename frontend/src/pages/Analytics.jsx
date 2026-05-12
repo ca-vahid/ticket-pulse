@@ -904,6 +904,14 @@ export default function Analytics() {
           animation: { duration: 160 },
           animationLimit: 140,
           layoutAlgorithm: 'squarified',
+          nodeSizeBy: 'leaf',
+          cluster: {
+            enabled: true,
+            pixelWidth: 34,
+            pixelHeight: 18,
+            minimumClusterSize: 3,
+            name: 'Other tiny items',
+          },
           borderRadius: 3,
           borderWidth: 1,
           borderColor: '#64748b',
@@ -942,7 +950,7 @@ export default function Analytics() {
               const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 112 && shape.height >= 62)));
               const headerStyle = categoryShareHeaderStyle(selectedCategoryAgent ? agentShareOfNodePct : shareValue, Boolean(selectedCategoryAgent));
               const nameStyle = isParent
-                ? `display:block;width:100%;box-sizing:border-box;background:${headerStyle.bg};border-left:5px solid ${headerStyle.border};border-bottom:1px solid rgba(15,23,42,0.12);border-radius:4px;padding:3px 6px;font-size:11px;font-weight:800;line-height:13px;box-shadow:0 1px 2px rgba(15,23,42,0.06);`
+                ? `display:block;width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:${headerStyle.bg};border-left:5px solid ${headerStyle.border};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:800;line-height:13px;box-shadow:0 1px 2px rgba(15,23,42,0.06);`
                 : '';
               const metricStyle = showShare
                 ? 'font-size:8px;font-weight:700;color:#334155'
@@ -950,6 +958,12 @@ export default function Analytics() {
               const metric = showAgentShare
                 ? `${formatNumber(agentCreated)} by ${selectedCategoryAgent.name.split(' ')[0]} · ${formatSharePct(agentShareOfNodePct)}`
                 : `${formatNumber(created)} created${showShare ? ` · ${sharePct}` : ''}`;
+              if (isParent) {
+                const compactMetric = showAgentShare
+                  ? `${formatNumber(agentCreated)} · ${formatSharePct(agentShareOfNodePct)}`
+                  : `${formatNumber(created)} · ${sharePct || '0%'}`;
+                return `<span style="${nameStyle}">${name} <span style="font-size:9px;font-weight:800;color:#334155">${compactMetric}</span></span>`;
+              }
               return shape.height >= 44 && created
                 ? `<span style="${nameStyle}">${name}</span><br/><span style="${metricStyle}">${metric}</span>`
                 : `<span style="${nameStyle}">${name}</span>`;

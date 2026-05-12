@@ -561,6 +561,7 @@ function finalizeCategoryRow(row, totalCreated = 0) {
 }
 
 function buildCategoryHierarchy(rows, mode) {
+  const visibleRows = rows.filter((row) => (row.created || 0) > 0);
   const nodes = [];
   const categoryNodes = new Map();
   const categoryTotals = new Map();
@@ -568,14 +569,14 @@ function buildCategoryHierarchy(rows, mode) {
   const smallNodeThreshold = mode === 'canonical' ? 5 : 0;
   const smallChildCounts = new Map();
   if (smallNodeThreshold > 0) {
-    for (const row of rows) {
+    for (const row of visibleRows) {
       if (row.key === row.categoryKey) continue;
       if ((row.created || 0) > 0 && (row.created || 0) < smallNodeThreshold) {
         smallChildCounts.set(row.categoryKey, (smallChildCounts.get(row.categoryKey) || 0) + 1);
       }
     }
   }
-  for (const row of rows) {
+  for (const row of visibleRows) {
     if (!categoryNodes.has(row.categoryKey)) {
       const categoryName = row.categoryName || row.name;
       categoryNodes.set(row.categoryKey, {
