@@ -697,7 +697,16 @@ class AssignmentRepository {
       const where = {
         status: 'completed',
         decision: { in: ['auto_assigned', 'noise_dismissed'] },
-        OR: [{ syncStatus: null }, { syncStatus: 'pending' }],
+        OR: [
+          { syncStatus: null },
+          { syncStatus: 'pending' },
+          {
+            decision: 'noise_dismissed',
+            syncStatus: 'failed',
+            syncError: { contains: 'Validation failed', mode: 'insensitive' },
+            updatedAt: { lt: cutoff },
+          },
+        ],
         decidedAt: { lt: cutoff, not: null },
         ...(workspaceId !== null && workspaceId !== undefined ? { workspaceId } : {}),
       };
@@ -708,6 +717,7 @@ class AssignmentRepository {
           decidedAt: true, syncStatus: true, assignedTechId: true,
         },
         orderBy: { decidedAt: 'asc' },
+        take: 10,
       });
     } catch (error) {
       logger.error('Error finding orphaned sync runs:', error);

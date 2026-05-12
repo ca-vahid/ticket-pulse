@@ -52,6 +52,14 @@ function readQueueSubViewFromUrl() {
   return URL_TO_QUEUE_SUBVIEW[raw] || 'pending';
 }
 
+function isNestedInteractiveKeyTarget(target, currentTarget) {
+  if (!(target instanceof Element)) return false;
+  const interactiveTarget = target.closest(
+    'input, textarea, select, button, a[href], [contenteditable=""], [contenteditable="true"], [role="button"]',
+  );
+  return Boolean(interactiveTarget && interactiveTarget !== currentTarget);
+}
+
 function queueSubViewSearch(subView) {
   const urlValue = QUEUE_SUBVIEW_TO_URL[subView];
   return urlValue && urlValue !== QUEUE_SUBVIEW_TO_URL.pending ? `?queue=${urlValue}` : '';
@@ -316,6 +324,7 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
                   placeholder="Search by name or location..."
                   className="w-full pl-6 pr-2 py-1 text-xs border border-slate-200 rounded bg-white focus:ring-1 focus:ring-blue-200 focus:border-blue-300"
                   onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
                   autoFocus
                 />
               </div>
@@ -368,6 +377,7 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
           placeholder={isOverride ? 'Why this technician? (required)' : 'Note (optional)'}
           className={`w-full border rounded-lg px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs focus:ring-2 focus:border-blue-300 bg-slate-50 ${isOverride && !note.trim() ? 'border-amber-300 focus:ring-amber-200' : 'border-slate-200 focus:ring-blue-200'}`}
           onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
         />
       </div>
       <div className="border-t border-slate-100 px-3 py-2.5 sm:py-2 flex items-center justify-end gap-2">
@@ -399,6 +409,7 @@ function QuickApprovePopover({ run, align = 'right', quickApproveId, popoverRef,
     <div
       ref={popoverRef}
       onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
       className={`hidden md:block absolute z-50 mt-1 w-72 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
       style={{ top: '100%' }}
     >
@@ -1044,6 +1055,7 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
       <div
         ref={sheetRef}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
         className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl pb-safe max-h-[70vh] overflow-y-auto"
       >
         <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-slate-300" /></div>
@@ -2814,7 +2826,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                               role="button"
                               tabIndex={0}
                               onClick={() => handleSelectRun(run.id)}
-                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectRun(run.id); } }}
+                              onKeyDown={(e) => {
+                                if (isNestedInteractiveKeyTarget(e.target, e.currentTarget)) return;
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  handleSelectRun(run.id);
+                                }
+                              }}
                               className={`relative grid items-center border-b border-slate-100 border-l-[3px] ${priClass} ${bgClass} hover:bg-blue-50/60 cursor-pointer group transition-[opacity,background-color] duration-[240ms] ${removingIds.has(run.id) ? 'opacity-0' : ''} focus:outline-none focus-visible:bg-blue-50`}
                               style={{ gridTemplateColumns: cols, minHeight: '52px' }}
                             >

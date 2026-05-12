@@ -44,6 +44,8 @@ const PREHEAT_MAX_CONVERSATIONS_PER_TICKET = 30;
 const PREHEAT_POOL_SIZE = 8;
 const NOISE_RULE_TRIGGER_SOURCE = 'noise_rule';
 const ACTIONABLE_TICKET_STATUSES = new Set(['Open', 'Pending']);
+const ACTIONABLE_FRESHSERVICE_STATUS_IDS = new Set([2, 3]);
+const INCREMENTAL_SYNC_OVERLAP_MS = 5 * 60 * 1000;
 
 function formatNoiseCategory(category) {
   if (!category) return null;
@@ -52,6 +54,13 @@ function formatNoiseCategory(category) {
     .filter(Boolean)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(' ');
+}
+
+function isActionableUnassignedFreshServiceTicket(ticket) {
+  if (!ticket || ticket.responder_id) return false;
+  const status = ticket.status;
+  if (typeof status === 'number') return ACTIONABLE_FRESHSERVICE_STATUS_IDS.has(status);
+  return ACTIONABLE_TICKET_STATUSES.has(status);
 }
 
 // Note: SSE manager will be imported lazily to avoid circular dependency
@@ -1049,8 +1058,12 @@ class SyncService {
     } else {
       const latestSync = await syncLogRepository.getLatestSuccessful(workspaceId);
 
-      if (latestSync && latestSync.completedAt) {
-        filters.updated_since = new Date(latestSync.completedAt.getTime() - 5 * 60 * 1000).toISOString();
+      if (latestSync && (latestSync.startedAt || latestSync.completedAt)) {
+        // Use the previous sync start as the watermark. FreshService tickets
+        // updated while a long sync is already running can be missed forever
+        // if the next run starts from completedAt.
+        const watermarkBase = latestSync.startedAt || latestSync.completedAt;
+        filters.updated_since = new Date(watermarkBase.getTime() - INCREMENTAL_SYNC_OVERLAP_MS).toISOString();
       } else {
         const historicalDate = new Date();
         historicalDate.setDate(historicalDate.getDate() - daysToSync);
@@ -1496,13 +1509,33 @@ class SyncService {
     }
 
     const fsTickets = await client.fetchTickets(filters);
-    const recentTickets = [...fsTickets]
+    const sortedTickets = [...fsTickets]
       .sort((a, b) => {
         const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
         const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
         return bTime - aTime;
-      })
-      .slice(0, maxTickets);
+      });
+    const unassignedTickets = sortedTickets.filter(isActionableUnassignedFreshServiceTicket);
+    const selectedTicketIds = new Set();
+    const recentTickets = [];
+
+    for (const ticket of [...unassignedTickets, ...sortedTickets]) {
+      const id = ticket.id?.toString?.() || String(ticket.id);
+      if (selectedTicketIds.has(id)) continue;
+      if (recentTickets.length >= maxTickets && !isActionableUnassignedFreshServiceTicket(ticket)) {
+        continue;
+      }
+      selectedTicketIds.add(id);
+      recentTickets.push(ticket);
+    }
+
+    if (unassignedTickets.length > maxTickets) {
+      logger.warn('Assignment fast sync: unassigned candidates exceed maxTickets; processing all unassigned candidates', {
+        workspaceId,
+        unassignedCandidates: unassignedTickets.length,
+        maxTickets,
+      });
+    }
 
     for (const fsTicket of recentTickets) {
       if (fsTicket.requester_id && fsTicket.requester?.name) {

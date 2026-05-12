@@ -98,7 +98,13 @@ class FreshServiceActionService {
       }
 
       const fsAgentId = Number(tech.freshserviceId);
-      actions.push({ type: 'assign', ticketId: fsTicketId, agentId: fsAgentId });
+      actions.push({
+        type: 'assign',
+        ticketId: fsTicketId,
+        agentId: fsAgentId,
+        techId: run.assignedTechId,
+        techName: tech.name,
+      });
 
       const decisionLabel = decision === 'auto_assigned' ? 'auto-assigned' : decision === 'modified' ? 'assigned (admin override)' : 'approved';
 
@@ -142,6 +148,25 @@ class FreshServiceActionService {
       noteBody += `${messageHtml}<br>`;
       noteBody += `<b>Run ID:</b> ${run.id}`;
 
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: run.workspaceId },
+        select: { tpSkillCustomField: true, tpSubskillCustomField: true },
+      });
+      const categoryField = workspace?.tpSkillCustomField || 'lf_ticket_pulse_category';
+      const subcategoryField = workspace?.tpSubskillCustomField || 'lf_ticket_pulse_subcategory';
+
+      actions.push({
+        type: 'update_custom_fields',
+        ticketId: fsTicketId,
+        customFields: {
+          [categoryField]: 'Service Desk & Routing',
+          [subcategoryField]: 'Non-actionable Notifications',
+        },
+        localFields: {
+          tpSkill: 'Service Desk & Routing',
+          tpSubskill: 'Non-actionable Notifications',
+        },
+      });
       actions.push({ type: 'note', ticketId: fsTicketId, body: noteBody, private: true });
       actions.push({ type: 'close', ticketId: fsTicketId, status: 4 });
     } else {
@@ -179,6 +204,7 @@ class FreshServiceActionService {
             id: true,
             freshserviceTicketId: true,
             subject: true,
+            firstAssignedAt: true,
             ticketCategory: true,
             tpSkill: true,
             tpSubskill: true,
@@ -286,6 +312,7 @@ class FreshServiceActionService {
         if (action.type === 'assign') {
           const result = await client.assignTicket(action.ticketId, action.agentId);
           if (result?.alreadyClosed) { ticketGone = true; continue; }
+          await this._mirrorLocalAssignment(run, action);
           logger.info('FreshService: ticket assigned', { ticketId: action.ticketId, agentId: action.agentId, runId });
         } else if (action.type === 'update_custom_fields') {
           const customFields = await this._resolveTicketPulseLookupFields(client, action, fsConfig);
@@ -353,6 +380,41 @@ class FreshServiceActionService {
       logger.error('FreshService sync failed', { runId, error: err.message, freshserviceError });
       return { success: false, error: err.message, preview, freshserviceError };
     }
+  }
+
+  async _mirrorLocalAssignment(run, action) {
+    const assignedTechId = Number(action.techId || run.assignedTechId);
+    if (!Number.isFinite(assignedTechId) || assignedTechId <= 0) return;
+
+    const now = new Date();
+    const serviceAccountNames = await settingsRepository.getServiceAccountNames().catch((error) => {
+      logger.warn('FreshService sync: failed to load service account names for local assignment mirror', {
+        runId: run.id,
+        error: error.message,
+      });
+      return [];
+    });
+    const assignedBy = serviceAccountNames[0] || 'Ticket Pulse';
+
+    await prisma.ticket.update({
+      where: { id: run.ticketId },
+      data: {
+        assignedTechId,
+        assignedAt: now,
+        firstAssignedAt: run.ticket?.firstAssignedAt || now,
+        assignedBy,
+        isSelfPicked: false,
+        updatedAt: now,
+      },
+    }).catch((updateError) => {
+      logger.warn('FreshService sync: assignment succeeded but local ticket mirror update failed', {
+        ticketId: run.ticketId,
+        freshserviceTicketId: action.ticketId,
+        assignedTechId,
+        runId: run.id,
+        error: updateError.message,
+      });
+    });
   }
 
   async _resolveTicketPulseLookupFields(client, action, fsConfig) {

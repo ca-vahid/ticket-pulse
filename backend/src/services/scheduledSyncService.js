@@ -21,6 +21,8 @@ class ScheduledSyncService {
     this.cronJobs = new Map();
     this.vtCronJobs = new Map();
     this.calendarLeaveCronJobs = new Map();
+    this.assignmentFastSyncCronJobs = new Map();
+    this.assignmentFastSyncInProgress = new Set();
   }
 
   /**
@@ -38,6 +40,7 @@ class ScheduledSyncService {
 
       for (const ws of workspaces) {
         await this.startForWorkspace(ws);
+        await this.startAssignmentFastSyncForWorkspace(ws);
         await this.startVTSyncForWorkspace(ws);
         await this.startCalendarLeaveSyncForWorkspace(ws);
       }
@@ -205,6 +208,60 @@ class ScheduledSyncService {
     this.vtCronJobs.set(wsId, { job, workspaceName: wsName });
   }
 
+  async startAssignmentFastSyncForWorkspace(workspace) {
+    const wsId = workspace.id;
+    const wsName = workspace.name;
+    const tz = workspace.defaultTimezone || 'America/Los_Angeles';
+    const secondOffset = (wsId * 13) % 60;
+
+    this.stopAssignmentFastSyncForWorkspace(wsId);
+
+    logger.info(`Starting assignment fast sync for workspace "${wsName}" (id=${wsId}) every 1m at :${secondOffset.toString().padStart(2, '0')}`);
+
+    const job = cron.schedule(
+      `${secondOffset} * * * * *`,
+      async () => {
+        if (this.assignmentFastSyncInProgress.has(wsId)) {
+          logger.debug(`[${wsName}] Assignment fast sync already in progress, skipping`);
+          return;
+        }
+
+        this.assignmentFastSyncInProgress.add(wsId);
+        try {
+          const cfg = await assignmentRepository.getConfig(wsId);
+          if (!cfg?.isEnabled || !cfg?.pollForUnassigned) {
+            return;
+          }
+
+          const result = await syncService.syncAssignmentCandidatesNow(wsId, {
+            lookbackMinutes: 30,
+            maxTickets: 50,
+            maxPipelineRuns: cfg.pollMaxPerCycle || 5,
+          });
+
+          if (result.polling?.triggered || result.ticketsSynced > 0) {
+            logger.info(`[${wsName}] Assignment fast sync completed`, {
+              ticketsFetched: result.ticketsFetched,
+              ticketsSynced: result.ticketsSynced,
+              candidates: result.polling?.candidates || 0,
+              triggered: result.polling?.triggered || 0,
+            });
+          }
+        } catch (error) {
+          logger.error(`[${wsName}] Assignment fast sync failed:`, error);
+        } finally {
+          this.assignmentFastSyncInProgress.delete(wsId);
+        }
+      },
+      {
+        scheduled: true,
+        timezone: tz,
+      },
+    );
+
+    this.assignmentFastSyncCronJobs.set(wsId, { job, workspaceName: wsName });
+  }
+
   async startCalendarLeaveSyncForWorkspace(workspace) {
     const wsId = workspace.id;
     const wsName = workspace.name;
@@ -273,8 +330,19 @@ class ScheduledSyncService {
       entry.job.stop();
       this.cronJobs.delete(wsId);
     }
+    this.stopAssignmentFastSyncForWorkspace(wsId);
     this.stopVTSyncForWorkspace(wsId);
     this.stopCalendarLeaveSyncForWorkspace(wsId);
+  }
+
+  stopAssignmentFastSyncForWorkspace(wsId) {
+    const entry = this.assignmentFastSyncCronJobs.get(wsId);
+    if (entry) {
+      logger.info(`Stopping assignment fast sync for workspace "${entry.workspaceName}"`);
+      entry.job.stop();
+      this.assignmentFastSyncCronJobs.delete(wsId);
+    }
+    this.assignmentFastSyncInProgress.delete(wsId);
   }
 
   stopAll() {
@@ -283,6 +351,9 @@ class ScheduledSyncService {
       for (const [wsId] of this.cronJobs) {
         this.stopForWorkspace(wsId);
       }
+    }
+    for (const [wsId] of this.assignmentFastSyncCronJobs) {
+      this.stopAssignmentFastSyncForWorkspace(wsId);
     }
     for (const [wsId] of this.vtCronJobs) {
       this.stopVTSyncForWorkspace(wsId);
@@ -304,6 +375,7 @@ class ScheduledSyncService {
       const ws = await workspaceRepository.getById(workspaceId);
       this.stopForWorkspace(workspaceId);
       await this.startForWorkspace(ws);
+      await this.startAssignmentFastSyncForWorkspace(ws);
       await this.startVTSyncForWorkspace(ws);
       await this.startCalendarLeaveSyncForWorkspace(ws);
     } else {

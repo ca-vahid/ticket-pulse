@@ -26,6 +26,21 @@ import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
 
 const MAX_TURNS = 20;
 
+function sanitizeJsonValue(value) {
+  if (typeof value === 'bigint') return value.toString();
+  if (Array.isArray(value)) return value.map(sanitizeJsonValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, sanitizeJsonValue(entry)]),
+    );
+  }
+  return value;
+}
+
+function stringifyForModel(value) {
+  return JSON.stringify(sanitizeJsonValue(value));
+}
+
 function normalizeTaxonomyFit(value) {
   const normalized = String(value || '').toLowerCase();
   return ['exact', 'weak', 'none'].includes(normalized) ? normalized : null;
@@ -615,20 +630,21 @@ class AssignmentPipelineService {
             } catch (err) {
               toolResult = { error: err.message };
             }
+            const sanitizedToolResult = sanitizeJsonValue(toolResult);
             const toolDuration = Date.now() - toolStart;
 
-            toolResultMap.set(block.id, toolResult);
+            toolResultMap.set(block.id, sanitizedToolResult);
 
             await assignmentRepository.updatePipelineStep(toolStep.id, {
               status: 'completed',
               durationMs: toolDuration,
-              output: toolResult,
+              output: sanitizedToolResult,
             });
             queueHeartbeat();
 
-            emit({ type: 'tool_result', name: block.name, data: toolResult, durationMs: toolDuration, toolUseId: block.id });
+            emit({ type: 'tool_result', name: block.name, data: sanitizedToolResult, durationMs: toolDuration, toolUseId: block.id });
 
-            const toolResultStr = JSON.stringify(toolResult);
+            const toolResultStr = stringifyForModel(sanitizedToolResult);
             fullTranscript += `\n\n[Tool: ${block.name}] → ${toolResultStr.slice(0, 500)}${toolResultStr.length > 500 ? '...' : ''}\n\n`;
           }
         }
@@ -652,7 +668,7 @@ class AssignmentPipelineService {
             .map((b) => ({
               type: 'tool_result',
               tool_use_id: b.id,
-              content: JSON.stringify(toolResultMap.get(b.id) || { error: 'Result not found' }),
+              content: stringifyForModel(toolResultMap.get(b.id) || { error: 'Result not found' }),
             }));
 
           messages.push({ role: 'user', content: toolResultBlocks });
@@ -794,6 +810,22 @@ class AssignmentPipelineService {
 
       if (recommendation) {
         await this._persistInternalClassification(ticketId, workspaceId, recommendation);
+        if (decision === 'noise_dismissed') {
+          await prisma.ticket.update({
+            where: { id: ticketId },
+            data: {
+              isNoise: true,
+              ticketCategory: recommendation.ticketClassification || 'Noise',
+              updatedAt: new Date(),
+            },
+          }).catch((updateError) => {
+            logger.warn('Pipeline: failed to mark noise-dismissed ticket locally', {
+              runId,
+              ticketId,
+              error: updateError.message,
+            });
+          });
+        }
       }
 
       await assignmentRepository.updatePipelineRun(runId, {
