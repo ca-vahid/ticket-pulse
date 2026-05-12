@@ -28,6 +28,8 @@ describe('api auth/workspace helpers', () => {
     const { analyticsAPI } = await import('./api');
     expect(Object.keys(analyticsAPI).sort()).toEqual([
       'getAutomationOps',
+      'getCategories',
+      'getCategoryIntelligence',
       'getDemandFlow',
       'getInsights',
       'getOverview',

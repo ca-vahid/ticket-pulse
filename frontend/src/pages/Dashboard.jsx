@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { analyticsAPI, syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
@@ -43,7 +43,6 @@ import {
   VolumeX,
   Volume2,
   Bot,
-  Boxes,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -68,7 +67,6 @@ export default function Dashboard() {
   } = useDashboard();
   const { currentWorkspace } = useWorkspace();
   const location = useLocation();
-  const navigate = useNavigate();
   const showSummitWorkshop = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
   const [categoryMetadata, setCategoryMetadata] = useState(null);
 
@@ -1256,16 +1254,6 @@ export default function Dashboard() {
           onSyncWeek: handleSyncWeek,
           refreshing,
         },
-        extraActions: showSummitWorkshop ? (
-          <button
-            type="button"
-            onClick={() => navigate('/summit-taxonomy')}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-200 bg-cyan-50 text-cyan-700 transition-colors hover:border-cyan-300 hover:bg-cyan-100 hover:shadow-sm"
-            title="BGC Engineering IT Summit category workshop"
-          >
-            <Boxes className="h-5 w-5" />
-          </button>
-        ) : null,
       }}
     >
       {/* Fancy Loading Overlay */}

@@ -48,6 +48,15 @@ const apiLongTimeout = axios.create({
   timeout: 900000,
 });
 
+const apiAnalytics = axios.create({
+  baseURL: API_BASE_URL,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  timeout: 90000,
+});
+
 // Attach JWT + workspace headers to every request
 const authRequestInterceptor = (reqConfig) => {
   if (_authToken && !reqConfig.headers.Authorization) {
@@ -60,6 +69,25 @@ const authRequestInterceptor = (reqConfig) => {
 };
 api.interceptors.request.use(authRequestInterceptor);
 apiLongTimeout.interceptors.request.use(authRequestInterceptor);
+apiAnalytics.interceptors.request.use(authRequestInterceptor);
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const analyticsRetryInterceptor = async (error) => {
+  const config = error.config || {};
+  const status = error.response?.status;
+  const retryableNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK';
+  const retryableServerError = status === 502 || status === 503 || status === 504;
+
+  if ((retryableNetworkError || retryableServerError) && (config._analyticsRetryCount || 0) < 3) {
+    config._analyticsRetryCount = (config._analyticsRetryCount || 0) + 1;
+    const backoffMs = [1500, 3500, 7000][config._analyticsRetryCount - 1] || 7000;
+    await delay(backoffMs);
+    return apiAnalytics(config);
+  }
+
+  return Promise.reject(error);
+};
 
 // Response interceptor for error handling
 const errorInterceptor = (error) => {
@@ -100,6 +128,16 @@ api.interceptors.response.use(
 
 apiLongTimeout.interceptors.response.use(
   scrubResponseInterceptor,
+  errorInterceptor,
+);
+
+apiAnalytics.interceptors.response.use(
+  scrubResponseInterceptor,
+  analyticsRetryInterceptor,
+);
+
+apiAnalytics.interceptors.response.use(
+  (response) => response,
   errorInterceptor,
 );
 
@@ -657,14 +695,14 @@ export const agentAPI = {
  * Analytics API
  */
 export const analyticsAPI = {
-  getCategories: () => api.get('/analytics/categories'),
-  getOverview: (params = {}) => api.get('/analytics/overview', { params }),
-  getDemandFlow: (params = {}) => api.get('/analytics/demand-flow', { params }),
-  getCategoryIntelligence: (params = {}) => api.get('/analytics/category-intelligence', { params }),
-  getTeamBalance: (params = {}) => api.get('/analytics/team-balance', { params }),
-  getQuality: (params = {}) => api.get('/analytics/quality', { params }),
-  getAutomationOps: (params = {}) => api.get('/analytics/automation-ops', { params }),
-  getInsights: (params = {}) => api.get('/analytics/insights', { params }),
+  getCategories: () => apiAnalytics.get('/analytics/categories'),
+  getOverview: (params = {}) => apiAnalytics.get('/analytics/overview', { params }),
+  getDemandFlow: (params = {}) => apiAnalytics.get('/analytics/demand-flow', { params }),
+  getCategoryIntelligence: (params = {}) => apiAnalytics.get('/analytics/category-intelligence', { params }),
+  getTeamBalance: (params = {}) => apiAnalytics.get('/analytics/team-balance', { params }),
+  getQuality: (params = {}) => apiAnalytics.get('/analytics/quality', { params }),
+  getAutomationOps: (params = {}) => apiAnalytics.get('/analytics/automation-ops', { params }),
+  getInsights: (params = {}) => apiAnalytics.get('/analytics/insights', { params }),
 };
 
 /**

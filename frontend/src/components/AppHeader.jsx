@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Calendar,
   Award,
+  Boxes,
+  Calendar,
+  ChevronDown,
   Clock,
   BarChart3,
   LayoutDashboard,
+  LogOut,
   Map,
   RefreshCw,
   Settings,
@@ -41,6 +44,7 @@ export default function AppHeader({
   const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
   const { isRefreshing, lastUpdated, sseConnectionStatus } = useDashboard();
   const [showChangelog, setShowChangelog] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const demoMode = useDemoMode();
   const displayUserName = useDemoLabel('name', user?.name || user?.username || 'User');
@@ -58,6 +62,28 @@ export default function AppHeader({
     return ws?.role || 'viewer';
   })();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
+  const canManageWorkspace = wsRole === 'admin';
+  const showAdminSummitLink = canManageWorkspace && (Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it');
+
+  useEffect(() => {
+    if (!userMenuOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (!event.target.closest('[data-ticket-pulse-user-menu]')) {
+        setUserMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setUserMenuOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [userMenuOpen]);
 
   const handleLogout = async () => {
     clearCacheOnLogout?.();
@@ -94,14 +120,99 @@ export default function AppHeader({
       Icon: Sparkles,
       inactiveClass: 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300',
     }] : []),
-    ...(user?.agentProfile ? [{
-      id: 'my-competencies',
-      label: 'My Skills',
-      path: '/my-competencies',
-      Icon: Award,
-      inactiveClass: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300',
-    }] : []),
   ];
+
+  const navigateFromMenu = (path) => {
+    setUserMenuOpen(false);
+    navigate(path);
+  };
+
+  const renderUserMenu = (compact = false) => {
+    const adminItems = [
+      ...(showAdminSummitLink ? [{
+        id: 'summit',
+        label: 'Summit',
+        description: 'Category workshop',
+        path: '/summit-taxonomy',
+        Icon: Boxes,
+      }] : []),
+      ...(canManageWorkspace ? [{
+        id: 'skills',
+        label: 'Skills',
+        description: 'Competency matrix',
+        path: '/assignments/competencies',
+        Icon: Award,
+      }] : []),
+    ];
+
+    return (
+      <div className="relative flex-shrink-0" data-ticket-pulse-user-menu>
+        <button
+          type="button"
+          onClick={() => setUserMenuOpen((open) => !open)}
+          aria-haspopup="menu"
+          aria-expanded={userMenuOpen}
+          className={`${compact ? 'h-8 rounded-full pl-2 pr-1.5 text-[11px]' : 'h-9 rounded-full pl-2.5 pr-2 text-xs'} inline-flex items-center gap-1 border border-slate-200 bg-slate-100 font-bold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-200 touch-manipulation`}
+          title={displayUserName}
+        >
+          <span className={`${compact ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full bg-white text-slate-700 shadow-sm`}>
+            {userInitials}
+          </span>
+          <ChevronDown className={`${compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} text-slate-500 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {userMenuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10"
+          >
+            <div className="border-b border-slate-100 px-3 py-2">
+              <p className="truncate text-sm font-semibold text-slate-900">{displayUserName}</p>
+              <p className="truncate text-xs text-slate-500">{user?.email || user?.username || wsRole}</p>
+            </div>
+
+            {adminItems.map(({ id, label, description, path, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                role="menuitem"
+                onClick={() => navigateFromMenu(path)}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <Icon className="h-4 w-4 text-slate-500" />
+                <span className="min-w-0">
+                  <span className="block font-semibold">{label}</span>
+                  <span className="block truncate text-xs text-slate-500">{description}</span>
+                </span>
+              </button>
+            ))}
+
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => navigateFromMenu('/settings')}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            >
+              <Settings className="h-4 w-4 text-slate-500" />
+              <span className="font-semibold">Settings</span>
+            </button>
+
+            <div className="my-1 border-t border-slate-100" />
+
+            <button
+              type="button"
+              role="menuitem"
+              onClick={handleLogout}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm font-semibold text-red-600 hover:bg-red-50"
+            >
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderPrimaryNav = (compact = false, options = {}) => {
     const visibleItems = options.hideActive
@@ -174,21 +285,21 @@ export default function AppHeader({
     <>
       <header className="sticky top-0 z-40 bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2">
-          <div className="flex items-center justify-between gap-2 md:hidden">
-            <div className="flex-1 min-w-0">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <div className="relative h-9 w-[112px] overflow-hidden flex items-center justify-start flex-shrink-0">
+          <div className="space-y-2 md:hidden">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div className="relative flex h-8 w-8 flex-shrink-0 items-center justify-center">
                   <button type="button" onClick={() => navigate('/dashboard')} title="Dashboard">
                     <img
-                      src="/brand/logo-wordmark.png"
+                      src="/brand/logo-mark.png"
                       alt="Ticket Pulse"
-                      className="h-24 w-auto"
+                      className="h-8 w-8 object-contain"
                     />
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowChangelog(true)}
-                    className="absolute bottom-0 right-0 rounded border border-blue-200 bg-white/95 px-1 py-px text-[8px] font-semibold leading-none text-blue-600 shadow-sm"
+                    className="absolute -bottom-1 -right-1 rounded border border-blue-200 bg-white/95 px-0.5 py-px text-[7px] font-semibold leading-none text-blue-600 shadow-sm"
                     title="View changelog"
                   >
                     v{APP_VERSION}
@@ -196,28 +307,25 @@ export default function AppHeader({
                 </div>
                 {renderWorkspaceControl(true)}
               </div>
+              {renderUserMenu(true)}
             </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              {extraActions}
-              {backgroundSyncRunning && (
-                <button
-                  onClick={onKillSync}
-                  disabled={killingSync || !onKillSync}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700 touch-manipulation disabled:opacity-50"
-                  title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing... (tap to stop)'}
-                >
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                </button>
-              )}
-              {renderPrimaryNav(true, { hideActive: true })}
-              <button onClick={() => navigate('/settings')} className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-gray-100 touch-manipulation" title="Settings"><Settings className="w-4 h-4" /></button>
-              <button
-                onClick={handleLogout}
-                className="h-8 w-8 rounded-full border border-slate-200 bg-slate-100 text-slate-700 text-[11px] font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors touch-manipulation"
-                title={`Sign out ${displayUserName}`}
-              >
-                {userInitials}
-              </button>
+
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {extraActions}
+                {backgroundSyncRunning && (
+                  <button
+                    onClick={onKillSync}
+                    disabled={killingSync || !onKillSync}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700 touch-manipulation disabled:opacity-50"
+                    title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing... (tap to stop)'}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  </button>
+                )}
+                {renderPrimaryNav(true, { hideActive: true })}
+              </div>
+              <button onClick={() => navigate('/settings')} className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg hover:bg-gray-100 touch-manipulation" title="Settings"><Settings className="w-4 h-4" /></button>
             </div>
           </div>
 
@@ -372,13 +480,7 @@ export default function AppHeader({
                 <Settings className="w-6 h-6" />
               </button>
 
-              <button
-                onClick={handleLogout}
-                className="h-9 w-9 rounded-full border border-slate-200 bg-slate-100 text-slate-700 text-xs font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"
-                title={`Sign out ${displayUserName}`}
-              >
-                {userInitials}
-              </button>
+              {renderUserMenu(false)}
             </div>
           </div>
         </div>

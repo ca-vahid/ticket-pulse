@@ -14,6 +14,7 @@ const RANGE_DAYS = {
 };
 const CACHE_TTL_MS = 15_000;
 const cache = new Map();
+const pendingCache = new Map();
 
 const PRIORITY_LABELS = {
   1: 'Low',
@@ -213,9 +214,21 @@ async function withCache(workspaceId, endpoint, query, producer) {
   const key = cacheKey(workspaceId, endpoint, query);
   const hit = cache.get(key);
   if (hit && Date.now() - hit.createdAt < CACHE_TTL_MS) return hit.value;
-  const value = await producer();
-  cache.set(key, { createdAt: Date.now(), value });
-  return value;
+
+  const pending = pendingCache.get(key);
+  if (pending) return pending;
+
+  const pendingValue = producer()
+    .then((value) => {
+      cache.set(key, { createdAt: Date.now(), value });
+      return value;
+    })
+    .finally(() => {
+      pendingCache.delete(key);
+    });
+
+  pendingCache.set(key, pendingValue);
+  return pendingValue;
 }
 
 function metadata(rangeInfo, extra = {}) {
