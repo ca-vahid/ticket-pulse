@@ -241,9 +241,9 @@ function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', de
 
 function Panel({ title, subtitle, children, actions }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+    <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
         </div>
@@ -830,10 +830,12 @@ export default function Analytics() {
     const chartRows = rows.map((row) => {
       const created = Number(row.custom?.created ?? row.value ?? 0);
       const parentHasChildren = parentIdsWithChildren.has(row.id);
-      const agentRow = row.parent
-        ? selectedAgentCategoryCounts.leaf.get(row.id)
-        : selectedAgentCategoryCounts.top.get(row.id);
-      const agentCreated = agentRow?.count || 0;
+      const agentLeafKeys = Array.isArray(row.custom?.agentLeafKeys) && row.custom.agentLeafKeys.length > 0
+        ? row.custom.agentLeafKeys
+        : [row.custom?.agentLeafKey || row.id];
+      const agentCreated = row.parent
+        ? agentLeafKeys.reduce((sum, key) => sum + (selectedAgentCategoryCounts.leaf.get(key)?.count || 0), 0)
+        : (selectedAgentCategoryCounts.top.get(row.id)?.count || 0);
       const agentShareOfNodePct = created > 0 ? Number(((agentCreated / created) * 100).toFixed(1)) : 0;
       const agentPortfolioPct = selectedCategoryAgent?.totalCreated
         ? Number(((agentCreated / selectedCategoryAgent.totalCreated) * 100).toFixed(1))
@@ -911,7 +913,6 @@ export default function Analytics() {
           animation: mapEffectsEnabled ? { duration: 180 } : false,
           animationLimit: mapEffectsEnabled ? 180 : 0,
           layoutAlgorithm: 'squarified',
-          nodeSizeBy: 'leaf',
           cluster: {
             enabled: false,
           },
@@ -1747,7 +1748,7 @@ export default function Analytics() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel title="Assignment Mix" subtitle="How assigned tickets entered a technician's queue in the selected range.">
-          <div className="grid gap-4 xl:grid-cols-[minmax(22rem,1fr)_minmax(18rem,24rem)]">
+          <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)]">
             <div className="relative h-72 min-w-0 sm:h-80">
               <HighchartsBlock options={assignmentMixOptions} height="100%" />
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -1759,21 +1760,21 @@ export default function Analytics() {
                 </div>
               </div>
             </div>
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               {buildAssignmentMixRows(overview?.assignmentMix).map((row) => (
-                <div key={row.key} className="rounded-lg border border-slate-200 p-3">
+                <div key={row.key} className="min-w-0 rounded-lg border border-slate-200 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: row.color }} />
                       <p className="truncate text-sm font-semibold text-slate-800">{row.label}</p>
                     </div>
-                    <p className="text-sm font-bold text-slate-900">{formatNumber(row.value)}</p>
+                    <p className="shrink-0 text-sm font-bold text-slate-900">{formatNumber(row.value)}</p>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">{row.pct}% · {row.description}</p>
+                  <p className="mt-1 break-words text-xs text-slate-500">{row.pct}% · {row.description}</p>
                 </div>
               ))}
               {(overview?.assignmentMix?.unknown || 0) > 0 && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
                   <span className="font-semibold text-slate-800">Source unavailable</span> means FreshService/local activity data did not include a usable `assignedBy` value for that assigned ticket.
                 </div>
               )}

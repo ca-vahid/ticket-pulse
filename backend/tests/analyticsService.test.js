@@ -218,6 +218,176 @@ describe('analyticsService pure helpers', () => {
     expect(result.assignmentFlow.some((row) => row.to === 'Identity / MFA' || row.from === 'Identity / MFA')).toBe(false);
   });
 
+  test('buildCategoryIntelligence gives category-only canonical tickets a child bucket', () => {
+    const rangeInfo = parseAnalyticsRange(
+      { timezone: 'America/Los_Angeles', compare: 'none' },
+      new Date('2026-04-26T19:00:00.000Z'),
+    );
+    const base = {
+      status: 'Open',
+      createdAt: new Date('2026-04-21T16:00:00.000Z'),
+      internalCategoryId: 10,
+      internalCategory: { id: 10, name: 'Identity' },
+      assignedTech: { id: 9, name: 'Tech One' },
+      taxonomyReviewNeeded: false,
+    };
+    const categoryOnly = {
+      ...base,
+      id: 10,
+      freshserviceTicketId: 1010n,
+      subject: 'Needs category cleanup',
+      internalSubcategoryId: null,
+      internalSubcategory: null,
+    };
+    const subcategoryTicket = {
+      ...base,
+      id: 11,
+      freshserviceTicketId: 1011n,
+      subject: 'MFA reset',
+      internalSubcategoryId: 11,
+      internalSubcategory: { id: 11, name: 'MFA', parentId: 10 },
+    };
+
+    const result = buildCategoryIntelligence({
+      workspaceId: 1,
+      rangeInfo,
+      categoryMode: 'canonical',
+      createdTickets: [categoryOnly, subcategoryTicket],
+      assignedTickets: [],
+      openTickets: [],
+      previousCreatedTickets: [],
+      pipelineRuns: [],
+      serviceAccountNames: [],
+    });
+
+    expect(result.hierarchy).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'category:10:no-subcategory',
+        parent: 'category:10',
+        name: 'No subcategory',
+        value: 1,
+        custom: expect.objectContaining({
+          key: 'category:10:no-subcategory',
+          agentLeafKeys: expect.arrayContaining(['category:10']),
+          nodeType: 'categoryOnly',
+        }),
+      }),
+      expect.objectContaining({
+        id: 'subcategory:11',
+        parent: 'category:10',
+        name: 'MFA',
+        value: 1,
+      }),
+    ]));
+    expect(result.hierarchy.filter((node) => node.id === 'category:10')).toHaveLength(1);
+  });
+
+  test('buildCategoryIntelligence does not render standalone canonical fallback categories as leaf parents', () => {
+    const rangeInfo = parseAnalyticsRange(
+      { timezone: 'America/Los_Angeles', compare: 'none' },
+      new Date('2026-04-26T19:00:00.000Z'),
+    );
+    const ticket = {
+      id: 12,
+      freshserviceTicketId: 1012n,
+      subject: 'Legacy-only analytics row',
+      status: 'Open',
+      createdAt: new Date('2026-04-21T16:00:00.000Z'),
+      ticketCategory: 'Software & Apps',
+      assignedTech: null,
+      taxonomyReviewNeeded: false,
+    };
+
+    const result = buildCategoryIntelligence({
+      workspaceId: 1,
+      rangeInfo,
+      categoryMode: 'canonical',
+      createdTickets: [ticket],
+      assignedTickets: [],
+      openTickets: [],
+      previousCreatedTickets: [],
+      pipelineRuns: [],
+      serviceAccountNames: [],
+    });
+
+    expect(result.hierarchy.some((node) => node.id === 'category-label:Software & Apps' && !node.parent)).toBe(false);
+    expect(result.hierarchy).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'legacy-fallback',
+        name: 'Legacy fallback',
+        value: 1,
+        custom: expect.objectContaining({
+          nodeType: 'category',
+        }),
+      }),
+      expect.objectContaining({
+        id: 'category-label:Software & Apps',
+        parent: 'legacy-fallback',
+        name: 'Software & Apps',
+        value: 1,
+        custom: expect.objectContaining({
+          nodeType: 'subcategory',
+        }),
+      }),
+    ]));
+  });
+
+  test('buildCategoryIntelligence merges fallback category rows into matching canonical parents', () => {
+    const rangeInfo = parseAnalyticsRange(
+      { timezone: 'America/Los_Angeles', compare: 'none' },
+      new Date('2026-04-26T19:00:00.000Z'),
+    );
+    const canonicalTicket = {
+      id: 13,
+      freshserviceTicketId: 1013n,
+      subject: 'MFA reset',
+      status: 'Open',
+      createdAt: new Date('2026-04-21T16:00:00.000Z'),
+      internalCategoryId: 10,
+      internalCategory: { id: 10, name: 'Identity' },
+      internalSubcategoryId: 11,
+      internalSubcategory: { id: 11, name: 'MFA', parentId: 10 },
+      assignedTech: null,
+      taxonomyReviewNeeded: false,
+    };
+    const fallbackTicket = {
+      id: 14,
+      freshserviceTicketId: 1014n,
+      subject: 'Legacy identity row',
+      status: 'Open',
+      createdAt: new Date('2026-04-21T16:00:00.000Z'),
+      ticketCategory: 'Identity',
+      assignedTech: null,
+      taxonomyReviewNeeded: false,
+    };
+
+    const result = buildCategoryIntelligence({
+      workspaceId: 1,
+      rangeInfo,
+      categoryMode: 'canonical',
+      createdTickets: [canonicalTicket, fallbackTicket],
+      assignedTickets: [],
+      openTickets: [],
+      previousCreatedTickets: [],
+      pipelineRuns: [],
+      serviceAccountNames: [],
+    });
+
+    expect(result.hierarchy.filter((node) => node.id === 'category:10')).toHaveLength(1);
+    expect(result.hierarchy.some((node) => node.id === 'category-label:Identity')).toBe(false);
+    expect(result.hierarchy).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'category:10:no-subcategory',
+        parent: 'category:10',
+        name: 'No subcategory',
+        value: 1,
+        custom: expect.objectContaining({
+          agentLeafKeys: expect.arrayContaining(['category-label:Identity']),
+        }),
+      }),
+    ]));
+  });
+
   test('buildCategoryIntelligence hides subcategory semantics for legacy workspaces', () => {
     const rangeInfo = parseAnalyticsRange(
       { timezone: 'America/Los_Angeles', compare: 'none' },

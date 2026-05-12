@@ -562,21 +562,51 @@ function finalizeCategoryRow(row, totalCreated = 0) {
 
 function buildCategoryHierarchy(rows, mode) {
   const visibleRows = rows.filter((row) => (row.created || 0) > 0);
+  const canonicalCategoryByName = new Map();
+  if (mode === 'canonical') {
+    for (const row of visibleRows) {
+      if (!row.categoryId || !row.categoryName) continue;
+      canonicalCategoryByName.set(String(row.categoryName).trim().toLowerCase(), {
+        key: row.categoryKey,
+        id: row.categoryId,
+        name: row.categoryName,
+      });
+    }
+  }
+  const resolvedRows = visibleRows.map((row) => {
+    const categoryName = row.categoryName || row.name;
+    const canonicalCategory = mode === 'canonical' && !row.categoryId && categoryName
+      ? canonicalCategoryByName.get(String(categoryName).trim().toLowerCase())
+      : null;
+    const unmatchedLegacyFallback = mode === 'canonical'
+      && !canonicalCategory
+      && !row.categoryId
+      && row.source === 'legacyFallback';
+    return {
+      ...row,
+      categoryKey: canonicalCategory?.key || (unmatchedLegacyFallback ? 'legacy-fallback' : row.categoryKey),
+      categoryId: canonicalCategory?.id || row.categoryId,
+      categoryName: canonicalCategory?.name || (unmatchedLegacyFallback ? 'Legacy fallback' : categoryName),
+      isCategoryOnlyRow: row.key === row.categoryKey && !unmatchedLegacyFallback,
+      agentLeafKey: row.key,
+    };
+  });
   const nodes = [];
   const categoryNodes = new Map();
   const categoryTotals = new Map();
   const groupedSmallByCategory = new Map();
+  const categoryOnlyByCategory = new Map();
   const smallNodeThreshold = mode === 'canonical' ? 5 : 0;
   const smallChildCounts = new Map();
   if (smallNodeThreshold > 0) {
-    for (const row of visibleRows) {
-      if (row.key === row.categoryKey) continue;
+    for (const row of resolvedRows) {
+      if (row.isCategoryOnlyRow) continue;
       if ((row.created || 0) > 0 && (row.created || 0) < smallNodeThreshold) {
         smallChildCounts.set(row.categoryKey, (smallChildCounts.get(row.categoryKey) || 0) + 1);
       }
     }
   }
-  for (const row of visibleRows) {
+  for (const row of resolvedRows) {
     if (!categoryNodes.has(row.categoryKey)) {
       const categoryName = row.categoryName || row.name;
       categoryNodes.set(row.categoryKey, {
@@ -622,28 +652,22 @@ function buildCategoryHierarchy(rows, mode) {
     total.automationRebounds += row.automationRebounds || 0;
     total.pressureScore += row.pressureScore || 0;
     categoryTotals.set(row.categoryKey, total);
-    if (row.key !== row.categoryKey) {
-      const shouldGroupSmallNode = smallNodeThreshold > 0
-        && (smallChildCounts.get(row.categoryKey) || 0) >= 2
-        && (row.created || 0) > 0
-        && (row.created || 0) < smallNodeThreshold;
-      if (shouldGroupSmallNode) {
-        const groupedKey = `${row.categoryKey}:other-small`;
-        const grouped = groupedSmallByCategory.get(row.categoryKey) || {
-          id: groupedKey,
+
+    if (row.isCategoryOnlyRow) {
+      if (mode === 'canonical') {
+        const categoryOnlyKey = `${row.categoryKey}:no-subcategory`;
+        const categoryOnly = categoryOnlyByCategory.get(row.categoryKey) || {
+          id: categoryOnlyKey,
           parent: row.categoryKey,
-          name: 'Other subcategories',
+          name: 'No subcategory',
           value: 0,
           colorValue: 0,
           custom: {
-            key: groupedKey,
-            categoryKey: row.categoryKey,
-            name: 'Other subcategories',
-            categoryName: row.categoryName,
-            subcategoryName: 'Other subcategories',
-            categoryId: row.categoryId,
-            subcategoryId: null,
-            source: row.source,
+            ...row,
+            key: categoryOnlyKey,
+            agentLeafKeys: [],
+            name: 'No subcategory',
+            subcategoryName: 'No subcategory',
             created: 0,
             assigned: 0,
             open: 0,
@@ -654,37 +678,90 @@ function buildCategoryHierarchy(rows, mode) {
             automationFailures: 0,
             automationRebounds: 0,
             pressureScore: 0,
-            nodeType: 'subcategoryGroup',
-            groupedCount: 0,
-            groupedNames: [],
+            nodeType: 'categoryOnly',
           },
         };
-        grouped.value += row.created || 0;
-        grouped.colorValue = Math.max(grouped.colorValue || 0, row.pressureScore || 0);
-        grouped.custom.created += row.created || 0;
-        grouped.custom.assigned += row.assigned || 0;
-        grouped.custom.open += row.open || 0;
-        grouped.custom.overdue += row.overdue || 0;
-        grouped.custom.reviewNeeded += row.reviewNeeded || 0;
-        grouped.custom.unmapped += row.unmapped || 0;
-        grouped.custom.automationRuns += row.automationRuns || 0;
-        grouped.custom.automationFailures += row.automationFailures || 0;
-        grouped.custom.automationRebounds += row.automationRebounds || 0;
-        grouped.custom.pressureScore += row.pressureScore || 0;
-        grouped.custom.groupedCount += 1;
-        if (grouped.custom.groupedNames.length < 8) grouped.custom.groupedNames.push(row.subcategoryName || row.name);
-        groupedSmallByCategory.set(row.categoryKey, grouped);
-        continue;
+        categoryOnly.value += row.created || 0;
+        categoryOnly.colorValue = Math.max(categoryOnly.colorValue || 0, row.pressureScore || 0);
+        categoryOnly.custom.created += row.created || 0;
+        categoryOnly.custom.assigned += row.assigned || 0;
+        categoryOnly.custom.open += row.open || 0;
+        categoryOnly.custom.overdue += row.overdue || 0;
+        categoryOnly.custom.reviewNeeded += row.reviewNeeded || 0;
+        categoryOnly.custom.unmapped += row.unmapped || 0;
+        categoryOnly.custom.automationRuns += row.automationRuns || 0;
+        categoryOnly.custom.automationFailures += row.automationFailures || 0;
+        categoryOnly.custom.automationRebounds += row.automationRebounds || 0;
+        categoryOnly.custom.pressureScore += row.pressureScore || 0;
+        if (!categoryOnly.custom.agentLeafKeys.includes(row.agentLeafKey)) {
+          categoryOnly.custom.agentLeafKeys.push(row.agentLeafKey);
+        }
+        categoryOnlyByCategory.set(row.categoryKey, categoryOnly);
       }
-      nodes.push({
-        id: row.key,
-        parent: row.categoryKey,
-        name: row.subcategoryName || row.name,
-        value: row.created,
-        colorValue: row.pressureScore,
-        custom: { ...row, nodeType: 'subcategory' },
-      });
+      continue;
     }
+
+    const shouldGroupSmallNode = smallNodeThreshold > 0
+      && (smallChildCounts.get(row.categoryKey) || 0) >= 2
+      && (row.created || 0) > 0
+      && (row.created || 0) < smallNodeThreshold;
+    if (shouldGroupSmallNode) {
+      const groupedKey = `${row.categoryKey}:other-small`;
+      const grouped = groupedSmallByCategory.get(row.categoryKey) || {
+        id: groupedKey,
+        parent: row.categoryKey,
+        name: 'Other subcategories',
+        value: 0,
+        colorValue: 0,
+        custom: {
+          key: groupedKey,
+          categoryKey: row.categoryKey,
+          name: 'Other subcategories',
+          categoryName: row.categoryName,
+          subcategoryName: 'Other subcategories',
+          categoryId: row.categoryId,
+          subcategoryId: null,
+          source: row.source,
+          created: 0,
+          assigned: 0,
+          open: 0,
+          overdue: 0,
+          reviewNeeded: 0,
+          unmapped: 0,
+          automationRuns: 0,
+          automationFailures: 0,
+          automationRebounds: 0,
+          pressureScore: 0,
+          nodeType: 'subcategoryGroup',
+          groupedCount: 0,
+          groupedNames: [],
+        },
+      };
+      grouped.value += row.created || 0;
+      grouped.colorValue = Math.max(grouped.colorValue || 0, row.pressureScore || 0);
+      grouped.custom.created += row.created || 0;
+      grouped.custom.assigned += row.assigned || 0;
+      grouped.custom.open += row.open || 0;
+      grouped.custom.overdue += row.overdue || 0;
+      grouped.custom.reviewNeeded += row.reviewNeeded || 0;
+      grouped.custom.unmapped += row.unmapped || 0;
+      grouped.custom.automationRuns += row.automationRuns || 0;
+      grouped.custom.automationFailures += row.automationFailures || 0;
+      grouped.custom.automationRebounds += row.automationRebounds || 0;
+      grouped.custom.pressureScore += row.pressureScore || 0;
+      grouped.custom.groupedCount += 1;
+      if (grouped.custom.groupedNames.length < 8) grouped.custom.groupedNames.push(row.subcategoryName || row.name);
+      groupedSmallByCategory.set(row.categoryKey, grouped);
+      continue;
+    }
+    nodes.push({
+      id: row.key,
+      parent: row.categoryKey,
+      name: row.subcategoryName || row.name,
+      value: row.created,
+      colorValue: row.pressureScore,
+      custom: { ...row, nodeType: 'subcategory' },
+    });
   }
 
   return [
@@ -693,6 +770,7 @@ function buildCategoryHierarchy(rows, mode) {
       custom: categoryTotals.get(node.id) || node.custom,
     })),
     ...Array.from(groupedSmallByCategory.values()),
+    ...Array.from(categoryOnlyByCategory.values()),
     ...nodes,
   ];
 }
