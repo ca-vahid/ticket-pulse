@@ -826,8 +826,10 @@ export default function Analytics() {
         .filter((row) => !row.parent)
         .reduce((sum, row) => sum + Number(row.custom?.created ?? row.value ?? 0), 0);
     const lensEnabled = Boolean(selectedCategoryAgent);
+    const parentIdsWithChildren = new Set(rows.filter((row) => row.parent).map((row) => row.parent));
     const chartRows = rows.map((row) => {
       const created = Number(row.custom?.created ?? row.value ?? 0);
+      const parentHasChildren = parentIdsWithChildren.has(row.id);
       const agentRow = row.parent
         ? selectedAgentCategoryCounts.leaf.get(row.id)
         : selectedAgentCategoryCounts.top.get(row.id);
@@ -838,6 +840,7 @@ export default function Analytics() {
         : 0;
       return {
         ...row,
+        value: parentHasChildren ? undefined : row.value,
         colorValue: lensEnabled ? agentShareOfNodePct : row.colorValue,
         borderWidth: row.parent && created <= 4 ? 0.75 : row.borderWidth,
         custom: {
@@ -950,7 +953,7 @@ export default function Analytics() {
               const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 112 && shape.height >= 62)));
               const headerStyle = categoryShareHeaderStyle(selectedCategoryAgent ? agentShareOfNodePct : shareValue, Boolean(selectedCategoryAgent));
               const nameStyle = isParent
-                ? `display:block;width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:transparent;border-left:5px solid ${headerStyle.border};padding:1px 6px;font-size:11px;font-weight:800;line-height:13px;`
+                ? `display:flex;width:100%;box-sizing:border-box;align-items:center;gap:3px;overflow:hidden;background:transparent;border-left:5px solid ${headerStyle.border};padding:1px 6px;font-size:11px;font-weight:800;line-height:13px;`
                 : '';
               const metricStyle = showShare
                 ? 'font-size:8px;font-weight:700;color:#334155'
@@ -959,10 +962,13 @@ export default function Analytics() {
                 ? `${formatNumber(agentCreated)} by ${selectedCategoryAgent.name.split(' ')[0]} · ${formatSharePct(agentShareOfNodePct)}`
                 : `${formatNumber(created)} created${showShare ? ` · ${sharePct}` : ''}`;
               if (isParent) {
-                const compactMetric = selectedCategoryAgent
-                  ? `${formatNumber(agentCreated)} - ${formatSharePct(agentShareOfNodePct)}`
-                  : `${formatNumber(created)} - ${sharePct || '0%'}`;
-                return `<span style="${nameStyle}">${name} <span style="font-size:9px;font-weight:800;color:#334155">(${compactMetric})</span></span>`;
+                const pctMetric = selectedCategoryAgent ? formatSharePct(agentShareOfNodePct) : (sharePct || '0%');
+                const compactMetric = shape.width < 96
+                  ? pctMetric
+                  : selectedCategoryAgent
+                    ? `${formatNumber(agentCreated)} - ${pctMetric}`
+                    : `${formatNumber(created)} - ${pctMetric}`;
+                return `<span style="${nameStyle}"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span><span style="flex-shrink:0;white-space:nowrap;font-size:9px;font-weight:800;color:#334155">(${compactMetric})</span></span>`;
               }
               return shape.height >= 44 && created
                 ? `<span style="${nameStyle}">${name}</span><br/><span style="${metricStyle}">${metric}</span>`
