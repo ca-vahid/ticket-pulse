@@ -16,7 +16,7 @@ import logger from '../utils/logger.js';
 export const TOOL_SCHEMAS = [
   {
     name: 'get_ticket_details',
-    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, raw FreshService categories, stored internal category/subcategory classification, taxonomy fit, previous AI category suggestions, and creation timestamps in workspace-local time.',
+    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, FreshService group ID, raw FreshService categories, stored internal category/subcategory classification, taxonomy fit, previous AI category suggestions, and creation timestamps in workspace-local time.',
     input_schema: {
       type: 'object',
       properties: {
@@ -101,7 +101,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'search_tickets',
-    description: 'Search the workspace ticket database. Use this to find similar past tickets, see who resolved them, understand internal category/subcategory patterns, review previous AI category suggestions, and build context for your recommendation. You can search by keyword, raw FreshService category, internal category/subcategory, assigned technician, status, date range, and more. Returns up to 25 results.',
+    description: 'Search the workspace ticket database. Use this to find similar past tickets, see who resolved them, understand group/category/subcategory patterns, review previous AI category suggestions, and build context for your recommendation. You can search by keyword, raw FreshService category, internal category/subcategory, assigned technician, status, date range, and more. Returns up to 25 results with FreshService group IDs when known.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1154,6 +1154,7 @@ async function searchTickets(workspaceId, params) {
       select: {
         id: true,
         freshserviceTicketId: true,
+        groupId: true,
         subject: true,
         status: true,
         priority: true,
@@ -1189,6 +1190,7 @@ async function searchTickets(workspaceId, params) {
     tickets: tickets.map((t) => ({
       id: t.id,
       freshserviceTicketId: Number(t.freshserviceTicketId),
+      groupId: t.groupId ? Number(t.groupId) : null,
       subject: t.subject,
       status: t.status,
       priority: t.priority,
@@ -1239,6 +1241,7 @@ async function getTechTicketHistory(workspaceId, params) {
       select: {
         id: true,
         freshserviceTicketId: true,
+        groupId: true,
         subject: true,
         status: true,
         priority: true,
@@ -1303,6 +1306,7 @@ async function getTechTicketHistory(workspaceId, params) {
     recentTickets: tickets.slice(0, 15).map((t) => ({
       id: t.id,
       freshserviceTicketId: Number(t.freshserviceTicketId),
+      groupId: t.groupId ? Number(t.groupId) : null,
       subject: t.subject,
       status: t.status,
       priority: t.priority,
@@ -1395,6 +1399,7 @@ async function getTicketDetails(ticketId) {
   return {
     id: ticket.id,
     freshserviceTicketId: Number(ticket.freshserviceTicketId),
+    groupId: ticket.groupId ? Number(ticket.groupId) : null,
     subject: ticket.subject,
     description: (ticket.descriptionText || ticket.description || '').slice(0, 5000),
     status: ticket.status,

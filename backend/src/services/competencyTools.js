@@ -237,7 +237,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'get_existing_competency_categories',
-    description: 'Get the active published category/subcategory hierarchy currently defined in this workspace. Reuse existing category/subcategory IDs; do not invent active categories.',
+    description: 'Get the active published category/subcategory hierarchy currently defined in this workspace, plus inactive admin-review suggestions. Reuse active category/subcategory IDs; do not invent active categories. Pending suggestions are review-only context.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -253,7 +253,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'get_technician_ticket_history',
-    description: 'Get recent tickets handled by this technician. Shows canonical category/subcategory, taxonomy fit, legacy Freshservice fields as supporting evidence, priority, subject, dates, self-picked flag, and rejection count.',
+    description: 'Get recent tickets handled by this technician. Shows canonical category/subcategory, taxonomy fit, FreshService group ID, legacy Freshservice fields as supporting evidence, priority, subject, dates, self-picked flag, and rejection count.',
     input_schema: {
       type: 'object',
       properties: {
@@ -276,7 +276,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'get_technician_assignment_signals',
-    description: 'Get assignment-quality evidence for this technician: rejected/reassigned episodes, rebound runs, ticket descriptions, and cached FreshService note/reply snippets. Use this before final assessment to distinguish successful experience from misassignments or uncertain skill fit.',
+    description: 'Get assignment-quality evidence for this technician: rejected/reassigned episodes, rebound runs, FreshService group IDs, ticket descriptions, and cached FreshService note/reply snippets. Use this before final assessment to distinguish successful experience from misassignments or uncertain skill fit.',
     input_schema: {
       type: 'object',
       properties: {
@@ -289,7 +289,7 @@ export const COMPETENCY_TOOL_SCHEMAS = [
   },
   {
     name: 'search_workspace_tickets',
-    description: 'Search tickets across the workspace by keyword, canonical category/subcategory ID, legacy Freshservice category, or technician. Use canonical filters for skill evidence; legacy category is supporting context only.',
+    description: 'Search tickets across the workspace by keyword, canonical category/subcategory ID, legacy Freshservice category, or technician. Returns FreshService group IDs when known. Use canonical filters for skill evidence; legacy category is supporting context only.',
     input_schema: {
       type: 'object',
       properties: {
@@ -416,6 +416,20 @@ async function getExistingCategories(workspaceId) {
     select: { id: true, name: true, description: true, parentId: true, sortOrder: true },
     orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
   });
+  const pendingReviewCategories = await prisma.competencyCategory.findMany({
+    where: { workspaceId, isActive: false, isSystemSuggested: true },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      parentId: true,
+      source: true,
+      createdAt: true,
+      parent: { select: { id: true, name: true, isActive: true } },
+    },
+    orderBy: [{ createdAt: 'desc' }, { name: 'asc' }],
+    take: 50,
+  });
 
   return {
     count: categories.length,
@@ -427,7 +441,20 @@ async function getExistingCategories(workspaceId) {
       levelType: category.parentId ? 'subcategory' : 'category',
     })),
     categoryTree: buildCategoryTree(categories),
-    instruction: 'Use only these active category/subcategory IDs for competency mappings. Prefer exact subcategory IDs for specific repeatable work; use parent-category IDs only for broader/general capability when subcategory evidence is missing or weak. Suggested or legacy category names are taxonomy-review evidence, not active skill IDs.',
+    pendingReviewSuggestions: pendingReviewCategories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      description: category.description,
+      parentId: category.parentId,
+      parentName: category.parent?.name || null,
+      parentIsActive: category.parent?.isActive ?? null,
+      levelType: category.parentId ? 'subcategory' : 'category',
+      displayName: category.parent ? `${category.parent.name} > ${category.name}` : category.name,
+      source: category.source,
+      suggestedAt: category.createdAt?.toISOString?.() || null,
+      usableForSkillMapping: false,
+    })),
+    instruction: 'Use only active category/subcategory IDs for competency mappings. Prefer exact subcategory IDs for specific repeatable work; use parent-category IDs only for broader/general capability when subcategory evidence is missing or weak. pendingReviewSuggestions are inactive admin-review items only: do not map them as active skills, but check them before proposing duplicate create_new suggestions.',
   };
 }
 
@@ -527,7 +554,7 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params = {}
   const tickets = await prisma.ticket.findMany({
     where: { workspaceId, assignedTechId: technicianId, createdAt: { gte: since } },
     select: {
-      id: true, freshserviceTicketId: true, subject: true,
+      id: true, freshserviceTicketId: true, groupId: true, subject: true,
       status: true, priority: true, category: true, subCategory: true,
       ticketCategory: true,
       internalCategory: { select: { id: true, name: true } },
@@ -558,6 +585,7 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params = {}
       const row = {
         id: t.id,
         freshserviceTicketId: Number(t.freshserviceTicketId),
+        groupId: t.groupId ? Number(t.groupId) : null,
         subject: t.subject,
         status: t.status,
         priority: t.priority,
@@ -781,6 +809,7 @@ async function getTechnicianAssignmentSignals(workspaceId, technicianId, params 
     select: {
       id: true,
       freshserviceTicketId: true,
+      groupId: true,
       subject: true,
       descriptionText: true,
       status: true,
@@ -884,6 +913,7 @@ async function getTechnicianAssignmentSignals(workspaceId, technicianId, params 
     const row = {
       id: ticket.id,
       freshserviceTicketId: Number(ticket.freshserviceTicketId),
+      groupId: ticket.groupId ? Number(ticket.groupId) : null,
       subject: ticket.subject,
       descriptionSnippet: cleanSnippet(ticket.descriptionText, 500),
       status: ticket.status,
@@ -1021,7 +1051,7 @@ async function searchWorkspaceTickets(workspaceId, params = {}) {
   const tickets = await prisma.ticket.findMany({
     where,
     select: {
-      id: true, freshserviceTicketId: true, subject: true,
+      id: true, freshserviceTicketId: true, groupId: true, subject: true,
       descriptionText: true,
       status: true, priority: true, category: true, subCategory: true, ticketCategory: true,
       rejectionCount: true,
@@ -1046,6 +1076,7 @@ async function searchWorkspaceTickets(workspaceId, params = {}) {
       const row = {
         id: t.id,
         freshserviceTicketId: Number(t.freshserviceTicketId),
+        groupId: t.groupId ? Number(t.groupId) : null,
         subject: t.subject,
         descriptionSnippet: cleanSnippet(t.descriptionText, 350),
         status: t.status,
