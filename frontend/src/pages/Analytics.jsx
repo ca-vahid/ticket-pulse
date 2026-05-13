@@ -2330,7 +2330,10 @@ export default function Analytics({ view = 'standard' }) {
                   </div>
                 )}
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+              <div className={`mt-3 grid grid-cols-2 gap-2 overflow-y-auto pr-1 [scrollbar-width:thin] sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 ${
+                isCategoryMapPage ? 'max-h-[30rem]' : 'max-h-[19rem]'
+              }`}
+              >
                 <button
                   type="button"
                   onClick={() => setSelectedCategoryAgentId('all')}
@@ -2358,7 +2361,7 @@ export default function Analytics({ view = 'standard' }) {
                     </span>
                   </span>
                 </button>
-                {categoryAgentRows.slice(0, 14).map((agent) => {
+                {categoryAgentRows.map((agent) => {
                   const key = categoryAgentKey(agent);
                   const selected = selectedCategoryAgentId === key;
                   return (
