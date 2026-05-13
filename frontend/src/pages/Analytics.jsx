@@ -63,6 +63,11 @@ const TABS = [
   { id: 'insights', label: 'Insights', Icon: Sparkles },
 ];
 
+const HEADER_CONTROL_LABEL_CLASS = 'mb-1.5 block text-[10px] font-bold uppercase tracking-normal text-slate-500';
+const HEADER_SELECT_CLASS = 'h-10 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none transition-colors hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 sm:w-auto';
+const HEADER_FILTER_CONTROL_CLASS = '[&>button]:h-10 [&>button]:rounded-xl [&>button]:px-3 [&>button]:shadow-sm';
+const HEADER_LEGACY_FILTER_CONTROL_CLASS = '[&>div>button]:h-10 [&>div>button]:rounded-xl [&>div>button]:px-3 [&>div>button]:text-sm [&>div>button]:shadow-sm';
+
 const ASSIGNMENT_MIX_LABELS = {
   appAssigned: {
     label: 'Assigned by Ticket Pulse',
@@ -3307,29 +3312,31 @@ export default function Analytics({ view = 'standard' }) {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-            <Filter className="hidden h-4 w-4 text-slate-400 sm:block" />
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
+            <span className="hidden h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-sm sm:inline-flex">
+              <Filter className="h-4 w-4" />
+            </span>
             <label className="min-w-0">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-normal text-slate-500">Range</span>
-              <select value={range} onChange={(e) => setRange(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
+              <span className={HEADER_CONTROL_LABEL_CLASS}>Range</span>
+              <select value={range} onChange={(e) => setRange(e.target.value)} className={HEADER_SELECT_CLASS}>
                 {RANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             {range === 'custom' && (
               <>
                 <label className="min-w-0">
-                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-normal text-slate-500">From</span>
-                  <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm sm:w-auto" />
+                  <span className={HEADER_CONTROL_LABEL_CLASS}>From</span>
+                  <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className={HEADER_SELECT_CLASS} />
                 </label>
                 <label className="min-w-0">
-                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-normal text-slate-500">To</span>
-                  <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm sm:w-auto" />
+                  <span className={HEADER_CONTROL_LABEL_CLASS}>To</span>
+                  <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className={HEADER_SELECT_CLASS} />
                 </label>
               </>
             )}
             <label className="min-w-0">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-normal text-slate-500">Trend by</span>
-              <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm sm:w-auto">
+              <span className={HEADER_CONTROL_LABEL_CLASS}>Trend by</span>
+              <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className={HEADER_SELECT_CLASS}>
                 {GROUP_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
@@ -3340,6 +3347,7 @@ export default function Analytics({ view = 'standard' }) {
                   selectedCategoryIds={selectedCanonicalCategories.categoryIds || []}
                   selectedSubcategoryIds={selectedCanonicalCategories.subcategoryIds || []}
                   onChange={setSelectedCanonicalCategories}
+                  className={HEADER_FILTER_CONTROL_CLASS}
                 />
               </div>
             ) : (
@@ -3349,11 +3357,11 @@ export default function Analytics({ view = 'standard' }) {
                   selected={selectedLegacyCategories}
                   onChange={setSelectedLegacyCategories}
                   placeholder="Category"
-                  className="w-full"
+                  className={`w-full ${HEADER_LEGACY_FILTER_CONTROL_CLASS}`}
                 />
               </div>
             )}
-            <label className="inline-flex h-9 min-w-0 items-center justify-center gap-2 rounded-lg border border-slate-300 px-2 text-sm text-slate-700 sm:justify-start">
+            <label className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:bg-slate-50 sm:justify-start">
               <input
                 type="checkbox"
                 checked={excludeNoise}
@@ -3361,6 +3369,7 @@ export default function Analytics({ view = 'standard' }) {
                   setExcludeNoise(e.target.checked);
                   setGlobalExcludeNoise(e.target.checked);
                 }}
+                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
               />
               Exclude noise
             </label>
@@ -3368,7 +3377,7 @@ export default function Analytics({ view = 'standard' }) {
               type="button"
               onClick={() => exportAnalyticsWorkbook(payload, activeTab)}
               disabled={loading || error}
-              className="col-span-2 inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50 sm:col-span-1"
+              className="col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 shadow-sm transition-colors hover:bg-blue-100 disabled:opacity-50 sm:col-span-1"
             >
               <Download className="h-4 w-4" />
               Export
