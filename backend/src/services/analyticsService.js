@@ -738,6 +738,7 @@ function buildCategoryHierarchy(rows, mode) {
           automationRebounds: 0,
           pressureScore: 0,
           nodeType: 'subcategoryGroup',
+          agentLeafKeys: [],
           groupedCount: 0,
           groupedNames: [],
         },
@@ -755,6 +756,9 @@ function buildCategoryHierarchy(rows, mode) {
       grouped.custom.automationRebounds += row.automationRebounds || 0;
       grouped.custom.pressureScore += row.pressureScore || 0;
       grouped.custom.groupedCount += 1;
+      if (!grouped.custom.agentLeafKeys.includes(row.agentLeafKey)) {
+        grouped.custom.agentLeafKeys.push(row.agentLeafKey);
+      }
       if (grouped.custom.groupedNames.length < 8) grouped.custom.groupedNames.push(row.subcategoryName || row.name);
       groupedSmallByCategory.set(row.categoryKey, grouped);
       continue;

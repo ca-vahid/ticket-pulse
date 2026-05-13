@@ -1,22 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowLeft,
   BarChart3,
   Calendar,
   CheckCircle2,
   Clock,
   Download,
+  ExternalLink,
   Filter,
   Gauge,
   Info,
   Loader2,
+  Maximize2,
+  Pause,
+  Play,
   RefreshCw,
   ShieldAlert,
+  SkipBack,
+  SkipForward,
   Sparkles,
   Tags,
   Users,
   XCircle,
 } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
 import Highcharts from 'highcharts';
 import 'highcharts/highcharts-more';
 import 'highcharts/modules/treemap';
@@ -155,6 +163,18 @@ function formatSharePct(value) {
 function formatHours(value) {
   if (value === null || value === undefined) return '—';
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
+}
+
+function parseCsvParam(value) {
+  if (!value) return [];
+  return String(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function validOptionValue(value, options, fallback) {
+  return options.some((option) => (option.value ?? option.id) === value) ? value : fallback;
 }
 
 function formatDateTime(value) {
@@ -571,15 +591,23 @@ function exportAnalyticsWorkbook(payload, activeTab) {
   XLSX.writeFile(wb, `ticket-pulse-analytics-${activeTab}-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-export default function Analytics() {
+export default function Analytics({ view = 'standard' }) {
+  const location = useLocation();
+  const initialParams = new URLSearchParams(location.search);
+  const isCategoryMapPage = view === 'category-map';
   const { currentWorkspace } = useWorkspace();
   const isMobile = useMediaQuery('(max-width: 767px)');
-  const [activeTab, setActiveTab] = useState('overview');
-  const [range, setRange] = useState('30d');
-  const [groupBy, setGroupBy] = useState('day');
-  const [excludeNoise, setExcludeNoise] = useState(() => getGlobalExcludeNoise());
-  const [customStart, setCustomStart] = useState('');
-  const [customEnd, setCustomEnd] = useState('');
+  const [activeTab, setActiveTab] = useState(() => {
+    if (isCategoryMapPage) return 'categories';
+    return validOptionValue(initialParams.get('tab'), TABS, 'overview');
+  });
+  const [range, setRange] = useState(() => validOptionValue(initialParams.get('range'), RANGE_OPTIONS, '30d'));
+  const [groupBy, setGroupBy] = useState(() => validOptionValue(initialParams.get('groupBy'), GROUP_OPTIONS, 'day'));
+  const [excludeNoise, setExcludeNoise] = useState(() => (
+    initialParams.has('excludeNoise') ? initialParams.get('excludeNoise') === 'true' : getGlobalExcludeNoise()
+  ));
+  const [customStart, setCustomStart] = useState(() => initialParams.get('start') || '');
+  const [customEnd, setCustomEnd] = useState(() => initialParams.get('end') || '');
   const [teamSearch, setTeamSearch] = useState('');
   const [teamFilter, setTeamFilter] = useState('all');
   const [teamSort, setTeamSort] = useState({ key: 'assigned', direction: 'desc' });
@@ -588,13 +616,23 @@ export default function Analytics() {
   const [showTeamPicker, setShowTeamPicker] = useState(false);
   const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
-  const [selectedCategoryKey, setSelectedCategoryKey] = useState(null);
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState(() => initialParams.get('focus') || null);
   const [hoveredCategory, setHoveredCategory] = useState(null);
   const [mapEffectsEnabled, setMapEffectsEnabled] = useState(true);
-  const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState('all');
+  const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState(() => initialParams.get('agent') || 'all');
+  const [categoryAgentLensMode, setCategoryAgentLensMode] = useState(() => (
+    initialParams.get('lens') === 'portfolio' ? 'portfolio' : 'teamShare'
+  ));
+  const [categoryMapTemporalMode, setCategoryMapTemporalMode] = useState('range');
+  const [categoryMapFrameIndex, setCategoryMapFrameIndex] = useState(null);
+  const [categoryMapPlaying, setCategoryMapPlaying] = useState(false);
+  const [categoryMapColorMode, setCategoryMapColorMode] = useState('pressure');
   const [categoryMetadata, setCategoryMetadata] = useState(null);
-  const [selectedLegacyCategories, setSelectedLegacyCategories] = useState([]);
-  const [selectedCanonicalCategories, setSelectedCanonicalCategories] = useState({ categoryIds: [], subcategoryIds: [] });
+  const [selectedLegacyCategories, setSelectedLegacyCategories] = useState(() => parseCsvParam(initialParams.get('legacyCategories')));
+  const [selectedCanonicalCategories, setSelectedCanonicalCategories] = useState(() => ({
+    categoryIds: parseCsvParam(initialParams.get('categoryIds')),
+    subcategoryIds: parseCsvParam(initialParams.get('subcategoryIds')),
+  }));
   const [payload, setPayload] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -673,7 +711,7 @@ export default function Analytics() {
       setSelectedCategoryKey(null);
       return;
     }
-    if (!selectedCategoryKey || !categoryRows.some((row) => row.key === selectedCategoryKey)) {
+    if (!selectedCategoryKey || !categoryRows.some((row) => row.key === selectedCategoryKey || row.categoryKey === selectedCategoryKey)) {
       setSelectedCategoryKey(categoryRows[0].key);
     }
   }, [payload.categories?.rows, selectedCategoryKey]);
@@ -692,6 +730,119 @@ export default function Analytics() {
   const quality = payload.quality;
   const ops = payload.ops;
   const insights = payload.insights;
+
+  const categoryMapSearch = useMemo(() => {
+    const query = new URLSearchParams();
+    query.set('tab', 'categories');
+    query.set('range', range);
+    query.set('groupBy', groupBy);
+    query.set('excludeNoise', excludeNoise ? 'true' : 'false');
+    if (range === 'custom') {
+      if (customStart) query.set('start', customStart);
+      if (customEnd) query.set('end', customEnd);
+    }
+    if (selectedCanonicalCategories.categoryIds?.length) {
+      query.set('categoryIds', selectedCanonicalCategories.categoryIds.join(','));
+    }
+    if (selectedCanonicalCategories.subcategoryIds?.length) {
+      query.set('subcategoryIds', selectedCanonicalCategories.subcategoryIds.join(','));
+    }
+    if (selectedLegacyCategories.length) query.set('legacyCategories', selectedLegacyCategories.join(','));
+    if (selectedCategoryKey) query.set('focus', selectedCategoryKey);
+    if (selectedCategoryAgentId !== 'all') {
+      query.set('agent', selectedCategoryAgentId);
+      query.set('lens', categoryAgentLensMode);
+    }
+    return query.toString();
+  }, [
+    categoryAgentLensMode,
+    customEnd,
+    customStart,
+    excludeNoise,
+    groupBy,
+    range,
+    selectedCanonicalCategories.categoryIds,
+    selectedCanonicalCategories.subcategoryIds,
+    selectedCategoryAgentId,
+    selectedCategoryKey,
+    selectedLegacyCategories,
+  ]);
+
+  const categoryMapRoute = `/analytics/category-map?${categoryMapSearch}`;
+
+  const categoryTimelinePeriods = useMemo(() => (
+    Array.from(new Set((categories?.trend || []).map((row) => row.period))).sort((a, b) => a.localeCompare(b))
+  ), [categories?.trend]);
+
+  const categoryTimelineStats = useMemo(() => {
+    const leafToCategory = new Map((categories?.rows || []).map((row) => [row.key, row.categoryKey]));
+    const leafByPeriod = new Map();
+    const topByPeriod = new Map();
+    const totalByPeriod = new Map();
+    let maxLeafCount = 0;
+    let maxTopCount = 0;
+
+    for (const row of categories?.trend || []) {
+      const period = row.period;
+      const count = Number(row.count || 0);
+      if (!leafByPeriod.has(period)) leafByPeriod.set(period, new Map());
+      if (!topByPeriod.has(period)) topByPeriod.set(period, new Map());
+      const periodLeaf = leafByPeriod.get(period);
+      const periodTop = topByPeriod.get(period);
+      periodLeaf.set(row.key, (periodLeaf.get(row.key) || 0) + count);
+      const categoryKey = leafToCategory.get(row.key) || row.key;
+      periodTop.set(categoryKey, (periodTop.get(categoryKey) || 0) + count);
+      totalByPeriod.set(period, (totalByPeriod.get(period) || 0) + count);
+      maxLeafCount = Math.max(maxLeafCount, periodLeaf.get(row.key) || 0);
+      maxTopCount = Math.max(maxTopCount, periodTop.get(categoryKey) || 0);
+    }
+
+    return { leafByPeriod, topByPeriod, totalByPeriod, maxLeafCount, maxTopCount };
+  }, [categories?.rows, categories?.trend]);
+
+  const activeCategoryFrameIndex = categoryTimelinePeriods.length
+    ? Math.min(categoryMapFrameIndex ?? categoryTimelinePeriods.length - 1, categoryTimelinePeriods.length - 1)
+    : 0;
+  const activeCategoryPeriod = categoryTimelinePeriods[activeCategoryFrameIndex] || null;
+  const categoryTimelineEnabled = isCategoryMapPage
+    && categoryMapTemporalMode === 'period'
+    && Boolean(activeCategoryPeriod);
+
+  const getCategoryTimelineCount = useCallback((node) => {
+    if (!node || !activeCategoryPeriod) return 0;
+    const leafCounts = categoryTimelineStats.leafByPeriod.get(activeCategoryPeriod) || new Map();
+    const topCounts = categoryTimelineStats.topByPeriod.get(activeCategoryPeriod) || new Map();
+    if (node.nodeType === 'category' || (!node.subcategoryId && node.categoryKey === node.key)) {
+      return topCounts.get(node.categoryKey || node.key) || 0;
+    }
+    if (Array.isArray(node.agentLeafKeys) && node.agentLeafKeys.length) {
+      return node.agentLeafKeys.reduce((sum, key) => sum + (leafCounts.get(key) || 0), 0);
+    }
+    return leafCounts.get(node.key) || 0;
+  }, [activeCategoryPeriod, categoryTimelineStats.leafByPeriod, categoryTimelineStats.topByPeriod]);
+
+  useEffect(() => {
+    if (!categoryTimelinePeriods.length) {
+      setCategoryMapFrameIndex(null);
+      setCategoryMapPlaying(false);
+      return;
+    }
+    setCategoryMapFrameIndex((current) => (
+      current === null ? categoryTimelinePeriods.length - 1 : Math.min(current, categoryTimelinePeriods.length - 1)
+    ));
+  }, [categoryTimelinePeriods.length]);
+
+  useEffect(() => {
+    if (!isCategoryMapPage || !categoryMapPlaying || categoryTimelinePeriods.length <= 1) return undefined;
+    const intervalId = window.setInterval(() => {
+      setCategoryMapTemporalMode('period');
+      setCategoryMapFrameIndex((current) => {
+        const currentIndex = current ?? 0;
+        return currentIndex >= categoryTimelinePeriods.length - 1 ? 0 : currentIndex + 1;
+      });
+    }, 1400);
+    return () => window.clearInterval(intervalId);
+  }, [categoryMapPlaying, categoryTimelinePeriods.length, isCategoryMapPage]);
 
   const teamRows = useMemo(() => {
     let rows = [...(team?.technicians || [])];
@@ -778,6 +929,8 @@ export default function Analytics() {
   const selectedCategoryAgent = useMemo(() => (
     categoryAgentRows.find((agent) => categoryAgentKey(agent) === selectedCategoryAgentId) || null
   ), [categoryAgentRows, selectedCategoryAgentId]);
+  const agentPortfolioLensEnabled = Boolean(selectedCategoryAgent && categoryAgentLensMode === 'portfolio');
+  const mapTimelineEnabled = categoryTimelineEnabled && !agentPortfolioLensEnabled;
 
   const selectedAgentCategoryCounts = useMemo(() => {
     if (!selectedCategoryAgent) return { leaf: new Map(), top: new Map() };
@@ -815,20 +968,45 @@ export default function Analytics() {
           agentSharePct: selectedCategoryAgent && row.created
             ? Number(((agentCount / row.created) * 100).toFixed(1))
             : null,
+          agentPortfolioPct: selectedCategoryAgent?.totalCreated
+            ? Number(((agentCount / selectedCategoryAgent.totalCreated) * 100).toFixed(1))
+            : null,
         };
       });
   }, [categories?.rows, mapFocusCategory, selectedAgentCategoryCounts.leaf, selectedCategoryAgent]);
 
   const categoryHierarchyOptions = useMemo(() => {
     const rows = categories?.hierarchy || [];
-    const totalCreated = Number(categories?.summary?.totalCreated)
+    const rangeTotalCreated = Number(categories?.summary?.totalCreated)
       || rows
         .filter((row) => !row.parent)
         .reduce((sum, row) => sum + Number(row.custom?.created ?? row.value ?? 0), 0);
+    const totalCreated = agentPortfolioLensEnabled
+      ? (selectedCategoryAgent?.totalCreated || 0)
+      : (mapTimelineEnabled
+        ? (categoryTimelineStats.totalByPeriod.get(activeCategoryPeriod) || 0)
+        : rangeTotalCreated);
+    const agentPortfolioColorMax = agentPortfolioLensEnabled
+      ? Math.max(20, Math.ceil(Math.max(
+        ...((selectedCategoryAgent?.topCategories || []).map((row) => (
+          selectedCategoryAgent.totalCreated ? (row.count / selectedCategoryAgent.totalCreated) * 100 : 0
+        ))),
+        0,
+      ) / 5) * 5)
+      : 100;
     const lensEnabled = Boolean(selectedCategoryAgent);
     const parentIdsWithChildren = new Set(rows.filter((row) => row.parent).map((row) => row.parent));
     const chartRows = rows.map((row) => {
-      const created = Number(row.custom?.created ?? row.value ?? 0);
+      const rangeCreated = Number(row.custom?.created ?? row.value ?? 0);
+      const timelineCreated = mapTimelineEnabled
+        ? getCategoryTimelineCount({
+          ...(row.custom || {}),
+          key: row.custom?.key || row.id,
+          categoryKey: row.custom?.categoryKey || row.id,
+          nodeType: row.custom?.nodeType,
+        })
+        : null;
+      const teamCreated = mapTimelineEnabled ? timelineCreated : rangeCreated;
       const parentHasChildren = parentIdsWithChildren.has(row.id);
       const agentLeafKeys = Array.isArray(row.custom?.agentLeafKeys) && row.custom.agentLeafKeys.length > 0
         ? row.custom.agentLeafKeys
@@ -836,24 +1014,44 @@ export default function Analytics() {
       const agentCreated = row.parent
         ? agentLeafKeys.reduce((sum, key) => sum + (selectedAgentCategoryCounts.leaf.get(key)?.count || 0), 0)
         : (selectedAgentCategoryCounts.top.get(row.id)?.count || 0);
-      const agentShareOfNodePct = created > 0 ? Number(((agentCreated / created) * 100).toFixed(1)) : 0;
+      const agentShareDenominator = rangeCreated > 0 ? rangeCreated : teamCreated;
+      const agentShareOfNodePct = agentShareDenominator > 0 ? Number(((agentCreated / agentShareDenominator) * 100).toFixed(1)) : 0;
       const agentPortfolioPct = selectedCategoryAgent?.totalCreated
         ? Number(((agentCreated / selectedCategoryAgent.totalCreated) * 100).toFixed(1))
         : 0;
+      const displayCreated = agentPortfolioLensEnabled ? agentCreated : teamCreated;
+      const colorValue = lensEnabled
+        ? (agentPortfolioLensEnabled ? agentPortfolioPct : agentShareOfNodePct)
+        : categoryMapColorMode === 'demand'
+          ? teamCreated
+          : row.colorValue;
       return {
         ...row,
-        value: parentHasChildren ? undefined : row.value,
-        colorValue: lensEnabled ? agentShareOfNodePct : row.colorValue,
-        borderWidth: row.parent && created <= 4 ? 0.75 : row.borderWidth,
+        value: parentHasChildren ? undefined : displayCreated,
+        colorValue,
+        borderWidth: row.parent && displayCreated <= 4 ? 0.75 : row.borderWidth,
         custom: {
           ...row.custom,
+          created: displayCreated,
+          teamCreated,
+          rangeCreated,
+          periodCreated: mapTimelineEnabled ? teamCreated : null,
+          activePeriod: mapTimelineEnabled ? activeCategoryPeriod : null,
           agentCreated,
           agentShareOfNodePct,
           agentPortfolioPct,
+          agentLensMode: agentPortfolioLensEnabled ? 'portfolio' : 'teamShare',
           selectedAgentName: selectedCategoryAgent?.name || null,
         },
       };
     });
+    const visibleChartRows = agentPortfolioLensEnabled
+      ? chartRows.filter((row) => {
+        const agentCreated = Number(row.custom?.agentCreated || 0);
+        if (row.parent) return agentCreated > 0;
+        return agentCreated > 0 || chartRows.some((child) => child.parent === row.id && Number(child.custom?.agentCreated || 0) > 0);
+      })
+      : chartRows;
     return {
       ...chartBase('treemap'),
       chart: {
@@ -862,15 +1060,23 @@ export default function Analytics() {
       },
       colorAxis: {
         min: 0,
-        max: lensEnabled ? 100 : undefined,
+        max: lensEnabled ? (agentPortfolioLensEnabled ? agentPortfolioColorMax : 100) : undefined,
         stops: lensEnabled
-          ? [
-            [0, '#f8fafc'],
-            [0.18, '#dbeafe'],
-            [0.45, '#93c5fd'],
-            [0.72, '#3b82f6'],
-            [1, '#1d4ed8'],
-          ]
+          ? agentPortfolioLensEnabled
+            ? [
+              [0, '#f8fafc'],
+              [0.16, '#dcfce7'],
+              [0.4, '#bae6fd'],
+              [0.68, '#fde68a'],
+              [1, '#fb7185'],
+            ]
+            : [
+              [0, '#f8fafc'],
+              [0.18, '#dbeafe'],
+              [0.45, '#93c5fd'],
+              [0.72, '#3b82f6'],
+              [1, '#1d4ed8'],
+            ]
           : [
             [0, '#dbeafe'],
             [0.22, '#d1fae5'],
@@ -882,8 +1088,12 @@ export default function Analytics() {
       accessibility: {
         enabled: true,
         description: lensEnabled
-          ? 'Category hierarchy treemap with agent lens enabled. Larger blocks mean more created tickets. Darker blue means the selected agent owns a larger share of that category.'
-          : 'Category hierarchy treemap. Larger blocks mean more created tickets. Warmer colors mean more open, overdue, review-needed, or automation-failure pressure.',
+          ? agentPortfolioLensEnabled
+            ? 'Category hierarchy treemap with personal agent heatmap enabled. Larger and warmer blocks mean a larger share of the selected agent portfolio.'
+            : 'Category hierarchy treemap with team-share agent lens enabled. Larger blocks mean more team created tickets. Darker blue means the selected agent owns a larger share of that category.'
+          : categoryMapColorMode === 'demand'
+            ? 'Category hierarchy treemap. Larger blocks and stronger color mean more created tickets.'
+            : 'Category hierarchy treemap. Larger blocks mean more created tickets. Warmer colors mean more open, overdue, review-needed, or automation-failure pressure.',
       },
       tooltip: { enabled: false },
       breadcrumbs: {
@@ -950,9 +1160,11 @@ export default function Analytics() {
               const sharePct = shareValue > 0 ? formatSharePct(shareValue) : null;
               const agentCreated = Number(this.point.custom?.agentCreated || 0);
               const agentShareOfNodePct = Number(this.point.custom?.agentShareOfNodePct || 0);
+              const agentPortfolioPct = Number(this.point.custom?.agentPortfolioPct || 0);
+              const agentMetricPct = agentPortfolioLensEnabled ? agentPortfolioPct : agentShareOfNodePct;
               const showAgentShare = Boolean(selectedCategoryAgent && (isParent || (shape.width >= 118 && shape.height >= 68)));
               const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 112 && shape.height >= 62)));
-              const headerStyle = categoryShareHeaderStyle(selectedCategoryAgent ? agentShareOfNodePct : shareValue, Boolean(selectedCategoryAgent));
+              const headerStyle = categoryShareHeaderStyle(selectedCategoryAgent ? agentMetricPct : shareValue, Boolean(selectedCategoryAgent));
               const nameStyle = isParent
                 ? `display:flex;width:100%;box-sizing:border-box;align-items:center;gap:3px;overflow:hidden;background:transparent;border-left:5px solid ${headerStyle.border};padding:1px 6px;font-size:11px;font-weight:800;line-height:13px;`
                 : '';
@@ -960,10 +1172,12 @@ export default function Analytics() {
                 ? 'font-size:8px;font-weight:700;color:#334155'
                 : 'font-size:8px;font-weight:600';
               const metric = showAgentShare
-                ? `${formatNumber(agentCreated)} by ${selectedCategoryAgent.name.split(' ')[0]} · ${formatSharePct(agentShareOfNodePct)}`
+                ? agentPortfolioLensEnabled
+                  ? `${formatNumber(agentCreated)} created · ${formatSharePct(agentPortfolioPct)}`
+                  : `${formatNumber(agentCreated)} by ${selectedCategoryAgent.name.split(' ')[0]} · ${formatSharePct(agentShareOfNodePct)}`
                 : `${formatNumber(created)} created${showShare ? ` · ${sharePct}` : ''}`;
               if (isParent) {
-                const pctMetric = selectedCategoryAgent ? formatSharePct(agentShareOfNodePct) : (sharePct || '0%');
+                const pctMetric = selectedCategoryAgent ? formatSharePct(agentMetricPct) : (sharePct || '0%');
                 const compactMetric = shape.width < 96
                   ? pctMetric
                   : selectedCategoryAgent
@@ -1037,16 +1251,26 @@ export default function Analytics() {
       series: [{
         type: 'treemap',
         name: selectedCategoryAgent
-          ? `${selectedCategoryAgent.name} share`
-          : (legacyMode ? 'Legacy categories' : 'All categories'),
-        data: chartRows,
+          ? agentPortfolioLensEnabled
+            ? `${selectedCategoryAgent.name} personal heatmap`
+            : `${selectedCategoryAgent.name} team share`
+          : mapTimelineEnabled
+            ? `${activeCategoryPeriod} created demand`
+            : (legacyMode ? 'Legacy categories' : 'All categories'),
+        data: visibleChartRows,
       }],
     };
   }, [
+    activeCategoryPeriod,
+    agentPortfolioLensEnabled,
     categories?.hierarchy,
     categories?.summary?.totalCreated,
+    categoryMapColorMode,
+    categoryTimelineStats.totalByPeriod,
+    getCategoryTimelineCount,
     legacyMode,
     mapEffectsEnabled,
+    mapTimelineEnabled,
     selectedAgentCategoryCounts.leaf,
     selectedAgentCategoryCounts.top,
     selectedCategoryAgent,
@@ -1820,6 +2044,146 @@ export default function Analytics() {
     </div>
   );
 
+  const renderCategoryMapControls = () => {
+    if (!isCategoryMapPage) return null;
+    const hasFrames = categoryTimelinePeriods.length > 0;
+    const periodTotal = mapTimelineEnabled && activeCategoryPeriod
+      ? (categoryTimelineStats.totalByPeriod.get(activeCategoryPeriod) || 0)
+      : 0;
+    const goToFrame = (nextIndex) => {
+      if (!hasFrames || agentPortfolioLensEnabled) return;
+      setCategoryMapTemporalMode('period');
+      setCategoryMapPlaying(false);
+      setCategoryMapFrameIndex(Math.max(0, Math.min(nextIndex, categoryTimelinePeriods.length - 1)));
+    };
+
+    return (
+      <Panel
+        title="Map Timeline"
+        subtitle={mapTimelineEnabled && activeCategoryPeriod
+          ? `${formatNumber(periodTotal)} tickets created in ${activeCategoryPeriod}.`
+          : agentPortfolioLensEnabled
+            ? `${selectedCategoryAgent.name} personal heatmap uses the selected range.`
+            : 'Full selected range view.'}
+        actions={(
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+              {[
+                ['range', 'Range'],
+                ['period', 'Timeline'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={value === 'period' && agentPortfolioLensEnabled}
+                  onClick={() => {
+                    if (value === 'period' && agentPortfolioLensEnabled) return;
+                    setCategoryMapTemporalMode(value);
+                    if (value === 'range') setCategoryMapPlaying(false);
+                  }}
+                  className={`h-8 rounded-md px-3 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                    categoryMapTemporalMode === value
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+              {[
+                ['pressure', 'Pressure'],
+                ['demand', 'Demand'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setCategoryMapColorMode(value)}
+                  className={`h-8 rounded-md px-3 text-xs font-bold transition ${
+                    categoryMapColorMode === value
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      >
+        <div className="grid gap-3 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => goToFrame(activeCategoryFrameIndex - 1)}
+              disabled={!hasFrames}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              title="Previous period"
+            >
+              <SkipBack className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!hasFrames) return;
+                setCategoryMapTemporalMode('period');
+                setCategoryMapFrameIndex((current) => current ?? 0);
+                setCategoryMapPlaying((playing) => !playing);
+              }}
+              disabled={!hasFrames || agentPortfolioLensEnabled}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-40"
+              title={categoryMapPlaying ? 'Pause timeline' : 'Play timeline'}
+            >
+              {categoryMapPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => goToFrame(activeCategoryFrameIndex + 1)}
+              disabled={!hasFrames}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              title="Next period"
+            >
+              <SkipForward className="h-4 w-4" />
+            </button>
+          </div>
+
+          <label className="min-w-0">
+            <span className="mb-1 flex items-center justify-between gap-3 text-xs font-semibold text-slate-600">
+              <span>{activeCategoryPeriod || 'No period data'}</span>
+              <span>{hasFrames ? `${activeCategoryFrameIndex + 1} / ${categoryTimelinePeriods.length}` : '0 / 0'}</span>
+            </span>
+            <input
+              type="range"
+              min="0"
+              max={Math.max(0, categoryTimelinePeriods.length - 1)}
+              value={activeCategoryFrameIndex}
+              disabled={!hasFrames || agentPortfolioLensEnabled}
+              onChange={(event) => goToFrame(Number(event.target.value))}
+              className="w-full accent-blue-600"
+            />
+          </label>
+
+          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:w-80">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="font-bold text-slate-900">{formatNumber(categories?.summary?.totalCreated || 0)}</p>
+              <p className="font-semibold uppercase tracking-normal text-slate-500">Range</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="font-bold text-slate-900">{agentPortfolioLensEnabled ? '—' : formatNumber(periodTotal)}</p>
+              <p className="font-semibold uppercase tracking-normal text-slate-500">Frame</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="font-bold text-slate-900">{categoryMapColorMode === 'pressure' ? 'Pressure' : 'Demand'}</p>
+              <p className="font-semibold uppercase tracking-normal text-slate-500">Color</p>
+            </div>
+          </div>
+        </div>
+      </Panel>
+    );
+  };
+
   const renderCategories = () => {
     const selectedRows = selectedCategory?.recentTickets || [];
     const mapFocusType = mapFocusCategory?.nodeType === 'category'
@@ -1832,6 +2196,16 @@ export default function Analytics() {
     const mapFocusAutoFailureRate = mapFocusCategory?.automationRuns
       ? (mapFocusCategory.automationFailureRatePct ?? Math.round(((mapFocusCategory.automationFailures || 0) / mapFocusCategory.automationRuns) * 100))
       : 0;
+    const mapFocusCreated = agentPortfolioLensEnabled
+      ? (mapFocusCategory?.agentCreated ?? mapFocusCategory?.created)
+      : (mapTimelineEnabled
+        ? getCategoryTimelineCount(mapFocusCategory)
+        : mapFocusCategory?.created);
+    const mapFocusCreatedLabel = agentPortfolioLensEnabled
+      ? `${firstName(selectedCategoryAgent.name)} created`
+      : (mapTimelineEnabled && activeCategoryPeriod
+        ? `Created (${activeCategoryPeriod})`
+        : 'Created');
 
     return (
       <div className="space-y-4">
@@ -1847,26 +2221,62 @@ export default function Analytics() {
           <StatCard title="Automation Failures" value={formatNumber(categories?.summary?.automationFailures)} subtitle={`${formatNumber(categories?.summary?.automationRuns || 0)} category-linked runs`} icon={RefreshCw} tone={(categories?.summary?.automationFailures || 0) > 0 ? 'red' : 'green'} />
         </div>
 
+        {renderCategoryMapControls()}
+
         <Panel
-          title={legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map'}
-          subtitle="Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures."
+          title={isCategoryMapPage ? 'Category Map Explorer' : (legacyMode ? 'Legacy Category Map' : 'Category / Subcategory Map')}
+          subtitle={agentPortfolioLensEnabled
+            ? `Size and color show ${selectedCategoryAgent.name}'s own category mix in the selected range.`
+            : (mapTimelineEnabled && activeCategoryPeriod
+              ? `Size shows created demand in ${activeCategoryPeriod}. Color follows the selected map mode.`
+              : 'Size shows created demand. Color shows pressure from open backlog, overdue tickets, review-needed flags, and automation failures.')}
           actions={(
-            <div className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm">
-              <span>Live effects</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={mapEffectsEnabled}
-                onClick={() => setMapEffectsEnabled((enabled) => !enabled)}
-                className={`relative h-5 w-9 rounded-full transition ${
-                  mapEffectsEnabled ? 'bg-blue-600' : 'bg-slate-300'
-                }`}
-              >
-                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${
-                  mapEffectsEnabled ? 'left-4' : 'left-0.5'
-                }`}
-                />
-              </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {isCategoryMapPage ? (
+                <Link
+                  to="/analytics?tab=categories"
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Analytics
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    to={categoryMapRoute}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                    Expand
+                  </Link>
+                  <a
+                    href={categoryMapRoute}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    title="Open category map in a new tab"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                </>
+              )}
+              <div className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm">
+                <span>Live effects</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={mapEffectsEnabled}
+                  onClick={() => setMapEffectsEnabled((enabled) => !enabled)}
+                  className={`relative h-5 w-9 rounded-full transition ${
+                    mapEffectsEnabled ? 'bg-blue-600' : 'bg-slate-300'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${
+                    mapEffectsEnabled ? 'left-4' : 'left-0.5'
+                  }`}
+                  />
+                </button>
+              </div>
             </div>
           )}
         >
@@ -1876,17 +2286,48 @@ export default function Analytics() {
                 <div>
                   <p className="text-sm font-bold text-slate-900">Agent Lens</p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    Select an agent to recolor the map by that agent&apos;s share of each category.
+                    {selectedCategoryAgent
+                      ? agentPortfolioLensEnabled
+                        ? `Showing ${firstName(selectedCategoryAgent.name)}'s personal category heatmap.`
+                        : `Showing ${firstName(selectedCategoryAgent.name)}'s share of team category volume.`
+                      : 'Select an agent to recolor the map by that agent\'s share of each category.'}
                   </p>
                 </div>
                 {selectedCategoryAgent && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCategoryAgentId('all')}
-                    className="rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
-                  >
-                    Clear
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                      {[
+                        ['teamShare', 'Team share'],
+                        ['portfolio', 'Personal heatmap'],
+                      ].map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => {
+                            setCategoryAgentLensMode(value);
+                            if (value === 'portfolio') {
+                              setCategoryMapTemporalMode('range');
+                              setCategoryMapPlaying(false);
+                            }
+                          }}
+                          className={`h-8 rounded-md px-3 text-xs font-bold transition ${
+                            categoryAgentLensMode === value
+                              ? 'bg-blue-600 text-white shadow-sm'
+                              : 'text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategoryAgentId('all')}
+                      className="h-8 rounded-md bg-white px-2.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                    >
+                      Clear
+                    </button>
+                  </div>
                 )}
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
@@ -1956,7 +2397,11 @@ export default function Analytics() {
             </div>
             <div className="self-start overflow-hidden rounded-lg border border-slate-200 bg-white p-3 xl:max-h-[16.5rem]">
               <p className="text-sm font-bold text-slate-900">
-                {selectedCategoryAgent ? selectedCategoryAgent.name : 'Team category mix'}
+                {selectedCategoryAgent
+                  ? agentPortfolioLensEnabled
+                    ? `${selectedCategoryAgent.name} heatmap mix`
+                    : `${selectedCategoryAgent.name} team share`
+                  : 'Team category mix'}
               </p>
               <p className="mt-0.5 text-xs text-slate-500">
                 {selectedCategoryAgent
@@ -2000,7 +2445,7 @@ export default function Analytics() {
                 </div>
                 <div className="grid grid-cols-4 gap-2 text-center text-xs sm:grid-cols-6 lg:min-w-[32rem]">
                   {[
-                    ['Created', formatNumber(mapFocusCategory.created)],
+                    [mapFocusCreatedLabel, formatNumber(mapFocusCreated)],
                     ['Open', formatNumber(mapFocusCategory.open || 0)],
                     ['Overdue', formatNumber(mapFocusCategory.overdue || 0)],
                     ['Review', formatNumber(mapFocusCategory.reviewNeeded || 0)],
@@ -2017,7 +2462,7 @@ export default function Analytics() {
             </div>
           )}
           {(categories?.hierarchy || []).length > 0
-            ? <HighchartsBlock options={categoryHierarchyOptions} height={isMobile ? '24rem' : '38rem'} />
+            ? <HighchartsBlock options={categoryHierarchyOptions} height={isCategoryMapPage ? (isMobile ? '34rem' : 'min(72vh, 52rem)') : (isMobile ? '24rem' : '38rem')} />
             : <EmptyState />}
           {supplementalCategoryRows.length > 0 && (
             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -2053,7 +2498,9 @@ export default function Analytics() {
                     </div>
                     {selectedCategoryAgent && (
                       <p className="mt-2 rounded-md bg-slate-50 px-2 py-1 text-xs font-semibold text-blue-700 ring-1 ring-slate-200">
-                        {selectedCategoryAgent.name.split(' ')[0]}: {formatNumber(row.agentCount)} · {formatSharePct(row.agentSharePct || 0)} of this subcategory
+                        {selectedCategoryAgent.name.split(' ')[0]}: {formatNumber(row.agentCount)} · {agentPortfolioLensEnabled
+                          ? `${formatSharePct(row.agentPortfolioPct || 0)} of their tickets`
+                          : `${formatSharePct(row.agentSharePct || 0)} of this subcategory`}
                       </p>
                     )}
                   </button>
@@ -2832,7 +3279,9 @@ export default function Analytics() {
   return (
     <AppShell
       activePage="analytics"
-      contentClassName="max-w-7xl mx-auto w-full px-2 py-3 sm:px-4 sm:py-4"
+      contentClassName={isCategoryMapPage
+        ? 'mx-auto w-full max-w-[1760px] px-2 py-3 sm:px-4 sm:py-4'
+        : 'max-w-7xl mx-auto w-full px-2 py-3 sm:px-4 sm:py-4'}
       extraActions={
         <button
           type="button"
@@ -2847,7 +3296,9 @@ export default function Analytics() {
       <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
-            <h1 className="text-lg font-bold text-slate-900 sm:text-xl">Analytics and Insights</h1>
+            <h1 className="text-lg font-bold text-slate-900 sm:text-xl">
+              {isCategoryMapPage ? 'Category Map Explorer' : 'Analytics and Insights'}
+            </h1>
             <p className="mt-1 break-words text-xs text-slate-500 sm:text-sm">
               {meta ? `${meta.range.start} to ${meta.range.end} ${meta.range.timezone}` : 'Deterministic analytics from local Ticket Pulse data'}
             </p>
@@ -2922,26 +3373,28 @@ export default function Analytics() {
           </div>
         </div>
 
-        <div className="-mx-3 mt-4 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden">
-          {TABS.map(({ id, label, Icon }) => {
-            const isActive = activeTab === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setActiveTab(id)}
-                className={`inline-flex h-9 flex-none items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors ${
-                  isActive
-                    ? 'border-slate-900 bg-slate-900 text-white'
-                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {label}
-              </button>
-            );
-          })}
-        </div>
+        {!isCategoryMapPage && (
+          <div className="-mx-3 mt-4 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden">
+            {TABS.map(({ id, label, Icon }) => {
+              const isActive = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setActiveTab(id)}
+                  className={`inline-flex h-9 flex-none items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors ${
+                    isActive
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {renderActiveTab()}

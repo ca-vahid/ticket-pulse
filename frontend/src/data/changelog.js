@@ -1,6 +1,19 @@
-export const APP_VERSION = '2.3';
+export const APP_VERSION = '2.4';
 
 export const changelog = [
+  {
+    version: '2.4',
+    date: 'May 13, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>Category Map Explorer</strong> promotes the category/subcategory map into a dedicated expanded analytics route with preserved filters, new-tab access, timeline playback, and pressure/demand color modes.' },
+      { type: 'new', html: '<mark>Major</mark> <strong>Agent Portfolio Heatmaps</strong> add a personal lens beside team-share mode so managers can see each agent&apos;s own category mix and hot spots.' },
+      { type: 'improved', html: '<strong>Category map polish</strong> tightens treemap labels, borders, focus metrics, live effects, small-category handling, and agent lens readability.' },
+      { type: 'improved', html: '<strong>Canonical analytics filters</strong> now keep fallback, unmapped, and duplicate parent rows out of the migrated IT treemap while preserving them for quality review.' },
+      { type: 'fixed', html: '<strong>Assignment pickup reliability</strong> improves FreshService pickup handling, workspace-gated category writeback, and classification for assigned tickets missing category data.' },
+      { type: 'security', html: '<strong>Daily Review and competency guardrails</strong> keep IT category suggestions, parent skill inference, and review rules scoped to the intended workspace and subcategory model.' },
+      { type: 'database', html: '<strong>Database-safe release</strong> uses existing analytics and assignment tables; no new database migration is required for the expanded map experience.' },
+    ],
+  },
   {
     version: '2.3',
     date: 'May 10, 2026',

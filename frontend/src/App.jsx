@@ -248,6 +248,15 @@ function App() {
                 />
 
                 <Route
+                  path="/analytics/category-map"
+                  element={
+                    <ProtectedRoute>
+                      <Analytics view="category-map" />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
                   path="/summit-taxonomy"
                   element={
                     <ProtectedRoute>
