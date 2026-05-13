@@ -563,8 +563,9 @@ function finalizeCategoryRow(row, totalCreated = 0) {
 function buildCategoryHierarchy(rows, mode) {
   const visibleRows = rows.filter((row) => (
     (row.created || 0) > 0
-    // Unmapped tickets remain in data-quality totals and insight rows; the treemap is taxonomy-only.
-    && !(mode === 'canonical' && row.source === 'unmapped')
+    // Canonical IT treemap is taxonomy-only. Fallback/unmapped rows stay in data-quality
+    // totals, insights, and row lists, but should not become chart sections for some ranges.
+    && (mode !== 'canonical' || row.source === 'canonical')
   ));
   const canonicalCategoryByName = new Map();
   if (mode === 'canonical') {

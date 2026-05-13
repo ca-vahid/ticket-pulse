@@ -282,7 +282,7 @@ describe('analyticsService pure helpers', () => {
     expect(result.hierarchy.filter((node) => node.id === 'category:10')).toHaveLength(1);
   });
 
-  test('buildCategoryIntelligence does not render standalone canonical fallback categories as leaf parents', () => {
+  test('buildCategoryIntelligence keeps standalone legacy fallback counts out of canonical treemap hierarchy', () => {
     const rangeInfo = parseAnalyticsRange(
       { timezone: 'America/Los_Angeles', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
@@ -310,29 +310,19 @@ describe('analyticsService pure helpers', () => {
       serviceAccountNames: [],
     });
 
-    expect(result.hierarchy.some((node) => node.id === 'category-label:Software & Apps' && !node.parent)).toBe(false);
-    expect(result.hierarchy).toEqual(expect.arrayContaining([
+    expect(result.rows).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: 'legacy-fallback',
-        name: 'Legacy fallback',
-        value: 1,
-        custom: expect.objectContaining({
-          nodeType: 'category',
-        }),
-      }),
-      expect.objectContaining({
-        id: 'category-label:Software & Apps',
-        parent: 'legacy-fallback',
+        key: 'category-label:Software & Apps',
         name: 'Software & Apps',
-        value: 1,
-        custom: expect.objectContaining({
-          nodeType: 'subcategory',
-        }),
+        source: 'legacyFallback',
+        created: 1,
       }),
     ]));
+    expect(result.hierarchy.some((node) => node.id === 'legacy-fallback')).toBe(false);
+    expect(result.hierarchy.some((node) => node.id === 'category-label:Software & Apps')).toBe(false);
   });
 
-  test('buildCategoryIntelligence merges fallback category rows into matching canonical parents', () => {
+  test('buildCategoryIntelligence does not merge legacy fallback rows into canonical treemap parents', () => {
     const rangeInfo = parseAnalyticsRange(
       { timezone: 'America/Los_Angeles', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
@@ -375,15 +365,12 @@ describe('analyticsService pure helpers', () => {
 
     expect(result.hierarchy.filter((node) => node.id === 'category:10')).toHaveLength(1);
     expect(result.hierarchy.some((node) => node.id === 'category-label:Identity')).toBe(false);
-    expect(result.hierarchy).toEqual(expect.arrayContaining([
+    expect(result.hierarchy.some((node) => node.id === 'category:10:no-subcategory')).toBe(false);
+    expect(result.rows).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: 'category:10:no-subcategory',
-        parent: 'category:10',
-        name: 'No subcategory',
-        value: 1,
-        custom: expect.objectContaining({
-          agentLeafKeys: expect.arrayContaining(['category-label:Identity']),
-        }),
+        key: 'category-label:Identity',
+        source: 'legacyFallback',
+        created: 1,
       }),
     ]));
   });
