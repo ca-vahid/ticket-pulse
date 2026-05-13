@@ -620,6 +620,23 @@ class FreshServiceClient {
     }
   }
 
+  async updateTicketGroup(ticketId, groupId) {
+    try {
+      const response = await this._put(`/tickets/${ticketId}`, {
+        ticket: { group_id: Number(groupId) },
+      });
+      return response.data.ticket;
+    } catch (error) {
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error(`Error updating group for ticket ${ticketId}:`, { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
+    }
+  }
+
   async getTicket(ticketId) {
     try {
       const response = await this._fetchWithRetry(`/tickets/${ticketId}?include=stats`);

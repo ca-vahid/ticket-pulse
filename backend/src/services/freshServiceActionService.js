@@ -2,6 +2,10 @@ import { createFreshServiceClient } from '../integrations/freshservice.js';
 import settingsRepository from './settingsRepository.js';
 import prisma from './prisma.js';
 import { shouldCloseNoiseDismissedRun } from './assignmentFlowGuards.js';
+import {
+  freshServiceGroupHasAgent,
+  resolveBroadAssignmentGroup,
+} from './freshServiceGroupGuard.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 
@@ -36,6 +40,21 @@ function recordName(record) {
 
 function recordDisplayId(record) {
   return record?.data?.bo_display_id ?? record?.bo_display_id ?? record?.id ?? null;
+}
+
+function buildActionPreview(actions) {
+  return actions.map((a) => {
+    if (a.type === 'assign') return `Assign ticket #${a.ticketId} to agent ${a.agentId}`;
+    if (a.type === 'update_group') return `Move ticket #${a.ticketId} to group "${a.groupName || a.groupId}"`;
+    if (a.type === 'update_custom_fields') return `Update Ticket Pulse category fields on ticket #${a.ticketId}`;
+    if (a.type === 'close') return `Close ticket #${a.ticketId}`;
+    if (a.type === 'note') return `Add private note to ticket #${a.ticketId}`;
+    return `${a.type} on ticket #${a.ticketId}`;
+  }).join(' → ');
+}
+
+function buildSyncPayload(actions, preview, dryRun, extras = {}) {
+  return { actions, preview, dryRun, timestamp: new Date().toISOString(), ...extras };
 }
 
 class FreshServiceActionService {
@@ -186,15 +205,7 @@ class FreshServiceActionService {
       return { actions: [], preview: `No FreshService action for decision: ${decision}`, error: null };
     }
 
-    const preview = actions.map((a) => {
-      if (a.type === 'assign') return `Assign ticket #${a.ticketId} to agent ${a.agentId}`;
-      if (a.type === 'update_custom_fields') return `Update Ticket Pulse category fields on ticket #${a.ticketId}`;
-      if (a.type === 'close') return `Close ticket #${a.ticketId}`;
-      if (a.type === 'note') return `Add private note to ticket #${a.ticketId}`;
-      return `${a.type} on ticket #${a.ticketId}`;
-    }).join(' → ');
-
-    return { actions, preview, error: null };
+    return { actions, preview: buildActionPreview(actions), error: null };
   }
 
   /**
@@ -233,7 +244,9 @@ class FreshServiceActionService {
       return { success: false, error: 'Run not found' };
     }
 
-    const { actions, preview, error: buildError } = await this.buildAction(run);
+    const actionPlan = await this.buildAction(run);
+    let { actions, preview } = actionPlan;
+    const buildError = actionPlan.error;
 
     if (buildError) {
       await prisma.assignmentPipelineRun.update({
@@ -253,7 +266,7 @@ class FreshServiceActionService {
     }
 
     // Store payload regardless of mode
-    const payloadData = { actions, preview, dryRun, timestamp: new Date().toISOString() };
+    let payloadData = buildSyncPayload(actions, preview, dryRun);
 
     if (dryRun) {
       await prisma.assignmentPipelineRun.update({
@@ -280,36 +293,55 @@ class FreshServiceActionService {
       if (!force) {
         const assignAction = actions.find((a) => a.type === 'assign');
         if (assignAction) {
-          const preflightResult = await this._preflightCheck(client, run, assignAction);
+          const preflightResult = await this._preflightCheck(client, run, assignAction, fsConfig);
           if (preflightResult) {
-            // For auto-assigned runs (no human in the loop yet), downgrade the
-            // decision to pending_review so the run surfaces in Awaiting
-            // Decision instead of being stuck as `auto_assigned + syncStatus=failed`
-            // — which would falsely appear assigned in the dashboard while
-            // FreshService is unchanged. Manually-approved runs keep their
-            // existing decision so the audit trail shows admin intent.
-            const shouldDowngrade = run.decision === 'auto_assigned';
-            const updatePayload = {
-              syncStatus: 'failed',
-              syncError: preflightResult.reason,
-              syncPayload: { ...payloadData, preflightAbort: preflightResult },
-            };
-            if (shouldDowngrade) {
-              updatePayload.decision = 'pending_review';
-              updatePayload.assignedTechId = null;
-              // Clear decidedAt — the pipeline set it when the decision was
-              // auto_assigned (see _executeRun), but we're reverting that
-              // decision now. A pending_review run should always have
-              // decidedAt=null until an admin makes the real call.
-              updatePayload.decidedAt = null;
-              updatePayload.errorMessage = `Auto-assign blocked at FreshService preflight: ${preflightResult.reason}. Downgraded to pending_review for manual handling.`;
+            if (preflightResult.remediation?.type === 'update_group') {
+              const assignIndex = actions.findIndex((action) => action === assignAction);
+              actions = [
+                ...actions.slice(0, assignIndex),
+                preflightResult.remediation,
+                ...actions.slice(assignIndex),
+              ];
+              preview = buildActionPreview(actions);
+              payloadData = buildSyncPayload(actions, preview, dryRun, { preflightRemediation: preflightResult });
+              logger.warn('FreshService sync will broaden ticket group before assignment', {
+                runId,
+                ticketId: assignAction.ticketId,
+                fromGroupId: preflightResult.details?.groupId,
+                fromGroupName: preflightResult.details?.groupName,
+                toGroupId: preflightResult.remediation.groupId,
+                toGroupName: preflightResult.remediation.groupName,
+              });
+            } else {
+              // For auto-assigned runs (no human in the loop yet), downgrade the
+              // decision to pending_review so the run surfaces in Awaiting
+              // Decision instead of being stuck as `auto_assigned + syncStatus=failed`
+              // — which would falsely appear assigned in the dashboard while
+              // FreshService is unchanged. Manually-approved runs keep their
+              // existing decision so the audit trail shows admin intent.
+              const shouldDowngrade = run.decision === 'auto_assigned';
+              const updatePayload = {
+                syncStatus: 'failed',
+                syncError: preflightResult.reason,
+                syncPayload: { ...payloadData, preflightAbort: preflightResult },
+              };
+              if (shouldDowngrade) {
+                updatePayload.decision = 'pending_review';
+                updatePayload.assignedTechId = null;
+                // Clear decidedAt — the pipeline set it when the decision was
+                // auto_assigned (see _executeRun), but we're reverting that
+                // decision now. A pending_review run should always have
+                // decidedAt=null until an admin makes the real call.
+                updatePayload.decidedAt = null;
+                updatePayload.errorMessage = `Auto-assign blocked at FreshService preflight: ${preflightResult.reason}. Downgraded to pending_review for manual handling.`;
+              }
+              await prisma.assignmentPipelineRun.update({
+                where: { id: runId },
+                data: updatePayload,
+              });
+              logger.warn('FreshService sync aborted by preflight', { runId, downgraded: shouldDowngrade, ...preflightResult });
+              return { success: false, error: preflightResult.reason, preflightAbort: preflightResult, preview, downgraded: shouldDowngrade };
             }
-            await prisma.assignmentPipelineRun.update({
-              where: { id: runId },
-              data: updatePayload,
-            });
-            logger.warn('FreshService sync aborted by preflight', { runId, downgraded: shouldDowngrade, ...preflightResult });
-            return { success: false, error: preflightResult.reason, preflightAbort: preflightResult, preview, downgraded: shouldDowngrade };
           }
         }
       }
@@ -327,6 +359,29 @@ class FreshServiceActionService {
           if (result?.alreadyClosed) { ticketGone = true; continue; }
           await this._mirrorLocalAssignment(run, action);
           logger.info('FreshService: ticket assigned', { ticketId: action.ticketId, agentId: action.agentId, runId });
+        } else if (action.type === 'update_group') {
+          const result = await client.updateTicketGroup(action.ticketId, action.groupId);
+          if (result?.alreadyClosed) { ticketGone = true; continue; }
+          await prisma.ticket.update({
+            where: { id: run.ticketId },
+            data: {
+              groupId: BigInt(action.groupId),
+              updatedAt: new Date(),
+            },
+          }).catch((updateError) => {
+            logger.warn('FreshService sync: group updated but local mirror update failed', {
+              ticketId: run.ticketId,
+              freshserviceTicketId: action.ticketId,
+              runId,
+              error: updateError.message,
+            });
+          });
+          logger.info('FreshService: ticket group updated before assignment', {
+            ticketId: action.ticketId,
+            groupId: action.groupId,
+            groupName: action.groupName,
+            runId,
+          });
         } else if (action.type === 'update_custom_fields') {
           const customFields = await this._resolveTicketPulseLookupFields(client, action, fsConfig);
           action.sentCustomFields = customFields;
@@ -475,7 +530,7 @@ class FreshServiceActionService {
    * Pre-validate that the assignment will succeed before making the API call.
    * Returns null if OK, or { code, reason, details } if should abort.
    */
-  async _preflightCheck(client, run, assignAction) {
+  async _preflightCheck(client, run, assignAction, fsConfig = {}) {
     try {
       const fsTicket = await client.getTicket(assignAction.ticketId);
       if (!fsTicket) return null;
@@ -493,27 +548,7 @@ class FreshServiceActionService {
         };
       }
 
-      // Check 2: ticket is in a group — check if target agent belongs to it
-      if (fsTicket.group_id) {
-        const group = await client.getGroup(fsTicket.group_id);
-        // FreshService returns group members under `members` (not `agent_ids`
-        // as Freshdesk does — this check was silently always-true before
-        // v1.9.75 because agent_ids is never populated on /groups responses).
-        // Fall back to agent_ids for defensiveness in case a future API
-        // version or a different FS tier returns the older shape.
-        const memberIds = Array.isArray(group?.members)
-          ? group.members
-          : Array.isArray(group?.agent_ids) ? group.agent_ids : null;
-        if (group && memberIds && !memberIds.includes(Number(assignAction.agentId))) {
-          return {
-            code: 'incompatible_group',
-            reason: `Target agent is not a member of group "${group.name || fsTicket.group_id}"`,
-            details: { groupId: fsTicket.group_id, groupName: group.name },
-          };
-        }
-      }
-
-      // Check 3: agent previously rejected this ticket
+      // Check 2: agent previously rejected this ticket
       if (run.ticket?.id) {
         const rejection = await prisma.ticketAssignmentEpisode.findFirst({
           where: {
@@ -528,6 +563,37 @@ class FreshServiceActionService {
             code: 'already_rejected_by_this_agent',
             reason: `${rejection.technician.name} previously rejected this ticket at ${rejection.endedAt?.toISOString()}`,
             details: { rejectedAt: rejection.endedAt, agentName: rejection.technician.name },
+          };
+        }
+      }
+
+      // Check 3: ticket is in a group — check if target agent belongs to it
+      if (fsTicket.group_id) {
+        const group = await client.getGroup(fsTicket.group_id);
+        if (group && !freshServiceGroupHasAgent(group, assignAction.agentId)) {
+          const broadGroupResult = await resolveBroadAssignmentGroup(client, fsConfig, assignAction.agentId, fsTicket.group_id);
+          const reason = `Target agent is not a member of group "${group.name || fsTicket.group_id}"`;
+          const baseResult = {
+            code: 'incompatible_group',
+            reason,
+            details: { groupId: fsTicket.group_id, groupName: group.name },
+          };
+          if (broadGroupResult.ok) {
+            return {
+              ...baseResult,
+              remediation: {
+                type: 'update_group',
+                ticketId: assignAction.ticketId,
+                groupId: broadGroupResult.group.id,
+                groupName: broadGroupResult.group.name,
+                previousGroupId: Number(fsTicket.group_id),
+                previousGroupName: group.name || null,
+              },
+            };
+          }
+          return {
+            ...baseResult,
+            reason: `${reason}; ${broadGroupResult.reason}`,
           };
         }
       }

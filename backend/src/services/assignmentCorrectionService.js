@@ -2,6 +2,10 @@ import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { convertToTimezone } from '../utils/timezone.js';
 import assignmentRepository from './assignmentRepository.js';
 import settingsRepository from './settingsRepository.js';
+import {
+  freshServiceGroupHasAgent,
+  resolveBroadAssignmentGroup,
+} from './freshServiceGroupGuard.js';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 
@@ -214,14 +218,22 @@ class AssignmentCorrectionService {
       throw new Error(`FreshService ticket is not open/pending (status: ${fsTicket.status})`);
     }
 
+    let groupRemediationAction = null;
     if (fsTicket.group_id) {
       const group = await client.getGroup(fsTicket.group_id);
-      const memberIds = Array.isArray(group?.members)
-        ? group.members
-        : Array.isArray(group?.agent_ids) ? group.agent_ids : null;
-      const normalizedMemberIds = Array.isArray(memberIds) ? memberIds.map((id) => Number(id)) : null;
-      if (group && normalizedMemberIds && !normalizedMemberIds.includes(Number(targetTech.freshserviceId))) {
-        throw new Error(`Target technician is not a member of group "${group.name || fsTicket.group_id}"`);
+      if (group && !freshServiceGroupHasAgent(group, targetTech.freshserviceId)) {
+        const broadGroupResult = await resolveBroadAssignmentGroup(client, fsConfig, targetTech.freshserviceId, fsTicket.group_id);
+        if (!broadGroupResult.ok) {
+          throw new Error(`Target technician is not a member of group "${group.name || fsTicket.group_id}"; ${broadGroupResult.reason}`);
+        }
+        groupRemediationAction = {
+          type: 'update_group',
+          ticketId: fsTicketId,
+          groupId: broadGroupResult.group.id,
+          groupName: broadGroupResult.group.name,
+          previousGroupId: Number(fsTicket.group_id),
+          previousGroupName: group.name || null,
+        };
       }
     }
 
@@ -245,6 +257,9 @@ class AssignmentCorrectionService {
       `<b>Correction ID:</b> ${correction.id}`,
     ].join('');
 
+    if (groupRemediationAction) {
+      await client.updateTicketGroup(fsTicketId, groupRemediationAction.groupId);
+    }
     await client.assignTicket(fsTicketId, Number(targetTech.freshserviceId));
     await client.addPrivateNote(fsTicketId, noteBody);
 
@@ -266,6 +281,7 @@ class AssignmentCorrectionService {
           freshservicePayload: {
             ...(correction.freshservicePayload || {}),
             actions: [
+              ...(groupRemediationAction ? [groupRemediationAction] : []),
               { type: 'assign', ticketId: fsTicketId, agentId: Number(targetTech.freshserviceId) },
               { type: 'note', ticketId: fsTicketId, private: true },
             ],
