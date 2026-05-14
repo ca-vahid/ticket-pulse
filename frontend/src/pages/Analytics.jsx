@@ -182,6 +182,53 @@ function categoryFocusFromPoint(point) {
   };
 }
 
+function findTopCategoryPoint(point) {
+  const series = point?.series;
+  if (!series || series.rootNode) return null;
+
+  if (point.node?.children?.length > 0 && !point.parent) return point;
+
+  const parentId = point.parent || point.node?.parent;
+  const parentPoint = series.points?.find((candidate) => candidate.id === parentId);
+  return parentPoint?.node?.children?.length > 0 ? parentPoint : null;
+}
+
+function resetTreemapCategoryHover(chart) {
+  const hover = chart?.customCategoryHover;
+  const point = hover?.point;
+  if (!point?.graphic || point.graphic.destroyed) {
+    if (chart) chart.customCategoryHover = null;
+    return;
+  }
+
+  point.graphic.attr({
+    stroke: hover.borderColor,
+    'stroke-width': hover.borderWidth,
+  });
+  chart.customCategoryHover = null;
+}
+
+function applyTreemapCategoryHover(point, enabled) {
+  if (!enabled) return;
+
+  const target = findTopCategoryPoint(point);
+  const chart = target?.series?.chart;
+  if (!target?.graphic || !chart || chart.destroyed) return;
+  if (chart.customCategoryHover?.point === target) return;
+
+  resetTreemapCategoryHover(chart);
+
+  chart.customCategoryHover = {
+    point: target,
+    borderColor: target.options?.borderColor || '#334155',
+    borderWidth: target.options?.borderWidth ?? 3,
+  };
+  target.graphic.attr({
+    stroke: '#2563eb',
+    'stroke-width': 5,
+  });
+}
+
 function formatHours(value) {
   if (value === null || value === undefined) return '—';
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
@@ -1253,6 +1300,7 @@ export default function Analytics({ view = 'standard' }) {
                 chart.redraw(false);
               };
 
+              resetTreemapCategoryHover(chart);
               setHoveredCategory(null);
 
               if (typeof window !== 'undefined') {
@@ -1353,13 +1401,16 @@ export default function Analytics({ view = 'standard' }) {
               mouseOver() {
                 const focus = categoryFocusFromPoint(this);
                 if (!focus) return;
+                applyTreemapCategoryHover(this, mapEffectsEnabled);
                 setHoveredCategory((current) => (current?.key === focus.key ? current : focus));
               },
               mouseOut() {
+                resetTreemapCategoryHover(this.series?.chart);
                 const key = this.custom?.key;
                 setHoveredCategory((current) => (current?.key === key ? null : current));
               },
               click() {
+                resetTreemapCategoryHover(this.series?.chart);
                 setHoveredCategory(null);
                 if (this.custom?.key) setSelectedCategoryKey(this.custom.key);
                 const isParent = this.node?.children?.length > 0;
