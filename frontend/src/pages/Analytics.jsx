@@ -660,8 +660,7 @@ export default function Analytics({ view = 'standard' }) {
   const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(() => initialParams.get('focus') || null);
-  const [hoveredCategory, setHoveredCategory] = useState(null);
-  const hoveredCategoryKeyRef = useRef(null);
+  const hoveredCategory = null;
   const [mapEffectsEnabled, setMapEffectsEnabled] = useState(true);
   const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState(() => initialParams.get('agent') || 'all');
   const [categoryAgentLensMode, setCategoryAgentLensMode] = useState(() => (
@@ -759,10 +758,6 @@ export default function Analytics({ view = 'standard' }) {
       setSelectedCategoryKey(categoryRows[0].key);
     }
   }, [payload.categories?.rows, selectedCategoryKey]);
-
-  useEffect(() => {
-    if (!mapEffectsEnabled) setHoveredCategory(null);
-  }, [mapEffectsEnabled]);
 
   const meta = payload.overview?.metadata || payload.demand?.metadata;
   const overview = payload.overview;
@@ -1083,16 +1078,6 @@ export default function Analytics({ view = 'standard' }) {
         color: parentHasChildren ? 'rgba(255,255,255,0.001)' : row.color,
         borderColor: parentHasChildren ? parentBorderColor : row.borderColor,
         borderWidth: parentHasChildren ? 3 : (row.parent && displayCreated <= 4 ? 0.75 : row.borderWidth),
-        states: parentHasChildren
-          ? {
-            hover: {
-              color: 'rgba(14,165,233,0.08)',
-              borderColor: '#0ea5e9',
-              brightness: 0,
-              lineWidthPlus: 1,
-            },
-          }
-          : undefined,
         custom: {
           ...row.custom,
           created: displayCreated,
@@ -1294,37 +1279,6 @@ export default function Analytics({ view = 'standard' }) {
           }],
           point: {
             events: {
-              mouseOver() {
-                if (!mapEffectsEnabled) return;
-                if (this.node?.children?.length > 0 && this.graphic?.attr) {
-                  this.graphic.attr({
-                    stroke: '#0ea5e9',
-                    'stroke-width': 5,
-                  });
-                }
-                const focusKey = this.custom?.key || this.id || this.name;
-                if (!focusKey) return;
-                if (hoveredCategoryKeyRef.current === focusKey) return;
-                hoveredCategoryKeyRef.current = focusKey;
-                setHoveredCategory({
-                  ...(this.custom || {}),
-                  key: this.custom?.key || this.id,
-                  name: this.name || this.custom?.name || 'Category area',
-                  created: this.value ?? this.custom?.created ?? 0,
-                  nodeType: this.custom?.nodeType || (this.node?.children?.length > 0 ? 'category' : 'subcategory'),
-                });
-              },
-              mouseOut() {
-                if (this.node?.children?.length > 0 && this.graphic?.attr) {
-                  const selected = selectedCategoryKey === this.custom?.key;
-                  this.graphic.attr({
-                    stroke: selected ? '#2563eb' : '#334155',
-                    'stroke-width': selected ? 4 : 3,
-                  });
-                }
-                hoveredCategoryKeyRef.current = null;
-                setHoveredCategory(null);
-              },
               click() {
                 if (this.custom?.key) setSelectedCategoryKey(this.custom.key);
                 const isParent = this.node?.children?.length > 0;
