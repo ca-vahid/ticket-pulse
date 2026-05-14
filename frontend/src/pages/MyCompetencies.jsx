@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive, CheckCircle2, Clock3, LogOut, Search, ShieldCheck, UserRound,
   XCircle, Loader2, AlertCircle, BriefcaseBusiness, PlusCircle,
-  X, Send, Sparkles, Undo2,
+  X, Send, Sparkles, Undo2, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { agentAPI } from '../services/api';
@@ -69,6 +69,9 @@ export default function MyCompetencies() {
   const [cancellingRequestId, setCancellingRequestId] = useState(null);
   const [activeTab, setActiveTab] = useState('competencies');
   const [activeSummitTab, setActiveSummitTab] = useState('categories');
+  const [matrixScrollLeft, setMatrixScrollLeft] = useState(0);
+  const [matrixMaxScrollLeft, setMatrixMaxScrollLeft] = useState(0);
+  const matrixScrollRef = useRef(null);
 
   const fetchData = async (targetWorkspaceId = workspaceId) => {
     try {
@@ -159,6 +162,48 @@ export default function MyCompetencies() {
     || Number(user?.workspace?.id) === 1
     || userProfiles.some((profile) => Number(profile?.workspaceId || profile?.workspace?.id) === 1);
   const showSummitTab = userHasItWorkspace || Number(data?.technician?.workspaceId) === 1;
+  const canScrollMatrixLeft = matrixScrollLeft > 2;
+  const canScrollMatrixRight = matrixScrollLeft < matrixMaxScrollLeft - 2;
+  const matrixScrollPercent = matrixMaxScrollLeft > 0 ? (matrixScrollLeft / matrixMaxScrollLeft) * 100 : 0;
+
+  const updateMatrixScrollMetrics = useCallback(() => {
+    const node = matrixScrollRef.current;
+    if (!node) return;
+
+    const nextMaxScrollLeft = Math.max(0, node.scrollWidth - node.clientWidth);
+    setMatrixMaxScrollLeft(nextMaxScrollLeft);
+
+    if (node.scrollLeft > nextMaxScrollLeft) {
+      node.scrollLeft = nextMaxScrollLeft;
+      setMatrixScrollLeft(nextMaxScrollLeft);
+    } else {
+      setMatrixScrollLeft(node.scrollLeft);
+    }
+  }, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(updateMatrixScrollMetrics);
+    window.addEventListener('resize', updateMatrixScrollMetrics);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', updateMatrixScrollMetrics);
+    };
+  }, [activeTab, categories.length, data?.technicians?.length, query, updateMatrixScrollMetrics]);
+
+  const handleMatrixScroll = (event) => {
+    const node = event.currentTarget;
+    setMatrixScrollLeft(node.scrollLeft);
+    setMatrixMaxScrollLeft(Math.max(0, node.scrollWidth - node.clientWidth));
+  };
+
+  const scrollMatrixBy = (direction) => {
+    const node = matrixScrollRef.current;
+    if (!node) return;
+    node.scrollBy({
+      left: direction * Math.max(280, Math.round(node.clientWidth * 0.55)),
+      behavior: 'smooth',
+    });
+  };
 
   useEffect(() => {
     if (!loading && !showSummitTab && activeTab === 'summit') {
@@ -786,8 +831,50 @@ export default function MyCompetencies() {
                 </div>
               </section>
 
-              <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                <div className="overflow-x-auto">
+              <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-slate-100 bg-white/95 px-3 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Skill matrix</div>
+                    <div className="mt-1 max-w-xl truncate text-sm font-medium text-slate-800">
+                      {data.technicians.length} team columns
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="hidden h-1.5 w-28 overflow-hidden rounded-full bg-slate-100 sm:block">
+                      <div
+                        className="h-full rounded-full bg-blue-500 transition-all duration-200"
+                        style={{ width: matrixMaxScrollLeft > 0 ? `${Math.max(8, matrixScrollPercent)}%` : '100%' }}
+                      />
+                    </div>
+                    <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => scrollMatrixBy(-1)}
+                        disabled={!canScrollMatrixLeft}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-white hover:text-blue-700 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-35"
+                        aria-label="Scroll skills matrix left"
+                        title="Scroll left"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => scrollMatrixBy(1)}
+                        disabled={!canScrollMatrixRight}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-white hover:text-blue-700 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-35"
+                        aria-label="Scroll skills matrix right"
+                        title="Scroll right"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  ref={matrixScrollRef}
+                  onScroll={handleMatrixScroll}
+                  className="overflow-x-auto [scrollbar-gutter:stable]"
+                >
                   <table className="min-w-full border-collapse text-sm">
                     <thead className="bg-slate-50">
                       <tr>
