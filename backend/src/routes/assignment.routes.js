@@ -1062,6 +1062,18 @@ router.get('/competency-requests', requireAdmin, asyncHandler(async (req, res) =
   res.json({ success: true, data: items, pendingCount });
 }));
 
+router.post('/competency-requests/groups/:groupId/decision', requireAdmin, asyncHandler(async (req, res) => {
+  const items = await agentCompetencyService.decideCompetencyRequestGroup(
+    req.workspaceId,
+    req.params.groupId,
+    req.body?.decision,
+    req.session?.user?.email,
+    req.body?.decisionNote,
+  );
+  const pendingCount = await agentCompetencyService.getPendingRequestCount(req.workspaceId);
+  res.json({ success: true, data: items, pendingCount });
+}));
+
 router.post('/competency-requests/:id/decision', requireAdmin, asyncHandler(async (req, res) => {
   const items = await agentCompetencyService.decideCompetencyRequest(
     req.workspaceId,

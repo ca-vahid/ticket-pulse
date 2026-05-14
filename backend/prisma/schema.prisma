@@ -874,6 +874,7 @@ model CompetencyChangeRequest {
   requestType          String             @db.VarChar(30) @map("request_type") // add | increase | decrease | remove
   currentLevel         String?            @db.VarChar(20) @map("current_level")
   requestedLevel       String?            @db.VarChar(20) @map("requested_level")
+  requestGroupId       String?            @db.VarChar(64) @map("request_group_id")
   note                 String?            @db.Text
   status               String             @default("pending") @db.VarChar(20) // pending | approved | rejected | auto_applied
   requestedByEmail     String             @db.VarChar(255) @map("requested_by_email")
@@ -886,6 +887,7 @@ model CompetencyChangeRequest {
 
   @@map("competency_change_requests")
   @@index([workspaceId, status])
+  @@index([workspaceId, requestGroupId])
   @@index([technicianId, status])
   @@index([competencyCategoryId])
   @@index([requestedByEmail])

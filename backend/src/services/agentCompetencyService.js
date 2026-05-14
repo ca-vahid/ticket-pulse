@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import prisma from './prisma.js';
 import competencyRepository from './competencyRepository.js';
 import { AuthenticationError, NotFoundError, ValidationError } from '../utils/errors.js';
@@ -10,6 +11,7 @@ export const SELF_SERVICE_LEVEL_ORDER = {
   advanced: 3,
   expert: 4,
 };
+const MAX_BULK_COMPETENCY_REQUESTS = 50;
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
@@ -29,6 +31,33 @@ function requestTypeFor(currentLevel, requestedLevel) {
   if (requestedRank === 0) return 'remove';
   if (requestedRank > currentRank) return 'increase';
   return 'decrease';
+}
+
+function normalizeNote(note) {
+  return String(note || '').trim().slice(0, 2000) || null;
+}
+
+function normalizeBulkChangeItems(items = []) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new ValidationError('requests must include at least one skill');
+  }
+  if (items.length > MAX_BULK_COMPETENCY_REQUESTS) {
+    throw new ValidationError(`Submit ${MAX_BULK_COMPETENCY_REQUESTS} or fewer skills at a time`);
+  }
+
+  const byCategory = new Map();
+  for (const item of items) {
+    const competencyCategoryId = Number(item?.competencyCategoryId);
+    if (!Number.isInteger(competencyCategoryId)) {
+      throw new ValidationError('Each request must include competencyCategoryId');
+    }
+    byCategory.set(competencyCategoryId, {
+      competencyCategoryId,
+      requestedLevel: normalizeLevel(item?.requestedLevel, { allowEmpty: false }),
+    });
+  }
+
+  return Array.from(byCategory.values());
 }
 
 async function getAgentTechnicians(email) {
@@ -184,7 +213,7 @@ export async function submitMyCompetencyChange(email, body = {}) {
   }
 
   const requestType = requestTypeFor(currentLevel, requestedLevel);
-  const note = String(body.note || '').trim().slice(0, 2000) || null;
+  const note = normalizeNote(body.note);
   const requestedByEmail = normalizeEmail(email);
 
   if (requestedRank < currentRank) {
@@ -227,6 +256,7 @@ export async function submitMyCompetencyChange(email, body = {}) {
       requestType,
       currentLevel,
       requestedLevel,
+      requestGroupId: null,
       note,
       status: 'pending',
       requestedByEmail,
@@ -240,6 +270,149 @@ export async function submitMyCompetencyChange(email, body = {}) {
   });
 
   return { changed: true, autoApplied: false, data: await getMyCompetencyMatrix(email, technician.workspaceId) };
+}
+
+export async function submitMyCompetencyChanges(email, body = {}) {
+  const requestedByEmail = normalizeEmail(email);
+  const note = normalizeNote(body.note);
+  const requestedItems = normalizeBulkChangeItems(body.requests);
+  const { technician } = await resolveAgentTechnician(email, body.workspaceId);
+  const requestedCategoryIds = requestedItems.map((item) => item.competencyCategoryId);
+
+  const [categories, currentRows] = await Promise.all([
+    prisma.competencyCategory.findMany({ where: { id: { in: requestedCategoryIds } } }),
+    prisma.technicianCompetency.findMany({
+      where: {
+        technicianId: technician.id,
+        competencyCategoryId: { in: requestedCategoryIds },
+      },
+    }),
+  ]);
+
+  const categoriesById = new Map(categories.map((category) => [category.id, category]));
+  const currentByCategory = new Map(currentRows.map((row) => [row.competencyCategoryId, row]));
+  const topLevelIds = categories.filter((category) => !category.parentId).map((category) => category.id);
+  const childRows = topLevelIds.length
+    ? await prisma.competencyCategory.findMany({
+      where: {
+        workspaceId: technician.workspaceId,
+        parentId: { in: topLevelIds },
+        isActive: true,
+      },
+      select: { parentId: true },
+    })
+    : [];
+  const parentIdsWithChildren = new Set(childRows.map((row) => row.parentId));
+
+  const pendingChanges = [];
+  const autoAppliedChanges = [];
+  const skippedChanges = [];
+
+  for (const item of requestedItems) {
+    const category = categoriesById.get(item.competencyCategoryId);
+    if (!category || category.workspaceId !== technician.workspaceId || !category.isActive) {
+      throw new ValidationError('Select active skills from your workspace');
+    }
+    if (!category.parentId && parentIdsWithChildren.has(category.id)) {
+      throw new ValidationError(`Choose subcategories under ${category.name}`);
+    }
+
+    const current = currentByCategory.get(category.id);
+    const currentLevel = current?.proficiencyLevel || null;
+    const currentRank = SELF_SERVICE_LEVEL_ORDER[currentLevel || ''] || 0;
+    const requestedRank = SELF_SERVICE_LEVEL_ORDER[item.requestedLevel || ''] || 0;
+    if (currentRank === requestedRank) {
+      skippedChanges.push({ competencyCategoryId: category.id, reason: 'same_level' });
+      continue;
+    }
+    if (currentRank > 0 && requestedRank === 0) {
+      throw new ValidationError('You can downgrade a skill to Basic, but you cannot remove it completely');
+    }
+
+    const change = {
+      competencyCategoryId: category.id,
+      requestType: requestTypeFor(currentLevel, item.requestedLevel),
+      currentLevel,
+      requestedLevel: item.requestedLevel,
+    };
+    if (requestedRank < currentRank) autoAppliedChanges.push(change);
+    else pendingChanges.push(change);
+  }
+
+  if (!pendingChanges.length && !autoAppliedChanges.length) {
+    return {
+      changed: false,
+      submittedCount: 0,
+      autoAppliedCount: 0,
+      skippedCount: skippedChanges.length,
+      data: await getMyCompetencyMatrix(email, technician.workspaceId),
+    };
+  }
+
+  const requestGroupId = pendingChanges.length > 1 ? randomUUID() : null;
+
+  await prisma.$transaction(async (tx) => {
+    for (const change of autoAppliedChanges) {
+      await tx.competencyChangeRequest.create({
+        data: {
+          workspaceId: technician.workspaceId,
+          technicianId: technician.id,
+          competencyCategoryId: change.competencyCategoryId,
+          requestType: change.requestType,
+          currentLevel: change.currentLevel,
+          requestedLevel: change.requestedLevel,
+          requestGroupId,
+          note,
+          status: 'auto_applied',
+          requestedByEmail,
+          reviewedByEmail: requestedByEmail,
+          reviewedAt: new Date(),
+          appliedAt: new Date(),
+        },
+      });
+      await applyCompetency(tx, technician.id, technician.workspaceId, change.competencyCategoryId, change.requestedLevel, note);
+    }
+
+    for (const change of pendingChanges) {
+      const existingPending = await tx.competencyChangeRequest.findFirst({
+        where: {
+          technicianId: technician.id,
+          competencyCategoryId: change.competencyCategoryId,
+          status: 'pending',
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const data = {
+        workspaceId: technician.workspaceId,
+        technicianId: technician.id,
+        competencyCategoryId: change.competencyCategoryId,
+        requestType: change.requestType,
+        currentLevel: change.currentLevel,
+        requestedLevel: change.requestedLevel,
+        requestGroupId,
+        note,
+        status: 'pending',
+        requestedByEmail,
+      };
+
+      if (existingPending) {
+        await tx.competencyChangeRequest.update({ where: { id: existingPending.id }, data });
+      } else {
+        await tx.competencyChangeRequest.create({ data });
+      }
+    }
+  });
+
+  return {
+    changed: true,
+    autoApplied: pendingChanges.length === 0,
+    requestGroupId,
+    submittedCount: pendingChanges.length,
+    autoAppliedCount: autoAppliedChanges.length,
+    skippedCount: skippedChanges.length,
+    data: await getMyCompetencyMatrix(email, technician.workspaceId),
+  };
 }
 
 export async function cancelMyCompetencyChange(email, requestId) {
@@ -339,12 +512,64 @@ export async function decideCompetencyRequest(workspaceId, requestId, decision, 
   return listCompetencyRequests(workspaceId, { status: 'pending' });
 }
 
+export async function decideCompetencyRequestGroup(workspaceId, requestGroupId, decision, reviewerEmail, decisionNote = null) {
+  const groupId = String(requestGroupId || '').trim();
+  if (!groupId) throw new ValidationError('requestGroupId is required');
+
+  const normalizedDecision = String(decision || '').toLowerCase();
+  if (!['approved', 'rejected'].includes(normalizedDecision)) {
+    throw new ValidationError('decision must be approved or rejected');
+  }
+
+  const requests = await prisma.competencyChangeRequest.findMany({
+    where: {
+      workspaceId,
+      requestGroupId: groupId,
+      status: 'pending',
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (!requests.length) throw new NotFoundError('Competency request group not found');
+
+  const reviewedByEmail = normalizeEmail(reviewerEmail);
+  const reviewedAt = new Date();
+  await prisma.$transaction(async (tx) => {
+    if (normalizedDecision === 'approved') {
+      for (const request of requests) {
+        await applyCompetency(
+          tx,
+          request.technicianId,
+          request.workspaceId,
+          request.competencyCategoryId,
+          request.requestedLevel,
+          request.note,
+        );
+      }
+    }
+
+    await tx.competencyChangeRequest.updateMany({
+      where: { id: { in: requests.map((request) => request.id) } },
+      data: {
+        status: normalizedDecision,
+        reviewedByEmail,
+        reviewedAt,
+        decisionNote: normalizeNote(decisionNote),
+        appliedAt: normalizedDecision === 'approved' ? reviewedAt : null,
+      },
+    });
+  });
+
+  return listCompetencyRequests(workspaceId, { status: 'pending' });
+}
+
 export default {
   getAgentProfiles,
   getMyCompetencyMatrix,
   submitMyCompetencyChange,
+  submitMyCompetencyChanges,
   cancelMyCompetencyChange,
   listCompetencyRequests,
   getPendingRequestCount,
   decideCompetencyRequest,
+  decideCompetencyRequestGroup,
 };

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2, Clock3, Loader2, RefreshCw, ShieldCheck, XCircle,
 } from 'lucide-react';
@@ -29,6 +29,7 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
   const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState(null);
+  const [actingGroupId, setActingGroupId] = useState(null);
   const [message, setMessage] = useState(null);
 
   const fetchData = useCallback(async () => {
@@ -47,6 +48,29 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const displayGroups = useMemo(() => {
+    const groups = [];
+    const groupMap = new Map();
+    for (const item of items) {
+      const key = item.requestGroupId ? `group:${item.requestGroupId}` : `item:${item.id}`;
+      if (!groupMap.has(key)) {
+        const group = {
+          key,
+          requestGroupId: item.requestGroupId || null,
+          items: [],
+        };
+        groupMap.set(key, group);
+        groups.push(group);
+      }
+      groupMap.get(key).items.push(item);
+    }
+    return groups.map((group) => ({
+      ...group,
+      isBatch: Boolean(group.requestGroupId && group.items.length > 1),
+      note: group.items.find((item) => item.note)?.note || null,
+    }));
+  }, [items]);
+
   const decide = async (request, decision) => {
     setActingId(request.id);
     setMessage(null);
@@ -60,6 +84,28 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
       setMessage({ type: 'error', text: err.message || 'Decision failed' });
     } finally {
       setActingId(null);
+    }
+  };
+
+  const decideGroup = async (group, decision) => {
+    if (!group.requestGroupId) return;
+    setActingGroupId(group.key);
+    setMessage(null);
+    try {
+      const res = await assignmentAPI.decideCompetencyRequestGroup(group.requestGroupId, { decision });
+      setItems(res.data || []);
+      setPendingCount(res.pendingCount || 0);
+      onPendingCountChange?.(res.pendingCount || 0);
+      setMessage({
+        type: 'success',
+        text: decision === 'approved'
+          ? `${group.items.length} competency requests approved and applied.`
+          : `${group.items.length} competency requests rejected.`,
+      });
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Group decision failed' });
+    } finally {
+      setActingGroupId(null);
     }
   };
 
@@ -126,60 +172,100 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
                 </tr>
               </thead>
               <tbody>
-                {items.map((request) => (
-                  <tr key={request.id} className="border-t border-slate-100 hover:bg-slate-50">
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-900">{request.technician?.name}</div>
-                      <div className="text-xs text-slate-500">{request.technician?.email}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
-                      {request.competencyCategory?.parent?.name && (
-                        <div className="text-xs text-slate-500">{request.competencyCategory.parent.name}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-slate-800">
-                        {levelLabel(request.currentLevel)} to {levelLabel(request.requestedLevel)}
-                      </div>
-                      <div className="text-xs text-slate-500">{request.requestType}</div>
-                    </td>
-                    <td className="max-w-xs px-4 py-3 text-slate-600">
-                      <div className="line-clamp-3">{request.note || '-'}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-semibold ${statusClasses(request.status)}`}>
-                        {request.status === 'pending' ? <Clock3 className="h-3 w-3" /> : request.status === 'rejected' ? <XCircle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
-                        {request.status.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {request.status === 'pending' ? (
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => decide(request, 'rejected')}
-                            disabled={actingId === request.id}
-                            className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
-                          >
-                            Reject
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => decide(request, 'approved')}
-                            disabled={actingId === request.id}
-                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                          >
-                            Approve
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="text-right text-xs text-slate-400">
-                          {request.reviewedAt ? new Date(request.reviewedAt).toLocaleString() : '-'}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
+                {displayGroups.map((group) => (
+                  <Fragment key={group.key}>
+                    {group.isBatch && (
+                      <tr className="border-t border-blue-100 bg-blue-50/70">
+                        <td colSpan={6} className="px-4 py-3">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="font-semibold text-blue-950">
+                                Request bundle: {group.items.length} skills from {group.items[0]?.technician?.name}
+                              </div>
+                              <div className="mt-0.5 text-xs text-blue-700">
+                                {group.note || 'No shared note provided.'}
+                              </div>
+                            </div>
+                            {group.items.every((item) => item.status === 'pending') && (
+                              <div className="flex shrink-0 justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => decideGroup(group, 'rejected')}
+                                  disabled={actingGroupId === group.key}
+                                  className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                >
+                                  Reject all
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => decideGroup(group, 'approved')}
+                                  disabled={actingGroupId === group.key}
+                                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                                >
+                                  Approve all
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {group.items.map((request) => (
+                      <tr key={request.id} className={`border-t border-slate-100 hover:bg-slate-50 ${group.isBatch ? 'bg-blue-50/20' : ''}`}>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-900">{request.technician?.name}</div>
+                          <div className="text-xs text-slate-500">{request.technician?.email}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
+                          {request.competencyCategory?.parent?.name && (
+                            <div className="text-xs text-slate-500">{request.competencyCategory.parent.name}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-slate-800">
+                            {levelLabel(request.currentLevel)} to {levelLabel(request.requestedLevel)}
+                          </div>
+                          <div className="text-xs text-slate-500">{request.requestType}</div>
+                        </td>
+                        <td className="max-w-xs px-4 py-3 text-slate-600">
+                          <div className="line-clamp-3">{request.note || '-'}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-semibold ${statusClasses(request.status)}`}>
+                            {request.status === 'pending' ? <Clock3 className="h-3 w-3" /> : request.status === 'rejected' ? <XCircle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
+                            {request.status.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {request.status === 'pending' ? (
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => decide(request, 'rejected')}
+                                disabled={actingId === request.id || actingGroupId === group.key}
+                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                              >
+                                Reject
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => decide(request, 'approved')}
+                                disabled={actingId === request.id || actingGroupId === group.key}
+                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                              >
+                                Approve
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-right text-xs text-slate-400">
+                              {request.reviewedAt ? new Date(request.reviewedAt).toLocaleString() : '-'}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))}
                 {items.length === 0 && (
                   <tr>

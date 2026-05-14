@@ -21,6 +21,14 @@ router.post('/competencies/changes', asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
+router.post('/competencies/changes/bulk', asyncHandler(async (req, res) => {
+  const result = await agentCompetencyService.submitMyCompetencyChanges(
+    req.session?.user?.email,
+    req.body || {},
+  );
+  res.json({ success: true, ...result });
+}));
+
 router.delete('/competencies/changes/:id', asyncHandler(async (req, res) => {
   const result = await agentCompetencyService.cancelMyCompetencyChange(
     req.session?.user?.email,

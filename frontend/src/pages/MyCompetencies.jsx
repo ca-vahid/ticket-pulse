@@ -44,6 +44,10 @@ function formatRequest(request) {
   return `${current} to ${requested}`;
 }
 
+function levelRank(level) {
+  return levelByValue[level || '']?.rank || 0;
+}
+
 export default function MyCompetencies() {
   const { user, logout } = useAuth();
   const [data, setData] = useState(null);
@@ -55,7 +59,12 @@ export default function MyCompetencies() {
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
   const [requestModalOpen, setRequestModalOpen] = useState(false);
-  const [requestForm, setRequestForm] = useState({ categoryId: '', requestedLevel: 'basic', note: '' });
+  const [requestForm, setRequestForm] = useState({
+    parentId: '',
+    requestedLevel: 'basic',
+    note: '',
+    selectedCategoryIds: [],
+  });
   const [highlightCategoryId, setHighlightCategoryId] = useState(null);
   const [cancellingRequestId, setCancellingRequestId] = useState(null);
   const [activeTab, setActiveTab] = useState('summit');
@@ -119,6 +128,28 @@ export default function MyCompetencies() {
   const requestableSkills = useMemo(() => allCategories.filter((category) => (
     category.depth === 1 || !categoryHasChildren[category.id]
   )), [allCategories, categoryHasChildren]);
+  const categoryById = useMemo(() => {
+    const map = {};
+    for (const category of allCategories) map[category.id] = category;
+    return map;
+  }, [allCategories]);
+  const requestGroups = useMemo(() => {
+    const topCategories = allCategories.filter((category) => category.depth === 0);
+    return topCategories.map((category) => ({
+      category,
+      skills: requestableSkills.filter((skill) => Number(skill.parentId || skill.id) === Number(category.id)),
+    })).filter((group) => group.skills.length > 0);
+  }, [allCategories, requestableSkills]);
+  const activeRequestGroup = useMemo(() => (
+    requestGroups.find((group) => String(group.category.id) === String(requestForm.parentId))
+    || requestGroups[0]
+    || null
+  ), [requestForm.parentId, requestGroups]);
+  const selectedRequestSkills = useMemo(() => (
+    (requestForm.selectedCategoryIds || [])
+      .map((id) => categoryById[Number(id)])
+      .filter(Boolean)
+  ), [categoryById, requestForm.selectedCategoryIds]);
 
   const myTechId = data?.technician?.id;
   const myMappedCount = Object.keys(mappingMap[myTechId] || {}).length;
@@ -149,50 +180,60 @@ export default function MyCompetencies() {
   };
 
   const openRequestModal = (category = null, requestedLevel = 'basic') => {
-    const target = category && (category.depth === 1 || !categoryHasChildren[category.id])
-      ? category
-      : requestableSkills.find((candidate) => !category || candidate.parentId === category.id)
-        || requestableSkills[0];
+    const isRequestable = category && (category.depth === 1 || !categoryHasChildren[category.id]);
+    const parentId = isRequestable
+      ? (category.parentId || category.id)
+      : (category?.id || requestGroups[0]?.category?.id || '');
     setRequestForm({
-      categoryId: target ? String(target.id) : '',
+      parentId: parentId ? String(parentId) : '',
       requestedLevel: requestedLevel || 'basic',
       note,
+      selectedCategoryIds: isRequestable ? [Number(category.id)] : [],
     });
     setRequestModalOpen(true);
   };
 
   const submitRequestForm = async (event) => {
     event?.preventDefault();
-    if (!requestForm.categoryId) {
+    const requestedRank = levelRank(requestForm.requestedLevel);
+    const validSelectedIds = (requestForm.selectedCategoryIds || [])
+      .map((id) => Number(id))
+      .filter((id) => {
+        const currentLevel = mappingMap[myTechId]?.[id] || '';
+        return !pendingByCategory[id] && requestedRank > levelRank(currentLevel);
+      });
+
+    if (!validSelectedIds.length) {
       setMessage({
         type: 'warning',
-        title: 'Choose a skill',
-        text: 'Choose a subcategory, or a top-level category that has no subcategories.',
+        title: 'Choose skills',
+        text: 'Select at least one skill where the requested level is higher than your current approved or pending level.',
         autoClose: 5000,
       });
       return;
     }
-    const category = requestableSkills.find((option) => String(option.id) === String(requestForm.categoryId));
-    if (!category) return;
 
-    setSavingCell(category.id);
+    setSavingCell('bulk');
     setMessage(null);
     try {
-      const res = await agentAPI.submitCompetencyChange({
+      const res = await agentAPI.submitCompetencyChangesBulk({
         workspaceId: data.technician.workspaceId,
-        competencyCategoryId: category.id,
-        requestedLevel: requestForm.requestedLevel || null,
+        requests: validSelectedIds.map((competencyCategoryId) => ({
+          competencyCategoryId,
+          requestedLevel: requestForm.requestedLevel || 'basic',
+        })),
         note: requestForm.note,
       });
       setData(res.data);
       setRequestModalOpen(false);
-      flashCategory(category.id);
+      flashCategory(validSelectedIds[0]);
+      const requestCount = res.submittedCount || validSelectedIds.length;
       setMessage({
         type: res.autoApplied ? 'success' : 'info',
-        title: res.autoApplied ? 'Skill updated' : 'Request sent',
+        title: res.autoApplied ? 'Skills updated' : 'Requests sent',
         text: res.autoApplied
-          ? `${category.name} was saved immediately.`
-          : `${category.name} is pending admin approval. It will not become active until approved.`,
+          ? `${validSelectedIds.length} skill update${validSelectedIds.length === 1 ? '' : 's'} saved immediately.`
+          : `${requestCount} skill request${requestCount === 1 ? '' : 's'} sent for admin approval with one shared note.`,
         autoClose: 7000,
       });
     } catch (err) {
@@ -354,15 +395,15 @@ export default function MyCompetencies() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm animate-[fadeIn_.18s_ease-out]">
           <form
             onSubmit={submitRequestForm}
-            className="w-full max-w-lg animate-[popIn_.2s_ease-out] rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+            className="max-h-[92vh] w-full max-w-3xl animate-[popIn_.2s_ease-out] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
               <div>
                 <div className="flex items-center gap-2 text-lg font-semibold text-slate-950">
                   <Sparkles className="h-5 w-5 text-blue-600" />
-                  Request a skill
+                  Request skill upgrades
                 </div>
-                <p className="mt-1 text-sm text-slate-500">Choose a subcategory when available. If a category has no subcategories, request the category itself.</p>
+                <p className="mt-1 text-sm text-slate-500">Select multiple subskills and send them as one approval bundle with one optional note.</p>
               </div>
               <button
                 type="button"
@@ -374,49 +415,152 @@ export default function MyCompetencies() {
               </button>
             </div>
 
-            <label className="mt-5 block text-xs font-semibold uppercase text-slate-500">Skill</label>
-            <select
-              value={requestForm.categoryId}
-              onChange={(event) => setRequestForm((current) => ({ ...current, categoryId: event.target.value }))}
-              className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
-            >
-              {requestableSkills.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.parentName ? `${category.parentName} / ` : ''}{category.name}
-                </option>
-              ))}
-            </select>
-            {requestableSkills.length === 0 && (
-              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                No active skills are available to request in this workspace.
-              </div>
-            )}
+            <div className="grid max-h-[calc(92vh-9rem)] gap-4 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_17rem]">
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
+                  <label className="block">
+                    <span className="block text-xs font-semibold uppercase text-slate-500">Top category</span>
+                    <select
+                      value={activeRequestGroup?.category?.id ? String(activeRequestGroup.category.id) : ''}
+                      onChange={(event) => setRequestForm((current) => ({ ...current, parentId: event.target.value }))}
+                      className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                    >
+                      {requestGroups.map((group) => (
+                        <option key={group.category.id} value={group.category.id}>{group.category.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs font-semibold uppercase text-slate-500">Requested level</span>
+                    <select
+                      value={requestForm.requestedLevel}
+                      onChange={(event) => {
+                        const nextLevel = event.target.value;
+                        const nextRank = levelRank(nextLevel);
+                        setRequestForm((current) => ({
+                          ...current,
+                          requestedLevel: nextLevel,
+                          selectedCategoryIds: (current.selectedCategoryIds || []).filter((id) => {
+                            const currentLevel = mappingMap[myTechId]?.[id] || '';
+                            return !pendingByCategory[id] && nextRank > levelRank(currentLevel);
+                          }),
+                        }));
+                      }}
+                      className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                    >
+                      {LEVELS.filter((level) => level.value).map((level) => (
+                        <option key={level.value} value={level.value}>{level.short} {level.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
 
-            <label className="mt-4 block text-xs font-semibold uppercase text-slate-500">Requested level</label>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {LEVELS.filter((level) => level.value).map((level) => (
-                <button
-                  key={level.value}
-                  type="button"
-                  onClick={() => setRequestForm((current) => ({ ...current, requestedLevel: level.value }))}
-                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                    requestForm.requestedLevel === level.value ? `${level.className} ring-2 ring-blue-200` : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  {level.short} {level.label}
-                </button>
-              ))}
+                <div className="rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
+                    <div className="text-sm font-semibold text-slate-900">{activeRequestGroup?.category?.name || 'Skills'}</div>
+                    <div className="text-xs font-medium text-slate-500">{selectedRequestSkills.length} selected</div>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto p-2">
+                    {(activeRequestGroup?.skills || []).map((skill) => {
+                      const currentLevel = mappingMap[myTechId]?.[skill.id] || '';
+                      const pending = pendingByCategory[skill.id];
+                      const disabled = Boolean(pending) || levelRank(requestForm.requestedLevel) <= levelRank(currentLevel);
+                      const checked = (requestForm.selectedCategoryIds || []).includes(skill.id);
+                      return (
+                        <label
+                          key={skill.id}
+                          className={`flex items-start gap-3 rounded-lg border px-3 py-2 transition ${
+                            disabled ? 'border-slate-100 bg-slate-50 text-slate-400' : checked ? 'border-blue-200 bg-blue-50 text-slate-900' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={disabled}
+                            onChange={(event) => {
+                              const id = skill.id;
+                              setRequestForm((current) => ({
+                                ...current,
+                                selectedCategoryIds: event.target.checked
+                                  ? Array.from(new Set([...(current.selectedCategoryIds || []), id]))
+                                  : (current.selectedCategoryIds || []).filter((selectedId) => selectedId !== id),
+                              }));
+                            }}
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-semibold">{skill.name}</span>
+                            <span className="block text-xs text-slate-500">
+                              {pending
+                                ? `Pending ${levelByValue[pending.requestedLevel || '']?.label || pending.requestedLevel}`
+                                : `Current: ${levelByValue[currentLevel || '']?.label || 'No experience'}`}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {!activeRequestGroup?.skills?.length && (
+                      <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                        No active skills are available to request in this category.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <label className="block">
+                  <span className="block text-xs font-semibold uppercase text-slate-500">Shared note</span>
+                  <textarea
+                    value={requestForm.note}
+                    onChange={(event) => setRequestForm((current) => ({ ...current, note: event.target.value }))}
+                    placeholder="Optional context for the whole request bundle"
+                    className="mt-1 min-h-[82px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+              </div>
+
+              <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-semibold text-slate-900">Request cart</div>
+                  {selectedRequestSkills.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setRequestForm((current) => ({ ...current, selectedCategoryIds: [] }))}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="mt-3 space-y-2">
+                  {selectedRequestSkills.map((skill) => (
+                    <div key={skill.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-900">{skill.name}</div>
+                        <div className="truncate text-xs text-slate-500">{skill.parentName || 'Top-level skill'}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setRequestForm((current) => ({
+                          ...current,
+                          selectedCategoryIds: (current.selectedCategoryIds || []).filter((selectedId) => selectedId !== skill.id),
+                        }))}
+                        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        aria-label={`Remove ${skill.name}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {selectedRequestSkills.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-6 text-center text-sm text-slate-500">
+                      Select one or more skills to build a request.
+                    </div>
+                  )}
+                </div>
+              </aside>
             </div>
 
-            <label className="mt-4 block text-xs font-semibold uppercase text-slate-500">Note</label>
-            <textarea
-              value={requestForm.note}
-              onChange={(event) => setRequestForm((current) => ({ ...current, note: event.target.value }))}
-              placeholder="Optional evidence or context for the admin"
-              className="mt-1 min-h-[82px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
-            />
-
-            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-white p-5 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setRequestModalOpen(false)}
@@ -426,11 +570,13 @@ export default function MyCompetencies() {
               </button>
               <button
                 type="submit"
-                disabled={savingCell !== null}
+                disabled={savingCell !== null || selectedRequestSkills.length === 0}
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
               >
                 {savingCell !== null ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Send request
+                {selectedRequestSkills.length > 0
+                  ? `Send ${selectedRequestSkills.length} request${selectedRequestSkills.length === 1 ? '' : 's'}`
+                  : 'Send requests'}
               </button>
             </div>
           </form>
@@ -617,7 +763,7 @@ export default function MyCompetencies() {
                 <textarea
                   value={note}
                   onChange={(event) => setNote(event.target.value)}
-                  placeholder="Optional note for your next request"
+                  placeholder="Optional note for direct cell changes"
                   className="mt-3 min-h-[48px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
                 />
                 <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">

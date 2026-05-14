@@ -629,6 +629,7 @@ export const assignmentAPI = {
   getCompetencyTools: () => api.get('/assignment/competency-tools'),
   getCompetencyRequests: (params = {}) => api.get('/assignment/competency-requests', { params }),
   decideCompetencyRequest: (id, data) => api.post(`/assignment/competency-requests/${id}/decision`, data),
+  decideCompetencyRequestGroup: (groupId, data) => api.post(`/assignment/competency-requests/groups/${encodeURIComponent(groupId)}/decision`, data),
   detectDuplicateCategories: () => api.get('/assignment/competencies/duplicates'),
   mergeCategories: (data) => api.post('/assignment/competencies/merge', data),
   getSkillDraft: () => api.get('/assignment/skills/draft'),
@@ -680,6 +681,7 @@ export const assignmentAPI = {
 export const agentAPI = {
   getMyCompetencies: (params = {}) => api.get('/agent/competencies', { params }),
   submitCompetencyChange: (data) => api.post('/agent/competencies/changes', data),
+  submitCompetencyChangesBulk: (data) => api.post('/agent/competencies/changes/bulk', data),
   cancelCompetencyChange: (id) => api.delete(`/agent/competencies/changes/${id}`),
   getSummitWorkshop: () => api.get('/agent/summit-2026/workshop'),
   voteSummitCategory: (data) => api.post('/agent/summit-2026/votes', data),
