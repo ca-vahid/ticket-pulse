@@ -18,6 +18,8 @@ const LEVELS = [
 ];
 
 const levelByValue = Object.fromEntries(LEVELS.map((level) => [level.value, level]));
+const MATRIX_CATEGORY_COL_WIDTH = 240;
+const MATRIX_TECH_COL_WIDTH = 82;
 
 function initials(name) {
   return String(name || 'U').split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'U';
@@ -155,6 +157,16 @@ export default function MyCompetencies() {
   ), [categoryById, requestForm.selectedCategoryIds]);
 
   const myTechId = data?.technician?.id;
+  const orderedTechnicians = useMemo(() => {
+    const technicians = data?.technicians || [];
+    if (!myTechId) return technicians;
+    return [...technicians].sort((a, b) => {
+      if (a.id === myTechId) return -1;
+      if (b.id === myTechId) return 1;
+      return 0;
+    });
+  }, [data?.technicians, myTechId]);
+  const teammateCount = Math.max(orderedTechnicians.length - (myTechId ? 1 : 0), 0);
   const myMappedCount = Object.keys(mappingMap[myTechId] || {}).length;
   const pendingCount = (data?.requests || []).filter((request) => request.status === 'pending').length;
   const userProfiles = user?.agentProfiles || (user?.agentProfile ? [user.agentProfile] : []);
@@ -188,7 +200,7 @@ export default function MyCompetencies() {
       window.cancelAnimationFrame(frame);
       window.removeEventListener('resize', updateMatrixScrollMetrics);
     };
-  }, [activeTab, categories.length, data?.technicians?.length, query, updateMatrixScrollMetrics]);
+  }, [activeTab, categories.length, orderedTechnicians.length, query, updateMatrixScrollMetrics]);
 
   const handleMatrixScroll = (event) => {
     const node = event.currentTarget;
@@ -836,7 +848,7 @@ export default function MyCompetencies() {
                   <div className="min-w-0">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Skill matrix</div>
                     <div className="mt-1 max-w-xl truncate text-sm font-medium text-slate-800">
-                      {data.technicians.length} team columns
+                      {myTechId ? `You pinned + ${teammateCount} teammate${teammateCount === 1 ? '' : 's'}` : `${orderedTechnicians.length} team columns`}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -878,14 +890,27 @@ export default function MyCompetencies() {
                   <table className="min-w-full border-collapse text-sm">
                     <thead className="bg-slate-50">
                       <tr>
-                        <th className="sticky left-0 z-20 min-w-[240px] bg-slate-50 px-3 py-3 text-left text-xs font-semibold uppercase text-slate-500">Category / subcategory</th>
-                        {data.technicians.map((tech) => {
+                        <th
+                          className="sticky left-0 z-40 bg-slate-50 px-3 py-3 text-left text-xs font-semibold uppercase text-slate-500 shadow-[1px_0_0_rgba(226,232,240,0.9)]"
+                          style={{ width: MATRIX_CATEGORY_COL_WIDTH, minWidth: MATRIX_CATEGORY_COL_WIDTH }}
+                        >
+                          Category / subcategory
+                        </th>
+                        {orderedTechnicians.map((tech) => {
                           const isMe = tech.id === myTechId;
                           return (
-                            <th key={tech.id} className={`min-w-[74px] px-2 py-2 text-center ${isMe ? 'bg-blue-50' : ''}`}>
+                            <th
+                              key={tech.id}
+                              className={`px-2 py-2 text-center ${isMe ? 'sticky z-30 border-x border-blue-200 bg-blue-50 shadow-[0_0_0_1px_rgba(59,130,246,0.16),0_8px_20px_rgba(37,99,235,0.08)]' : ''}`}
+                              style={{
+                                width: MATRIX_TECH_COL_WIDTH,
+                                minWidth: MATRIX_TECH_COL_WIDTH,
+                                ...(isMe ? { left: MATRIX_CATEGORY_COL_WIDTH } : {}),
+                              }}
+                            >
                               <div className="flex flex-col items-center gap-1">
                                 {tech.photoUrl ? (
-                                  <img src={tech.photoUrl} alt="" className={`h-8 w-8 rounded-full object-cover ${isMe ? 'ring-2 ring-blue-500' : ''}`} />
+                                  <img src={tech.photoUrl} alt="" className={`h-8 w-8 rounded-full object-cover ${isMe ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-blue-50' : ''}`} />
                                 ) : (
                                   <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white ring-2 ring-blue-200' : 'bg-slate-200 text-slate-500'}`}>
                                     {initials(tech.name)}
@@ -906,7 +931,10 @@ export default function MyCompetencies() {
                         const isHighlighted = highlightCategoryId === category.id;
                         return (
                           <tr key={category.id} className={`border-t border-slate-100 transition-colors duration-300 ${isHighlighted ? 'animate-[pulseOnce_1.8s_ease-out]' : ''} ${category.depth === 0 ? 'bg-slate-50/70' : 'hover:bg-slate-50'}`}>
-                            <td className={`sticky left-0 z-10 px-3 py-2 transition-colors duration-300 ${isHighlighted ? 'bg-blue-50' : category.depth === 0 ? 'bg-slate-50' : 'bg-white'} ${category.depth === 0 ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
+                            <td
+                              className={`sticky left-0 z-30 px-3 py-2 shadow-[1px_0_0_rgba(226,232,240,0.9)] transition-colors duration-300 ${isHighlighted ? 'bg-blue-50' : category.depth === 0 ? 'bg-slate-50' : 'bg-white'} ${category.depth === 0 ? 'font-semibold text-slate-800' : 'text-slate-700'}`}
+                              style={{ width: MATRIX_CATEGORY_COL_WIDTH, minWidth: MATRIX_CATEGORY_COL_WIDTH }}
+                            >
                               <div className="flex items-center gap-2">
                                 {category.depth === 1 && <span className="ml-3 h-px w-4 bg-slate-300" />}
                                 <span>{category.name}</span>
@@ -914,12 +942,21 @@ export default function MyCompetencies() {
                                 {pending && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">pending</span>}
                               </div>
                             </td>
-                            {data.technicians.map((tech) => {
+                            {orderedTechnicians.map((tech) => {
                               const isMe = tech.id === myTechId;
                               const level = mappingMap[tech.id]?.[category.id] || '';
                               const levelInfo = levelByValue[level] || levelByValue[''];
+                              const myCellTone = isHighlighted ? 'bg-blue-100/95' : category.depth === 0 ? 'bg-blue-50/95' : 'bg-blue-50/75';
                               return (
-                                <td key={tech.id} className={`px-1 py-1 text-center transition-colors duration-300 ${isHighlighted && isMe ? 'bg-blue-100/80' : isMe ? 'bg-blue-50/50' : ''}`}>
+                                <td
+                                  key={tech.id}
+                                  className={`px-1 py-1 text-center transition-colors duration-300 ${isMe ? `sticky z-20 border-x border-blue-100 shadow-[0_0_0_1px_rgba(59,130,246,0.12)] ${myCellTone}` : ''}`}
+                                  style={{
+                                    width: MATRIX_TECH_COL_WIDTH,
+                                    minWidth: MATRIX_TECH_COL_WIDTH,
+                                    ...(isMe ? { left: MATRIX_CATEGORY_COL_WIDTH } : {}),
+                                  }}
+                                >
                                   {isMe ? (
                                     <select
                                       value={pending?.requestedLevel ?? level}
@@ -951,7 +988,7 @@ export default function MyCompetencies() {
                       })}
                       {categories.length === 0 && (
                         <tr>
-                          <td colSpan={(data.technicians?.length || 0) + 1} className="px-4 py-10 text-center text-sm text-slate-400">
+                          <td colSpan={orderedTechnicians.length + 1} className="px-4 py-10 text-center text-sm text-slate-400">
                           No matching categories.
                           </td>
                         </tr>
