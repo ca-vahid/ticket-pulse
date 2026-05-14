@@ -174,6 +174,14 @@ function escapeChartText(value) {
     .replace(/'/g, '&#39;');
 }
 
+function categoryFocusFromPoint(point) {
+  if (!point?.custom?.key) return null;
+  return {
+    ...point.custom,
+    name: point.name || point.custom.name,
+  };
+}
+
 function formatHours(value) {
   if (value === null || value === undefined) return '—';
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
@@ -596,6 +604,7 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
 
 function HighchartsBlock({ options, height = '24rem', stabilizeLayout = false }) {
   const chartRef = useRef(null);
+  const containerProps = useMemo(() => ({ style: { height: '100%', width: '100%' } }), []);
 
   useLayoutEffect(() => {
     if (!stabilizeLayout || typeof window === 'undefined') return undefined;
@@ -645,7 +654,7 @@ function HighchartsBlock({ options, height = '24rem', stabilizeLayout = false })
         ref={chartRef}
         highcharts={Highcharts}
         options={options}
-        containerProps={{ style: { height: '100%', width: '100%' } }}
+        containerProps={containerProps}
       />
     </div>
   );
@@ -705,7 +714,7 @@ export default function Analytics({ view = 'standard' }) {
   const [showAgentDetails, setShowAgentDetails] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(() => initialParams.get('focus') || null);
-  const hoveredCategory = null;
+  const [hoveredCategory, setHoveredCategory] = useState(null);
   const [mapEffectsEnabled, setMapEffectsEnabled] = useState(true);
   const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState(() => initialParams.get('agent') || 'all');
   const [categoryAgentLensMode, setCategoryAgentLensMode] = useState(() => (
@@ -1241,6 +1250,25 @@ export default function Analytics({ view = 'standard' }) {
               opacity: 1,
             },
           },
+          events: {
+            setRootNode() {
+              const chart = this.chart;
+              const settleAfterRootChange = () => {
+                if (chart?.destroyed) return;
+                chart.reflow();
+                chart.redraw(false);
+              };
+
+              setHoveredCategory(null);
+
+              if (typeof window !== 'undefined') {
+                window.requestAnimationFrame(() => {
+                  window.requestAnimationFrame(settleAfterRootChange);
+                });
+                window.setTimeout(settleAfterRootChange, 180);
+              }
+            },
+          },
           dataLabels: {
             enabled: true,
             useHTML: false,
@@ -1324,7 +1352,17 @@ export default function Analytics({ view = 'standard' }) {
           }],
           point: {
             events: {
+              mouseOver() {
+                const focus = categoryFocusFromPoint(this);
+                if (!focus) return;
+                setHoveredCategory((current) => (current?.key === focus.key ? current : focus));
+              },
+              mouseOut() {
+                const key = this.custom?.key;
+                setHoveredCategory((current) => (current?.key === key ? null : current));
+              },
               click() {
+                setHoveredCategory(null);
                 if (this.custom?.key) setSelectedCategoryKey(this.custom.key);
                 const isParent = this.node?.children?.length > 0;
                 if (isParent && this.series?.setRootNode && this.id && this.series.rootNode !== this.id) {
