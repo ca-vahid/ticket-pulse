@@ -201,10 +201,13 @@ function resetTreemapCategoryHover(chart) {
     return;
   }
 
-  point.graphic.attr({
-    stroke: hover.borderColor,
-    'stroke-width': hover.borderWidth,
-  });
+  point.graphic.animate(
+    {
+      stroke: hover.borderColor,
+      'stroke-width': hover.borderWidth,
+    },
+    { duration: 220, easing: 'easeInOutSine' },
+  );
   chart.customCategoryHover = null;
 }
 
@@ -223,10 +226,13 @@ function applyTreemapCategoryHover(point, enabled) {
     borderColor: target.options?.borderColor || '#334155',
     borderWidth: target.options?.borderWidth ?? 3,
   };
-  target.graphic.attr({
-    stroke: '#2563eb',
-    'stroke-width': 5,
-  });
+  target.graphic.animate(
+    {
+      stroke: '#2563eb',
+      'stroke-width': 5,
+    },
+    { duration: 220, easing: 'easeInOutSine' },
+  );
 }
 
 function formatHours(value) {
@@ -1141,6 +1147,9 @@ export default function Analytics({ view = 'standard' }) {
     const leafMetricFontSize = Math.round(8 * labelScale);
     const headerFontSize = Math.round(10 * labelScale);
     const headerLineHeight = Math.round(12 * labelScale);
+    const treemapAnimation = mapEffectsEnabled
+      ? { duration: 650, easing: 'easeInOutSine' }
+      : false;
     const parentIdsWithChildren = new Set(rows.filter((row) => row.parent).map((row) => row.parent));
     const chartRows = rows.map((row) => {
       const rangeCreated = Number(row.custom?.created ?? row.value ?? 0);
@@ -1205,7 +1214,7 @@ export default function Analytics({ view = 'standard' }) {
       ...chartBase('treemap'),
       chart: {
         ...chartBase('treemap').chart,
-        animation: mapEffectsEnabled ? { duration: 450 } : false,
+        animation: treemapAnimation,
       },
       colorAxis: {
         min: 0,
@@ -1271,8 +1280,8 @@ export default function Analytics({ view = 'standard' }) {
           interactByLeaf: false,
           levelIsConstant: true,
           nodeSizeBy: 'leaf',
-          animation: mapEffectsEnabled ? { duration: 450 } : false,
-          animationLimit: mapEffectsEnabled ? 1000 : 0,
+          animation: treemapAnimation,
+          animationLimit: mapEffectsEnabled ? Number.MAX_SAFE_INTEGER : 0,
           layoutAlgorithm: 'squarified',
           cluster: { enabled: false },
           borderRadius: 3,
@@ -1314,6 +1323,7 @@ export default function Analytics({ view = 'standard' }) {
           dataLabels: {
             enabled: true,
             useHTML: false,
+            animation: treemapAnimation,
             allowOverlap: false,
             crop: true,
             overflow: 'none',
