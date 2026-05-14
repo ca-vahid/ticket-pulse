@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  CheckCircle2, Clock3, LogOut, Search, ShieldCheck, UserRound,
+  Archive, CheckCircle2, Clock3, LogOut, Search, ShieldCheck, UserRound,
   XCircle, Loader2, AlertCircle, BriefcaseBusiness, PlusCircle,
   X, Send, Sparkles, Undo2,
 } from 'lucide-react';
@@ -67,8 +67,8 @@ export default function MyCompetencies() {
   });
   const [highlightCategoryId, setHighlightCategoryId] = useState(null);
   const [cancellingRequestId, setCancellingRequestId] = useState(null);
-  const [activeTab, setActiveTab] = useState('summit');
-  const [activeSummitTab, setActiveSummitTab] = useState('feedback');
+  const [activeTab, setActiveTab] = useState('competencies');
+  const [activeSummitTab, setActiveSummitTab] = useState('categories');
 
   const fetchData = async (targetWorkspaceId = workspaceId) => {
     try {
@@ -590,7 +590,7 @@ export default function MyCompetencies() {
             <div className="hidden h-8 w-px bg-slate-200 sm:block" />
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-slate-900">My Competencies</div>
-              <div className="truncate text-xs text-slate-500">Review your skills and participate in IT Summit 2026.</div>
+              <div className="truncate text-xs text-slate-500">Review your skills and request competency updates.</div>
             </div>
           </div>
           <button
@@ -610,16 +610,6 @@ export default function MyCompetencies() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setActiveTab('summit')}
-                className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                  activeTab === 'summit' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                <Sparkles className="h-4 w-4" />
-                IT Summit 2026
-              </button>
-              <button
-                type="button"
                 onClick={() => setActiveTab('competencies')}
                 className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
                   activeTab === 'competencies' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -628,6 +618,21 @@ export default function MyCompetencies() {
                 <ShieldCheck className="h-4 w-4" />
                 My Competencies
               </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('summit')}
+                className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                  activeTab === 'summit' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <Archive className="h-4 w-4" />
+                IT Summit 2026
+                <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                  activeTab === 'summit' ? 'bg-white/15 text-white' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  Archived
+                </span>
+              </button>
             </div>
           </section>
         )}
@@ -635,33 +640,42 @@ export default function MyCompetencies() {
         {activeTab === 'summit' && showSummitTab && (
           <div className="space-y-4">
             <section className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveSummitTab('feedback')}
-                  className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                    activeSummitTab === 'feedback' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  <Sparkles className="h-4 w-4" />
-                  What Works / Needs Attention
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveSummitTab('categories')}
-                  className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                    activeSummitTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  <PlusCircle className="h-4 w-4" />
-                  Categories & Skills
-                </button>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSummitTab('categories')}
+                    className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                      activeSummitTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <PlusCircle className="h-4 w-4" />
+                    Categories & Skills
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSummitTab('feedback')}
+                    className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                      activeSummitTab === 'feedback' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    What Works / Needs Attention
+                  </button>
+                </div>
+                <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                  <Archive className="h-4 w-4" />
+                  Archived read-only
+                </div>
               </div>
             </section>
-            {activeSummitTab === 'feedback' ? (
-              <ItSummitFeedbackPanel mode="participant" />
-            ) : (
+            <section className="rounded-xl border border-slate-200 bg-white/95 px-4 py-3 text-sm text-slate-600 shadow-sm">
+              IT Summit 2026 is archived. Results remain available for reference, but voting, comments, and new submissions are closed.
+            </section>
+            {activeSummitTab === 'categories' ? (
               <ItSummitCategoriesPanel />
+            ) : (
+              <ItSummitFeedbackPanel mode="participant" readOnly />
             )}
           </div>
         )}

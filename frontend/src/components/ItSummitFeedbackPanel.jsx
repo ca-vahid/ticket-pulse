@@ -3,7 +3,7 @@ import {
   Edit3,
   AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare,
   Plus, RotateCcw, Send, Sparkles, ThumbsUp, Trash2, X,
-  BarChart3, MessageCircle, Trophy, UsersRound,
+  BarChart3, Lock, MessageCircle, Trophy, UsersRound,
 } from 'lucide-react';
 import { agentAPI, summitAPI } from '../services/api';
 
@@ -389,7 +389,7 @@ function FeedbackCard({
   );
 }
 
-export default function ItSummitFeedbackPanel({ mode = 'participant', initialFeedback = null, token = null, participantKey = null, onFeedbackChange = null }) {
+export default function ItSummitFeedbackPanel({ mode = 'participant', initialFeedback = null, token = null, participantKey = null, onFeedbackChange = null, readOnly = false }) {
   const isFacilitator = mode === 'facilitator';
   const isPublic = mode === 'public';
   const darkMode = isPublic;
@@ -556,6 +556,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
 
   const submitItem = async (event) => {
     event.preventDefault();
+    if (readOnly) return;
     if (!title.trim()) return;
     setSaving(true);
     setError('');
@@ -582,6 +583,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
   };
 
   const voteItem = async (item) => {
+    if (readOnly) return;
     const nextActive = !item.isSupportedByMe;
     const res = isPublic
       ? await summitAPI.votePublicFeedback(token, item.itemId, { active: nextActive, participantKey })
@@ -594,6 +596,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
   };
 
   const commentItem = async (item, text) => {
+    if (readOnly) return;
     const res = isPublic
       ? await summitAPI.commentPublicFeedback(token, item.itemId, { text, participantKey })
       : isFacilitator
@@ -804,9 +807,17 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
                 <Sparkles className={`h-5 w-5 ${darkMode ? 'text-cyan-300' : 'text-blue-600'}`} />
                 IT Summit 2026
               </div>
-              <p className={`mt-1 text-sm ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>Share what is working well and what needs attention. Vote once per item and add context when useful.</p>
+              <p className={`mt-1 text-sm ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                {readOnly ? 'Archived read-only record of what worked well and what needed attention.' : 'Share what is working well and what needs attention. Vote once per item and add context when useful.'}
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              {readOnly && (
+                <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600">
+                  <Lock className="h-4 w-4" />
+                  Read-only
+                </span>
+              )}
               {SECTIONS.map((section) => (
                 <button
                   key={section.id}
@@ -851,7 +862,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
         </div>
       </div>
 
-      {!isFacilitator && (
+      {!isFacilitator && !readOnly && (
         <form onSubmit={submitItem} className={`mb-4 rounded-xl border p-4 shadow-sm ${
           darkMode ? 'border-white/10 bg-slate-900/95 shadow-xl shadow-black/20' : 'border-slate-200 bg-white'
         }`}>
@@ -952,7 +963,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
                   <div key={item.itemId} className="animate-[summitFeedbackIn_.22s_ease-out]">
                     <FeedbackCard
                       item={item}
-                      canInteract={!isFacilitator}
+                      canInteract={!isFacilitator && !readOnly}
                       collapsedByDefault={isFacilitator}
                       highlighted={highlightIds[item.itemId]}
                       onVote={voteItem}
