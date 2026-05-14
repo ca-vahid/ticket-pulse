@@ -1227,13 +1227,7 @@ export default function Analytics({ view = 'standard' }) {
           animation: mapEffectsEnabled ? { duration: 450 } : false,
           animationLimit: mapEffectsEnabled ? 1000 : 0,
           layoutAlgorithm: 'squarified',
-          cluster: {
-            enabled: true,
-            pixelWidth: isCategoryMapPage ? (isMobile ? 22 : 8) : (isMobile ? 30 : 20),
-            pixelHeight: isCategoryMapPage ? (isMobile ? 18 : 7) : (isMobile ? 24 : 16),
-            minimumClusterSize: 2,
-            name: 'Other small areas',
-          },
+          cluster: { enabled: false },
           borderRadius: 3,
           borderWidth: 1,
           borderColor: '#64748b',
@@ -1281,7 +1275,10 @@ export default function Analytics({ view = 'standard' }) {
               if (rootNode !== 'root' && this.point.id === rootNode) return '';
               const isParent = this.point.node?.children?.length > 0;
               if (isParent && rootNode !== '') return '';
-              if (shape.width < 42 || shape.height < 20) return '';
+              const minLeafLabelWidth = isCategoryMapPage ? 74 : 62;
+              const minLeafLabelHeight = isCategoryMapPage ? 34 : 28;
+              if (!isParent && (shape.width < minLeafLabelWidth || shape.height < minLeafLabelHeight)) return '';
+              if (isParent && (shape.width < 42 || shape.height < 20)) return '';
               const rawName = this.point.name || '';
               const lineHeight = isParent ? 11 : 10;
               const maxChars = Math.max(8, Math.floor((shape.width || 80) / 5.2) * Math.max(1, Math.floor((shape.height || 24) / (lineHeight + 3))));
@@ -1293,8 +1290,9 @@ export default function Analytics({ view = 'standard' }) {
               const agentShareOfNodePct = Number(this.point.custom?.agentShareOfNodePct || 0);
               const agentPortfolioPct = Number(this.point.custom?.agentPortfolioPct || 0);
               const agentMetricPct = agentPortfolioLensEnabled ? agentPortfolioPct : agentShareOfNodePct;
-              const showAgentShare = Boolean(selectedCategoryAgent && (isParent || (shape.width >= 118 && shape.height >= 68)));
-              const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 112 && shape.height >= 62)));
+              const hasRoomForMetric = shape.width >= 96 && shape.height >= 54;
+              const showAgentShare = Boolean(selectedCategoryAgent && (isParent || (shape.width >= 124 && shape.height >= 70)));
+              const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 118 && shape.height >= 64)));
               const metricStyle = showShare
                 ? `font-size:${leafMetricFontSize}px;font-weight:700;color:#334155`
                 : `font-size:${leafMetricFontSize}px;font-weight:600`;
@@ -1312,7 +1310,7 @@ export default function Analytics({ view = 'standard' }) {
                     : `${formatNumber(created)} - ${pctMetric}`;
                 return `${name} <span style="font-size:${Math.max(8, Math.round(headerFontSize * 0.82))}px;font-weight:800;color:#334155">(${escapeChartText(compactMetric)})</span>`;
               }
-              return shape.height >= 44 && created
+              return hasRoomForMetric && created
                 ? `<span>${name}</span><br/><span style="${metricStyle}">${escapeChartText(metric)}</span>`
                 : `<span>${name}</span>`;
             },
@@ -1395,7 +1393,6 @@ export default function Analytics({ view = 'standard' }) {
     categoryTimelineStats.totalByPeriod,
     getCategoryTimelineCount,
     isCategoryMapPage,
-    isMobile,
     legacyMode,
     mapEffectsEnabled,
     mapTimelineEnabled,
