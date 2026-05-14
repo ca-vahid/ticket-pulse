@@ -24,6 +24,7 @@ const prismaMock = {
     updateMany: jest.fn(),
     count: jest.fn(),
   },
+  $queryRaw: jest.fn(),
   $transaction: jest.fn(async (callback) => callback(prismaMock)),
 };
 
@@ -62,6 +63,7 @@ describe('agentCompetencyService bulk requests', () => {
     competencyRepositoryMock.getActiveCategories.mockResolvedValue([]);
     competencyRepositoryMock.getAllCompetenciesForWorkspace.mockResolvedValue([]);
     competencyRepositoryMock.buildCategoryTree.mockReturnValue([]);
+    prismaMock.$queryRaw.mockResolvedValue([{ exists: true }]);
     prismaMock.competencyChangeRequest.findMany.mockResolvedValue([]);
   });
 

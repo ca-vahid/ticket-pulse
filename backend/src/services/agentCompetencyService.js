@@ -12,6 +12,53 @@ export const SELF_SERVICE_LEVEL_ORDER = {
   expert: 4,
 };
 const MAX_BULK_COMPETENCY_REQUESTS = 50;
+let competencyRequestGroupsSupportedPromise = null;
+
+const COMPETENCY_REQUEST_SELECT = {
+  id: true,
+  workspaceId: true,
+  technicianId: true,
+  competencyCategoryId: true,
+  requestType: true,
+  currentLevel: true,
+  requestedLevel: true,
+  note: true,
+  status: true,
+  requestedByEmail: true,
+  reviewedByEmail: true,
+  reviewedAt: true,
+  decisionNote: true,
+  appliedAt: true,
+  createdAt: true,
+  updatedAt: true,
+};
+
+function competencyRequestSelect({ supportsRequestGroups, include = {} } = {}) {
+  return {
+    ...COMPETENCY_REQUEST_SELECT,
+    ...(supportsRequestGroups ? { requestGroupId: true } : {}),
+    ...include,
+  };
+}
+
+async function supportsCompetencyRequestGroups() {
+  if (!competencyRequestGroupsSupportedPromise) {
+    competencyRequestGroupsSupportedPromise = prisma.$queryRaw`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'competency_change_requests'
+          AND column_name = 'request_group_id'
+      ) AS "exists"
+    `.then((rows) => Boolean(rows?.[0]?.exists)).catch(() => false);
+  }
+  return competencyRequestGroupsSupportedPromise;
+}
+
+function maybeWithRequestGroupId(data, requestGroupId, supportsRequestGroups) {
+  return supportsRequestGroups ? { ...data, requestGroupId } : data;
+}
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
@@ -119,6 +166,7 @@ export async function getAgentProfiles(email) {
 
 export async function getMyCompetencyMatrix(email, workspaceId = null) {
   const { technician, matches } = await resolveAgentTechnician(email, workspaceId);
+  const supportsRequestGroups = await supportsCompetencyRequestGroups();
   const [categories, mappings, technicians, requests] = await Promise.all([
     competencyRepository.getActiveCategories(technician.workspaceId),
     competencyRepository.getAllCompetenciesForWorkspace(technician.workspaceId),
@@ -129,9 +177,12 @@ export async function getMyCompetencyMatrix(email, workspaceId = null) {
     }),
     prisma.competencyChangeRequest.findMany({
       where: { technicianId: technician.id },
-      include: {
-        competencyCategory: { select: { id: true, name: true, parentId: true } },
-      },
+      select: competencyRequestSelect({
+        supportsRequestGroups,
+        include: {
+          competencyCategory: { select: { id: true, name: true, parentId: true } },
+        },
+      }),
       orderBy: { createdAt: 'desc' },
       take: 100,
     }),
@@ -215,6 +266,7 @@ export async function submitMyCompetencyChange(email, body = {}) {
   const requestType = requestTypeFor(currentLevel, requestedLevel);
   const note = normalizeNote(body.note);
   const requestedByEmail = normalizeEmail(email);
+  const supportsRequestGroups = await supportsCompetencyRequestGroups();
 
   if (requestedRank < currentRank) {
     await prisma.$transaction(async (tx) => {
@@ -233,6 +285,7 @@ export async function submitMyCompetencyChange(email, body = {}) {
           reviewedAt: new Date(),
           appliedAt: new Date(),
         },
+        select: { id: true },
       });
       await applyCompetency(tx, technician.id, technician.workspaceId, competencyCategoryId, requestedLevel, note);
     });
@@ -246,26 +299,26 @@ export async function submitMyCompetencyChange(email, body = {}) {
         competencyCategoryId,
         status: 'pending',
       },
+      select: { id: true },
       orderBy: { createdAt: 'desc' },
     });
 
-    const data = {
+    const data = maybeWithRequestGroupId({
       workspaceId: technician.workspaceId,
       technicianId: technician.id,
       competencyCategoryId,
       requestType,
       currentLevel,
       requestedLevel,
-      requestGroupId: null,
       note,
       status: 'pending',
       requestedByEmail,
-    };
+    }, null, supportsRequestGroups);
 
     if (existingPending) {
-      await tx.competencyChangeRequest.update({ where: { id: existingPending.id }, data });
+      await tx.competencyChangeRequest.update({ where: { id: existingPending.id }, data, select: { id: true } });
     } else {
-      await tx.competencyChangeRequest.create({ data });
+      await tx.competencyChangeRequest.create({ data, select: { id: true } });
     }
   });
 
@@ -349,26 +402,27 @@ export async function submitMyCompetencyChanges(email, body = {}) {
     };
   }
 
-  const requestGroupId = pendingChanges.length > 1 ? randomUUID() : null;
+  const supportsRequestGroups = await supportsCompetencyRequestGroups();
+  const requestGroupId = supportsRequestGroups && pendingChanges.length > 1 ? randomUUID() : null;
 
   await prisma.$transaction(async (tx) => {
     for (const change of autoAppliedChanges) {
       await tx.competencyChangeRequest.create({
-        data: {
+        data: maybeWithRequestGroupId({
           workspaceId: technician.workspaceId,
           technicianId: technician.id,
           competencyCategoryId: change.competencyCategoryId,
           requestType: change.requestType,
           currentLevel: change.currentLevel,
           requestedLevel: change.requestedLevel,
-          requestGroupId,
           note,
           status: 'auto_applied',
           requestedByEmail,
           reviewedByEmail: requestedByEmail,
           reviewedAt: new Date(),
           appliedAt: new Date(),
-        },
+        }, requestGroupId, supportsRequestGroups),
+        select: { id: true },
       });
       await applyCompetency(tx, technician.id, technician.workspaceId, change.competencyCategoryId, change.requestedLevel, note);
     }
@@ -380,26 +434,26 @@ export async function submitMyCompetencyChanges(email, body = {}) {
           competencyCategoryId: change.competencyCategoryId,
           status: 'pending',
         },
+        select: { id: true },
         orderBy: { createdAt: 'desc' },
       });
 
-      const data = {
+      const data = maybeWithRequestGroupId({
         workspaceId: technician.workspaceId,
         technicianId: technician.id,
         competencyCategoryId: change.competencyCategoryId,
         requestType: change.requestType,
         currentLevel: change.currentLevel,
         requestedLevel: change.requestedLevel,
-        requestGroupId,
         note,
         status: 'pending',
         requestedByEmail,
-      };
+      }, requestGroupId, supportsRequestGroups);
 
       if (existingPending) {
-        await tx.competencyChangeRequest.update({ where: { id: existingPending.id }, data });
+        await tx.competencyChangeRequest.update({ where: { id: existingPending.id }, data, select: { id: true } });
       } else {
-        await tx.competencyChangeRequest.create({ data });
+        await tx.competencyChangeRequest.create({ data, select: { id: true } });
       }
     }
   });
@@ -425,7 +479,10 @@ export async function cancelMyCompetencyChange(email, requestId) {
     throw new AuthenticationError('No active technician profile is linked to this SSO account');
   }
   const technicianIds = new Set(matches.map((technician) => technician.id));
-  const request = await prisma.competencyChangeRequest.findUnique({ where: { id } });
+  const request = await prisma.competencyChangeRequest.findUnique({
+    where: { id },
+    select: { id: true, technicianId: true, status: true, workspaceId: true },
+  });
   if (!request || !technicianIds.has(request.technicianId)) {
     throw new NotFoundError('Competency request not found');
   }
@@ -441,6 +498,7 @@ export async function cancelMyCompetencyChange(email, requestId) {
       reviewedAt: new Date(),
       decisionNote: 'Cancelled by requester',
     },
+    select: { id: true },
   });
 
   return { changed: true, data: await getMyCompetencyMatrix(normalizedEmail, request.workspaceId) };
@@ -449,19 +507,23 @@ export async function cancelMyCompetencyChange(email, requestId) {
 export async function listCompetencyRequests(workspaceId, { status = 'pending', limit = 100 } = {}) {
   const where = { workspaceId };
   if (status && status !== 'all') where.status = status;
+  const supportsRequestGroups = await supportsCompetencyRequestGroups();
   return prisma.competencyChangeRequest.findMany({
     where,
-    include: {
-      technician: { select: { id: true, name: true, email: true, photoUrl: true, location: true } },
-      competencyCategory: {
-        select: {
-          id: true,
-          name: true,
-          parentId: true,
-          parent: { select: { id: true, name: true } },
+    select: competencyRequestSelect({
+      supportsRequestGroups,
+      include: {
+        technician: { select: { id: true, name: true, email: true, photoUrl: true, location: true } },
+        competencyCategory: {
+          select: {
+            id: true,
+            name: true,
+            parentId: true,
+            parent: { select: { id: true, name: true } },
+          },
         },
       },
-    },
+    }),
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
     take: Math.min(Math.max(Number(limit) || 100, 1), 500),
   });
@@ -479,6 +541,7 @@ export async function decideCompetencyRequest(workspaceId, requestId, decision, 
 
   const request = await prisma.competencyChangeRequest.findUnique({
     where: { id: Number(requestId) },
+    select: competencyRequestSelect(),
   });
   if (!request || request.workspaceId !== workspaceId) throw new NotFoundError('Competency request not found');
   if (request.status !== 'pending') throw new ValidationError('Only pending requests can be reviewed');
@@ -506,6 +569,7 @@ export async function decideCompetencyRequest(workspaceId, requestId, decision, 
         decisionNote: String(decisionNote || '').trim().slice(0, 2000) || null,
         appliedAt: normalizedDecision === 'approved' ? reviewedAt : null,
       },
+      select: { id: true },
     });
   });
 
@@ -515,6 +579,8 @@ export async function decideCompetencyRequest(workspaceId, requestId, decision, 
 export async function decideCompetencyRequestGroup(workspaceId, requestGroupId, decision, reviewerEmail, decisionNote = null) {
   const groupId = String(requestGroupId || '').trim();
   if (!groupId) throw new ValidationError('requestGroupId is required');
+  const supportsRequestGroups = await supportsCompetencyRequestGroups();
+  if (!supportsRequestGroups) throw new NotFoundError('Competency request group not found');
 
   const normalizedDecision = String(decision || '').toLowerCase();
   if (!['approved', 'rejected'].includes(normalizedDecision)) {
@@ -527,6 +593,7 @@ export async function decideCompetencyRequestGroup(workspaceId, requestGroupId, 
       requestGroupId: groupId,
       status: 'pending',
     },
+    select: competencyRequestSelect({ supportsRequestGroups }),
     orderBy: { createdAt: 'asc' },
   });
   if (!requests.length) throw new NotFoundError('Competency request group not found');
