@@ -128,7 +128,7 @@ export default function AppHeader({
   };
 
   const renderUserMenu = (compact = false) => {
-    const adminItems = [
+    const menuItems = [
       ...(showAdminSummitLink ? [{
         id: 'summit',
         label: 'Summit',
@@ -136,10 +136,17 @@ export default function AppHeader({
         path: '/summit-taxonomy',
         Icon: Boxes,
       }] : []),
+      {
+        id: 'my-skills',
+        label: 'My Skills',
+        description: 'My competencies',
+        path: '/my-competencies',
+        Icon: Award,
+      },
       ...(canManageWorkspace ? [{
-        id: 'skills',
-        label: 'Skills',
-        description: 'Competency matrix',
+        id: 'skill-matrix',
+        label: 'Skill Matrix',
+        description: 'Admin competency matrix',
         path: '/assignments/competencies',
         Icon: Award,
       }] : []),
@@ -171,7 +178,7 @@ export default function AppHeader({
               <p className="truncate text-xs text-slate-500">{user?.email || user?.username || wsRole}</p>
             </div>
 
-            {adminItems.map(({ id, label, description, path, Icon }) => (
+            {menuItems.map(({ id, label, description, path, Icon }) => (
               <button
                 key={id}
                 type="button"
