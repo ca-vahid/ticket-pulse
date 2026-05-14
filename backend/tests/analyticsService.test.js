@@ -485,7 +485,7 @@ describe('analyticsService pure helpers', () => {
     });
   });
 
-  test('buildCategoryIntelligence groups tiny canonical treemap leaves', () => {
+  test('buildCategoryIntelligence keeps tiny canonical treemap leaves available for responsive clustering', () => {
     const rangeInfo = parseAnalyticsRange(
       { timezone: 'America/Los_Angeles', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
@@ -521,18 +521,19 @@ describe('analyticsService pure helpers', () => {
 
     expect(result.hierarchy).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: 'category:20:other-small',
-        name: 'Other subcategories',
-        value: 2,
-        custom: expect.objectContaining({
-          nodeType: 'subcategoryGroup',
-          groupedCount: 2,
-          groupedNames: ['Tiny A', 'Tiny B'],
-        }),
+        id: 'subcategory:21',
+        name: 'Tiny A',
+        parent: 'category:20',
+        value: 1,
+      }),
+      expect.objectContaining({
+        id: 'subcategory:22',
+        name: 'Tiny B',
+        parent: 'category:20',
+        value: 1,
       }),
     ]));
-    expect(result.hierarchy.some((node) => node.name === 'Tiny A')).toBe(false);
-    expect(result.hierarchy.some((node) => node.name === 'Tiny B')).toBe(false);
+    expect(result.hierarchy.some((node) => node.id === 'category:20:other-small')).toBe(false);
   });
 
   test('buildCategoryIntelligence excludes zero-created rows from treemap hierarchy', () => {

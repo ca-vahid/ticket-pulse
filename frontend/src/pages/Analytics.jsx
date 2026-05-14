@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -165,6 +165,15 @@ function formatSharePct(value) {
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
 }
 
+function escapeChartText(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function formatHours(value) {
   if (value === null || value === undefined) return '—';
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
@@ -207,6 +216,47 @@ function useMediaQuery(query) {
   }, [query]);
 
   return matches;
+}
+
+function useBrowserZoomCompensation(enabled = true) {
+  const getZoomSignals = useCallback(() => {
+    if (typeof window === 'undefined') return { dpr: 1, viewportRatio: 1 };
+    const dpr = window.devicePixelRatio || 1;
+    const viewportRatio = window.outerWidth && window.innerWidth
+      ? window.outerWidth / window.innerWidth
+      : 1;
+    return { dpr, viewportRatio };
+  }, []);
+  const baselineRef = useRef(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') {
+      setScale(1);
+      return undefined;
+    }
+
+    if (!baselineRef.current) baselineRef.current = getZoomSignals();
+
+    const updateScale = () => {
+      const current = getZoomSignals();
+      const baseline = baselineRef.current || current;
+      const dprScale = current.dpr > 0 ? baseline.dpr / current.dpr : 1;
+      const viewportScale = current.viewportRatio > 0 ? baseline.viewportRatio / current.viewportRatio : 1;
+      const nextScale = Math.max(1, Math.min(1.75, Math.max(dprScale, viewportScale)));
+      setScale((previous) => (Math.abs(previous - nextScale) > 0.03 ? nextScale : previous));
+    };
+
+    updateScale();
+    window.addEventListener('resize', updateScale);
+    window.visualViewport?.addEventListener('resize', updateScale);
+    return () => {
+      window.removeEventListener('resize', updateScale);
+      window.visualViewport?.removeEventListener('resize', updateScale);
+    };
+  }, [enabled, getZoomSignals]);
+
+  return scale;
 }
 
 function labelFromKey(value, labelMap = {}) {
@@ -314,19 +364,6 @@ function initials(name) {
     .slice(0, 2)
     .join('')
     .toUpperCase() || '?';
-}
-
-function categoryShareHeaderStyle(pct = 0, lensEnabled = false) {
-  if (lensEnabled) {
-    if (pct >= 35) return { border: '#1d4ed8' };
-    if (pct >= 18) return { border: '#2563eb' };
-    if (pct >= 8) return { border: '#60a5fa' };
-    return { border: '#93c5fd' };
-  }
-  if (pct >= 18) return { border: '#059669' };
-  if (pct >= 10) return { border: '#2563eb' };
-  if (pct >= 5) return { border: '#ca8a04' };
-  return { border: '#64748b' };
 }
 
 function EmptyState({ text = 'No data for this range.' }) {
@@ -602,6 +639,7 @@ export default function Analytics({ view = 'standard' }) {
   const isCategoryMapPage = view === 'category-map';
   const { currentWorkspace } = useWorkspace();
   const isMobile = useMediaQuery('(max-width: 767px)');
+  const categoryMapZoomScale = useBrowserZoomCompensation(isCategoryMapPage);
   const [activeTab, setActiveTab] = useState(() => {
     if (isCategoryMapPage) return 'categories';
     return validOptionValue(initialParams.get('tab'), TABS, 'overview');
@@ -623,6 +661,7 @@ export default function Analytics({ view = 'standard' }) {
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(() => initialParams.get('focus') || null);
   const [hoveredCategory, setHoveredCategory] = useState(null);
+  const hoveredCategoryKeyRef = useRef(null);
   const [mapEffectsEnabled, setMapEffectsEnabled] = useState(true);
   const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState(() => initialParams.get('agent') || 'all');
   const [categoryAgentLensMode, setCategoryAgentLensMode] = useState(() => (
@@ -1000,6 +1039,12 @@ export default function Analytics({ view = 'standard' }) {
       ) / 5) * 5)
       : 100;
     const lensEnabled = Boolean(selectedCategoryAgent);
+    const labelScale = isCategoryMapPage ? categoryMapZoomScale : 1;
+    const leafFontSize = Math.round(9 * labelScale);
+    const leafLineHeight = Math.round(11 * labelScale);
+    const leafMetricFontSize = Math.round(8 * labelScale);
+    const headerFontSize = Math.round(10 * labelScale);
+    const headerLineHeight = Math.round(12 * labelScale);
     const parentIdsWithChildren = new Set(rows.filter((row) => row.parent).map((row) => row.parent));
     const chartRows = rows.map((row) => {
       const rangeCreated = Number(row.custom?.created ?? row.value ?? 0);
@@ -1030,11 +1075,24 @@ export default function Analytics({ view = 'standard' }) {
         : categoryMapColorMode === 'demand'
           ? teamCreated
           : row.colorValue;
+      const parentBorderColor = selectedCategoryKey === row.custom?.key ? '#2563eb' : '#334155';
       return {
         ...row,
         value: parentHasChildren ? undefined : displayCreated,
-        colorValue,
-        borderWidth: row.parent && displayCreated <= 4 ? 0.75 : row.borderWidth,
+        colorValue: parentHasChildren ? undefined : colorValue,
+        color: parentHasChildren ? 'rgba(255,255,255,0.001)' : row.color,
+        borderColor: parentHasChildren ? parentBorderColor : row.borderColor,
+        borderWidth: parentHasChildren ? 3 : (row.parent && displayCreated <= 4 ? 0.75 : row.borderWidth),
+        states: parentHasChildren
+          ? {
+            hover: {
+              color: 'rgba(14,165,233,0.08)',
+              borderColor: '#0ea5e9',
+              brightness: 0,
+              lineWidthPlus: 1,
+            },
+          }
+          : undefined,
         custom: {
           ...row.custom,
           created: displayCreated,
@@ -1061,7 +1119,7 @@ export default function Analytics({ view = 'standard' }) {
       ...chartBase('treemap'),
       chart: {
         ...chartBase('treemap').chart,
-        animation: mapEffectsEnabled ? { duration: 180 } : false,
+        animation: mapEffectsEnabled ? { duration: 450 } : false,
       },
       colorAxis: {
         min: 0,
@@ -1125,30 +1183,40 @@ export default function Analytics({ view = 'standard' }) {
         treemap: {
           allowTraversingTree: true,
           interactByLeaf: false,
-          animation: mapEffectsEnabled ? { duration: 180 } : false,
-          animationLimit: mapEffectsEnabled ? 180 : 0,
+          levelIsConstant: true,
+          nodeSizeBy: 'leaf',
+          animation: mapEffectsEnabled ? { duration: 450 } : false,
+          animationLimit: mapEffectsEnabled ? 1000 : 0,
           layoutAlgorithm: 'squarified',
           cluster: {
-            enabled: false,
+            enabled: true,
+            pixelWidth: isCategoryMapPage ? (isMobile ? 22 : 8) : (isMobile ? 30 : 20),
+            pixelHeight: isCategoryMapPage ? (isMobile ? 18 : 7) : (isMobile ? 24 : 16),
+            minimumClusterSize: 2,
+            name: 'Other small areas',
           },
           borderRadius: 3,
           borderWidth: 1,
           borderColor: '#64748b',
+          cursor: 'pointer',
           states: {
             hover: {
-              enabled: false,
+              enabled: mapEffectsEnabled,
+              brightness: 0.16,
+              lineWidthPlus: 2,
+              opacity: 1,
             },
             inactive: {
-              enabled: false,
+              enabled: mapEffectsEnabled,
               opacity: 1,
             },
           },
           dataLabels: {
             enabled: true,
-            useHTML: true,
+            useHTML: false,
             allowOverlap: false,
             crop: true,
-            overflow: 'justify',
+            overflow: 'none',
             formatter() {
               const shape = this.point.shapeArgs || {};
               const rootNode = this.series.rootNode || '';
@@ -1159,7 +1227,7 @@ export default function Analytics({ view = 'standard' }) {
               const rawName = this.point.name || '';
               const lineHeight = isParent ? 11 : 10;
               const maxChars = Math.max(8, Math.floor((shape.width || 80) / 5.2) * Math.max(1, Math.floor((shape.height || 24) / (lineHeight + 3))));
-              const name = rawName.length > maxChars ? `${rawName.slice(0, Math.max(5, maxChars - 1))}...` : rawName;
+              const name = escapeChartText(rawName.length > maxChars ? `${rawName.slice(0, Math.max(5, maxChars - 1))}...` : rawName);
               const created = Number(this.point.custom?.created ?? this.point.value ?? 0);
               const shareValue = totalCreated > 0 && created > 0 ? (created / totalCreated) * 100 : 0;
               const sharePct = shareValue > 0 ? formatSharePct(shareValue) : null;
@@ -1169,13 +1237,9 @@ export default function Analytics({ view = 'standard' }) {
               const agentMetricPct = agentPortfolioLensEnabled ? agentPortfolioPct : agentShareOfNodePct;
               const showAgentShare = Boolean(selectedCategoryAgent && (isParent || (shape.width >= 118 && shape.height >= 68)));
               const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 112 && shape.height >= 62)));
-              const headerStyle = categoryShareHeaderStyle(selectedCategoryAgent ? agentMetricPct : shareValue, Boolean(selectedCategoryAgent));
-              const nameStyle = isParent
-                ? `display:flex;width:100%;box-sizing:border-box;align-items:center;gap:3px;overflow:hidden;background:transparent;border-left:5px solid ${headerStyle.border};padding:1px 6px;font-size:11px;font-weight:800;line-height:13px;`
-                : '';
               const metricStyle = showShare
-                ? 'font-size:8px;font-weight:700;color:#334155'
-                : 'font-size:8px;font-weight:600';
+                ? `font-size:${leafMetricFontSize}px;font-weight:700;color:#334155`
+                : `font-size:${leafMetricFontSize}px;font-weight:600`;
               const metric = showAgentShare
                 ? agentPortfolioLensEnabled
                   ? `${formatNumber(agentCreated)} created · ${formatSharePct(agentPortfolioPct)}`
@@ -1188,20 +1252,19 @@ export default function Analytics({ view = 'standard' }) {
                   : selectedCategoryAgent
                     ? `${formatNumber(agentCreated)} - ${pctMetric}`
                     : `${formatNumber(created)} - ${pctMetric}`;
-                return `<span style="${nameStyle}"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span><span style="flex-shrink:0;white-space:nowrap;font-size:9px;font-weight:800;color:#334155">(${compactMetric})</span></span>`;
+                return `${name} <span style="font-size:${Math.max(8, Math.round(headerFontSize * 0.82))}px;font-weight:800;color:#334155">(${escapeChartText(compactMetric)})</span>`;
               }
               return shape.height >= 44 && created
-                ? `<span style="${nameStyle}">${name}</span><br/><span style="${metricStyle}">${metric}</span>`
-                : `<span style="${nameStyle}">${name}</span>`;
+                ? `<span>${name}</span><br/><span style="${metricStyle}">${escapeChartText(metric)}</span>`
+                : `<span>${name}</span>`;
             },
             style: {
               color: '#0f172a',
-              fontSize: '8px',
+              fontSize: `${leafFontSize}px`,
               fontWeight: '700',
-              lineHeight: '10px',
-              textOutline: '1px contrast',
+              lineHeight: `${leafLineHeight}px`,
+              textOutline: 'none',
               textOverflow: 'ellipsis',
-              pointerEvents: 'none',
             },
           },
           levels: [{
@@ -1216,10 +1279,10 @@ export default function Analytics({ view = 'standard' }) {
               verticalAlign: 'top',
               padding: 5,
               style: {
-                fontSize: '10px',
+                fontSize: `${headerFontSize}px`,
                 fontWeight: '800',
                 color: '#0f172a',
-                lineHeight: '12px',
+                lineHeight: `${headerLineHeight}px`,
                 textOutline: 'none',
               },
             },
@@ -1227,19 +1290,39 @@ export default function Analytics({ view = 'standard' }) {
             level: 2,
             borderWidth: 1.5,
             borderColor: '#94a3b8',
+            groupPadding: 1,
           }],
           point: {
             events: {
               mouseOver() {
                 if (!mapEffectsEnabled) return;
-                if (!this.custom?.key || !this.custom?.nodeType) return;
+                if (this.node?.children?.length > 0 && this.graphic?.attr) {
+                  this.graphic.attr({
+                    stroke: '#0ea5e9',
+                    'stroke-width': 5,
+                  });
+                }
+                const focusKey = this.custom?.key || this.id || this.name;
+                if (!focusKey) return;
+                if (hoveredCategoryKeyRef.current === focusKey) return;
+                hoveredCategoryKeyRef.current = focusKey;
                 setHoveredCategory({
-                  ...this.custom,
-                  name: this.name || this.custom.name,
-                  created: this.value ?? this.custom.created ?? 0,
+                  ...(this.custom || {}),
+                  key: this.custom?.key || this.id,
+                  name: this.name || this.custom?.name || 'Category area',
+                  created: this.value ?? this.custom?.created ?? 0,
+                  nodeType: this.custom?.nodeType || (this.node?.children?.length > 0 ? 'category' : 'subcategory'),
                 });
               },
               mouseOut() {
+                if (this.node?.children?.length > 0 && this.graphic?.attr) {
+                  const selected = selectedCategoryKey === this.custom?.key;
+                  this.graphic.attr({
+                    stroke: selected ? '#2563eb' : '#334155',
+                    'stroke-width': selected ? 4 : 3,
+                  });
+                }
+                hoveredCategoryKeyRef.current = null;
                 setHoveredCategory(null);
               },
               click() {
@@ -1271,14 +1354,18 @@ export default function Analytics({ view = 'standard' }) {
     categories?.hierarchy,
     categories?.summary?.totalCreated,
     categoryMapColorMode,
+    categoryMapZoomScale,
     categoryTimelineStats.totalByPeriod,
     getCategoryTimelineCount,
+    isCategoryMapPage,
+    isMobile,
     legacyMode,
     mapEffectsEnabled,
     mapTimelineEnabled,
     selectedAgentCategoryCounts.leaf,
     selectedAgentCategoryCounts.top,
     selectedCategoryAgent,
+    selectedCategoryKey,
   ]);
 
   const categoryTrendOptions = useMemo(() => {
@@ -2470,7 +2557,7 @@ export default function Analytics({ view = 'standard' }) {
             </div>
           )}
           {(categories?.hierarchy || []).length > 0
-            ? <HighchartsBlock options={categoryHierarchyOptions} height={isCategoryMapPage ? (isMobile ? '34rem' : 'min(72vh, 52rem)') : (isMobile ? '24rem' : '38rem')} />
+            ? <HighchartsBlock options={categoryHierarchyOptions} height={isCategoryMapPage ? (isMobile ? '34rem' : '78vh') : (isMobile ? '24rem' : '38rem')} />
             : <EmptyState />}
           {supplementalCategoryRows.length > 0 && (
             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -3288,7 +3375,7 @@ export default function Analytics({ view = 'standard' }) {
     <AppShell
       activePage="analytics"
       contentClassName={isCategoryMapPage
-        ? 'mx-auto w-full max-w-[1760px] px-2 py-3 sm:px-4 sm:py-4'
+        ? 'w-full max-w-none px-2 py-3 sm:px-4 sm:py-4'
         : 'max-w-7xl mx-auto w-full px-2 py-3 sm:px-4 sm:py-4'}
       extraActions={
         <button
