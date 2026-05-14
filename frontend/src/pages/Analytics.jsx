@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -594,10 +594,55 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
   );
 }
 
-function HighchartsBlock({ options, height = '24rem' }) {
+function HighchartsBlock({ options, height = '24rem', stabilizeLayout = false }) {
+  const chartRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (!stabilizeLayout || typeof window === 'undefined') return undefined;
+
+    const chart = chartRef.current?.chart;
+    if (!chart) return undefined;
+
+    let disposed = false;
+    const frameIds = [];
+    const timerIds = [];
+
+    const settleChartLayout = () => {
+      if (disposed || chart.destroyed) return;
+      chart.reflow();
+      chart.redraw(false);
+    };
+
+    const scheduleFrame = () => {
+      if (disposed) return;
+      const frameId = window.requestAnimationFrame(settleChartLayout);
+      frameIds.push(frameId);
+    };
+
+    const scheduleTimer = (delay) => {
+      const timerId = window.setTimeout(scheduleFrame, delay);
+      timerIds.push(timerId);
+    };
+
+    scheduleFrame();
+    scheduleTimer(90);
+    scheduleTimer(240);
+
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(scheduleFrame).catch(() => {});
+    }
+
+    return () => {
+      disposed = true;
+      frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId));
+      timerIds.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, [height, options, stabilizeLayout]);
+
   return (
     <div className="min-w-0" style={{ height }}>
       <HighchartsReact
+        ref={chartRef}
         highcharts={Highcharts}
         options={options}
         containerProps={{ style: { height: '100%', width: '100%' } }}
@@ -2511,7 +2556,7 @@ export default function Analytics({ view = 'standard' }) {
             </div>
           )}
           {(categories?.hierarchy || []).length > 0
-            ? <HighchartsBlock options={categoryHierarchyOptions} height={isCategoryMapPage ? (isMobile ? '34rem' : '78vh') : (isMobile ? '24rem' : '38rem')} />
+            ? <HighchartsBlock options={categoryHierarchyOptions} height={isCategoryMapPage ? (isMobile ? '34rem' : '78vh') : (isMobile ? '24rem' : '38rem')} stabilizeLayout />
             : <EmptyState />}
           {supplementalCategoryRows.length > 0 && (
             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
