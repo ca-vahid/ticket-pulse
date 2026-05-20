@@ -244,6 +244,27 @@ class FreshServiceActionService {
       return { success: false, error: 'Run not found' };
     }
 
+    if (run.decision === 'noise_dismissed' && !force) {
+      const assignmentConfig = await prisma.assignmentConfig.findUnique({
+        where: { workspaceId },
+        select: { autoCloseNoise: true },
+      });
+
+      if (!assignmentConfig?.autoCloseNoise) {
+        const preview = 'Skipped: noise auto-close is disabled for this workspace';
+        await prisma.assignmentPipelineRun.update({
+          where: { id: runId },
+          data: {
+            syncStatus: 'skipped',
+            syncError: 'Noise auto-close disabled for workspace',
+            syncPayload: buildSyncPayload([], preview, dryRun, { autoCloseNoise: false }),
+          },
+        });
+        logger.info('FreshService sync skipped: noise auto-close disabled', { runId, workspaceId });
+        return { success: true, skipped: true, preview, reason: 'noise_auto_close_disabled' };
+      }
+    }
+
     const actionPlan = await this.buildAction(run);
     let { actions, preview } = actionPlan;
     const buildError = actionPlan.error;

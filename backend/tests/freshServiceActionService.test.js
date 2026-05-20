@@ -1,6 +1,13 @@
 import { jest } from '@jest/globals';
 
 const prismaMock = {
+  assignmentConfig: {
+    findUnique: jest.fn(),
+  },
+  assignmentPipelineRun: {
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
   technician: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
@@ -41,6 +48,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 }));
 
 const { default: freshServiceActionService } = await import('../src/services/freshServiceActionService.js');
+const freshserviceModule = await import('../src/integrations/freshservice.js');
 
 const ticket = (overrides = {}) => ({
   freshserviceTicketId: 222018,
@@ -77,6 +85,8 @@ describe('freshServiceActionService workspace-scoped category writeback', () => 
       tpSkillCustomField: 'lf_ticket_pulse_category',
       tpSubskillCustomField: 'lf_ticket_pulse_subcategory',
     });
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ autoCloseNoise: true });
+    prismaMock.assignmentPipelineRun.update.mockResolvedValue({});
     prismaMock.technician.findFirst.mockResolvedValue(null);
     prismaMock.ticketAssignmentEpisode.findFirst.mockResolvedValue(null);
   });
@@ -124,6 +134,34 @@ describe('freshServiceActionService workspace-scoped category writeback', () => 
     expect(result.actions.map((action) => action.type)).toEqual(['note', 'close']);
     expect(result.actions).not.toContainEqual(expect.objectContaining({ type: 'update_custom_fields' }));
     expect(prismaMock.workspace.findUnique).not.toHaveBeenCalled();
+  });
+
+  test('skips closing noise-dismissed tickets when workspace auto-close is disabled', async () => {
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ autoCloseNoise: false });
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(run({
+      decision: 'noise_dismissed',
+      assignedTechId: null,
+      recommendation: {
+        closureNoticeHtml: '<p>No action needed.</p>',
+        recommendations: [],
+      },
+    }));
+
+    const result = await freshServiceActionService.execute(2174, 2, false);
+
+    expect(result).toEqual(expect.objectContaining({
+      success: true,
+      skipped: true,
+      reason: 'noise_auto_close_disabled',
+    }));
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 2174 },
+      data: expect.objectContaining({
+        syncStatus: 'skipped',
+        syncError: 'Noise auto-close disabled for workspace',
+      }),
+    });
+    expect(freshserviceModule.createFreshServiceClient).not.toHaveBeenCalled();
   });
 });
 
