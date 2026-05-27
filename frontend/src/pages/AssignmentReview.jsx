@@ -3850,7 +3850,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       const cfg = res?.data || {};
       setConfig({
         isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true,
-        llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null,
+        llmModel: 'claude-sonnet-4-6', maxRecommendations: 3, scoringWeights: null,
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
         excludedGroupIds: [],
@@ -3865,7 +3865,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       setAnthropicConfigured(res?.anthropicConfigured ?? false);
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false, afterHoursUrgentEscalationEnabled: false, afterHoursUrgentEscalationChannels: [], afterHoursUrgentEscalationEmails: [], afterHoursUrgentEscalationPhones: [] });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false, afterHoursUrgentEscalationEnabled: false, afterHoursUrgentEscalationChannels: [], afterHoursUrgentEscalationEmails: [], afterHoursUrgentEscalationPhones: [] });
     } finally { setLoading(false); }
   }, []);
 

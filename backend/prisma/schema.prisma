@@ -750,7 +750,7 @@ model AssignmentConfig {
   workspace               Workspace @relation(fields: [workspaceId], references: [id])
   isEnabled               Boolean   @default(false) @map("is_enabled")
   autoAssign              Boolean   @default(false) @map("auto_assign")
-  llmModel                String    @default("claude-sonnet-4-6-20260217") @db.VarChar(100) @map("llm_model")
+  llmModel                String    @default("claude-sonnet-4-6") @db.VarChar(100) @map("llm_model")
   maxRecommendations      Int       @default(3) @map("max_recommendations")
   scoringWeights          Json?     @map("scoring_weights") // { competency: 0.35, workload: 0.30, location: 0.20, recency: 0.15 }
   classificationPrompt    String?   @db.Text @map("classification_prompt")
