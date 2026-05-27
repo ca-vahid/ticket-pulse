@@ -31,7 +31,36 @@ function whatsappAddress(number) {
   return text.toLowerCase().startsWith('whatsapp:') ? text : `whatsapp:${text}`;
 }
 
-async function getRequiredConfig() {
+function parseContentVariableTemplate(rawTemplate) {
+  const raw = compact(rawTemplate) || '{"1":"{{message}}"}';
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      throw new Error('must be a JSON object');
+    }
+    return parsed;
+  } catch (error) {
+    throw new ValidationError(`WhatsApp content variables must be valid JSON: ${error.message}`);
+  }
+}
+
+function renderTemplateValue(value, variables) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replaceAll('{{message}}', variables.message || '')
+    .replaceAll('{{priority}}', variables.priority || '')
+    .replaceAll('{{ticketId}}', variables.ticketId || '')
+    .replaceAll('{{link}}', variables.link || '');
+}
+
+function buildContentVariables(rawTemplate, variables) {
+  const template = parseContentVariableTemplate(rawTemplate);
+  return Object.fromEntries(
+    Object.entries(template).map(([key, value]) => [key, renderTemplateValue(value, variables)]),
+  );
+}
+
+async function getRequiredConfig({ requireFromNumber = true } = {}) {
   const config = await settingsRepository.getTwilioConfig();
   const accountSid = compact(config.accountSid);
   const authToken = compact(config.authToken);
@@ -40,14 +69,22 @@ async function getRequiredConfig() {
   const missing = [
     !accountSid ? 'twilio_account_sid' : null,
     !authToken ? 'twilio_auth_token' : null,
-    !fromNumber ? 'twilio_from_number' : null,
+    requireFromNumber && !fromNumber ? 'twilio_from_number' : null,
   ].filter(Boolean);
 
   if (missing.length > 0) {
     throw new ValidationError(`Twilio is not configured (${missing.join(', ')})`);
   }
 
-  return { accountSid, authToken, fromNumber };
+  return {
+    accountSid,
+    authToken,
+    fromNumber,
+    whatsappSender: compact(config.whatsappSender),
+    whatsappMessagingServiceSid: compact(config.whatsappMessagingServiceSid),
+    whatsappContentSid: compact(config.whatsappContentSid),
+    whatsappContentVariables: compact(config.whatsappContentVariables),
+  };
 }
 
 async function postTwilioForm(path, form, config) {
@@ -100,18 +137,41 @@ export async function sendVerificationSms({ to, code }) {
   });
 }
 
-export async function sendWhatsApp({ to, body }) {
+export async function sendWhatsApp({ to, body, variables = {} }) {
   const recipient = whatsappAddress(to);
   const message = compact(body);
   if (!recipient) throw new ValidationError('WhatsApp recipient is required');
-  if (!message) throw new ValidationError('WhatsApp body is required');
+  if (!message) throw new ValidationError('WhatsApp message is required');
 
-  const twilioConfig = await getRequiredConfig();
-  const data = await postTwilioForm('/Messages.json', {
-    From: whatsappAddress(twilioConfig.fromNumber),
+  const twilioConfig = await getRequiredConfig({ requireFromNumber: false });
+  const messagingServiceSid = compact(twilioConfig.whatsappMessagingServiceSid);
+  const fromAddress = whatsappAddress(twilioConfig.whatsappSender || twilioConfig.fromNumber);
+  const contentSid = compact(twilioConfig.whatsappContentSid);
+
+  const missing = [
+    !messagingServiceSid && !fromAddress ? 'twilio_whatsapp_sender_or_messaging_service_sid' : null,
+    !contentSid ? 'twilio_whatsapp_content_sid' : null,
+  ].filter(Boolean);
+  if (missing.length > 0) {
+    throw new ValidationError(`WhatsApp is not configured (${missing.join(', ')})`);
+  }
+
+  const contentVariables = buildContentVariables(twilioConfig.whatsappContentVariables, {
+    ...variables,
+    message,
+  });
+  const form = {
     To: recipient,
-    Body: message,
-  }, twilioConfig);
+    ContentSid: contentSid,
+    ContentVariables: JSON.stringify(contentVariables),
+  };
+  if (messagingServiceSid) {
+    form.MessagingServiceSid = messagingServiceSid;
+  } else {
+    form.From = fromAddress;
+  }
+
+  const data = await postTwilioForm('/Messages.json', form, twilioConfig);
 
   return {
     provider: 'twilio',

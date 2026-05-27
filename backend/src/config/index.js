@@ -38,6 +38,10 @@ const envSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_FROM_NUMBER: z.string().optional(),
   TWILIO_VOICE_FROM_NUMBER: z.string().optional(),
+  TWILIO_WHATSAPP_SENDER: z.string().optional(),
+  TWILIO_WHATSAPP_MESSAGING_SERVICE_SID: z.string().optional(),
+  TWILIO_WHATSAPP_CONTENT_SID: z.string().optional(),
+  TWILIO_WHATSAPP_CONTENT_VARIABLES: z.string().optional(),
 });
 
 // Validate environment variables
@@ -157,5 +161,9 @@ export default {
     authToken: config.TWILIO_AUTH_TOKEN,
     fromNumber: config.TWILIO_FROM_NUMBER,
     voiceFromNumber: config.TWILIO_VOICE_FROM_NUMBER || config.TWILIO_FROM_NUMBER,
+    whatsappSender: config.TWILIO_WHATSAPP_SENDER || config.TWILIO_FROM_NUMBER,
+    whatsappMessagingServiceSid: config.TWILIO_WHATSAPP_MESSAGING_SERVICE_SID,
+    whatsappContentSid: config.TWILIO_WHATSAPP_CONTENT_SID,
+    whatsappContentVariables: config.TWILIO_WHATSAPP_CONTENT_VARIABLES,
   },
 };

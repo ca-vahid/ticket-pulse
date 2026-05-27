@@ -60,6 +60,10 @@ const DEFAULT_SETTINGS = {
   twilio_account_sid: '',
   twilio_auth_token: '',
   twilio_from_number: '',
+  twilio_whatsapp_sender: '',
+  twilio_whatsapp_messaging_service_sid: '',
+  twilio_whatsapp_content_sid: '',
+  twilio_whatsapp_content_variables: '{"1":"{{message}}"}',
 };
 
 /**
@@ -289,10 +293,22 @@ class SettingsRepository {
    */
   async getTwilioConfig() {
     try {
-      const [accountSid, authToken, fromNumber] = await Promise.all([
+      const [
+        accountSid,
+        authToken,
+        fromNumber,
+        whatsappSender,
+        whatsappMessagingServiceSid,
+        whatsappContentSid,
+        whatsappContentVariables,
+      ] = await Promise.all([
         this.get('twilio_account_sid'),
         this.get('twilio_auth_token'),
         this.get('twilio_from_number'),
+        this.get('twilio_whatsapp_sender'),
+        this.get('twilio_whatsapp_messaging_service_sid'),
+        this.get('twilio_whatsapp_content_sid'),
+        this.get('twilio_whatsapp_content_variables'),
       ]);
 
       const trimOrNull = (value) => {
@@ -307,14 +323,23 @@ class SettingsRepository {
         authToken: trimOrNull(authToken) || trimOrNull(process.env.TWILIO_AUTH_TOKEN),
         fromNumber: effectiveFromNumber,
         voiceFromNumber: effectiveFromNumber,
+        whatsappSender: trimOrNull(whatsappSender) || trimOrNull(process.env.TWILIO_WHATSAPP_SENDER) || effectiveFromNumber,
+        whatsappMessagingServiceSid: trimOrNull(whatsappMessagingServiceSid) || trimOrNull(process.env.TWILIO_WHATSAPP_MESSAGING_SERVICE_SID),
+        whatsappContentSid: trimOrNull(whatsappContentSid) || trimOrNull(process.env.TWILIO_WHATSAPP_CONTENT_SID),
+        whatsappContentVariables: trimOrNull(whatsappContentVariables) || trimOrNull(process.env.TWILIO_WHATSAPP_CONTENT_VARIABLES) || DEFAULT_SETTINGS.twilio_whatsapp_content_variables,
       };
     } catch (error) {
       logger.error('Error fetching Twilio config:', error);
+      const fallbackFromNumber = process.env.TWILIO_FROM_NUMBER || null;
       return {
         accountSid: process.env.TWILIO_ACCOUNT_SID || null,
         authToken: process.env.TWILIO_AUTH_TOKEN || null,
-        fromNumber: process.env.TWILIO_FROM_NUMBER || null,
-        voiceFromNumber: process.env.TWILIO_FROM_NUMBER || null,
+        fromNumber: fallbackFromNumber,
+        voiceFromNumber: fallbackFromNumber,
+        whatsappSender: process.env.TWILIO_WHATSAPP_SENDER || fallbackFromNumber,
+        whatsappMessagingServiceSid: process.env.TWILIO_WHATSAPP_MESSAGING_SERVICE_SID || null,
+        whatsappContentSid: process.env.TWILIO_WHATSAPP_CONTENT_SID || null,
+        whatsappContentVariables: process.env.TWILIO_WHATSAPP_CONTENT_VARIABLES || DEFAULT_SETTINGS.twilio_whatsapp_content_variables,
       };
     }
   }

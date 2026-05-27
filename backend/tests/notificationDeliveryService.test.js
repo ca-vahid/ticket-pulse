@@ -77,7 +77,14 @@ describe('notificationDeliveryService', () => {
         recipient: '+16045550101',
         assessedPriority: 'Urgent',
         provider: 'twilio',
-        payload: { message: 'WhatsApp message' },
+        payload: {
+          message: 'WhatsApp message',
+          whatsappVariables: {
+            priority: 'Urgent',
+            ticketId: '123',
+            link: 'https://example.freshservice.com/a/tickets/123',
+          },
+        },
       },
       {
         id: 4,
@@ -98,7 +105,15 @@ describe('notificationDeliveryService', () => {
       body: 'Email message',
     }));
     expect(sendSmsMock).toHaveBeenCalledWith({ to: '+16045550101', body: 'SMS message' });
-    expect(sendWhatsAppMock).toHaveBeenCalledWith({ to: '+16045550101', body: 'WhatsApp message' });
+    expect(sendWhatsAppMock).toHaveBeenCalledWith({
+      to: '+16045550101',
+      body: 'WhatsApp message',
+      variables: {
+        priority: 'Urgent',
+        ticketId: '123',
+        link: 'https://example.freshservice.com/a/tickets/123',
+      },
+    });
     expect(placeVoiceCallMock).toHaveBeenCalledWith({ to: '+16045550101', message: 'Voice message' });
     expect(prismaMock.notificationDelivery.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 1 },

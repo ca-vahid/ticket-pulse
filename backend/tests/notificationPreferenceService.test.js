@@ -107,6 +107,10 @@ describe('notificationPreferenceService', () => {
       authToken: null,
       fromNumber: null,
       voiceFromNumber: null,
+      whatsappSender: null,
+      whatsappMessagingServiceSid: null,
+      whatsappContentSid: null,
+      whatsappContentVariables: '{"1":"{{message}}"}',
     });
     settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
       apiKey: null,
@@ -175,12 +179,16 @@ describe('notificationPreferenceService', () => {
     expect(result.preferences.effectivePhone).toBe('+16045550101');
   });
 
-  test('reports SMS, WhatsApp, and voice as configured from one global Twilio number', async () => {
+  test('reports SMS and voice as configured from one global Twilio number', async () => {
     settingsRepositoryMock.getTwilioConfig.mockResolvedValue({
       accountSid: 'AC123',
       authToken: 'secret',
       fromNumber: '+16045550100',
       voiceFromNumber: '+16045550100',
+      whatsappSender: '+16045550100',
+      whatsappMessagingServiceSid: null,
+      whatsappContentSid: null,
+      whatsappContentVariables: '{"1":"{{message}}"}',
     });
 
     const status = await getNotificationProviderStatus();
@@ -195,6 +203,27 @@ describe('notificationPreferenceService', () => {
       configured: true,
       missing: [],
     }));
+    expect(status.whatsapp).toEqual(expect.objectContaining({
+      provider: 'twilio',
+      configured: false,
+      missing: ['twilio_whatsapp_content_sid'],
+    }));
+  });
+
+  test('reports WhatsApp as configured only when a template Content SID is present', async () => {
+    settingsRepositoryMock.getTwilioConfig.mockResolvedValue({
+      accountSid: 'AC123',
+      authToken: 'secret',
+      fromNumber: '+16045550100',
+      voiceFromNumber: '+16045550100',
+      whatsappSender: '+16045550100',
+      whatsappMessagingServiceSid: null,
+      whatsappContentSid: 'HX123',
+      whatsappContentVariables: '{"1":"{{message}}"}',
+    });
+
+    const status = await getNotificationProviderStatus();
+
     expect(status.whatsapp).toEqual(expect.objectContaining({
       provider: 'twilio',
       configured: true,
@@ -223,6 +252,10 @@ describe('notificationPreferenceService', () => {
       authToken: 'secret',
       fromNumber: '+16045550100',
       voiceFromNumber: '+16045550100',
+      whatsappSender: '+16045550100',
+      whatsappMessagingServiceSid: null,
+      whatsappContentSid: null,
+      whatsappContentVariables: '{"1":"{{message}}"}',
     });
     prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue({
       id: 1,
@@ -331,6 +364,10 @@ describe('notificationPreferenceService', () => {
       authToken: 'secret',
       fromNumber: '+16045550100',
       voiceFromNumber: '+16045550100',
+      whatsappSender: '+16045550100',
+      whatsappMessagingServiceSid: null,
+      whatsappContentSid: 'HX123',
+      whatsappContentVariables: '{"1":"{{message}}"}',
     });
     prismaMock.notificationDelivery.createMany.mockResolvedValue({ count: 3 });
 
@@ -361,6 +398,11 @@ describe('notificationPreferenceService', () => {
           dedupeKey: '3101:501:17:email',
           payload: expect.objectContaining({
             message: expect.stringContaining('https://example.freshservice.com/a/tickets/222999'),
+            whatsappVariables: expect.objectContaining({
+              priority: 'High',
+              ticketId: '222999',
+              link: 'https://example.freshservice.com/a/tickets/222999',
+            }),
           }),
         }),
         expect.objectContaining({

@@ -9,12 +9,24 @@ export async function getNotificationProviderStatus() {
   ].filter(Boolean);
   const twilioConfig = await settingsRepository.getTwilioConfig();
   const twilioSmsConfigured = Boolean(twilioConfig.accountSid && twilioConfig.authToken && twilioConfig.fromNumber);
-  const twilioWhatsAppConfigured = twilioSmsConfigured;
   const twilioVoiceConfigured = twilioSmsConfigured;
+  const twilioWhatsAppSenderConfigured = Boolean(twilioConfig.whatsappMessagingServiceSid || twilioConfig.whatsappSender || twilioConfig.fromNumber);
+  const twilioWhatsAppConfigured = Boolean(
+    twilioConfig.accountSid
+    && twilioConfig.authToken
+    && twilioWhatsAppSenderConfigured
+    && twilioConfig.whatsappContentSid
+  );
   const twilioMissing = [
     !twilioConfig.accountSid ? 'twilio_account_sid' : null,
     !twilioConfig.authToken ? 'twilio_auth_token' : null,
     !twilioConfig.fromNumber ? 'twilio_from_number' : null,
+  ].filter(Boolean);
+  const twilioWhatsAppMissing = [
+    !twilioConfig.accountSid ? 'twilio_account_sid' : null,
+    !twilioConfig.authToken ? 'twilio_auth_token' : null,
+    !twilioWhatsAppSenderConfigured ? 'twilio_whatsapp_sender_or_messaging_service_sid' : null,
+    !twilioConfig.whatsappContentSid ? 'twilio_whatsapp_content_sid' : null,
   ].filter(Boolean);
 
   return {
@@ -31,7 +43,7 @@ export async function getNotificationProviderStatus() {
     whatsapp: {
       provider: 'twilio',
       configured: twilioWhatsAppConfigured,
-      missing: twilioWhatsAppConfigured ? [] : twilioMissing,
+      missing: twilioWhatsAppConfigured ? [] : twilioWhatsAppMissing,
     },
     phone_call: {
       provider: 'twilio',

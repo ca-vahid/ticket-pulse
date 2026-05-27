@@ -37,6 +37,7 @@ async function sendDelivery(delivery) {
     return sendWhatsApp({
       to: delivery.recipient,
       body: message,
+      variables: payloadValue(delivery.payload, 'whatsappVariables') || {},
     });
   }
 

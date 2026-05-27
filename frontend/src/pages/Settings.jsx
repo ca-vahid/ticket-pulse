@@ -84,6 +84,10 @@ export default function Settings() {
     twilio_account_sid: '',
     twilio_auth_token: '',
     twilio_from_number: '',
+    twilio_whatsapp_sender: '',
+    twilio_whatsapp_messaging_service_sid: '',
+    twilio_whatsapp_content_sid: '',
+    twilio_whatsapp_content_variables: '{"1":"{{message}}"}',
     sync_interval_minutes: 5,
     default_timezone: 'America/Los_Angeles',
     dashboard_refresh_seconds: 30,
@@ -151,6 +155,10 @@ export default function Settings() {
         twilio_account_sid: settings.twilio_account_sid || '',
         twilio_auth_token: settings.twilio_auth_token === '***MASKED***' ? '' : settings.twilio_auth_token || '',
         twilio_from_number: settings.twilio_from_number || '',
+        twilio_whatsapp_sender: settings.twilio_whatsapp_sender || '',
+        twilio_whatsapp_messaging_service_sid: settings.twilio_whatsapp_messaging_service_sid || '',
+        twilio_whatsapp_content_sid: settings.twilio_whatsapp_content_sid || '',
+        twilio_whatsapp_content_variables: settings.twilio_whatsapp_content_variables || '{"1":"{{message}}"}',
         sync_interval_minutes: settings.sync_interval_minutes || 5,
         default_timezone: settings.default_timezone || 'America/Los_Angeles',
         dashboard_refresh_seconds: settings.dashboard_refresh_seconds || 30,
@@ -244,6 +252,10 @@ export default function Settings() {
         twilio_account_sid: formData.twilio_account_sid,
         twilio_auth_token: formData.twilio_auth_token,
         twilio_from_number: formData.twilio_from_number,
+        twilio_whatsapp_sender: formData.twilio_whatsapp_sender,
+        twilio_whatsapp_messaging_service_sid: formData.twilio_whatsapp_messaging_service_sid,
+        twilio_whatsapp_content_sid: formData.twilio_whatsapp_content_sid,
+        twilio_whatsapp_content_variables: formData.twilio_whatsapp_content_variables,
       });
     }
 
@@ -253,6 +265,10 @@ export default function Settings() {
       twilio_account_sid: formData.twilio_account_sid,
       twilio_auth_token: formData.twilio_auth_token,
       twilio_from_number: formData.twilio_from_number,
+      twilio_whatsapp_sender: formData.twilio_whatsapp_sender,
+      twilio_whatsapp_messaging_service_sid: formData.twilio_whatsapp_messaging_service_sid,
+      twilio_whatsapp_content_sid: formData.twilio_whatsapp_content_sid,
+      twilio_whatsapp_content_variables: formData.twilio_whatsapp_content_variables,
     });
   };
 
@@ -320,7 +336,17 @@ export default function Settings() {
     try {
       const sectionKeys = {
         freshservice: ['freshservice_domain', 'freshservice_api_key', 'service_account_names'],
-        'notification-providers': ['sendgrid_api_key', 'sendgrid_from_email', 'twilio_account_sid', 'twilio_auth_token', 'twilio_from_number'],
+        'notification-providers': [
+          'sendgrid_api_key',
+          'sendgrid_from_email',
+          'twilio_account_sid',
+          'twilio_auth_token',
+          'twilio_from_number',
+          'twilio_whatsapp_sender',
+          'twilio_whatsapp_messaging_service_sid',
+          'twilio_whatsapp_content_sid',
+          'twilio_whatsapp_content_variables',
+        ],
         sync: ['sync_interval_minutes', 'default_timezone'],
         dashboard: ['dashboard_refresh_seconds'],
       };
@@ -722,16 +748,28 @@ export default function Settings() {
                           </span>
                           <div>
                             <h3 className="text-sm font-semibold text-slate-950">Twilio SMS, WhatsApp, and Voice</h3>
-                            <p className="text-xs text-slate-500">One Twilio number is used for SMS, WhatsApp, and phone calls.</p>
+                            <p className="text-xs text-slate-500">WhatsApp alerts use an approved Twilio Content template.</p>
                           </div>
                         </div>
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                          settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-slate-200 text-slate-600'
-                        }`}>
-                          {settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number ? 'Configured' : 'Not configured'}
-                        </span>
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                            settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number ? 'SMS/voice ready' : 'SMS/voice incomplete'}
+                          </span>
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                            settings?.twilio_account_sid
+                              && settings?.twilio_auth_token === '***MASKED***'
+                              && settings?.twilio_whatsapp_content_sid
+                              && (settings?.twilio_whatsapp_messaging_service_sid || settings?.twilio_whatsapp_sender || settings?.twilio_from_number)
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {settings?.twilio_whatsapp_content_sid ? 'WhatsApp template set' : 'WhatsApp template needed'}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="grid gap-3">
@@ -772,6 +810,66 @@ export default function Settings() {
                           />
                           <span className="mt-1 block text-xs text-slate-500">Use E.164 format.</span>
                         </label>
+
+                        <div className="grid gap-3 rounded-lg border border-emerald-100 bg-emerald-50/50 p-3">
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">WhatsApp template</div>
+                            <p className="mt-1 text-xs text-emerald-700/80">
+                              Use a Twilio-approved template for business-initiated WhatsApp tests and alerts.
+                            </p>
+                          </div>
+
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">WhatsApp sender</span>
+                            <input
+                              type="tel"
+                              name="twilio_whatsapp_sender"
+                              value={formData.twilio_whatsapp_sender}
+                              onChange={handleChange}
+                              placeholder="Defaults to Twilio phone number"
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                            />
+                            <span className="mt-1 block text-xs text-slate-500">Optional. Use +16045550100 or whatsapp:+16045550100.</span>
+                          </label>
+
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Messaging Service SID</span>
+                            <input
+                              type="text"
+                              name="twilio_whatsapp_messaging_service_sid"
+                              value={formData.twilio_whatsapp_messaging_service_sid}
+                              onChange={handleChange}
+                              placeholder="MG..."
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                            />
+                            <span className="mt-1 block text-xs text-slate-500">Optional. If set, Twilio selects the WhatsApp sender from the service.</span>
+                          </label>
+
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Content SID</span>
+                            <input
+                              type="text"
+                              name="twilio_whatsapp_content_sid"
+                              value={formData.twilio_whatsapp_content_sid}
+                              onChange={handleChange}
+                              placeholder="HX..."
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                            />
+                            <span className="mt-1 block text-xs text-slate-500">Required for WhatsApp tests and assignment alerts.</span>
+                          </label>
+
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Content variables JSON</span>
+                            <textarea
+                              name="twilio_whatsapp_content_variables"
+                              value={formData.twilio_whatsapp_content_variables}
+                              onChange={handleChange}
+                              rows={3}
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                            />
+                            <span className="mt-1 block text-xs text-slate-500">Default sends the full alert text as template variable 1.</span>
+                          </label>
+                        </div>
 
                         <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
                           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Test SMS, WhatsApp, and voice</div>

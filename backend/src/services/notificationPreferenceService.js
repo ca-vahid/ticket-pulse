@@ -63,6 +63,21 @@ export function buildNotificationMessage({ ticket, priority }) {
   ].filter(Boolean).join(' ');
 }
 
+function buildWhatsAppVariables({ ticket, priority, message }) {
+  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
+  const domain = config.freshservice?.domain || null;
+  const host = domain
+    ? (domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`)
+    : null;
+  const link = fsId && host ? `https://${host}/a/tickets/${fsId}` : '';
+  return {
+    message,
+    priority: priority || '',
+    ticketId: fsId ? String(fsId) : '',
+    link,
+  };
+}
+
 export function buildVoiceNotificationMessage({ ticket, priority }) {
   const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
   return [
@@ -300,6 +315,11 @@ class NotificationPreferenceService {
 
     const message = buildNotificationMessage({ ticket, priority: ticket.assessedPriority });
     const voiceMessage = buildVoiceNotificationMessage({ ticket, priority: ticket.assessedPriority });
+    const whatsappVariables = buildWhatsAppVariables({
+      ticket,
+      priority: ticket.assessedPriority,
+      message,
+    });
     const deliveries = channels.map((channel) => {
       const provider = providerStatus[channel] || { provider: null, configured: false, missing: [] };
       const recipient = channel === 'email'
@@ -319,6 +339,7 @@ class NotificationPreferenceService {
         payload: {
           message,
           voiceMessage,
+          whatsappVariables,
           providerConfigured: provider.configured,
           providerMissing: provider.missing,
           freshserviceTicketId: Number(ticket.freshserviceTicketId),

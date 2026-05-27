@@ -40,6 +40,13 @@ function validateE164(value, fieldName) {
   }
 }
 
+function validateWhatsAppSender(value, fieldName) {
+  if (value === undefined || value === null || String(value).trim() === '') return;
+  const text = String(value).trim();
+  const e164 = text.toLowerCase().startsWith('whatsapp:') ? text.slice('whatsapp:'.length) : text;
+  validateE164(e164, fieldName);
+}
+
 function validateEmail(value, fieldName) {
   if (value === undefined || value === null || String(value).trim() === '') return;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim())) {
@@ -109,11 +116,33 @@ router.put(
     }
 
     validateE164(normalizedSettings.twilio_from_number, 'Twilio phone number');
+    validateWhatsAppSender(normalizedSettings.twilio_whatsapp_sender, 'WhatsApp sender');
     validateEmail(normalizedSettings.sendgrid_from_email, 'SendGrid from email');
     if (normalizedSettings.twilio_account_sid !== undefined
       && normalizedSettings.twilio_account_sid
       && !String(normalizedSettings.twilio_account_sid).trim().startsWith('AC')) {
       throw new ValidationError('Twilio Account SID should start with AC');
+    }
+    if (normalizedSettings.twilio_whatsapp_messaging_service_sid !== undefined
+      && normalizedSettings.twilio_whatsapp_messaging_service_sid
+      && !String(normalizedSettings.twilio_whatsapp_messaging_service_sid).trim().startsWith('MG')) {
+      throw new ValidationError('Twilio WhatsApp Messaging Service SID should start with MG');
+    }
+    if (normalizedSettings.twilio_whatsapp_content_sid !== undefined
+      && normalizedSettings.twilio_whatsapp_content_sid
+      && !String(normalizedSettings.twilio_whatsapp_content_sid).trim().startsWith('HX')) {
+      throw new ValidationError('Twilio WhatsApp Content SID should start with HX');
+    }
+    if (normalizedSettings.twilio_whatsapp_content_variables !== undefined
+      && normalizedSettings.twilio_whatsapp_content_variables) {
+      try {
+        const parsed = JSON.parse(String(normalizedSettings.twilio_whatsapp_content_variables));
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+          throw new Error('must be a JSON object');
+        }
+      } catch (error) {
+        throw new ValidationError(`WhatsApp content variables must be valid JSON: ${error.message}`);
+      }
     }
 
     // Update settings
@@ -215,6 +244,11 @@ router.post(
       result = await sendWhatsApp({
         to: recipient,
         body: 'Ticket Pulse Twilio WhatsApp test. If you received this, WhatsApp notifications are configured.',
+        variables: {
+          priority: 'Test',
+          ticketId: '000000',
+          link: 'https://ticketpulse.local/settings',
+        },
       });
     } else if (channel === 'twilio_voice') {
       validateE164(recipient, 'Test recipient');

@@ -123,3 +123,5 @@ This tracker mirrors the active implementation checklist in `plans/Priority Dete
 - [x] Final v2.45 backend suite: `npm test --prefix backend -- --runInBand`
 - [x] Final v2.45 frontend suite: `npm test --prefix frontend -- --run`
 - [x] Local and production Prisma migrations: `20260526010000_add_whatsapp_notifications` applied and both databases report schema up to date.
+- [x] WhatsApp template fix backend tests: `npm test --prefix backend -- twilioNotificationService.test.js notificationPreferenceService.test.js notificationDeliveryService.test.js --runInBand`
+- [x] WhatsApp template fix build verification: `npm run build --prefix frontend`
