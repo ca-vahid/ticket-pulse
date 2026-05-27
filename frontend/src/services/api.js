@@ -3,17 +3,49 @@ import { formatDateLocal } from '../utils/dateHelpers';
 import { isDemoMode, maybeScrub } from '../utils/demoMode';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
+const AUTH_TOKEN_STORAGE_KEY = 'tp_authToken';
 
-// JWT token stored in memory (never localStorage — cleared on tab close).
-let _authToken = null;
+function readSessionStorage(key) {
+  try {
+    return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionStorage(key, value) {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(key, value);
+    }
+  } catch { /* sessionStorage unavailable */ }
+}
+
+function removeSessionStorage(key) {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(key);
+    }
+  } catch { /* sessionStorage unavailable */ }
+}
+
+// JWT token is tab-scoped: memory for speed, sessionStorage for page refreshes.
+// It is intentionally not stored in localStorage.
+let _authToken = readSessionStorage(AUTH_TOKEN_STORAGE_KEY);
 let _workspaceId = null;
 
 export function setAuthToken(token) {
-  _authToken = token;
+  _authToken = token || null;
+  if (_authToken) {
+    writeSessionStorage(AUTH_TOKEN_STORAGE_KEY, _authToken);
+  } else {
+    removeSessionStorage(AUTH_TOKEN_STORAGE_KEY);
+  }
 }
 
 export function clearAuthToken() {
   _authToken = null;
+  removeSessionStorage(AUTH_TOKEN_STORAGE_KEY);
 }
 
 export function getAuthToken() {

@@ -1,6 +1,15 @@
-export const APP_VERSION = '2.48';
+export const APP_VERSION = '2.49';
 
 export const changelog = [
+  {
+    version: '2.49',
+    date: 'May 26, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Incognito assignment runs</strong> keep API and SSE authentication after refresh by restoring the short-lived JWT from tab-scoped session storage.' },
+      { type: 'fixed', html: '<strong>Dashboard and live pipeline streams</strong> no longer drop into 401 loops when App Service cookies are blocked by the browser.' },
+      { type: 'database', html: '<strong>Database-safe release</strong> contains no schema migration.' },
+    ],
+  },
   {
     version: '2.48',
     date: 'May 26, 2026',
