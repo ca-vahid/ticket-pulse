@@ -3,7 +3,7 @@ import {
   Archive, CheckCircle2, Clock3, LogOut, Search, ShieldCheck, UserRound,
   XCircle, Loader2, AlertCircle, BriefcaseBusiness, PlusCircle,
   X, Send, Sparkles, Undo2, ChevronLeft, ChevronRight,
-  Bell,
+  Bell, LayoutDashboard,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { agentAPI } from '../services/api';
@@ -54,6 +54,7 @@ function levelRank(level) {
 
 export default function MyCompetencies() {
   const { user, logout } = useAuth();
+  const canAccessDashboard = user?.role && user.role !== 'agent';
   const [data, setData] = useState(null);
   const [workspaceId, setWorkspaceId] = useState('');
   const [query, setQuery] = useState('');
@@ -652,14 +653,27 @@ export default function MyCompetencies() {
               <div className="truncate text-xs text-slate-500">Review your skills and request competency updates.</div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
-          >
-            <LogOut className="h-4 w-4" />
-            <span className="hidden sm:inline">Logout</span>
-          </button>
+          <div className="flex flex-none items-center gap-2">
+            {canAccessDashboard && (
+              <a
+                href="/dashboard"
+                aria-label="Back to Dashboard"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 shadow-sm shadow-blue-100/50 transition hover:border-blue-300 hover:bg-blue-100 hover:text-blue-800"
+              >
+                <LayoutDashboard className="h-4 w-4" />
+                <span className="hidden sm:inline">Back to Dashboard</span>
+                <span className="sm:hidden">Dashboard</span>
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+          </div>
         </div>
       </header>
 
