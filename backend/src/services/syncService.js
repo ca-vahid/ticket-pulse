@@ -22,6 +22,7 @@ import assignmentRepository from './assignmentRepository.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
 import freshServiceActionService from './freshServiceActionService.js';
 import ticketPriorityEventService from './ticketPriorityEventService.js';
+import notificationPreferenceService from './notificationPreferenceService.js';
 import {
   shouldTriggerAssignmentForLatestRun,
   shouldTriggerClassificationForLatestRun,
@@ -50,6 +51,21 @@ const NOISE_RULE_TRIGGER_SOURCE = 'noise_rule';
 const ACTIONABLE_TICKET_STATUSES = new Set(['Open', 'Pending']);
 const ACTIONABLE_FRESHSERVICE_STATUS_IDS = new Set([2, 3]);
 const INCREMENTAL_SYNC_OVERLAP_MS = 5 * 60 * 1000;
+const RECENT_ASSIGNED_TICKET_NOTIFICATION_WINDOW_MS = 30 * 60 * 1000;
+
+function isRecentDate(value, now = Date.now()) {
+  if (!value) return false;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) && now - time >= 0 && now - time <= RECENT_ASSIGNED_TICKET_NOTIFICATION_WINDOW_MS;
+}
+
+function shouldQueueFreshServiceAssignmentNotification(existingTicket, upsertedTicket) {
+  if (!upsertedTicket?.assignedTechId) return false;
+  if (existingTicket) {
+    return Number(existingTicket.assignedTechId || 0) !== Number(upsertedTicket.assignedTechId);
+  }
+  return isRecentDate(upsertedTicket.createdAt) || isRecentDate(upsertedTicket.freshserviceUpdatedAt);
+}
 
 function formatNoiseCategory(category) {
   if (!category) return null;
@@ -1370,6 +1386,23 @@ class SyncService {
             });
           }
 
+          if (shouldQueueFreshServiceAssignmentNotification(existingTicket, upsertedTicket)) {
+            await notificationPreferenceService.queueNotificationsForFreshServiceAssignment(upsertedTicket, {
+              technicianId: upsertedTicket.assignedTechId,
+              previousTechnicianId: existingTicket?.assignedTechId || null,
+              source: existingTicket ? 'freshservice_assignment_change' : 'freshservice_initial_assignment',
+              sourceUpdatedAt: upsertedTicket.freshserviceUpdatedAt,
+            }).catch((err) => {
+              logger.warn('FreshService assignment notification queueing failed (non-fatal)', {
+                ticketId: upsertedTicket.id,
+                freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
+                assignedTechId: upsertedTicket.assignedTechId,
+                previousTechId: existingTicket?.assignedTechId || null,
+                error: err.message,
+              });
+            });
+          }
+
           // Create activity log if status changed
           if (existingTicket && existingTicket.status !== upsertedTicket.status) {
             await ticketActivityRepository.create({
@@ -1626,6 +1659,24 @@ class SyncService {
             error: err.message,
           });
         });
+
+        if (shouldQueueFreshServiceAssignmentNotification(existingTicket, upsertedTicket)) {
+          await notificationPreferenceService.queueNotificationsForFreshServiceAssignment(upsertedTicket, {
+            technicianId: upsertedTicket.assignedTechId,
+            previousTechnicianId: existingTicket?.assignedTechId || null,
+            source: existingTicket ? 'assignment_fast_sync_assignment_change' : 'assignment_fast_sync_initial_assignment',
+            sourceUpdatedAt: upsertedTicket.freshserviceUpdatedAt,
+          }).catch((err) => {
+            logger.warn('Assignment fast sync: FreshService assignment notification queueing failed', {
+              workspaceId,
+              ticketId: upsertedTicket.id,
+              freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
+              assignedTechId: upsertedTicket.assignedTechId,
+              previousTechId: existingTicket?.assignedTechId || null,
+              error: err.message,
+            });
+          });
+        }
 
         upsertedIds.push(upsertedTicket.id);
         await this._ensureNoiseTicketDismissed(upsertedTicket, ticketWorkspaceId, {

@@ -3,7 +3,7 @@ import prisma from './prisma.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import { ValidationError } from '../utils/errors.js';
 import { resolveAgentTechnician } from './agentCompetencyService.js';
-import { priorityMeetsThreshold } from './priorityAssessment.js';
+import { PRIORITY_ID_TO_LABEL, PRIORITY_LABEL_TO_ID, priorityMeetsThreshold } from './priorityAssessment.js';
 import { getNotificationProviderStatus } from './notificationProviders.js';
 import notificationDeliveryService from './notificationDeliveryService.js';
 import { sendVerificationSms } from './twilioNotificationService.js';
@@ -37,6 +37,35 @@ function normalizePhone(value) {
 
 function preferredPhone(preference = {}) {
   return preference.phoneOverride || preference.entraMobilePhone || preference.entraPhone || null;
+}
+
+function priorityIdFor(label) {
+  return PRIORITY_LABEL_TO_ID[label] || null;
+}
+
+function finitePriorityId(value) {
+  const id = Number(value);
+  return Number.isInteger(id) && id >= PRIORITY_LABEL_TO_ID.Low && id <= PRIORITY_LABEL_TO_ID.Urgent ? id : null;
+}
+
+function priorityFromTicket(ticket = {}, { preferHighest = false } = {}) {
+  const sourceTicket = ticket || {};
+  const assessedLabel = sourceTicket.assessedPriority || null;
+  const assessedId = finitePriorityId(sourceTicket.assessedPriorityId) || priorityIdFor(assessedLabel);
+  const freshserviceId = finitePriorityId(sourceTicket.priority);
+
+  if (preferHighest) {
+    const highestId = Math.max(assessedId || 0, freshserviceId || 0);
+    return PRIORITY_ID_TO_LABEL[highestId] || assessedLabel || null;
+  }
+
+  return assessedLabel || PRIORITY_ID_TO_LABEL[freshserviceId] || null;
+}
+
+function sourceStamp(value) {
+  if (!value) return 'unknown-source-time';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value).slice(0, 60) : date.toISOString();
 }
 
 export function notificationPreferenceAllows(preference = {}, priority, channel) {
@@ -310,57 +339,138 @@ class NotificationPreferenceService {
   }
 
   async queueNotificationsForAssignment(run, action) {
-    const ticket = run.ticket || await prisma.ticket.findUnique({
-      where: { id: run.ticketId },
+    const ticket = await this._hydrateNotificationTicket(run.ticket, run.ticketId);
+    const priority = priorityFromTicket(ticket);
+
+    if (!priority || !action?.techId) {
+      return { queued: 0, skipped: 'missing_priority_or_technician' };
+    }
+
+    return this._queueAssignedTicketNotifications({
+      workspaceId: run.workspaceId || ticket.workspaceId,
+      ticket,
+      technicianId: action.techId,
+      techEmail: action.techEmail,
+      pipelineRunId: run.id,
+      priority,
+      dedupeBase: `${run.id}:${run.ticketId}:${action.techId}`,
+      notificationType: 'ticket_pulse_assignment',
+      assignmentContext: {
+        source: 'ticket_pulse_assignment',
+        pipelineRunId: run.id,
+      },
+    });
+  }
+
+  async queueNotificationsForFreshServiceAssignment(ticketLike, options = {}) {
+    const ticketId = ticketLike?.id || ticketLike?.ticketId || options.ticketId;
+    const ticket = await this._hydrateNotificationTicket(ticketLike, ticketId);
+    const technicianId = options.technicianId || ticket?.assignedTechId;
+    const priority = priorityFromTicket(ticket, { preferHighest: true });
+
+    if (!priority || !technicianId) {
+      return { queued: 0, skipped: 'missing_priority_or_technician' };
+    }
+
+    const stamp = sourceStamp(options.sourceUpdatedAt || ticket?.freshserviceUpdatedAt || ticket?.updatedAt);
+    const previousTechnicianId = options.previousTechnicianId || null;
+
+    return this._queueAssignedTicketNotifications({
+      workspaceId: ticket.workspaceId,
+      ticket,
+      technicianId,
+      pipelineRunId: null,
+      priority,
+      dedupeBase: `fs-assignment:${ticket.id}:${previousTechnicianId || 'none'}:${technicianId}:${stamp}`,
+      notificationType: 'freshservice_assignment_change',
+      assignmentContext: {
+        source: options.source || 'freshservice_assignment_change',
+        previousTechnicianId,
+        technicianId,
+        sourceUpdatedAt: options.sourceUpdatedAt || ticket?.freshserviceUpdatedAt || null,
+        prioritySource: priority === ticket.assessedPriority ? 'ticket_pulse_assessed_priority' : 'freshservice_priority',
+      },
+    });
+  }
+
+  async _hydrateNotificationTicket(ticketLike, ticketId) {
+    const ticket = ticketLike || null;
+    if (
+      ticket?.id
+      && ticket?.workspaceId
+      && ticket?.freshserviceTicketId
+      && (ticket.assessedPriority || ticket.priority)
+    ) {
+      return ticket;
+    }
+
+    const id = ticket?.id || ticketId;
+    if (!id) return ticket;
+
+    return prisma.ticket.findUnique({
+      where: { id },
       select: {
         id: true,
         workspaceId: true,
         freshserviceTicketId: true,
         assessedPriority: true,
         assessedPriorityId: true,
+        priority: true,
+        freshserviceUpdatedAt: true,
+        updatedAt: true,
+        assignedTechId: true,
+        assignedTech: { select: { email: true } },
       },
     });
+  }
 
-    if (!ticket?.assessedPriority || !action?.techId) {
-      return { queued: 0, skipped: 'missing_priority_or_technician' };
-    }
-
+  async _queueAssignedTicketNotifications({
+    workspaceId,
+    ticket,
+    technicianId,
+    techEmail = null,
+    pipelineRunId = null,
+    priority,
+    dedupeBase,
+    notificationType,
+    assignmentContext = {},
+  }) {
     const preference = await prisma.technicianNotificationPreference.findUnique({
-      where: { technicianId: action.techId },
+      where: { technicianId },
       include: { technician: { select: { email: true } } },
     });
     if (!preference) return { queued: 0, skipped: 'no_preferences' };
 
     const providerStatus = await getNotificationProviderStatus();
     const channels = NOTIFICATION_CHANNELS.filter((channel) => (
-      notificationPreferenceAllows(preference, ticket.assessedPriority, channel)
+      notificationPreferenceAllows(preference, priority, channel)
       && providerStatus[channel]?.configured
     ));
     if (channels.length === 0) return { queued: 0, skipped: 'threshold_channel_or_provider_disabled' };
 
-    const message = buildNotificationMessage({ ticket, priority: ticket.assessedPriority });
-    const voiceMessage = buildVoiceNotificationMessage({ ticket, priority: ticket.assessedPriority });
+    const message = buildNotificationMessage({ ticket, priority });
+    const voiceMessage = buildVoiceNotificationMessage({ ticket, priority });
     const whatsappVariables = buildWhatsAppVariables({
       ticket,
-      priority: ticket.assessedPriority,
+      priority,
       message,
     });
     const deliveries = channels.map((channel) => {
       const provider = providerStatus[channel] || { provider: null, configured: false, missing: [] };
       const recipient = channel === 'email'
-        ? action.techEmail || preference.technician?.email || null
+        ? techEmail || preference.technician?.email || ticket.assignedTech?.email || null
         : preferredPhone(preference);
       return {
-        workspaceId: run.workspaceId,
-        technicianId: action.techId,
-        ticketId: run.ticketId,
-        pipelineRunId: run.id,
+        workspaceId,
+        technicianId,
+        ticketId: ticket.id,
+        pipelineRunId,
         channel,
         status: 'queued',
-        assessedPriority: ticket.assessedPriority,
+        assessedPriority: priority,
         recipient,
         provider: provider.provider,
-        dedupeKey: `${run.id}:${run.ticketId}:${action.techId}:${channel}`,
+        dedupeKey: `${dedupeBase}:${channel}`,
         payload: {
           message,
           voiceMessage,
@@ -368,6 +478,8 @@ class NotificationPreferenceService {
           providerConfigured: provider.configured,
           providerMissing: provider.missing,
           freshserviceTicketId: Number(ticket.freshserviceTicketId),
+          notificationType,
+          assignment: assignmentContext,
         },
       };
     });
@@ -382,8 +494,8 @@ class NotificationPreferenceService {
     if (result.count > 0) {
       notificationDeliveryService.processQueuedDeliveries({ limit: result.count }).catch((error) => {
         logger.warn('Notification delivery processing failed', {
-          runId: run.id,
-          ticketId: run.ticketId,
+          runId: pipelineRunId,
+          ticketId: ticket.id,
           error: error.message,
         });
       });

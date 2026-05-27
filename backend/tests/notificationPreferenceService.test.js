@@ -422,6 +422,71 @@ describe('notificationPreferenceService', () => {
     expect(notificationDeliveryServiceMock.processQueuedDeliveries).toHaveBeenCalledWith({ limit: 3 });
   });
 
+  test('hydrates assignment priority when the pipeline run has a partial ticket payload', async () => {
+    prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue({
+      id: 1,
+      workspaceId: 1,
+      technicianId: 17,
+      threshold: 'urgent_only',
+      emailEnabled: true,
+      smsEnabled: false,
+      whatsappEnabled: false,
+      phoneCallEnabled: false,
+      phoneVerifiedAt: null,
+      technician: { email: 'fallback@example.com' },
+    });
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
+      apiKey: 'SG.test',
+      fromEmail: 'ticketpulse@example.com',
+    });
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      id: 503,
+      workspaceId: 1,
+      freshserviceTicketId: 223001,
+      assessedPriority: 'Urgent',
+      assessedPriorityId: 4,
+      priority: 4,
+      freshserviceUpdatedAt: new Date('2026-05-27T18:00:00.000Z'),
+      updatedAt: new Date('2026-05-27T18:00:00.000Z'),
+      assignedTechId: 17,
+      assignedTech: { email: 'fallback@example.com' },
+    });
+    prismaMock.notificationDelivery.createMany.mockResolvedValue({ count: 1 });
+
+    const result = await notificationPreferenceService.queueNotificationsForAssignment({
+      id: 3103,
+      workspaceId: 1,
+      ticketId: 503,
+      ticket: {
+        id: 503,
+        freshserviceTicketId: 223001,
+      },
+    }, {
+      techId: 17,
+      techEmail: 'alex.chen@example.com',
+    });
+
+    expect(result).toEqual({ queued: 1, channels: ['email'] });
+    expect(prismaMock.ticket.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 503 },
+    }));
+    expect(prismaMock.notificationDelivery.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          channel: 'email',
+          recipient: 'alex.chen@example.com',
+          pipelineRunId: 3103,
+          assessedPriority: 'Urgent',
+          dedupeKey: '3103:503:17:email',
+          payload: expect.objectContaining({
+            notificationType: 'ticket_pulse_assignment',
+          }),
+        }),
+      ],
+      skipDuplicates: true,
+    });
+  });
+
   test('does not queue notifications for pending-review priority writeback without assignment', async () => {
     prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue({
       id: 1,
@@ -523,6 +588,63 @@ describe('notificationPreferenceService', () => {
       skipDuplicates: true,
     });
     expect(notificationDeliveryServiceMock.processQueuedDeliveries).toHaveBeenCalledWith({ limit: 2 });
+  });
+
+  test('queues notification delivery records when FreshService reassigns a High/Urgent ticket', async () => {
+    prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue({
+      id: 1,
+      workspaceId: 1,
+      technicianId: 17,
+      threshold: 'high_urgent',
+      emailEnabled: true,
+      smsEnabled: false,
+      whatsappEnabled: false,
+      phoneCallEnabled: false,
+      phoneVerifiedAt: null,
+      technician: { email: 'alex.chen@example.com' },
+    });
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
+      apiKey: 'SG.test',
+      fromEmail: 'ticketpulse@example.com',
+    });
+    prismaMock.notificationDelivery.createMany.mockResolvedValue({ count: 1 });
+
+    const result = await notificationPreferenceService.queueNotificationsForFreshServiceAssignment({
+      id: 504,
+      workspaceId: 1,
+      freshserviceTicketId: 223002,
+      assessedPriority: 'Medium',
+      assessedPriorityId: 2,
+      priority: 4,
+      assignedTechId: 17,
+      freshserviceUpdatedAt: new Date('2026-05-27T18:05:00.000Z'),
+      assignedTech: { email: 'assigned@example.com' },
+    }, {
+      previousTechnicianId: 9,
+      sourceUpdatedAt: new Date('2026-05-27T18:05:00.000Z'),
+    });
+
+    expect(result).toEqual({ queued: 1, channels: ['email'] });
+    expect(prismaMock.notificationDelivery.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          channel: 'email',
+          recipient: 'alex.chen@example.com',
+          pipelineRunId: null,
+          assessedPriority: 'Urgent',
+          dedupeKey: 'fs-assignment:504:9:17:2026-05-27T18:05:00.000Z:email',
+          payload: expect.objectContaining({
+            notificationType: 'freshservice_assignment_change',
+            assignment: expect.objectContaining({
+              previousTechnicianId: 9,
+              technicianId: 17,
+              prioritySource: 'freshservice_priority',
+            }),
+          }),
+        }),
+      ],
+      skipDuplicates: true,
+    });
   });
 
   test('builds concise FreshService-linked messages', () => {
