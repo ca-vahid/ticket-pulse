@@ -93,6 +93,12 @@ jest.unstable_mockModule('../src/services/assignmentPipelineService.js', () => (
 jest.unstable_mockModule('../src/services/freshServiceActionService.js', () => ({
   default: {},
 }));
+jest.unstable_mockModule('../src/services/ticketPriorityEventService.js', () => ({
+  default: {
+    recordFreshServicePriorityChange: jest.fn().mockResolvedValue({ recorded: false }),
+    processPendingEvents: jest.fn().mockResolvedValue({ checked: 0, processed: 0 }),
+  },
+}));
 jest.unstable_mockModule('../src/services/assignmentFlowGuards.js', () => ({
   shouldTriggerAssignmentForLatestRun: () => false,
   shouldTriggerClassificationForLatestRun: () => false,

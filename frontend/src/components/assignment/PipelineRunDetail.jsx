@@ -526,6 +526,8 @@ const SYNC_BADGES = {
   dry_run: { label: 'Dry run (not synced)', style: 'bg-yellow-100 text-yellow-800', icon: '◑' },
   pending: { label: 'Sync pending', style: 'bg-gray-100 text-gray-600', icon: '…' },
   skipped: { label: 'Sync skipped', style: 'bg-gray-100 text-gray-500', icon: '–' },
+  handled_in_fs: { label: 'Handled in FreshService', style: 'bg-amber-100 text-amber-800', icon: '↷' },
+  read_only_skipped: { label: 'FreshService read-only', style: 'bg-slate-100 text-slate-600', icon: '–' },
 };
 
 const REASSIGNABLE_DECISIONS = new Set(['approved', 'modified', 'auto_assigned']);
@@ -550,13 +552,45 @@ const DELIVERY_CHANNEL_ICONS = {
   phone_call: PhoneCall,
 };
 
+function isFreshServiceReadOnlyMessage(value) {
+  return /PUT method is not allowed/i.test(String(value || '')) && /method\(s\): GET/i.test(String(value || ''));
+}
+
+function isReadOnlyFreshServiceRun(run) {
+  const message = run?.syncError
+    || run?.priorityWritebackError
+    || run?.syncPayload?.freshserviceError?.body?.message
+    || run?.priorityWritebackPayload?.freshserviceError?.body?.message;
+  return isFreshServiceReadOnlyMessage(message);
+}
+
+function isHandledInFreshServiceRun(run) {
+  return run?.syncPayload?.preflightAbort?.code === 'superseded_assignee';
+}
+
 function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const [syncing, setSyncing] = useState(false);
   const [localSyncStatus, setLocalSyncStatus] = useState(run.syncStatus);
   const [localSyncedAt, setLocalSyncedAt] = useState(run.syncedAt);
   const [localSyncError, setLocalSyncError] = useState(run.syncError);
   const [result, setResult] = useState(null);
-  const badge = SYNC_BADGES[localSyncStatus] || SYNC_BADGES.pending;
+  const handledInFreshService = isHandledInFreshServiceRun(run);
+  const readOnlySkipped = isReadOnlyFreshServiceRun(run);
+  const effectiveSyncStatus = handledInFreshService
+    ? 'handled_in_fs'
+    : readOnlySkipped
+      ? 'read_only_skipped'
+      : localSyncStatus;
+  const badge = SYNC_BADGES[effectiveSyncStatus] || SYNC_BADGES.pending;
+  const statusTone = effectiveSyncStatus === 'failed'
+    ? 'border-red-200 bg-red-50'
+    : effectiveSyncStatus === 'dry_run'
+      ? 'border-yellow-200 bg-yellow-50'
+      : effectiveSyncStatus === 'synced'
+        ? 'border-green-200 bg-green-50'
+        : effectiveSyncStatus === 'handled_in_fs'
+          ? 'border-amber-200 bg-amber-50'
+          : 'border-slate-200 bg-slate-50';
 
   const handleSync = async (dryRun) => {
     try {
@@ -586,7 +620,7 @@ function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezon
   };
 
   return (
-    <div className={`rounded-lg border p-3 ${localSyncStatus === 'failed' ? 'border-red-200 bg-red-50' : localSyncStatus === 'dry_run' ? 'border-yellow-200 bg-yellow-50' : localSyncStatus === 'synced' ? 'border-green-200 bg-green-50' : 'border-slate-200 bg-slate-50'}`}>
+    <div className={`rounded-lg border p-3 ${statusTone}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${badge.style}`}>{badge.icon} {badge.label}</span>
@@ -594,7 +628,7 @@ function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezon
         </div>
         {isAdmin && (
           <div className="flex gap-1.5">
-            {(localSyncStatus === 'dry_run' || localSyncStatus === 'failed') && (
+            {(localSyncStatus === 'dry_run' || (localSyncStatus === 'failed' && !handledInFreshService && !readOnlySkipped)) && (
               <button onClick={() => handleSync(false)} disabled={syncing} className="px-2.5 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
                 {syncing ? 'Syncing...' : localSyncStatus === 'failed' ? 'Retry Sync' : 'Execute for Real'}
               </button>
@@ -607,7 +641,11 @@ function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezon
           </div>
         )}
       </div>
-      {localSyncError && <p className="text-xs text-red-600 mt-1.5">{localSyncError}</p>}
+      {localSyncError && (
+        <p className={`text-xs mt-1.5 ${handledInFreshService ? 'text-amber-700' : readOnlySkipped ? 'text-slate-600' : 'text-red-600'}`}>
+          {localSyncError}
+        </p>
+      )}
       {run.syncPayload?.freshserviceError?.body?.errors && (
         <div className="text-xs text-red-500 mt-1 space-y-0.5">
           {run.syncPayload.freshserviceError.body.errors.map((e, i) => (
@@ -645,11 +683,14 @@ function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Los_Angeles'
     return null;
   }
 
-  const priorityStatusClass = run.priorityWritebackStatus === 'synced'
+  const effectivePriorityWritebackStatus = run.priorityWritebackStatus === 'failed' && isReadOnlyFreshServiceRun(run)
+    ? 'skipped'
+    : run.priorityWritebackStatus;
+  const priorityStatusClass = effectivePriorityWritebackStatus === 'synced'
     ? 'bg-green-100 text-green-700'
-    : run.priorityWritebackStatus === 'failed'
+    : effectivePriorityWritebackStatus === 'failed'
       ? 'bg-red-100 text-red-700'
-      : run.priorityWritebackStatus === 'dry_run'
+      : effectivePriorityWritebackStatus === 'dry_run'
         ? 'bg-yellow-100 text-yellow-700'
         : 'bg-slate-100 text-slate-600';
 
@@ -670,7 +711,7 @@ function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Los_Angeles'
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">FreshService priority writeback</span>
             <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${priorityStatusClass}`}>
-              {run.priorityWritebackStatus ? run.priorityWritebackStatus.replace(/_/g, ' ') : 'not attempted'}
+              {effectivePriorityWritebackStatus ? effectivePriorityWritebackStatus.replace(/_/g, ' ') : 'not attempted'}
             </span>
           </div>
           {run.priorityWrittenAt && (
@@ -680,7 +721,9 @@ function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Los_Angeles'
             <p className="mt-1 text-xs text-slate-600">{run.priorityWritebackPayload.preview}</p>
           )}
           {run.priorityWritebackError && (
-            <p className="mt-1 text-xs text-red-600">{run.priorityWritebackError}</p>
+            <p className={`mt-1 text-xs ${effectivePriorityWritebackStatus === 'skipped' ? 'text-slate-600' : 'text-red-600'}`}>
+              {effectivePriorityWritebackStatus === 'skipped' ? 'FreshService made this ticket read-only before priority could be written.' : run.priorityWritebackError}
+            </p>
           )}
         </div>
 

@@ -85,6 +85,7 @@ const {
   default: notificationPreferenceService,
   notificationPreferenceAllows,
   buildNotificationMessage,
+  buildPriorityChangeNotificationMessage,
 } = await import('../src/services/notificationPreferenceService.js');
 const { getNotificationProviderStatus } = await import('../src/services/notificationProviders.js');
 
@@ -445,10 +446,93 @@ describe('notificationPreferenceService', () => {
     expect(prismaMock.notificationDelivery.createMany).not.toHaveBeenCalled();
   });
 
+  test('queues notification delivery records when FreshService raises an assigned ticket priority', async () => {
+    const verifiedAt = new Date('2026-05-26T16:00:00.000Z');
+    prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue({
+      id: 1,
+      workspaceId: 1,
+      technicianId: 17,
+      threshold: 'high_urgent',
+      emailEnabled: true,
+      smsEnabled: true,
+      whatsappEnabled: false,
+      phoneCallEnabled: false,
+      phoneVerifiedAt: verifiedAt,
+      phoneOverride: '+16045550101',
+      technician: { email: 'alex.chen@example.com' },
+    });
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
+      apiKey: 'SG.test',
+      fromEmail: 'ticketpulse@example.com',
+    });
+    settingsRepositoryMock.getTwilioConfig.mockResolvedValue({
+      accountSid: 'AC123',
+      authToken: 'secret',
+      fromNumber: '+16045550100',
+      voiceFromNumber: '+16045550100',
+      whatsappSender: null,
+      whatsappMessagingServiceSid: null,
+      whatsappContentSid: null,
+      whatsappContentVariables: '{"1":"{{message}}"}',
+    });
+    prismaMock.notificationDelivery.createMany.mockResolvedValue({ count: 2 });
+
+    const result = await notificationPreferenceService.queueNotificationsForPriorityChange({
+      id: 44,
+      workspaceId: 1,
+      fromPriorityId: 2,
+      fromPriorityLabel: 'Medium',
+      toPriorityId: 3,
+      toPriorityLabel: 'High',
+      sourceUpdatedAt: new Date('2026-05-27T15:05:00.000Z'),
+      ticket: {
+        id: 501,
+        workspaceId: 1,
+        freshserviceTicketId: 222999,
+        assignedTechId: 17,
+        assignedTech: { email: 'assigned@example.com' },
+      },
+    });
+
+    expect(result).toEqual({ queued: 2, channels: ['email', 'sms'] });
+    expect(prismaMock.notificationDelivery.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          channel: 'email',
+          recipient: 'alex.chen@example.com',
+          pipelineRunId: null,
+          priorityEventId: 44,
+          assessedPriority: 'High',
+          dedupeKey: 'priority-change:44:501:17:email',
+          payload: expect.objectContaining({
+            notificationType: 'freshservice_priority_change',
+            priorityChange: expect.objectContaining({
+              fromPriorityLabel: 'Medium',
+              toPriorityLabel: 'High',
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          channel: 'sms',
+          recipient: '+16045550101',
+          pipelineRunId: null,
+          priorityEventId: 44,
+          dedupeKey: 'priority-change:44:501:17:sms',
+        }),
+      ],
+      skipDuplicates: true,
+    });
+    expect(notificationDeliveryServiceMock.processQueuedDeliveries).toHaveBeenCalledWith({ limit: 2 });
+  });
+
   test('builds concise FreshService-linked messages', () => {
     expect(buildNotificationMessage({
       ticket: { freshserviceTicketId: 222999 },
       priority: 'Urgent',
     })).toContain('Ticket #222999 Urgent priority has been assigned to you.');
+    expect(buildPriorityChangeNotificationMessage({
+      ticket: { freshserviceTicketId: 222999 },
+      priority: 'High',
+    })).toContain('Ticket #222999 is now High priority. You are assigned in FreshService.');
   });
 });

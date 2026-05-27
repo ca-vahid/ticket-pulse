@@ -3613,21 +3613,14 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
                           {run.decision.replace(/_/g, ' ')}
                         </span>
                       )}
-                      {run.syncStatus && (
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                            run.syncStatus === 'synced'
-                              ? 'bg-green-100 text-green-700'
-                              : run.syncStatus === 'failed'
-                                ? 'bg-red-100 text-red-700'
-                                : run.syncStatus === 'dry_run'
-                                  ? 'bg-yellow-100 text-yellow-700'
-                                  : 'bg-slate-100 text-slate-500'
-                          }`}
-                        >
-                          {run.syncStatus === 'synced' ? '✓ synced' : run.syncStatus === 'dry_run' ? '◑ dry run' : run.syncStatus === 'failed' ? '✗ sync failed' : run.syncStatus}
-                        </span>
-                      )}
+                      {run.syncStatus && (() => {
+                        const syncMeta = getSyncPillMeta(run);
+                        return (
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${syncMeta.className}`}>
+                            {syncMeta.label}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}</td>
@@ -3688,6 +3681,42 @@ function statusPillClass(status) {
   return AUDIT_STATUS_PILL[status] || 'bg-slate-100 text-slate-600';
 }
 
+function isFreshServiceReadOnlyMessage(value) {
+  return /PUT method is not allowed/i.test(String(value || '')) && /method\(s\): GET/i.test(String(value || ''));
+}
+
+function isReadOnlyFreshServiceRun(run) {
+  const message = run?.syncError
+    || run?.priorityWritebackError
+    || run?.syncPayload?.freshserviceError?.body?.message
+    || run?.priorityWritebackPayload?.freshserviceError?.body?.message;
+  return isFreshServiceReadOnlyMessage(message);
+}
+
+function isHandledInFreshServiceRun(run) {
+  return run?.syncPayload?.preflightAbort?.code === 'superseded_assignee';
+}
+
+function getSyncPillMeta(run) {
+  if (isHandledInFreshServiceRun(run)) {
+    return { label: '↷ handled in FS', className: 'bg-amber-100 text-amber-800' };
+  }
+  if (isReadOnlyFreshServiceRun(run)) {
+    return { label: '– FS read-only', className: 'bg-slate-100 text-slate-600' };
+  }
+  if (run.syncStatus === 'synced') return { label: '✓ synced', className: 'bg-green-100 text-green-700' };
+  if (run.syncStatus === 'dry_run') return { label: '◑ dry run', className: 'bg-yellow-100 text-yellow-700' };
+  if (run.syncStatus === 'failed') return { label: '✗ sync failed', className: 'bg-red-100 text-red-700' };
+  return { label: run.syncStatus, className: 'bg-slate-100 text-slate-500' };
+}
+
+function effectivePriorityWritebackStatus(item) {
+  if (item?.priorityWritebackStatus === 'failed' && isReadOnlyFreshServiceRun(item)) {
+    return 'skipped';
+  }
+  return item?.priorityWritebackStatus;
+}
+
 function deliverySummary(deliveries = []) {
   if (!deliveries.length) return { label: 'No alert deliveries', className: 'bg-slate-100 text-slate-600' };
   const failed = deliveries.filter((delivery) => delivery.status === 'failed').length;
@@ -3730,8 +3759,9 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
   };
 
   const pageSummary = audit.items.reduce((acc, item) => {
-    if (item.ticket?.assessedPriority) acc.priorityProcessed += 1;
-    if (item.ticket?.assessedPriority === 'Urgent') acc.urgent += 1;
+    if (item.auditKind === 'priority_event') acc.priorityChanges += 1;
+    if (item.ticket?.assessedPriority || item.auditKind === 'priority_event') acc.priorityProcessed += 1;
+    if (item.ticket?.assessedPriority === 'Urgent' || item.priorityEvent?.toPriorityLabel === 'Urgent') acc.urgent += 1;
     for (const delivery of item.notificationDeliveries || []) {
       acc.deliveries += 1;
       if (delivery.status === 'sent') acc.sent += 1;
@@ -3739,7 +3769,7 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
       if (delivery.status === 'queued') acc.queued += 1;
     }
     return acc;
-  }, { priorityProcessed: 0, urgent: 0, deliveries: 0, sent: 0, failed: 0, queued: 0 });
+  }, { priorityProcessed: 0, priorityChanges: 0, urgent: 0, deliveries: 0, sent: 0, failed: 0, queued: 0 });
   const summary = audit.summary || pageSummary;
 
   if (selectedRun) {
@@ -3770,10 +3800,11 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         {[
           ['Audit records', audit.total, 'bg-slate-50 text-slate-700'],
           ['Priority processed', summary.priorityProcessed, 'bg-blue-50 text-blue-700'],
+          ['FS priority changes', summary.priorityChanges || 0, 'bg-violet-50 text-violet-700'],
           ['Urgent', summary.urgent, 'bg-red-50 text-red-700'],
           ['Sent', summary.sent, 'bg-green-50 text-green-700'],
           ['Failed', summary.failed, 'bg-red-50 text-red-700'],
@@ -3794,19 +3825,26 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
         <div className="space-y-3">
           {audit.items.map((item) => {
             const ticket = item.ticket || {};
+            const priorityEvent = item.priorityEvent || null;
             const deliveries = item.notificationDeliveries || [];
             const alertSummary = deliverySummary(deliveries);
             const escalationStep = (item.steps || []).find((step) => step.stepName === 'after_hours_urgent_escalation');
             const isAfterHoursPriority = item.triggerSource === 'priority_assessment_after_hours';
+            const isPriorityEvent = item.auditKind === 'priority_event';
             return (
-              <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div key={`${item.auditKind || 'run'}-${item.id}`} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs text-slate-400">Run #{item.id}</span>
+                      <span className="font-mono text-xs text-slate-400">{isPriorityEvent ? 'Event' : 'Run'} #{item.id}</span>
                       <span className="font-mono text-xs text-slate-400">Ticket #{ticket.freshserviceTicketId || item.ticketId}</span>
                       {isAfterHoursPriority && (
                         <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">After-hours priority</span>
+                      )}
+                      {priorityEvent && (
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                          FS {priorityEvent.fromPriorityLabel || 'Unknown'} → {priorityEvent.toPriorityLabel}
+                        </span>
                       )}
                       {ticket.assessedPriority && (
                         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${AUDIT_PRIORITY_PILL[ticket.assessedPriority] || 'bg-blue-100 text-blue-700'}`}>
@@ -3814,8 +3852,8 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
                         </span>
                       )}
                       {item.priorityWritebackStatus && (
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusPillClass(item.priorityWritebackStatus)}`}>
-                          Priority {item.priorityWritebackStatus.replace(/_/g, ' ')}
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusPillClass(effectivePriorityWritebackStatus(item))}`}>
+                          Priority {effectivePriorityWritebackStatus(item).replace(/_/g, ' ')}
                         </span>
                       )}
                       <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${alertSummary.className}`}>
@@ -3833,20 +3871,47 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
                           Assignment {item.relatedAssignmentRun.status.replace(/_/g, ' ')}
                         </span>
                       )}
+                      {item.reassessmentRun && (
+                        <span className="rounded bg-violet-50 px-1.5 py-0.5 font-medium text-violet-700">
+                          Reassessment {item.reassessmentRun.status.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                      {priorityEvent?.skipReason && (
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">
+                          {String(priorityEvent.skipReason).replace(/_/g, ' ')}
+                        </span>
+                      )}
                       {ticket.requester?.name && <span>{ticket.requester.name}</span>}
                     </div>
                     {ticket.priorityRationale && (
                       <p className="mt-2 max-h-10 overflow-hidden text-xs leading-relaxed text-slate-600">{ticket.priorityRationale}</p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => openRun(item.id)}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
-                  >
-                    View Run
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
+                  {isPriorityEvent ? (
+                    item.reassessmentRunId ? (
+                      <button
+                        type="button"
+                        onClick={() => openRun(item.reassessmentRunId)}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+                      >
+                        View Reassessment
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+                        No reassessment run yet
+                      </div>
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => openRun(item.id)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+                    >
+                      View Run
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
 
                 {(deliveries.length > 0 || escalationStep) && (

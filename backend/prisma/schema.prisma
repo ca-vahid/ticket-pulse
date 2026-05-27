@@ -64,6 +64,7 @@ model Workspace {
   ticketReclassificationRuns TicketReclassificationRun[]
   technicianNotificationPreferences TechnicianNotificationPreference[]
   notificationDeliveries NotificationDelivery[]
+  ticketPriorityEvents TicketPriorityEvent[]
 
   @@map("workspaces")
 }
@@ -251,6 +252,7 @@ model Ticket {
   assignmentEpisodes   TicketAssignmentEpisode[]
   threadEntries        TicketThreadEntry[]
   notificationDeliveries NotificationDelivery[]
+  priorityEvents       TicketPriorityEvent[]
 
   @@map("tickets")
   @@index([workspaceId])
@@ -872,8 +874,10 @@ model NotificationDelivery {
   technician        Technician? @relation(fields: [technicianId], references: [id], onDelete: Cascade)
   ticketId          Int        @map("ticket_id")
   ticket            Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  pipelineRunId     Int        @map("pipeline_run_id")
-  pipelineRun       AssignmentPipelineRun @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+  pipelineRunId     Int?       @map("pipeline_run_id")
+  pipelineRun       AssignmentPipelineRun? @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+  priorityEventId   Int?       @map("priority_event_id")
+  priorityEvent     TicketPriorityEvent? @relation(fields: [priorityEventId], references: [id], onDelete: Cascade)
   channel           String     @db.VarChar(20)
   status            String     @default("queued") @db.VarChar(30)
   assessedPriority  String     @db.VarChar(20) @map("assessed_priority")
@@ -894,7 +898,41 @@ model NotificationDelivery {
   @@index([technicianId])
   @@index([ticketId])
   @@index([pipelineRunId])
+  @@index([priorityEventId])
   @@index([channel])
+}
+
+model TicketPriorityEvent {
+  id                  Int       @id @default(autoincrement())
+  workspaceId         Int       @map("workspace_id")
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ticketId            Int       @map("ticket_id")
+  ticket              Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  eventType           String    @default("freshservice_priority_changed") @db.VarChar(40) @map("event_type")
+  source              String    @default("freshservice_sync") @db.VarChar(40)
+  fromPriorityId      Int?      @map("from_priority_id")
+  fromPriorityLabel   String?   @db.VarChar(20) @map("from_priority_label")
+  toPriorityId        Int       @map("to_priority_id")
+  toPriorityLabel     String    @db.VarChar(20) @map("to_priority_label")
+  direction           String    @default("changed") @db.VarChar(20)
+  detectedAt          DateTime  @default(now()) @map("detected_at")
+  sourceUpdatedAt     DateTime? @map("source_updated_at")
+  status              String    @default("recorded") @db.VarChar(30)
+  skipReason          String?   @db.Text @map("skip_reason")
+  notificationSummary Json?     @map("notification_summary")
+  reassessmentRunId   Int?      @map("reassessment_run_id")
+  dedupeKey           String    @unique @db.VarChar(255) @map("dedupe_key")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  notificationDeliveries NotificationDelivery[]
+
+  @@map("ticket_priority_events")
+  @@index([workspaceId, detectedAt])
+  @@index([ticketId, detectedAt])
+  @@index([toPriorityId])
+  @@index([status])
+  @@index([reassessmentRunId])
 }
 
 model SkillHierarchyDraft {

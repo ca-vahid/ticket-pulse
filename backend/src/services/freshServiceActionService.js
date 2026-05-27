@@ -60,6 +60,22 @@ function buildSyncPayload(actions, preview, dryRun, extras = {}) {
   return { actions, preview, dryRun, timestamp: new Date().toISOString(), ...extras };
 }
 
+function freshServiceErrorMessage(errorOrDetail) {
+  const detail = errorOrDetail?.body || errorOrDetail?.freshserviceDetail || errorOrDetail?.response?.data || errorOrDetail;
+  return detail?.description || detail?.message || errorOrDetail?.message || '';
+}
+
+function isFreshServiceReadOnlyError(error) {
+  const detail = extractFreshServiceError(error);
+  const status = detail?.status || error?.response?.status || error?.freshserviceStatus || null;
+  const message = freshServiceErrorMessage(detail || error);
+  return Number(status) === 405 && /PUT method is not allowed/i.test(message) && /method\(s\): GET/i.test(message);
+}
+
+function readOnlyTicketSyncMessage() {
+  return 'FreshService marked this ticket read-only, spam, deleted, or otherwise GET-only before Ticket Pulse could write back. No further action needed.';
+}
+
 class FreshServiceActionService {
   /**
    * Build the FreshService actions for a pipeline run decision.
@@ -338,6 +354,19 @@ class FreshServiceActionService {
       return { success: true, preview, actions };
     } catch (err) {
       const freshserviceError = extractFreshServiceError(err);
+      if (isFreshServiceReadOnlyError(err)) {
+        const skippedReason = readOnlyTicketSyncMessage();
+        await prisma.assignmentPipelineRun.update({
+          where: { id: runId },
+          data: {
+            priorityWritebackStatus: 'skipped',
+            priorityWritebackError: skippedReason,
+            priorityWritebackPayload: { ...payloadData, freshserviceError, skippedReason },
+          },
+        });
+        logger.info('FreshService priority sync skipped for read-only ticket', { runId, preview, freshserviceError });
+        return { success: true, skipped: true, error: skippedReason, preview, freshserviceError };
+      }
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },
         data: {
@@ -484,6 +513,35 @@ class FreshServiceActionService {
               // FreshService is unchanged. Manually-approved runs keep their
               // existing decision so the audit trail shows admin intent.
               const shouldDowngrade = run.decision === 'auto_assigned';
+              if (shouldDowngrade && preflightResult.code === 'superseded_assignee') {
+                const completedActions = await this._executeSafeActionsBeforeAssignment(client, run, actions, assignAction, fsConfig);
+                const handledMessage = `Handled in FreshService: ${preflightResult.reason}. Ticket Pulse left assignment untouched.`;
+                await prisma.assignmentPipelineRun.update({
+                  where: { id: runId },
+                  data: {
+                    decision: 'pending_review',
+                    assignedTechId: null,
+                    decidedAt: null,
+                    syncStatus: 'skipped',
+                    syncError: handledMessage,
+                    syncPayload: { ...payloadData, preflightAbort: preflightResult, completedActions },
+                    errorMessage: `${handledMessage} Priority and category writeback were preserved when available.`,
+                  },
+                });
+                logger.info('FreshService sync handled externally by existing assignee', {
+                  runId,
+                  completedActions: completedActions.map((action) => action.type),
+                  ...preflightResult,
+                });
+                return {
+                  success: true,
+                  skipped: true,
+                  handledInFreshService: true,
+                  preflightAbort: preflightResult,
+                  preview,
+                  completedActions,
+                };
+              }
               const updatePayload = {
                 syncStatus: 'failed',
                 syncError: preflightResult.reason,
@@ -609,6 +667,19 @@ class FreshServiceActionService {
 
     } catch (err) {
       const freshserviceError = extractFreshServiceError(err);
+      if (isFreshServiceReadOnlyError(err)) {
+        const skippedReason = readOnlyTicketSyncMessage();
+        await prisma.assignmentPipelineRun.update({
+          where: { id: runId },
+          data: {
+            syncStatus: 'skipped',
+            syncError: skippedReason,
+            syncPayload: { ...payloadData, freshserviceError, skippedReason },
+          },
+        });
+        logger.info('FreshService sync skipped for read-only ticket', { runId, preview, freshserviceError });
+        return { success: true, skipped: true, preview, freshserviceError, syncNote: skippedReason };
+      }
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },
         data: {
@@ -620,6 +691,38 @@ class FreshServiceActionService {
       logger.error('FreshService sync failed', { runId, error: err.message, freshserviceError });
       return { success: false, error: err.message, preview, freshserviceError };
     }
+  }
+
+  async _executeSafeActionsBeforeAssignment(client, run, actions, assignAction, fsConfig) {
+    const assignIndex = actions.findIndex((action) => action === assignAction);
+    const safeActions = assignIndex >= 0 ? actions.slice(0, assignIndex) : [];
+    const completedActions = [];
+
+    for (const action of safeActions) {
+      if (action.type !== 'update_custom_fields') continue;
+      const customFields = await this._resolveTicketPulseLookupFields(client, action, fsConfig);
+      action.sentCustomFields = customFields;
+      const result = await client.updateTicketCustomFields(action.ticketId, customFields);
+      if (result?.alreadyClosed) break;
+      await prisma.ticket.update({
+        where: { id: run.ticketId },
+        data: action.localFields,
+      }).catch((updateError) => {
+        logger.warn('FreshService sync: custom fields updated before external assignment handling, but local mirror failed', {
+          ticketId: run.ticketId,
+          freshserviceTicketId: action.ticketId,
+          runId: run.id,
+          error: updateError.message,
+        });
+      });
+      completedActions.push(action);
+      logger.info('FreshService: Ticket Pulse skill fields updated before external assignment handling', {
+        ticketId: action.ticketId,
+        runId: run.id,
+      });
+    }
+
+    return completedActions;
   }
 
   async _mirrorLocalAssignment(run, action) {

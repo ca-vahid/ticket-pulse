@@ -290,6 +290,33 @@ describe('freshServiceActionService priority writeback', () => {
     });
   });
 
+  test('skips priority writeback when FreshService marks a ticket read-only', async () => {
+    const readOnlyError = new Error('PUT method is not allowed. It should be one of these method(s): GET');
+    readOnlyError.response = {
+      status: 405,
+      data: { message: 'PUT method is not allowed. It should be one of these method(s): GET' },
+    };
+    const client = {
+      updateTicketPriority: jest.fn().mockRejectedValue(readOnlyError),
+    };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(priorityRun());
+
+    const result = await freshServiceActionService.executePriorityWriteback(3101, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({
+      success: true,
+      skipped: true,
+    }));
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 3101 },
+      data: expect.objectContaining({
+        priorityWritebackStatus: 'skipped',
+        priorityWritebackError: expect.stringContaining('read-only'),
+      }),
+    });
+  });
+
   test('does not queue agent notifications for pending-review priority-only writeback', async () => {
     const client = {
       updateTicketPriority: jest.fn().mockResolvedValue({ id: 222999, priority: 4 }),
@@ -377,6 +404,68 @@ describe('freshServiceActionService assignment notifications', () => {
         techEmail: 'zoe.dio@example.com',
       }),
     );
+  });
+
+  test('treats manually assigned FreshService tickets as handled and still writes category fields', async () => {
+    const client = {
+      getTicket: jest.fn().mockResolvedValue({ responder_id: 100200300, group_id: null }),
+      updateTicketCustomFields: jest.fn().mockResolvedValue({ id: 222999 }),
+      listCustomObjects: jest.fn().mockResolvedValue([]),
+      assignTicket: jest.fn(),
+      addPrivateNote: jest.fn(),
+    };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.technician.findFirst.mockResolvedValue({ name: 'Andrew Fong' });
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      tpSkillCustomField: 'lf_ticket_pulse_category',
+      tpSubskillCustomField: 'lf_ticket_pulse_subcategory',
+    });
+    const assignmentRun = run({
+      id: 3202,
+      ticketId: 501,
+      workspaceId: 1,
+      decision: 'auto_assigned',
+      assignedTechId: 901,
+      ticket: {
+        id: 501,
+        freshserviceTicketId: 222999,
+        firstAssignedAt: null,
+        subject: 'BST update issue',
+        ticketCategory: 'BST',
+        tpSkill: null,
+        tpSubskill: null,
+        internalCategory: { name: 'Software & Apps' },
+        internalSubcategory: { name: 'BST' },
+      },
+      recommendation: {
+        agentBriefingHtml: '<p>BST update issue.</p>',
+        recommendations: [{ techId: 901, techName: 'Zoe Dio' }],
+      },
+    });
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(assignmentRun);
+
+    const result = await freshServiceActionService.execute(3202, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({
+      success: true,
+      skipped: true,
+      handledInFreshService: true,
+    }));
+    expect(client.updateTicketCustomFields).toHaveBeenCalledWith(222999, {
+      lf_ticket_pulse_category: 'Software & Apps',
+      lf_ticket_pulse_subcategory: 'BST',
+    });
+    expect(client.assignTicket).not.toHaveBeenCalled();
+    expect(client.addPrivateNote).not.toHaveBeenCalled();
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 3202 },
+      data: expect.objectContaining({
+        decision: 'pending_review',
+        syncStatus: 'skipped',
+        syncError: expect.stringContaining('Handled in FreshService'),
+        errorMessage: expect.stringContaining('Handled in FreshService'),
+      }),
+    });
   });
 });
 

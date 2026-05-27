@@ -63,6 +63,21 @@ export function buildNotificationMessage({ ticket, priority }) {
   ].filter(Boolean).join(' ');
 }
 
+export function buildPriorityChangeNotificationMessage({ ticket, priority }) {
+  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
+  const domain = config.freshservice?.domain || null;
+  const host = domain
+    ? (domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`)
+    : null;
+  const link = fsId && host ? `https://${host}/a/tickets/${fsId}` : null;
+  return [
+    fsId ? `Ticket #${fsId}` : 'A ticket',
+    `is now ${priority} priority.`,
+    'You are assigned in FreshService.',
+    link ? `Open: ${link}` : null,
+  ].filter(Boolean).join(' ');
+}
+
 function buildWhatsAppVariables({ ticket, priority, message }) {
   const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
   const domain = config.freshservice?.domain || null;
@@ -84,6 +99,16 @@ export function buildVoiceNotificationMessage({ ticket, priority }) {
     'Ticket Pulse alert.',
     fsId ? `Ticket number ${fsId}` : 'A ticket',
     `is ${priority} priority and has been assigned to you.`,
+  ].filter(Boolean).join(' ');
+}
+
+export function buildPriorityChangeVoiceNotificationMessage({ ticket, priority }) {
+  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
+  return [
+    'Ticket Pulse priority alert.',
+    fsId ? `Ticket number ${fsId}` : 'A ticket',
+    `is now ${priority} priority.`,
+    'You are assigned in FreshService.',
   ].filter(Boolean).join(' ');
 }
 
@@ -359,6 +384,105 @@ class NotificationPreferenceService {
         logger.warn('Notification delivery processing failed', {
           runId: run.id,
           ticketId: run.ticketId,
+          error: error.message,
+        });
+      });
+    }
+
+    return { queued: result.count, channels };
+  }
+
+  async queueNotificationsForPriorityChange(event) {
+    const hydratedEvent = event?.ticket?.id ? event : await prisma.ticketPriorityEvent.findUnique({
+      where: { id: event?.id },
+      include: {
+        ticket: {
+          select: {
+            id: true,
+            workspaceId: true,
+            freshserviceTicketId: true,
+            subject: true,
+            assignedTechId: true,
+            assignedTech: { select: { id: true, email: true, name: true } },
+          },
+        },
+      },
+    });
+
+    const ticket = hydratedEvent?.ticket;
+    const priority = hydratedEvent?.toPriorityLabel;
+    const technicianId = ticket?.assignedTechId;
+    if (!hydratedEvent?.id || !ticket?.id || !priority) {
+      return { queued: 0, skipped: 'missing_priority_event_context' };
+    }
+    if (!technicianId) {
+      return { queued: 0, skipped: 'no_assigned_technician' };
+    }
+
+    const preference = await prisma.technicianNotificationPreference.findUnique({
+      where: { technicianId },
+      include: { technician: { select: { email: true } } },
+    });
+    if (!preference) return { queued: 0, skipped: 'no_preferences' };
+
+    const providerStatus = await getNotificationProviderStatus();
+    const channels = NOTIFICATION_CHANNELS.filter((channel) => (
+      notificationPreferenceAllows(preference, priority, channel)
+      && providerStatus[channel]?.configured
+    ));
+    if (channels.length === 0) return { queued: 0, skipped: 'threshold_channel_or_provider_disabled' };
+
+    const message = buildPriorityChangeNotificationMessage({ ticket, priority });
+    const voiceMessage = buildPriorityChangeVoiceNotificationMessage({ ticket, priority });
+    const whatsappVariables = buildWhatsAppVariables({ ticket, priority, message });
+    const deliveries = channels.map((channel) => {
+      const provider = providerStatus[channel] || { provider: null, configured: false, missing: [] };
+      const recipient = channel === 'email'
+        ? preference.technician?.email || ticket.assignedTech?.email || null
+        : preferredPhone(preference);
+      return {
+        workspaceId: hydratedEvent.workspaceId,
+        technicianId,
+        ticketId: ticket.id,
+        pipelineRunId: null,
+        priorityEventId: hydratedEvent.id,
+        channel,
+        status: 'queued',
+        assessedPriority: priority,
+        recipient,
+        provider: provider.provider,
+        dedupeKey: `priority-change:${hydratedEvent.id}:${ticket.id}:${technicianId}:${channel}`,
+        payload: {
+          message,
+          voiceMessage,
+          whatsappVariables,
+          providerConfigured: provider.configured,
+          providerMissing: provider.missing,
+          freshserviceTicketId: Number(ticket.freshserviceTicketId),
+          notificationType: 'freshservice_priority_change',
+          priorityChange: {
+            fromPriorityId: hydratedEvent.fromPriorityId,
+            fromPriorityLabel: hydratedEvent.fromPriorityLabel,
+            toPriorityId: hydratedEvent.toPriorityId,
+            toPriorityLabel: hydratedEvent.toPriorityLabel,
+            sourceUpdatedAt: hydratedEvent.sourceUpdatedAt,
+          },
+        },
+      };
+    });
+
+    if (deliveries.length === 0) return { queued: 0 };
+
+    const result = await prisma.notificationDelivery.createMany({
+      data: deliveries,
+      skipDuplicates: true,
+    });
+
+    if (result.count > 0) {
+      notificationDeliveryService.processQueuedDeliveries({ limit: result.count }).catch((error) => {
+        logger.warn('Priority-change notification delivery processing failed', {
+          priorityEventId: hydratedEvent.id,
+          ticketId: ticket.id,
           error: error.message,
         });
       });

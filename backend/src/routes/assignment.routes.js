@@ -34,7 +34,7 @@ import logger from '../utils/logger.js';
 const router = express.Router();
 const ASSIGNMENT_STATS_TIMEZONE = 'America/Los_Angeles';
 const ESCALATION_CHANNELS = new Set(['email', 'sms', 'whatsapp', 'phone_call']);
-const PRIORITY_AUDIT_TRIGGERS = ['priority_assessment_after_hours', 'priority_assessment_only'];
+const PRIORITY_AUDIT_TRIGGERS = ['priority_assessment_after_hours', 'priority_assessment_only', 'priority_changed'];
 
 function normalizeConfigStringArray(value) {
   if (value === undefined) return undefined;
@@ -531,6 +531,7 @@ router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
 router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const pageWindow = offset + limit;
   const auditWhere = {
     workspaceId: req.workspaceId,
     OR: [
@@ -539,8 +540,11 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
       { notificationDeliveries: { some: {} } },
     ],
   };
+  const priorityEventWhere = {
+    workspaceId: req.workspaceId,
+  };
 
-  const [items, total, priorityProcessed, urgent, deliveryStatuses] = await Promise.all([
+  const [runItems, runTotal, eventItems, eventTotal, priorityProcessed, urgentRuns, urgentPriorityChanges, deliveryStatuses] = await Promise.all([
     prisma.assignmentPipelineRun.findMany({
       where: auditWhere,
       include: {
@@ -596,10 +600,54 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: limit,
-      skip: offset,
+      take: pageWindow,
     }),
     prisma.assignmentPipelineRun.count({ where: auditWhere }),
+    prisma.ticketPriorityEvent.findMany({
+      where: priorityEventWhere,
+      include: {
+        ticket: {
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            subject: true,
+            status: true,
+            priority: true,
+            assessedPriority: true,
+            assessedPriorityId: true,
+            priorityRationale: true,
+            priorityConfidence: true,
+            priorityEvidence: true,
+            priorityAssessedAt: true,
+            createdAt: true,
+            requester: { select: { name: true, email: true, department: true } },
+            assignedTech: { select: { id: true, name: true } },
+          },
+        },
+        notificationDeliveries: {
+          orderBy: { queuedAt: 'asc' },
+          select: {
+            id: true,
+            channel: true,
+            status: true,
+            assessedPriority: true,
+            recipient: true,
+            provider: true,
+            providerMessageId: true,
+            retryCount: true,
+            error: true,
+            payload: true,
+            queuedAt: true,
+            sentAt: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+      orderBy: { detectedAt: 'desc' },
+      take: pageWindow,
+    }),
+    prisma.ticketPriorityEvent.count({ where: priorityEventWhere }),
     prisma.assignmentPipelineRun.count({
       where: {
         ...auditWhere,
@@ -612,6 +660,12 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
         ticket: { is: { assessedPriority: 'Urgent' } },
       },
     }),
+    prisma.ticketPriorityEvent.count({
+      where: {
+        ...priorityEventWhere,
+        toPriorityLabel: 'Urgent',
+      },
+    }),
     prisma.notificationDelivery.groupBy({
       by: ['status'],
       where: { workspaceId: req.workspaceId },
@@ -619,10 +673,51 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
     }),
   ]);
 
+  const normalizedRunItems = runItems.map((item) => ({ ...item, auditKind: 'pipeline_run' }));
+  const normalizedEventItems = eventItems.map((event) => ({
+    id: event.id,
+    auditKind: 'priority_event',
+    ticketId: event.ticketId,
+    workspaceId: event.workspaceId,
+    triggerSource: event.source,
+    status: event.status,
+    decision: null,
+    createdAt: event.detectedAt,
+    updatedAt: event.updatedAt,
+    priorityWritebackStatus: null,
+    priorityWritebackError: null,
+    notificationDeliveries: event.notificationDeliveries || [],
+    steps: [],
+    ticket: event.ticket,
+    priorityEvent: {
+      id: event.id,
+      eventType: event.eventType,
+      source: event.source,
+      fromPriorityId: event.fromPriorityId,
+      fromPriorityLabel: event.fromPriorityLabel,
+      toPriorityId: event.toPriorityId,
+      toPriorityLabel: event.toPriorityLabel,
+      direction: event.direction,
+      detectedAt: event.detectedAt,
+      sourceUpdatedAt: event.sourceUpdatedAt,
+      status: event.status,
+      skipReason: event.skipReason,
+      notificationSummary: event.notificationSummary,
+      reassessmentRunId: event.reassessmentRunId,
+    },
+    reassessmentRunId: event.reassessmentRunId,
+  }));
+  const items = [...normalizedRunItems, ...normalizedEventItems]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(offset, offset + limit);
+
   const ticketIds = [...new Set(items.map((item) => item.ticketId).filter(Boolean))];
   const oldestAuditCreatedAt = items.reduce((oldest, item) => (
     !oldest || item.createdAt < oldest ? item.createdAt : oldest
   ), null);
+  const reassessmentRunIds = [...new Set(items
+    .filter((item) => item.auditKind === 'priority_event' && item.reassessmentRunId)
+    .map((item) => item.reassessmentRunId))];
   const relatedRuns = ticketIds.length > 0 && oldestAuditCreatedAt
     ? await prisma.assignmentPipelineRun.findMany({
       where: {
@@ -646,24 +741,45 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
       orderBy: { createdAt: 'asc' },
     })
     : [];
+  const reassessmentRuns = reassessmentRunIds.length > 0
+    ? await prisma.assignmentPipelineRun.findMany({
+      where: { id: { in: reassessmentRunIds } },
+      select: {
+        id: true,
+        ticketId: true,
+        status: true,
+        decision: true,
+        triggerSource: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
+    : [];
+  const reassessmentRunById = new Map(reassessmentRuns.map((run) => [run.id, run]));
 
   const enrichedItems = items.map((item) => ({
     ...item,
-    relatedAssignmentRun: relatedRuns.find((run) => (
-      run.ticketId === item.ticketId
-      && run.id !== item.id
-      && run.createdAt >= item.createdAt
-    )) || null,
+    relatedAssignmentRun: item.auditKind === 'pipeline_run'
+      ? relatedRuns.find((run) => (
+        run.ticketId === item.ticketId
+        && run.id !== item.id
+        && run.createdAt >= item.createdAt
+      )) || null
+      : null,
+    reassessmentRun: item.auditKind === 'priority_event'
+      ? reassessmentRunById.get(item.reassessmentRunId) || null
+      : null,
   }));
 
   res.json({
     success: true,
     data: {
       items: enrichedItems,
-      total,
+      total: runTotal + eventTotal,
       summary: {
-        priorityProcessed,
-        urgent,
+        priorityProcessed: priorityProcessed + eventTotal,
+        priorityChanges: eventTotal,
+        urgent: urgentRuns + urgentPriorityChanges,
         deliveries: deliveryStatuses.reduce((sum, item) => sum + item._count._all, 0),
         sent: deliveryStatuses.find((item) => item.status === 'sent')?._count._all || 0,
         failed: deliveryStatuses.find((item) => item.status === 'failed')?._count._all || 0,

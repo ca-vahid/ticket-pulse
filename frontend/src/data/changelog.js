@@ -1,6 +1,16 @@
-export const APP_VERSION = '2.49';
+export const APP_VERSION = '2.50';
 
 export const changelog = [
+  {
+    version: '2.50',
+    date: 'May 27, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>FreshService priority-change alerts</strong> detect external High/Urgent priority raises during sync and notify the assigned agent when their saved threshold and channels allow it.' },
+      { type: 'improved', html: '<strong>Priority audit</strong> now includes FreshService priority-change events, delivery outcomes, skip reasons, and linked Ticket Pulse reassessment runs.' },
+      { type: 'fixed', html: '<strong>FreshService handoff states</strong> show read-only/spam tickets as skipped and manually assigned tickets as handled in FreshService instead of false sync failures.' },
+      { type: 'database', html: '<strong>Database updates</strong> add ticket priority event audit storage and connect notification deliveries to either pipeline runs or priority-change events.' },
+    ],
+  },
   {
     version: '2.49',
     date: 'May 26, 2026',

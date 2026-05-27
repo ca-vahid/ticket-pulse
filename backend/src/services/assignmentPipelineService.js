@@ -72,7 +72,9 @@ class AssignmentPipelineService {
     const isManual = triggerSource === 'manual';
     const isClassificationOnly = triggerSource === 'classification_only';
     const isPriorityAssessmentAfterHours = triggerSource === 'priority_assessment_after_hours';
-    const isPriorityAssessmentOnly = triggerSource === 'priority_assessment_only' || isPriorityAssessmentAfterHours;
+    const isPriorityAssessmentOnly = triggerSource === 'priority_assessment_only'
+      || isPriorityAssessmentAfterHours
+      || triggerSource === 'priority_changed';
     // reboundFrom: { previousTechId, previousTechName, unassignedAt, unassignedByName, reboundCount }
     // Set when this run is being created because the ticket bounced back from
     // a prior assignee. Persisted on the run so the UI / LLM can show context.
@@ -617,7 +619,8 @@ class AssignmentPipelineService {
    */
   async _executeRun(runId, ticketId, workspaceId, triggerSource, pipelineStart, emit, signal) {
     const isPriorityAssessmentOnly = triggerSource === 'priority_assessment_only'
-      || triggerSource === 'priority_assessment_after_hours';
+      || triggerSource === 'priority_assessment_after_hours'
+      || triggerSource === 'priority_changed';
     const assignmentConfig = await assignmentRepository.getConfig(workspaceId);
     const promptVersion = await promptRepository.getPublished(workspaceId);
     let systemPrompt = promptVersion.systemPrompt;
@@ -631,6 +634,9 @@ class AssignmentPipelineService {
       systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category and subcategory. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory is saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields.';
     } else if (isPriorityAssessmentOnly) {
       systemPrompt += '\n\n## Priority-assessment-only Mode\nThis run exists to assess and persist Ticket Pulse priority for an active ticket. Still inspect and classify the ticket enough to produce valid structured output, but do not change the assignee and do not write an assignment recommendation as an action request. If the ticket is non-actionable noise/FYI, submit an empty recommendations array with closureNoticeHtml; the system will apply the workspace noise-dismissal policy. Do not call get_agent_availability, find_matching_agents, get_workload_stats, get_tech_ticket_history, or get_technician_ad_profile unless one of those tools is directly needed as evidence for priority or classification. Call submit_recommendation so assessedPriority, priorityRationale, priorityConfidence, and optional prioritySignals are saved and can be written to FreshService native priority.';
+      if (triggerSource === 'priority_changed') {
+        systemPrompt += '\n\nFreshService priority changed outside Ticket Pulse. Treat that change as an escalation signal to consider, but still assess priority from the ticket evidence and explain whether the evidence supports the new FreshService priority.';
+      }
     }
 
     const workspace = await prisma.workspace.findUnique({

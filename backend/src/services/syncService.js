@@ -21,6 +21,7 @@ import noiseRuleService from './noiseRuleService.js';
 import assignmentRepository from './assignmentRepository.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
 import freshServiceActionService from './freshServiceActionService.js';
+import ticketPriorityEventService from './ticketPriorityEventService.js';
 import {
   shouldTriggerAssignmentForLatestRun,
   shouldTriggerClassificationForLatestRun,
@@ -1337,6 +1338,18 @@ class SyncService {
             rejectionCount,
           });
 
+          await ticketPriorityEventService.recordFreshServicePriorityChange({
+            existingTicket,
+            upsertedTicket,
+            source: 'freshservice_sync',
+          }).catch((err) => {
+            logger.warn('FreshService priority-change event recording failed (non-fatal)', {
+              ticketId: upsertedTicket.id,
+              freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
+              error: err.message,
+            });
+          });
+
           await this._ensureNoiseTicketDismissed(upsertedTicket, ticketWorkspaceId, {
             noiseRuleCategory: normalizedNoiseCategory,
             waitForSync: false,
@@ -1462,6 +1475,12 @@ class SyncService {
       for (const workspaceId of recoveryWorkspaceIds) {
         this._recoverOpenNoiseTickets(workspaceId, { waitForSync: false }).catch((err) => {
           logger.warn('Open noise-ticket recovery failed (non-fatal)', {
+            workspaceId,
+            error: err.message,
+          });
+        });
+        ticketPriorityEventService.processPendingEvents(workspaceId).catch((err) => {
+          logger.warn('Priority-change event recovery failed (non-fatal)', {
             workspaceId,
             error: err.message,
           });
@@ -1595,6 +1614,19 @@ class SyncService {
           rejectionCount: existingTicket?.rejectionCount || 0,
         });
 
+        await ticketPriorityEventService.recordFreshServicePriorityChange({
+          existingTicket,
+          upsertedTicket,
+          source: 'assignment_fast_sync',
+        }).catch((err) => {
+          logger.warn('Assignment fast sync: priority-change event recording failed', {
+            workspaceId,
+            ticketId: upsertedTicket.id,
+            freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
+            error: err.message,
+          });
+        });
+
         upsertedIds.push(upsertedTicket.id);
         await this._ensureNoiseTicketDismissed(upsertedTicket, ticketWorkspaceId, {
           noiseRuleCategory: normalizedNoiseCategory,
@@ -1640,6 +1672,13 @@ class SyncService {
       });
       return { skipped: true, reason: 'recovery_failed', error: err.message };
     });
+    const priorityEventRecovery = await ticketPriorityEventService.processPendingEvents(workspaceId).catch((err) => {
+      logger.warn('Assignment fast sync: priority-change event recovery failed', {
+        workspaceId,
+        error: err.message,
+      });
+      return { skipped: true, reason: 'priority_event_recovery_failed', error: err.message };
+    });
 
     clearReadCache();
 
@@ -1654,6 +1693,7 @@ class SyncService {
       polling,
       classification,
       noiseRecovery,
+      priorityEventRecovery,
       timestamp: new Date(),
     };
 
