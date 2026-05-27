@@ -1,6 +1,15 @@
-export const APP_VERSION = '2.47';
+export const APP_VERSION = '2.48';
 
 export const changelog = [
+  {
+    version: '2.48',
+    date: 'May 26, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Manual assignment re-runs</strong> now keep the live analysis stream open instead of falsely cancelling when the request body closes.' },
+      { type: 'fixed', html: '<strong>Pipeline live view</strong> receives the final completion event reliably, preventing the empty “Claude is analyzing” state after a re-run starts.' },
+      { type: 'database', html: '<strong>Database-safe release</strong> contains no schema migration.' },
+    ],
+  },
   {
     version: '2.47',
     date: 'May 26, 2026',

@@ -25,6 +25,7 @@ import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { analyzeTicketActivities } from '../integrations/freshserviceTransformer.js';
 import { convertToTimezone } from '../utils/timezone.js';
 import { DEFAULT_ANTHROPIC_MODEL, normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { attachSseDisconnectAbort } from '../utils/sseDisconnect.js';
 import { requireReviewer, requireAdmin } from '../middleware/auth.js';
 import appConfig from '../config/index.js';
 import prisma from '../services/prisma.js';
@@ -412,6 +413,15 @@ router.post('/runs/:id/run-now', requireAdmin, asyncHandler(async (req, res) => 
 
   const abortController = new AbortController();
   let clientDisconnected = false;
+  const markSseEnding = attachSseDisconnectAbort({
+    req,
+    res,
+    abortController,
+    onDisconnect: () => {
+      clientDisconnected = true;
+      logger.debug('SSE client disconnected during run-now', { runId });
+    },
+  });
 
   const onEvent = (event) => {
     if (clientDisconnected) return;
@@ -419,14 +429,9 @@ router.post('/runs/:id/run-now', requireAdmin, asyncHandler(async (req, res) => 
       res.write(`data: ${JSON.stringify(event)}\n\n`);
     } catch {
       clientDisconnected = true;
+      abortController.abort();
     }
   };
-
-  req.on('close', () => {
-    clientDisconnected = true;
-    abortController.abort();
-    logger.debug('SSE client disconnected during run-now', { runId });
-  });
 
   try {
     await assignmentPipelineService._executeRun(runId, run.ticketId, run.workspaceId, 'manual', Date.now(), onEvent, abortController.signal);
@@ -439,6 +444,7 @@ router.post('/runs/:id/run-now', requireAdmin, asyncHandler(async (req, res) => 
 
   if (!clientDisconnected) {
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    markSseEnding();
     res.end();
   }
 }));
@@ -1046,6 +1052,15 @@ router.post('/trigger/:ticketId', requireAdmin, asyncHandler(async (req, res) =>
 
   const abortController = new AbortController();
   let clientDisconnected = false;
+  const markSseEnding = attachSseDisconnectAbort({
+    req,
+    res,
+    abortController,
+    onDisconnect: () => {
+      clientDisconnected = true;
+      logger.debug('SSE client disconnected during pipeline', { ticketId });
+    },
+  });
 
   const onEvent = (event) => {
     if (clientDisconnected) return;
@@ -1053,14 +1068,9 @@ router.post('/trigger/:ticketId', requireAdmin, asyncHandler(async (req, res) =>
       res.write(`data: ${JSON.stringify(event)}\n\n`);
     } catch {
       clientDisconnected = true;
+      abortController.abort();
     }
   };
-
-  req.on('close', () => {
-    clientDisconnected = true;
-    abortController.abort();
-    logger.debug('SSE client disconnected during pipeline', { ticketId });
-  });
 
   try {
     await assignmentPipelineService.runPipeline(ticketId, req.workspaceId, 'manual', onEvent, abortController.signal);
@@ -1072,6 +1082,7 @@ router.post('/trigger/:ticketId', requireAdmin, asyncHandler(async (req, res) =>
 
   if (!clientDisconnected) {
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    markSseEnding();
     res.end();
   }
 }));
