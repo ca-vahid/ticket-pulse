@@ -23,6 +23,10 @@ import {
   getLocalTicketQueueBlocker,
 } from './assignmentQueueEligibility.js';
 import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import {
+  buildPriorityTicketUpdateFields,
+  validateRecommendationPriorityFields,
+} from './priorityAssessment.js';
 
 const MAX_TURNS = 20;
 
@@ -63,6 +67,8 @@ class AssignmentPipelineService {
     const emit = (event) => { try { onEvent?.(event); } catch { /* SSE write errors are non-fatal */ } };
     const isManual = triggerSource === 'manual';
     const isClassificationOnly = triggerSource === 'classification_only';
+    const isPriorityAssessmentAfterHours = triggerSource === 'priority_assessment_after_hours';
+    const isPriorityAssessmentOnly = triggerSource === 'priority_assessment_only' || isPriorityAssessmentAfterHours;
     // reboundFrom: { previousTechId, previousTechName, unassignedAt, unassignedByName, reboundCount }
     // Set when this run is being created because the ticket bounced back from
     // a prior assignee. Persisted on the run so the UI / LLM can show context.
@@ -96,8 +102,14 @@ class AssignmentPipelineService {
       return { skipped: true, reason: 'assignment_not_enabled' };
     }
 
+    if (isPriorityAssessmentAfterHours && !assignmentConfig?.priorityAssessmentAfterHoursEnabled) {
+      emit({ type: 'error', message: 'After-hours priority assessment is disabled for this workspace' });
+      emit({ type: 'complete' });
+      return { skipped: true, reason: 'priority_assessment_after_hours_disabled' };
+    }
+
     // ── Business hours gate (automatic triggers only) ───────────────────
-    if (!isManual && !isClassificationOnly) {
+    if (!isManual && !isClassificationOnly && !isPriorityAssessmentOnly) {
       // Queue-time validation: never queue a ticket that is already closed,
       // deleted, or assigned. Without this guard the email poller floods the
       // queue with noise — security alerts, marketing emails, and FS tickets
@@ -444,6 +456,8 @@ class AssignmentPipelineService {
    * for both fresh runs and claimed queued runs.
    */
   async _executeRun(runId, ticketId, workspaceId, triggerSource, pipelineStart, emit, signal) {
+    const isPriorityAssessmentOnly = triggerSource === 'priority_assessment_only'
+      || triggerSource === 'priority_assessment_after_hours';
     const assignmentConfig = await assignmentRepository.getConfig(workspaceId);
     const promptVersion = await promptRepository.getPublished(workspaceId);
     let systemPrompt = promptVersion.systemPrompt;
@@ -455,6 +469,8 @@ class AssignmentPipelineService {
     systemPrompt += '\n\n## Time Handling\nTreat the workspace current date/time supplied in the user message as the source of truth for what "today" means. Tool outputs expose ticket and decision timestamps in workspace-local time unless explicitly labeled as UTC. Agent availability includes each technician\'s own local date/time. Historical admin feedback may contain legacy UTC timestamps from older runs, so prefer current workspace-local timestamps when there is any ambiguity.';
     if (triggerSource === 'classification_only') {
       systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category and subcategory. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory is saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields.';
+    } else if (isPriorityAssessmentOnly) {
+      systemPrompt += '\n\n## Priority-assessment-only Mode\nThis run exists to assess and persist Ticket Pulse priority for an active ticket. Still inspect and classify the ticket enough to produce valid structured output, but do not change the assignee, do not close the ticket, and do not write an assignment recommendation as an action request. Call submit_recommendation so assessedPriority, priorityRationale, priorityConfidence, and optional prioritySignals are saved and can be written to FreshService native priority.';
     }
 
     const workspace = await prisma.workspace.findUnique({
@@ -598,21 +614,36 @@ class AssignmentPipelineService {
         for (const block of finalMessage.content) {
           if (block.type === 'tool_use') {
             if (block.name === 'submit_recommendation') {
-              recommendation = block.input;
+              let accepted = true;
+              let validationError = null;
+              try {
+                validateRecommendationPriorityFields(block.input);
+                recommendation = block.input;
+              } catch (err) {
+                accepted = false;
+                validationError = err.message;
+                logger.warn('submit_recommendation rejected by priority schema validation', {
+                  runId,
+                  ticketId,
+                  error: validationError,
+                });
+              }
 
               await assignmentRepository.createPipelineStep({
                 pipelineRunId: runId,
                 stepNumber: stepCounter,
                 stepName: 'submit_recommendation',
-                status: 'completed',
+                status: accepted ? 'completed' : 'failed',
                 input: block.input,
-                output: { accepted: true },
+                output: accepted ? { accepted: true } : { accepted: false, error: validationError },
+                errorMessage: validationError,
                 durationMs: 0,
               });
 
               emit({ type: 'tool_call', name: block.name, input: block.input, toolUseId: block.id });
-              toolResultMap.set(block.id, { accepted: true });
-              emit({ type: 'tool_result', name: block.name, data: { accepted: true }, durationMs: 0, toolUseId: block.id });
+              const toolResult = accepted ? { accepted: true } : { accepted: false, error: validationError };
+              toolResultMap.set(block.id, toolResult);
+              emit({ type: 'tool_result', name: block.name, data: toolResult, durationMs: 0, toolUseId: block.id });
               continue;
             }
 
@@ -768,6 +799,8 @@ class AssignmentPipelineService {
         decision = null;
       } else if (triggerSource === 'classification_only') {
         decision = 'classified_only';
+      } else if (isPriorityAssessmentOnly) {
+        decision = 'priority_only';
       } else if (isNoise) {
         decision = 'noise_dismissed';
       } else if (llmIgnoredRebound) {
@@ -817,6 +850,7 @@ class AssignmentPipelineService {
 
       if (recommendation) {
         await this._persistInternalClassification(ticketId, workspaceId, recommendation);
+        await this._persistPriorityAssessment(ticketId, runId, recommendation);
         if (decision === 'noise_dismissed') {
           await prisma.ticket.update({
             where: { id: ticketId },
@@ -858,6 +892,17 @@ class AssignmentPipelineService {
         runId, ticketId, status: finalStatus, decision: recommendation ? decision : null,
         turns: stepCounter, durationMs: Date.now() - pipelineStart, totalTokens,
       });
+
+      if (recommendation && finalStatus === 'completed') {
+        await freshServiceActionService.executePriorityWriteback(
+          runId,
+          workspaceId,
+          assignmentConfig?.dryRunMode ?? true,
+        ).catch((err) => {
+          logger.warn('FreshService priority writeback failed', { runId, decision, error: err.message });
+          return null;
+        });
+      }
 
       // FreshService write-back — separate logic for assignments vs noise
       if (decision === 'auto_assigned' || decision === 'classified_only') {
@@ -913,6 +958,21 @@ class AssignmentPipelineService {
       emit({ type: 'error', message: error.message });
       emit({ type: 'complete', runId });
       return await assignmentRepository.getPipelineRun(runId);
+    }
+  }
+
+  async _persistPriorityAssessment(ticketId, runId, recommendation) {
+    try {
+      await prisma.ticket.update({
+        where: { id: ticketId },
+        data: buildPriorityTicketUpdateFields(recommendation, runId, new Date()),
+      });
+    } catch (err) {
+      logger.warn('Failed to persist assessed ticket priority', {
+        ticketId,
+        runId,
+        error: err.message,
+      });
     }
   }
 

@@ -186,6 +186,25 @@ export const TOOL_SCHEMAS = [
 
 FORMAT: Plain text or simple Markdown. Use short paragraphs separated by a blank line, and bullet lists ("- ") where you're enumerating candidates or factors. Do NOT produce one giant wall of text — break it up so an admin can scan it quickly. No HTML.`,
         },
+        assessedPriority: {
+          type: 'string',
+          enum: ['Low', 'Medium', 'High', 'Urgent'],
+          description: 'Ticket Pulse priority assessment for this ticket. This is the source of truth that will be written back to FreshService native priority.',
+        },
+        priorityRationale: {
+          type: 'string',
+          description: 'Short admin-facing explanation of why this priority was selected. Mention concrete urgency/impact signals, but do not include sensitive ticket body text beyond what is needed to justify the priority.',
+        },
+        priorityConfidence: {
+          type: 'string',
+          enum: ['low', 'medium', 'high'],
+          description: 'Confidence in the assessed priority based on the available ticket details and history.',
+        },
+        prioritySignals: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional concise evidence signals used for priority assessment, such as VIP requester, outage language, production impact, due date risk, or missing urgency evidence.',
+        },
         agentBriefingHtml: {
           type: 'string',
           description: `Public-facing HTML message that will be posted as a private note on the FreshService ticket and read by the assigned technician. REQUIRED when recommendations is non-empty.
@@ -256,7 +275,7 @@ Length: under 300 characters.`,
         estimatedComplexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Estimated complexity of the ticket' },
         confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Overall confidence in the recommendation' },
       },
-      required: ['recommendations', 'overallReasoning', 'ticketClassification', 'classificationRationale', 'categoryFit', 'subcategoryFit', 'taxonomyReviewNeeded', 'confidence'],
+      required: ['recommendations', 'overallReasoning', 'assessedPriority', 'priorityRationale', 'priorityConfidence', 'ticketClassification', 'classificationRationale', 'categoryFit', 'subcategoryFit', 'taxonomyReviewNeeded', 'confidence'],
     },
   },
 ];
@@ -1405,6 +1424,12 @@ async function getTicketDetails(ticketId) {
     status: ticket.status,
     priority: ticket.priority,
     priorityLabel: { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' }[ticket.priority] || `P${ticket.priority}`,
+    assessedPriority: ticket.assessedPriority,
+    assessedPriorityId: ticket.assessedPriorityId,
+    priorityRationale: ticket.priorityRationale,
+    priorityConfidence: ticket.priorityConfidence,
+    priorityEvidence: ticket.priorityEvidence,
+    priorityAssessedAt: ticket.priorityAssessedAt?.toISOString?.() || null,
     category: ticket.category,
     subCategory: ticket.subCategory,
     ticketCategory: ticket.ticketCategory,

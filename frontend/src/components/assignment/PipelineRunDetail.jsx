@@ -508,6 +508,7 @@ const DECISION_BADGES = {
   rejected: { label: 'Rejected', style: 'bg-red-100 text-red-800' },
   auto_assigned: { label: 'Auto-Assigned', style: 'bg-purple-100 text-purple-800' },
   noise_dismissed: { label: 'Noise Dismissed', style: 'bg-gray-100 text-gray-600' },
+  priority_only: { label: 'Priority Only', style: 'bg-blue-100 text-blue-800' },
 };
 
 const RUN_STATUS_BADGES = {
@@ -924,6 +925,10 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
 
   const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
   const PRIORITY_PILL = { 1: 'bg-slate-100 text-slate-600', 2: 'bg-yellow-100 text-yellow-800', 3: 'bg-orange-100 text-orange-800', 4: 'bg-red-100 text-red-800' };
+  const PRIORITY_ID_BY_LABEL = { Low: 1, Medium: 2, High: 3, Urgent: 4 };
+  const assessedPriorityId = Number(ticket?.assessedPriorityId) || PRIORITY_ID_BY_LABEL[ticket?.assessedPriority] || null;
+  const assessedPriorityLabel = ticket?.assessedPriority || (assessedPriorityId ? PRIORITY_LABELS[assessedPriorityId] : null);
+  const freshservicePriorityLabel = PRIORITY_LABELS[ticket?.priority] || (ticket?.priority ? `P${ticket.priority}` : '—');
 
   const ticketUrl = fsDomain && ticket?.freshserviceTicketId ? `https://${fsDomain}/a/tickets/${ticket.freshserviceTicketId}` : null;
   const latestSyncedCorrection = Array.isArray(run.corrections)
@@ -973,8 +978,16 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="text-xs text-slate-400 font-mono">#{ticket?.freshserviceTicketId}</span>
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${PRIORITY_PILL[ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
-                {PRIORITY_LABELS[ticket?.priority] || '—'}
+                FS {freshservicePriorityLabel}
               </span>
+              {assessedPriorityLabel && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${PRIORITY_PILL[assessedPriorityId] || 'bg-blue-100 text-blue-700'}`}
+                  title={ticket?.priorityRationale || undefined}
+                >
+                  TP {assessedPriorityLabel}
+                </span>
+              )}
               {headerCategoryLabel && (
                 <span className="max-w-full truncate rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
                   {headerCategoryLabel}
@@ -1062,6 +1075,29 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
                 <> The correction used LLM recommendation #{latestSyncedCorrection.recommendationRank}.</>
               )}
             </p>
+          </div>
+        </div>
+      )}
+
+      {assessedPriorityLabel && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2.5">
+          <AlertTriangle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-blue-800">
+              Ticket Pulse assessed priority: {assessedPriorityLabel}
+              {ticket?.priorityConfidence && <span className="font-medium"> ({ticket.priorityConfidence} confidence)</span>}
+            </p>
+            {ticket?.priorityRationale && (
+              <p className="mt-1 text-xs leading-relaxed text-blue-700">{ticket.priorityRationale}</p>
+            )}
+            {ticket?.priorityEvidence && Array.isArray(ticket.priorityEvidence) && ticket.priorityEvidence.length > 0 && (
+              <p className="mt-1 text-xs text-blue-600">
+                Signals: {ticket.priorityEvidence.slice(0, 4).join(', ')}
+              </p>
+            )}
+            {assessedPriorityId && Number(ticket?.priority) && assessedPriorityId !== Number(ticket.priority) && (
+              <p className="mt-1 text-xs text-blue-600">FreshService currently shows {freshservicePriorityLabel}.</p>
+            )}
           </div>
         </div>
       )}

@@ -84,7 +84,10 @@ get_ticket_categories can return pendingReviewSuggestions.
 find_matching_agents returns competencyCoverage.
 search_tickets can search internal category/subcategory.
 Do NOT set taxonomyReviewNeeded=true for missing technician competency coverage.
-Do not propose new top-level categories.`;
+Do not propose new top-level categories.
+
+## Priority Definitions (PRIORITY_OUTPUT_V1)
+Always populate assessedPriority, priorityRationale, and priorityConfidence.`;
 
     // This passes ONLY because we explicitly added the marker — proves the
     // detector keys on the literal "Rebound Context" string, not on a regex

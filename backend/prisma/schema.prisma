@@ -62,6 +62,8 @@ model Workspace {
   summitWorkshopSessions SummitWorkshopSession[]
   skillHierarchyDrafts   SkillHierarchyDraft[]
   ticketReclassificationRuns TicketReclassificationRun[]
+  technicianNotificationPreferences TechnicianNotificationPreference[]
+  notificationDeliveries NotificationDelivery[]
 
   @@map("workspaces")
 }
@@ -110,6 +112,8 @@ model Technician {
   competencyRuns       CompetencyAnalysisRun[]
   competencyChangeRequests CompetencyChangeRequest[]
   assignmentEpisodes   TicketAssignmentEpisode[]
+  notificationPreference TechnicianNotificationPreference?
+  notificationDeliveries NotificationDelivery[]
 
   @@unique([freshserviceId, workspaceId])
   @@map("technicians")
@@ -148,6 +152,13 @@ model Ticket {
   descriptionText       String?   @db.Text @map("description_text")
   status                String    @db.VarChar(50)
   priority              Int       @default(3)
+  assessedPriority      String?   @db.VarChar(20) @map("assessed_priority")
+  assessedPriorityId    Int?      @map("assessed_priority_id")
+  priorityRationale     String?   @db.Text @map("priority_rationale")
+  priorityConfidence    String?   @db.VarChar(20) @map("priority_confidence")
+  priorityEvidence      Json?     @map("priority_evidence")
+  priorityAssessedAt    DateTime? @map("priority_assessed_at")
+  priorityAssessedByRunId Int?    @map("priority_assessed_by_run_id")
 
   // Workspace
   workspaceId           Int       @map("workspace_id")
@@ -239,6 +250,7 @@ model Ticket {
   assignmentCorrections AssignmentCorrection[]
   assignmentEpisodes   TicketAssignmentEpisode[]
   threadEntries        TicketThreadEntry[]
+  notificationDeliveries NotificationDelivery[]
 
   @@map("tickets")
   @@index([workspaceId])
@@ -254,6 +266,8 @@ model Ticket {
   @@index([isNoise])
   @@index([freshserviceUpdatedAt])
   @@index([activitiesSyncFreshserviceUpdatedAt])
+  @@index([assessedPriorityId])
+  @@index([priorityAssessedAt])
   @@index([tpSkill])
   @@index([tpSubskill])
   @@index([internalCategoryId])
@@ -760,6 +774,7 @@ model AssignmentConfig {
   // review can run with a near-warm cache. Off by default — workspaces
   // that don't use Daily Review shouldn't pay the FS API budget tax.
   dailyReviewPreheatEnabled Boolean @default(false) @map("daily_review_preheat_enabled")
+  priorityAssessmentAfterHoursEnabled Boolean @default(false) @map("priority_assessment_after_hours_enabled")
   // FreshService group IDs that are excluded from auto-assignment. When a
   // ticket's group_id is in this list, the LLM still runs and produces a
   // recommendation, but decision is forced to pending_review for manual
@@ -817,6 +832,65 @@ model TechnicianCompetency {
   @@index([workspaceId])
   @@index([technicianId])
   @@index([competencyCategoryId])
+}
+
+model TechnicianNotificationPreference {
+  id                         Int        @id @default(autoincrement())
+  workspaceId                Int        @map("workspace_id")
+  workspace                  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  technicianId               Int        @unique @map("technician_id")
+  technician                 Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  threshold                  String     @default("high_urgent") @db.VarChar(20)
+  emailEnabled               Boolean    @default(false) @map("email_enabled")
+  smsEnabled                 Boolean    @default(false) @map("sms_enabled")
+  whatsappEnabled            Boolean    @default(false) @map("whatsapp_enabled")
+  phoneCallEnabled           Boolean    @default(false) @map("phone_call_enabled")
+  entraPhone                 String?    @db.VarChar(50) @map("entra_phone")
+  entraMobilePhone           String?    @db.VarChar(50) @map("entra_mobile_phone")
+  phoneOverride              String?    @db.VarChar(50) @map("phone_override")
+  phoneVerifiedAt            DateTime?  @map("phone_verified_at")
+  phoneVerificationCode      String?    @db.VarChar(20) @map("phone_verification_code")
+  phoneVerificationRequestedAt DateTime? @map("phone_verification_requested_at")
+  createdAt                  DateTime   @default(now()) @map("created_at")
+  updatedAt                  DateTime   @updatedAt @map("updated_at")
+
+  @@map("technician_notification_preferences")
+  @@unique([workspaceId, technicianId])
+  @@index([workspaceId])
+  @@index([technicianId])
+}
+
+model NotificationDelivery {
+  id                Int        @id @default(autoincrement())
+  workspaceId       Int        @map("workspace_id")
+  workspace         Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  technicianId      Int        @map("technician_id")
+  technician        Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  ticketId          Int        @map("ticket_id")
+  ticket            Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  pipelineRunId     Int        @map("pipeline_run_id")
+  pipelineRun       AssignmentPipelineRun @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+  channel           String     @db.VarChar(20)
+  status            String     @default("queued") @db.VarChar(30)
+  assessedPriority  String     @db.VarChar(20) @map("assessed_priority")
+  recipient         String?    @db.VarChar(255)
+  provider          String?    @db.VarChar(50)
+  providerMessageId String?    @db.VarChar(255) @map("provider_message_id")
+  retryCount        Int        @default(0) @map("retry_count")
+  error             String?    @db.Text
+  dedupeKey         String     @unique @db.VarChar(255) @map("dedupe_key")
+  payload           Json?
+  queuedAt          DateTime   @default(now()) @map("queued_at")
+  sentAt            DateTime?  @map("sent_at")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  @@map("notification_deliveries")
+  @@index([workspaceId, status])
+  @@index([technicianId])
+  @@index([ticketId])
+  @@index([pipelineRunId])
+  @@index([channel])
 }
 
 model SkillHierarchyDraft {
@@ -924,6 +998,10 @@ model AssignmentPipelineRun {
   syncedAt          DateTime?  @map("synced_at")
   syncError         String?    @db.Text @map("sync_error")
   syncPayload       Json?      @map("sync_payload")
+  priorityWritebackStatus String?   @db.VarChar(20) @map("priority_writeback_status")
+  priorityWritebackPayload Json?    @map("priority_writeback_payload")
+  priorityWritebackError String?    @db.Text @map("priority_writeback_error")
+  priorityWrittenAt DateTime?       @map("priority_written_at")
   feedbackApplied   Boolean    @default(false) @map("feedback_applied")
   createdAt         DateTime   @default(now()) @map("created_at")
   updatedAt         DateTime   @updatedAt @map("updated_at")
@@ -931,6 +1009,7 @@ model AssignmentPipelineRun {
   steps             AssignmentPipelineStep[]
   ticketAssignments TicketAssignment[]
   corrections       AssignmentCorrection[]
+  notificationDeliveries NotificationDelivery[]
 
   @@map("assignment_pipeline_runs")
   @@index([ticketId])

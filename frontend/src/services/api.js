@@ -302,6 +302,10 @@ export const settingsAPI = {
     return await api.post('/settings/test-connection');
   },
 
+  testNotificationProvider: async (data) => {
+    return await api.post('/settings/notification-providers/test', data);
+  },
+
   initialize: async () => {
     return await api.post('/settings/initialize');
   },
@@ -598,6 +602,7 @@ export const assignmentAPI = {
   getRunFreshness: (id) => api.get(`/assignment/runs/${id}/freshness`),
   rerunPipeline: (id) => api.post(`/assignment/runs/${id}/rerun`),
   triggerPipeline: (ticketId) => api.post(`/assignment/trigger/${ticketId}`),
+  priorityAssessmentBackfill: (data = {}) => api.post('/assignment/priority-assessment/backfill', data),
   syncNow: (data = {}) => apiLongTimeout.post('/assignment/sync-now', data),
   getRecentTickets: (params) => api.get('/assignment/recent-tickets', { params }),
 
@@ -683,6 +688,10 @@ export const agentAPI = {
   submitCompetencyChange: (data) => api.post('/agent/competencies/changes', data),
   submitCompetencyChangesBulk: (data) => api.post('/agent/competencies/changes/bulk', data),
   cancelCompetencyChange: (id) => api.delete(`/agent/competencies/changes/${id}`),
+  getNotificationPreferences: (params = {}) => api.get('/agent/notifications/preferences', { params }),
+  saveNotificationPreferences: (data) => api.put('/agent/notifications/preferences', data),
+  requestPhoneVerification: (data) => api.post('/agent/notifications/phone-verification', data),
+  confirmPhoneVerification: (data) => api.post('/agent/notifications/phone-verification/confirm', data),
   getSummitWorkshop: () => api.get('/agent/summit-2026/workshop'),
   voteSummitCategory: (data) => api.post('/agent/summit-2026/votes', data),
   getSummitWorkshopEventSource: () => new EventSource(`${API_BASE_URL}/agent/summit-2026/workshop/events${_authToken ? `?token=${encodeURIComponent(_authToken)}` : ''}`, { withCredentials: true }),

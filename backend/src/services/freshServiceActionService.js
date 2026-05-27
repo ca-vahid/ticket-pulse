@@ -8,6 +8,8 @@ import {
 } from './freshServiceGroupGuard.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
+import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
+import notificationPreferenceService from './notificationPreferenceService.js';
 
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
@@ -47,6 +49,7 @@ function buildActionPreview(actions) {
     if (a.type === 'assign') return `Assign ticket #${a.ticketId} to agent ${a.agentId}`;
     if (a.type === 'update_group') return `Move ticket #${a.ticketId} to group "${a.groupName || a.groupId}"`;
     if (a.type === 'update_custom_fields') return `Update Ticket Pulse category fields on ticket #${a.ticketId}`;
+    if (a.type === 'update_priority') return `Update ticket #${a.ticketId} priority to ${a.priorityLabel || `P${a.priorityId}`}`;
     if (a.type === 'close') return `Close ticket #${a.ticketId}`;
     if (a.type === 'note') return `Add private note to ticket #${a.ticketId}`;
     return `${a.type} on ticket #${a.ticketId}`;
@@ -119,7 +122,7 @@ class FreshServiceActionService {
       const tech = run.assignedTechId
         ? await prisma.technician.findUnique({
           where: { id: run.assignedTechId },
-          select: { freshserviceId: true, name: true },
+          select: { freshserviceId: true, name: true, email: true },
         })
         : null;
 
@@ -134,6 +137,7 @@ class FreshServiceActionService {
         agentId: fsAgentId,
         techId: run.assignedTechId,
         techName: tech.name,
+        techEmail: tech.email,
       });
 
       const decisionLabel = decision === 'auto_assigned' ? 'auto-assigned' : decision === 'modified' ? 'assigned (admin override)' : 'approved';
@@ -206,6 +210,145 @@ class FreshServiceActionService {
     }
 
     return { actions, preview: buildActionPreview(actions), error: null };
+  }
+
+  async buildPriorityWritebackAction(run) {
+    const ticket = run.ticket || await prisma.ticket.findUnique({
+      where: { id: run.ticketId },
+      select: {
+        freshserviceTicketId: true,
+        assessedPriority: true,
+        assessedPriorityId: true,
+      },
+    });
+
+    const fsTicketId = Number(ticket?.freshserviceTicketId);
+    if (!fsTicketId) {
+      return { actions: [], preview: 'Cannot sync priority: ticket has no FreshService ID', error: 'missing_fs_ticket_id' };
+    }
+
+    const priorityId = Number(ticket?.assessedPriorityId);
+    const priorityLabel = ticket?.assessedPriority || PRIORITY_ID_TO_LABEL[priorityId];
+    if (!Number.isInteger(priorityId) || priorityId < 1 || priorityId > 4 || !priorityLabel) {
+      return { actions: [], preview: 'Cannot sync priority: ticket has no assessed priority', error: 'missing_assessed_priority' };
+    }
+
+    const actions = [{
+      type: 'update_priority',
+      ticketId: fsTicketId,
+      priorityId,
+      priorityLabel,
+      localFields: {
+        priority: priorityId,
+      },
+    }];
+
+    return { actions, preview: buildActionPreview(actions), error: null };
+  }
+
+  async executePriorityWriteback(runId, workspaceId, dryRun = false) {
+    const run = await prisma.assignmentPipelineRun.findUnique({
+      where: { id: runId },
+      include: {
+        ticket: {
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            assessedPriority: true,
+            assessedPriorityId: true,
+            priorityRationale: true,
+          },
+        },
+      },
+    });
+
+    if (!run) {
+      logger.warn('FreshService priority sync: run not found', { runId });
+      return { success: false, error: 'Run not found' };
+    }
+
+    const actionPlan = await this.buildPriorityWritebackAction(run);
+    const { actions, preview } = actionPlan;
+    const payloadData = buildSyncPayload(actions, preview, dryRun, { kind: 'priority_writeback' });
+
+    if (actionPlan.error) {
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          priorityWritebackStatus: 'skipped',
+          priorityWritebackError: actionPlan.error,
+          priorityWritebackPayload: payloadData,
+        },
+      });
+      return { success: false, skipped: true, error: actionPlan.error, preview };
+    }
+
+    if (dryRun) {
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          priorityWritebackStatus: 'dry_run',
+          priorityWritebackError: null,
+          priorityWritebackPayload: payloadData,
+        },
+      });
+      logger.info('FreshService priority sync dry-run', { runId, preview });
+      return { success: true, dryRun: true, preview, actions };
+    }
+
+    try {
+      const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+      if (!fsConfig?.domain || !fsConfig?.apiKey) {
+        throw new Error('FreshService not configured for this workspace');
+      }
+
+      const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+        priority: 'high',
+        source: 'freshservice-priority-writeback',
+      });
+
+      const action = actions[0];
+      await client.updateTicketPriority(action.ticketId, action.priorityId);
+      await prisma.ticket.update({
+        where: { id: run.ticketId },
+        data: {
+          priority: action.priorityId,
+          updatedAt: new Date(),
+        },
+      }).catch((updateError) => {
+        logger.warn('FreshService priority sync: priority updated but local mirror update failed', {
+          ticketId: run.ticketId,
+          freshserviceTicketId: action.ticketId,
+          runId,
+          error: updateError.message,
+        });
+      });
+
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          priorityWritebackStatus: 'synced',
+          priorityWritebackError: null,
+          priorityWritebackPayload: payloadData,
+          priorityWrittenAt: new Date(),
+        },
+      });
+
+      logger.info('FreshService priority sync completed', { runId, preview });
+      return { success: true, preview, actions };
+    } catch (err) {
+      const freshserviceError = extractFreshServiceError(err);
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          priorityWritebackStatus: 'failed',
+          priorityWritebackError: err.message,
+          priorityWritebackPayload: { ...payloadData, freshserviceError },
+        },
+      });
+      logger.error('FreshService priority sync failed', { runId, error: err.message, freshserviceError });
+      return { success: false, error: err.message, preview, freshserviceError };
+    }
   }
 
   /**
@@ -379,6 +522,14 @@ class FreshServiceActionService {
           const result = await client.assignTicket(action.ticketId, action.agentId);
           if (result?.alreadyClosed) { ticketGone = true; continue; }
           await this._mirrorLocalAssignment(run, action);
+          await notificationPreferenceService.queueNotificationsForAssignment(run, action).catch((notificationError) => {
+            logger.warn('FreshService sync: assignment succeeded but notification queueing failed', {
+              ticketId: run.ticketId,
+              freshserviceTicketId: action.ticketId,
+              runId,
+              error: notificationError.message,
+            });
+          });
           logger.info('FreshService: ticket assigned', { ticketId: action.ticketId, agentId: action.agentId, runId });
         } else if (action.type === 'update_group') {
           const result = await client.updateTicketGroup(action.ticketId, action.groupId);

@@ -51,7 +51,14 @@ function buildTicketStatusFilter(ticketStatus) {
  *
  * Returns {} when nothing is filtered, so callers can spread unconditionally.
  */
-function buildAdvancedTicketFilter({ priorities, statuses, assignedTechIds, reboundFromTechIds, search } = {}) {
+function buildAdvancedTicketFilter({
+  priorities,
+  prioritySource = 'freshservice',
+  statuses,
+  assignedTechIds,
+  reboundFromTechIds,
+  search,
+} = {}) {
   const clause = {};
 
   // Multi-status (overrides any single-status filter when present).
@@ -66,7 +73,11 @@ function buildAdvancedTicketFilter({ priorities, statuses, assignedTechIds, rebo
   }
 
   if (Array.isArray(priorities) && priorities.length > 0) {
-    clause.priority = { in: priorities };
+    if (prioritySource === 'assessed') {
+      clause.assessedPriorityId = { in: priorities };
+    } else {
+      clause.priority = { in: priorities };
+    }
   }
 
   if (Array.isArray(assignedTechIds) && assignedTechIds.length > 0) {
@@ -208,6 +219,13 @@ class AssignmentRepository {
               descriptionText: true,
               status: true,
               priority: true,
+              assessedPriority: true,
+              assessedPriorityId: true,
+              priorityRationale: true,
+              priorityConfidence: true,
+              priorityEvidence: true,
+              priorityAssessedAt: true,
+              priorityAssessedByRunId: true,
               category: true,
               ticketCategory: true,
               internalCategory: { select: { id: true, name: true } },
@@ -253,6 +271,7 @@ class AssignmentRepository {
     since,
     sinceField,
     priorities,
+    prioritySource = 'freshservice',
     statuses,
     assignedTechIds,
     reboundFromTechIds,
@@ -293,7 +312,7 @@ class AssignmentRepository {
       // Counts (totalAll / totalUnassigned / totalOutsideAssigned) intentionally
       // ignore these so the tab badges keep showing the unfiltered scope —
       // matches the Decided sub-tab counts which are also unfiltered by Source/Status.
-      const advancedTicketClause = buildAdvancedTicketFilter({ priorities, statuses, assignedTechIds, reboundFromTechIds, search });
+      const advancedTicketClause = buildAdvancedTicketFilter({ priorities, prioritySource, statuses, assignedTechIds, reboundFromTechIds, search });
       if (Object.keys(advancedTicketClause).length > 0) {
         // Multi-status (when given) takes precedence over the single ticketStatus value.
         const merged = { ...itemsWhere.ticket.is, ...advancedTicketClause };
@@ -327,6 +346,11 @@ class AssignmentRepository {
                 subject: true,
                 status: true,
                 priority: true,
+                assessedPriority: true,
+                assessedPriorityId: true,
+                priorityRationale: true,
+                priorityConfidence: true,
+                priorityAssessedAt: true,
                 category: true,
                 ticketCategory: true,
                 internalCategory: { select: { id: true, name: true } },
@@ -371,6 +395,8 @@ class AssignmentRepository {
                 freshserviceTicketId: true,
                 subject: true,
                 priority: true,
+                assessedPriority: true,
+                assessedPriorityId: true,
                 requester: { select: { name: true, email: true } },
               },
             },
@@ -408,6 +434,7 @@ class AssignmentRepository {
     decisions,
     ticketStatus,
     priorities,
+    prioritySource = 'freshservice',
     statuses,
     assignedTechIds,
     reboundFromTechIds,
@@ -429,7 +456,7 @@ class AssignmentRepository {
 
       // Layer the modern multi-select filters on top. When `statuses` is provided
       // it overrides the single `ticketStatus` value (the multi-select wins).
-      const advancedTicketClause = buildAdvancedTicketFilter({ priorities, statuses, assignedTechIds, reboundFromTechIds, search });
+      const advancedTicketClause = buildAdvancedTicketFilter({ priorities, prioritySource, statuses, assignedTechIds, reboundFromTechIds, search });
       if (Object.keys(advancedTicketClause).length > 0) {
         const baseTicketIs = where.ticket?.is || {};
         where.ticket = { is: { ...baseTicketIs, ...advancedTicketClause } };
@@ -446,6 +473,11 @@ class AssignmentRepository {
                 subject: true,
                 status: true,
                 priority: true,
+                assessedPriority: true,
+                assessedPriorityId: true,
+                priorityRationale: true,
+                priorityConfidence: true,
+                priorityAssessedAt: true,
                 category: true,
                 ticketCategory: true,
                 internalCategory: { select: { id: true, name: true } },

@@ -17,6 +17,7 @@ import syncService from '../services/syncService.js';
 import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
+import priorityBackfillService from '../services/priorityBackfillService.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import availabilityService from '../services/availabilityService.js';
 import settingsRepository from '../services/settingsRepository.js';
@@ -63,6 +64,7 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
       dailyReviewRunMinute: 5,
       dailyReviewLookbackDays: 14,
       dailyReviewPreheatEnabled: false,
+      priorityAssessmentAfterHoursEnabled: false,
     },
     anthropicConfigured: anthropicService.isConfigured(),
     graphConfigured: graphMailClient.isConfigured(),
@@ -77,7 +79,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
     autoCloseNoise, dryRunMode, excludedGroupIds,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
-    dailyReviewPreheatEnabled,
+    dailyReviewPreheatEnabled, priorityAssessmentAfterHoursEnabled,
   } = req.body;
 
   const data = {};
@@ -101,6 +103,9 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (dailyReviewRunMinute !== undefined) data.dailyReviewRunMinute = Math.max(0, Math.min(59, parseInt(dailyReviewRunMinute, 10) || 0));
   if (dailyReviewLookbackDays !== undefined) data.dailyReviewLookbackDays = Math.max(1, Math.min(90, parseInt(dailyReviewLookbackDays, 10) || 14));
   if (dailyReviewPreheatEnabled !== undefined) data.dailyReviewPreheatEnabled = !!dailyReviewPreheatEnabled;
+  if (priorityAssessmentAfterHoursEnabled !== undefined) {
+    data.priorityAssessmentAfterHoursEnabled = !!priorityAssessmentAfterHoursEnabled;
+  }
   if (excludedGroupIds !== undefined) {
     // Defensive normalization: accept array of numbers or numeric strings,
     // coerce to ints, dedupe. Postgres Int[] rejects non-int values.
@@ -443,6 +448,7 @@ router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
     since,
     sinceField,
     priorities: parseCsvInt(req.query.priorities),
+    prioritySource: req.query.prioritySource === 'assessed' ? 'assessed' : 'freshservice',
     statuses: parseCsv(req.query.statuses),
     assignedTechIds: parseCsvInt(req.query.assignedTechIds),
     reboundFromTechIds: parseCsvInt(req.query.reboundFromTechIds),
@@ -469,6 +475,7 @@ router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
     decisions: decisionsArr,
     ticketStatus,
     priorities: parseCsvInt(req.query.priorities),
+    prioritySource: req.query.prioritySource === 'assessed' ? 'assessed' : 'freshservice',
     statuses: parseCsv(req.query.statuses),
     assignedTechIds: parseCsvInt(req.query.assignedTechIds),
     reboundFromTechIds: parseCsvInt(req.query.reboundFromTechIds),
@@ -807,6 +814,8 @@ router.get('/ticket/:ticketId/latest-run', requireReviewer, asyncHandler(async (
       ticket: {
         select: {
           id: true, freshserviceTicketId: true, subject: true, status: true, priority: true,
+          assessedPriority: true, assessedPriorityId: true, priorityRationale: true,
+          priorityConfidence: true, priorityEvidence: true, priorityAssessedAt: true,
           category: true, ticketCategory: true,
           internalCategory: { select: { id: true, name: true } },
           internalSubcategory: { select: { id: true, name: true, parentId: true } },
@@ -882,6 +891,20 @@ router.post('/trigger/:ticketId', requireAdmin, asyncHandler(async (req, res) =>
   }
 }));
 
+router.post('/priority-assessment/backfill', requireAdmin, asyncHandler(async (req, res) => {
+  const run = req.body?.run === true;
+  const result = await priorityBackfillService.planOrStart(req.workspaceId, {
+    days: req.body?.days,
+    limit: req.body?.limit,
+    run,
+  });
+  res.status(run ? 202 : 200).json({
+    success: true,
+    dryRun: !run,
+    data: result,
+  });
+}));
+
 // ─── Email Monitoring ───────────────────────────────────────────────────
 
 router.post('/email/test', requireAdmin, asyncHandler(async (req, res) => {
@@ -931,6 +954,11 @@ router.get('/recent-tickets', requireAdmin, asyncHandler(async (req, res) => {
       subject: true,
       status: true,
       priority: true,
+      assessedPriority: true,
+      assessedPriorityId: true,
+      priorityRationale: true,
+      priorityConfidence: true,
+      priorityAssessedAt: true,
       category: true,
       ticketCategory: true,
       internalCategory: { select: { id: true, name: true } },

@@ -2,6 +2,7 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import agentCompetencyService from '../services/agentCompetencyService.js';
 import summitWorkshopService from '../services/summitWorkshopService.js';
+import notificationPreferenceService from '../services/notificationPreferenceService.js';
 
 const router = express.Router();
 
@@ -35,6 +36,38 @@ router.delete('/competencies/changes/:id', asyncHandler(async (req, res) => {
     req.params.id,
   );
   res.json({ success: true, ...result });
+}));
+
+router.get('/notifications/preferences', asyncHandler(async (req, res) => {
+  const result = await notificationPreferenceService.getMyPreferences(
+    req.session?.user?.email,
+    req.query.workspaceId,
+  );
+  res.json({ success: true, data: result });
+}));
+
+router.put('/notifications/preferences', asyncHandler(async (req, res) => {
+  const result = await notificationPreferenceService.saveMyPreferences(
+    req.session?.user?.email,
+    req.body || {},
+  );
+  res.json({ success: true, data: result });
+}));
+
+router.post('/notifications/phone-verification', asyncHandler(async (req, res) => {
+  const result = await notificationPreferenceService.requestPhoneVerification(
+    req.session?.user?.email,
+    req.body || {},
+  );
+  res.json({ success: true, ...result });
+}));
+
+router.post('/notifications/phone-verification/confirm', asyncHandler(async (req, res) => {
+  const result = await notificationPreferenceService.confirmPhoneVerification(
+    req.session?.user?.email,
+    req.body || {},
+  );
+  res.json({ success: true, data: result });
 }));
 
 router.get('/summit-2026/feedback', asyncHandler(async (req, res) => {

@@ -32,6 +32,12 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
   SMTP_FROM_EMAIL: z.string().optional(),
+  SENDGRID_API_KEY: z.string().optional(),
+  SENDGRID_FROM_EMAIL: z.string().optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_NUMBER: z.string().optional(),
+  TWILIO_VOICE_FROM_NUMBER: z.string().optional(),
 });
 
 // Validate environment variables
@@ -139,5 +145,17 @@ export default {
     user: config.SMTP_USER,
     password: config.SMTP_PASSWORD,
     fromEmail: config.SMTP_FROM_EMAIL || 'noreply@ticketpulse.local',
+  },
+
+  sendgrid: {
+    apiKey: config.SENDGRID_API_KEY,
+    fromEmail: config.SENDGRID_FROM_EMAIL,
+  },
+
+  twilio: {
+    accountSid: config.TWILIO_ACCOUNT_SID,
+    authToken: config.TWILIO_AUTH_TOKEN,
+    fromNumber: config.TWILIO_FROM_NUMBER,
+    voiceFromNumber: config.TWILIO_VOICE_FROM_NUMBER || config.TWILIO_FROM_NUMBER,
   },
 };

@@ -125,7 +125,7 @@ class GraphMailClient {
       const client = this._getClient();
       const user = await client
         .api(`/users/${email}`)
-        .select('id,displayName,jobTitle,department,officeLocation,mail,employeeType,employeeId,companyName,city,state,country')
+        .select('id,displayName,jobTitle,department,officeLocation,mail,employeeType,employeeId,companyName,city,state,country,businessPhones,mobilePhone')
         .get();
 
       return {
@@ -139,6 +139,8 @@ class GraphMailClient {
         city: user.city,
         state: user.state,
         country: user.country,
+        businessPhones: user.businessPhones || [],
+        mobilePhone: user.mobilePhone || null,
         employeeType: user.employeeType,
         employeeId: user.employeeId,
       };

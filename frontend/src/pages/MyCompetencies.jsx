@@ -3,11 +3,13 @@ import {
   Archive, CheckCircle2, Clock3, LogOut, Search, ShieldCheck, UserRound,
   XCircle, Loader2, AlertCircle, BriefcaseBusiness, PlusCircle,
   X, Send, Sparkles, Undo2, ChevronLeft, ChevronRight,
+  Bell,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { agentAPI } from '../services/api';
 import ItSummitFeedbackPanel from '../components/ItSummitFeedbackPanel';
 import ItSummitCategoriesPanel from '../components/ItSummitCategoriesPanel';
+import NotificationSettingsPanel from '../components/agent/NotificationSettingsPanel';
 
 const LEVELS = [
   { value: '', label: 'No experience', short: '-', rank: 0, className: 'bg-slate-100 text-slate-400 border-slate-200' },
@@ -662,19 +664,29 @@ export default function MyCompetencies() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        {showSummitTab && (
-          <section className="mb-4 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveTab('competencies')}
-                className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                  activeTab === 'competencies' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                <ShieldCheck className="h-4 w-4" />
-                My Competencies
-              </button>
+        <section className="mb-4 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('competencies')}
+              className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                activeTab === 'competencies' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <ShieldCheck className="h-4 w-4" />
+              My Competencies
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('notifications')}
+              className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                activeTab === 'notifications' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Bell className="h-4 w-4" />
+              Notifications
+            </button>
+            {showSummitTab && (
               <button
                 type="button"
                 onClick={() => setActiveTab('summit')}
@@ -690,9 +702,9 @@ export default function MyCompetencies() {
                   Archived
                 </span>
               </button>
-            </div>
-          </section>
-        )}
+            )}
+          </div>
+        </section>
 
         {activeTab === 'summit' && showSummitTab && (
           <div className="space-y-4">
@@ -1047,6 +1059,10 @@ export default function MyCompetencies() {
               </section>
             </>
           </div>
+        )}
+
+        {!loading && activeTab === 'notifications' && (
+          <NotificationSettingsPanel workspaceId={workspaceId} />
         )}
       </main>
     </div>

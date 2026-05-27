@@ -17,6 +17,7 @@ const prismaMock = {
   },
   ticket: {
     findUnique: jest.fn(),
+    update: jest.fn(),
   },
   ticketAssignmentEpisode: {
     findFirst: jest.fn(),
@@ -27,8 +28,13 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({
   default: prismaMock,
 }));
 
+const settingsRepositoryMock = {
+  getFreshServiceConfigForWorkspace: jest.fn(),
+  getServiceAccountNames: jest.fn(),
+};
+
 jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({
-  default: {},
+  default: settingsRepositoryMock,
 }));
 
 jest.unstable_mockModule('../src/integrations/freshservice.js', () => ({
@@ -37,6 +43,14 @@ jest.unstable_mockModule('../src/integrations/freshservice.js', () => ({
 
 jest.unstable_mockModule('../src/services/assignmentFlowGuards.js', () => ({
   shouldCloseNoiseDismissedRun: jest.fn(() => true),
+}));
+
+const notificationPreferenceServiceMock = {
+  queueNotificationsForAssignment: jest.fn().mockResolvedValue({ queued: 1 }),
+};
+
+jest.unstable_mockModule('../src/services/notificationPreferenceService.js', () => ({
+  default: notificationPreferenceServiceMock,
 }));
 
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
@@ -87,8 +101,14 @@ describe('freshServiceActionService workspace-scoped category writeback', () => 
     });
     prismaMock.assignmentConfig.findUnique.mockResolvedValue({ autoCloseNoise: true });
     prismaMock.assignmentPipelineRun.update.mockResolvedValue({});
+    prismaMock.ticket.update.mockResolvedValue({});
     prismaMock.technician.findFirst.mockResolvedValue(null);
     prismaMock.ticketAssignmentEpisode.findFirst.mockResolvedValue(null);
+    settingsRepositoryMock.getServiceAccountNames.mockResolvedValue(['Ticket Pulse']);
+    settingsRepositoryMock.getFreshServiceConfigForWorkspace.mockResolvedValue({
+      domain: 'example.freshservice.com',
+      apiKey: 'test-key',
+    });
   });
 
   test('does not write Ticket Pulse category fields for non-IT approvals', async () => {
@@ -162,6 +182,201 @@ describe('freshServiceActionService workspace-scoped category writeback', () => 
       }),
     });
     expect(freshserviceModule.createFreshServiceClient).not.toHaveBeenCalled();
+  });
+});
+
+describe('freshServiceActionService priority writeback', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.assignmentPipelineRun.update.mockResolvedValue({});
+    prismaMock.ticket.update.mockResolvedValue({});
+    settingsRepositoryMock.getFreshServiceConfigForWorkspace.mockResolvedValue({
+      domain: 'example.freshservice.com',
+      apiKey: 'test-key',
+    });
+  });
+
+  const priorityRun = (overrides = {}) => ({
+    id: 3101,
+    ticketId: 501,
+    workspaceId: 1,
+    ticket: {
+      id: 501,
+      freshserviceTicketId: 222999,
+      assessedPriority: 'Urgent',
+      assessedPriorityId: 4,
+      priorityRationale: 'Active outage affecting a project team.',
+    },
+    ...overrides,
+  });
+
+  test('builds native priority writeback actions with preview text', async () => {
+    const result = await freshServiceActionService.buildPriorityWritebackAction(priorityRun());
+
+    expect(result.error).toBeNull();
+    expect(result.preview).toBe('Update ticket #222999 priority to Urgent');
+    expect(result.actions).toEqual([expect.objectContaining({
+      type: 'update_priority',
+      ticketId: 222999,
+      priorityId: 4,
+      priorityLabel: 'Urgent',
+    })]);
+  });
+
+  test('stores intended priority update in dry-run payload without calling FreshService', async () => {
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(priorityRun());
+
+    const result = await freshServiceActionService.executePriorityWriteback(3101, 1, true);
+
+    expect(result).toEqual(expect.objectContaining({ success: true, dryRun: true }));
+    expect(freshserviceModule.createFreshServiceClient).not.toHaveBeenCalled();
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 3101 },
+      data: expect.objectContaining({
+        priorityWritebackStatus: 'dry_run',
+        priorityWritebackError: null,
+        priorityWritebackPayload: expect.objectContaining({
+          dryRun: true,
+          preview: 'Update ticket #222999 priority to Urgent',
+        }),
+      }),
+    });
+  });
+
+  test('mirrors successful priority writeback back to the local ticket', async () => {
+    const client = {
+      updateTicketPriority: jest.fn().mockResolvedValue({ id: 222999, priority: 4 }),
+    };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(priorityRun());
+
+    const result = await freshServiceActionService.executePriorityWriteback(3101, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(client.updateTicketPriority).toHaveBeenCalledWith(222999, 4);
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith({
+      where: { id: 501 },
+      data: expect.objectContaining({ priority: 4 }),
+    });
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 3101 },
+      data: expect.objectContaining({
+        priorityWritebackStatus: 'synced',
+        priorityWritebackError: null,
+        priorityWrittenAt: expect.any(Date),
+      }),
+    });
+  });
+
+  test('records priority writeback failure without throwing into assignment sync flow', async () => {
+    const client = {
+      updateTicketPriority: jest.fn().mockRejectedValue(new Error('FreshService priority rejected')),
+    };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(priorityRun());
+
+    const result = await freshServiceActionService.executePriorityWriteback(3101, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({
+      success: false,
+      error: 'FreshService priority rejected',
+    }));
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 3101 },
+      data: expect.objectContaining({
+        priorityWritebackStatus: 'failed',
+        priorityWritebackError: 'FreshService priority rejected',
+      }),
+    });
+  });
+
+  test('does not queue agent notifications for pending-review priority-only writeback', async () => {
+    const client = {
+      updateTicketPriority: jest.fn().mockResolvedValue({ id: 222999, priority: 4 }),
+    };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(priorityRun({
+      decision: 'pending_review',
+    }));
+
+    const result = await freshServiceActionService.executePriorityWriteback(3101, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(notificationPreferenceServiceMock.queueNotificationsForAssignment).not.toHaveBeenCalled();
+  });
+});
+
+describe('freshServiceActionService assignment notifications', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.assignmentPipelineRun.update.mockResolvedValue({});
+    prismaMock.ticket.update.mockResolvedValue({});
+    prismaMock.technician.findUnique.mockResolvedValue({
+      freshserviceId: 1001082570,
+      name: 'Zoe Dio',
+      email: 'zoe.dio@example.com',
+    });
+    prismaMock.technician.findFirst.mockResolvedValue(null);
+    prismaMock.ticketAssignmentEpisode.findFirst.mockResolvedValue(null);
+    settingsRepositoryMock.getServiceAccountNames.mockResolvedValue(['Ticket Pulse']);
+    settingsRepositoryMock.getFreshServiceConfigForWorkspace.mockResolvedValue({
+      domain: 'example.freshservice.com',
+      apiKey: 'test-key',
+    });
+  });
+
+  test('queues notifications only after a successful FreshService assignment sync', async () => {
+    const client = {
+      getTicket: jest.fn().mockResolvedValue({ responder_id: null, group_id: null }),
+      assignTicket: jest.fn().mockResolvedValue({ id: 222999 }),
+      addPrivateNote: jest.fn().mockResolvedValue({ id: 11 }),
+    };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    const assignmentRun = run({
+      id: 3201,
+      ticketId: 501,
+      workspaceId: 1,
+      decision: 'auto_assigned',
+      assignedTechId: 901,
+      ticket: {
+        id: 501,
+        freshserviceTicketId: 222999,
+        firstAssignedAt: null,
+        subject: 'VPN down for project team',
+        ticketCategory: 'IT',
+        tpSkill: 'Network',
+        tpSubskill: 'VPN',
+        assessedPriority: 'High',
+        assessedPriorityId: 3,
+        priorityRationale: 'Project team cannot connect to VPN.',
+        internalCategory: { name: 'Network' },
+        internalSubcategory: { name: 'VPN' },
+      },
+      recommendation: {
+        agentBriefingHtml: '<p>VPN access appears blocked for the project team.</p>',
+        recommendations: [{ techId: 901, techName: 'Zoe Dio' }],
+      },
+    });
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(assignmentRun);
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      tpSkillCustomField: 'lf_ticket_pulse_category',
+      tpSubskillCustomField: 'lf_ticket_pulse_subcategory',
+    });
+    client.listCustomObjects = jest.fn().mockResolvedValue([]);
+    client.updateTicketCustomFields = jest.fn().mockResolvedValue({});
+
+    const result = await freshServiceActionService.execute(3201, 1, false, { force: true });
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(client.assignTicket).toHaveBeenCalledWith(222999, 1001082570);
+    expect(notificationPreferenceServiceMock.queueNotificationsForAssignment).toHaveBeenCalledWith(
+      assignmentRun,
+      expect.objectContaining({
+        type: 'assign',
+        techId: 901,
+        techEmail: 'zoe.dio@example.com',
+      }),
+    );
   });
 });
 

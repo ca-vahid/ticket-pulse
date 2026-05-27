@@ -1,6 +1,18 @@
-export const APP_VERSION = '2.4';
+export const APP_VERSION = '2.45';
 
 export const changelog = [
+  {
+    version: '2.45',
+    date: 'May 26, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>Priority Detection and Agent Alerts</strong> assess assigned-ticket priority, persist rationale/evidence, and queue agent notifications only when the saved threshold is met.' },
+      { type: 'new', html: '<strong>Notification providers</strong> add global SendGrid, Twilio SMS, WhatsApp, and voice setup with isolated live test actions for each channel.' },
+      { type: 'new', html: '<strong>Agent notification preferences</strong> let agents opt into email, SMS, WhatsApp, or phone-call alerts after phone verification where needed.' },
+      { type: 'improved', html: '<strong>Assignment prompts</strong> now include priority-specific handling guidance from the database-synced prompt source.' },
+      { type: 'fixed', html: '<strong>Provider settings</strong> stay global instead of workspace-bound, and Twilio tests no longer depend on SendGrid fields.' },
+      { type: 'database', html: '<strong>Database updates</strong> add priority assessment fields, notification preference/delivery tables, and WhatsApp opt-in storage.' },
+    ],
+  },
   {
     version: '2.4',
     date: 'May 13, 2026',

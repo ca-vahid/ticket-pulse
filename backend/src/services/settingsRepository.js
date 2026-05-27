@@ -55,6 +55,11 @@ const DEFAULT_SETTINGS = {
   avoidance_watch_threshold: '0.15',
   avoidance_easy_categories: '[]',
   service_account_names: '',
+  sendgrid_api_key: '',
+  sendgrid_from_email: '',
+  twilio_account_sid: '',
+  twilio_auth_token: '',
+  twilio_from_number: '',
 };
 
 /**
@@ -275,6 +280,71 @@ class SettingsRepository {
     } catch (error) {
       logger.error('Error fetching service account names:', error);
       return [];
+    }
+  }
+
+  /**
+   * Get global Twilio notification provider configuration.
+   * app_settings wins; environment variables are a deployment fallback.
+   */
+  async getTwilioConfig() {
+    try {
+      const [accountSid, authToken, fromNumber] = await Promise.all([
+        this.get('twilio_account_sid'),
+        this.get('twilio_auth_token'),
+        this.get('twilio_from_number'),
+      ]);
+
+      const trimOrNull = (value) => {
+        const trimmed = String(value || '').trim();
+        return trimmed || null;
+      };
+
+      const effectiveFromNumber = trimOrNull(fromNumber) || trimOrNull(process.env.TWILIO_FROM_NUMBER);
+
+      return {
+        accountSid: trimOrNull(accountSid) || trimOrNull(process.env.TWILIO_ACCOUNT_SID),
+        authToken: trimOrNull(authToken) || trimOrNull(process.env.TWILIO_AUTH_TOKEN),
+        fromNumber: effectiveFromNumber,
+        voiceFromNumber: effectiveFromNumber,
+      };
+    } catch (error) {
+      logger.error('Error fetching Twilio config:', error);
+      return {
+        accountSid: process.env.TWILIO_ACCOUNT_SID || null,
+        authToken: process.env.TWILIO_AUTH_TOKEN || null,
+        fromNumber: process.env.TWILIO_FROM_NUMBER || null,
+        voiceFromNumber: process.env.TWILIO_FROM_NUMBER || null,
+      };
+    }
+  }
+
+  /**
+   * Get global SendGrid notification provider configuration.
+   * app_settings wins; environment variables are a deployment fallback.
+   */
+  async getSendGridConfig() {
+    try {
+      const [apiKey, fromEmail] = await Promise.all([
+        this.get('sendgrid_api_key'),
+        this.get('sendgrid_from_email'),
+      ]);
+
+      const trimOrNull = (value) => {
+        const trimmed = String(value || '').trim();
+        return trimmed || null;
+      };
+
+      return {
+        apiKey: trimOrNull(apiKey) || trimOrNull(process.env.SENDGRID_API_KEY),
+        fromEmail: trimOrNull(fromEmail) || trimOrNull(process.env.SENDGRID_FROM_EMAIL),
+      };
+    } catch (error) {
+      logger.error('Error fetching SendGrid config:', error);
+      return {
+        apiKey: process.env.SENDGRID_API_KEY || null,
+        fromEmail: process.env.SENDGRID_FROM_EMAIL || null,
+      };
     }
   }
 

@@ -1084,6 +1084,11 @@ const PRIORITY_OPTIONS = [
   { id: 1, label: 'Low', dotClass: 'bg-slate-400' },
 ];
 
+const PRIORITY_SOURCE_OPTIONS = [
+  { id: 'assessed', label: 'Ticket Pulse' },
+  { id: 'freshservice', label: 'FreshService' },
+];
+
 const SOURCE_OPTIONS = [
   { id: 'all', label: 'All sources' },
   { id: 'via_pipeline', label: 'Pipeline', dotClass: 'bg-emerald-500' },
@@ -1135,6 +1140,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   // which now sets an array (e.g. ['approved', 'modified']) directly.
   const [selectedDecisions, setSelectedDecisions] = useState([]);
   const [selectedPriorities, setSelectedPriorities] = useState([]); // number[] (1..4)
+  const [prioritySource, setPrioritySource] = useState('assessed');
   const [selectedReboundFromTechIds, setSelectedReboundFromTechIds] = useState([]); // tech ids
   const [selectedAssignedToTechIds, setSelectedAssignedToTechIds] = useState([]); // tech ids
   const [searchQuery, setSearchQuery] = useState('');
@@ -1153,6 +1159,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       decisions: selectedDecisions,
       statuses: selectedStatuses,
       priorities: selectedPriorities,
+      prioritySource,
       returnedFrom: selectedReboundFromTechIds,
       assignedTo: selectedAssignedToTechIds,
       diffAgent: differentAgentOnly,
@@ -1163,6 +1170,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       decisions: setSelectedDecisions,
       statuses: setSelectedStatuses,
       priorities: setSelectedPriorities,
+      prioritySource: setPrioritySource,
       returnedFrom: setSelectedReboundFromTechIds,
       assignedTo: setSelectedAssignedToTechIds,
       diffAgent: setDifferentAgentOnly,
@@ -1173,6 +1181,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       decisions: { type: 'csv', default: [] },
       statuses: { type: 'csv', default: [] },
       priorities: { type: 'csvInt', default: [] },
+      prioritySource: { type: 'string', default: 'assessed' },
       returnedFrom: { type: 'csvInt', default: [] },
       assignedTo: { type: 'csvInt', default: [] },
       diffAgent: { type: 'bool', default: false },
@@ -1313,6 +1322,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       // empty / undefined values, so we don't need defensive trimming here.
       const commonFilters = {
         priorities: selectedPriorities.length > 0 ? selectedPriorities.join(',') : undefined,
+        prioritySource,
         statuses: statusesCsv,
         assignedTechIds: selectedAssignedToTechIds.length > 0 ? selectedAssignedToTechIds.join(',') : undefined,
         reboundFromTechIds: selectedReboundFromTechIds.length > 0 ? selectedReboundFromTechIds.join(',') : undefined,
@@ -1411,6 +1421,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     selectedStatuses,
     selectedDecisions,
     selectedPriorities,
+    prioritySource,
     selectedReboundFromTechIds,
     selectedAssignedToTechIds,
     searchQuery,
@@ -1803,6 +1814,31 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     3: 'border-l-orange-400',
     4: 'border-l-red-500',
   };
+  const PRIORITY_ID_BY_LABEL = {
+    Low: 1,
+    Medium: 2,
+    High: 3,
+    Urgent: 4,
+  };
+
+  const getPriorityMeta = (ticket) => {
+    const assessedId = Number(ticket?.assessedPriorityId) || PRIORITY_ID_BY_LABEL[ticket?.assessedPriority] || null;
+    const freshserviceId = Number(ticket?.priority) || null;
+    const displayId = assessedId || freshserviceId;
+    const displayLabel = ticket?.assessedPriority || PRIORITY_LABELS[freshserviceId] || null;
+    const freshserviceLabel = PRIORITY_LABELS[freshserviceId] || (freshserviceId ? `P${freshserviceId}` : null);
+    return {
+      id: displayId,
+      label: displayLabel,
+      source: assessedId ? 'Ticket Pulse' : 'FreshService',
+      pill: PRIORITY_PILL[displayId] || 'bg-slate-100 text-slate-500',
+      border: PRIORITY_BORDER[displayId] || 'border-l-transparent',
+      rationale: ticket?.priorityRationale || null,
+      confidence: ticket?.priorityConfidence || null,
+      freshserviceLabel,
+      differsFromFreshservice: assessedId && freshserviceId && assessedId !== freshserviceId,
+    };
+  };
 
   // Compact "Apr 23, 4:13 PM" — drops weekday & year that crowded the original
   // verbose timestamps. `year: undefined` overrides the helper's default
@@ -1861,7 +1897,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     .sort((a, b) => {
       let av, bv;
       if (sortField === 'createdAt') { av = new Date(a.createdAt); bv = new Date(b.createdAt); }
-      else if (sortField === 'priority') { av = a.ticket?.priority || 0; bv = b.ticket?.priority || 0; }
+      else if (sortField === 'priority') { av = getPriorityMeta(a.ticket).id || 0; bv = getPriorityMeta(b.ticket).id || 0; }
       else if (sortField === 'requester') { av = a.ticket?.requester?.name || ''; bv = b.ticket?.requester?.name || ''; }
       else { av = a.ticket?.subject || ''; bv = b.ticket?.subject || ''; }
       if (av < bv) return sortDir === 'asc' ? -1 : 1;
@@ -2009,6 +2045,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     (selectedDecisions.length > 0 ? 1 : 0) +
     (selectedStatuses.length > 0 ? 1 : 0) +
     (selectedPriorities.length > 0 ? 1 : 0) +
+    (prioritySource !== 'assessed' ? 1 : 0) +
     (selectedReboundFromTechIds.length > 0 ? 1 : 0) +
     (selectedAssignedToTechIds.length > 0 ? 1 : 0) +
     (differentAgentOnly ? 1 : 0);
@@ -2024,6 +2061,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     setSelectedDecisions([]);
     setSelectedStatuses([]);
     setSelectedPriorities([]);
+    setPrioritySource('assessed');
     setSelectedReboundFromTechIds([]);
     setSelectedAssignedToTechIds([]);
     setDifferentAgentOnly(false);
@@ -2156,8 +2194,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const topRec = run.recommendation?.recommendations?.[0];
     const flag = getTicketFlag(run);
     const recs = run.recommendation?.recommendations || [];
-    const priLabel = PRIORITY_LABELS[run.ticket?.priority];
-    const priPill = PRIORITY_PILL[run.ticket?.priority] || 'bg-slate-100 text-slate-500';
+    const priorityMeta = getPriorityMeta(run.ticket);
     const categoryLabel = getTicketPulseCategoryLabel(run.ticket, run.recommendation);
     const suggestedCategoryLabel = getSuggestedCategoryLabel(run.ticket, run.recommendation);
     const categoryNeedsReview = needsCategoryReview(run.ticket, run.recommendation);
@@ -2178,7 +2215,21 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       >
         {/* Row 1: priority + ticket ID + category + decision (non-pending) + chevron */}
         <div className="flex min-w-0 items-center gap-1.5 flex-wrap">
-          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${priPill}`}>{priLabel || '—'}</span>
+          <span
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${priorityMeta.pill}`}
+            title={[
+              `${priorityMeta.source} priority`,
+              priorityMeta.rationale,
+              priorityMeta.differsFromFreshservice ? `FreshService: ${priorityMeta.freshserviceLabel}` : null,
+            ].filter(Boolean).join(' - ')}
+          >
+            {priorityMeta.label || '—'}
+          </span>
+          {priorityMeta.source === 'Ticket Pulse' && (
+            <span className="shrink-0 rounded bg-blue-50 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-blue-600">
+              TP
+            </span>
+          )}
           <span className="text-slate-400 font-mono text-[11px]">#{run.ticket?.freshserviceTicketId}</span>
           {categoryLabel && (
             <span className="max-w-full truncate rounded bg-blue-50 px-1 py-0.5 text-[10px] font-semibold text-blue-700" title={categoryLabel}>
@@ -2222,6 +2273,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         <p className="text-sm font-semibold text-slate-800 leading-snug mt-1.5 break-words">
           {run.ticket?.subject || 'No subject'}
         </p>
+        {priorityMeta.rationale && (
+          <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-slate-500">
+            <span className="font-semibold text-slate-600">{priorityMeta.source} priority:</span> {priorityMeta.rationale}
+          </p>
+        )}
 
         {/* Row 3: requester + date */}
         <div className="flex items-center gap-1.5 mt-1.5 text-[11px] leading-none flex-wrap">
@@ -2487,6 +2543,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
               {/* Priority — always available */}
               <FilterDropdown
+                label="Priority source"
+                value={prioritySource}
+                options={PRIORITY_SOURCE_OPTIONS}
+                onChange={setPrioritySource}
+              />
+              <FilterDropdown
                 label="Priority"
                 multi
                 value={selectedPriorities}
@@ -2623,7 +2685,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             Includes the modern filter primitives so the fade fires when the user
             narrows or widens via any of the new dropdowns, not just Source/Status. */}
         <div
-          key={`${subView}-${assignedFilter}-${queuePage}-${resultsPage}-${selectedStatuses.join(',')}-${selectedDecisions.join(',')}-${selectedPriorities.join(',')}-${selectedReboundFromTechIds.join(',')}-${selectedAssignedToTechIds.join(',')}-${differentAgentOnly}-${searchQuery}`}
+          key={`${subView}-${assignedFilter}-${queuePage}-${resultsPage}-${selectedStatuses.join(',')}-${selectedDecisions.join(',')}-${selectedPriorities.join(',')}-${prioritySource}-${selectedReboundFromTechIds.join(',')}-${selectedAssignedToTechIds.join(',')}-${differentAgentOnly}-${searchQuery}`}
           className="animate-in fade-in duration-150"
         >
           {activeItems.length === 0 ? (
@@ -2797,7 +2859,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                   : newIds.has(run.id)
                                     ? 'bg-emerald-50/60'
                                     : '';
-                          const priClass = PRIORITY_BORDER[run.ticket?.priority] || 'border-l-transparent';
+                          const priorityMeta = getPriorityMeta(run.ticket);
+                          const priClass = priorityMeta.border;
                           // The Status column is meant to show the ticket's CURRENT
                           // owner (see comment on the cell below). On non-pending
                           // tabs we previously preferred `run.assignedTech` (the
@@ -2861,6 +2924,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 leading-none truncate">
                                   <span className="font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                                  <span className="text-slate-300">·</span>
+                                  <span
+                                    className={`shrink-0 rounded px-1.5 py-0.5 font-semibold ${priorityMeta.pill}`}
+                                    title={[
+                                      `${priorityMeta.source} priority`,
+                                      priorityMeta.rationale,
+                                      priorityMeta.differsFromFreshservice ? `FreshService: ${priorityMeta.freshserviceLabel}` : null,
+                                    ].filter(Boolean).join(' - ')}
+                                  >
+                                    {priorityMeta.source === 'Ticket Pulse' ? 'TP ' : ''}{priorityMeta.label || '—'}
+                                  </span>
                                   {categoryLabel && (
                                     <>
                                       <span className="text-slate-300">·</span>
@@ -2887,6 +2961,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                     </span>
                                   )}
                                 </div>
+                                {priorityMeta.rationale && (
+                                  <div className="mt-1 truncate text-[10px] text-slate-500" title={priorityMeta.rationale}>
+                                    {priorityMeta.rationale}
+                                  </div>
+                                )}
                               </div>
 
                               {/* Requester: avatar + name; secondary line shown only
@@ -3751,13 +3830,13 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
         excludedGroupIds: [],
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
-        dailyReviewPreheatEnabled: false,
+        dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false,
         ...cfg,
       });
       setAnthropicConfigured(res?.anthropicConfigured ?? false);
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false });
     } finally { setLoading(false); }
   }, []);
 
@@ -3823,6 +3902,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       {/* Section 4: Ticket Detection */}
       <ConfigSection icon={Search} title="Ticket Detection">
         <ConfigToggle label="Poll for Unassigned Tickets" description="Safety net: check for unassigned tickets after each sync cycle" checked={config.pollForUnassigned} onChange={() => setConfig({ ...config, pollForUnassigned: !config.pollForUnassigned })} />
+        <ConfigToggle label="Assess Priority After Hours" description="Allow priority-only assessment runs outside business hours without assigning or notifying agents" checked={config.priorityAssessmentAfterHoursEnabled} onChange={() => setConfig({ ...config, priorityAssessmentAfterHoursEnabled: !config.priorityAssessmentAfterHoursEnabled })} />
         <div className="py-3">
           <h4 className="font-medium text-sm text-slate-800 mb-1.5">Max Tickets Per Poll Cycle</h4>
           <input type="number" min="1" max="20" value={config.pollMaxPerCycle || 5} onChange={(e) => setConfig({ ...config, pollMaxPerCycle: parseInt(e.target.value) || 5 })} className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-sm" />

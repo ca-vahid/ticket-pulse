@@ -14,6 +14,30 @@ describe('prompt upgrade helpers', () => {
     expect(needsPromptUpgrade(DEFAULT_SYSTEM_PROMPT)).toBe(false);
   });
 
+  test('detects prompts missing structured priority output marker', () => {
+    const stale = DEFAULT_SYSTEM_PROMPT.replace(/\n## Priority Definitions \(PRIORITY_OUTPUT_V1\)[\s\S]*?(?=\n## Step 2: Classify the Ticket)/, '');
+    expect(needsPromptUpgrade(stale)).toBe(true);
+    expect(upgradeLegacyPrompt(stale)).toContain('PRIORITY_OUTPUT_V1');
+  });
+
+  test('injects priority instructions into custom workspace prompts without replacing custom content', () => {
+    const custom = `You are the Accounting assignment assistant.
+
+## Step 1: Read the Ticket
+Preserve this workspace-specific routing guidance.
+
+## Step 2: Submit Recommendation
+Call **submit_recommendation** with the chosen technician.`;
+
+    const upgraded = upgradeLegacyPrompt(custom);
+
+    expect(needsPromptUpgrade(custom)).toBe(true);
+    expect(upgraded).toContain('You are the Accounting assignment assistant.');
+    expect(upgraded).toContain('Preserve this workspace-specific routing guidance.');
+    expect(upgraded).toContain('PRIORITY_OUTPUT_V1');
+    expect(upgraded).toContain('Always populate `assessedPriority`, `priorityRationale`, and `priorityConfidence`');
+  });
+
   test('upgrades old default-style prompts to the current default prompt', () => {
     const legacyDefault = `You are an IT helpdesk ticket assignment assistant.\n\n## Step 1: Check Business Hours\nCall **check_business_hours** first.\n\n## Step 2: Read the Ticket`;
     expect(upgradeLegacyPrompt(legacyDefault)).toBe(DEFAULT_SYSTEM_PROMPT);

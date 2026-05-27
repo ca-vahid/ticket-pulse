@@ -1,15 +1,60 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireWorkspaceAccess } from '../middleware/auth.js';
+import { requireWorkspace } from '../middleware/workspace.js';
 import { ValidationError } from '../utils/errors.js';
 import settingsRepository from '../services/settingsRepository.js';
 import technicianRepository from '../services/technicianRepository.js';
 import syncService from '../services/syncService.js';
 import scheduledSyncService from '../services/scheduledSyncService.js';
 import { clearReadCache } from '../services/dashboardReadCache.js';
+import { sendAssignmentEmail } from '../services/sendgridNotificationService.js';
+import { placeVoiceCall, sendSms, sendWhatsApp } from '../services/twilioNotificationService.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
+const MASKED_SETTING_VALUE = '***MASKED***';
+const SENSITIVE_SETTING_KEYS = new Set(['freshservice_api_key', 'sendgrid_api_key', 'twilio_auth_token']);
+
+function maskSensitiveSettings(settings) {
+  for (const key of SENSITIVE_SETTING_KEYS) {
+    if (settings[key]) settings[key] = MASKED_SETTING_VALUE;
+  }
+  return settings;
+}
+
+function normalizeSettingsForUpdate(settings) {
+  const normalized = { ...settings };
+  for (const key of SENSITIVE_SETTING_KEYS) {
+    if (normalized[key] === '' || normalized[key] === MASKED_SETTING_VALUE) {
+      delete normalized[key];
+    }
+  }
+  return normalized;
+}
+
+function validateE164(value, fieldName) {
+  if (value === undefined || value === null || String(value).trim() === '') return;
+  if (!/^\+[1-9]\d{6,14}$/.test(String(value).trim())) {
+    throw new ValidationError(`${fieldName} must be in E.164 format, for example +16045550100`);
+  }
+}
+
+function validateEmail(value, fieldName) {
+  if (value === undefined || value === null || String(value).trim() === '') return;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim())) {
+    throw new ValidationError(`${fieldName} must be a valid email address`);
+  }
+}
+
+function attachWorkspaceIdIfPresent(req, _res, next) {
+  const raw = req.headers['x-workspace-id'] || req.session?.user?.selectedWorkspaceId || req.query.workspaceId;
+  if (raw !== undefined && raw !== null && raw !== '') {
+    const workspaceId = Number(raw);
+    if (!Number.isNaN(workspaceId)) req.workspaceId = workspaceId;
+  }
+  next();
+}
 
 // Protect all settings routes with authentication
 router.use(requireAuth);
@@ -22,11 +67,7 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const settings = await settingsRepository.getAll();
-
-    // Mask API key for security
-    if (settings.freshservice_api_key) {
-      settings.freshservice_api_key = '***MASKED***';
-    }
+    maskSensitiveSettings(settings);
 
     res.json({
       success: true,
@@ -41,6 +82,7 @@ router.get(
  */
 router.put(
   '/',
+  attachWorkspaceIdIfPresent,
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { settings } = req.body;
@@ -49,31 +91,41 @@ router.put(
       throw new ValidationError('Settings object is required');
     }
 
+    const normalizedSettings = normalizeSettingsForUpdate(settings);
+
     // Validate specific settings
-    if (settings.sync_interval_minutes !== undefined) {
-      const interval = Number(settings.sync_interval_minutes);
+    if (normalizedSettings.sync_interval_minutes !== undefined) {
+      const interval = Number(normalizedSettings.sync_interval_minutes);
       if (isNaN(interval) || interval < 1 || interval > 60) {
         throw new ValidationError('Sync interval must be between 1 and 60 minutes');
       }
     }
 
-    if (settings.dashboard_refresh_seconds !== undefined) {
-      const refresh = Number(settings.dashboard_refresh_seconds);
+    if (normalizedSettings.dashboard_refresh_seconds !== undefined) {
+      const refresh = Number(normalizedSettings.dashboard_refresh_seconds);
       if (isNaN(refresh) || refresh < 10 || refresh > 300) {
         throw new ValidationError('Dashboard refresh must be between 10 and 300 seconds');
       }
     }
 
+    validateE164(normalizedSettings.twilio_from_number, 'Twilio phone number');
+    validateEmail(normalizedSettings.sendgrid_from_email, 'SendGrid from email');
+    if (normalizedSettings.twilio_account_sid !== undefined
+      && normalizedSettings.twilio_account_sid
+      && !String(normalizedSettings.twilio_account_sid).trim().startsWith('AC')) {
+      throw new ValidationError('Twilio Account SID should start with AC');
+    }
+
     // Update settings
-    const count = await settingsRepository.setMany(settings);
+    const count = await settingsRepository.setMany(normalizedSettings);
 
     logger.info(`Updated ${count} settings`);
 
     // If sync interval changed, restart scheduled sync
-    if (settings.sync_interval_minutes !== undefined) {
-      const newInterval = Number(settings.sync_interval_minutes);
-      logger.info(`Restarting scheduled sync with new interval: ${newInterval}m`);
-      await scheduledSyncService.restart(newInterval);
+    if (normalizedSettings.sync_interval_minutes !== undefined) {
+      const newInterval = Number(normalizedSettings.sync_interval_minutes);
+      logger.info(`Restarting scheduled sync after sync interval setting update: ${newInterval}m`);
+      await scheduledSyncService.restart();
     }
 
     res.json({
@@ -89,6 +141,7 @@ router.put(
  */
 router.put(
   '/:key',
+  attachWorkspaceIdIfPresent,
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { key } = req.params;
@@ -126,6 +179,61 @@ router.post(
       message: isConnected
         ? 'FreshService connection successful'
         : 'FreshService connection failed',
+    });
+  }),
+);
+
+/**
+ * POST /api/settings/notification-providers/test
+ * Send a real provider test using the saved global provider configuration.
+ */
+router.post(
+  '/notification-providers/test',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const channel = String(req.body?.channel || '').trim();
+    const recipient = String(req.body?.recipient || '').trim();
+
+    if (!recipient) throw new ValidationError('Test recipient is required');
+
+    let result;
+    if (channel === 'sendgrid') {
+      validateEmail(recipient, 'Test recipient');
+      result = await sendAssignmentEmail({
+        to: recipient,
+        subject: 'Ticket Pulse notification provider test',
+        body: 'This is a Ticket Pulse SendGrid test email. If you received it, email notifications are configured.',
+      });
+    } else if (channel === 'twilio_sms') {
+      validateE164(recipient, 'Test recipient');
+      result = await sendSms({
+        to: recipient,
+        body: 'Ticket Pulse Twilio SMS test. If you received this, SMS notifications are configured.',
+      });
+    } else if (channel === 'twilio_whatsapp') {
+      validateE164(recipient, 'Test recipient');
+      result = await sendWhatsApp({
+        to: recipient,
+        body: 'Ticket Pulse Twilio WhatsApp test. If you received this, WhatsApp notifications are configured.',
+      });
+    } else if (channel === 'twilio_voice') {
+      validateE164(recipient, 'Test recipient');
+      result = await placeVoiceCall({
+        to: recipient,
+        message: 'Ticket Pulse Twilio voice test. If you received this call, voice notifications are configured.',
+      });
+    } else {
+      throw new ValidationError('Unknown notification provider test channel');
+    }
+
+    res.json({
+      success: true,
+      data: {
+        provider: result.provider,
+        providerMessageId: result.providerMessageId,
+        status: result.status,
+        recipient: result.to,
+      },
     });
   }),
 );
@@ -200,6 +308,8 @@ router.put(
  */
 router.get(
   '/technicians',
+  requireWorkspace,
+  requireWorkspaceAccess,
   requireAdmin,
   asyncHandler(async (req, res) => {
     const techs = await technicianRepository.getAll(req.workspaceId, { lite: true });
@@ -222,6 +332,8 @@ router.get(
  */
 router.put(
   '/technicians/:id/active',
+  requireWorkspace,
+  requireWorkspaceAccess,
   requireAdmin,
   asyncHandler(async (req, res) => {
     const id = parseInt(req.params.id, 10);
@@ -243,6 +355,8 @@ router.put(
  */
 router.get(
   '/technicians/:id/workspaces',
+  requireWorkspace,
+  requireWorkspaceAccess,
   requireAdmin,
   asyncHandler(async (req, res) => {
     const id = parseInt(req.params.id, 10);

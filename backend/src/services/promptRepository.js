@@ -1,6 +1,19 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
+import { PRIORITY_OUTPUT_MARKER } from './priorityAssessment.js';
+
+const PRIORITY_DEFINITIONS_SECTION = `
+## Priority Definitions (${PRIORITY_OUTPUT_MARKER})
+Ticket Pulse is the source of truth for priority assessment. Assess priority from the ticket's business impact, time sensitivity, affected scope, requester context, and evidence quality. FreshService's imported priority is historical input only; do not copy it blindly.
+
+Use exactly one normalized value:
+- \`Low\`: routine request, no meaningful time pressure, single-user inconvenience, or informational work that is still actionable.
+- \`Medium\`: normal operational support, limited user impact, standard access/software/help request, or unclear urgency with no outage or deadline signals.
+- \`High\`: significant user/team impact, blocked work, time-sensitive operational deadline, escalated requester context, or credible security/production-risk language that needs priority handling.
+- \`Urgent\`: active outage, broad business disruption, safety/security incident, executive-critical interruption, or immediate deadline where delay materially increases risk.
+
+Always populate \`assessedPriority\`, \`priorityRationale\`, and \`priorityConfidence\` when calling \`submit_recommendation\`. Add concise \`prioritySignals\` when useful. If evidence is thin, choose the best supported value and set confidence to \`low\` or \`medium\`; do not inflate priority just because the requester used vague urgency language.`;
 
 const DEFAULT_SYSTEM_PROMPT = `You are an IT helpdesk ticket assignment assistant. You analyze incoming tickets and recommend the best technician to handle them.
 
@@ -13,6 +26,8 @@ Call **get_ticket_details** to understand what the requester needs. Determine:
 - Is this an actionable support request, or informational noise (FYI, auto-generated alert, newsletter)?
 - Does this require physical presence at a specific location?
 - What is the urgency level?
+
+${PRIORITY_DEFINITIONS_SECTION}
 
 ## Step 2: Classify the Ticket
 Call **get_ticket_categories** to get the internal taxonomy for this workspace. Classify the ticket into one existing top-level internal category and, when specific enough, one existing internal subcategory. Do NOT invent an active category or subcategory. FreshService category fields are raw evidence only; they are not the source of truth.
@@ -71,7 +86,7 @@ Admin decision notes carry high weight — if an admin has explicitly stated a r
 For HIGH priority or complex tickets, call **get_technician_ad_profile** on your top candidates to check their job title, IT level (IT 1-5), and seniority (Jr/Sr). Prefer senior technicians for complex/critical issues. For routine tickets, this step is optional.
 
 ## Step 7: Submit Recommendation
-Call **submit_recommendation** with your final ranked list, \`internalCategoryId\`, optional \`internalSubcategoryId\`, \`categoryFit\`, \`subcategoryFit\`, \`taxonomyReviewNeeded\`, and a short \`classificationRationale\`. If the subcategory fit is weak or none, state what was missing from the category/subcategory list in \`classificationRationale\` and include a suggested subcategory name when useful. Do not suggest a new top-level category; select the closest existing parent category instead. If the selected subcategory has no exact competency coverage, mention that in \`overallReasoning\` as an agent skill matrix gap; do not set \`taxonomyReviewNeeded=true\` for that reason, and do not hide it by pretending the parent fallback is an exact skill match. You MUST always call this tool — never output raw JSON.
+Call **submit_recommendation** with your final ranked list, \`assessedPriority\`, \`priorityRationale\`, \`priorityConfidence\`, optional \`prioritySignals\`, \`internalCategoryId\`, optional \`internalSubcategoryId\`, \`categoryFit\`, \`subcategoryFit\`, \`taxonomyReviewNeeded\`, and a short \`classificationRationale\`. If the subcategory fit is weak or none, state what was missing from the category/subcategory list in \`classificationRationale\` and include a suggested subcategory name when useful. Do not suggest a new top-level category; select the closest existing parent category instead. If the selected subcategory has no exact competency coverage, mention that in \`overallReasoning\` as an agent skill matrix gap; do not set \`taxonomyReviewNeeded=true\` for that reason, and do not hide it by pretending the parent fallback is an exact skill match. You MUST always call this tool — never output raw JSON.
 
 If the ticket is noise/FYI, call submit_recommendation with an empty recommendations array and explain why.
 
@@ -172,6 +187,12 @@ function needsPromptUpgrade(systemPrompt = '') {
   if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('Do not propose new top-level categories')) {
     return true;
   }
+  if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes(PRIORITY_OUTPUT_MARKER)) {
+    return true;
+  }
+  if (systemPrompt && !systemPrompt.includes(PRIORITY_OUTPUT_MARKER)) {
+    return true;
+  }
   return false;
 }
 
@@ -252,7 +273,25 @@ function replaceAgentBriefingStep(prompt) {
   return `${before}\n${AGENT_BRIEFING_STEP.trim()}\n${tail}`;
 }
 
+function injectPriorityDefinitions(prompt) {
+  if (!prompt || prompt.includes(PRIORITY_OUTPUT_MARKER)) return prompt;
+  const step2Match = prompt.match(/\n## Step 2:/);
+  if (step2Match) {
+    const idx = step2Match.index;
+    return `${prompt.slice(0, idx).trimEnd()}\n\n${PRIORITY_DEFINITIONS_SECTION.trim()}\n${prompt.slice(idx)}`;
+  }
+  const submitMatch = prompt.match(/\n## Step \d+:\s*Submit Recommendation/i);
+  if (submitMatch) {
+    const idx = submitMatch.index;
+    return `${prompt.slice(0, idx).trimEnd()}\n\n${PRIORITY_DEFINITIONS_SECTION.trim()}\n${prompt.slice(idx)}`;
+  }
+  return `${prompt.trimEnd()}\n\n${PRIORITY_DEFINITIONS_SECTION.trim()}`;
+}
+
 function finishPromptUpgrade(prompt) {
+  if (prompt && !prompt.includes(PRIORITY_OUTPUT_MARKER)) {
+    prompt = injectPriorityDefinitions(prompt);
+  }
   if (prompt.includes('IT helpdesk ticket assignment assistant') && (
     !prompt.includes('taxonomyReviewNeeded')
     || !prompt.includes('pendingReviewSuggestions')
@@ -260,6 +299,7 @@ function finishPromptUpgrade(prompt) {
     || !prompt.includes('internal category/subcategory')
     || !prompt.includes('missing technician competency coverage')
     || !prompt.includes('Do not propose new top-level categories')
+    || !prompt.includes(PRIORITY_OUTPUT_MARKER)
   )) {
     return DEFAULT_SYSTEM_PROMPT;
   }
@@ -310,6 +350,10 @@ function upgradeLegacyPrompt(systemPrompt = '') {
     return finishPromptUpgrade(replaceAgentBriefingStep(systemPrompt));
   }
 
+  if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes(PRIORITY_OUTPUT_MARKER)) {
+    return finishPromptUpgrade(injectPriorityDefinitions(systemPrompt));
+  }
+
   if (systemPrompt.includes('You are an IT helpdesk ticket assignment assistant.')) {
     return DEFAULT_SYSTEM_PROMPT;
   }
@@ -331,7 +375,7 @@ function upgradeLegacyPrompt(systemPrompt = '') {
     .replace(/check_business_hours/gi, 'get_agent_availability')
     .replace(/deferUntil/gi, '');
 
-  return upgraded.trim();
+  return finishPromptUpgrade(upgraded.trim());
 }
 
 class PromptRepository {

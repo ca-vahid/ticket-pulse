@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../contexts/SettingsContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
-import { syncAPI, visualsAPI } from '../services/api';
+import { settingsAPI, syncAPI, visualsAPI } from '../services/api';
 import api from '../services/api';
 import { dataCache } from '../services/dataCache';
 import AutoResponseSettings from '../components/AutoResponseSettings';
@@ -41,6 +41,12 @@ import {
   Shield,
   EyeOff,
   KeyRound,
+  Bell,
+  Mail,
+  MessageCircle,
+  MessageSquare,
+  PhoneCall,
+  Send,
 } from 'lucide-react';
 
 export default function Settings() {
@@ -57,7 +63,7 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker', 'calendar-leave'];
+  const validSections = ['freshservice', 'notification-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -73,6 +79,11 @@ export default function Settings() {
     freshservice_domain: '',
     freshservice_api_key: '',
     service_account_names: '',
+    sendgrid_api_key: '',
+    sendgrid_from_email: '',
+    twilio_account_sid: '',
+    twilio_auth_token: '',
+    twilio_from_number: '',
     sync_interval_minutes: 5,
     default_timezone: 'America/Los_Angeles',
     dashboard_refresh_seconds: 30,
@@ -90,10 +101,17 @@ export default function Settings() {
   const [scheduleSaving, setScheduleSaving] = useState({});
   const [scheduleStatus, setScheduleStatus] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [providerTestTargets, setProviderTestTargets] = useState({
+    sendgrid: user?.email || '',
+    twilio: '',
+  });
+  const [providerTesting, setProviderTesting] = useState(null);
+  const [providerTestStatus, setProviderTestStatus] = useState({});
 
   // role: 'global' = global admin only, 'admin' = workspace admin+, 'viewer' = anyone
   const allNavigationItems = [
     { id: 'freshservice', label: 'FreshService', Icon: Plug, minRole: 'global' },
+    { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global' },
     { id: 'sync', label: 'Sync Settings', Icon: RefreshCw, minRole: 'admin' },
     { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3, minRole: 'admin' },
     { id: 'backfill', label: 'Backfill', Icon: Download, minRole: 'admin' },
@@ -128,6 +146,11 @@ export default function Settings() {
         freshservice_domain: settings.freshservice_domain || '',
         freshservice_api_key: settings.freshservice_api_key === '***MASKED***' ? '' : settings.freshservice_api_key || '',
         service_account_names: settings.service_account_names || '',
+        sendgrid_api_key: settings.sendgrid_api_key === '***MASKED***' ? '' : settings.sendgrid_api_key || '',
+        sendgrid_from_email: settings.sendgrid_from_email || '',
+        twilio_account_sid: settings.twilio_account_sid || '',
+        twilio_auth_token: settings.twilio_auth_token === '***MASKED***' ? '' : settings.twilio_auth_token || '',
+        twilio_from_number: settings.twilio_from_number || '',
         sync_interval_minutes: settings.sync_interval_minutes || 5,
         default_timezone: settings.default_timezone || 'America/Los_Angeles',
         dashboard_refresh_seconds: settings.dashboard_refresh_seconds || 30,
@@ -197,6 +220,78 @@ export default function Settings() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleProviderTargetChange = (name, value) => {
+    setProviderTestTargets(prev => ({ ...prev, [name]: value }));
+  };
+
+  const pruneNotificationSecrets = (settingsToUpdate) => {
+    const pruned = { ...settingsToUpdate };
+    if (!pruned.sendgrid_api_key) delete pruned.sendgrid_api_key;
+    if (!pruned.twilio_auth_token) delete pruned.twilio_auth_token;
+    return pruned;
+  };
+
+  const buildNotificationProviderSettings = (channel = 'all') => {
+    if (channel === 'sendgrid') {
+      return pruneNotificationSecrets({
+        sendgrid_api_key: formData.sendgrid_api_key,
+        sendgrid_from_email: formData.sendgrid_from_email,
+      });
+    }
+
+    if (channel === 'twilio_sms' || channel === 'twilio_whatsapp' || channel === 'twilio_voice' || channel === 'twilio') {
+      return pruneNotificationSecrets({
+        twilio_account_sid: formData.twilio_account_sid,
+        twilio_auth_token: formData.twilio_auth_token,
+        twilio_from_number: formData.twilio_from_number,
+      });
+    }
+
+    return pruneNotificationSecrets({
+      sendgrid_api_key: formData.sendgrid_api_key,
+      sendgrid_from_email: formData.sendgrid_from_email,
+      twilio_account_sid: formData.twilio_account_sid,
+      twilio_auth_token: formData.twilio_auth_token,
+      twilio_from_number: formData.twilio_from_number,
+    });
+  };
+
+  const handleProviderTest = async (channel) => {
+    setProviderTesting(channel);
+    setProviderTestStatus(prev => ({ ...prev, [channel]: null }));
+
+    try {
+      const saveResult = await updateSettings(buildNotificationProviderSettings(channel));
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || 'Could not save provider settings before testing');
+      }
+
+      const recipient = channel === 'sendgrid'
+        ? providerTestTargets.sendgrid
+        : providerTestTargets.twilio;
+      const result = await settingsAPI.testNotificationProvider({ channel, recipient });
+      const providerMessageId = result?.data?.providerMessageId ? ` Provider ID: ${result.data.providerMessageId}` : '';
+      setProviderTestStatus(prev => ({
+        ...prev,
+        [channel]: {
+          success: true,
+          message: `Test sent.${providerMessageId}`,
+        },
+      }));
+      await fetchSettings();
+    } catch (err) {
+      setProviderTestStatus(prev => ({
+        ...prev,
+        [channel]: {
+          success: false,
+          message: err.message || 'Provider test failed',
+        },
+      }));
+    } finally {
+      setProviderTesting(null);
+    }
+  };
+
   const handleTestConnection = async () => {
     setIsTesting(true);
     setTestStatus(null);
@@ -223,10 +318,22 @@ export default function Settings() {
     setSaveStatus(null);
 
     try {
-      // Only include API key if it was changed (not empty)
-      const settingsToUpdate = { ...formData };
+      const sectionKeys = {
+        freshservice: ['freshservice_domain', 'freshservice_api_key', 'service_account_names'],
+        'notification-providers': ['sendgrid_api_key', 'sendgrid_from_email', 'twilio_account_sid', 'twilio_auth_token', 'twilio_from_number'],
+        sync: ['sync_interval_minutes', 'default_timezone'],
+        dashboard: ['dashboard_refresh_seconds'],
+      };
+      const keys = sectionKeys[activeSection] || Object.keys(formData);
+      const settingsToUpdate = Object.fromEntries(keys.map((key) => [key, formData[key]]));
       if (!settingsToUpdate.freshservice_api_key) {
         delete settingsToUpdate.freshservice_api_key;
+      }
+      if (!settingsToUpdate.sendgrid_api_key) {
+        delete settingsToUpdate.sendgrid_api_key;
+      }
+      if (!settingsToUpdate.twilio_auth_token) {
+        delete settingsToUpdate.twilio_auth_token;
       }
 
       const result = await updateSettings(settingsToUpdate);
@@ -500,6 +607,229 @@ export default function Settings() {
                 {saveStatus && (
                   <div className={`flex items-center gap-2 p-4 rounded-lg ${saveStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
                     {saveStatus.success ? <CheckCircle className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+                    <span>{saveStatus.message}</span>
+                  </div>
+                )}
+              </form>
+            )}
+
+            {/* Notification Provider Configuration */}
+            {activeSection === 'notification-providers' && (
+              <form onSubmit={handleSave} className="p-6 space-y-5">
+                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-950">Notification Providers</h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Global provider setup for all workspaces. Tests save the provider settings first, then send a real test message.
+                      </p>
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      <Save className="h-4 w-4" />
+                      {isSaving ? 'Saving...' : 'Save Providers'}
+                    </button>
+                  </div>
+
+                  <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                    <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                      <div className="mb-4 flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+                            <Mail className="h-4 w-4" />
+                          </span>
+                          <div>
+                            <h3 className="text-sm font-semibold text-slate-950">SendGrid Email</h3>
+                            <p className="text-xs text-slate-500">Uses the SendGrid v3 Web API with a Bearer API key.</p>
+                          </div>
+                        </div>
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                          settings?.sendgrid_api_key === '***MASKED***' && settings?.sendgrid_from_email
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-slate-200 text-slate-600'
+                        }`}>
+                          {settings?.sendgrid_api_key === '***MASKED***' && settings?.sendgrid_from_email ? 'Configured' : 'Not configured'}
+                        </span>
+                      </div>
+
+                      <div className="grid gap-3">
+                        <label className="block">
+                          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">API key</span>
+                          <input
+                            type="password"
+                            name="sendgrid_api_key"
+                            value={formData.sendgrid_api_key}
+                            onChange={handleChange}
+                            placeholder={settings?.sendgrid_api_key === '***MASKED***' ? '(Configured)' : 'SG.xxxxx'}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                          />
+                          <span className="mt-1 block text-xs text-slate-500">Leave blank to keep the existing key.</span>
+                        </label>
+
+                        <label className="block">
+                          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">From email</span>
+                          <input
+                            type="email"
+                            name="sendgrid_from_email"
+                            value={formData.sendgrid_from_email}
+                            onChange={handleChange}
+                            placeholder="ticketpulse@example.com"
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                          />
+                          <span className="mt-1 block text-xs text-slate-500">Must be a verified sender or domain in SendGrid.</span>
+                        </label>
+
+                        <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Test email</div>
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <input
+                              type="email"
+                              value={providerTestTargets.sendgrid}
+                              onChange={(event) => handleProviderTargetChange('sendgrid', event.target.value)}
+                              placeholder="recipient@example.com"
+                              className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleProviderTest('sendgrid')}
+                              disabled={providerTesting === 'sendgrid' || !providerTestTargets.sendgrid}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <Send className="h-4 w-4" />
+                              {providerTesting === 'sendgrid' ? 'Sending...' : 'Send Test'}
+                            </button>
+                          </div>
+                          {providerTestStatus.sendgrid && (
+                            <div className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
+                              providerTestStatus.sendgrid.success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                            }`}>
+                              {providerTestStatus.sendgrid.success ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                              <span>{providerTestStatus.sendgrid.message}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                      <div className="mb-4 flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+                            <MessageSquare className="h-4 w-4" />
+                          </span>
+                          <div>
+                            <h3 className="text-sm font-semibold text-slate-950">Twilio SMS, WhatsApp, and Voice</h3>
+                            <p className="text-xs text-slate-500">One Twilio number is used for SMS, WhatsApp, and phone calls.</p>
+                          </div>
+                        </div>
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                          settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-slate-200 text-slate-600'
+                        }`}>
+                          {settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number ? 'Configured' : 'Not configured'}
+                        </span>
+                      </div>
+
+                      <div className="grid gap-3">
+                        <label className="block">
+                          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Account SID</span>
+                          <input
+                            type="text"
+                            name="twilio_account_sid"
+                            value={formData.twilio_account_sid}
+                            onChange={handleChange}
+                            placeholder="AC..."
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                          />
+                        </label>
+
+                        <label className="block">
+                          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Auth token</span>
+                          <input
+                            type="password"
+                            name="twilio_auth_token"
+                            value={formData.twilio_auth_token}
+                            onChange={handleChange}
+                            placeholder={settings?.twilio_auth_token === '***MASKED***' ? '(Configured)' : 'Enter auth token'}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                          />
+                          <span className="mt-1 block text-xs text-slate-500">Leave blank to keep the existing token.</span>
+                        </label>
+
+                        <label className="block">
+                          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Twilio phone number</span>
+                          <input
+                            type="tel"
+                            name="twilio_from_number"
+                            value={formData.twilio_from_number}
+                            onChange={handleChange}
+                            placeholder="+16045550100"
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                          />
+                          <span className="mt-1 block text-xs text-slate-500">Use E.164 format.</span>
+                        </label>
+
+                        <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Test SMS, WhatsApp, and voice</div>
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+                            <input
+                              type="tel"
+                              value={providerTestTargets.twilio}
+                              onChange={(event) => handleProviderTargetChange('twilio', event.target.value)}
+                              placeholder="+16045550100"
+                              className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleProviderTest('twilio_sms')}
+                              disabled={providerTesting === 'twilio_sms' || !providerTestTargets.twilio}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                              {providerTesting === 'twilio_sms' ? 'Sending...' : 'Test SMS'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleProviderTest('twilio_whatsapp')}
+                              disabled={providerTesting === 'twilio_whatsapp' || !providerTestTargets.twilio}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <MessageCircle className="h-4 w-4" />
+                              {providerTesting === 'twilio_whatsapp' ? 'Sending...' : 'Test WhatsApp'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleProviderTest('twilio_voice')}
+                              disabled={providerTesting === 'twilio_voice' || !providerTestTargets.twilio}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <PhoneCall className="h-4 w-4" />
+                              {providerTesting === 'twilio_voice' ? 'Calling...' : 'Test Voice'}
+                            </button>
+                          </div>
+                          {['twilio_sms', 'twilio_whatsapp', 'twilio_voice'].map((channel) => (
+                            providerTestStatus[channel] && (
+                              <div key={channel} className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
+                                providerTestStatus[channel].success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                              }`}>
+                                {providerTestStatus[channel].success ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                                <span>{channel === 'twilio_sms' ? 'SMS: ' : channel === 'twilio_whatsapp' ? 'WhatsApp: ' : 'Voice: '}{providerTestStatus[channel].message}</span>
+                              </div>
+                            )
+                          ))}
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+
+                {saveStatus && (
+                  <div className={`flex items-center gap-2 rounded-lg p-4 ${saveStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                    {saveStatus.success ? <CheckCircle className="h-5 w-5" /> : <XCircle className="h-5 w-5" />}
                     <span>{saveStatus.message}</span>
                   </div>
                 )}

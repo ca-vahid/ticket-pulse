@@ -79,6 +79,7 @@ export function WorkspaceProvider({ children }) {
 
       const serverSelectedId = workspaceData.selectedWorkspaceId;
       const localWs = loadPersistedWorkspace();
+      const serverWorkspace = workspaces.find(w => w.id === serverSelectedId);
 
       // localStorage takes priority — it's updated synchronously during
       // switchWorkspace() before the page reload, while the server session
@@ -89,21 +90,23 @@ export function WorkspaceProvider({ children }) {
         if (localWs.id !== serverSelectedId) {
           workspaceAPI.select(localWs.id).catch(() => {});
         }
-      } else if (serverSelectedId) {
-        const ws = workspaces.find(w => w.id === serverSelectedId) || {
-          id: serverSelectedId,
-          name: workspaceData.selectedWorkspaceName || 'Workspace',
-          slug: workspaceData.selectedWorkspaceSlug || '',
-        };
-        setCurrentWorkspace(ws);
-        setWorkspaceId(ws.id);
-        persistWorkspace(ws);
-      } else if (workspaces.length === 1) {
+      } else if (serverWorkspace) {
+        setCurrentWorkspace(serverWorkspace);
+        setWorkspaceId(serverWorkspace.id);
+        persistWorkspace(serverWorkspace);
+      } else if (workspaces.length > 0) {
+        // After a dev DB refresh, the session/localStorage can point at a
+        // workspace ID that no longer exists. Fall back to a real workspace
+        // instead of fabricating the stale ID and breaking workspace-scoped APIs.
         const ws = workspaces[0];
         setCurrentWorkspace(ws);
         setWorkspaceId(ws.id);
         persistWorkspace(ws);
         workspaceAPI.select(ws.id).catch(() => {});
+      } else {
+        setCurrentWorkspace(null);
+        setWorkspaceId(null);
+        persistWorkspace(null);
       }
     }
 

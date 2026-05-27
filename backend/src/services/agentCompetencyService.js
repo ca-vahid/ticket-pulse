@@ -125,7 +125,7 @@ async function getAgentTechnicians(email) {
   });
 }
 
-async function resolveAgentTechnician(email, workspaceId = null) {
+export async function resolveAgentTechnician(email, workspaceId = null) {
   const matches = await getAgentTechnicians(email);
   if (!matches.length) {
     throw new AuthenticationError('No active technician profile is linked to this SSO account');

@@ -54,12 +54,15 @@ router.use((req, _res, next) => {
 // before requireWorkspaceAccess checks the user's email against the DB.
 router.use(requireAuth);
 router.use('/agent', agentRoutes);
+// Settings has both global app configuration and a few workspace-specific
+// helpers. Mount it before global workspace enforcement so one-time global
+// settings are not blocked by a stale selected workspace.
+router.use('/settings', settingsRoutes);
 router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 
 // Mount route modules (individual route files no longer need requireAuth)
 router.use('/dashboard', dashboardRoutes);
-router.use('/settings', settingsRoutes);
 router.use('/sync', syncRoutes);
 router.use('/sse', sseRoutes);
 router.use('/photos', photosRoutes);
