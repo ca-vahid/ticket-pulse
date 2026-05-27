@@ -1,6 +1,17 @@
-export const APP_VERSION = '2.45';
+export const APP_VERSION = '2.46';
 
 export const changelog = [
+  {
+    version: '2.46',
+    date: 'May 26, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>After-hours urgent escalation</strong> lets each workspace decide whether Urgent priority-only after-hours tickets alert escalation recipients before assignment resumes.' },
+      { type: 'improved', html: '<strong>After-hours priority processing</strong> now classifies and writes priority immediately, then queues full assignment for business-hours reassessment when the ticket is actionable.' },
+      { type: 'improved', html: '<strong>Assignment queue visibility</strong> shows “Priority processed” badges so reviewed after-hours tickets are visible while still waiting for business-hours assignment.' },
+      { type: 'fixed', html: '<strong>Noise dismissal</strong> now acts during after-hours priority checks and respects each workspace&apos;s existing auto-close setting instead of queueing non-actionable tickets.' },
+      { type: 'database', html: '<strong>Database updates</strong> add workspace escalation policy fields and allow notification deliveries for workspace recipients without an assigned technician.' },
+    ],
+  },
   {
     version: '2.45',
     date: 'May 26, 2026',

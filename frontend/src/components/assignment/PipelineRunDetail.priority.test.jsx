@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import PipelineRunDetail from './PipelineRunDetail';
 import { assignmentAPI, dashboardAPI } from '../../services/api';

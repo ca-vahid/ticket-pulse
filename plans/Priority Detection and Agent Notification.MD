@@ -62,8 +62,26 @@
 
 - [x] Add a disabled workspace config flag such as `priorityAssessmentAfterHoursEnabled`.
 - [x] Add pipeline branching so future after-hours priority-only assessment can run without enabling full after-hours assignment.
-- [x] Keep current behavior for now: outside-business-hours assignment runs remain queued unless manually triggered.
-- [x] Document the future flow: assess priority after hours, update Freshservice priority, and optionally notify only if assignment/alert policy later permits it.
+- [x] Preserve queue-only behavior while the flag is disabled: outside-business-hours assignment runs remain queued unless manually triggered.
+- [x] Document the planned flow: assess priority after hours, update Freshservice priority, and optionally notify only if assignment/alert policy later permits it.
+
+## After-Hours Activation
+
+- [x] Wire `priorityAssessmentAfterHoursEnabled` so automatic after-hours assignment triggers run priority-only assessment immediately.
+- [x] Queue the original full assignment trigger after the priority-only pass so business-hours drain reassesses before assignment finalization.
+- [x] Keep completed `priority_only` runs from blocking later full assignment polling if queue creation is interrupted.
+- [x] Refresh workspace prompt upgrade guidance with `AFTER_HOURS_PRIORITY_QUEUE_V2` so DB-synced prompts stop claiming that all processing waits for business hours and now document after-hours noise dismissal.
+- [x] Keep agent notifications assignment-bound; after-hours priority writeback does not notify a technician until a later assignment sync succeeds.
+
+## After-Hours Urgent Escalation
+
+- [x] Add workspace-scoped after-hours urgent escalation settings, disabled by default.
+- [x] Let admins choose escalation channels and recipients per workspace.
+- [x] Queue escalation notifications only when an after-hours priority-only run assesses `Urgent`.
+- [x] Keep escalation independent from agent assignment notifications; escalation recipients do not require an assigned technician.
+- [x] Surface Ticket Pulse priority on queued business-hours runs so processed-but-queued tickets are visible in the queue.
+- [x] Treat after-hours non-actionable/noise findings as `noise_dismissed` before queueing full assignment.
+- [x] Respect the existing workspace `autoCloseNoise` setting so after-hours noise dismissal closes Freshservice only where enabled.
 
 ## Tests and Acceptance Criteria
 
@@ -123,3 +141,11 @@
 - [x] Local and production Prisma migrations: `20260526010000_add_whatsapp_notifications` applied and both databases report schema up to date.
 - [x] WhatsApp template fix backend tests: `npm test --prefix backend -- twilioNotificationService.test.js notificationPreferenceService.test.js notificationDeliveryService.test.js --runInBand`
 - [x] WhatsApp template fix build verification: `npm run build --prefix frontend`
+- [x] After-hours urgent escalation targeted backend tests: `npm test --prefix backend -- afterHoursUrgentEscalationService.test.js assignmentPipelineAfterHours.test.js groupExclusion.test.js promptRepository.test.js reboundPromptUpgrade.test.js notificationDeliveryService.test.js notificationPreferenceService.test.js --runInBand`
+- [x] After-hours urgent escalation Prisma generation: `npm run prisma:generate --prefix backend -- --schema prisma/schema.prisma`
+- [x] After-hours urgent escalation dev migration: `npm run prisma:deploy --prefix backend -- --schema prisma/schema.prisma`
+- [x] After-hours urgent escalation full backend suite: `npm test --prefix backend -- --runInBand`
+- [x] After-hours urgent escalation frontend suite: `npm test --prefix frontend -- --run`
+- [x] After-hours urgent escalation frontend build: `npm run build --prefix frontend`
+- [x] After-hours urgent escalation lint: `npm run lint --prefix backend` and `npm run lint --prefix frontend`
+- [x] After-hours urgent escalation local health check: `GET http://localhost:3000/api/health` returned healthy after backend restart.

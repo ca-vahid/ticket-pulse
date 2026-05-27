@@ -32,6 +32,25 @@ import logger from '../utils/logger.js';
 
 const router = express.Router();
 const ASSIGNMENT_STATS_TIMEZONE = 'America/Los_Angeles';
+const ESCALATION_CHANNELS = new Set(['email', 'sms', 'whatsapp', 'phone_call']);
+
+function normalizeConfigStringArray(value) {
+  if (value === undefined) return undefined;
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[\n,]+/);
+  return [...new Set(
+    rawValues
+      .map((item) => String(item || '').trim())
+      .filter(Boolean),
+  )];
+}
+
+function normalizeEscalationChannels(value) {
+  const channels = normalizeConfigStringArray(value);
+  if (channels === undefined) return undefined;
+  return channels.filter((channel) => ESCALATION_CHANNELS.has(channel));
+}
 
 router.get('/freshservice-domain', requireReviewer, (req, res) => {
   const domain = appConfig.freshservice.domain;
@@ -65,6 +84,10 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
       dailyReviewLookbackDays: 14,
       dailyReviewPreheatEnabled: false,
       priorityAssessmentAfterHoursEnabled: false,
+      afterHoursUrgentEscalationEnabled: false,
+      afterHoursUrgentEscalationChannels: [],
+      afterHoursUrgentEscalationEmails: [],
+      afterHoursUrgentEscalationPhones: [],
     },
     anthropicConfigured: anthropicService.isConfigured(),
     graphConfigured: graphMailClient.isConfigured(),
@@ -80,6 +103,8 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     autoCloseNoise, dryRunMode, excludedGroupIds,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
     dailyReviewPreheatEnabled, priorityAssessmentAfterHoursEnabled,
+    afterHoursUrgentEscalationEnabled, afterHoursUrgentEscalationChannels,
+    afterHoursUrgentEscalationEmails, afterHoursUrgentEscalationPhones,
   } = req.body;
 
   const data = {};
@@ -105,6 +130,18 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (dailyReviewPreheatEnabled !== undefined) data.dailyReviewPreheatEnabled = !!dailyReviewPreheatEnabled;
   if (priorityAssessmentAfterHoursEnabled !== undefined) {
     data.priorityAssessmentAfterHoursEnabled = !!priorityAssessmentAfterHoursEnabled;
+  }
+  if (afterHoursUrgentEscalationEnabled !== undefined) {
+    data.afterHoursUrgentEscalationEnabled = !!afterHoursUrgentEscalationEnabled;
+  }
+  if (afterHoursUrgentEscalationChannels !== undefined) {
+    data.afterHoursUrgentEscalationChannels = normalizeEscalationChannels(afterHoursUrgentEscalationChannels);
+  }
+  if (afterHoursUrgentEscalationEmails !== undefined) {
+    data.afterHoursUrgentEscalationEmails = normalizeConfigStringArray(afterHoursUrgentEscalationEmails);
+  }
+  if (afterHoursUrgentEscalationPhones !== undefined) {
+    data.afterHoursUrgentEscalationPhones = normalizeConfigStringArray(afterHoursUrgentEscalationPhones);
   }
   if (excludedGroupIds !== undefined) {
     // Defensive normalization: accept array of numbers or numeric strings,

@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import MyCompetencies from './MyCompetencies';
 import { agentAPI } from '../services/api';

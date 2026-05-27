@@ -775,6 +775,10 @@ model AssignmentConfig {
   // that don't use Daily Review shouldn't pay the FS API budget tax.
   dailyReviewPreheatEnabled Boolean @default(false) @map("daily_review_preheat_enabled")
   priorityAssessmentAfterHoursEnabled Boolean @default(false) @map("priority_assessment_after_hours_enabled")
+  afterHoursUrgentEscalationEnabled Boolean @default(false) @map("after_hours_urgent_escalation_enabled")
+  afterHoursUrgentEscalationChannels String[] @default([]) @map("after_hours_urgent_escalation_channels")
+  afterHoursUrgentEscalationEmails String[] @default([]) @map("after_hours_urgent_escalation_emails")
+  afterHoursUrgentEscalationPhones String[] @default([]) @map("after_hours_urgent_escalation_phones")
   // FreshService group IDs that are excluded from auto-assignment. When a
   // ticket's group_id is in this list, the LLM still runs and produces a
   // recommendation, but decision is forced to pending_review for manual
@@ -864,8 +868,8 @@ model NotificationDelivery {
   id                Int        @id @default(autoincrement())
   workspaceId       Int        @map("workspace_id")
   workspace         Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  technicianId      Int        @map("technician_id")
-  technician        Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  technicianId      Int?       @map("technician_id")
+  technician        Technician? @relation(fields: [technicianId], references: [id], onDelete: Cascade)
   ticketId          Int        @map("ticket_id")
   ticket            Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   pipelineRunId     Int        @map("pipeline_run_id")

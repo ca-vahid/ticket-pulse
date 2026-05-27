@@ -3,6 +3,9 @@ import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
 import { PRIORITY_OUTPUT_MARKER } from './priorityAssessment.js';
 
+const AFTER_HOURS_WORKFLOW_MARKER = 'AFTER_HOURS_PRIORITY_QUEUE_V2';
+const AFTER_HOURS_WORKFLOW_NOTE = `Note (${AFTER_HOURS_WORKFLOW_MARKER}): Full assignment finalization only runs during business hours. When after-hours priority assessment is enabled, Ticket Pulse may run a priority-assessment-only pass immediately, classify the ticket, write the assessed priority back to FreshService, and then queue the full assignment run for business hours. If that priority-only pass determines the ticket is non-actionable noise/FYI, submit an empty recommendations array so the workspace noise-dismissal policy can close it instead of queueing assignment. Urgent after-hours escalation is workspace policy controlled by Ticket Pulse settings; do not decide whether to notify recipients from the prompt. The queued business-hours run reassesses the ticket before any assignment is finalized. You do not need to decide whether to defer based on business hours.`;
+
 const PRIORITY_DEFINITIONS_SECTION = `
 ## Priority Definitions (${PRIORITY_OUTPUT_MARKER})
 Ticket Pulse is the source of truth for priority assessment. Assess priority from the ticket's business impact, time sensitivity, affected scope, requester context, and evidence quality. FreshService's imported priority is historical input only; do not copy it blindly.
@@ -19,7 +22,7 @@ const DEFAULT_SYSTEM_PROMPT = `You are an IT helpdesk ticket assignment assistan
 
 Follow this process EXACTLY in order. Do not skip steps.
 
-Note: The pipeline only runs during business hours. After-hours tickets are automatically queued and processed when business hours resume. You do not need to check business hours.
+${AFTER_HOURS_WORKFLOW_NOTE}
 
 ## Step 1: Read the Ticket
 Call **get_ticket_details** to understand what the requester needs. Determine:
@@ -190,6 +193,9 @@ function needsPromptUpgrade(systemPrompt = '') {
   if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes(PRIORITY_OUTPUT_MARKER)) {
     return true;
   }
+  if (systemPrompt && !systemPrompt.includes(AFTER_HOURS_WORKFLOW_MARKER)) {
+    return true;
+  }
   if (systemPrompt && !systemPrompt.includes(PRIORITY_OUTPUT_MARKER)) {
     return true;
   }
@@ -288,7 +294,30 @@ function injectPriorityDefinitions(prompt) {
   return `${prompt.trimEnd()}\n\n${PRIORITY_DEFINITIONS_SECTION.trim()}`;
 }
 
+function injectAfterHoursWorkflowGuidance(prompt) {
+  if (!prompt || prompt.includes(AFTER_HOURS_WORKFLOW_MARKER)) return prompt;
+
+  const priorMarkerNote = /Note \(AFTER_HOURS_PRIORITY_QUEUE_V\d+\):[\s\S]*?(?=\n\n## |\n## |$)/i;
+  if (priorMarkerNote.test(prompt)) {
+    return prompt.replace(priorMarkerNote, AFTER_HOURS_WORKFLOW_NOTE);
+  }
+
+  const legacyNote = /Note:\s*The pipeline only runs during business hours\. After-hours tickets are automatically queued and processed when business hours resume\. You do not need to check business hours\.\s*/i;
+  if (legacyNote.test(prompt)) {
+    return prompt.replace(legacyNote, `${AFTER_HOURS_WORKFLOW_NOTE}\n\n`);
+  }
+
+  const stepOneMatch = prompt.match(/\n## Step 1:/);
+  if (stepOneMatch) {
+    const idx = stepOneMatch.index;
+    return `${prompt.slice(0, idx).trimEnd()}\n\n${AFTER_HOURS_WORKFLOW_NOTE}\n${prompt.slice(idx)}`;
+  }
+
+  return `${prompt.trimEnd()}\n\n${AFTER_HOURS_WORKFLOW_NOTE}`;
+}
+
 function finishPromptUpgrade(prompt) {
+  prompt = injectAfterHoursWorkflowGuidance(prompt);
   if (prompt && !prompt.includes(PRIORITY_OUTPUT_MARKER)) {
     prompt = injectPriorityDefinitions(prompt);
   }
@@ -362,7 +391,7 @@ function upgradeLegacyPrompt(systemPrompt = '') {
 
   upgraded = upgraded.replace(
     /## Step 1: Check Business Hours[\s\S]*?(?=## Step 2: Read the Ticket)/i,
-    'Note: The pipeline only runs during business hours. After-hours tickets are automatically queued and processed when business hours resume. You do not need to check business hours.\n\n',
+    `${AFTER_HOURS_WORKFLOW_NOTE}\n\n`,
   );
 
   upgraded = upgraded

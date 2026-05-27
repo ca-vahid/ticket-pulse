@@ -15,7 +15,7 @@ export async function getNotificationProviderStatus() {
     twilioConfig.accountSid
     && twilioConfig.authToken
     && twilioWhatsAppSenderConfigured
-    && twilioConfig.whatsappContentSid
+    && twilioConfig.whatsappContentSid,
   );
   const twilioMissing = [
     !twilioConfig.accountSid ? 'twilio_account_sid' : null,

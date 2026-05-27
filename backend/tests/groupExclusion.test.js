@@ -1,4 +1,4 @@
-import { isGroupExcluded, isPipelineFinalDecision } from '../src/services/assignmentDecisionRules.js';
+import { isGroupExcluded, isPipelineFinalDecision, resolvePipelineDecision } from '../src/services/assignmentDecisionRules.js';
 
 describe('isGroupExcluded — empty / null cases', () => {
   test('returns false when ticketGroupId is null', () => {
@@ -111,5 +111,27 @@ describe('isPipelineFinalDecision', () => {
     expect(isPipelineFinalDecision(undefined)).toBe(false);
     expect(isPipelineFinalDecision('')).toBe(false);
     expect(isPipelineFinalDecision('some_future_decision')).toBe(false);
+  });
+});
+
+describe('resolvePipelineDecision', () => {
+  test('noise wins over priority-only mode so after-hours passes can dismiss it', () => {
+    expect(resolvePipelineDecision({
+      recommendation: { recommendations: [] },
+      triggerSource: 'priority_assessment_after_hours',
+      isPriorityAssessmentOnly: true,
+      isNoise: true,
+      autoAssign: true,
+    })).toBe('noise_dismissed');
+  });
+
+  test('priority-only non-noise runs remain priority_only', () => {
+    expect(resolvePipelineDecision({
+      recommendation: { recommendations: [{ techId: 17 }] },
+      triggerSource: 'priority_assessment_after_hours',
+      isPriorityAssessmentOnly: true,
+      isNoise: false,
+      autoAssign: true,
+    })).toBe('priority_only');
   });
 });

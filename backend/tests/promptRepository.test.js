@@ -14,6 +14,22 @@ describe('prompt upgrade helpers', () => {
     expect(needsPromptUpgrade(DEFAULT_SYSTEM_PROMPT)).toBe(false);
   });
 
+  test('detects and upgrades prompts with stale after-hours queue guidance', () => {
+    const stale = DEFAULT_SYSTEM_PROMPT.replace(
+      /Note \(AFTER_HOURS_PRIORITY_QUEUE_V2\):[\s\S]*?\n\n## Step 1:/,
+      'Note: The pipeline only runs during business hours. After-hours tickets are automatically queued and processed when business hours resume. You do not need to check business hours.\n\n## Step 1:',
+    );
+
+    const upgraded = upgradeLegacyPrompt(stale);
+
+    expect(needsPromptUpgrade(stale)).toBe(true);
+    expect(upgraded).toContain('AFTER_HOURS_PRIORITY_QUEUE_V2');
+    expect(upgraded).toContain('priority-assessment-only pass immediately');
+    expect(upgraded).toContain('workspace noise-dismissal policy');
+    expect(upgraded).toContain('queued business-hours run reassesses the ticket');
+    expect(upgraded).not.toContain('After-hours tickets are automatically queued and processed when business hours resume');
+  });
+
   test('detects prompts missing structured priority output marker', () => {
     const stale = DEFAULT_SYSTEM_PROMPT.replace(/\n## Priority Definitions \(PRIORITY_OUTPUT_V1\)[\s\S]*?(?=\n## Step 2: Classify the Ticket)/, '');
     expect(needsPromptUpgrade(stale)).toBe(true);

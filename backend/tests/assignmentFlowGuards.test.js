@@ -25,6 +25,7 @@ describe('assignment flow guards', () => {
     expect(shouldTriggerAssignmentForLatestRun({ status: 'skipped_stale' })).toBe(true);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'superseded' })).toBe(true);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'failed_schema_validation' })).toBe(true);
+    expect(shouldTriggerAssignmentForLatestRun({ status: 'completed', decision: 'priority_only' })).toBe(true);
 
     expect(shouldTriggerAssignmentForLatestRun({ status: 'queued' })).toBe(false);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'running' })).toBe(false);

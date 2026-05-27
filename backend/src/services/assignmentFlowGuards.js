@@ -20,6 +20,9 @@ export function shouldTriggerAssignmentForLatestRun(latestRun) {
   }
 
   if (latestRun.status === 'completed') {
+    if (latestRun.decision === 'priority_only') {
+      return true;
+    }
     return false;
   }
 

@@ -21,6 +21,7 @@ import {
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
   ShieldCheck, Users, Bot, Sparkles, Clock, X, CalendarDays,
+  MessageSquare, PhoneCall,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -3229,6 +3230,18 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   <div key={run.id} className="px-3 py-2 space-y-1.5">
                     <div>
                       <span className="text-[10px] text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                      {run.ticket?.assessedPriority && (
+                        <span
+                          className={`ml-1.5 inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded leading-none ${getPriorityMeta(run.ticket).pill}`}
+                          title={[
+                            `Priority processed: ${run.ticket.assessedPriority}`,
+                            run.ticket.priorityAssessedAt ? `Assessed ${formatDateTimeInTimezone(run.ticket.priorityAssessedAt, workspaceTimezone)}` : null,
+                            run.ticket.priorityRationale || null,
+                          ].filter(Boolean).join(' - ')}
+                        >
+                          TP {run.ticket.assessedPriority}
+                        </span>
+                      )}
                       {run.reboundFrom?.previousTechName && (
                         <span
                           className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none"
@@ -3270,6 +3283,18 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     <tr key={run.id} className="border-t border-amber-50 hover:bg-amber-50/60 transition-colors">
                       <td className="px-3 py-1.5">
                         <span className="text-[10px] text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                        {run.ticket?.assessedPriority && (
+                          <span
+                            className={`ml-2 inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded align-middle leading-none ${getPriorityMeta(run.ticket).pill}`}
+                            title={[
+                              `Priority processed: ${run.ticket.assessedPriority}`,
+                              run.ticket.priorityAssessedAt ? `Assessed ${formatDateTimeInTimezone(run.ticket.priorityAssessedAt, workspaceTimezone)}` : null,
+                              run.ticket.priorityRationale || null,
+                            ].filter(Boolean).join(' - ')}
+                          >
+                            Priority processed: {run.ticket.assessedPriority}
+                          </span>
+                        )}
                         {run.reboundFrom?.previousTechName && (
                           <span
                             className="ml-2 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded align-middle leading-none"
@@ -3831,12 +3856,16 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         excludedGroupIds: [],
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
         dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false,
+        afterHoursUrgentEscalationEnabled: false,
+        afterHoursUrgentEscalationChannels: [],
+        afterHoursUrgentEscalationEmails: [],
+        afterHoursUrgentEscalationPhones: [],
         ...cfg,
       });
       setAnthropicConfigured(res?.anthropicConfigured ?? false);
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6-20260217', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false, afterHoursUrgentEscalationEnabled: false, afterHoursUrgentEscalationChannels: [], afterHoursUrgentEscalationEmails: [], afterHoursUrgentEscalationPhones: [] });
     } finally { setLoading(false); }
   }, []);
 
@@ -3846,6 +3875,12 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
     try { setSaving(true); setSaveSuccess(false); const res = await assignmentAPI.updateConfig(config); setConfig(res?.data || config); setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); }
     catch { /* keep current config visible on save failure */ }
     finally { setSaving(false); }
+  };
+
+  const toggleEscalationChannel = (channel) => {
+    const current = new Set(config.afterHoursUrgentEscalationChannels || []);
+    if (current.has(channel)) current.delete(channel); else current.add(channel);
+    setConfig({ ...config, afterHoursUrgentEscalationChannels: [...current] });
   };
 
   if (loading || !config) return <div className="flex items-center justify-center p-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>;
@@ -3902,14 +3937,65 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       {/* Section 4: Ticket Detection */}
       <ConfigSection icon={Search} title="Ticket Detection">
         <ConfigToggle label="Poll for Unassigned Tickets" description="Safety net: check for unassigned tickets after each sync cycle" checked={config.pollForUnassigned} onChange={() => setConfig({ ...config, pollForUnassigned: !config.pollForUnassigned })} />
-        <ConfigToggle label="Assess Priority After Hours" description="Allow priority-only assessment runs outside business hours without assigning or notifying agents" checked={config.priorityAssessmentAfterHoursEnabled} onChange={() => setConfig({ ...config, priorityAssessmentAfterHoursEnabled: !config.priorityAssessmentAfterHoursEnabled })} />
+        <ConfigToggle label="Assess Priority After Hours" description="Immediately assess and write ticket priority after hours, then queue full assignment for the next business-hours reassessment" checked={config.priorityAssessmentAfterHoursEnabled} onChange={() => setConfig({ ...config, priorityAssessmentAfterHoursEnabled: !config.priorityAssessmentAfterHoursEnabled })} />
         <div className="py-3">
           <h4 className="font-medium text-sm text-slate-800 mb-1.5">Max Tickets Per Poll Cycle</h4>
           <input type="number" min="1" max="20" value={config.pollMaxPerCycle || 5} onChange={(e) => setConfig({ ...config, pollMaxPerCycle: parseInt(e.target.value) || 5 })} className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         </div>
       </ConfigSection>
 
-      {/* Section 5: Email Monitoring */}
+      {/* Section 5: After-hours urgent escalation */}
+      <ConfigSection icon={AlertCircle} title="After-Hours Urgent Escalation">
+        <ConfigToggle label="Enable Urgent Escalation" description="When an after-hours priority-only run assesses a ticket as Urgent, notify the workspace escalation recipients before assignment is finalized" checked={config.afterHoursUrgentEscalationEnabled} onChange={() => setConfig({ ...config, afterHoursUrgentEscalationEnabled: !config.afterHoursUrgentEscalationEnabled })} color="text-red-500" />
+        <div className="py-3 space-y-3">
+          <div>
+            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Channels</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { id: 'email', label: 'Email', icon: Mail },
+                { id: 'sms', label: 'SMS', icon: MessageSquare },
+                { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
+                { id: 'phone_call', label: 'Voice', icon: PhoneCall },
+              ].map(({ id, label, icon: Icon }) => {
+                const checked = (config.afterHoursUrgentEscalationChannels || []).includes(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => toggleEscalationChannel(id)}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${checked ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Email Recipients</h4>
+            <textarea
+              value={(config.afterHoursUrgentEscalationEmails || []).join('\n')}
+              onChange={(e) => setConfig({ ...config, afterHoursUrgentEscalationEmails: e.target.value.split(/[\n,]+/).map((v) => v.trim()).filter(Boolean) })}
+              placeholder="manager@example.com"
+              className="w-full min-h-20 border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y"
+            />
+            <p className="text-xs text-slate-500 mt-1">One email per line or comma-separated. Used only when Email is selected.</p>
+          </div>
+          <div>
+            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Phone Recipients</h4>
+            <textarea
+              value={(config.afterHoursUrgentEscalationPhones || []).join('\n')}
+              onChange={(e) => setConfig({ ...config, afterHoursUrgentEscalationPhones: e.target.value.split(/[\n,]+/).map((v) => v.trim()).filter(Boolean) })}
+              placeholder="+16045551234"
+              className="w-full min-h-20 border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y"
+            />
+            <p className="text-xs text-slate-500 mt-1">Use E.164 format. Used by SMS, WhatsApp, and voice.</p>
+          </div>
+        </div>
+      </ConfigSection>
+
+      {/* Section 6: Email Monitoring */}
       <ConfigSection icon={Mail} title="Email Monitoring (Office 365)" defaultOpen={false}>
         <div className="py-3">
           <h4 className="font-medium text-sm text-slate-800 mb-1.5">Monitored Mailbox</h4>

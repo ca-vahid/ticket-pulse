@@ -8,6 +8,7 @@ import ticketActivityRepository from './ticketActivityRepository.js';
 import { TOOL_SCHEMAS, executeTool } from './assignmentTools.js';
 import freshServiceActionService from './freshServiceActionService.js';
 import competencyFeedbackService from './competencyFeedbackService.js';
+import afterHoursUrgentEscalationService from './afterHoursUrgentEscalationService.js';
 import { formatDateInTimezone } from '../utils/timezone.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
@@ -17,7 +18,7 @@ import logger from '../utils/logger.js';
 // rebound-context user-message logic and the auto-assign decision rules
 // without pulling in Prisma/Anthropic.
 import { buildUserMessage } from './assignmentUserMessage.js';
-import { isGroupExcluded, isPipelineFinalDecision } from './assignmentDecisionRules.js';
+import { isGroupExcluded, isPipelineFinalDecision, resolvePipelineDecision } from './assignmentDecisionRules.js';
 import {
   getFreshServiceTicketQueueBlocker,
   getLocalTicketQueueBlocker,
@@ -59,7 +60,10 @@ function truncateTaxonomySuggestion(value) {
 class AssignmentPipelineService {
   /**
    * Run the agentic assignment pipeline with streaming.
-   * Automatic triggers are queued outside business hours.
+   * Automatic assignment triggers are queued outside business hours. When the
+   * workspace enables after-hours priority assessment, an immediate priority-only
+   * run executes first, then the full assignment run is queued for business
+   * hours.
    * Manual triggers always execute immediately.
    */
   async runPipeline(ticketId, workspaceId, triggerSource = 'manual', onEvent = null, signal = null, options = {}) {
@@ -134,38 +138,30 @@ class AssignmentPipelineService {
       const bh = await availabilityService.isBusinessHours(new Date(), tz, workspaceId);
 
       if (!bh.isBusinessHours) {
-        let queuedReason = bh.reason || 'Outside business hours';
-        // For rebound runs, prefix the reason with rebound context so the
-        // queue UI immediately shows why this is back here.
-        if (reboundFrom?.previousTechName) {
-          const when = reboundFrom.unassignedAt ? ` at ${new Date(reboundFrom.unassignedAt).toISOString()}` : '';
-          const who = reboundFrom.unassignedByName ? ` by ${reboundFrom.unassignedByName}` : '';
-          queuedReason = `Returned from ${reboundFrom.previousTechName}${when}${who} — ${queuedReason}`;
-        }
+        const queuedReason = this._buildAfterHoursQueuedReason(bh.reason || 'Outside business hours', reboundFrom);
         let run;
-        try {
-          run = await assignmentRepository.createQueuedRun({
-            ticketId, workspaceId, triggerSource, queuedReason, reboundFrom,
+
+        if (assignmentConfig?.priorityAssessmentAfterHoursEnabled) {
+          run = await this._runAfterHoursPriorityAssessmentAndQueue({
+            ticketId,
+            workspaceId,
+            triggerSource,
+            queuedReason,
+            reboundFrom,
+            emit,
+            signal,
           });
-        } catch (error) {
-          const existingRun = await assignmentRepository.getOpenPipelineRun(ticketId);
-          if (existingRun) {
-            logger.info('Pipeline queue skipped: open run was created concurrently', {
-              ticketId,
-              existingRunId: existingRun.id,
-              existingStatus: existingRun.status,
-              triggerSource,
-            });
-            emit({ type: 'error', message: `Pipeline already ${existingRun.status} for this ticket (run #${existingRun.id})` });
-            emit({ type: 'complete' });
-            return { skipped: true, reason: 'open_run_exists', existingRunId: existingRun.id };
-          }
-          throw error;
+        } else {
+          run = await this._queueRunForBusinessHours({
+            ticketId,
+            workspaceId,
+            triggerSource,
+            queuedReason,
+            reboundFrom,
+            emit,
+          });
         }
-        logger.info('Pipeline queued (outside business hours)', {
-          runId: run.id, ticketId, workspaceId, triggerSource, queuedReason,
-        });
-        emit({ type: 'queued', runId: run.id, reason: queuedReason });
+
         emit({ type: 'complete' });
         return run;
       }
@@ -202,6 +198,144 @@ class AssignmentPipelineService {
     }
 
     return this._executeRun(run.id, ticketId, workspaceId, triggerSource, pipelineStart, emit, signal);
+  }
+
+  _buildAfterHoursQueuedReason(baseReason, reboundFrom = null) {
+    let queuedReason = baseReason || 'Outside business hours';
+    if (reboundFrom?.previousTechName) {
+      const when = reboundFrom.unassignedAt ? ` at ${new Date(reboundFrom.unassignedAt).toISOString()}` : '';
+      const who = reboundFrom.unassignedByName ? ` by ${reboundFrom.unassignedByName}` : '';
+      queuedReason = `Returned from ${reboundFrom.previousTechName}${when}${who} - ${queuedReason}`;
+    }
+    return queuedReason;
+  }
+
+  async _queueRunForBusinessHours({ ticketId, workspaceId, triggerSource, queuedReason, reboundFrom = null, emit = () => {} }) {
+    let run;
+    try {
+      run = await assignmentRepository.createQueuedRun({
+        ticketId, workspaceId, triggerSource, queuedReason, reboundFrom,
+      });
+    } catch (error) {
+      const existingRun = await assignmentRepository.getOpenPipelineRun(ticketId);
+      if (existingRun) {
+        logger.info('Pipeline queue skipped: open run was created concurrently', {
+          ticketId,
+          existingRunId: existingRun.id,
+          existingStatus: existingRun.status,
+          triggerSource,
+        });
+        emit({ type: 'error', message: `Pipeline already ${existingRun.status} for this ticket (run #${existingRun.id})` });
+        return { skipped: true, reason: 'open_run_exists', existingRunId: existingRun.id };
+      }
+      throw error;
+    }
+
+    logger.info('Pipeline queued (outside business hours)', {
+      runId: run.id, ticketId, workspaceId, triggerSource, queuedReason,
+    });
+    emit({ type: 'queued', runId: run.id, reason: queuedReason });
+    return run;
+  }
+
+  async _runAfterHoursPriorityAssessmentAndQueue({
+    ticketId,
+    workspaceId,
+    triggerSource,
+    queuedReason,
+    reboundFrom = null,
+    emit = () => {},
+    signal = null,
+  }) {
+    logger.info('Pipeline after-hours priority assessment starting before business-hours queue', {
+      ticketId,
+      workspaceId,
+      triggerSource,
+    });
+    emit({ type: 'priority_assessment_started', reason: 'after_hours_priority_only' });
+
+    const priorityRun = await this.runPipeline(
+      ticketId,
+      workspaceId,
+      'priority_assessment_after_hours',
+      null,
+      signal,
+      { parentTriggerSource: triggerSource },
+    ).catch((error) => {
+      logger.warn('Pipeline after-hours priority assessment failed before queueing assignment run', {
+        ticketId,
+        workspaceId,
+        triggerSource,
+        error: error.message,
+      });
+      return { skipped: true, reason: 'priority_assessment_failed', error: error.message };
+    });
+
+    if (signal?.aborted) {
+      return priorityRun;
+    }
+
+    const assessedPriority = priorityRun?.recommendation?.assessedPriority || priorityRun?.ticket?.assessedPriority || null;
+    const priorityStatus = priorityRun?.status || (priorityRun?.skipped ? 'skipped' : null);
+    const priorityRunId = priorityRun?.id || null;
+
+    let escalation = null;
+    if (priorityStatus === 'completed' && priorityRun?.decision === 'noise_dismissed') {
+      logger.info('Pipeline after-hours priority assessment dismissed ticket as noise; skipping business-hours queue', {
+        ticketId,
+        workspaceId,
+        triggerSource,
+        priorityRunId,
+      });
+      return {
+        ...priorityRun,
+        afterHoursPriorityRunId: priorityRunId,
+        afterHoursPriorityStatus: priorityStatus,
+        afterHoursAssessedPriority: assessedPriority,
+        afterHoursAssignmentQueued: false,
+        afterHoursQueueSkippedReason: 'noise_dismissed',
+      };
+    }
+
+    if (priorityStatus === 'completed' && assessedPriority === 'Urgent') {
+      escalation = await afterHoursUrgentEscalationService.queueForPriorityRun(priorityRun).catch((error) => {
+        logger.warn('Pipeline after-hours urgent escalation failed', {
+          ticketId,
+          workspaceId,
+          priorityRunId,
+          error: error.message,
+        });
+        return { queued: 0, skipped: 'error', error: error.message };
+      });
+    }
+
+    const queueRun = await this._queueRunForBusinessHours({
+      ticketId,
+      workspaceId,
+      triggerSource,
+      queuedReason,
+      reboundFrom,
+      emit,
+    });
+
+    logger.info('Pipeline after-hours assignment queued after priority assessment', {
+      ticketId,
+      workspaceId,
+      triggerSource,
+      priorityRunId,
+      priorityStatus,
+      assessedPriority,
+      escalation,
+      queuedRunId: queueRun?.id,
+    });
+
+    return {
+      ...queueRun,
+      afterHoursPriorityRunId: priorityRunId,
+      afterHoursPriorityStatus: priorityStatus,
+      afterHoursAssessedPriority: assessedPriority,
+      afterHoursUrgentEscalation: escalation,
+    };
   }
 
   /**
@@ -470,7 +604,7 @@ class AssignmentPipelineService {
     if (triggerSource === 'classification_only') {
       systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category and subcategory. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory is saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields.';
     } else if (isPriorityAssessmentOnly) {
-      systemPrompt += '\n\n## Priority-assessment-only Mode\nThis run exists to assess and persist Ticket Pulse priority for an active ticket. Still inspect and classify the ticket enough to produce valid structured output, but do not change the assignee, do not close the ticket, and do not write an assignment recommendation as an action request. Call submit_recommendation so assessedPriority, priorityRationale, priorityConfidence, and optional prioritySignals are saved and can be written to FreshService native priority.';
+      systemPrompt += '\n\n## Priority-assessment-only Mode\nThis run exists to assess and persist Ticket Pulse priority for an active ticket. Still inspect and classify the ticket enough to produce valid structured output, but do not change the assignee and do not write an assignment recommendation as an action request. If the ticket is non-actionable noise/FYI, submit an empty recommendations array with closureNoticeHtml; the system will apply the workspace noise-dismissal policy. Do not call get_agent_availability, find_matching_agents, get_workload_stats, get_tech_ticket_history, or get_technician_ad_profile unless one of those tools is directly needed as evidence for priority or classification. Call submit_recommendation so assessedPriority, priorityRationale, priorityConfidence, and optional prioritySignals are saved and can be written to FreshService native priority.';
     }
 
     const workspace = await prisma.workspace.findUnique({
@@ -794,28 +928,15 @@ class AssignmentPipelineService {
         }
       }
 
-      let decision;
-      if (!recommendation) {
-        decision = null;
-      } else if (triggerSource === 'classification_only') {
-        decision = 'classified_only';
-      } else if (isPriorityAssessmentOnly) {
-        decision = 'priority_only';
-      } else if (isNoise) {
-        decision = 'noise_dismissed';
-      } else if (llmIgnoredRebound) {
-        // Force manual review when the LLM ignored the rebound constraint.
-        decision = 'pending_review';
-      } else if (groupExcluded) {
-        // Force manual review when the ticket's group is on the workspace's
-        // excluded-from-auto-assign list. LLM recommendation is still there
-        // for the admin to approve; we just don't act on it automatically.
-        decision = 'pending_review';
-      } else if (assignmentConfig?.autoAssign) {
-        decision = 'auto_assigned';
-      } else {
-        decision = 'pending_review';
-      }
+      const decision = resolvePipelineDecision({
+        recommendation,
+        triggerSource,
+        isPriorityAssessmentOnly,
+        isNoise,
+        llmIgnoredRebound,
+        groupExcluded,
+        autoAssign: assignmentConfig?.autoAssign,
+      });
 
       const finalStatus = recommendation ? 'completed' : 'failed_schema_validation';
       let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';

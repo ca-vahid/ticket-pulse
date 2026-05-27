@@ -40,3 +40,22 @@ export function isGroupExcluded(ticketGroupId, excludedGroupIds) {
 export function isPipelineFinalDecision(decision) {
   return decision === 'auto_assigned' || decision === 'noise_dismissed' || decision === 'classified_only' || decision === 'priority_only';
 }
+
+export function resolvePipelineDecision({
+  recommendation,
+  triggerSource,
+  isPriorityAssessmentOnly = false,
+  isNoise = false,
+  llmIgnoredRebound = false,
+  groupExcluded = false,
+  autoAssign = false,
+} = {}) {
+  if (!recommendation) return null;
+  if (triggerSource === 'classification_only') return 'classified_only';
+  if (isNoise) return 'noise_dismissed';
+  if (isPriorityAssessmentOnly) return 'priority_only';
+  if (llmIgnoredRebound) return 'pending_review';
+  if (groupExcluded) return 'pending_review';
+  if (autoAssign) return 'auto_assigned';
+  return 'pending_review';
+}
