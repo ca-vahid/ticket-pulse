@@ -1,6 +1,14 @@
-export const APP_VERSION = '2.51';
+export const APP_VERSION = '2.51.1';
 
 export const changelog = [
+  {
+    version: '2.51.1',
+    date: 'May 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>GPT-5.5 live pipeline streaming</strong> now shows visible transcript deltas and the processing KB counter during function-call turns, matching the Claude live analysis experience.' },
+      { type: 'improved', html: '<strong>Live analysis status</strong> now names GPT or Claude based on the active provider attempt instead of always saying Claude.' },
+    ],
+  },
   {
     version: '2.51',
     date: 'May 27, 2026',

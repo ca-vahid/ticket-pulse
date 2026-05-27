@@ -67,11 +67,14 @@ class OpenAiProvider {
     signal = null,
     onText = null,
     onThinking = null,
+    onInputJson = null,
     extra = {},
   }) {
     const selectedModel = normalizeAiModel(model || config.openai.model, 'openai');
     const convertedTools = convertAnthropicToolsToOpenAiResponses(tools);
-    const response = await this.getClient().responses.create({
+    let streamedText = '';
+    let streamedThinking = '';
+    const stream = this.getClient().responses.stream({
       model: selectedModel,
       instructions: this._instructions(systemPrompt, convertedTools.unsupported),
       input: convertAnthropicMessagesToOpenAiInput(messages),
@@ -82,11 +85,26 @@ class OpenAiProvider {
       text: extra.text || { verbosity: 'medium' },
     }, signal ? { signal } : undefined);
 
+    stream.on('response.output_text.delta', (event) => {
+      if (!event?.delta) return;
+      streamedText += event.delta;
+      onText?.(event.delta);
+    });
+
+    stream.on('response.function_call_arguments.delta', (event) => {
+      if (!event?.delta) return;
+      onInputJson?.(event.delta);
+    });
+
+    stream.on('event', (event) => {
+      if (event?.type !== 'response.reasoning_text.delta' || !event.delta) return;
+      streamedThinking += event.delta;
+      onThinking?.(event.delta);
+    });
+
+    const response = await stream.finalResponse();
     const finalMessage = buildAnthropicMessageFromOpenAiResponse(response);
-    for (const block of finalMessage.content || []) {
-      if (block.type === 'text' && block.text) onText?.(block.text);
-      if (block.type === 'thinking' && block.thinking) onThinking?.(block.thinking);
-    }
+    this._emitMissingFinalText(finalMessage, streamedText, streamedThinking, { onText, onThinking });
 
     return {
       message: finalMessage,
@@ -96,6 +114,31 @@ class OpenAiProvider {
         unsupportedTools: convertedTools.unsupported,
       },
     };
+  }
+
+  _emitMissingFinalText(finalMessage, streamedText, streamedThinking, { onText, onThinking }) {
+    const finalText = (finalMessage?.content || [])
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text || '')
+      .join('');
+    const finalThinking = (finalMessage?.content || [])
+      .filter((block) => block.type === 'thinking')
+      .map((block) => block.thinking || '')
+      .join('');
+
+    if (finalText && finalText.startsWith(streamedText)) {
+      const missingText = finalText.slice(streamedText.length);
+      if (missingText) onText?.(missingText);
+    } else if (finalText && !streamedText) {
+      onText?.(finalText);
+    }
+
+    if (finalThinking && finalThinking.startsWith(streamedThinking)) {
+      const missingThinking = finalThinking.slice(streamedThinking.length);
+      if (missingThinking) onThinking?.(missingThinking);
+    } else if (finalThinking && !streamedThinking) {
+      onThinking?.(finalThinking);
+    }
   }
 
   _instructions(systemPrompt, unsupportedTools = []) {

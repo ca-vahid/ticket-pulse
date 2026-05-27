@@ -578,10 +578,17 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
     }
   };
 
+  const activeProvider = [...events].reverse().find((event) => event.provider)?.provider || null;
+  const runningText = activeProvider === 'openai'
+    ? 'GPT is analyzing...'
+    : activeProvider === 'anthropic'
+      ? 'Claude is analyzing...'
+      : 'AI is analyzing...';
+
   const STATUS_INDICATORS = {
     loading: { icon: Loader2, text: 'Loading...', color: 'text-gray-500', spin: true },
     connecting: { icon: Loader2, text: 'Connecting...', color: 'text-gray-500', spin: true },
-    running: { icon: Brain, text: 'Claude is analyzing...', color: 'text-blue-600', spin: true },
+    running: { icon: Brain, text: runningText, color: 'text-blue-600', spin: true },
     completed: { icon: CheckCircle, text: 'Analysis complete', color: 'text-green-600', spin: false },
     error: { icon: XCircle, text: 'Pipeline failed', color: 'text-red-600', spin: false },
     queued: { icon: AlertTriangle, text: 'Queued for business hours', color: 'text-orange-600', spin: false },
