@@ -1,10 +1,10 @@
-import Anthropic from '@anthropic-ai/sdk';
 import prisma from './prisma.js';
 import promptRepository from './promptRepository.js';
 import competencyRepository from './competencyRepository.js';
 import logger from '../utils/logger.js';
-import appConfig from '../config/index.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
+import providerGateway from './aiProviders/providerGateway.js';
 
 const ACTIVE_STATUSES = ['collecting', 'analyzing', 'saving'];
 const APPLYABLE_SECTIONS = ['prompt', 'skills', 'technician_competencies'];
@@ -66,13 +66,16 @@ class AssignmentDailyReviewConsolidationService {
     });
     if (existing) return this.getRun(existing.id, workspaceId);
 
+    const llmProvider = providerForModel('claude-opus-4-7', 'anthropic');
+    const llmModel = normalizeAiModel('claude-opus-4-7', llmProvider, null, 'daily_review_consolidation');
     const run = await prisma.assignmentDailyReviewConsolidationRun.create({
       data: {
         workspaceId,
         status: 'collecting',
         phase: 'collecting',
         triggeredBy: actorEmail,
-        llmModel: 'claude-opus-4-7',
+        llmProvider,
+        llmModel,
         progress: { phase: 'collecting', message: 'Collecting approved Daily Review recommendations...', percent: 5 },
       },
     });
@@ -348,7 +351,7 @@ class AssignmentDailyReviewConsolidationService {
         return this.getRun(runId, baseRun.workspaceId);
       }
 
-      await this._updateProgress(runId, 'analyzing', 'Running Opus 4.7 consolidation analysis...', 35);
+      await this._updateProgress(runId, 'analyzing', 'Running AI consolidation analysis...', 35);
       const analysis = await this._analyze(context, runId);
 
       await this._updateProgress(runId, 'saving', 'Saving editable consolidation plan...', 88);
@@ -374,6 +377,7 @@ class AssignmentDailyReviewConsolidationService {
             totalTokensUsed: analysis.tokens,
             totalDurationMs: Date.now() - startedAt,
             completedAt: new Date(),
+            ...(analysis.providerMetadata || {}),
             progress: {
               phase: 'completed',
               percent: 100,
@@ -474,6 +478,7 @@ class AssignmentDailyReviewConsolidationService {
 
     const categoryTree = competencyRepository.buildCategoryTree(categories);
     const snapshot = {
+      workspaceId,
       recommendations: sourceRecommendations.map((rec) => ({
         id: rec.id,
         runId: rec.runId,
@@ -558,10 +563,6 @@ class AssignmentDailyReviewConsolidationService {
   }
 
   async _analyze(context, runId) {
-    const apiKey = appConfig.anthropic.apiKey;
-    if (!apiKey) throw new Error('Anthropic API key is not configured on the server');
-
-    const client = new Anthropic({ apiKey });
     const tool = this._consolidationToolSchema();
     const system = `You are a senior IT operations analyst improving a ticket assignment system.
 
@@ -604,17 +605,8 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
     let lastStreamActivityAt = Date.now();
     let lastOutputAt = Date.now();
     let lastOutputType = 'connection';
-
-    const stream = client.messages.stream({
-      model: 'claude-opus-4-7',
-      max_tokens: 32000,
-      system,
-      tools: [tool],
-      thinking: { type: 'adaptive', display: 'summarized' },
-      output_config: { effort: 'medium' },
-      messages,
-    });
-    this.activeStreams.set(runId, stream);
+    const abortController = new AbortController();
+    this.activeStreams.set(runId, { abort: () => abortController.abort() });
 
     const heartbeat = setInterval(() => {
       const sinceOutputSec = Math.round((Date.now() - lastOutputAt) / 1000);
@@ -622,7 +614,7 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
       this._recordEvent(
         runId,
         'heartbeat',
-        `Anthropic stream is open. Last output: ${lastOutputType} ${sinceOutputSec}s ago; last stream event ${sinceStreamEventSec}s ago.`,
+        `Provider stream is active. Last output: ${lastOutputType} ${sinceOutputSec}s ago; last provider event ${sinceStreamEventSec}s ago.`,
         {
           sinceOutputSec,
           sinceStreamEventSec,
@@ -630,80 +622,66 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
           textKb: parseFloat((transcript.length / 1024).toFixed(1)),
           thinkingKb: parseFloat((thinking.length / 1024).toFixed(1)),
           structuredPlanKb: parseFloat((inputJsonLength / 1024).toFixed(1)),
-          requestId: stream.request_id || null,
         },
       ).catch(() => {});
     }, 5000);
 
-    stream.on('streamEvent', (event) => {
-      lastStreamActivityAt = Date.now();
-      if (event?.type === 'content_block_delta' && event.delta?.type) {
-        this._recordEvent(runId, 'stream_delta', `Received ${event.delta.type}.`, {
-          deltaType: event.delta.type,
-        }).catch(() => {});
-      }
-    });
-
-    stream.on('connect', () => {
-      lastStreamActivityAt = Date.now();
-      lastOutputAt = Date.now();
-      lastOutputType = 'connected';
-      this._recordEvent(runId, 'connected', 'Connected to Anthropic stream.', {
-        requestId: stream.request_id || null,
-      }).catch(() => {});
-    });
-
-    stream.on('text', (text) => {
-      lastStreamActivityAt = Date.now();
-      lastOutputAt = Date.now();
-      lastOutputType = 'visible text';
-      transcript += text;
-      this._recordEvent(runId, 'text', text).catch(() => {});
-    });
-
-    stream.on('inputJson', (partialJson) => {
-      lastStreamActivityAt = Date.now();
-      lastOutputAt = Date.now();
-      lastOutputType = 'structured plan JSON';
-      inputJsonLength += partialJson.length;
-      const now = Date.now();
-      if (now - lastProgressAt > 400) {
-        lastProgressAt = now;
-        this._recordEvent(runId, 'tool_json', 'Structured plan JSON is streaming...', {
-          kb: parseFloat((inputJsonLength / 1024).toFixed(1)),
-        }).catch(() => {});
-      }
-    });
-
-    stream.on('thinking', (chunk) => {
-      lastStreamActivityAt = Date.now();
-      lastOutputAt = Date.now();
-      lastOutputType = 'thinking';
-      if (chunk) {
-        thinking += chunk;
-        this._recordEvent(runId, 'thinking', chunk).catch(() => {});
-      }
-    });
-
-    stream.on('error', (error) => {
-      lastStreamActivityAt = Date.now();
-      this._recordEvent(runId, 'error', error?.message || 'Anthropic stream error').catch(() => {});
-    });
-
-    stream.on('end', () => {
-      lastStreamActivityAt = Date.now();
-      this._recordEvent(runId, 'stream_end', 'Anthropic stream ended.').catch(() => {});
-    });
-
     const timeoutMs = 6 * 60 * 1000;
-    let finalMessage;
+    let response;
     try {
-      finalMessage = await Promise.race([
-        stream.finalMessage(),
+      response = await Promise.race([
+        providerGateway.runToolTurn({
+          operation: 'daily_review_consolidation',
+          workspaceId: context.snapshot.workspaceId,
+          legacyModel: 'claude-opus-4-7',
+          runLinks: { dailyReviewConsolidationRunId: runId },
+          systemPrompt: system,
+          tools: [tool],
+          messages,
+          maxTokens: 32000,
+          signal: abortController.signal,
+          extra: {
+            thinking: { type: 'adaptive', display: 'summarized' },
+            outputConfig: { effort: 'medium' },
+          },
+          emit: (event) => {
+            lastStreamActivityAt = Date.now();
+            this._recordEvent(runId, event.type, event.message || event.reason || event.status || event.provider || event.type, event).catch(() => {});
+          },
+          onText: (text) => {
+            lastStreamActivityAt = Date.now();
+            lastOutputAt = Date.now();
+            lastOutputType = 'visible text';
+            transcript += text;
+            this._recordEvent(runId, 'text', text).catch(() => {});
+          },
+          onInputJson: (partialJson) => {
+            lastStreamActivityAt = Date.now();
+            lastOutputAt = Date.now();
+            lastOutputType = 'structured plan JSON';
+            inputJsonLength += partialJson.length;
+            const now = Date.now();
+            if (now - lastProgressAt > 400) {
+              lastProgressAt = now;
+              this._recordEvent(runId, 'tool_json', 'Structured plan JSON is streaming...', {
+                kb: parseFloat((inputJsonLength / 1024).toFixed(1)),
+              }).catch(() => {});
+            }
+          },
+          onThinking: (chunk) => {
+            lastStreamActivityAt = Date.now();
+            lastOutputAt = Date.now();
+            lastOutputType = 'thinking';
+            if (chunk) {
+              thinking += chunk;
+              this._recordEvent(runId, 'thinking', chunk).catch(() => {});
+            }
+          },
+        }),
         new Promise((_, reject) => {
           setTimeout(() => {
-            stream.abort();
-            reject(new Error('Anthropic consolidation stream timed out after 6 minutes'));
+            abortController.abort();
+            reject(new Error('Consolidation provider stream timed out after 6 minutes'));
           }, timeoutMs);
         }),
       ]);
@@ -711,7 +689,8 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
       clearInterval(heartbeat);
       this.activeStreams.delete(runId);
     }
-    totalTokens += (finalMessage.usage?.input_tokens || 0) + (finalMessage.usage?.output_tokens || 0);
+    const finalMessage = response.message;
+    totalTokens += response.usage?.totalTokens || 0;
 
     const toolUse = finalMessage.content.find((block) => block.type === 'tool_use' && block.name === 'submit_consolidation_plan');
     if (toolUse?.input) {
@@ -727,7 +706,18 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
       thinkingChars: thinking.length,
     });
 
-    return { result: submission, tokens: totalTokens, transcript };
+    return {
+      result: submission,
+      tokens: totalTokens,
+      transcript,
+      providerMetadata: {
+        llmProvider: response.provider,
+        llmModel: response.model,
+        llmFallbackUsed: !!response.fallbackUsed,
+        llmFallbackReason: response.fallbackReason || null,
+        llmAttemptCount: response.attemptNumber || 1,
+      },
+    };
   }
 
   _consolidationToolSchema() {

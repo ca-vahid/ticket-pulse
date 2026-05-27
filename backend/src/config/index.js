@@ -114,7 +114,7 @@ export default {
   // OpenAI (auto-response)
   openai: {
     apiKey: config.OPENAI_API_KEY,
-    model: 'gpt-5.1',
+    model: 'gpt-5.5',
   },
 
   // Anthropic (assignment pipeline)

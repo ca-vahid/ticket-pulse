@@ -1203,6 +1203,16 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
               <span>· {workspaceTimezone}</span>
               {run.totalDurationMs && <span>· {(run.totalDurationMs / 1000).toFixed(1)}s</span>}
               {run.totalTokensUsed && <span>· {run.totalTokensUsed.toLocaleString()} tokens</span>}
+              {(run.llmProvider || run.llmModel) && (
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">
+                  {[run.llmProvider, run.llmModel].filter(Boolean).join(' · ')}
+                </span>
+              )}
+              {run.llmFallbackUsed && (
+                <span className="rounded bg-yellow-50 px-1.5 py-0.5 font-semibold text-yellow-700">
+                  fallback used
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -1278,6 +1288,23 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
       )}
 
       <PriorityAlertAuditCard run={run} workspaceTimezone={workspaceTimezone} />
+
+      {run.llmFallbackUsed && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start gap-2.5">
+          <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-yellow-800">
+              AI provider fallback used{run.llmProvider ? ` — completed with ${run.llmProvider}` : ''}
+            </p>
+            <p className="text-xs text-yellow-700 mt-1">
+              {run.llmFallbackReason || 'The primary provider was unavailable or returned a retryable error.'}
+              {Array.isArray(run.aiProviderAttempts) && run.aiProviderAttempts.length > 0 && (
+                <> Attempts: {run.aiProviderAttempts.map((attempt) => `${attempt.provider}/${attempt.model}: ${attempt.status}`).join('; ')}.</>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Rebound / auto-fallback context strip — surfaces why this run exists.
           Two flavors: ongoing rebound (amber) vs auto-fallback exhausted (red). */}

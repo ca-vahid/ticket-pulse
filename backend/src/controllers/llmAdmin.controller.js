@@ -1,5 +1,6 @@
 import llmConfigService from '../services/llmConfigService.js';
 import logger from '../utils/logger.js';
+import { getModelMetadata } from '../utils/aiProviders.js';
 
 /**
  * LLM Admin Controller
@@ -204,7 +205,7 @@ export const updateRuntimeSettings = async (req, res) => {
     const { model, reasoningEffort, verbosity, maxOutputTokens } = req.body;
     const updatedBy = req.session?.user?.name || 'admin';
 
-    const allowedModels = ['gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano'];
+    const allowedModels = getModelMetadata({ operation: 'autoresponse_generation' }).map((entry) => entry.model);
     const allowedReasoning = ['none', 'low', 'medium', 'high'];
     const allowedVerbosity = ['low', 'medium', 'high'];
 
@@ -452,4 +453,3 @@ export const previewPrompt = async (req, res) => {
     });
   }
 };
-

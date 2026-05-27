@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 
 const mockMessagesCreate = jest.fn();
+const mockProviderSendJson = jest.fn();
 
 const prismaMock = {
   competencyCategory: {
@@ -35,6 +36,12 @@ jest.unstable_mockModule('@anthropic-ai/sdk', () => ({
   })),
 }));
 
+jest.unstable_mockModule('../src/services/aiProviders/providerGateway.js', () => ({
+  default: {
+    sendJson: mockProviderSendJson,
+  },
+}));
+
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: {
     info: jest.fn(),
@@ -59,6 +66,7 @@ describe('ticketReclassificationService', () => {
     prismaMock.ticketReclassificationRun.create.mockResolvedValue({ id: 900 });
     prismaMock.ticketReclassificationRun.update.mockResolvedValue({});
     mockMessagesCreate.mockReset();
+    mockProviderSendJson.mockReset();
   });
 
   test('blocks non-IT workspaces during phased migration', async () => {
@@ -96,20 +104,21 @@ describe('ticketReclassificationService', () => {
       createdAt: new Date('2026-05-01T12:00:00Z'),
       assignedTech: { id: 59, name: 'Vahid' },
     }]);
-    mockMessagesCreate.mockResolvedValue({
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          internalCategoryId: 10,
-          internalSubcategoryId: 11,
-          categoryFit: 'exact',
-          subcategoryFit: 'exact',
-          confidence: 'high',
-          classificationRationale: 'MFA reset request maps to Password & MFA.',
-          suggestedInternalCategoryName: null,
-          suggestedInternalSubcategoryName: null,
-        }),
-      }],
+    mockProviderSendJson.mockResolvedValue({
+      parsed: {
+        internalCategoryId: 10,
+        internalSubcategoryId: 11,
+        categoryFit: 'exact',
+        subcategoryFit: 'exact',
+        confidence: 'high',
+        classificationRationale: 'MFA reset request maps to Password & MFA.',
+        suggestedInternalCategoryName: null,
+        suggestedInternalSubcategoryName: null,
+      },
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5-20251001',
+      fallbackUsed: false,
+      attemptNumber: 1,
     });
 
     const result = await ticketReclassificationService.run(1, { apply: true, limit: 1, days: 30 });
@@ -120,8 +129,9 @@ describe('ticketReclassificationService', () => {
     expect(result.classified).toBe(1);
     expect(result.model).toBe('claude-haiku-4-5-20251001');
     expect(result.concurrency).toBe(10);
-    expect(mockMessagesCreate).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'claude-haiku-4-5-20251001',
+    expect(mockProviderSendJson).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'ticket_reclassification',
+      legacyModel: 'claude-haiku-4-5-20251001',
     }));
     expect(prismaMock.ticketReclassificationRun.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -209,20 +219,21 @@ describe('ticketReclassificationService', () => {
       createdAt: new Date('2026-05-02T12:00:00Z'),
       assignedTech: null,
     }]);
-    mockMessagesCreate.mockResolvedValue({
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          internalCategoryId: 20,
-          internalSubcategoryId: null,
-          categoryFit: 'weak',
-          subcategoryFit: 'none',
-          confidence: 'medium',
-          classificationRationale: 'Closest existing parent is Hardware.',
-          suggestedInternalCategoryName: null,
-          suggestedInternalSubcategoryName: 'Keyboard',
-        }),
-      }],
+    mockProviderSendJson.mockResolvedValue({
+      parsed: {
+        internalCategoryId: 20,
+        internalSubcategoryId: null,
+        categoryFit: 'weak',
+        subcategoryFit: 'none',
+        confidence: 'medium',
+        classificationRationale: 'Closest existing parent is Hardware.',
+        suggestedInternalCategoryName: null,
+        suggestedInternalSubcategoryName: 'Keyboard',
+      },
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
+      fallbackUsed: false,
+      attemptNumber: 1,
     });
 
     const result = await ticketReclassificationService.run(1, {
@@ -286,7 +297,7 @@ describe('ticketReclassificationService', () => {
 
     expect(result.applied).toBe(true);
     expect(result.classified).toBe(1);
-    expect(mockMessagesCreate).not.toHaveBeenCalled();
+    expect(mockProviderSendJson).not.toHaveBeenCalled();
     expect(prismaMock.ticketReclassificationRun.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         request: expect.objectContaining({

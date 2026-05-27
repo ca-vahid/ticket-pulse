@@ -65,6 +65,9 @@ model Workspace {
   technicianNotificationPreferences TechnicianNotificationPreference[]
   notificationDeliveries NotificationDelivery[]
   ticketPriorityEvents TicketPriorityEvent[]
+  aiProviderSettings AiProviderSetting[]
+  aiProviderAttempts AiProviderAttempt[]
+  aiProviderHealthEvents AiProviderHealthEvent[]
 
   @@map("workspaces")
 }
@@ -518,7 +521,7 @@ model LlmConfig {
   fallbackMessage       String?   @db.Text @map("fallback_message")
   tonePresets           Json?     @map("tone_presets")
 
-  model                 String    @default("gpt-5.1") @db.VarChar(100)
+  model                 String    @default("gpt-5.5") @db.VarChar(100)
   reasoningEffort       String    @default("none") @db.VarChar(20) @map("reasoning_effort")
   verbosity             String    @default("medium") @db.VarChar(20)
   maxOutputTokens       Int       @default(800) @map("max_output_tokens")
@@ -792,6 +795,88 @@ model AssignmentConfig {
   @@map("assignment_configs")
 }
 
+model AiProviderSetting {
+  id                  Int       @id @default(autoincrement())
+  workspaceId         Int       @map("workspace_id")
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  operation           String    @db.VarChar(60)
+  primaryProvider     String    @default("anthropic") @db.VarChar(30) @map("primary_provider")
+  primaryModel        String    @default("claude-sonnet-4-6") @db.VarChar(100) @map("primary_model")
+  fallbackProvider    String?   @default("openai") @db.VarChar(30) @map("fallback_provider")
+  fallbackModel       String?   @default("gpt-5.5") @db.VarChar(100) @map("fallback_model")
+  autoFallbackEnabled Boolean   @default(true) @map("auto_fallback_enabled")
+  fallbackMode        String    @default("retry_safe_checkpoint") @db.VarChar(40) @map("fallback_mode")
+  lastChangedBy       String?   @db.VarChar(255) @map("last_changed_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@map("ai_provider_settings")
+  @@unique([workspaceId, operation])
+  @@index([workspaceId])
+  @@index([operation])
+}
+
+model AiProviderAttempt {
+  id                            Int       @id @default(autoincrement())
+  workspaceId                   Int       @map("workspace_id")
+  workspace                     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  operation                     String    @db.VarChar(60)
+  provider                      String    @db.VarChar(30)
+  model                         String    @db.VarChar(100)
+  attemptNumber                 Int       @map("attempt_number")
+  status                        String    @default("running") @db.VarChar(30)
+  fallbackFromProvider          String?   @db.VarChar(30) @map("fallback_from_provider")
+  fallbackReason                String?   @db.Text @map("fallback_reason")
+  errorClass                    String?   @db.VarChar(50) @map("error_class")
+  errorMessage                  String?   @db.Text @map("error_message")
+  startedAt                     DateTime  @default(now()) @map("started_at")
+  completedAt                   DateTime? @map("completed_at")
+  durationMs                    Int?      @map("duration_ms")
+  inputTokens                   Int?      @map("input_tokens")
+  outputTokens                  Int?      @map("output_tokens")
+  rawMetadata                   Json?     @map("raw_metadata")
+  assignmentPipelineRunId       Int?      @map("assignment_pipeline_run_id")
+  assignmentPipelineRun         AssignmentPipelineRun? @relation(fields: [assignmentPipelineRunId], references: [id], onDelete: Cascade)
+  competencyAnalysisRunId       Int?      @map("competency_analysis_run_id")
+  competencyAnalysisRun         CompetencyAnalysisRun? @relation(fields: [competencyAnalysisRunId], references: [id], onDelete: Cascade)
+  assignmentDailyReviewRunId    Int?      @map("assignment_daily_review_run_id")
+  assignmentDailyReviewRun      AssignmentDailyReviewRun? @relation(fields: [assignmentDailyReviewRunId], references: [id], onDelete: Cascade)
+  dailyReviewConsolidationRunId Int?      @map("daily_review_consolidation_run_id")
+  dailyReviewConsolidationRun   AssignmentDailyReviewConsolidationRun? @relation(fields: [dailyReviewConsolidationRunId], references: [id], onDelete: Cascade)
+  ticketReclassificationRunId   Int?      @map("ticket_reclassification_run_id")
+  ticketReclassificationRun     TicketReclassificationRun? @relation(fields: [ticketReclassificationRunId], references: [id], onDelete: Cascade)
+
+  @@map("ai_provider_attempts")
+  @@index([workspaceId, operation, startedAt])
+  @@index([provider, startedAt])
+  @@index([status])
+  @@index([assignmentPipelineRunId])
+  @@index([competencyAnalysisRunId])
+  @@index([assignmentDailyReviewRunId])
+  @@index([dailyReviewConsolidationRunId])
+  @@index([ticketReclassificationRunId])
+}
+
+model AiProviderHealthEvent {
+  id               Int        @id @default(autoincrement())
+  workspaceId      Int?       @map("workspace_id")
+  workspace        Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  operation        String?    @db.VarChar(60)
+  provider         String     @db.VarChar(30)
+  model            String?    @db.VarChar(100)
+  success          Boolean
+  errorClass       String?    @db.VarChar(50) @map("error_class")
+  statusCode       Int?       @map("status_code")
+  durationMs       Int?       @map("duration_ms")
+  sanitizedMessage String?    @db.VarChar(500) @map("sanitized_message")
+  createdAt        DateTime   @default(now()) @map("created_at")
+
+  @@map("ai_provider_health_events")
+  @@index([provider, createdAt])
+  @@index([workspaceId, operation, createdAt])
+  @@index([success, createdAt])
+}
+
 model CompetencyCategory {
   id                Int       @id @default(autoincrement())
   workspaceId       Int       @map("workspace_id")
@@ -962,6 +1047,11 @@ model TicketReclassificationRun {
   status         String    @default("running") @db.VarChar(20)
   mode           String    @db.VarChar(20) // dry_run | apply
   actorEmail     String?   @db.VarChar(255) @map("actor_email")
+  llmProvider    String?   @db.VarChar(30) @map("llm_provider")
+  llmModel       String?   @db.VarChar(100) @map("llm_model")
+  llmFallbackUsed Boolean  @default(false) @map("llm_fallback_used")
+  llmFallbackReason String? @db.Text @map("llm_fallback_reason")
+  llmAttemptCount Int      @default(0) @map("llm_attempt_count")
   request        Json
   summary        Json?
   results        Json?
@@ -973,6 +1063,8 @@ model TicketReclassificationRun {
   rollbackResult Json?     @map("rollback_result")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  aiProviderAttempts AiProviderAttempt[]
 
   @@map("ticket_reclassification_runs")
   @@index([workspaceId, createdAt])
@@ -1018,7 +1110,11 @@ model AssignmentPipelineRun {
   status            String     @default("running") @db.VarChar(20) // queued | running | completed | failed | failed_schema_validation | cancelled | superseded | skipped_stale
   triggerSource     String     @db.VarChar(20) @map("trigger_source") // webhook | poll | manual | email | rebound
   reboundFrom       Json?      @map("rebound_from") // { previousTechId, previousTechName, unassignedAt, unassignedByName, reboundCount } — set when this run was triggered because the ticket bounced back from a prior assignee
+  llmProvider       String?    @db.VarChar(30) @map("llm_provider")
   llmModel          String?    @db.VarChar(100) @map("llm_model")
+  llmFallbackUsed   Boolean    @default(false) @map("llm_fallback_used")
+  llmFallbackReason String?    @db.Text @map("llm_fallback_reason")
+  llmAttemptCount   Int        @default(0) @map("llm_attempt_count")
   totalDurationMs   Int?       @map("total_duration_ms")
   totalTokensUsed   Int?       @map("total_tokens_used")
   recommendation    Json?      // ranked list: [{ techId, name, score, breakdown, reasoning }]
@@ -1052,6 +1148,7 @@ model AssignmentPipelineRun {
   ticketAssignments TicketAssignment[]
   corrections       AssignmentCorrection[]
   notificationDeliveries NotificationDelivery[]
+  aiProviderAttempts AiProviderAttempt[]
 
   @@map("assignment_pipeline_runs")
   @@index([ticketId])
@@ -1169,7 +1266,11 @@ model CompetencyAnalysisRun {
   decision          String?    @db.VarChar(20) // auto_applied | preserved_existing | rolled_back
   promptVersionId   Int?       @map("prompt_version_id")
   promptVersion     CompetencyPromptVersion? @relation(fields: [promptVersionId], references: [id])
+  llmProvider       String?    @db.VarChar(30) @map("llm_provider")
   llmModel          String?    @db.VarChar(100) @map("llm_model")
+  llmFallbackUsed   Boolean    @default(false) @map("llm_fallback_used")
+  llmFallbackReason String?    @db.Text @map("llm_fallback_reason")
+  llmAttemptCount   Int        @default(0) @map("llm_attempt_count")
   fullTranscript    String?    @db.Text @map("full_transcript")
   structuredResult  Json?      @map("structured_result")
   beforeSnapshot    Json?      @map("before_snapshot")
@@ -1184,6 +1285,7 @@ model CompetencyAnalysisRun {
   updatedAt         DateTime   @updatedAt @map("updated_at")
 
   steps             CompetencyAnalysisStep[]
+  aiProviderAttempts AiProviderAttempt[]
 
   @@map("competency_analysis_runs")
   @@index([workspaceId])
@@ -1244,7 +1346,11 @@ model AssignmentDailyReviewRun {
   rangeStart             DateTime? @map("range_start")
   rangeEnd               DateTime? @map("range_end")
   triggeredBy            String?   @db.VarChar(255) @map("triggered_by")
+  llmProvider            String?   @db.VarChar(30) @map("llm_provider")
   llmModel               String?   @db.VarChar(100) @map("llm_model")
+  llmFallbackUsed        Boolean   @default(false) @map("llm_fallback_used")
+  llmFallbackReason      String?   @db.Text @map("llm_fallback_reason")
+  llmAttemptCount        Int       @default(0) @map("llm_attempt_count")
   summaryMetrics         Json?     @map("summary_metrics")
   analyzedTicketIds      Json?     @map("analyzed_ticket_ids")
   evidenceCases          Json?     @map("evidence_cases")
@@ -1275,6 +1381,7 @@ model AssignmentDailyReviewRun {
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
   recommendations        AssignmentDailyReviewRecommendation[]
+  aiProviderAttempts     AiProviderAttempt[]
 
   @@map("assignment_daily_review_runs")
   @@index([workspaceId, createdAt])
@@ -1322,7 +1429,11 @@ model AssignmentDailyReviewConsolidationRun {
   status                   String    @default("collecting") @db.VarChar(30)
   phase                    String?   @db.VarChar(40)
   triggeredBy              String?   @db.VarChar(255) @map("triggered_by")
+  llmProvider              String?   @db.VarChar(30) @map("llm_provider")
   llmModel                 String?   @db.VarChar(100) @map("llm_model")
+  llmFallbackUsed          Boolean   @default(false) @map("llm_fallback_used")
+  llmFallbackReason        String?   @db.Text @map("llm_fallback_reason")
+  llmAttemptCount          Int       @default(0) @map("llm_attempt_count")
   sourceRecommendationIds  Json?     @map("source_recommendation_ids")
   sourceCounts             Json?     @map("source_counts")
   contextSnapshot          Json?     @map("context_snapshot")
@@ -1341,6 +1452,7 @@ model AssignmentDailyReviewConsolidationRun {
 
   items                    AssignmentDailyReviewConsolidationItem[]
   events                   AssignmentDailyReviewConsolidationEvent[]
+  aiProviderAttempts       AiProviderAttempt[]
 
   @@map("assignment_daily_review_consolidation_runs")
   @@index([workspaceId])

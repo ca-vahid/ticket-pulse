@@ -1,7 +1,7 @@
-import OpenAI from 'openai';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import llmConfigService from './llmConfigService.js';
+import providerGateway from './aiProviders/providerGateway.js';
 
 /**
  * LLM Service
@@ -9,17 +9,7 @@ import llmConfigService from './llmConfigService.js';
  */
 class LLMService {
   constructor() {
-    if (!config.openai.apiKey) {
-      logger.warn('OpenAI API key not configured. LLM features will be disabled.');
-      this.client = null;
-    } else {
-      this.client = new OpenAI({
-        apiKey: config.openai.apiKey,
-      });
-    }
-
-    // Default to GPT-5.1 unless overridden
-    this.model = config.openai.model || 'gpt-5.1';
+    this.model = config.openai.model || 'gpt-5.5';
   }
 
   /**
@@ -28,11 +18,6 @@ class LLMService {
    * @returns {Promise<Object>} Classification result
    */
   async classifyTicket(ticketData) {
-    if (!this.client) {
-      logger.error('OpenAI client not initialized');
-      throw new Error('LLM service not available');
-    }
-
     const { subject, body, senderEmail, senderName } = ticketData;
 
     const llmConfig = await llmConfigService.getPublishedConfig(ticketData.workspaceId);
@@ -79,36 +64,43 @@ class LLMService {
     try {
       const startTime = Date.now();
 
-      const response = await this.client.responses.create({
-        model: llmConfig.model || this.model,
-        input: [
-          { role: 'system', content: 'You are an expert IT helpdesk ticket classifier. Always respond with valid JSON only.' },
-          { role: 'user', content: prompt },
-        ],
-        reasoning: { effort: llmConfig.reasoningEffort || 'none' },
-        text: {
-          verbosity: llmConfig.verbosity || 'medium',
-          format: { type: 'json_object' },
+      const response = await providerGateway.sendJson({
+        operation: 'autoresponse_classification',
+        workspaceId: ticketData.workspaceId || 1,
+        legacyModel: llmConfig.model || this.model,
+        systemPrompt: 'You are an expert IT helpdesk ticket classifier. Always respond with valid JSON only.',
+        userMessage: prompt,
+        maxTokens: Math.min(600, llmConfig.maxOutputTokens || 800),
+        temperature: 0,
+        extra: {
+          reasoning: { effort: llmConfig.reasoningEffort || 'none' },
+          text: {
+            verbosity: llmConfig.verbosity || 'medium',
+            format: { type: 'json_object' },
+          },
         },
-        max_output_tokens: Math.min(600, llmConfig.maxOutputTokens || 800),
       });
 
       const duration = Date.now() - startTime;
-      const outputText = response.output_text || this.flattenResponseOutput(response);
-      const result = JSON.parse(outputText);
-      const tokensUsed = response.usage?.total_tokens
-        ?? (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+      const result = response.parsed || JSON.parse(response.content || '{}');
+      const tokensUsed = response.usage?.totalTokens
+        ?? (response.usage?.inputTokens || 0) + (response.usage?.outputTokens || 0);
 
       logger.info(`Ticket classified in ${duration}ms: ${result.category} (${result.severity})`, {
         sourceType: result.sourceType,
         tokensUsed,
+        provider: response.provider,
         model: response.model,
+        fallbackUsed: response.fallbackUsed,
       });
 
       return {
         classification: result,
         tokensUsed,
         model: response.model,
+        provider: response.provider,
+        fallbackUsed: response.fallbackUsed,
+        fallbackReason: response.fallbackReason || null,
         duration,
       };
     } catch (error) {
@@ -139,11 +131,6 @@ class LLMService {
    * @returns {Promise<Object>} Generated response
    */
   async generateResponse(params) {
-    if (!this.client) {
-      logger.error('OpenAI client not initialized');
-      throw new Error('LLM service not available');
-    }
-
     const {
       classification,
       senderName,
@@ -204,29 +191,33 @@ class LLMService {
     try {
       const startTime = Date.now();
 
-      const response = await this.client.responses.create({
-        model: llmConfig.model || this.model,
-        input: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt },
-        ],
-        reasoning: { effort: llmConfig.reasoningEffort || 'none' },
-        text: {
-          verbosity: llmConfig.verbosity || 'medium',
-          format: { type: 'json_object' },
+      const response = await providerGateway.sendJson({
+        operation: 'autoresponse_generation',
+        workspaceId: params.workspaceId || 1,
+        legacyModel: llmConfig.model || this.model,
+        systemPrompt,
+        userMessage: prompt,
+        maxTokens: llmConfig.maxOutputTokens || 800,
+        temperature: 0,
+        extra: {
+          reasoning: { effort: llmConfig.reasoningEffort || 'none' },
+          text: {
+            verbosity: llmConfig.verbosity || 'medium',
+            format: { type: 'json_object' },
+          },
         },
-        max_output_tokens: llmConfig.maxOutputTokens || 800,
       });
 
       const duration = Date.now() - startTime;
-      const outputText = response.output_text || this.flattenResponseOutput(response);
-      const result = JSON.parse(outputText);
-      const tokensUsed = response.usage?.total_tokens
-        ?? (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+      const result = response.parsed || JSON.parse(response.content || '{}');
+      const tokensUsed = response.usage?.totalTokens
+        ?? (response.usage?.inputTokens || 0) + (response.usage?.outputTokens || 0);
 
       logger.info(`Response generated in ${duration}ms (${result.tone})`, {
         tokensUsed,
+        provider: response.provider,
         model: response.model,
+        fallbackUsed: response.fallbackUsed,
       });
 
       // Add signature if configured
@@ -238,6 +229,9 @@ class LLMService {
         response: result,
         tokensUsed,
         model: response.model,
+        provider: response.provider,
+        fallbackUsed: response.fallbackUsed,
+        fallbackReason: response.fallbackReason || null,
         duration,
       };
     } catch (error) {
@@ -268,21 +262,6 @@ ${isAfterHours ? 'Your message was received outside of business hours. We will r
     }
   }
 
-  /**
-   * Helper to flatten Responses API output into text
-   */
-  flattenResponseOutput(response) {
-    if (!response?.output) return '';
-    return response.output
-      .map(block => {
-        if (!block.content) return '';
-        return block.content
-          .map(part => part.text ?? part?.content ?? '')
-          .join('');
-      })
-      .join('');
-  }
 }
 
 export default new LLMService();
-

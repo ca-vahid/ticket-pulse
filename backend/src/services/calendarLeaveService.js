@@ -5,7 +5,7 @@ import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-grap
 import prisma from './prisma.js';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
-import anthropicService from './anthropicService.js';
+import providerGateway from './aiProviders/providerGateway.js';
 import vtRepo from './vacationTrackerRepository.js';
 
 const VALID_CATEGORIES = new Set(['OFF', 'WFH', 'OTHER', 'IGNORED']);
@@ -397,10 +397,6 @@ class CalendarLeaveService {
       return { ...cached.classification, source: cached.source, cached: true };
     }
 
-    if (!anthropicService.isConfigured()) {
-      return { category: 'OTHER', isLeave: false, confidence: 0, source: 'none', cached: false, reason: 'ANTHROPIC_API_KEY is not configured' };
-    }
-
     const systemPrompt = 'You classify shared Accounting calendar entries into technician availability records. Return only JSON. Categories: OFF, WFH, OTHER, IGNORED. Use IGNORED for statutory holidays, meetings, reminders, pension/admin events, or entries that are not a person\'s leave/appointment. If an entry looks like a person\'s leave but the person is not in the technician/alias list, keep the leave category with technicianId null so it can be reviewed. Use halfDayPart AM or PM only when the subject/time clearly indicates it.';
     const userMessage = JSON.stringify({
       event: {
@@ -426,15 +422,25 @@ class CalendarLeaveService {
     });
 
     let parsed;
+    let providerMetadata = {};
     try {
-      const result = await anthropicService.sendMessage({
+      const result = await providerGateway.sendJson({
+        operation: 'calendar_leave',
+        workspaceId,
+        legacyModel: config.anthropic.calendarModel,
         systemPrompt,
         userMessage,
-        model: config.anthropic.calendarModel,
         maxTokens: 500,
         temperature: 0,
       });
       parsed = result.parsed || {};
+      providerMetadata = {
+        llmProvider: result.provider,
+        llmModel: result.model,
+        llmFallbackUsed: result.fallbackUsed,
+        llmFallbackReason: result.fallbackReason,
+        llmAttemptCount: result.attemptNumber,
+      };
     } catch (error) {
       logger.warn('Calendar leave LLM classification failed', { workspaceId, subject: event.subject, error: error.message });
       parsed = { isLeave: false, category: 'OTHER', confidence: 0, reason: error.message };
@@ -449,6 +455,7 @@ class CalendarLeaveService {
       confidence: typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0.4,
       reason: typeof parsed.reason === 'string' ? parsed.reason.slice(0, 500) : 'LLM classified calendar entry',
       version: CLASSIFICATION_VERSION,
+      ...providerMetadata,
     };
 
     await prisma.calendarLeaveClassification.upsert({

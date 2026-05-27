@@ -129,6 +129,7 @@ class AutoResponseService {
         body,
         senderEmail,
         senderName,
+        workspaceId: wsId,
       });
 
       const classification = classificationResult.classification;
@@ -146,6 +147,9 @@ class AutoResponseService {
           classification: classificationResult.classification,
           tokensUsed: classificationResult.tokensUsed,
           model: classificationResult.model,
+          provider: classificationResult.provider,
+          fallbackUsed: classificationResult.fallbackUsed,
+          fallbackReason: classificationResult.fallbackReason,
           duration: classificationResult.duration,
         },
       );
@@ -278,6 +282,7 @@ class AutoResponseService {
         senderName,
         senderEmail,
         subject,
+        workspaceId,
         etaInfo,
         isAfterHours,
         isHoliday,
@@ -298,6 +303,9 @@ class AutoResponseService {
           response: responseResult.response,
           tokensUsed: responseResult.tokensUsed,
           model: responseResult.model,
+          provider: responseResult.provider,
+          fallbackUsed: responseResult.fallbackUsed,
+          fallbackReason: responseResult.fallbackReason,
           duration: responseResult.duration,
           error: responseResult.error,
         },
@@ -505,4 +513,3 @@ class AutoResponseService {
 }
 
 export default new AutoResponseService();
-

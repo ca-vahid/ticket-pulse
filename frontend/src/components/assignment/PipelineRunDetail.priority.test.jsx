@@ -125,4 +125,46 @@ describe('PipelineRunDetail priority display', () => {
     expect(screen.getByText('SMS')).toBeInTheDocument();
     expect(screen.getByText('SM123')).toBeInTheDocument();
   });
+
+  test('shows provider and fallback audit details', async () => {
+    render(<PipelineRunDetail
+      run={{
+        id: 3103,
+        status: 'completed',
+        decision: 'pending_review',
+        triggerSource: 'manual',
+        createdAt: '2026-05-26T16:00:00.000Z',
+        llmProvider: 'openai',
+        llmModel: 'gpt-5.5',
+        llmFallbackUsed: true,
+        llmFallbackReason: 'primary_request_failed',
+        aiProviderAttempts: [
+          { provider: 'anthropic', model: 'claude-sonnet-4-6', status: 'failed' },
+          { provider: 'openai', model: 'gpt-5.5', status: 'succeeded' },
+        ],
+        ticket: {
+          id: 503,
+          freshserviceTicketId: 223001,
+          subject: 'Laptop setup request',
+          status: 'Open',
+          priority: 2,
+          createdAt: '2026-05-26T15:30:00.000Z',
+          requester: { name: 'Casey Brown', department: 'Operations' },
+        },
+        recommendation: {
+          overallReasoning: 'Route to endpoint support.',
+          recommendations: [{ techId: 17, techName: 'Alex Chen' }],
+        },
+        steps: [],
+      }}
+      isAdmin={false}
+      workspaceTimezone="America/Vancouver"
+    />);
+
+    expect(await screen.findByText('AI provider fallback used — completed with openai')).toBeInTheDocument();
+    expect(screen.getByText(/primary_request_failed/)).toBeInTheDocument();
+    expect(screen.getByText(/anthropic\/claude-sonnet-4-6: failed/)).toBeInTheDocument();
+    expect(screen.getByText(/openai\/gpt-5.5: succeeded/)).toBeInTheDocument();
+    expect(screen.getByText('fallback used')).toBeInTheDocument();
+  });
 });

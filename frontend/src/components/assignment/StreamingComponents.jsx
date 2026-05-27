@@ -3,6 +3,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Loader2, CheckCircle, Wrench, ChevronDown, ChevronRight, Copy, Check,
+  Zap, AlertTriangle,
 } from 'lucide-react';
 
 export function CopyBadge({ label, value }) {
@@ -118,6 +119,12 @@ export function StreamContent({ events, toolCalls, thinkingKb, status, accentCol
   for (const event of events) {
     if (event.type === 'text') {
       textSoFar += event.text;
+    } else if (event.type?.startsWith('provider_')) {
+      if (textSoFar) {
+        segments.push({ type: 'text', content: textSoFar });
+        textSoFar = '';
+      }
+      segments.push({ type: 'provider', event });
     } else if (event.type === 'tool_call') {
       if (textSoFar) {
         segments.push({ type: 'text', content: textSoFar });
@@ -155,6 +162,20 @@ export function StreamContent({ events, toolCalls, thinkingKb, status, accentCol
               result={seg.result}
               durationMs={seg.durationMs}
             />
+          );
+        }
+        if (seg.type === 'provider') {
+          const isFailure = seg.event.type === 'provider_attempt_failed';
+          return (
+            <div key={i} className={`my-2 rounded-lg border px-3 py-2 text-xs flex items-start gap-2 ${isFailure ? 'bg-red-50 border-red-200 text-red-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
+              {isFailure ? <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> : <Zap className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />}
+              <span>
+                {seg.event.type === 'provider_fallback_started' ? 'Fallback started' : seg.event.type.replace(/_/g, ' ')}
+                {seg.event.provider ? `: ${seg.event.provider}` : ''}
+                {seg.event.model ? ` / ${seg.event.model}` : ''}
+                {seg.event.message ? ` - ${seg.event.message}` : ''}
+              </span>
+            </div>
           );
         }
         return null;
@@ -214,7 +235,7 @@ export function processStreamEvent(event, { setEvents, setToolCalls, setThinking
     setTimeout(scrollToBottom, 10);
     break;
   case 'thinking':
-    setThinkingKb(event.kb);
+    if (typeof event.kb === 'number') setThinkingKb(event.kb);
     break;
   case 'tool_call':
     setToolCalls((prev) => [...prev, {

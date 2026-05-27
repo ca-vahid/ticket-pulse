@@ -1,12 +1,11 @@
-import Anthropic from '@anthropic-ai/sdk';
-import config from '../config/index.js';
 import competencyPromptRepository from './competencyPromptRepository.js';
 import competencyRepository from './competencyRepository.js';
 import { COMPETENCY_TOOL_SCHEMAS, executeCompetencyTool } from './competencyTools.js';
 import prisma from './prisma.js';
 import { findBestCategoryMatch } from '../utils/categoryMatcher.js';
-import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+import providerGateway from './aiProviders/providerGateway.js';
 import logger from '../utils/logger.js';
 
 const MAX_TURNS = 15;
@@ -80,7 +79,8 @@ class CompetencyAnalysisService {
       where: { workspaceId },
       select: { llmModel: true },
     });
-    const llmModel = normalizeAnthropicModel(assignmentConfig?.llmModel);
+    const llmProvider = providerForModel(assignmentConfig?.llmModel, 'anthropic');
+    const llmModel = normalizeAiModel(assignmentConfig?.llmModel, llmProvider, null, 'competency_analysis');
 
     const beforeSnapshot = await this._captureSnapshot(technicianId, workspaceId);
 
@@ -90,6 +90,7 @@ class CompetencyAnalysisService {
         technicianId,
         status: 'running',
         promptVersionId: promptVersion.id,
+        llmProvider,
         llmModel,
         triggeredBy,
         beforeSnapshot,
@@ -97,18 +98,12 @@ class CompetencyAnalysisService {
     });
 
     emit({ type: 'run_started', runId: run.id, technicianId, techName: tech.name, promptVersion: promptVersion.version });
-
-    const apiKey = config.anthropic.apiKey;
-    if (!apiKey) {
-      const errMsg = 'ANTHROPIC_API_KEY not configured';
-      await prisma.competencyAnalysisRun.update({ where: { id: run.id }, data: { status: 'failed', errorMessage: errMsg, totalDurationMs: Date.now() - pipelineStart } });
-      emit({ type: 'error', message: errMsg });
-      emit({ type: 'complete', runId: run.id });
-      return await this._getRunWithSteps(run.id);
-    }
-
-    const client = new Anthropic({ apiKey });
     let totalTokens = 0;
+    let resolvedProvider = llmProvider;
+    let resolvedModel = llmModel;
+    let llmFallbackUsed = false;
+    let llmFallbackReason = null;
+    let llmAttemptCount = 0;
     let stepCounter = 0;
     let fullTranscript = '';
 
@@ -129,33 +124,54 @@ class CompetencyAnalysisService {
         stepCounter++;
         emit({ type: 'turn_start', turn: stepCounter });
 
-        const stream = client.messages.stream({
-          model: llmModel,
-          max_tokens: 8192,
-          system: promptVersion.systemPrompt,
-          tools,
-          messages,
-        });
-
-        stream.on('text', (text) => {
-          fullTranscript += text;
-          emit({ type: 'text', text });
-        });
-
         let toolJsonLength = 0;
         let lastProgressAt = 0;
-        stream.on('inputJson', (partialJson) => {
-          toolJsonLength += partialJson.length;
-          const now = Date.now();
-          if (now - lastProgressAt > 1000) {
-            lastProgressAt = now;
-            const kb = (toolJsonLength / 1024).toFixed(1);
-            emit({ type: 'thinking', kb: parseFloat(kb) });
-          }
+        const turnResult = await providerGateway.runToolTurn({
+          operation: 'competency_analysis',
+          workspaceId,
+          legacyModel: assignmentConfig?.llmModel,
+          runLinks: { competencyAnalysisRunId: run.id },
+          systemPrompt: promptVersion.systemPrompt,
+          tools,
+          messages,
+          maxTokens: 8192,
+          emit,
+          onText: (text) => {
+            fullTranscript += text;
+            emit({ type: 'text', text });
+          },
+          onInputJson: (partialJson) => {
+            toolJsonLength += partialJson.length;
+            const now = Date.now();
+            if (now - lastProgressAt > 1000) {
+              lastProgressAt = now;
+              const kb = (toolJsonLength / 1024).toFixed(1);
+              emit({ type: 'thinking', kb: parseFloat(kb) });
+            }
+          },
+          onThinking: (chunk) => {
+            if (chunk) emit({ type: 'thinking', text: chunk });
+          },
         });
 
-        const finalMessage = await stream.finalMessage();
-        totalTokens += (finalMessage.usage?.input_tokens || 0) + (finalMessage.usage?.output_tokens || 0);
+        const finalMessage = turnResult.message;
+        totalTokens += turnResult.usage?.totalTokens || 0;
+        resolvedProvider = turnResult.provider;
+        resolvedModel = turnResult.model;
+        llmFallbackUsed = llmFallbackUsed || turnResult.fallbackUsed;
+        llmFallbackReason = turnResult.fallbackReason || llmFallbackReason;
+        llmAttemptCount += turnResult.attemptNumber || 1;
+
+        await prisma.competencyAnalysisRun.update({
+          where: { id: run.id },
+          data: {
+            llmProvider: resolvedProvider,
+            llmModel: resolvedModel,
+            llmFallbackUsed,
+            llmFallbackReason,
+            llmAttemptCount,
+          },
+        });
 
         const toolResultMap = new Map();
 
@@ -225,7 +241,18 @@ class CompetencyAnalysisService {
         const errMsg = 'LLM did not call submit_competency_assessment';
         await prisma.competencyAnalysisRun.update({
           where: { id: run.id },
-          data: { status: 'failed', errorMessage: errMsg, fullTranscript, totalTokensUsed: totalTokens, totalDurationMs: Date.now() - pipelineStart },
+          data: {
+            status: 'failed',
+            errorMessage: errMsg,
+            fullTranscript,
+            totalTokensUsed: totalTokens,
+            totalDurationMs: Date.now() - pipelineStart,
+            llmProvider: resolvedProvider,
+            llmModel: resolvedModel,
+            llmFallbackUsed,
+            llmFallbackReason,
+            llmAttemptCount,
+          },
         });
         emit({ type: 'error', message: errMsg });
         emit({ type: 'complete', runId: run.id });
@@ -249,6 +276,11 @@ class CompetencyAnalysisService {
           fullTranscript,
           totalTokensUsed: totalTokens,
           totalDurationMs: Date.now() - pipelineStart,
+          llmProvider: resolvedProvider,
+          llmModel: resolvedModel,
+          llmFallbackUsed,
+          llmFallbackReason,
+          llmAttemptCount,
         },
       });
 
@@ -268,7 +300,18 @@ class CompetencyAnalysisService {
       logger.error('Competency analysis failed', { runId: run.id, technicianId, error: error.message });
       await prisma.competencyAnalysisRun.update({
         where: { id: run.id },
-        data: { status: 'failed', fullTranscript, errorMessage: error.message, totalTokensUsed: totalTokens, totalDurationMs: Date.now() - pipelineStart },
+        data: {
+          status: 'failed',
+          fullTranscript,
+          errorMessage: error.message,
+          totalTokensUsed: totalTokens,
+          totalDurationMs: Date.now() - pipelineStart,
+          llmProvider: resolvedProvider,
+          llmModel: resolvedModel,
+          llmFallbackUsed,
+          llmFallbackReason,
+          llmAttemptCount,
+        },
       });
       emit({ type: 'error', message: error.message });
       emit({ type: 'complete', runId: run.id });

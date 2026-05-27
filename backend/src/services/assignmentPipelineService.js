@@ -1,5 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
-import config from '../config/index.js';
 import assignmentRepository from './assignmentRepository.js';
 import promptRepository from './promptRepository.js';
 import availabilityService from './availabilityService.js';
@@ -23,7 +21,8 @@ import {
   getFreshServiceTicketQueueBlocker,
   getLocalTicketQueueBlocker,
 } from './assignmentQueueEligibility.js';
-import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
+import providerGateway from './aiProviders/providerGateway.js';
 import {
   buildPriorityTicketUpdateFields,
   validateRecommendationPriorityFields,
@@ -171,7 +170,8 @@ class AssignmentPipelineService {
 
     // ── Create running run and execute ──────────────────────────────────
     const promptVersion = await promptRepository.getPublished(workspaceId);
-    const llmModel = normalizeAnthropicModel(assignmentConfig.llmModel);
+    const llmProvider = providerForModel(assignmentConfig.llmModel, 'anthropic');
+    const llmModel = normalizeAiModel(assignmentConfig.llmModel, llmProvider, null, 'assignment_pipeline');
     let run;
     try {
       run = await assignmentRepository.createPipelineRun({
@@ -179,6 +179,7 @@ class AssignmentPipelineService {
         workspaceId,
         status: 'running',
         triggerSource,
+        llmProvider,
         llmModel,
         promptVersionId: promptVersion.id,
         reboundFrom,
@@ -666,26 +667,22 @@ class AssignmentPipelineService {
     }
 
     // Ensure run is in running state (may already be if created as running)
-    const llmModel = normalizeAnthropicModel(assignmentConfig?.llmModel);
+    const initialProvider = providerForModel(assignmentConfig?.llmModel, 'anthropic');
+    const llmModel = normalizeAiModel(assignmentConfig?.llmModel, initialProvider, null, 'assignment_pipeline');
     await assignmentRepository.updatePipelineRun(runId, {
       status: 'running',
+      llmProvider: initialProvider,
       llmModel,
       promptVersionId: promptVersion.id,
     });
 
     emit({ type: 'run_started', runId, ticketId, promptVersion: promptVersion.version });
-
-    const apiKey = config.anthropic.apiKey;
-    if (!apiKey) {
-      const errMsg = 'ANTHROPIC_API_KEY not configured';
-      await assignmentRepository.updatePipelineRun(runId, { status: 'failed', errorMessage: errMsg, totalDurationMs: Date.now() - pipelineStart });
-      emit({ type: 'error', message: errMsg });
-      emit({ type: 'complete', runId });
-      return await assignmentRepository.getPipelineRun(runId);
-    }
-
-    const client = new Anthropic({ apiKey });
     let totalTokens = 0;
+    let llmProvider = initialProvider;
+    let resolvedLlmModel = llmModel;
+    let llmFallbackUsed = false;
+    let llmFallbackReason = null;
+    let llmAttemptCount = 0;
     let stepCounter = 0;
     let fullTranscript = '';
     let lastHeartbeatAt = Date.now();
@@ -733,6 +730,11 @@ class AssignmentPipelineService {
           await assignmentRepository.updatePipelineRun(runId, {
             status: 'cancelled', totalDurationMs: Date.now() - pipelineStart,
             totalTokensUsed: totalTokens, fullTranscript,
+            llmProvider,
+            llmModel: resolvedLlmModel,
+            llmFallbackUsed,
+            llmFallbackReason,
+            llmAttemptCount,
           });
           emit({ type: 'error', message: 'Pipeline cancelled by client' });
           emit({ type: 'complete', runId });
@@ -742,38 +744,57 @@ class AssignmentPipelineService {
         stepCounter++;
         emit({ type: 'turn_start', turn: stepCounter });
 
-        const stream = client.messages.stream({
-          model: llmModel,
-          max_tokens: 4096,
-          system: systemPrompt,
-          tools,
-          messages,
-        });
-
-        stream.on('text', (text) => {
-          fullTranscript += text;
-          emit({ type: 'text', text });
-          queueHeartbeat();
-        });
-
         let toolJsonLength = 0;
         let lastProgressAt = 0;
-        stream.on('inputJson', (partialJson) => {
-          toolJsonLength += partialJson.length;
-          queueHeartbeat();
-          const now = Date.now();
-          if (now - lastProgressAt > 1000) {
-            lastProgressAt = now;
-            const kb = (toolJsonLength / 1024).toFixed(1);
-            emit({ type: 'thinking', kb: parseFloat(kb) });
-          }
+        const turnResult = await providerGateway.runToolTurn({
+          operation: 'assignment_pipeline',
+          workspaceId,
+          legacyModel: assignmentConfig?.llmModel,
+          runLinks: { assignmentPipelineRunId: runId },
+          systemPrompt,
+          tools,
+          messages,
+          maxTokens: 4096,
+          signal,
+          emit,
+          onText: (text) => {
+            fullTranscript += text;
+            emit({ type: 'text', text });
+            queueHeartbeat();
+          },
+          onInputJson: (partialJson) => {
+            toolJsonLength += partialJson.length;
+            queueHeartbeat();
+            const now = Date.now();
+            if (now - lastProgressAt > 1000) {
+              lastProgressAt = now;
+              const kb = (toolJsonLength / 1024).toFixed(1);
+              emit({ type: 'thinking', kb: parseFloat(kb) });
+            }
+          },
+          onThinking: (chunk) => {
+            if (chunk) {
+              emit({ type: 'thinking', text: chunk });
+              queueHeartbeat();
+            }
+          },
         });
 
-        const finalMessage = await stream.finalMessage();
-        const usage = finalMessage?.usage || {};
-        totalTokens += Object.values(usage).reduce((sum, value) => (
-          typeof value === 'number' ? sum + value : sum
-        ), 0);
+        const finalMessage = turnResult.message;
+        totalTokens += turnResult.usage?.totalTokens || 0;
+        llmProvider = turnResult.provider;
+        resolvedLlmModel = turnResult.model;
+        llmFallbackUsed = llmFallbackUsed || turnResult.fallbackUsed;
+        llmFallbackReason = turnResult.fallbackReason || llmFallbackReason;
+        llmAttemptCount += turnResult.attemptNumber || 1;
+
+        await assignmentRepository.updatePipelineRun(runId, {
+          llmProvider,
+          llmModel: resolvedLlmModel,
+          llmFallbackUsed,
+          llmFallbackReason,
+          llmAttemptCount,
+        });
 
         const toolResultMap = new Map();
 
@@ -899,7 +920,7 @@ class AssignmentPipelineService {
       }
 
       if (!recommendation) {
-        logger.warn('Claude did not call submit_recommendation, falling back to regex parse', { runId });
+        logger.warn('LLM did not call submit_recommendation, falling back to regex parse', { runId, provider: llmProvider });
         recommendation = this._parseRecommendationFromTranscript(fullTranscript, runId);
       }
 
@@ -1027,6 +1048,11 @@ class AssignmentPipelineService {
         decision,
         totalDurationMs: Date.now() - pipelineStart,
         totalTokensUsed: totalTokens,
+        llmProvider,
+        llmModel: resolvedLlmModel,
+        llmFallbackUsed,
+        llmFallbackReason,
+        llmAttemptCount,
         recommendation,
         fullTranscript,
         errorMessage,
@@ -1105,6 +1131,11 @@ class AssignmentPipelineService {
         status: 'failed',
         totalDurationMs: Date.now() - pipelineStart,
         totalTokensUsed: totalTokens,
+        llmProvider,
+        llmModel: resolvedLlmModel,
+        llmFallbackUsed,
+        llmFallbackReason,
+        llmAttemptCount,
         fullTranscript,
         errorMessage: error.message,
       });

@@ -1,8 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-import appConfig from '../config/index.js';
 import availabilityService from './availabilityService.js';
 import promptRepository from './promptRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
@@ -19,8 +17,9 @@ import {
   transformTicketConversationEntries,
 } from '../integrations/freshserviceTransformer.js';
 import { runJobsInPool } from '../utils/parallelPool.js';
-import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+import providerGateway from './aiProviders/providerGateway.js';
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const STALE_RUNNING_MS = 30 * 60 * 1000;
@@ -220,7 +219,7 @@ class AssignmentDailyReviewService {
       || error?.name === 'APIUserAbortError';
   }
 
-  async _analyzeDatasetWithTimeout(workspaceId, dataset, llmModel, parentSignal) {
+  async _analyzeDatasetWithTimeout(workspaceId, dataset, llmModel, parentSignal, options = {}) {
     const analysisAbortController = new AbortController();
     let timedOut = false;
     const abortFromParent = () => analysisAbortController.abort();
@@ -238,6 +237,7 @@ class AssignmentDailyReviewService {
     try {
       return await this._analyzeDataset(workspaceId, dataset, llmModel, {
         signal: analysisAbortController.signal,
+        runId: options.runId || null,
       });
     } catch (error) {
       if (timedOut && this._isCancellationError(error)) {
@@ -2077,10 +2077,6 @@ class AssignmentDailyReviewService {
 
   async _analyzeDataset(workspaceId, dataset, llmModel, options = {}) {
     this._throwIfCancelled(options.signal);
-    const apiKey = appConfig.anthropic.apiKey;
-    if (!apiKey) {
-      return this._buildHeuristicRecommendations(dataset);
-    }
 
     try {
       this._throwIfCancelled(options.signal);
@@ -2323,23 +2319,25 @@ ${canonicalCategoryReviewRules}
       const userMessage = `Daily review dataset:
 \n\n${JSON.stringify(analysisInput, null, 2)}\n\nSubmit the structured findings using the tool.`;
 
-      const client = new Anthropic({ apiKey });
-      const response = await client.messages.create({
-        model: normalizeAnthropicModel(llmModel),
-        max_tokens: 4096,
-        system: systemPrompt,
+      const response = await providerGateway.runToolTurn({
+        operation: 'daily_review',
+        workspaceId,
+        legacyModel: llmModel,
+        runLinks: options.runId ? { assignmentDailyReviewRunId: options.runId } : {},
+        systemPrompt,
         tools: [TOOL],
         messages: [{ role: 'user', content: userMessage }],
-      }, {
+        maxTokens: 4096,
         signal: options.signal,
       });
       this._throwIfCancelled(options.signal);
 
-      const transcript = response.content
+      const finalMessage = response.message;
+      const transcript = finalMessage.content
         .filter((block) => block.type === 'text')
         .map((block) => block.text)
         .join('\n');
-      const submission = response.content.find(
+      const submission = finalMessage.content.find(
         (block) => block.type === 'tool_use' && block.name === 'submit_daily_review_findings',
       )?.input;
 
@@ -2348,7 +2346,14 @@ ${canonicalCategoryReviewRules}
         const heuristic = this._buildHeuristicRecommendations(dataset);
         heuristic.warnings.push('LLM response did not contain a structured submission; heuristic recommendations were used instead.');
         heuristic.transcript = transcript;
-        heuristic.totalTokensUsed = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+        heuristic.totalTokensUsed = response.usage?.totalTokens || 0;
+        heuristic.providerMetadata = {
+          llmProvider: response.provider,
+          llmModel: response.model,
+          llmFallbackUsed: response.fallbackUsed,
+          llmFallbackReason: response.fallbackReason,
+          llmAttemptCount: response.attemptNumber,
+        };
         return heuristic;
       }
 
@@ -2380,7 +2385,14 @@ ${canonicalCategoryReviewRules}
           ...sanitizationWarnings,
         ],
         transcript,
-        totalTokensUsed: (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0),
+        totalTokensUsed: response.usage?.totalTokens || 0,
+        providerMetadata: {
+          llmProvider: response.provider,
+          llmModel: response.model,
+          llmFallbackUsed: response.fallbackUsed,
+          llmFallbackReason: response.fallbackReason,
+          llmAttemptCount: response.attemptNumber,
+        },
       };
     } catch (error) {
       if (this._isCancellationError(error)) throw error;
@@ -2469,6 +2481,8 @@ ${canonicalCategoryReviewRules}
       }
     }
 
+    const llmProvider = providerForModel(config?.llmModel, 'anthropic');
+    const llmModel = normalizeAiModel(config?.llmModel, llmProvider, null, 'daily_review');
     const run = await prisma.assignmentDailyReviewRun.create({
       data: {
         workspaceId,
@@ -2479,7 +2493,8 @@ ${canonicalCategoryReviewRules}
         triggerSource: options.triggerSource || 'manual',
         status: 'collecting',
         triggeredBy,
-        llmModel: normalizeAnthropicModel(config?.llmModel),
+        llmProvider,
+        llmModel,
         progress: sanitizeJsonForPostgres({
           phase: 'collecting',
           percent: 2,
@@ -2629,7 +2644,7 @@ ${canonicalCategoryReviewRules}
       persistProgress(analyzingPayload);
 
       this._throwIfCancelled(abortController.signal);
-      const analysis = await this._analyzeDatasetWithTimeout(workspace.id, dataset, config?.llmModel, abortController.signal);
+      const analysis = await this._analyzeDatasetWithTimeout(workspace.id, dataset, config?.llmModel, abortController.signal, { runId: run.id });
       this._throwIfCancelled(abortController.signal);
       const skillSplit = this._splitSkillAndTaxonomyRecommendations(analysis.skillRecommendations);
       const taxonomyRecommendations = this._mergeTaxonomyRecommendations([
@@ -2659,6 +2674,7 @@ ${canonicalCategoryReviewRules}
             fullTranscript: sanitizeJsonForPostgres(analysis.transcript || null),
             totalTokensUsed: analysis.totalTokensUsed || 0,
             totalDurationMs: Date.now() - startedAt,
+            ...(analysis.providerMetadata || {}),
             completedAt: new Date(),
           },
         });
@@ -2977,9 +2993,6 @@ ${canonicalCategoryReviewRules}
       throw new Error(`Briefing can only be generated for completed runs (current status: ${run.status})`);
     }
 
-    const apiKey = appConfig.anthropic.apiKey;
-    if (!apiKey) throw new Error('Anthropic API key is not configured on the server');
-
     const summary = run.summaryMetrics || {};
     const totals = summary.totals || {};
     const rates = summary.rates || {};
@@ -3146,17 +3159,18 @@ Hard rules:
 
     const userMessage = `Daily review dataset for the meeting briefing:\n\n${JSON.stringify(briefingInput, null, 2)}\n\nSubmit the briefing using the tool.`;
 
-    const llmModel = normalizeAnthropicModel(run.llmModel);
-    const client = new Anthropic({ apiKey });
-    const response = await client.messages.create({
-      model: llmModel,
-      max_tokens: 3000,
-      system: systemPrompt,
+    const response = await providerGateway.runToolTurn({
+      operation: 'daily_review',
+      workspaceId,
+      legacyModel: run.llmModel,
+      runLinks: { assignmentDailyReviewRunId: runId },
+      systemPrompt,
       tools: [TOOL],
       messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 3000,
     });
 
-    const submission = response.content.find(
+    const submission = response.message.content.find(
       (block) => block.type === 'tool_use' && block.name === 'submit_meeting_briefing',
     )?.input;
 
@@ -3187,7 +3201,7 @@ Hard rules:
       tone,
     };
 
-    const tokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+    const tokens = response.usage?.totalTokens || 0;
 
     const updated = await prisma.assignmentDailyReviewRun.update({
       where: { id: runId },
@@ -3195,8 +3209,13 @@ Hard rules:
         meetingBriefing: briefing,
         meetingBriefingGeneratedAt: new Date(),
         meetingBriefingTokens: tokens,
-        meetingBriefingModel: llmModel,
+        meetingBriefingModel: response.model,
         meetingBriefingBy: actorEmail,
+        llmProvider: response.provider,
+        llmModel: response.model,
+        llmFallbackUsed: response.fallbackUsed,
+        llmFallbackReason: response.fallbackReason,
+        llmAttemptCount: response.attemptNumber,
       },
     });
 

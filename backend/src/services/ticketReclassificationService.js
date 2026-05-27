@@ -1,7 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
 import config from '../config/index.js';
 import prisma from './prisma.js';
-import { DEFAULT_RECLASSIFICATION_MODEL, normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { DEFAULT_RECLASSIFICATION_MODEL } from '../utils/anthropicModels.js';
+import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
+import providerGateway from './aiProviders/providerGateway.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import { ValidationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
@@ -110,16 +111,11 @@ class TicketReclassificationService {
     }
     const apply = options.apply === true;
     const applyFromPreview = apply && Array.isArray(options.previewResults) && options.previewResults.length > 0;
-    if (!applyFromPreview && !config.anthropic.apiKey) {
-      throw new ValidationError('ANTHROPIC_API_KEY not configured');
-    }
-
     const days = clampInteger(options.days, DEFAULT_DAYS, 365);
     const limit = clampInteger(options.limit, DEFAULT_LIMIT, MAX_LIMIT);
-    const model = normalizeAnthropicModel(
-      options.model || config.anthropic.reclassificationModel,
-      DEFAULT_RECLASSIFICATION_MODEL,
-    );
+    const requestedModel = options.model || config.anthropic.reclassificationModel || DEFAULT_RECLASSIFICATION_MODEL;
+    const requestedProvider = providerForModel(requestedModel, 'anthropic');
+    const model = normalizeAiModel(requestedModel, requestedProvider, DEFAULT_RECLASSIFICATION_MODEL, 'ticket_reclassification');
     const concurrency = clampInteger(options.concurrency, DEFAULT_CONCURRENCY, MAX_CONCURRENCY);
     const actorEmail = options.actorEmail || null;
     const since = new Date();
@@ -193,6 +189,8 @@ class TicketReclassificationService {
         status: 'running',
         mode: apply ? 'apply' : 'dry_run',
         actorEmail,
+        llmProvider: requestedProvider,
+        llmModel: model,
         request: requested,
         beforeSnapshot,
       },
@@ -246,11 +244,14 @@ class TicketReclassificationService {
           }
         });
       } else {
-        const client = new Anthropic({ apiKey: config.anthropic.apiKey });
         results = await mapWithConcurrency(tickets, concurrency, async (ticket) => {
           const startedAt = Date.now();
           try {
-            const recommendation = await this._classifyTicket(client, model, categoryTree, ticket);
+            const recommendation = await this._classifyTicket({
+              workspaceId,
+              runId: auditRun.id,
+              legacyModel: model,
+            }, categoryTree, ticket);
             const normalized = this._normalizeRecommendation(recommendation, byId);
             if (apply) {
               await this._persist(ticket.id, workspaceId, normalized);
@@ -261,7 +262,11 @@ class TicketReclassificationService {
               subject: ticket.subject,
               createdAt: ticket.createdAt,
               applied: apply,
-              model,
+              provider: recommendation._provider || requestedProvider,
+              model: recommendation._model || model,
+              fallbackUsed: recommendation._fallbackUsed === true,
+              fallbackReason: recommendation._fallbackReason || null,
+              attemptCount: recommendation._attemptCount || 1,
               durationMs: Date.now() - startedAt,
               classification: normalized,
             };
@@ -289,6 +294,11 @@ class TicketReclassificationService {
       const classified = results.filter((result) => result.classification?.internalCategoryId).length;
       const reviewNeeded = results.filter((result) => result.classification?.taxonomyReviewNeeded).length;
       const failed = results.filter((result) => result.error).length;
+      const providerCounts = results.reduce((acc, result) => {
+        if (result.provider) acc[result.provider] = (acc[result.provider] || 0) + 1;
+        return acc;
+      }, {});
+      const fallbackCount = results.filter((result) => result.fallbackUsed).length;
       const afterSnapshot = apply
         ? await this._snapshotTickets(workspaceId, tickets.map((ticket) => ticket.id))
         : beforeSnapshot;
@@ -298,6 +308,9 @@ class TicketReclassificationService {
         reviewNeeded,
         failed,
         model,
+        provider: Object.keys(providerCounts)[0] || requestedProvider,
+        providerCounts,
+        fallbackCount,
         concurrency,
         applyFromPreview,
       };
@@ -305,6 +318,11 @@ class TicketReclassificationService {
         where: { id: auditRun.id },
         data: {
           status: 'completed',
+          llmProvider: summary.provider,
+          llmModel: model,
+          llmFallbackUsed: fallbackCount > 0,
+          llmFallbackReason: fallbackCount > 0 ? 'One or more tickets used provider fallback' : null,
+          llmAttemptCount: results.reduce((sum, result) => sum + (result.attemptCount || 0), 0),
           summary,
           results,
           afterSnapshot,
@@ -366,12 +384,8 @@ class TicketReclassificationService {
     return where;
   }
 
-  async _classifyTicket(client, model, categoryTree, ticket) {
-    const response = await client.messages.create({
-      model,
-      max_tokens: 1200,
-      temperature: 0,
-      system: `Classify one IT helpdesk ticket into the existing Ticket Pulse category/subcategory hierarchy.
+  async _classifyTicket({ workspaceId, runId, legacyModel }, categoryTree, ticket) {
+    const systemPrompt = `Classify one IT helpdesk ticket into the existing Ticket Pulse category/subcategory hierarchy.
 
 Rules:
 - Use only categoryId/subcategoryId values from the supplied hierarchy.
@@ -380,49 +394,62 @@ Rules:
 - Freshservice category fields and old custom fields are raw evidence only.
 - Do not propose new top-level categories. The top-level category list is fixed.
 - If no existing subcategory fits cleanly, choose the closest usable parent, set weak/none subcategory fit, and provide suggestedInternalSubcategoryName for admin review when useful.
-- Return JSON only. No markdown.`,
-      messages: [{
-        role: 'user',
-        content: JSON.stringify({
-          hierarchy: categoryTree,
-          ticket: {
-            id: ticket.id,
-            freshserviceTicketId: Number(ticket.freshserviceTicketId),
-            subject: ticket.subject,
-            description: cleanSnippet(ticket.descriptionText || ticket.description),
-            status: ticket.status,
-            priority: ticket.priority,
-            assignedTo: ticket.assignedTech?.name || null,
-            rawFreshserviceEvidence: {
-              category: ticket.category || null,
-              subCategory: ticket.subCategory || null,
-              ticketCategory: ticket.ticketCategory || null,
-              tpSkill: ticket.tpSkill || null,
-              tpSubskill: ticket.tpSubskill || null,
-            },
-            currentTicketPulseClassification: {
-              internalCategoryId: ticket.internalCategoryId,
-              internalSubcategoryId: ticket.internalSubcategoryId,
-              categoryFit: ticket.internalCategoryFit,
-              subcategoryFit: ticket.internalSubcategoryFit,
-              reviewNeeded: ticket.taxonomyReviewNeeded,
-            },
-          },
-          outputShape: {
-            internalCategoryId: 'number|null',
-            internalSubcategoryId: 'number|null',
-            categoryFit: 'exact|weak|none',
-            subcategoryFit: 'exact|weak|none',
-            confidence: 'low|medium|high',
-            classificationRationale: 'short explanation',
-            suggestedInternalCategoryName: 'null',
-            suggestedInternalSubcategoryName: 'string|null',
-          },
-        }),
-      }],
+- Return JSON only. No markdown.`;
+    const userMessage = JSON.stringify({
+      hierarchy: categoryTree,
+      ticket: {
+        id: ticket.id,
+        freshserviceTicketId: Number(ticket.freshserviceTicketId),
+        subject: ticket.subject,
+        description: cleanSnippet(ticket.descriptionText || ticket.description),
+        status: ticket.status,
+        priority: ticket.priority,
+        assignedTo: ticket.assignedTech?.name || null,
+        rawFreshserviceEvidence: {
+          category: ticket.category || null,
+          subCategory: ticket.subCategory || null,
+          ticketCategory: ticket.ticketCategory || null,
+          tpSkill: ticket.tpSkill || null,
+          tpSubskill: ticket.tpSubskill || null,
+        },
+        currentTicketPulseClassification: {
+          internalCategoryId: ticket.internalCategoryId,
+          internalSubcategoryId: ticket.internalSubcategoryId,
+          categoryFit: ticket.internalCategoryFit,
+          subcategoryFit: ticket.internalSubcategoryFit,
+          reviewNeeded: ticket.taxonomyReviewNeeded,
+        },
+      },
+      outputShape: {
+        internalCategoryId: 'number|null',
+        internalSubcategoryId: 'number|null',
+        categoryFit: 'exact|weak|none',
+        subcategoryFit: 'exact|weak|none',
+        confidence: 'low|medium|high',
+        classificationRationale: 'short explanation',
+        suggestedInternalCategoryName: 'null',
+        suggestedInternalSubcategoryName: 'string|null',
+      },
     });
-    const text = response.content?.filter((block) => block.type === 'text').map((block) => block.text).join('\n') || '';
-    return parseJsonObject(text);
+    const response = await providerGateway.sendJson({
+      operation: 'ticket_reclassification',
+      workspaceId,
+      legacyModel,
+      runLinks: { ticketReclassificationRunId: runId },
+      systemPrompt,
+      userMessage,
+      maxTokens: 1200,
+      temperature: 0,
+    });
+    const parsed = response.parsed || parseJsonObject(response.content);
+    return {
+      ...parsed,
+      _provider: response.provider,
+      _model: response.model,
+      _fallbackUsed: response.fallbackUsed,
+      _fallbackReason: response.fallbackReason,
+      _attemptCount: response.attemptNumber,
+    };
   }
 
   _normalizeRecommendation(recommendation, byId) {

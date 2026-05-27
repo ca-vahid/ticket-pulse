@@ -713,6 +713,14 @@ export const assignmentAPI = {
   applyDailyReviewConsolidation: (id, data) => api.post(`/assignment/daily-review/consolidations/runs/${id}/apply`, data),
 };
 
+export const aiProviderAPI = {
+  getModels: (params = {}) => api.get('/ai-providers/models', { params }),
+  getSettings: () => api.get('/ai-providers/settings'),
+  updateSettings: (settings) => api.put('/ai-providers/settings', { settings }),
+  getHealth: (params = {}) => api.get('/ai-providers/health', { params }),
+  testProvider: (data) => api.post('/ai-providers/test', data),
+};
+
 /**
  * Agent self-service API
  */

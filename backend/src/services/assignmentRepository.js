@@ -1,7 +1,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
-import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 
 const STALE_RUNNING_MINUTES = 30;
 
@@ -125,7 +125,7 @@ class AssignmentRepository {
       if (!config) return null;
       return {
         ...config,
-        llmModel: normalizeAnthropicModel(config.llmModel),
+        llmModel: normalizeAiModel(config.llmModel, providerForModel(config.llmModel) || 'anthropic'),
       };
     } catch (error) {
       logger.error('Error fetching assignment config:', error);
@@ -136,7 +136,7 @@ class AssignmentRepository {
   async upsertConfig(workspaceId, data) {
     try {
       const normalizedData = data.llmModel !== undefined
-        ? { ...data, llmModel: normalizeAnthropicModel(data.llmModel) }
+        ? { ...data, llmModel: normalizeAiModel(data.llmModel, providerForModel(data.llmModel) || 'anthropic') }
         : data;
       return await prisma.assignmentConfig.upsert({
         where: { workspaceId },
@@ -269,6 +269,26 @@ class AssignmentRepository {
               sentAt: true,
               createdAt: true,
               updatedAt: true,
+            },
+          },
+          aiProviderAttempts: {
+            orderBy: { startedAt: 'asc' },
+            select: {
+              id: true,
+              operation: true,
+              provider: true,
+              model: true,
+              attemptNumber: true,
+              status: true,
+              fallbackFromProvider: true,
+              fallbackReason: true,
+              errorClass: true,
+              errorMessage: true,
+              startedAt: true,
+              completedAt: true,
+              durationMs: true,
+              inputTokens: true,
+              outputTokens: true,
             },
           },
         },

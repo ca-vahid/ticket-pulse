@@ -49,6 +49,8 @@ import {
   Send,
 } from 'lucide-react';
 
+const DISABLED_SETTING_SECTIONS = new Set(['llm-config', 'auto-response-test']);
+
 export default function Settings() {
   const navigate = useNavigate();
   const { settings, isLoading, fetchSettings, updateSettings, testConnection } = useSettings();
@@ -66,11 +68,12 @@ export default function Settings() {
   const validSections = ['freshservice', 'notification-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
-    return validSections.includes(hash) ? hash : 'freshservice';
+    return validSections.includes(hash) && !DISABLED_SETTING_SECTIONS.has(hash) ? hash : 'freshservice';
   })();
   const [activeSection, setActiveSectionRaw] = useState(initialSection);
 
   const setActiveSection = (id) => {
+    if (DISABLED_SETTING_SECTIONS.has(id)) return;
     setActiveSectionRaw(id);
     window.history.replaceState(null, '', `#${id}`);
   };
@@ -128,8 +131,8 @@ export default function Settings() {
     { id: 'tech-schedules', label: 'Tech Schedules', Icon: CalendarDays, minRole: 'admin' },
     { id: 'tech-visibility', label: 'Tech Visibility', Icon: EyeOff, minRole: 'admin' },
     { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX, minRole: 'admin' },
-    { id: 'llm-config', label: 'LLM Config', Icon: Bot, minRole: 'admin' },
-    { id: 'auto-response-test', label: 'Test Auto-Response', Icon: FlaskConical, minRole: 'admin' },
+    { id: 'llm-config', label: 'LLM Config', Icon: Bot, minRole: 'admin', disabled: true, status: 'In development' },
+    { id: 'auto-response-test', label: 'Test Auto-Response', Icon: FlaskConical, minRole: 'admin', disabled: true, status: 'In development' },
     { id: 'vacation-tracker', label: 'Vacation Tracker', Icon: CalendarDays, minRole: 'admin' },
     { id: 'calendar-leave', label: 'Shared Calendar', Icon: CalendarDays, minRole: 'admin' },
   ];
@@ -520,18 +523,28 @@ export default function Settings() {
           <nav className="flex gap-1 overflow-x-auto p-2 [scrollbar-width:none] [-ms-overflow-style:none] md:block md:h-full md:space-y-px md:overflow-y-auto [&::-webkit-scrollbar]:hidden">
             {navigationItems.map((item) => {
               const isActive = activeSection === item.id;
+              const isDisabled = !!item.disabled;
               return (
                 <button
                   key={item.id}
                   onClick={() => setActiveSection(item.id)}
+                  disabled={isDisabled}
+                  title={isDisabled ? `${item.label} is in development` : undefined}
                   className={`flex flex-shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-all md:w-full ${
-                    isActive
-                      ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200/80 font-medium'
-                      : 'text-gray-500 hover:text-gray-700 hover:bg-white/60'
+                    isDisabled
+                      ? 'cursor-not-allowed bg-gray-100/70 text-gray-400 opacity-70'
+                      : isActive
+                        ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200/80 font-medium'
+                        : 'text-gray-500 hover:text-gray-700 hover:bg-white/60'
                   }`}
                 >
-                  <item.Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-600' : 'text-gray-400'}`} />
+                  <item.Icon className={`w-4 h-4 flex-shrink-0 ${isActive && !isDisabled ? 'text-blue-600' : 'text-gray-400'}`} />
                   <span className="truncate">{item.label}</span>
+                  {item.status && (
+                    <span className="ml-auto hidden rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 md:inline">
+                      {item.status}
+                    </span>
+                  )}
                 </button>
               );
             })}

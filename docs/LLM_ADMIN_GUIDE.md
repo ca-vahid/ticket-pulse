@@ -4,11 +4,30 @@
 
 The LLM Admin Panel gives you full control over how the AI classifies tickets and generates auto-responses. You can customize prompts, templates, ETA calculations, and classification rules through an intuitive UI.
 
+Auto-response classification and generation now run through the shared AI provider gateway. Each workspace can choose primary and fallback providers/models for `autoresponse_classification` and `autoresponse_generation`; prompt/version settings remain in this guide so historical LLM configuration stays compatible.
+
 ## Accessing the Admin Panel
 
 1. Navigate to **Settings** in your dashboard
 2. Scroll down to the **LLM Configuration** section
 3. Use the tabs to customize different aspects
+
+## Provider Settings And Failover
+
+Provider routing is workspace-scoped and operation-specific. Admins can manage it from Assignment Review configuration by selecting the auto-response operations:
+
+- `autoresponse_classification`
+- `autoresponse_generation`
+
+For each operation, configure:
+
+- Primary provider and model
+- Fallback provider and model
+- Automatic fallback on/off
+- Provider test button
+- Health status for Anthropic and OpenAI
+
+API keys are deployment secrets, not stored in prompt drafts. Set `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` in Azure App Service/Key Vault. If the primary provider is down, rate-limited, missing config, timing out, or returning retryable provider errors, Ticket Pulse retries once through the fallback provider. If both providers fail, auto-response uses the configured fallback message.
 
 ## Features
 
@@ -61,7 +80,7 @@ Customize the AI prompts that drive classification and response generation.
   ```
 
 #### Fallback Message
-- Used when OpenAI API fails or is unavailable
+- Used when both AI providers fail or are unavailable
 - Should be generic but professional
 - Include contact information
 - Example:
@@ -318,7 +337,7 @@ Update prompts to use your organization's terms:
 3. **Timing**: During and outside business hours
 4. **Holidays**: Test on configured holidays
 5. **High Queue**: Simulate various queue sizes
-6. **Fallback**: Test with OpenAI API disabled
+6. **Fallback**: Test with the primary provider disabled in staging and verify the alternate provider attempt
 
 ### Monitoring
 
@@ -355,14 +374,14 @@ After publishing changes:
 ### Fallback Message Used Too Often
 
 **Problem**: Seeing fallback message frequently  
-**Solution**: Check OpenAI API key, quota, and logs for errors. May need to handle rate limits.
+**Solution**: Check `/api/ai-providers/health`, provider attempt records, API keys, quota, and logs for both providers. See `AI_PROVIDER_FAILOVER_RUNBOOK.md`.
 
 ## Security & Privacy
 
 ### Data Handling
 
-- Email content sent to OpenAI for processing
-- Configure usage policies with OpenAI
+- Email content is sent to the configured AI provider for processing
+- Configure usage policies with Anthropic and OpenAI
 - All activity logged in `auto_responses` table
 - Config history retained indefinitely
 
@@ -420,17 +439,28 @@ POST /api/admin/llm-settings/validate
 POST /api/admin/llm-settings/preview
 ```
 
+### Provider Settings
+
+```bash
+GET /api/ai-providers/models
+GET /api/ai-providers/settings
+PUT /api/ai-providers/settings
+GET /api/ai-providers/health
+POST /api/ai-providers/test
+```
+
 ## Support
 
 For questions or issues:
 - Check logs: `backend/logs/combined.log`
 - Review history for recent changes
 - Test with known-good configuration
-- Check OpenAI API status
+- Check AI provider health and provider status pages
 - Verify SMTP configuration
+- Review `ai_provider_attempts` and `ai_provider_health_events`
 
 ---
 
-**Last Updated**: November 2024  
-**Version**: 1.0
+**Last Updated**: May 2026
+**Version**: 1.1
 

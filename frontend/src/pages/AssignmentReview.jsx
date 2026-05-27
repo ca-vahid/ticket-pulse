@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { formatInTimeZone } from 'date-fns-tz';
-import { assignmentAPI, workspaceAPI } from '../services/api';
+import { aiProviderAPI, assignmentAPI, workspaceAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
@@ -4141,11 +4141,267 @@ function ExcludedGroupsPicker({ autoAssign, excludedGroupIds, onChange }) {
   );
 }
 
+const AI_OPERATION_OPTIONS = [
+  { value: 'assignment_pipeline', label: 'Assignment' },
+  { value: 'competency_analysis', label: 'Competency' },
+  { value: 'daily_review', label: 'Daily Review' },
+  { value: 'daily_review_consolidation', label: 'Consolidation' },
+  { value: 'ticket_reclassification', label: 'Reclassification' },
+  { value: 'calendar_leave', label: 'Calendar Leave' },
+  { value: 'autoresponse_classification', label: 'Auto-response Classify' },
+  { value: 'autoresponse_generation', label: 'Auto-response Generate' },
+];
+
+export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
+  const [models, setModels] = useState([]);
+  const [settings, setSettings] = useState([]);
+  const [health, setHealth] = useState({});
+  const [operation, setOperation] = useState('assignment_pipeline');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testingProvider, setTestingProvider] = useState(null);
+  const [testResult, setTestResult] = useState(null);
+
+  const loadHealth = useCallback(async (op = operation) => {
+    try {
+      const res = await aiProviderAPI.getHealth({ operation: op });
+      setHealth(res?.data || {});
+    } catch {
+      setHealth({});
+    }
+  }, [operation]);
+
+  const loadSettings = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [modelRes, settingsRes] = await Promise.all([
+        aiProviderAPI.getModels(),
+        aiProviderAPI.getSettings(),
+      ]);
+      setModels(modelRes?.data?.models || []);
+      setSettings(settingsRes?.data || []);
+      await loadHealth(operation);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadHealth, operation]);
+
+  useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  useEffect(() => {
+    loadHealth(operation);
+    const timer = setInterval(() => loadHealth(operation), 30000);
+    return () => clearInterval(timer);
+  }, [loadHealth, operation]);
+
+  const selected = settings.find((row) => row.operation === operation) || {
+    operation,
+    primaryProvider: 'anthropic',
+    primaryModel: 'claude-sonnet-4-6',
+    fallbackProvider: 'openai',
+    fallbackModel: 'gpt-5.5',
+    autoFallbackEnabled: true,
+    fallbackMode: 'retry_safe_checkpoint',
+  };
+
+  const modelOptions = (provider) => models.filter((model) => (
+    model.provider === provider && model.operations?.includes(operation)
+  ));
+
+  const updateSelected = (patch) => {
+    const next = { ...selected, ...patch };
+    setSettings((current) => {
+      const index = current.findIndex((row) => row.operation === operation);
+      if (index === -1) return [...current, next];
+      const copy = [...current];
+      copy[index] = next;
+      return copy;
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setTestResult(null);
+    try {
+      const res = await aiProviderAPI.updateSettings([selected]);
+      const saved = res?.data?.[0] || selected;
+      setSettings((current) => current.map((row) => (row.operation === saved.operation ? saved : row)));
+      if (saved.operation === 'assignment_pipeline') {
+        onAssignmentModelChange?.(saved.primaryModel);
+      }
+      setTestResult({ ok: true, message: 'Provider setting saved.' });
+    } catch (error) {
+      setTestResult({ ok: false, message: error.message || 'Save failed.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const test = async (provider, model) => {
+    setTestingProvider(provider);
+    setTestResult(null);
+    try {
+      const res = await aiProviderAPI.testProvider({ operation, provider, model });
+      setTestResult({
+        ok: true,
+        message: `${provider} responded in ${res?.data?.durationMs ?? 0} ms.`,
+      });
+      await loadHealth(operation);
+    } catch (error) {
+      setTestResult({ ok: false, message: error.message || `${provider} test failed.` });
+      await loadHealth(operation);
+    } finally {
+      setTestingProvider(null);
+    }
+  };
+
+  const providerButton = (field, provider) => {
+    const checked = selected[field] === provider;
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-5.5' : 'claude-sonnet-4-6');
+          updateSelected({ [field]: provider, [field === 'primaryProvider' ? 'primaryModel' : 'fallbackModel']: firstModel });
+        }}
+        className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${checked ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+      >
+        {provider === 'openai' ? 'OpenAI' : 'Anthropic'}
+      </button>
+    );
+  };
+
+  const healthPill = (provider) => {
+    const status = health?.[provider]?.status || 'unknown';
+    const styles = {
+      healthy: 'bg-green-50 text-green-700 border-green-200',
+      degraded: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+      down: 'bg-red-50 text-red-700 border-red-200',
+      unknown: 'bg-slate-50 text-slate-600 border-slate-200',
+    };
+    return (
+      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${styles[status] || styles.unknown}`}>
+        {status}
+      </span>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="py-4 flex items-center gap-2 text-sm text-slate-500">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading provider settings...
+      </div>
+    );
+  }
+
+  return (
+    <div className="py-3 space-y-4">
+      <div>
+        <h4 className="font-medium text-sm text-slate-800 mb-1.5">Operation</h4>
+        <select
+          value={operation}
+          onChange={(event) => setOperation(event.target.value)}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+        >
+          {AI_OPERATION_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h4 className="font-medium text-sm text-slate-800">Primary</h4>
+            {healthPill(selected.primaryProvider)}
+          </div>
+          <div className="inline-flex overflow-hidden rounded-lg">
+            {providerButton('primaryProvider', 'anthropic')}
+            {providerButton('primaryProvider', 'openai')}
+          </div>
+          <select
+            value={selected.primaryModel || ''}
+            onChange={(event) => updateSelected({ primaryModel: event.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+          >
+            {modelOptions(selected.primaryProvider).map((model) => (
+              <option key={model.model} value={model.model}>{model.label}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => test(selected.primaryProvider, selected.primaryModel)}
+            disabled={testingProvider === selected.primaryProvider}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {testingProvider === selected.primaryProvider ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            Test
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h4 className="font-medium text-sm text-slate-800">Fallback</h4>
+            {healthPill(selected.fallbackProvider)}
+          </div>
+          <div className="inline-flex overflow-hidden rounded-lg">
+            {providerButton('fallbackProvider', 'anthropic')}
+            {providerButton('fallbackProvider', 'openai')}
+          </div>
+          <select
+            value={selected.fallbackModel || ''}
+            onChange={(event) => updateSelected({ fallbackModel: event.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+          >
+            {modelOptions(selected.fallbackProvider).map((model) => (
+              <option key={model.model} value={model.model}>{model.label}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => test(selected.fallbackProvider, selected.fallbackModel)}
+            disabled={testingProvider === selected.fallbackProvider}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {testingProvider === selected.fallbackProvider ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            Test
+          </button>
+        </div>
+      </div>
+
+      <ConfigToggle
+        label="Automatic fallback"
+        description="Retry through the alternate provider when the primary provider has a retryable outage, auth, config, rate-limit, or timeout failure."
+        checked={selected.autoFallbackEnabled !== false}
+        onChange={() => updateSelected({ autoFallbackEnabled: selected.autoFallbackEnabled === false })}
+      />
+
+      <div className="flex items-center justify-between gap-3 pt-3">
+        <p className="text-xs text-slate-500">Provider API keys are configured server-side through environment variables or Key Vault.</p>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="inline-flex items-center gap-2 bg-slate-900 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-800 disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          Save Provider
+        </button>
+      </div>
+      {testResult && (
+        <div className={`rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+          {testResult.message}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [anthropicConfigured, setAnthropicConfigured] = useState(false);
   const [emailTestResult, setEmailTestResult] = useState(null);
   const [emailTesting, setEmailTesting] = useState(false);
   const [emailStatus, setEmailStatus] = useState(null);
@@ -4171,7 +4427,6 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         afterHoursUrgentEscalationPhones: [],
         ...cfg,
       });
-      setAnthropicConfigured(res?.anthropicConfigured ?? false);
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
       setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false, afterHoursUrgentEscalationEnabled: false, afterHoursUrgentEscalationChannels: [], afterHoursUrgentEscalationEmails: [], afterHoursUrgentEscalationPhones: [] });
@@ -4196,20 +4451,12 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
 
   return (
     <div className="space-y-4 max-w-2xl">
-      {!anthropicConfigured && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-start gap-2">
-          <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-yellow-800"><strong>ANTHROPIC_API_KEY</strong> is not configured. The assignment pipeline requires a valid API key.</div>
-        </div>
-      )}
-
       {/* Section 1: Pipeline */}
       <ConfigSection icon={Brain} title="Pipeline">
         <ConfigToggle label="Enable Assignment Pipeline" description="When enabled, incoming tickets will be analyzed for technician assignment" checked={config.isEnabled} onChange={() => setConfig({ ...config, isEnabled: !config.isEnabled })} />
-        <div className="py-3">
-          <h4 className="font-medium text-sm text-slate-800 mb-1.5">LLM Model</h4>
-          <input type="text" value={config.llmModel || ''} onChange={(e) => setConfig({ ...config, llmModel: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono bg-white" />
-        </div>
+        <AiProviderSettingsPanel
+          onAssignmentModelChange={(model) => setConfig((current) => ({ ...current, llmModel: model }))}
+        />
       </ConfigSection>
 
       {/* Section 2: Assignment Behavior */}

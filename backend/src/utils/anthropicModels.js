@@ -1,12 +1,11 @@
-export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
-export const DEFAULT_RECLASSIFICATION_MODEL = 'claude-haiku-4-5-20251001';
+import {
+  DEFAULT_ANTHROPIC_MODEL,
+  DEFAULT_RECLASSIFICATION_MODEL,
+  normalizeAiModel,
+} from './aiProviders.js';
 
-const LEGACY_MODEL_ALIASES = new Map([
-  ['claude-sonnet-4-6-20260217', DEFAULT_ANTHROPIC_MODEL],
-]);
+export { DEFAULT_ANTHROPIC_MODEL, DEFAULT_RECLASSIFICATION_MODEL };
 
 export function normalizeAnthropicModel(model, fallbackModel = DEFAULT_ANTHROPIC_MODEL) {
-  const value = String(model || '').trim();
-  if (!value) return fallbackModel;
-  return LEGACY_MODEL_ALIASES.get(value) || value;
+  return normalizeAiModel(model, 'anthropic', fallbackModel);
 }

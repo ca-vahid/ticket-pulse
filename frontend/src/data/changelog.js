@@ -1,6 +1,17 @@
-export const APP_VERSION = '2.50';
+export const APP_VERSION = '2.51';
 
 export const changelog = [
+  {
+    version: '2.51',
+    date: 'May 27, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>Workspace AI provider failover</strong> lets assignment, review, competency, reclassification, calendar leave, and auto-response operations choose Anthropic or OpenAI with automatic retry on the alternate provider.' },
+      { type: 'improved', html: '<strong>GPT-5.5 provider settings</strong> expose the approved OpenAI model, keep reasoning effort as the cost/quality control, and mark Claude Opus 4.7 as an expensive Anthropic option.' },
+      { type: 'fixed', html: '<strong>OpenAI tool loops</strong> now preserve required Responses API reasoning items between function-call turns so GPT-5.5 assignment runs can continue after tool results.' },
+      { type: 'fixed', html: '<strong>Legacy main Settings AI panels</strong> are greyed out with an in-development marker while the active provider controls live in Assignment settings.' },
+      { type: 'database', html: '<strong>Database updates</strong> add workspace-scoped AI provider settings, health/attempt audit tables, provider metadata on AI run records, and migrate saved OpenAI model choices to GPT-5.5.' },
+    ],
+  },
   {
     version: '2.50',
     date: 'May 27, 2026',

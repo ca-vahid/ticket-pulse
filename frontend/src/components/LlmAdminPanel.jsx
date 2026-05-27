@@ -639,7 +639,7 @@ function TemplatesTab({ config, onSave, isSaving, defaults }) {
             className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono transition-all"
           />
           <p className="text-xs text-gray-500 mt-2">
-            Used when OpenAI API is unavailable or errors occur
+            Used when both AI providers are unavailable or response generation errors occur
           </p>
         </div>
       </div>
@@ -650,7 +650,7 @@ function TemplatesTab({ config, onSave, isSaving, defaults }) {
           <div>
             <h4 className="text-base font-semibold text-gray-900">Tone Presets & Instructions</h4>
             <p className="text-sm text-gray-500 mt-1">
-              Customize the directions passed to GPT-5.1 for each classification type.
+              Customize the directions passed to GPT-5.5 for each classification type.
             </p>
           </div>
           <button
@@ -978,17 +978,32 @@ function OverridesTab({ config, onSave, isSaving }) {
 
 // Runtime Tab Component
 function RuntimeTab({ config, onSave, isSaving }) {
-  const [model, setModel] = useState(config.model || 'gpt-5.1');
+  const [model, setModel] = useState(config.model || 'gpt-5.5');
+  const [modelOptions, setModelOptions] = useState([]);
   const [reasoningEffort, setReasoningEffort] = useState(config.reasoningEffort || 'none');
   const [verbosity, setVerbosity] = useState(config.verbosity || 'medium');
   const [maxOutputTokens, setMaxOutputTokens] = useState(config.maxOutputTokens || 800);
 
   useEffect(() => {
-    setModel(config.model || 'gpt-5.1');
+    setModel(config.model || 'gpt-5.5');
     setReasoningEffort(config.reasoningEffort || 'none');
     setVerbosity(config.verbosity || 'medium');
     setMaxOutputTokens(config.maxOutputTokens || 800);
   }, [config]);
+
+  useEffect(() => {
+    let isMounted = true;
+    api.get('/ai-providers/models', { params: { operation: 'autoresponse_generation' } })
+      .then((response) => {
+        if (!isMounted) return;
+        setModelOptions(response?.data?.models || []);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setModelOptions([]);
+      });
+    return () => { isMounted = false; };
+  }, []);
 
   const handleSave = () => {
     onSave('runtime', {
@@ -1006,7 +1021,7 @@ function RuntimeTab({ config, onSave, isSaving }) {
         <div>
           <h4 className="text-sm font-semibold text-blue-800">Model Configuration</h4>
           <p className="text-sm text-blue-700 mt-1">
-            GPT-5.1 ignores temperature and top_p. Use reasoning effort, verbosity, and token limits to tune behavior.
+            Auto-response calls use workspace provider settings with automatic fallback. This model is the legacy preference used when provider settings are first initialized.
           </p>
         </div>
       </div>
@@ -1020,13 +1035,18 @@ function RuntimeTab({ config, onSave, isSaving }) {
               onChange={(e) => setModel(e.target.value)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
             >
-              <option value="gpt-5.1">gpt-5.1 (Flagship)</option>
-              <option value="gpt-5">gpt-5 (Legacy)</option>
-              <option value="gpt-5-mini">gpt-5-mini (Faster, cheaper)</option>
-              <option value="gpt-5-nano">gpt-5-nano (High throughput)</option>
+              {(modelOptions.length ? modelOptions : [
+                { provider: 'openai', model: 'gpt-5.5', label: 'GPT-5.5' },
+                { provider: 'anthropic', model: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+                { provider: 'anthropic', model: 'claude-opus-4-7', label: 'Claude Opus 4.7 (Expensive)' },
+              ]).map((option) => (
+                <option key={`${option.provider}-${option.model}`} value={option.model}>
+                  {option.label} ({option.provider === 'openai' ? 'OpenAI' : 'Anthropic'})
+                </option>
+              ))}
             </select>
             <p className="text-xs text-gray-500 mt-1.5">
-              Choose which GPT-5 family variant to call for both classification and responses.
+              Provider and fallback routing are managed in AI provider settings; this keeps existing prompt version history compatible.
             </p>
           </div>
 

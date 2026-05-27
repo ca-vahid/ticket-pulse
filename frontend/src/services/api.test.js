@@ -46,4 +46,15 @@ describe('api auth/workspace helpers', () => {
       'getTeamBalance',
     ]);
   });
+
+  test('exports AI provider client methods', async () => {
+    const { aiProviderAPI } = await import('./api');
+    expect(Object.keys(aiProviderAPI).sort()).toEqual([
+      'getHealth',
+      'getModels',
+      'getSettings',
+      'testProvider',
+      'updateSettings',
+    ]);
+  });
 });

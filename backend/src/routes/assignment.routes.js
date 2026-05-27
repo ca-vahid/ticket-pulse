@@ -14,17 +14,18 @@ import assignmentCorrectionService from '../services/assignmentCorrectionService
 import skillHierarchyService from '../services/skillHierarchyService.js';
 import ticketReclassificationService from '../services/ticketReclassificationService.js';
 import syncService from '../services/syncService.js';
-import anthropicService from '../services/anthropicService.js';
 import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
 import priorityBackfillService from '../services/priorityBackfillService.js';
+import providerGateway from '../services/aiProviders/providerGateway.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import availabilityService from '../services/availabilityService.js';
 import settingsRepository from '../services/settingsRepository.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { analyzeTicketActivities } from '../integrations/freshserviceTransformer.js';
 import { convertToTimezone } from '../utils/timezone.js';
-import { DEFAULT_ANTHROPIC_MODEL, normalizeAnthropicModel } from '../utils/anthropicModels.js';
+import { DEFAULT_ANTHROPIC_MODEL } from '../utils/anthropicModels.js';
+import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import { attachSseDisconnectAbort } from '../utils/sseDisconnect.js';
 import { requireReviewer, requireAdmin } from '../middleware/auth.js';
 import appConfig from '../config/index.js';
@@ -91,7 +92,8 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
       afterHoursUrgentEscalationEmails: [],
       afterHoursUrgentEscalationPhones: [],
     },
-    anthropicConfigured: anthropicService.isConfigured(),
+    anthropicConfigured: providerGateway.isConfigured('anthropic'),
+    openAiConfigured: providerGateway.isConfigured('openai'),
     graphConfigured: graphMailClient.isConfigured(),
   });
 }));
@@ -112,7 +114,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   const data = {};
   if (isEnabled !== undefined) data.isEnabled = isEnabled;
   if (autoAssign !== undefined) data.autoAssign = autoAssign;
-  if (llmModel !== undefined) data.llmModel = normalizeAnthropicModel(llmModel);
+  if (llmModel !== undefined) data.llmModel = normalizeAiModel(llmModel, providerForModel(llmModel) || 'anthropic');
   if (maxRecommendations !== undefined) data.maxRecommendations = maxRecommendations;
   if (scoringWeights !== undefined) data.scoringWeights = scoringWeights;
   if (classificationPrompt !== undefined) data.classificationPrompt = classificationPrompt;
