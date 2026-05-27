@@ -590,6 +590,7 @@ export const assignmentAPI = {
   runNowStreamPath: (id) => `/assignment/runs/${id}/run-now?stream=true`,
   getQueue: (params) => api.get('/assignment/queue', { params }),
   getRuns: (params) => api.get('/assignment/runs', { params }),
+  getPriorityAlertAudit: (params) => api.get('/assignment/audit/priority-alerts', { params }),
   getRun: (id) => api.get(`/assignment/runs/${id}`),
   getLatestRunForTicket: (ticketId) => api.get(`/assignment/ticket/${ticketId}/latest-run`),
   decide: (id, data) => api.post(`/assignment/runs/${id}/decide`, data),

@@ -33,6 +33,7 @@ import logger from '../utils/logger.js';
 const router = express.Router();
 const ASSIGNMENT_STATS_TIMEZONE = 'America/Los_Angeles';
 const ESCALATION_CHANNELS = new Set(['email', 'sms', 'whatsapp', 'phone_call']);
+const PRIORITY_AUDIT_TRIGGERS = ['priority_assessment_after_hours', 'priority_assessment_only'];
 
 function normalizeConfigStringArray(value) {
   if (value === undefined) return undefined;
@@ -519,6 +520,153 @@ router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
     search: parseSearch(req.query.search),
   });
   res.json({ success: true, ...result });
+}));
+
+router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const auditWhere = {
+    workspaceId: req.workspaceId,
+    OR: [
+      { triggerSource: { in: PRIORITY_AUDIT_TRIGGERS } },
+      { priorityWritebackStatus: { not: null } },
+      { notificationDeliveries: { some: {} } },
+    ],
+  };
+
+  const [items, total, priorityProcessed, urgent, deliveryStatuses] = await Promise.all([
+    prisma.assignmentPipelineRun.findMany({
+      where: auditWhere,
+      include: {
+        ticket: {
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            subject: true,
+            status: true,
+            priority: true,
+            assessedPriority: true,
+            assessedPriorityId: true,
+            priorityRationale: true,
+            priorityConfidence: true,
+            priorityEvidence: true,
+            priorityAssessedAt: true,
+            createdAt: true,
+            requester: { select: { name: true, email: true, department: true } },
+            assignedTech: { select: { id: true, name: true } },
+          },
+        },
+        assignedTech: { select: { id: true, name: true, email: true } },
+        notificationDeliveries: {
+          orderBy: { queuedAt: 'asc' },
+          select: {
+            id: true,
+            channel: true,
+            status: true,
+            assessedPriority: true,
+            recipient: true,
+            provider: true,
+            providerMessageId: true,
+            retryCount: true,
+            error: true,
+            payload: true,
+            queuedAt: true,
+            sentAt: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+        steps: {
+          where: { stepName: 'after_hours_urgent_escalation' },
+          orderBy: { stepNumber: 'asc' },
+          select: {
+            id: true,
+            stepName: true,
+            status: true,
+            output: true,
+            errorMessage: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+    }),
+    prisma.assignmentPipelineRun.count({ where: auditWhere }),
+    prisma.assignmentPipelineRun.count({
+      where: {
+        ...auditWhere,
+        ticket: { is: { assessedPriority: { not: null } } },
+      },
+    }),
+    prisma.assignmentPipelineRun.count({
+      where: {
+        ...auditWhere,
+        ticket: { is: { assessedPriority: 'Urgent' } },
+      },
+    }),
+    prisma.notificationDelivery.groupBy({
+      by: ['status'],
+      where: { workspaceId: req.workspaceId },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const ticketIds = [...new Set(items.map((item) => item.ticketId).filter(Boolean))];
+  const oldestAuditCreatedAt = items.reduce((oldest, item) => (
+    !oldest || item.createdAt < oldest ? item.createdAt : oldest
+  ), null);
+  const relatedRuns = ticketIds.length > 0 && oldestAuditCreatedAt
+    ? await prisma.assignmentPipelineRun.findMany({
+      where: {
+        workspaceId: req.workspaceId,
+        ticketId: { in: ticketIds },
+        triggerSource: { notIn: PRIORITY_AUDIT_TRIGGERS },
+        createdAt: { gte: oldestAuditCreatedAt },
+      },
+      select: {
+        id: true,
+        ticketId: true,
+        status: true,
+        decision: true,
+        triggerSource: true,
+        queuedAt: true,
+        queuedReason: true,
+        claimedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+    : [];
+
+  const enrichedItems = items.map((item) => ({
+    ...item,
+    relatedAssignmentRun: relatedRuns.find((run) => (
+      run.ticketId === item.ticketId
+      && run.id !== item.id
+      && run.createdAt >= item.createdAt
+    )) || null,
+  }));
+
+  res.json({
+    success: true,
+    data: {
+      items: enrichedItems,
+      total,
+      summary: {
+        priorityProcessed,
+        urgent,
+        deliveries: deliveryStatuses.reduce((sum, item) => sum + item._count._all, 0),
+        sent: deliveryStatuses.find((item) => item.status === 'sent')?._count._all || 0,
+        failed: deliveryStatuses.find((item) => item.status === 'failed')?._count._all || 0,
+        queued: deliveryStatuses.find((item) => item.status === 'queued')?._count._all || 0,
+      },
+      limit,
+      offset,
+    },
+  });
 }));
 
 router.get('/runs/:id', requireReviewer, asyncHandler(async (req, res) => {

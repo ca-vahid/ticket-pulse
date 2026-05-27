@@ -1,6 +1,15 @@
-export const APP_VERSION = '2.46';
+export const APP_VERSION = '2.47';
 
 export const changelog = [
+  {
+    version: '2.47',
+    date: 'May 26, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>Priority and alert audit</strong> adds a workspace review tab for priority decisions, FreshService priority writeback, after-hours assignment queueing, and notification delivery outcomes.' },
+      { type: 'improved', html: '<strong>Run details</strong> now show priority writeback status and alert delivery evidence beside the assessed-priority rationale.' },
+      { type: 'database', html: '<strong>Database-safe audit</strong> reuses pipeline run, step, ticket priority, and notification delivery records; no new schema migration is required.' },
+    ],
+  },
   {
     version: '2.46',
     date: 'May 26, 2026',

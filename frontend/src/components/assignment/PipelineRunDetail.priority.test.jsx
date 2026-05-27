@@ -67,4 +67,62 @@ describe('PipelineRunDetail priority display', () => {
     expect(screen.getByText('TP Urgent')).toBeInTheDocument();
     expect(screen.getByText('FS Medium')).toBeInTheDocument();
   });
+
+  test('shows priority writeback and alert delivery audit evidence', async () => {
+    render(<PipelineRunDetail
+      run={{
+        id: 3102,
+        status: 'completed',
+        decision: 'priority_only',
+        triggerSource: 'priority_assessment_after_hours',
+        createdAt: '2026-05-26T16:00:00.000Z',
+        priorityWritebackStatus: 'synced',
+        priorityWrittenAt: '2026-05-26T16:01:00.000Z',
+        priorityWritebackPayload: { preview: 'Set priority to Urgent' },
+        ticket: {
+          id: 502,
+          freshserviceTicketId: 223000,
+          subject: 'Production system outage',
+          status: 'Open',
+          priority: 4,
+          assessedPriority: 'Urgent',
+          assessedPriorityId: 4,
+          priorityRationale: 'Production outage after hours.',
+          priorityConfidence: 'high',
+          createdAt: '2026-05-26T15:30:00.000Z',
+          requester: { name: 'Casey Brown', department: 'Operations' },
+        },
+        recommendation: {
+          overallReasoning: 'After-hours urgent priority pass.',
+          recommendations: [{ techId: 17, techName: 'Alex Chen' }],
+        },
+        notificationDeliveries: [{
+          id: 88,
+          channel: 'sms',
+          status: 'sent',
+          recipient: '+16045551234',
+          provider: 'twilio',
+          providerMessageId: 'SM123',
+          queuedAt: '2026-05-26T16:01:10.000Z',
+          sentAt: '2026-05-26T16:01:12.000Z',
+        }],
+        steps: [{
+          id: 99,
+          stepName: 'after_hours_urgent_escalation',
+          status: 'completed',
+          output: { queued: 1, channels: ['sms'] },
+          createdAt: '2026-05-26T16:01:10.000Z',
+        }],
+      }}
+      isAdmin={false}
+      workspaceTimezone="America/Vancouver"
+    />);
+
+    expect(await screen.findByText('Priority and alert audit')).toBeInTheDocument();
+    expect(screen.getByText('After-hours priority pass')).toBeInTheDocument();
+    expect(screen.getByText('synced')).toBeInTheDocument();
+    expect(screen.getByText('Set priority to Urgent')).toBeInTheDocument();
+    expect(screen.getByText('SMS')).toBeInTheDocument();
+    expect(screen.getByText('SM123')).toBeInTheDocument();
+  });
 });

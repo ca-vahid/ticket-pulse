@@ -27,6 +27,7 @@ import {
 const ALL_TABS = [
   { id: 'queue', label: 'Review Queue', icon: Inbox, minRole: 'reviewer' },
   { id: 'history', label: 'History', icon: History, minRole: 'reviewer' },
+  { id: 'audit', label: 'Audit', icon: ShieldCheck, minRole: 'reviewer' },
   { id: 'daily-review', label: 'Review', icon: CalendarDays, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'competency-requests', label: 'Requests', icon: ShieldCheck, minRole: 'admin' },
@@ -3657,6 +3658,249 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
   );
 }
 
+const AUDIT_PRIORITY_PILL = {
+  Low: 'bg-slate-100 text-slate-600',
+  Medium: 'bg-yellow-100 text-yellow-800',
+  High: 'bg-orange-100 text-orange-800',
+  Urgent: 'bg-red-100 text-red-800',
+};
+
+const AUDIT_STATUS_PILL = {
+  sent: 'bg-green-100 text-green-700',
+  queued: 'bg-blue-100 text-blue-700',
+  failed: 'bg-red-100 text-red-700',
+  skipped: 'bg-slate-100 text-slate-600',
+  dry_run: 'bg-yellow-100 text-yellow-700',
+  synced: 'bg-green-100 text-green-700',
+  pending: 'bg-blue-100 text-blue-700',
+  completed: 'bg-green-100 text-green-700',
+  running: 'bg-blue-100 text-blue-700',
+};
+
+const AUDIT_CHANNEL_LABEL = {
+  email: 'Email',
+  sms: 'SMS',
+  whatsapp: 'WhatsApp',
+  phone_call: 'Voice',
+};
+
+function statusPillClass(status) {
+  return AUDIT_STATUS_PILL[status] || 'bg-slate-100 text-slate-600';
+}
+
+function deliverySummary(deliveries = []) {
+  if (!deliveries.length) return { label: 'No alert deliveries', className: 'bg-slate-100 text-slate-600' };
+  const failed = deliveries.filter((delivery) => delivery.status === 'failed').length;
+  const sent = deliveries.filter((delivery) => delivery.status === 'sent').length;
+  const queued = deliveries.filter((delivery) => delivery.status === 'queued').length;
+  if (failed > 0) return { label: `${failed} failed`, className: 'bg-red-100 text-red-700' };
+  if (queued > 0) return { label: `${queued} queued`, className: 'bg-blue-100 text-blue-700' };
+  return { label: `${sent || deliveries.length} sent`, className: 'bg-green-100 text-green-700' };
+}
+
+function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
+  const [audit, setAudit] = useState({ items: [], total: 0 });
+  const [selectedRun, setSelectedRun] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  const limit = 25;
+
+  const fetchAudit = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await assignmentAPI.getPriorityAlertAudit({ limit, offset: page * limit });
+      const payload = res?.data || res || {};
+      setAudit({ items: payload.items || [], total: payload.total || 0, summary: payload.summary || null });
+    } catch {
+      setAudit({ items: [], total: 0, summary: null });
+    } finally {
+      setLoading(false);
+    }
+  }, [page]);
+
+  useEffect(() => { fetchAudit(); }, [fetchAudit]);
+
+  const openRun = async (runId) => {
+    try {
+      const res = await assignmentAPI.getRun(runId);
+      setSelectedRun(res?.data || null);
+    } catch {
+      setSelectedRun(null);
+    }
+  };
+
+  const pageSummary = audit.items.reduce((acc, item) => {
+    if (item.ticket?.assessedPriority) acc.priorityProcessed += 1;
+    if (item.ticket?.assessedPriority === 'Urgent') acc.urgent += 1;
+    for (const delivery of item.notificationDeliveries || []) {
+      acc.deliveries += 1;
+      if (delivery.status === 'sent') acc.sent += 1;
+      if (delivery.status === 'failed') acc.failed += 1;
+      if (delivery.status === 'queued') acc.queued += 1;
+    }
+    return acc;
+  }, { priorityProcessed: 0, urgent: 0, deliveries: 0, sent: 0, failed: 0, queued: 0 });
+  const summary = audit.summary || pageSummary;
+
+  if (selectedRun) {
+    return (
+      <div className="space-y-4">
+        <button
+          type="button"
+          onClick={() => setSelectedRun(null)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Audit
+        </button>
+        <PipelineRunDetail run={selectedRun} workspaceTimezone={workspaceTimezone} onDecide={null} deciding={false} isAdmin={isAdmin} onSyncComplete={() => openRun(selectedRun.id)} />
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  const totalPages = Math.ceil(audit.total / limit);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {[
+          ['Audit records', audit.total, 'bg-slate-50 text-slate-700'],
+          ['Priority processed', summary.priorityProcessed, 'bg-blue-50 text-blue-700'],
+          ['Urgent', summary.urgent, 'bg-red-50 text-red-700'],
+          ['Sent', summary.sent, 'bg-green-50 text-green-700'],
+          ['Failed', summary.failed, 'bg-red-50 text-red-700'],
+        ].map(([label, value, color]) => (
+          <div key={label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <div className={`inline-flex rounded-lg px-2 py-1 text-[11px] font-semibold ${color}`}>{label}</div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {audit.items.length === 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white py-12 text-center">
+          <ShieldCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+          <p className="font-medium text-slate-600">No priority or alert audit records yet</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {audit.items.map((item) => {
+            const ticket = item.ticket || {};
+            const deliveries = item.notificationDeliveries || [];
+            const alertSummary = deliverySummary(deliveries);
+            const escalationStep = (item.steps || []).find((step) => step.stepName === 'after_hours_urgent_escalation');
+            const isAfterHoursPriority = item.triggerSource === 'priority_assessment_after_hours';
+            return (
+              <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-slate-400">Run #{item.id}</span>
+                      <span className="font-mono text-xs text-slate-400">Ticket #{ticket.freshserviceTicketId || item.ticketId}</span>
+                      {isAfterHoursPriority && (
+                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">After-hours priority</span>
+                      )}
+                      {ticket.assessedPriority && (
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${AUDIT_PRIORITY_PILL[ticket.assessedPriority] || 'bg-blue-100 text-blue-700'}`}>
+                          TP {ticket.assessedPriority}
+                        </span>
+                      )}
+                      {item.priorityWritebackStatus && (
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusPillClass(item.priorityWritebackStatus)}`}>
+                          Priority {item.priorityWritebackStatus.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${alertSummary.className}`}>
+                        {alertSummary.label}
+                      </span>
+                    </div>
+                    <h3 className="mt-2 truncate text-sm font-semibold text-slate-900">
+                      {ticket.subject || 'No subject'}
+                    </h3>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                      <span>{formatDateTimeInTimezone(item.createdAt, workspaceTimezone)}</span>
+                      <span>{item.triggerSource?.replace(/_/g, ' ') || 'unknown trigger'}</span>
+                      {item.relatedAssignmentRun && (
+                        <span className="rounded bg-orange-50 px-1.5 py-0.5 font-medium text-orange-700">
+                          Assignment {item.relatedAssignmentRun.status.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                      {ticket.requester?.name && <span>{ticket.requester.name}</span>}
+                    </div>
+                    {ticket.priorityRationale && (
+                      <p className="mt-2 max-h-10 overflow-hidden text-xs leading-relaxed text-slate-600">{ticket.priorityRationale}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openRun(item.id)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+                  >
+                    View Run
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {(deliveries.length > 0 || escalationStep) && (
+                  <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                    {deliveries.length > 0 ? (
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {deliveries.map((delivery) => (
+                          <div key={delivery.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-semibold text-slate-800">{AUDIT_CHANNEL_LABEL[delivery.channel] || delivery.channel}</span>
+                              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusPillClass(delivery.status)}`}>
+                                {delivery.status}
+                              </span>
+                              {delivery.provider && <span className="text-[11px] text-slate-400">{delivery.provider}</span>}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {delivery.recipient || 'No recipient'} · queued {formatDateTimeInTimezone(delivery.queuedAt, workspaceTimezone)}
+                              {delivery.sentAt && <> · sent {formatDateTimeInTimezone(delivery.sentAt, workspaceTimezone)}</>}
+                            </div>
+                            {delivery.error && <div className="mt-1 text-xs text-red-600">{delivery.error}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-600">
+                        Escalation result: <span className="font-semibold">{escalationStep.status}</span>
+                        {escalationStep.output?.skipped && <> · {String(escalationStep.output.skipped).replace(/_/g, ' ')}</>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
+          <span className="text-xs text-slate-500">Page {page + 1} of {totalPages}</span>
+          <div className="flex gap-1">
+            <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className="px-3 py-1 border border-slate-200 rounded text-xs hover:bg-white disabled:opacity-40 flex items-center gap-1">
+              <ChevronLeft className="w-3.5 h-3.5" /> Prev
+            </button>
+            <button onClick={() => setPage((p) => p + 1)} disabled={page >= totalPages - 1} className="px-3 py-1 border border-slate-200 rounded text-xs hover:bg-white disabled:opacity-40 flex items-center gap-1">
+              Next <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConfigToggle({ label, description, checked, onChange, color = 'text-blue-600' }) {
   return (
     <div className="flex items-center justify-between py-3">
@@ -4334,6 +4578,7 @@ export default function AssignmentReview() {
           <div className="px-2 py-3 sm:px-6 sm:py-5">
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} onHeaderActionChange={setAssignmentHeaderAction} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'audit' && <AuditTab isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competency-requests' && <CompetencyRequestsTab onPendingCountChange={setCompetencyRequestCount} />}

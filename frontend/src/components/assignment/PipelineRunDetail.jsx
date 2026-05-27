@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
   ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag, Sparkles,
-  RotateCcw, OctagonAlert, ShieldCheck, UserCog, Search, X,
+  RotateCcw, OctagonAlert, ShieldCheck, UserCog, Search, X, PhoneCall,
 } from 'lucide-react';
 import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
@@ -530,6 +530,25 @@ const SYNC_BADGES = {
 
 const REASSIGNABLE_DECISIONS = new Set(['approved', 'modified', 'auto_assigned']);
 const REASSIGN_BLOCKING_STATUSES = new Set(['closed', 'resolved', 'deleted', 'spam', '4', '5']);
+const PRIORITY_AUDIT_TRIGGERS = new Set(['priority_assessment_after_hours', 'priority_assessment_only']);
+const DELIVERY_STATUS_STYLES = {
+  sent: 'bg-green-100 text-green-700',
+  queued: 'bg-blue-100 text-blue-700',
+  failed: 'bg-red-100 text-red-700',
+  skipped: 'bg-slate-100 text-slate-600',
+};
+const DELIVERY_CHANNEL_LABELS = {
+  email: 'Email',
+  sms: 'SMS',
+  whatsapp: 'WhatsApp',
+  phone_call: 'Voice',
+};
+const DELIVERY_CHANNEL_ICONS = {
+  email: Mail,
+  sms: MessageSquare,
+  whatsapp: MessageSquare,
+  phone_call: PhoneCall,
+};
 
 function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const [syncing, setSyncing] = useState(false);
@@ -608,6 +627,119 @@ function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezon
       {result && (
         <div className={`mt-2 text-xs p-2 rounded ${result.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
           {result.success ? (result.dryRun ? `Dry run: ${result.preview}` : `Synced: ${result.preview}`) : `Error: ${result.error}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Los_Angeles' }) {
+  const deliveries = Array.isArray(run.notificationDeliveries) ? run.notificationDeliveries : [];
+  const escalationStep = Array.isArray(run.steps)
+    ? run.steps.find((step) => step.stepName === 'after_hours_urgent_escalation')
+    : null;
+  const hasPriorityWriteback = Boolean(run.priorityWritebackStatus || run.priorityWrittenAt || run.priorityWritebackError);
+  const isPriorityAuditRun = PRIORITY_AUDIT_TRIGGERS.has(run.triggerSource);
+
+  if (!deliveries.length && !escalationStep && !hasPriorityWriteback && !isPriorityAuditRun) {
+    return null;
+  }
+
+  const priorityStatusClass = run.priorityWritebackStatus === 'synced'
+    ? 'bg-green-100 text-green-700'
+    : run.priorityWritebackStatus === 'failed'
+      ? 'bg-red-100 text-red-700'
+      : run.priorityWritebackStatus === 'dry_run'
+        ? 'bg-yellow-100 text-yellow-700'
+        : 'bg-slate-100 text-slate-600';
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <ShieldCheck className="h-4 w-4 text-slate-500" />
+        <h4 className="text-sm font-semibold text-slate-800">Priority and alert audit</h4>
+        {isPriorityAuditRun && (
+          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+            {run.triggerSource === 'priority_assessment_after_hours' ? 'After-hours priority pass' : 'Priority-only pass'}
+          </span>
+        )}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">FreshService priority writeback</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${priorityStatusClass}`}>
+              {run.priorityWritebackStatus ? run.priorityWritebackStatus.replace(/_/g, ' ') : 'not attempted'}
+            </span>
+          </div>
+          {run.priorityWrittenAt && (
+            <p className="mt-1 text-xs text-slate-500">Written {formatDateTimeInTimezone(run.priorityWrittenAt, workspaceTimezone)}</p>
+          )}
+          {run.priorityWritebackPayload?.preview && (
+            <p className="mt-1 text-xs text-slate-600">{run.priorityWritebackPayload.preview}</p>
+          )}
+          {run.priorityWritebackError && (
+            <p className="mt-1 text-xs text-red-600">{run.priorityWritebackError}</p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">After-hours urgent escalation</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+              deliveries.some((delivery) => delivery.status === 'failed')
+                ? 'bg-red-100 text-red-700'
+                : deliveries.some((delivery) => delivery.status === 'sent')
+                  ? 'bg-green-100 text-green-700'
+                  : deliveries.length > 0
+                    ? 'bg-blue-100 text-blue-700'
+                    : escalationStep?.status === 'skipped'
+                      ? 'bg-slate-100 text-slate-600'
+                      : 'bg-slate-100 text-slate-600'
+            }`}>
+              {deliveries.length > 0
+                ? `${deliveries.length} deliver${deliveries.length === 1 ? 'y' : 'ies'}`
+                : escalationStep?.status || 'no alerts'}
+            </span>
+          </div>
+          {escalationStep?.output?.skipped && (
+            <p className="mt-1 text-xs text-slate-600">Skipped: {String(escalationStep.output.skipped).replace(/_/g, ' ')}</p>
+          )}
+          {escalationStep?.errorMessage && (
+            <p className="mt-1 text-xs text-red-600">{escalationStep.errorMessage}</p>
+          )}
+          {!deliveries.length && !escalationStep && (
+            <p className="mt-1 text-xs text-slate-500">No alert delivery was recorded for this run.</p>
+          )}
+        </div>
+      </div>
+
+      {deliveries.length > 0 && (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {deliveries.map((delivery) => {
+            const ChannelIcon = DELIVERY_CHANNEL_ICONS[delivery.channel] || MessageSquare;
+            return (
+              <div key={delivery.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <ChannelIcon className="h-3.5 w-3.5 text-slate-500" />
+                  <span className="text-xs font-semibold text-slate-800">{DELIVERY_CHANNEL_LABELS[delivery.channel] || delivery.channel}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${DELIVERY_STATUS_STYLES[delivery.status] || 'bg-slate-100 text-slate-600'}`}>
+                    {delivery.status}
+                  </span>
+                  {delivery.provider && <span className="text-[11px] text-slate-400">{delivery.provider}</span>}
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {delivery.recipient || 'No recipient'} · queued {formatDateTimeInTimezone(delivery.queuedAt, workspaceTimezone)}
+                  {delivery.sentAt && <> · sent {formatDateTimeInTimezone(delivery.sentAt, workspaceTimezone)}</>}
+                </p>
+                {delivery.providerMessageId && (
+                  <p className="mt-1 font-mono text-[11px] text-slate-400">{delivery.providerMessageId}</p>
+                )}
+                {delivery.error && <p className="mt-1 text-xs text-red-600">{delivery.error}</p>}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1101,6 +1233,8 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           </div>
         </div>
       )}
+
+      <PriorityAlertAuditCard run={run} workspaceTimezone={workspaceTimezone} />
 
       {/* Rebound / auto-fallback context strip — surfaces why this run exists.
           Two flavors: ongoing rebound (amber) vs auto-fallback exhausted (red). */}

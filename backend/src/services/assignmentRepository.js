@@ -252,6 +252,25 @@ class AssignmentRepository {
               toTechnician: { select: { id: true, name: true, email: true } },
             },
           },
+          notificationDeliveries: {
+            orderBy: { queuedAt: 'asc' },
+            select: {
+              id: true,
+              channel: true,
+              status: true,
+              assessedPriority: true,
+              recipient: true,
+              provider: true,
+              providerMessageId: true,
+              retryCount: true,
+              error: true,
+              payload: true,
+              queuedAt: true,
+              sentAt: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
         },
       });
       if (!run) throw new NotFoundError(`Pipeline run ${id} not found`);

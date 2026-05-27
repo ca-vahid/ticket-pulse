@@ -307,6 +307,7 @@ class AssignmentPipelineService {
         });
         return { queued: 0, skipped: 'error', error: error.message };
       });
+      await this._recordAfterHoursEscalationAudit(priorityRunId, escalation);
     }
 
     const queueRun = await this._queueRunForBusinessHours({
@@ -336,6 +337,31 @@ class AssignmentPipelineService {
       afterHoursAssessedPriority: assessedPriority,
       afterHoursUrgentEscalation: escalation,
     };
+  }
+
+  async _recordAfterHoursEscalationAudit(runId, escalation) {
+    if (!runId) return null;
+    try {
+      const maxStep = await prisma.assignmentPipelineStep.aggregate({
+        where: { pipelineRunId: runId },
+        _max: { stepNumber: true },
+      });
+      return await assignmentRepository.createPipelineStep({
+        pipelineRunId: runId,
+        stepNumber: (maxStep._max.stepNumber || 0) + 1,
+        stepName: 'after_hours_urgent_escalation',
+        status: escalation?.error ? 'failed' : escalation?.queued > 0 ? 'completed' : 'skipped',
+        output: escalation || { queued: 0, skipped: 'unknown' },
+        errorMessage: escalation?.error || null,
+        durationMs: 0,
+      });
+    } catch (error) {
+      logger.warn('Pipeline after-hours urgent escalation audit step failed', {
+        runId,
+        error: error.message,
+      });
+      return null;
+    }
   }
 
   /**

@@ -4,6 +4,7 @@ const assignmentRepositoryMock = {
   getOpenPipelineRun: jest.fn(),
   getConfig: jest.fn(),
   createQueuedRun: jest.fn(),
+  createPipelineStep: jest.fn(),
 };
 
 const availabilityServiceMock = {
@@ -21,6 +22,9 @@ const prismaMock = {
   },
   assignmentPipelineRun: {
     findUnique: jest.fn(),
+  },
+  assignmentPipelineStep: {
+    aggregate: jest.fn(),
   },
 };
 
@@ -106,6 +110,8 @@ describe('assignmentPipelineService after-hours priority workflow', () => {
       status: 'queued',
       triggerSource: 'poll',
     });
+    assignmentRepositoryMock.createPipelineStep.mockResolvedValue({ id: 9901 });
+    prismaMock.assignmentPipelineStep.aggregate.mockResolvedValue({ _max: { stepNumber: 7 } });
     prismaMock.ticket.findUnique.mockResolvedValue({ status: 'Open', assignedTechId: null });
     prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
     availabilityServiceMock.isBusinessHours.mockResolvedValue({
@@ -208,6 +214,13 @@ describe('assignmentPipelineService after-hours priority workflow', () => {
     expect(queueUrgentEscalationMock).toHaveBeenCalledWith(expect.objectContaining({
       id: 7701,
       decision: 'priority_only',
+    }));
+    expect(assignmentRepositoryMock.createPipelineStep).toHaveBeenCalledWith(expect.objectContaining({
+      pipelineRunId: 7701,
+      stepNumber: 8,
+      stepName: 'after_hours_urgent_escalation',
+      status: 'completed',
+      output: { queued: 1, channels: ['sms'] },
     }));
     expect(events[0]).toEqual({ type: 'priority_assessment_started', reason: 'after_hours_priority_only' });
 
