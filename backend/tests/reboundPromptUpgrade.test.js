@@ -82,6 +82,9 @@ submit_recommendation includes taxonomyReviewNeeded when internal taxonomy fit i
 
 get_ticket_categories can return pendingReviewSuggestions.
 find_matching_agents returns competencyCoverage.
+Use get_requester_site_context when site location matters.
+Call get_assignment_risk_signals for viable candidates.
+Use get_routing_boundary_context for group-owned work.
 search_tickets can search internal category/subcategory.
 Do NOT set taxonomyReviewNeeded=true for missing technician competency coverage.
 Do not propose new top-level categories.

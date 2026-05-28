@@ -14,6 +14,13 @@ describe('prompt upgrade helpers', () => {
     expect(needsPromptUpgrade(DEFAULT_SYSTEM_PROMPT)).toBe(false);
   });
 
+  test('default prompt includes risk and routing-boundary tool guidance', () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('get_requester_site_context');
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('get_assignment_risk_signals');
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('get_routing_boundary_context');
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('same-subcategory rejection');
+  });
+
   test('detects and upgrades prompts with stale after-hours queue guidance', () => {
     const stale = DEFAULT_SYSTEM_PROMPT.replace(
       /Note \(AFTER_HOURS_PRIORITY_QUEUE_V2\):[\s\S]*?\n\n## Step 1:/,
@@ -34,6 +41,15 @@ describe('prompt upgrade helpers', () => {
     const stale = DEFAULT_SYSTEM_PROMPT.replace(/\n## Priority Definitions \(PRIORITY_OUTPUT_V1\)[\s\S]*?(?=\n## Step 2: Classify the Ticket)/, '');
     expect(needsPromptUpgrade(stale)).toBe(true);
     expect(upgradeLegacyPrompt(stale)).toContain('PRIORITY_OUTPUT_V1');
+  });
+
+  test('detects prompts missing assignment risk signal tooling', () => {
+    const stale = DEFAULT_SYSTEM_PROMPT
+      .replace(/.*get_assignment_risk_signals.*\n/g, '')
+      .replace(/.*same-subcategory rejection.*\n/g, '');
+
+    expect(needsPromptUpgrade(stale)).toBe(true);
+    expect(upgradeLegacyPrompt(stale)).toBe(DEFAULT_SYSTEM_PROMPT);
   });
 
   test('injects priority instructions into custom workspace prompts without replacing custom content', () => {
