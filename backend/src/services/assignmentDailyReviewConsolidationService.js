@@ -3,7 +3,7 @@ import promptRepository from './promptRepository.js';
 import competencyRepository from './competencyRepository.js';
 import logger from '../utils/logger.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
-import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
+import { DEFAULT_OPUS_MODEL, normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import providerGateway from './aiProviders/providerGateway.js';
 
 const ACTIVE_STATUSES = ['collecting', 'analyzing', 'saving'];
@@ -66,8 +66,8 @@ class AssignmentDailyReviewConsolidationService {
     });
     if (existing) return this.getRun(existing.id, workspaceId);
 
-    const llmProvider = providerForModel('claude-opus-4-7', 'anthropic');
-    const llmModel = normalizeAiModel('claude-opus-4-7', llmProvider, null, 'daily_review_consolidation');
+    const llmProvider = providerForModel(DEFAULT_OPUS_MODEL, 'anthropic');
+    const llmModel = normalizeAiModel(DEFAULT_OPUS_MODEL, llmProvider, null, 'daily_review_consolidation');
     const run = await prisma.assignmentDailyReviewConsolidationRun.create({
       data: {
         workspaceId,
@@ -633,7 +633,7 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
         providerGateway.runToolTurn({
           operation: 'daily_review_consolidation',
           workspaceId: context.snapshot.workspaceId,
-          legacyModel: 'claude-opus-4-7',
+          legacyModel: DEFAULT_OPUS_MODEL,
           runLinks: { dailyReviewConsolidationRunId: runId },
           systemPrompt: system,
           tools: [tool],

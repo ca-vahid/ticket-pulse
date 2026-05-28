@@ -3,6 +3,7 @@ import {
   AI_PROVIDER_OPENAI,
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPUS_MODEL,
   DEFAULT_RECLASSIFICATION_MODEL,
   defaultModelForProvider,
   getDefaultProviderSetting,
@@ -27,6 +28,8 @@ describe('ai provider utilities', () => {
   test('normalizes legacy and mismatched models conservatively', () => {
     expect(normalizeAiModel('claude-sonnet-4-6-20260217', AI_PROVIDER_ANTHROPIC))
       .toBe(DEFAULT_ANTHROPIC_MODEL);
+    expect(normalizeAiModel('claude-opus-4-7', AI_PROVIDER_ANTHROPIC, null, 'daily_review_consolidation'))
+      .toBe(DEFAULT_OPUS_MODEL);
     expect(normalizeAiModel('gpt-5.1', AI_PROVIDER_ANTHROPIC))
       .toBe(DEFAULT_ANTHROPIC_MODEL);
     expect(normalizeAiModel('claude-sonnet-4-6', AI_PROVIDER_OPENAI))
@@ -60,7 +63,7 @@ describe('ai provider utilities', () => {
     });
     expect(anthropicModels).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        model: 'claude-opus-4-7',
+        model: DEFAULT_OPUS_MODEL,
         label: expect.stringContaining('Expensive'),
       }),
     ]));

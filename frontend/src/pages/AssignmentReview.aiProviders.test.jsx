@@ -43,7 +43,7 @@ describe('AiProviderSettingsPanel', () => {
       data: {
         models: [
           { provider: 'anthropic', model: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', operations: ['assignment_pipeline'] },
-          { provider: 'anthropic', model: 'claude-opus-4-7', label: 'Claude Opus 4.7 (Expensive)', operations: ['assignment_pipeline'] },
+          { provider: 'anthropic', model: 'claude-opus-4-8', label: 'Claude Opus 4.8 (Expensive)', operations: ['assignment_pipeline'] },
           { provider: 'openai', model: 'gpt-5.5', label: 'GPT-5.5', operations: ['assignment_pipeline'] },
         ],
       },
@@ -85,7 +85,7 @@ describe('AiProviderSettingsPanel', () => {
     render(<AiProviderSettingsPanel onAssignmentModelChange={onAssignmentModelChange} />);
 
     expect(await screen.findByText('Operation')).toBeInTheDocument();
-    expect(screen.getByText('Claude Opus 4.7 (Expensive)')).toBeInTheDocument();
+    expect(screen.getByText('Claude Opus 4.8 (Expensive)')).toBeInTheDocument();
     expect(screen.getAllByText('healthy')[0]).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByText('OpenAI')[0]);

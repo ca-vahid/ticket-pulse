@@ -1038,7 +1038,7 @@ function RuntimeTab({ config, onSave, isSaving }) {
               {(modelOptions.length ? modelOptions : [
                 { provider: 'openai', model: 'gpt-5.5', label: 'GPT-5.5' },
                 { provider: 'anthropic', model: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-                { provider: 'anthropic', model: 'claude-opus-4-7', label: 'Claude Opus 4.7 (Expensive)' },
+                { provider: 'anthropic', model: 'claude-opus-4-8', label: 'Claude Opus 4.8 (Expensive)' },
               ]).map((option) => (
                 <option key={`${option.provider}-${option.model}`} value={option.model}>
                   {option.label} ({option.provider === 'openai' ? 'OpenAI' : 'Anthropic'})

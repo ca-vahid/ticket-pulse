@@ -17,11 +17,14 @@ export const AI_OPERATIONS = [
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 export const DEFAULT_OPENAI_MODEL = 'gpt-5.5';
 export const DEFAULT_RECLASSIFICATION_MODEL = 'claude-haiku-4-5-20251001';
+export const DEFAULT_OPUS_MODEL = 'claude-opus-4-8';
 
 const ALL_OPERATIONS = new Set(AI_OPERATIONS);
 
 const LEGACY_MODEL_ALIASES = new Map([
   ['claude-sonnet-4-6-20260217', DEFAULT_ANTHROPIC_MODEL],
+  // Preserve saved settings created before the Opus 4.8 launch.
+  ['claude-opus-4-7', DEFAULT_OPUS_MODEL],
   ['gpt-5.1', DEFAULT_OPENAI_MODEL],
   ['gpt-5', DEFAULT_OPENAI_MODEL],
   ['gpt-5-mini', DEFAULT_OPENAI_MODEL],
@@ -53,8 +56,8 @@ export const MODEL_METADATA = [
   },
   {
     provider: AI_PROVIDER_ANTHROPIC,
-    model: 'claude-opus-4-7',
-    label: 'Claude Opus 4.7 (Expensive)',
+    model: DEFAULT_OPUS_MODEL,
+    label: 'Claude Opus 4.8 (Expensive)',
     operations: AI_OPERATIONS,
     supportsStreaming: true,
     supportsTools: true,
@@ -115,7 +118,7 @@ export function defaultModelForProvider(provider, operation = null) {
     return DEFAULT_RECLASSIFICATION_MODEL;
   }
   if (operation === 'daily_review_consolidation') {
-    return 'claude-opus-4-7';
+    return DEFAULT_OPUS_MODEL;
   }
   return DEFAULT_ANTHROPIC_MODEL;
 }
