@@ -18,6 +18,7 @@ import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
 import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
 import TechnicianVisibilityPanel from '../components/settings/TechnicianVisibilityPanel';
 import WorkspaceAccessPanel from '../components/settings/WorkspaceAccessPanel';
+import FreshServiceWebhookCard from '../components/settings/FreshServiceWebhookCard';
 import {
   ArrowLeft,
   Save,
@@ -65,7 +66,7 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'notification-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker', 'calendar-leave'];
+  const validSections = ['freshservice', 'webhooks', 'notification-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'llm-config', 'auto-response-test', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) && !DISABLED_SETTING_SECTIONS.has(hash) ? hash : 'freshservice';
@@ -118,6 +119,7 @@ export default function Settings() {
   // role: 'global' = global admin only, 'admin' = workspace admin+, 'viewer' = anyone
   const allNavigationItems = [
     { id: 'freshservice', label: 'FreshService', Icon: Plug, minRole: 'global' },
+    { id: 'webhooks', label: 'Webhooks', Icon: KeyRound, minRole: 'admin' },
     { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global' },
     { id: 'sync', label: 'Sync Settings', Icon: RefreshCw, minRole: 'admin' },
     { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3, minRole: 'admin' },
@@ -650,6 +652,28 @@ export default function Settings() {
                   </div>
                 )}
               </form>
+            )}
+
+            {/* FreshService Webhooks */}
+            {activeSection === 'webhooks' && (
+              <div className="p-6 space-y-4">
+                <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-base font-semibold text-gray-900">FreshService Webhooks</h2>
+                      <p className="mt-1 text-sm text-gray-500">
+                        Configure the inbound ticket webhook for {currentWorkspace?.name || 'the selected workspace'}.
+                      </p>
+                    </div>
+                    {currentWorkspace?.slug && (
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+                        {currentWorkspace.slug}
+                      </span>
+                    )}
+                  </div>
+                  <FreshServiceWebhookCard workspaceTimezone={formData.default_timezone} />
+                </div>
+              </div>
             )}
 
             {/* Notification Provider Configuration */}
