@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import config from '../../config/index.js';
-import { normalizeAiModel } from '../../utils/aiProviders.js';
+import { normalizeAiModel, shouldOmitAnthropicTemperature } from '../../utils/aiProviders.js';
 
 class AnthropicProvider {
   constructor() {
@@ -30,14 +30,17 @@ class AnthropicProvider {
     signal = null,
   }) {
     const selectedModel = normalizeAiModel(model || config.anthropic.defaultModel, 'anthropic');
-    const response = await this.getClient().messages.create({
+    const request = {
       model: selectedModel,
       max_tokens: maxTokens,
-      temperature,
       thinking: { type: 'disabled' },
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
-    }, signal ? { signal } : undefined);
+    };
+    if (!shouldOmitAnthropicTemperature(selectedModel)) {
+      request.temperature = temperature;
+    }
+    const response = await this.getClient().messages.create(request, signal ? { signal } : undefined);
     const content = response.content
       ?.filter((block) => block.type === 'text')
       .map((block) => block.text)

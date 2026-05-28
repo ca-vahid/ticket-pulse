@@ -146,3 +146,38 @@ describe('OpenAiProvider streaming tool responses', () => {
     expect(onText).toHaveBeenCalledWith('Final only');
   });
 });
+
+describe('OpenAiProvider JSON responses', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('adds a JSON instruction to JSON-mode input when the payload does not mention JSON', async () => {
+    createMock.mockResolvedValue({
+      output_text: '{"ok":true}',
+      output: [],
+      usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 },
+    });
+
+    const provider = new OpenAiProvider();
+    const result = await provider.sendJson({
+      systemPrompt: 'Classify the ticket.',
+      userMessage: '{"ticketId":123}',
+      model: 'gpt-5.5',
+    });
+
+    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.objectContaining({
+        format: { type: 'json_object' },
+      }),
+      input: [{
+        role: 'user',
+        content: expect.stringMatching(/^Return JSON only\.\n\n\{"ticketId":123\}$/),
+      }],
+    }), undefined);
+    expect(result).toMatchObject({
+      parsed: { ok: true },
+      usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+    });
+  });
+});

@@ -39,7 +39,7 @@ class OpenAiProvider {
     const response = await this.getClient().responses.create({
       model: selectedModel,
       instructions: systemPrompt,
-      input: [{ role: 'user', content: userMessage }],
+      input: [{ role: 'user', content: this._jsonModeInput(userMessage) }],
       text: {
         format: { type: 'json_object' },
         verbosity: 'medium',
@@ -146,6 +146,11 @@ class OpenAiProvider {
       ? `\n\nProvider note: Anthropic-only tools are unavailable on this OpenAI fallback attempt and were omitted: ${unsupportedTools.map((tool) => tool.name || tool.type).join(', ')}. Use the remaining local tools and supplied evidence.`
       : '';
     return `${systemPrompt}\n\nWhen referring to yourself, identify as the active OpenAI model for this fallback attempt, not as Claude or Anthropic.${unsupportedNote}`;
+  }
+
+  _jsonModeInput(userMessage) {
+    const content = String(userMessage || '');
+    return /\bjson\b/i.test(content) ? content : `Return JSON only.\n\n${content}`;
   }
 
   _usage(response) {

@@ -111,6 +111,12 @@ export function normalizeModelAlias(model) {
   return LEGACY_MODEL_ALIASES.get(value) || value;
 }
 
+export function shouldOmitAnthropicTemperature(model) {
+  const normalized = normalizeModelAlias(model);
+  const value = String(normalized || '').trim().toLowerCase();
+  return value === DEFAULT_OPUS_MODEL || value.startsWith(`${DEFAULT_OPUS_MODEL}-`);
+}
+
 export function defaultModelForProvider(provider, operation = null) {
   const normalizedProvider = normalizeProvider(provider);
   if (normalizedProvider === AI_PROVIDER_OPENAI) return DEFAULT_OPENAI_MODEL;

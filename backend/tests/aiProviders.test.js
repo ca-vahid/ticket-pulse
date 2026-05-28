@@ -12,6 +12,7 @@ import {
   isOpenAiModel,
   normalizeAiModel,
   providerForModel,
+  shouldOmitAnthropicTemperature,
   supportsOperation,
 } from '../src/utils/aiProviders.js';
 
@@ -43,6 +44,13 @@ describe('ai provider utilities', () => {
       .toBe(true);
     expect(supportsOperation(DEFAULT_RECLASSIFICATION_MODEL, AI_PROVIDER_ANTHROPIC, 'assignment_pipeline'))
       .toBe(false);
+  });
+
+  test('omits deprecated temperature for Opus 4.8 and legacy aliases', () => {
+    expect(shouldOmitAnthropicTemperature(DEFAULT_OPUS_MODEL)).toBe(true);
+    expect(shouldOmitAnthropicTemperature('claude-opus-4-7')).toBe(true);
+    expect(shouldOmitAnthropicTemperature(DEFAULT_ANTHROPIC_MODEL)).toBe(false);
+    expect(shouldOmitAnthropicTemperature(DEFAULT_RECLASSIFICATION_MODEL)).toBe(false);
   });
 
   test('exposes only the approved GPT-5.5 option and marks Opus as expensive', () => {
