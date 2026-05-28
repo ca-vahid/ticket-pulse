@@ -202,7 +202,12 @@ async function initialize() {
     // Start sync for all active workspaces (checks FreshService config internally)
     const isConfigured = await settingsRepository.isFreshServiceConfigured();
 
-    if (isConfigured) {
+    if (!config.sync.enableScheduledSync) {
+      logger.warn('Scheduled sync auto-start disabled by environment', {
+        environment: config.env,
+        enableScheduledSync: config.sync.enableScheduledSync,
+      });
+    } else if (isConfigured) {
       logger.info('FreshService is configured, starting scheduled sync for all workspaces');
       await scheduledSyncService.start();
     } else {
@@ -235,9 +240,11 @@ async function initialize() {
     // Last resort: still try to start the sync service
     try {
       const isConfigured = await settingsRepository.isFreshServiceConfigured();
-      if (isConfigured) {
+      if (config.sync.enableScheduledSync && isConfigured) {
         logger.info('Attempting to start scheduled sync despite initialization error');
         await scheduledSyncService.start();
+      } else if (!config.sync.enableScheduledSync) {
+        logger.warn('Skipping scheduled sync fallback because auto-start is disabled by environment');
       }
     } catch (syncError) {
       logger.error('Failed to start scheduled sync after initialization error:', syncError);

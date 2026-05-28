@@ -1,6 +1,16 @@
-export const APP_VERSION = '2.52';
+export const APP_VERSION = '2.52.1';
 
 export const changelog = [
+  {
+    version: '2.52.1',
+    date: 'May 28, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Priority-change loop guard</strong> keeps external FreshService priority-change reassessments audit-only for native priority, preventing Ticket Pulse instances from fighting over Medium/High priority changes.' },
+      { type: 'improved', html: '<strong>Webhook incident mitigation</strong> confirmed workspace webhooks can be disabled while scheduled polling continues as the reliability backstop.' },
+      { type: 'improved', html: '<strong>Development sync safety</strong> keeps local backends from auto-starting scheduled FreshService sync unless ENABLE_SCHEDULED_SYNC=true is set.' },
+      { type: 'database', html: '<strong>Database-safe hotfix</strong> contains no schema migration.' },
+    ],
+  },
   {
     version: '2.52',
     date: 'May 28, 2026',

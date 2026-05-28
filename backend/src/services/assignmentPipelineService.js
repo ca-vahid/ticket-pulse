@@ -56,6 +56,13 @@ function truncateTaxonomySuggestion(value) {
   return normalized.slice(0, 120);
 }
 
+export function priorityWritebackSkipReasonForTrigger(triggerSource) {
+  if (triggerSource === 'priority_changed') {
+    return 'external_priority_change_reassessment_no_writeback';
+  }
+  return null;
+}
+
 class AssignmentPipelineService {
   /**
    * Run the agentic assignment pipeline with streaming.
@@ -634,9 +641,9 @@ class AssignmentPipelineService {
     if (triggerSource === 'classification_only') {
       systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category and subcategory. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory is saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields.';
     } else if (isPriorityAssessmentOnly) {
-      systemPrompt += '\n\n## Priority-assessment-only Mode\nThis run exists to assess and persist Ticket Pulse priority for an active ticket. Still inspect and classify the ticket enough to produce valid structured output, but do not change the assignee and do not write an assignment recommendation as an action request. If the ticket is non-actionable noise/FYI, submit an empty recommendations array with closureNoticeHtml; the system will apply the workspace noise-dismissal policy. Do not call get_agent_availability, find_matching_agents, get_workload_stats, get_tech_ticket_history, or get_technician_ad_profile unless one of those tools is directly needed as evidence for priority or classification. Call submit_recommendation so assessedPriority, priorityRationale, priorityConfidence, and optional prioritySignals are saved and can be written to FreshService native priority.';
+      systemPrompt += '\n\n## Priority-assessment-only Mode\nThis run exists to assess and persist Ticket Pulse priority for an active ticket. Still inspect and classify the ticket enough to produce valid structured output, but do not change the assignee and do not write an assignment recommendation as an action request. If the ticket is non-actionable noise/FYI, submit an empty recommendations array with closureNoticeHtml; the system will apply the workspace noise-dismissal policy. Do not call get_agent_availability, find_matching_agents, get_workload_stats, get_tech_ticket_history, or get_technician_ad_profile unless one of those tools is directly needed as evidence for priority or classification. Call submit_recommendation so assessedPriority, priorityRationale, priorityConfidence, and optional prioritySignals are saved for Ticket Pulse priority handling.';
       if (triggerSource === 'priority_changed') {
-        systemPrompt += '\n\nFreshService priority changed outside Ticket Pulse. Treat that change as an escalation signal to consider, but still assess priority from the ticket evidence and explain whether the evidence supports the new FreshService priority.';
+        systemPrompt += '\n\nFreshService priority changed outside Ticket Pulse. Treat that change as an escalation signal to consider, but still assess priority from the ticket evidence and explain whether the evidence supports the new FreshService priority. This reassessment is audit-only for FreshService native priority: the system will not write the assessed priority back to FreshService from this trigger.';
       }
     }
 
@@ -1073,14 +1080,38 @@ class AssignmentPipelineService {
       });
 
       if (recommendation && finalStatus === 'completed') {
-        await freshServiceActionService.executePriorityWriteback(
-          runId,
-          workspaceId,
-          assignmentConfig?.dryRunMode ?? true,
-        ).catch((err) => {
-          logger.warn('FreshService priority writeback failed', { runId, decision, error: err.message });
-          return null;
-        });
+        const priorityWritebackSkipReason = priorityWritebackSkipReasonForTrigger(triggerSource);
+        if (priorityWritebackSkipReason) {
+          await prisma.assignmentPipelineRun.update({
+            where: { id: runId },
+            data: {
+              priorityWritebackStatus: 'skipped',
+              priorityWritebackError: priorityWritebackSkipReason,
+              priorityWritebackPayload: {
+                kind: 'priority_writeback',
+                skippedReason: priorityWritebackSkipReason,
+                triggerSource,
+              },
+            },
+          }).catch((err) => {
+            logger.warn('Failed to mark priority writeback skipped', { runId, triggerSource, error: err.message });
+          });
+          logger.info('FreshService priority writeback skipped for external priority-change reassessment', {
+            runId,
+            ticketId,
+            triggerSource,
+            reason: priorityWritebackSkipReason,
+          });
+        } else {
+          await freshServiceActionService.executePriorityWriteback(
+            runId,
+            workspaceId,
+            assignmentConfig?.dryRunMode ?? true,
+          ).catch((err) => {
+            logger.warn('FreshService priority writeback failed', { runId, decision, error: err.message });
+            return null;
+          });
+        }
       }
 
       // FreshService write-back — separate logic for assignments vs noise

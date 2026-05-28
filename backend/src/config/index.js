@@ -26,6 +26,7 @@ const envSchema = z.object({
   AZURE_GRAPH_CLIENT_ID: z.string().optional(),
   AZURE_GRAPH_CLIENT_SECRET: z.string().optional(),
   WEBHOOK_SECRET: z.string().optional(),
+  ENABLE_SCHEDULED_SYNC: z.string().optional(),
   MONITOR_KEY: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.string().optional(),
@@ -53,6 +54,11 @@ try {
   process.stderr.write(`${JSON.stringify(error.errors, null, 2)}\n`);
   process.exit(1);
 }
+
+const explicitEnableScheduledSync = config.ENABLE_SCHEDULED_SYNC?.trim().toLowerCase();
+const enableScheduledSync = explicitEnableScheduledSync
+  ? ['1', 'true', 'yes', 'on'].includes(explicitEnableScheduledSync)
+  : config.NODE_ENV === 'production';
 
 export default {
   // Node environment
@@ -109,6 +115,7 @@ export default {
     ticketInterval: 30, // seconds
     technicianInterval: 300, // 5 minutes
     defaultTimezone: 'America/Los_Angeles',
+    enableScheduledSync,
   },
 
   // OpenAI (auto-response)

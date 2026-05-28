@@ -66,7 +66,10 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
-const { default: assignmentPipelineService } = await import('../src/services/assignmentPipelineService.js');
+const {
+  default: assignmentPipelineService,
+  priorityWritebackSkipReasonForTrigger,
+} = await import('../src/services/assignmentPipelineService.js');
 
 describe('assignmentPipelineService priority persistence', () => {
   beforeEach(() => {
@@ -94,5 +97,13 @@ describe('assignmentPipelineService priority persistence', () => {
         priorityAssessedAt: expect.any(Date),
       }),
     });
+  });
+
+  test('skips FreshService priority writeback for external priority-change reassessments', () => {
+    expect(priorityWritebackSkipReasonForTrigger('priority_changed'))
+      .toBe('external_priority_change_reassessment_no_writeback');
+    expect(priorityWritebackSkipReasonForTrigger('poll')).toBeNull();
+    expect(priorityWritebackSkipReasonForTrigger('priority_assessment_only')).toBeNull();
+    expect(priorityWritebackSkipReasonForTrigger('priority_assessment_after_hours')).toBeNull();
   });
 });
