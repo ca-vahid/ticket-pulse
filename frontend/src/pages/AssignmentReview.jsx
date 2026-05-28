@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import {
+  flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from '@tanstack/react-table';
 import { formatInTimeZone } from 'date-fns-tz';
 import { aiProviderAPI, assignmentAPI, workspaceAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -3677,6 +3683,99 @@ const AUDIT_CHANNEL_LABEL = {
   phone_call: 'Voice',
 };
 
+const AUDIT_PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
+
+const AUDIT_RANGE_OPTIONS = [
+  { id: '24h', label: 'Today' },
+  { id: '7d', label: '7 days' },
+  { id: '30d', label: '30 days' },
+  { id: '90d', label: '90 days' },
+  { id: 'all', label: 'All time' },
+];
+
+const AUDIT_RECORD_TYPE_OPTIONS = [
+  { id: 'all', label: 'All records' },
+  { id: 'priority_decision', label: 'Priority decisions', dotClass: 'bg-blue-500' },
+  { id: 'freshservice_change', label: 'FS priority changes', dotClass: 'bg-violet-500' },
+  { id: 'after_hours', label: 'After-hours', dotClass: 'bg-indigo-500' },
+  { id: 'alert_delivery', label: 'Alert deliveries', dotClass: 'bg-emerald-500' },
+  { id: 'writeback', label: 'Writeback attempts', dotClass: 'bg-amber-500' },
+];
+
+const AUDIT_ALERT_STATUS_OPTIONS = [
+  { id: 'failed', label: 'Failed', dotClass: 'bg-red-500' },
+  { id: 'queued', label: 'Queued', dotClass: 'bg-blue-500' },
+  { id: 'sent', label: 'Sent', dotClass: 'bg-green-500' },
+  { id: 'skipped', label: 'Skipped', dotClass: 'bg-slate-400' },
+];
+
+const AUDIT_CHANNEL_OPTIONS = [
+  { id: 'email', label: 'Email', dotClass: 'bg-blue-500' },
+  { id: 'sms', label: 'SMS', dotClass: 'bg-emerald-500' },
+  { id: 'whatsapp', label: 'WhatsApp', dotClass: 'bg-green-500' },
+  { id: 'phone_call', label: 'Voice', dotClass: 'bg-purple-500' },
+];
+
+const AUDIT_WRITEBACK_OPTIONS = [
+  { id: 'failed', label: 'Failed', dotClass: 'bg-red-500' },
+  { id: 'synced', label: 'Synced', dotClass: 'bg-green-500' },
+  { id: 'dry_run', label: 'Dry run', dotClass: 'bg-amber-500' },
+  { id: 'pending', label: 'Pending', dotClass: 'bg-blue-500' },
+];
+
+function humanizeAuditValue(value) {
+  return String(value || 'unknown').replace(/_/g, ' ');
+}
+
+function getAuditSourceLabel(item) {
+  if (item.auditKind === 'priority_event') return 'FreshService priority change';
+  if (item.triggerSource === 'priority_assessment_after_hours') return 'After-hours priority';
+  if (item.triggerSource === 'priority_assessment_only') return 'Priority-only assessment';
+  return humanizeAuditValue(item.triggerSource);
+}
+
+function getAuditPriority(item) {
+  const ticket = item.ticket || {};
+  const event = item.priorityEvent || null;
+  const assessedId = Number(ticket.assessedPriorityId) || null;
+  const freshserviceId = Number(ticket.priority) || null;
+  const eventId = Number(event?.toPriorityId) || null;
+  const id = assessedId || eventId || freshserviceId || null;
+  const label = ticket.assessedPriority
+    || event?.toPriorityLabel
+    || AUDIT_PRIORITY_LABELS[freshserviceId]
+    || (id ? `P${id}` : 'Unknown');
+  const source = ticket.assessedPriority ? 'Ticket Pulse' : event ? 'FreshService event' : 'FreshService';
+  return {
+    id,
+    label,
+    source,
+    className: AUDIT_PRIORITY_PILL[label] || 'bg-slate-100 text-slate-600',
+  };
+}
+
+function getAuditRecordMeta(item) {
+  if (item.auditKind === 'priority_event') {
+    return { label: 'FS event', className: 'bg-violet-50 text-violet-700 ring-violet-200' };
+  }
+  if (item.triggerSource === 'priority_assessment_after_hours') {
+    return { label: 'After-hours', className: 'bg-indigo-50 text-indigo-700 ring-indigo-200' };
+  }
+  return { label: 'Run', className: 'bg-slate-100 text-slate-700 ring-slate-200' };
+}
+
+function getDeliveryHealthRank(deliveries = []) {
+  if (deliveries.some((delivery) => delivery.status === 'failed')) return 3;
+  if (deliveries.some((delivery) => delivery.status === 'queued')) return 2;
+  if (deliveries.some((delivery) => delivery.status === 'sent')) return 1;
+  return 0;
+}
+
+function getWritebackLabel(item) {
+  const status = effectivePriorityWritebackStatus(item);
+  return status ? humanizeAuditValue(status) : 'Not attempted';
+}
+
 function statusPillClass(status) {
   return AUDIT_STATUS_PILL[status] || 'bg-slate-100 text-slate-600';
 }
@@ -3731,32 +3830,77 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
   const [audit, setAudit] = useState({ items: [], total: 0 });
   const [selectedRun, setSelectedRun] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(0);
-  const limit = 25;
+  const [limit, setLimit] = useState(25);
+  const [range, setRange] = useState('30d');
+  const [recordType, setRecordType] = useState('all');
+  const [selectedPriorities, setSelectedPriorities] = useState([]);
+  const [selectedAlertStatuses, setSelectedAlertStatuses] = useState([]);
+  const [selectedChannels, setSelectedChannels] = useState([]);
+  const [selectedWritebackStatuses, setSelectedWritebackStatuses] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sorting, setSorting] = useState([{ id: 'createdAt', desc: true }]);
 
-  const fetchAudit = useCallback(async () => {
+  const fetchAudit = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
-      const res = await assignmentAPI.getPriorityAlertAudit({ limit, offset: page * limit });
+      if (silent) setRefreshing(true);
+      else setLoading(true);
+      const res = await assignmentAPI.getPriorityAlertAudit({
+        limit,
+        offset: page * limit,
+        range,
+        recordType,
+        priorities: selectedPriorities.length ? selectedPriorities.join(',') : undefined,
+        alertStatuses: selectedAlertStatuses.length ? selectedAlertStatuses.join(',') : undefined,
+        channels: selectedChannels.length ? selectedChannels.join(',') : undefined,
+        writebackStatuses: selectedWritebackStatuses.length ? selectedWritebackStatuses.join(',') : undefined,
+        search: searchQuery.trim() || undefined,
+      });
       const payload = res?.data || res || {};
       setAudit({ items: payload.items || [], total: payload.total || 0, summary: payload.summary || null });
     } catch {
       setAudit({ items: [], total: 0, summary: null });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [page]);
+  }, [
+    limit,
+    page,
+    range,
+    recordType,
+    selectedPriorities,
+    selectedAlertStatuses,
+    selectedChannels,
+    selectedWritebackStatuses,
+    searchQuery,
+  ]);
 
   useEffect(() => { fetchAudit(); }, [fetchAudit]);
 
-  const openRun = async (runId) => {
+  useEffect(() => {
+    setPage(0);
+  }, [
+    limit,
+    range,
+    recordType,
+    selectedPriorities,
+    selectedAlertStatuses,
+    selectedChannels,
+    selectedWritebackStatuses,
+    searchQuery,
+  ]);
+
+  const openRun = useCallback(async (runId) => {
+    if (!runId) return;
     try {
       const res = await assignmentAPI.getRun(runId);
       setSelectedRun(res?.data || null);
     } catch {
       setSelectedRun(null);
     }
-  };
+  }, []);
 
   const pageSummary = audit.items.reduce((acc, item) => {
     if (item.auditKind === 'priority_event') acc.priorityChanges += 1;
@@ -3771,6 +3915,229 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
     return acc;
   }, { priorityProcessed: 0, priorityChanges: 0, urgent: 0, deliveries: 0, sent: 0, failed: 0, queued: 0 });
   const summary = audit.summary || pageSummary;
+
+  const clearFilters = () => {
+    setRange('30d');
+    setRecordType('all');
+    setSelectedPriorities([]);
+    setSelectedAlertStatuses([]);
+    setSelectedChannels([]);
+    setSelectedWritebackStatuses([]);
+    setSearchQuery('');
+  };
+
+  const activeFilterCount =
+    (range !== '30d' ? 1 : 0) +
+    (recordType !== 'all' ? 1 : 0) +
+    selectedPriorities.length +
+    selectedAlertStatuses.length +
+    selectedChannels.length +
+    selectedWritebackStatuses.length +
+    (searchQuery.trim() ? 1 : 0);
+
+  const totalPages = Math.max(1, Math.ceil(audit.total / limit));
+  const firstRow = audit.total === 0 ? 0 : page * limit + 1;
+  const lastRow = Math.min(audit.total, (page + 1) * limit);
+
+  const columns = useMemo(() => [
+    {
+      id: 'createdAt',
+      header: 'When',
+      accessorFn: (item) => new Date(item.createdAt || 0).getTime(),
+      cell: ({ row }) => {
+        const item = row.original;
+        const meta = getAuditRecordMeta(item);
+        return (
+          <div className="min-w-[11rem]">
+            <div className="flex items-center gap-2">
+              <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ${meta.className}`}>
+                {meta.label}
+              </span>
+              <span className="font-mono text-[11px] text-slate-400">
+                {item.auditKind === 'priority_event' ? 'Event' : 'Run'} #{item.id}
+              </span>
+            </div>
+            <div className="mt-1 text-xs font-medium text-slate-700">
+              {formatDateTimeInTimezone(item.createdAt, workspaceTimezone)}
+            </div>
+            <div className="mt-0.5 truncate text-[11px] text-slate-500" title={getAuditSourceLabel(item)}>
+              {getAuditSourceLabel(item)}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: 'ticket',
+      header: 'Ticket',
+      accessorFn: (item) => `${item.ticket?.freshserviceTicketId || item.ticketId || ''} ${item.ticket?.subject || ''} ${item.ticket?.requester?.name || ''}`,
+      cell: ({ row }) => {
+        const item = row.original;
+        const ticket = item.ticket || {};
+        return (
+          <div className="min-w-[18rem] max-w-[30rem]">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs font-semibold text-slate-500">
+                #{String(ticket.freshserviceTicketId || item.ticketId || '-')}
+              </span>
+              {ticket.status && (
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                  {ticket.status}
+                </span>
+              )}
+            </div>
+            <div className="mt-1 truncate text-sm font-semibold text-slate-900" title={ticket.subject || 'No subject'}>
+              {ticket.subject || 'No subject'}
+            </div>
+            <div className="mt-0.5 truncate text-xs text-slate-500">
+              {ticket.requester?.name || ticket.requester?.email || 'Unknown requester'}
+              {ticket.assignedTech?.name ? ` · ${ticket.assignedTech.name}` : ''}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: 'priority',
+      header: 'Priority',
+      accessorFn: (item) => getAuditPriority(item).id || 0,
+      cell: ({ row }) => {
+        const item = row.original;
+        const priority = getAuditPriority(item);
+        const event = item.priorityEvent || null;
+        return (
+          <div className="min-w-[9rem]">
+            <span className={`inline-flex rounded px-2 py-1 text-xs font-semibold ${priority.className}`}>
+              {priority.label}
+            </span>
+            <div className="mt-1 text-[11px] font-medium text-slate-500">{priority.source}</div>
+            {event && (
+              <div className="mt-0.5 text-[11px] text-slate-500">
+                {event.fromPriorityLabel || 'Unknown'} to {event.toPriorityLabel}
+              </div>
+            )}
+            {item.ticket?.priorityRationale && (
+              <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-slate-500" title={item.ticket.priorityRationale}>
+                {item.ticket.priorityRationale}
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: 'writeback',
+      header: 'Writeback',
+      accessorFn: (item) => item.priorityWritebackStatus || '',
+      cell: ({ row }) => {
+        const item = row.original;
+        const status = effectivePriorityWritebackStatus(item);
+        return (
+          <div className="min-w-[8rem]">
+            <span className={`inline-flex rounded px-2 py-1 text-xs font-semibold ${status ? statusPillClass(status) : 'bg-slate-100 text-slate-600'}`}>
+              {getWritebackLabel(item)}
+            </span>
+            {item.priorityWrittenAt && (
+              <div className="mt-1 text-[11px] text-slate-500">
+                {formatDateTimeInTimezone(item.priorityWrittenAt, workspaceTimezone)}
+              </div>
+            )}
+            {item.priorityWritebackError && (
+              <div className="mt-1 line-clamp-2 text-[11px] text-red-600" title={item.priorityWritebackError}>
+                {status === 'skipped' ? 'FreshService read-only' : item.priorityWritebackError}
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: 'alerts',
+      header: 'Alerts',
+      accessorFn: (item) => getDeliveryHealthRank(item.notificationDeliveries || []),
+      cell: ({ row }) => {
+        const item = row.original;
+        const deliveries = item.notificationDeliveries || [];
+        const alertSummary = deliverySummary(deliveries);
+        const channels = [...new Set(deliveries.map((delivery) => delivery.channel).filter(Boolean))];
+        return (
+          <div className="min-w-[10rem]">
+            <span className={`inline-flex rounded px-2 py-1 text-xs font-semibold ${alertSummary.className}`}>
+              {alertSummary.label}
+            </span>
+            {channels.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {channels.map((channel) => (
+                  <span key={channel} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                    {AUDIT_CHANNEL_LABEL[channel] || channel}
+                  </span>
+                ))}
+              </div>
+            )}
+            {deliveries.find((delivery) => delivery.error)?.error && (
+              <div className="mt-1 line-clamp-2 text-[11px] text-red-600" title={deliveries.find((delivery) => delivery.error)?.error}>
+                {deliveries.find((delivery) => delivery.error)?.error}
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: 'outcome',
+      header: 'Outcome',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const item = row.original;
+        const viewRunId = item.auditKind === 'priority_event' ? item.reassessmentRunId : item.id;
+        return (
+          <div className="min-w-[10rem] text-xs text-slate-600">
+            {item.relatedAssignmentRun && (
+              <div className="rounded bg-orange-50 px-2 py-1 font-medium text-orange-700">
+                Assignment {humanizeAuditValue(item.relatedAssignmentRun.status)}
+              </div>
+            )}
+            {item.reassessmentRun && (
+              <div className="rounded bg-violet-50 px-2 py-1 font-medium text-violet-700">
+                Reassessment {humanizeAuditValue(item.reassessmentRun.status)}
+              </div>
+            )}
+            {item.priorityEvent?.skipReason && (
+              <div className="rounded bg-slate-100 px-2 py-1 font-medium text-slate-600">
+                {humanizeAuditValue(item.priorityEvent.skipReason)}
+              </div>
+            )}
+            {viewRunId ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openRun(viewRunId);
+                }}
+                className="mt-2 inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                View {item.auditKind === 'priority_event' ? 'reassessment' : 'run'}
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            ) : (
+              <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5 font-medium text-slate-500">
+                No reassessment run
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+  ], [openRun, workspaceTimezone]);
+
+  const table = useReactTable({
+    data: audit.items,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
 
   if (selectedRun) {
     return (
@@ -3788,19 +4155,9 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
     );
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-      </div>
-    );
-  }
-
-  const totalPages = Math.ceil(audit.total / limit);
-
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-6">
         {[
           ['Audit records', audit.total, 'bg-slate-50 text-slate-700'],
           ['Priority processed', summary.priorityProcessed, 'bg-blue-50 text-blue-700'],
@@ -3809,149 +4166,174 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
           ['Sent', summary.sent, 'bg-green-50 text-green-700'],
           ['Failed', summary.failed, 'bg-red-50 text-red-700'],
         ].map(([label, value, color]) => (
-          <div key={label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <div className={`inline-flex rounded-lg px-2 py-1 text-[11px] font-semibold ${color}`}>{label}</div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">{value}</div>
+          <div key={label} className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+            <div className={`inline-flex rounded px-2 py-1 text-[11px] font-semibold ${color}`}>{label}</div>
+            <div className="mt-1.5 text-xl font-bold text-slate-900">{value ?? 0}</div>
           </div>
         ))}
       </div>
 
-      {audit.items.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white py-12 text-center">
-          <ShieldCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="font-medium text-slate-600">No priority or alert audit records yet</p>
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+        <FilterBar
+          activeCount={activeFilterCount}
+          onClearAll={clearFilters}
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder="Search ticket, requester, event, or run ID"
+          trailing={(
+            <button
+              type="button"
+              onClick={() => fetchAudit({ silent: true })}
+              disabled={refreshing}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          )}
+        >
+          <FilterDropdown
+            label="Range"
+            value={range}
+            options={AUDIT_RANGE_OPTIONS}
+            onChange={setRange}
+            icon={Clock}
+            placeholderWhenEmpty="30 days"
+          />
+          <FilterDropdown
+            label="Type"
+            value={recordType}
+            options={AUDIT_RECORD_TYPE_OPTIONS}
+            onChange={setRecordType}
+            icon={ShieldCheck}
+          />
+          <FilterDropdown
+            label="Priority"
+            value={selectedPriorities}
+            options={PRIORITY_OPTIONS}
+            multi
+            onChange={setSelectedPriorities}
+            icon={AlertCircle}
+          />
+          <FilterDropdown
+            label="Alert"
+            value={selectedAlertStatuses}
+            options={AUDIT_ALERT_STATUS_OPTIONS}
+            multi
+            onChange={setSelectedAlertStatuses}
+            icon={MessageSquare}
+          />
+          <FilterDropdown
+            label="Channel"
+            value={selectedChannels}
+            options={AUDIT_CHANNEL_OPTIONS}
+            multi
+            onChange={setSelectedChannels}
+            icon={Mail}
+          />
+          <FilterDropdown
+            label="Writeback"
+            value={selectedWritebackStatuses}
+            options={AUDIT_WRITEBACK_OPTIONS}
+            multi
+            onChange={setSelectedWritebackStatuses}
+            icon={RefreshCw}
+            align="right"
+          />
+        </FilterBar>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 bg-slate-50 px-3 py-2.5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs font-medium text-slate-500">
+              {loading ? 'Loading audit records' : `${firstRow}-${lastRow} of ${audit.total} audit records`}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-slate-500" htmlFor="audit-page-size">Rows</label>
+              <select
+                id="audit-page-size"
+                value={limit}
+                onChange={(event) => setLimit(parseInt(event.target.value, 10))}
+                className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700"
+              >
+                {[25, 50, 100, 200].map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {audit.items.map((item) => {
-            const ticket = item.ticket || {};
-            const priorityEvent = item.priorityEvent || null;
-            const deliveries = item.notificationDeliveries || [];
-            const alertSummary = deliverySummary(deliveries);
-            const escalationStep = (item.steps || []).find((step) => step.stepName === 'after_hours_urgent_escalation');
-            const isAfterHoursPriority = item.triggerSource === 'priority_assessment_after_hours';
-            const isPriorityEvent = item.auditKind === 'priority_event';
-            return (
-              <div key={`${item.auditKind || 'run'}-${item.id}`} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs text-slate-400">{isPriorityEvent ? 'Event' : 'Run'} #{item.id}</span>
-                      <span className="font-mono text-xs text-slate-400">Ticket #{ticket.freshserviceTicketId || item.ticketId}</span>
-                      {isAfterHoursPriority && (
-                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">After-hours priority</span>
-                      )}
-                      {priorityEvent && (
-                        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
-                          FS {priorityEvent.fromPriorityLabel || 'Unknown'} → {priorityEvent.toPriorityLabel}
-                        </span>
-                      )}
-                      {ticket.assessedPriority && (
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${AUDIT_PRIORITY_PILL[ticket.assessedPriority] || 'bg-blue-100 text-blue-700'}`}>
-                          TP {ticket.assessedPriority}
-                        </span>
-                      )}
-                      {item.priorityWritebackStatus && (
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusPillClass(effectivePriorityWritebackStatus(item))}`}>
-                          Priority {effectivePriorityWritebackStatus(item).replace(/_/g, ' ')}
-                        </span>
-                      )}
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${alertSummary.className}`}>
-                        {alertSummary.label}
-                      </span>
-                    </div>
-                    <h3 className="mt-2 truncate text-sm font-semibold text-slate-900">
-                      {ticket.subject || 'No subject'}
-                    </h3>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-                      <span>{formatDateTimeInTimezone(item.createdAt, workspaceTimezone)}</span>
-                      <span>{item.triggerSource?.replace(/_/g, ' ') || 'unknown trigger'}</span>
-                      {item.relatedAssignmentRun && (
-                        <span className="rounded bg-orange-50 px-1.5 py-0.5 font-medium text-orange-700">
-                          Assignment {item.relatedAssignmentRun.status.replace(/_/g, ' ')}
-                        </span>
-                      )}
-                      {item.reassessmentRun && (
-                        <span className="rounded bg-violet-50 px-1.5 py-0.5 font-medium text-violet-700">
-                          Reassessment {item.reassessmentRun.status.replace(/_/g, ' ')}
-                        </span>
-                      )}
-                      {priorityEvent?.skipReason && (
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">
-                          {String(priorityEvent.skipReason).replace(/_/g, ' ')}
-                        </span>
-                      )}
-                      {ticket.requester?.name && <span>{ticket.requester.name}</span>}
-                    </div>
-                    {ticket.priorityRationale && (
-                      <p className="mt-2 max-h-10 overflow-hidden text-xs leading-relaxed text-slate-600">{ticket.priorityRationale}</p>
-                    )}
-                  </div>
-                  {isPriorityEvent ? (
-                    item.reassessmentRunId ? (
-                      <button
-                        type="button"
-                        onClick={() => openRun(item.reassessmentRunId)}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200">
+            <thead className="bg-slate-900">
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => {
+                    const sorted = header.column.getIsSorted();
+                    const canSort = header.column.getCanSort();
+                    return (
+                      <th
+                        key={header.id}
+                        scope="col"
+                        className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-100"
                       >
-                        View Reassessment
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    ) : (
-                      <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
-                        No reassessment run yet
-                      </div>
-                    )
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => openRun(item.id)}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+                        {canSort ? (
+                          <button
+                            type="button"
+                            onClick={header.column.getToggleSortingHandler()}
+                            className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-white/10"
+                          >
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            {sorted === 'asc' ? <ArrowUp className="h-3 w-3" /> : sorted === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUpDown className="h-3 w-3 text-slate-400" />}
+                          </button>
+                        ) : flexRender(header.column.columnDef.header, header.getContext())}
+                      </th>
+                    );
+                  })}
+                </tr>
+              ))}
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {loading ? (
+                <tr>
+                  <td colSpan={columns.length} className="px-4 py-14 text-center">
+                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-600" />
+                  </td>
+                </tr>
+              ) : table.getRowModel().rows.length === 0 ? (
+                <tr>
+                  <td colSpan={columns.length} className="px-4 py-14 text-center">
+                    <ShieldCheck className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+                    <p className="text-sm font-medium text-slate-600">No priority or alert audit records match the current filters.</p>
+                  </td>
+                </tr>
+              ) : (
+                table.getRowModel().rows.map((row) => {
+                  const item = row.original;
+                  const viewRunId = item.auditKind === 'priority_event' ? item.reassessmentRunId : item.id;
+                  return (
+                    <tr
+                      key={`${item.auditKind || 'run'}-${item.id}`}
+                      onClick={() => viewRunId && openRun(viewRunId)}
+                      className={`transition-colors ${viewRunId ? 'cursor-pointer hover:bg-blue-50/40' : 'hover:bg-slate-50'}`}
                     >
-                      View Run
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-
-                {(deliveries.length > 0 || escalationStep) && (
-                  <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
-                    {deliveries.length > 0 ? (
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {deliveries.map((delivery) => (
-                          <div key={delivery.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-xs font-semibold text-slate-800">{AUDIT_CHANNEL_LABEL[delivery.channel] || delivery.channel}</span>
-                              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusPillClass(delivery.status)}`}>
-                                {delivery.status}
-                              </span>
-                              {delivery.provider && <span className="text-[11px] text-slate-400">{delivery.provider}</span>}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {delivery.recipient || 'No recipient'} · queued {formatDateTimeInTimezone(delivery.queuedAt, workspaceTimezone)}
-                              {delivery.sentAt && <> · sent {formatDateTimeInTimezone(delivery.sentAt, workspaceTimezone)}</>}
-                            </div>
-                            {delivery.error && <div className="mt-1 text-xs text-red-600">{delivery.error}</div>}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-slate-600">
-                        Escalation result: <span className="font-semibold">{escalationStep.status}</span>
-                        {escalationStep.output?.skipped && <> · {String(escalationStep.output.skipped).replace(/_/g, ' ')}</>}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id} className="align-top px-4 py-3">
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
-          <span className="text-xs text-slate-500">Page {page + 1} of {totalPages}</span>
+      <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
+        <span className="text-xs text-slate-500">Page {Math.min(page + 1, totalPages)} of {totalPages}</span>
+        {audit.total > 0 && (
           <div className="flex gap-1">
             <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className="px-3 py-1 border border-slate-200 rounded text-xs hover:bg-white disabled:opacity-40 flex items-center gap-1">
               <ChevronLeft className="w-3.5 h-3.5" /> Prev
@@ -3960,8 +4342,8 @@ function AuditTab({ isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }
               Next <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

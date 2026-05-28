@@ -543,6 +543,56 @@ function parseSearch(raw) {
   return trimmed || undefined;
 }
 
+function parseAuditSince(range, explicitSince) {
+  if (explicitSince) {
+    const parsed = new Date(explicitSince);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  const now = Date.now();
+  if (range === '24h') return new Date(now - 24 * 60 * 60 * 1000);
+  if (range === '7d') return new Date(now - 7 * 24 * 60 * 60 * 1000);
+  if (range === '90d') return new Date(now - 90 * 24 * 60 * 60 * 1000);
+  if (range === 'all') return undefined;
+  return new Date(now - 30 * 24 * 60 * 60 * 1000);
+}
+
+function parseSearchId(search) {
+  if (!search) return null;
+  const numeric = String(search).trim().replace(/^#/, '');
+  if (!/^\d{1,15}$/.test(numeric)) return null;
+  const intId = parseInt(numeric, 10);
+  return Number.isSafeInteger(intId) ? intId : null;
+}
+
+function buildAuditTicketSearch(search) {
+  if (!search) return null;
+  const id = parseSearchId(search);
+  const ticketOr = [
+    { subject: { contains: search, mode: 'insensitive' } },
+    { requester: { is: { name: { contains: search, mode: 'insensitive' } } } },
+    { requester: { is: { email: { contains: search, mode: 'insensitive' } } } },
+    { requester: { is: { department: { contains: search, mode: 'insensitive' } } } },
+  ];
+  if (id) {
+    ticketOr.push({ freshserviceTicketId: BigInt(id) });
+  }
+  return { OR: ticketOr };
+}
+
+function buildAuditSearchWhere(search) {
+  const ticketSearch = buildAuditTicketSearch(search);
+  if (!ticketSearch) return null;
+  const id = parseSearchId(search);
+  const or = [{ ticket: { is: ticketSearch } }];
+  if (id) or.push({ id });
+  return { OR: or };
+}
+
+function compactAnd(clauses) {
+  const filtered = clauses.filter(Boolean);
+  return filtered.length > 1 ? { AND: filtered } : filtered[0] || {};
+}
+
 router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
@@ -601,59 +651,138 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   const pageWindow = offset + limit;
-  const auditWhere = {
-    workspaceId: req.workspaceId,
-    OR: [
-      { triggerSource: { in: PRIORITY_AUDIT_TRIGGERS } },
-      { priorityWritebackStatus: { not: null } },
-      { notificationDeliveries: { some: {} } },
-    ],
+  const since = parseAuditSince(req.query.range, req.query.since);
+  const search = parseSearch(req.query.search);
+  const recordType = [
+    'all',
+    'priority_decision',
+    'freshservice_change',
+    'after_hours',
+    'alert_delivery',
+    'writeback',
+  ].includes(req.query.recordType) ? req.query.recordType : 'all';
+  const priorities = parseCsvInt(req.query.priorities);
+  const alertStatuses = parseCsv(req.query.alertStatuses);
+  const channels = parseCsv(req.query.channels);
+  const writebackStatuses = parseCsv(req.query.writebackStatuses);
+
+  let includeRuns = true;
+  let includeEvents = true;
+  const runOnlyClauses = [];
+  const eventOnlyClauses = [];
+
+  if (recordType === 'priority_decision') includeEvents = false;
+  if (recordType === 'freshservice_change') includeRuns = false;
+  if (recordType === 'after_hours') {
+    includeEvents = false;
+    runOnlyClauses.push({ triggerSource: 'priority_assessment_after_hours' });
+  }
+  if (recordType === 'alert_delivery') {
+    runOnlyClauses.push({ notificationDeliveries: { some: {} } });
+    eventOnlyClauses.push({ notificationDeliveries: { some: {} } });
+  }
+  if (recordType === 'writeback') {
+    includeEvents = false;
+    runOnlyClauses.push({ priorityWritebackStatus: { not: null } });
+  }
+  if (writebackStatuses) {
+    includeEvents = false;
+    runOnlyClauses.push({ priorityWritebackStatus: { in: writebackStatuses } });
+  }
+
+  const ticketSelect = {
+    id: true,
+    freshserviceTicketId: true,
+    subject: true,
+    status: true,
+    priority: true,
+    assessedPriority: true,
+    assessedPriorityId: true,
+    priorityRationale: true,
+    priorityConfidence: true,
+    priorityEvidence: true,
+    priorityAssessedAt: true,
+    createdAt: true,
+    requester: { select: { name: true, email: true, department: true } },
+    assignedTech: { select: { id: true, name: true } },
   };
-  const priorityEventWhere = {
-    workspaceId: req.workspaceId,
+  const notificationSelect = {
+    id: true,
+    channel: true,
+    status: true,
+    assessedPriority: true,
+    recipient: true,
+    provider: true,
+    providerMessageId: true,
+    retryCount: true,
+    error: true,
+    payload: true,
+    queuedAt: true,
+    sentAt: true,
+    createdAt: true,
+    updatedAt: true,
   };
 
+  const runClauses = [
+    {
+      workspaceId: req.workspaceId,
+      OR: [
+        { triggerSource: { in: PRIORITY_AUDIT_TRIGGERS } },
+        { priorityWritebackStatus: { not: null } },
+        { notificationDeliveries: { some: {} } },
+      ],
+    },
+    since ? { createdAt: { gte: since } } : null,
+    priorities ? {
+      ticket: {
+        is: {
+          OR: [
+            { assessedPriorityId: { in: priorities } },
+            { priority: { in: priorities } },
+          ],
+        },
+      },
+    } : null,
+    alertStatuses ? { notificationDeliveries: { some: { status: { in: alertStatuses } } } } : null,
+    channels ? { notificationDeliveries: { some: { channel: { in: channels } } } } : null,
+    buildAuditSearchWhere(search),
+    ...runOnlyClauses,
+  ];
+  const eventClauses = [
+    { workspaceId: req.workspaceId },
+    since ? { detectedAt: { gte: since } } : null,
+    priorities ? {
+      OR: [
+        { toPriorityId: { in: priorities } },
+        { ticket: { is: { assessedPriorityId: { in: priorities } } } },
+      ],
+    } : null,
+    alertStatuses ? { notificationDeliveries: { some: { status: { in: alertStatuses } } } } : null,
+    channels ? { notificationDeliveries: { some: { channel: { in: channels } } } } : null,
+    buildAuditSearchWhere(search),
+    ...eventOnlyClauses,
+  ];
+  const auditWhere = includeRuns ? compactAnd(runClauses) : { id: -1 };
+  const priorityEventWhere = includeEvents ? compactAnd(eventClauses) : { id: -1 };
+  const deliveryOr = [];
+  if (includeRuns) deliveryOr.push({ pipelineRun: { is: auditWhere } });
+  if (includeEvents) deliveryOr.push({ priorityEvent: { is: priorityEventWhere } });
+  const deliveryWhere = deliveryOr.length > 0 ? compactAnd([
+    { workspaceId: req.workspaceId },
+    { OR: deliveryOr },
+    alertStatuses ? { status: { in: alertStatuses } } : null,
+    channels ? { channel: { in: channels } } : null,
+  ]) : { id: -1 };
+
   const [runItems, runTotal, eventItems, eventTotal, priorityProcessed, urgentRuns, urgentPriorityChanges, deliveryStatuses] = await Promise.all([
-    prisma.assignmentPipelineRun.findMany({
+    includeRuns ? prisma.assignmentPipelineRun.findMany({
       where: auditWhere,
       include: {
-        ticket: {
-          select: {
-            id: true,
-            freshserviceTicketId: true,
-            subject: true,
-            status: true,
-            priority: true,
-            assessedPriority: true,
-            assessedPriorityId: true,
-            priorityRationale: true,
-            priorityConfidence: true,
-            priorityEvidence: true,
-            priorityAssessedAt: true,
-            createdAt: true,
-            requester: { select: { name: true, email: true, department: true } },
-            assignedTech: { select: { id: true, name: true } },
-          },
-        },
+        ticket: { select: ticketSelect },
         assignedTech: { select: { id: true, name: true, email: true } },
         notificationDeliveries: {
           orderBy: { queuedAt: 'asc' },
-          select: {
-            id: true,
-            channel: true,
-            status: true,
-            assessedPriority: true,
-            recipient: true,
-            provider: true,
-            providerMessageId: true,
-            retryCount: true,
-            error: true,
-            payload: true,
-            queuedAt: true,
-            sentAt: true,
-            createdAt: true,
-            updatedAt: true,
-          },
+          select: notificationSelect,
         },
         steps: {
           where: { stepName: 'after_hours_urgent_escalation' },
@@ -670,74 +799,33 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
       },
       orderBy: { createdAt: 'desc' },
       take: pageWindow,
-    }),
-    prisma.assignmentPipelineRun.count({ where: auditWhere }),
-    prisma.ticketPriorityEvent.findMany({
+    }) : Promise.resolve([]),
+    includeRuns ? prisma.assignmentPipelineRun.count({ where: auditWhere }) : Promise.resolve(0),
+    includeEvents ? prisma.ticketPriorityEvent.findMany({
       where: priorityEventWhere,
       include: {
-        ticket: {
-          select: {
-            id: true,
-            freshserviceTicketId: true,
-            subject: true,
-            status: true,
-            priority: true,
-            assessedPriority: true,
-            assessedPriorityId: true,
-            priorityRationale: true,
-            priorityConfidence: true,
-            priorityEvidence: true,
-            priorityAssessedAt: true,
-            createdAt: true,
-            requester: { select: { name: true, email: true, department: true } },
-            assignedTech: { select: { id: true, name: true } },
-          },
-        },
+        ticket: { select: ticketSelect },
         notificationDeliveries: {
           orderBy: { queuedAt: 'asc' },
-          select: {
-            id: true,
-            channel: true,
-            status: true,
-            assessedPriority: true,
-            recipient: true,
-            provider: true,
-            providerMessageId: true,
-            retryCount: true,
-            error: true,
-            payload: true,
-            queuedAt: true,
-            sentAt: true,
-            createdAt: true,
-            updatedAt: true,
-          },
+          select: notificationSelect,
         },
       },
       orderBy: { detectedAt: 'desc' },
       take: pageWindow,
-    }),
-    prisma.ticketPriorityEvent.count({ where: priorityEventWhere }),
-    prisma.assignmentPipelineRun.count({
-      where: {
-        ...auditWhere,
-        ticket: { is: { assessedPriority: { not: null } } },
-      },
-    }),
-    prisma.assignmentPipelineRun.count({
-      where: {
-        ...auditWhere,
-        ticket: { is: { assessedPriority: 'Urgent' } },
-      },
-    }),
-    prisma.ticketPriorityEvent.count({
-      where: {
-        ...priorityEventWhere,
-        toPriorityLabel: 'Urgent',
-      },
-    }),
+    }) : Promise.resolve([]),
+    includeEvents ? prisma.ticketPriorityEvent.count({ where: priorityEventWhere }) : Promise.resolve(0),
+    includeRuns ? prisma.assignmentPipelineRun.count({
+      where: compactAnd([auditWhere, { ticket: { is: { assessedPriority: { not: null } } } }]),
+    }) : Promise.resolve(0),
+    includeRuns ? prisma.assignmentPipelineRun.count({
+      where: compactAnd([auditWhere, { ticket: { is: { assessedPriority: 'Urgent' } } }]),
+    }) : Promise.resolve(0),
+    includeEvents ? prisma.ticketPriorityEvent.count({
+      where: compactAnd([priorityEventWhere, { toPriorityLabel: 'Urgent' }]),
+    }) : Promise.resolve(0),
     prisma.notificationDelivery.groupBy({
       by: ['status'],
-      where: { workspaceId: req.workspaceId },
+      where: deliveryWhere,
       _count: { _all: true },
     }),
   ]);
@@ -856,6 +944,15 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
       },
       limit,
       offset,
+      filters: {
+        range: req.query.range || '30d',
+        recordType,
+        priorities: priorities || [],
+        alertStatuses: alertStatuses || [],
+        channels: channels || [],
+        writebackStatuses: writebackStatuses || [],
+        search: search || '',
+      },
     },
   });
 }));
