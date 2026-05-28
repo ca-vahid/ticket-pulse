@@ -364,6 +364,22 @@ class FreshServiceClient {
     }
   }
 
+  async fetchTicketSnapshot(ticketId) {
+    try {
+      const response = await this._fetchWithRetry('/tickets/' + encodeURIComponent(ticketId), {
+        params: { include: 'requester,stats' },
+      });
+      return response.data.ticket;
+    } catch (error) {
+      logger.error(`Error fetching ticket snapshot ${ticketId}:`, {
+        status: getFreshServiceStatus(error),
+        detail: getFreshServiceDetail(error),
+        message: error.message,
+      });
+      throw error;
+    }
+  }
+
   /**
    * Fetch a single ticket, returning null if deleted (404). 429s are handled
    * by the shared limiter; we retry once. A 403 (ticket exists but the API

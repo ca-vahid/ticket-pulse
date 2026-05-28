@@ -68,8 +68,32 @@ model Workspace {
   aiProviderSettings AiProviderSetting[]
   aiProviderAttempts AiProviderAttempt[]
   aiProviderHealthEvents AiProviderHealthEvent[]
+  webhookConfig WorkspaceWebhookConfig?
 
   @@map("workspaces")
+}
+
+model WorkspaceWebhookConfig {
+  id               Int       @id @default(autoincrement())
+  workspaceId      Int       @unique @map("workspace_id")
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  enabled          Boolean   @default(false)
+  secretHash       String?   @db.VarChar(255) @map("secret_hash")
+  secretLast4      String?   @db.VarChar(8) @map("secret_last4")
+  lastReceivedAt   DateTime? @map("last_received_at")
+  lastAcceptedAt   DateTime? @map("last_accepted_at")
+  lastRejectedAt   DateTime? @map("last_rejected_at")
+  lastErrorAt      DateTime? @map("last_error_at")
+  lastErrorMessage String?   @db.Text @map("last_error_message")
+  receivedCount    Int       @default(0) @map("received_count")
+  acceptedCount    Int       @default(0) @map("accepted_count")
+  rejectedCount    Int       @default(0) @map("rejected_count")
+  errorCount       Int       @default(0) @map("error_count")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("workspace_webhook_configs")
+  @@index([workspaceId, enabled])
 }
 
 model WorkspaceAccess {

@@ -17,6 +17,7 @@ import syncService from '../services/syncService.js';
 import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
 import priorityBackfillService from '../services/priorityBackfillService.js';
+import workspaceWebhookService from '../services/workspaceWebhookService.js';
 import providerGateway from '../services/aiProviders/providerGateway.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import availabilityService from '../services/availabilityService.js';
@@ -36,6 +37,28 @@ const router = express.Router();
 const ASSIGNMENT_STATS_TIMEZONE = 'America/Los_Angeles';
 const ESCALATION_CHANNELS = new Set(['email', 'sms', 'whatsapp', 'phone_call']);
 const PRIORITY_AUDIT_TRIGGERS = ['priority_assessment_after_hours', 'priority_assessment_only', 'priority_changed'];
+
+function getRequestBaseUrl(req) {
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+  const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+  return host ? `${proto}://${host}` : '';
+}
+
+async function getWebhookConfigExtras(req) {
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: req.workspaceId },
+    select: { slug: true, isActive: true },
+  });
+  return {
+    workspaceSlug: workspace?.slug || null,
+    workspaceActive: workspace?.isActive === true,
+    webhookUrl: workspace?.slug
+      ? workspaceWebhookService.buildWebhookUrl(getRequestBaseUrl(req), workspace.slug)
+      : null,
+    headerName: workspaceWebhookService.headerName,
+    tokenQueryParam: 'token',
+  };
+}
 
 function normalizeConfigStringArray(value) {
   if (value === undefined) return undefined;
@@ -214,6 +237,50 @@ router.get('/groups', requireAdmin, asyncHandler(async (req, res) => {
     logger.error('Failed to list FreshService groups', { workspaceId: req.workspaceId, error: err.message });
     res.status(502).json({ success: false, message: `Could not fetch groups from FreshService: ${err.message}` });
   }
+}));
+
+// ─── FreshService Webhook Config ────────────────────────────────────────
+
+router.get('/webhook-config', requireAdmin, asyncHandler(async (req, res) => {
+  const extras = await getWebhookConfigExtras(req);
+  const config = await workspaceWebhookService.getConfig(req.workspaceId, extras);
+  res.json({ success: true, data: config });
+}));
+
+router.put('/webhook-config', requireAdmin, asyncHandler(async (req, res) => {
+  const extras = await getWebhookConfigExtras(req);
+  const config = await workspaceWebhookService.updateConfig(req.workspaceId, {
+    enabled: req.body?.enabled,
+  }, extras);
+  res.json({ success: true, data: config });
+}));
+
+router.post('/webhook-config/rotate', requireAdmin, asyncHandler(async (req, res) => {
+  const extras = await getWebhookConfigExtras(req);
+  const config = await workspaceWebhookService.rotateSecret(req.workspaceId, extras);
+  res.json({ success: true, data: config });
+}));
+
+router.post('/webhook-config/test', requireAdmin, asyncHandler(async (req, res) => {
+  const extras = await getWebhookConfigExtras(req);
+  const config = await workspaceWebhookService.getConfig(req.workspaceId, extras);
+  const issues = [];
+  if (!extras.workspaceActive) issues.push('workspace_inactive');
+  if (!config.enabled) issues.push('webhook_disabled');
+  if (!config.hasSecret) issues.push('secret_missing');
+  if (!config.webhookUrl) issues.push('webhook_url_unavailable');
+
+  res.json({
+    success: issues.length === 0,
+    data: {
+      ok: issues.length === 0,
+      issues,
+      webhookUrl: config.webhookUrl,
+      headerName: config.headerName,
+      hasSecret: config.hasSecret,
+      enabled: config.enabled,
+    },
+  });
 }));
 
 // ─── Pipeline Runs ──────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import syncRoutes from './sync.routes.js';
 import sseRoutes from './sse.routes.js';
 import photosRoutes from './photos.routes.js';
 import webhookRoutes from './webhook.routes.js';
+import freshserviceWebhookRoutes from './freshserviceWebhook.routes.js';
 import autoresponseRoutes from './autoresponse.routes.js';
 import llmAdminRoutes from './llmAdmin.routes.js';
 import visualsRoutes from './visuals.routes.js';
@@ -36,6 +37,10 @@ router.use('/workspaces', workspaceRoutes);
 // External webhooks: uses shared-secret auth, NOT session/JWT auth.
 // Must be mounted BEFORE requireAuth so FreshService can reach them.
 router.use('/webhook', webhookRoutes);
+
+// FreshService v2 ticket-ingest webhook: per-workspace secret auth, NOT
+// session/JWT auth. Must stay before requireAuth for FreshService delivery.
+router.use('/freshservice-webhooks', freshserviceWebhookRoutes);
 
 // Temporary IT Summit voting links intentionally bypass app auth but require
 // an expiring workshop token.

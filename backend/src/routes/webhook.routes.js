@@ -7,6 +7,11 @@ import prisma from '../services/prisma.js';
 
 const router = express.Router();
 
+// LEGACY WEBHOOK V1:
+// This route module belongs to the older shared-secret auto-response/webhook
+// scaffold. Keep it isolated from the new per-workspace ticket-ingest webhook
+// so future assignment work does not accidentally build on the retired design.
+
 const authenticateWebhook = (req, res, next) => {
   const authHeader = req.headers['x-webhook-secret'] || req.headers['authorization'];
   const expectedSecret = config.webhook.secret;

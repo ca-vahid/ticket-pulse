@@ -1037,6 +1037,244 @@ class SyncService {
   }
 
   /**
+   * Shared FreshService ticket ingest boundary for scheduled sync, assignment
+   * fast-sync, and the v2 FreshService webhook.
+   */
+  async syncFreshServiceTicketSnapshot(workspaceId, fsTicket, options = {}) {
+    if (!workspaceId) {
+      throw new Error('workspaceId is required to sync a FreshService ticket snapshot');
+    }
+    if (!fsTicket && !options.preparedTicket) {
+      throw new Error('FreshService ticket payload is required');
+    }
+
+    if (fsTicket?.requester_id && fsTicket.requester?.name) {
+      this._embeddedRequesterNames.set(
+        BigInt(fsTicket.requester_id).toString(),
+        fsTicket.requester.name,
+      );
+    }
+
+    let client = options.client || null;
+    if (!client) {
+      const wsConfig = await this._getWorkspaceConfig(workspaceId);
+      client = createFreshServiceClient(wsConfig.domain, wsConfig.apiKey, {
+        priority: 'high',
+        source: options.source || 'ticket-snapshot-ingest',
+      });
+    }
+
+    let ticket = options.preparedTicket || null;
+    if (!ticket) {
+      const preparedTickets = await this._prepareTicketsForDatabase([fsTicket], workspaceId);
+      ticket = preparedTickets[0] || null;
+    }
+    if (!ticket) {
+      throw new Error(`Could not transform FreshService ticket ${fsTicket?.id || 'unknown'}`);
+    }
+
+    const ticketWorkspaceId = ticket.workspaceId ?? workspaceId;
+    const existingTicket = Object.prototype.hasOwnProperty.call(options, 'existingTicket')
+      ? options.existingTicket
+      : (await ticketRepository.getByFreshserviceIds([ticket.freshserviceTicketId]))[0] || null;
+
+    if (ticket.assignedFreshserviceId && !ticket.assignedTechId) {
+      const resolved = await this._resolveResponderTech(
+        ticket.assignedFreshserviceId,
+        ticketWorkspaceId,
+        client,
+      );
+      if (resolved) {
+        ticket.assignedTechId = resolved.techId;
+      }
+    }
+
+    const { isNoise, ruleId, category: noiseCategory } = await noiseRuleService.evaluate(
+      ticket.subject,
+      ticket.createdAt ? new Date(ticket.createdAt) : null,
+      ticketWorkspaceId,
+    );
+    const normalizedNoiseCategory = formatNoiseCategory(noiseCategory);
+
+    let isSelfPicked = false;
+    let assignedBy = null;
+    let firstAssignedAt = null;
+    let rejectionCount = existingTicket?.rejectionCount || 0;
+
+    const analyzedPayload = options.analysisPayload || null;
+    const analysis = analyzedPayload?.analysis || null;
+    const activities = analyzedPayload?.activities || null;
+    const activityFetchSucceeded = analyzedPayload?.activityFetchSucceeded === true;
+    const activityFetchFailed = analyzedPayload?.activityFetchSucceeded === false;
+    if (analysis) {
+      isSelfPicked = analysis.currentIsSelfPicked;
+      assignedBy = analysis.assignedBy;
+      firstAssignedAt = analysis.firstAssignedAt;
+      rejectionCount = analysis.rejectionCount || 0;
+    } else if (existingTicket) {
+      isSelfPicked = existingTicket.isSelfPicked;
+      assignedBy = existingTicket.assignedBy;
+      firstAssignedAt = existingTicket.firstAssignedAt;
+    }
+
+    const upsertedTicket = await ticketRepository.upsert({
+      ...ticket,
+      workspaceId: ticketWorkspaceId,
+      isNoise,
+      noiseRuleMatched: ruleId,
+      ticketCategory: ticket.ticketCategory || normalizedNoiseCategory,
+      freshserviceUpdatedAt: ticket.freshserviceUpdatedAt || null,
+      isSelfPicked,
+      assignedBy,
+      firstAssignedAt,
+      rejectionCount,
+    });
+
+    const source = options.source || 'freshservice_sync';
+    await ticketPriorityEventService.recordFreshServicePriorityChange({
+      existingTicket,
+      upsertedTicket,
+      source,
+    }).catch((err) => {
+      logger.warn('FreshService priority-change event recording failed (non-fatal)', {
+        workspaceId: ticketWorkspaceId,
+        ticketId: upsertedTicket.id,
+        freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
+        source,
+        error: err.message,
+      });
+    });
+
+    await this._ensureNoiseTicketDismissed(upsertedTicket, ticketWorkspaceId, {
+      noiseRuleCategory: normalizedNoiseCategory,
+      waitForSync: options.waitForNoiseSync === true,
+    });
+
+    if (existingTicket && existingTicket.assignedTechId !== upsertedTicket.assignedTechId) {
+      await ticketActivityRepository.create({
+        ticketId: upsertedTicket.id,
+        activityType: 'assigned',
+        performedBy: 'System',
+        performedAt: new Date(),
+        details: {
+          fromTechId: existingTicket.assignedTechId,
+          toTechId: upsertedTicket.assignedTechId,
+          note: 'Ticket reassigned',
+        },
+      });
+    }
+
+    if (shouldQueueFreshServiceAssignmentNotification(existingTicket, upsertedTicket)) {
+      await notificationPreferenceService.queueNotificationsForFreshServiceAssignment(upsertedTicket, {
+        technicianId: upsertedTicket.assignedTechId,
+        previousTechnicianId: existingTicket?.assignedTechId || null,
+        source: existingTicket
+          ? (options.assignmentChangeNotificationSource || 'freshservice_assignment_change')
+          : (options.initialAssignmentNotificationSource || 'freshservice_initial_assignment'),
+        sourceUpdatedAt: upsertedTicket.freshserviceUpdatedAt,
+      }).catch((err) => {
+        logger.warn('FreshService assignment notification queueing failed (non-fatal)', {
+          workspaceId: ticketWorkspaceId,
+          ticketId: upsertedTicket.id,
+          freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
+          assignedTechId: upsertedTicket.assignedTechId,
+          previousTechId: existingTicket?.assignedTechId || null,
+          source,
+          error: err.message,
+        });
+      });
+    }
+
+    if (existingTicket && existingTicket.status !== upsertedTicket.status) {
+      await ticketActivityRepository.create({
+        ticketId: upsertedTicket.id,
+        activityType: 'status_changed',
+        performedBy: 'System',
+        performedAt: new Date(),
+        details: {
+          oldStatus: existingTicket.status,
+          newStatus: upsertedTicket.status,
+          note: `Status changed from ${existingTicket.status} to ${upsertedTicket.status}`,
+        },
+      });
+    }
+
+    if (analysis && analysis.episodes && analysis.episodes.length > 0 && options.techNameMap) {
+      await this._reconcileEpisodes(upsertedTicket.id, ticketWorkspaceId, analysis, options.techNameMap);
+    }
+    if (analysis && analysis.events && analysis.events.length > 0) {
+      await this._writeEventActivities(upsertedTicket.id, analysis.events);
+    }
+    if (activities && activities.length > 0) {
+      await this._writeThreadEntries(upsertedTicket.id, ticketWorkspaceId, activities);
+    }
+
+    if (activityFetchSucceeded || activityFetchFailed) {
+      const activitySyncFinishedAt = new Date();
+      const activitySyncData = activityFetchSucceeded
+        ? {
+          activitiesSyncedAt: activitySyncFinishedAt,
+          activitiesSyncFreshserviceUpdatedAt: analyzedPayload.freshserviceUpdatedAt || ticket.freshserviceUpdatedAt || null,
+          activitiesSyncError: null,
+          activitiesSyncErrorAt: null,
+        }
+        : {
+          activitiesSyncError: analyzedPayload.errorMessage || 'FreshService activity fetch failed',
+          activitiesSyncErrorAt: activitySyncFinishedAt,
+        };
+      await prisma.ticket.update({
+        where: { id: upsertedTicket.id },
+        data: activitySyncData,
+      });
+    }
+
+    const snapshotBounce = !!(
+      existingTicket
+      && existingTicket.assignedTechId
+      && upsertedTicket.assignedTechId === null
+    );
+    const analyzerBounce = !!(
+      analysis
+      && analysis.currentEpisode
+      && analysis.currentEpisode.endMethod === 'rejected'
+      && upsertedTicket.assignedTechId === null
+    );
+
+    if (
+      (snapshotBounce || analyzerBounce)
+      && ['Open', 'Pending'].includes(upsertedTicket.status)
+      && !upsertedTicket.isNoise
+    ) {
+      this._handleTicketRebound(
+        upsertedTicket,
+        existingTicket,
+        analysis,
+        ticketWorkspaceId,
+      ).catch((err) => {
+        logger.warn('Bounce-detection follow-up failed (non-fatal)', {
+          ticketId: upsertedTicket.id, error: err.message,
+        });
+      });
+    }
+
+    if (options.clearReadCache) {
+      clearReadCache();
+    }
+
+    return {
+      ticket: upsertedTicket,
+      existingTicket,
+      workspaceId: ticketWorkspaceId,
+      isNew: !existingTicket,
+      isNoise,
+      noiseRuleMatched: ruleId,
+      noiseRuleCategory: normalizedNoiseCategory,
+      assignmentChanged: Boolean(existingTicket && existingTicket.assignedTechId !== upsertedTicket.assignedTechId),
+      statusChanged: Boolean(existingTicket && existingTicket.status !== upsertedTicket.status),
+    };
+  }
+
+  /**
    * Build FreshService API filters based on sync type and parameters
    *
    * @param {Object} params - Sync parameters
@@ -1213,6 +1451,7 @@ class SyncService {
       const preparedTicketMap = new Map(
         ticketsWithTechIds.map(t => [t.freshserviceTicketId.toString(), t]),
       );
+      const fsTicketMap = new Map(fsTickets.map(t => [t.id?.toString?.() || String(t.id), t]));
       const activeEpisodeMap = new Map();
       if (existingTicketsArray.length > 0) {
         const activeEpisodes = await prisma.ticketAssignmentEpisode.findMany({
@@ -1287,7 +1526,7 @@ class SyncService {
         if (t.email) techNameMap.set(t.email, t.id);
       }
 
-      // Step 6: Upsert tickets with merge logic, activity logging, and episode reconciliation
+      // Step 6: Upsert tickets through the shared snapshot ingest boundary.
       let syncedCount = 0;
       const touchedWorkspaceIds = new Set();
       for (const ticket of ticketsWithTechIds) {
@@ -1295,207 +1534,15 @@ class SyncService {
           const existingTicket = existingTicketsMap.get(ticket.freshserviceTicketId.toString());
           const ticketWorkspaceId = ticket.workspaceId ?? options.workspaceId ?? 1;
           touchedWorkspaceIds.add(ticketWorkspaceId);
-
-          // Resolve unknown-to-us responders. FS may assign tickets to agents
-          // we don't track (external contractors, agents deactivated from
-          // our map, agents that joined without a full tech sync, etc.). In
-          // those cases mapTechnicianIds leaves assignedTechId null, which
-          // leaves a stale pending_review run sitting in the queue forever.
-          // Resolve on-demand and persist the agent as inactive.
-          if (ticket.assignedFreshserviceId && !ticket.assignedTechId) {
-            const resolved = await this._resolveResponderTech(
-              ticket.assignedFreshserviceId,
-              ticketWorkspaceId,
-              client,
-            );
-            if (resolved) {
-              ticket.assignedTechId = resolved.techId;
-            }
-          }
-
-          const { isNoise, ruleId, category: noiseCategory } = await noiseRuleService.evaluate(
-            ticket.subject,
-            ticket.createdAt ? new Date(ticket.createdAt) : null,
-            ticketWorkspaceId,
-          );
-          const normalizedNoiseCategory = formatNoiseCategory(noiseCategory);
-
-          let isSelfPicked = false;
-          let assignedBy = null;
-          let firstAssignedAt = null;
-          let rejectionCount = existingTicket?.rejectionCount || 0;
-
-          const analyzedPayload = activityAnalysisMap.get(ticket.freshserviceTicketId.toString());
-          const analysis = analyzedPayload?.analysis || null;
-          const activities = analyzedPayload?.activities || null;
-          const activityFetchSucceeded = analyzedPayload?.activityFetchSucceeded === true;
-          const activityFetchFailed = analyzedPayload?.activityFetchSucceeded === false;
-          if (analysis) {
-            isSelfPicked = analysis.currentIsSelfPicked;
-            assignedBy = analysis.assignedBy;
-            firstAssignedAt = analysis.firstAssignedAt;
-            rejectionCount = analysis.rejectionCount || 0;
-          } else if (existingTicket) {
-            isSelfPicked = existingTicket.isSelfPicked;
-            assignedBy = existingTicket.assignedBy;
-            firstAssignedAt = existingTicket.firstAssignedAt;
-          }
-
-          const upsertedTicket = await ticketRepository.upsert({
-            ...ticket,
-            workspaceId: ticketWorkspaceId,
-            isNoise,
-            noiseRuleMatched: ruleId,
-            ticketCategory: ticket.ticketCategory || normalizedNoiseCategory,
-            freshserviceUpdatedAt: ticket.freshserviceUpdatedAt || null,
-            isSelfPicked,
-            assignedBy,
-            firstAssignedAt,
-            rejectionCount,
-          });
-
-          await ticketPriorityEventService.recordFreshServicePriorityChange({
+          await this.syncFreshServiceTicketSnapshot(ticketWorkspaceId, fsTicketMap.get(ticket.freshserviceTicketId.toString()), {
+            client,
+            preparedTicket: ticket,
             existingTicket,
-            upsertedTicket,
             source: 'freshservice_sync',
-          }).catch((err) => {
-            logger.warn('FreshService priority-change event recording failed (non-fatal)', {
-              ticketId: upsertedTicket.id,
-              freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
-              error: err.message,
-            });
+            analysisPayload: activityAnalysisMap.get(ticket.freshserviceTicketId.toString()) || null,
+            techNameMap,
+            waitForNoiseSync: false,
           });
-
-          await this._ensureNoiseTicketDismissed(upsertedTicket, ticketWorkspaceId, {
-            noiseRuleCategory: normalizedNoiseCategory,
-            waitForSync: false,
-          });
-
-          // Create activity log if assignment changed
-          if (existingTicket && existingTicket.assignedTechId !== upsertedTicket.assignedTechId) {
-            await ticketActivityRepository.create({
-              ticketId: upsertedTicket.id,
-              activityType: 'assigned',
-              performedBy: 'System',
-              performedAt: new Date(),
-              details: {
-                fromTechId: existingTicket.assignedTechId,
-                toTechId: upsertedTicket.assignedTechId,
-                note: 'Ticket reassigned',
-              },
-            });
-          }
-
-          if (shouldQueueFreshServiceAssignmentNotification(existingTicket, upsertedTicket)) {
-            await notificationPreferenceService.queueNotificationsForFreshServiceAssignment(upsertedTicket, {
-              technicianId: upsertedTicket.assignedTechId,
-              previousTechnicianId: existingTicket?.assignedTechId || null,
-              source: existingTicket ? 'freshservice_assignment_change' : 'freshservice_initial_assignment',
-              sourceUpdatedAt: upsertedTicket.freshserviceUpdatedAt,
-            }).catch((err) => {
-              logger.warn('FreshService assignment notification queueing failed (non-fatal)', {
-                ticketId: upsertedTicket.id,
-                freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
-                assignedTechId: upsertedTicket.assignedTechId,
-                previousTechId: existingTicket?.assignedTechId || null,
-                error: err.message,
-              });
-            });
-          }
-
-          // Create activity log if status changed
-          if (existingTicket && existingTicket.status !== upsertedTicket.status) {
-            await ticketActivityRepository.create({
-              ticketId: upsertedTicket.id,
-              activityType: 'status_changed',
-              performedBy: 'System',
-              performedAt: new Date(),
-              details: {
-                oldStatus: existingTicket.status,
-                newStatus: upsertedTicket.status,
-                note: `Status changed from ${existingTicket.status} to ${upsertedTicket.status}`,
-              },
-            });
-          }
-
-          // --- Reconcile assignment episodes from FS activity analysis ---
-          if (analysis && analysis.episodes && analysis.episodes.length > 0) {
-            await this._reconcileEpisodes(upsertedTicket.id, ticketWorkspaceId, analysis, techNameMap);
-          }
-
-          // --- Write FS-sourced event activities (richer than snapshot diffs) ---
-          if (analysis && analysis.events && analysis.events.length > 0) {
-            await this._writeEventActivities(upsertedTicket.id, analysis.events);
-          }
-          if (activities && activities.length > 0) {
-            await this._writeThreadEntries(upsertedTicket.id, ticketWorkspaceId, activities);
-          }
-
-          if (activityFetchSucceeded || activityFetchFailed) {
-            const activitySyncFinishedAt = new Date();
-            const activitySyncData = activityFetchSucceeded
-              ? {
-                activitiesSyncedAt: activitySyncFinishedAt,
-                activitiesSyncFreshserviceUpdatedAt: analyzedPayload.freshserviceUpdatedAt || ticket.freshserviceUpdatedAt || null,
-                activitiesSyncError: null,
-                activitiesSyncErrorAt: null,
-              }
-              : {
-                activitiesSyncError: analyzedPayload.errorMessage || 'FreshService activity fetch failed',
-                activitiesSyncErrorAt: activitySyncFinishedAt,
-              };
-            await prisma.ticket.update({
-              where: { id: upsertedTicket.id },
-              data: activitySyncData,
-            });
-          }
-
-          // --- Bounce detection: ticket was assigned then unassigned ---
-          // We trigger a fresh pipeline run if either signal fires:
-          //
-          //  (a) DB snapshot diff: existing.assignedTechId → null. This
-          //      catches the simple case where the sync saw the assigned
-          //      state at least once and now sees it cleared.
-          //
-          //  (b) Activity analyzer: the latest episode ended with
-          //      end_method='rejected'. This catches the case where
-          //      FS assignment + rejection both happened between two of
-          //      our sync ticks (the snapshot never saw the assignment),
-          //      so (a) would silently miss it. The analyzer reads FS
-          //      events directly, so it's the source of truth.
-          //
-          // The rebound handler itself dedupes against open runs and a
-          // max-rebounds-per-ticket loop guard, so firing both signals
-          // is safe.
-          const snapshotBounce = !!(
-            existingTicket
-            && existingTicket.assignedTechId
-            && upsertedTicket.assignedTechId === null
-          );
-          const analyzerBounce = !!(
-            analysis
-            && analysis.currentEpisode
-            && analysis.currentEpisode.endMethod === 'rejected'
-            && upsertedTicket.assignedTechId === null
-          );
-
-          if (
-            (snapshotBounce || analyzerBounce)
-            && ['Open', 'Pending'].includes(upsertedTicket.status)
-            && !upsertedTicket.isNoise
-          ) {
-            this._handleTicketRebound(
-              upsertedTicket,
-              existingTicket,
-              analysis,
-              ticketWorkspaceId,
-            ).catch((err) => {
-              logger.warn('Bounce-detection follow-up failed (non-fatal)', {
-                ticketId: upsertedTicket.id, error: err.message,
-              });
-            });
-          }
-
           syncedCount++;
         } catch (error) {
           logger.error(`Failed to upsert ticket ${ticket.freshserviceTicketId}:`, error);
@@ -1607,6 +1654,7 @@ class SyncService {
     const existingTicketsMap = new Map(
       existingTicketsArray.map(t => [t.freshserviceTicketId.toString(), t]),
     );
+    const fsTicketMap = new Map(recentTickets.map(t => [t.id?.toString?.() || String(t.id), t]));
 
     const upsertedIds = [];
     let syncedCount = 0;
@@ -1614,75 +1662,16 @@ class SyncService {
     for (const ticket of ticketsWithTechIds) {
       try {
         const existingTicket = existingTicketsMap.get(ticket.freshserviceTicketId.toString());
-        const ticketWorkspaceId = ticket.workspaceId ?? workspaceId;
-
-        if (ticket.assignedFreshserviceId && !ticket.assignedTechId) {
-          const resolved = await this._resolveResponderTech(
-            ticket.assignedFreshserviceId,
-            ticketWorkspaceId,
-            client,
-          );
-          if (resolved) {
-            ticket.assignedTechId = resolved.techId;
-          }
-        }
-
-        const { isNoise, ruleId, category: noiseCategory } = await noiseRuleService.evaluate(
-          ticket.subject,
-          ticket.createdAt ? new Date(ticket.createdAt) : null,
-          ticketWorkspaceId,
-        );
-        const normalizedNoiseCategory = formatNoiseCategory(noiseCategory);
-
-        const upsertedTicket = await ticketRepository.upsert({
-          ...ticket,
-          workspaceId: ticketWorkspaceId,
-          isNoise,
-          noiseRuleMatched: ruleId,
-          ticketCategory: ticket.ticketCategory || normalizedNoiseCategory,
-          freshserviceUpdatedAt: ticket.freshserviceUpdatedAt || null,
-          isSelfPicked: existingTicket?.isSelfPicked || false,
-          assignedBy: existingTicket?.assignedBy || null,
-          firstAssignedAt: existingTicket?.firstAssignedAt || null,
-          rejectionCount: existingTicket?.rejectionCount || 0,
-        });
-
-        await ticketPriorityEventService.recordFreshServicePriorityChange({
+        const result = await this.syncFreshServiceTicketSnapshot(workspaceId, fsTicketMap.get(ticket.freshserviceTicketId.toString()), {
+          client,
+          preparedTicket: ticket,
           existingTicket,
-          upsertedTicket,
           source: 'assignment_fast_sync',
-        }).catch((err) => {
-          logger.warn('Assignment fast sync: priority-change event recording failed', {
-            workspaceId,
-            ticketId: upsertedTicket.id,
-            freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
-            error: err.message,
-          });
+          waitForNoiseSync: true,
+          assignmentChangeNotificationSource: 'assignment_fast_sync_assignment_change',
+          initialAssignmentNotificationSource: 'assignment_fast_sync_initial_assignment',
         });
-
-        if (shouldQueueFreshServiceAssignmentNotification(existingTicket, upsertedTicket)) {
-          await notificationPreferenceService.queueNotificationsForFreshServiceAssignment(upsertedTicket, {
-            technicianId: upsertedTicket.assignedTechId,
-            previousTechnicianId: existingTicket?.assignedTechId || null,
-            source: existingTicket ? 'assignment_fast_sync_assignment_change' : 'assignment_fast_sync_initial_assignment',
-            sourceUpdatedAt: upsertedTicket.freshserviceUpdatedAt,
-          }).catch((err) => {
-            logger.warn('Assignment fast sync: FreshService assignment notification queueing failed', {
-              workspaceId,
-              ticketId: upsertedTicket.id,
-              freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
-              assignedTechId: upsertedTicket.assignedTechId,
-              previousTechId: existingTicket?.assignedTechId || null,
-              error: err.message,
-            });
-          });
-        }
-
-        upsertedIds.push(upsertedTicket.id);
-        await this._ensureNoiseTicketDismissed(upsertedTicket, ticketWorkspaceId, {
-          noiseRuleCategory: normalizedNoiseCategory,
-          waitForSync: true,
-        });
+        upsertedIds.push(result.ticket.id);
         syncedCount++;
       } catch (error) {
         logger.warn('Assignment fast sync: failed to upsert ticket', {
@@ -3101,11 +3090,12 @@ class SyncService {
     });
 
     const waitForCompletion = opts.waitForCompletion !== false;
+    const triggerSource = opts.triggerSourceOverride || 'poll';
     const pipelinePromises = [];
     let triggered = 0;
 
     for (const ticket of unassignedTickets) {
-      const run = assignmentPipelineService.runPipeline(ticket.id, workspaceId, 'poll')
+      const run = assignmentPipelineService.runPipeline(ticket.id, workspaceId, triggerSource)
         .catch((err) => {
           logger.warn('Assignment polling: pipeline failed for ticket', {
             ticketId: ticket.id,
@@ -3134,6 +3124,7 @@ class SyncService {
       async: !waitForCompletion,
       candidates: candidateTickets.length,
       triggered,
+      triggerSource,
       ticketIds: unassignedTickets.map(t => t.id),
     };
   }

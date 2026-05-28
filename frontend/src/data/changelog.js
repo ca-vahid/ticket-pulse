@@ -1,6 +1,16 @@
-export const APP_VERSION = '2.51.1';
+export const APP_VERSION = '2.52';
 
 export const changelog = [
+  {
+    version: '2.52',
+    date: 'May 28, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>FreshService ticket webhooks</strong> add workspace-specific inbound endpoints so new and updated tickets can enter Ticket Pulse immediately instead of waiting for the next polling cycle.' },
+      { type: 'improved', html: '<strong>Webhook setup in Assignment settings</strong> now shows the exact FreshService action URL, workspace slug, secret header, and JSON body needed for each workspace.' },
+      { type: 'fixed', html: '<strong>Assignment polling remains the backstop</strong> while webhook-triggered tickets reuse the same sync, notification, noise, priority, and assignment pipeline checks as scheduled FreshService syncs.' },
+      { type: 'database', html: '<strong>Database updates</strong> add workspace-scoped webhook configuration, hashed per-workspace secrets, and delivery audit counters. Migration 20260528070000_add_workspace_webhook_configs has been applied to production.' },
+    ],
+  },
   {
     version: '2.51.1',
     date: 'May 27, 2026',

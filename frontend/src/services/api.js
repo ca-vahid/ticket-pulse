@@ -612,6 +612,10 @@ export const assignmentAPI = {
   getConfig: () => api.get('/assignment/config'),
   updateConfig: (data) => api.put('/assignment/config', data),
   getGroups: () => api.get('/assignment/groups'),
+  getWebhookConfig: () => api.get('/assignment/webhook-config'),
+  updateWebhookConfig: (data) => api.put('/assignment/webhook-config', data),
+  rotateWebhookSecret: () => api.post('/assignment/webhook-config/rotate'),
+  testWebhookConfig: () => api.post('/assignment/webhook-config/test'),
 
   getQueuedRuns: () => api.get('/assignment/queued'),
   pruneQueuedRuns: () => api.post('/assignment/queued/prune'),

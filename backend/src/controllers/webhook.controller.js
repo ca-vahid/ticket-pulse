@@ -3,6 +3,11 @@ import assignmentPipelineService from '../services/assignmentPipelineService.js'
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
+// LEGACY WEBHOOK V1:
+// Kept for the older auto-response experiment and historical compatibility.
+// Do not extend this controller for the new workspace ticket-ingest webhook;
+// build the v2 assignment trigger around the sync/assignment services instead.
+
 /**
  * POST /api/webhook/:workspaceSlug/ticket
  * Receive incoming ticket webhook and trigger auto-response
