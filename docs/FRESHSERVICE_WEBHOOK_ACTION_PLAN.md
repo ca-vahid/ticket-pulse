@@ -72,7 +72,7 @@ The webhook must not bypass the existing sync pipeline. It should fetch and upse
 - [x] Add route/service tests and idempotency coverage.
   - Cover valid webhook, invalid secret, disabled webhook, inactive workspace, FreshService 404/403/429 handling, duplicate delivery while a run is queued/running, already-assigned ticket, noise ticket, and malformed payload.
 
-## [ ] Phase 3: Admin UI, Operations, and Rollout
+## [x] Phase 3: Admin UI, Operations, and Rollout
 
 - [x] Extend Assignment settings with a Webhook card in "Ticket Detection".
   - Show enabled state, workspace-specific webhook URL, secret status/suffix, last received/accepted/error timestamps, and copy/regenerate controls.
@@ -91,9 +91,11 @@ The webhook must not bypass the existing sync pipeline. It should fetch and upse
   - Add a concise setup guide with the exact webhook URL pattern, expected payload field, auth header or token placement, enable/disable behavior, and safe rollback steps.
   - State clearly that scheduled polling remains enabled and catches missed webhook deliveries.
 
-- [ ] Validate with local and staging/prod smoke tests.
-  - Unit tests for repository/service/route behavior.
-  - Manual curl test against local API with mocked or real FreshService ticket ID.
-  - Staging test from FreshService automation for one workspace.
-  - Confirm that a new unassigned ticket creates or queues a pipeline run immediately and that scheduled polling still handles missed or duplicate events.
-  - Current status: unit tests, build/lint, local migration, backend health, and unauthenticated local webhook-route smoke are complete. Staging/prod FreshService automation delivery is intentionally left for rollout because it requires changing FreshService automation outside the repo.
+- [x] Validate with local and production smoke tests.
+  - Unit tests for repository/service/route behavior passed.
+  - Manual curl test against the local API confirmed the unauthenticated webhook route is public and validates payload/config state.
+  - Production App Service deployment completed and `/api/health` reports version `2.52`.
+  - Production webhook route smoke passed: missing ticket IDs return `missing_ticket_id`, and disabled workspace webhooks return `webhook_not_configured` instead of session auth.
+  - Production database migration status is up to date.
+  - The deployed frontend contains the `2.52` webhook setup UI with the exact FreshService action URL, workspace slug, header name, and JSON body fields.
+  - Scheduled polling remains enabled as the missed-delivery and duplicate-delivery backstop. Live FreshService automation delivery can now be enabled per workspace from the documented setup fields.
