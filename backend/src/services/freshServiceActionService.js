@@ -569,6 +569,7 @@ class FreshServiceActionService {
       }
 
       let ticketGone = false;
+      const optionalActionFailures = [];
 
       for (const action of actions) {
         if (ticketGone) {
@@ -613,22 +614,44 @@ class FreshServiceActionService {
             runId,
           });
         } else if (action.type === 'update_custom_fields') {
-          const customFields = await this._resolveTicketPulseLookupFields(client, action, fsConfig);
-          action.sentCustomFields = customFields;
-          const result = await client.updateTicketCustomFields(action.ticketId, customFields);
-          if (result?.alreadyClosed) { ticketGone = true; continue; }
-          await prisma.ticket.update({
-            where: { id: run.ticketId },
-            data: action.localFields,
-          }).catch((updateError) => {
-            logger.warn('FreshService sync: custom fields updated but local mirror update failed', {
-              ticketId: run.ticketId,
-              freshserviceTicketId: action.ticketId,
-              runId,
-              error: updateError.message,
+          try {
+            const customFields = await this._resolveTicketPulseLookupFields(client, action, fsConfig);
+            action.sentCustomFields = customFields;
+            const result = await client.updateTicketCustomFields(action.ticketId, customFields);
+            if (result?.alreadyClosed) { ticketGone = true; continue; }
+            await prisma.ticket.update({
+              where: { id: run.ticketId },
+              data: action.localFields,
+            }).catch((updateError) => {
+              logger.warn('FreshService sync: custom fields updated but local mirror update failed', {
+                ticketId: run.ticketId,
+                freshserviceTicketId: action.ticketId,
+                runId,
+                error: updateError.message,
+              });
             });
-          });
-          logger.info('FreshService: Ticket Pulse skill fields updated', { ticketId: action.ticketId, runId });
+            logger.info('FreshService: Ticket Pulse skill fields updated', { ticketId: action.ticketId, runId });
+          } catch (customFieldError) {
+            if (run.decision !== 'noise_dismissed') {
+              throw customFieldError;
+            }
+
+            const optionalFailure = {
+              type: action.type,
+              ticketId: action.ticketId,
+              error: customFieldError.message,
+              freshserviceError: extractFreshServiceError(customFieldError),
+            };
+            optionalActionFailures.push(optionalFailure);
+            action.optionalFailure = optionalFailure;
+            payloadData = buildSyncPayload(actions, preview, dryRun, { optionalActionFailures });
+            logger.warn('FreshService sync: optional noise category write failed; continuing to close ticket', {
+              ticketId: action.ticketId,
+              runId,
+              error: customFieldError.message,
+              freshserviceError: optionalFailure.freshserviceError,
+            });
+          }
         } else if (action.type === 'close') {
           const result = await client.closeTicket(action.ticketId, action.status);
           if (result?.alreadyClosed) { ticketGone = true; }
@@ -655,7 +678,12 @@ class FreshServiceActionService {
         }
       }
 
-      const syncNote = ticketGone ? 'Ticket already deleted or closed in FreshService — no action needed' : null;
+      const syncNotes = [];
+      if (ticketGone) syncNotes.push('Ticket already deleted or closed in FreshService — no action needed');
+      if (optionalActionFailures.length > 0) {
+        syncNotes.push('Optional Ticket Pulse category write failed; continued with remaining FreshService actions');
+      }
+      const syncNote = syncNotes.length > 0 ? syncNotes.join(' ') : null;
 
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },

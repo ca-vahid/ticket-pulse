@@ -183,6 +183,67 @@ describe('freshServiceActionService workspace-scoped category writeback', () => 
     });
     expect(freshserviceModule.createFreshServiceClient).not.toHaveBeenCalled();
   });
+
+  test('continues closing noise-dismissed tickets when optional category writeback fails', async () => {
+    const customFieldError = new Error('FreshService API error: Validation failed');
+    customFieldError.freshserviceStatus = 400;
+    customFieldError.freshserviceDetail = {
+      description: 'Validation failed',
+      errors: [{ field: 'lf_ticket_pulse_category', code: 'datatype_mismatch' }],
+    };
+    const client = {
+      listCustomObjects: jest.fn().mockResolvedValue([]),
+      updateTicketCustomFields: jest.fn().mockRejectedValue(customFieldError),
+      addPrivateNote: jest.fn().mockResolvedValue({ id: 88 }),
+      closeTicket: jest.fn().mockResolvedValue({ id: 224242, status: 4 }),
+    };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(run({
+      id: 3301,
+      ticketId: 501,
+      workspaceId: 1,
+      decision: 'noise_dismissed',
+      assignedTechId: null,
+      ticket: ticket({
+        id: 501,
+        freshserviceTicketId: 224242,
+        firstAssignedAt: null,
+        internalCategory: { name: 'Service Desk & Routing' },
+        internalSubcategory: { name: 'Non-actionable Notifications' },
+      }),
+      recommendation: {
+        closureNoticeHtml: '<p>No action needed.</p>',
+        recommendations: [],
+      },
+    }));
+
+    const result = await freshServiceActionService.execute(3301, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(client.updateTicketCustomFields).toHaveBeenCalled();
+    expect(client.addPrivateNote).toHaveBeenCalledWith(
+      224242,
+      expect.stringContaining('Ticket closed without assignment'),
+    );
+    expect(client.closeTicket).toHaveBeenCalledWith(224242, 4);
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenLastCalledWith({
+      where: { id: 3301 },
+      data: expect.objectContaining({
+        syncStatus: 'synced',
+        syncError: expect.stringContaining('Optional Ticket Pulse category write failed'),
+        syncPayload: expect.objectContaining({
+          optionalActionFailures: [
+            expect.objectContaining({
+              type: 'update_custom_fields',
+              ticketId: 224242,
+              error: 'FreshService API error: Validation failed',
+              freshserviceError: expect.objectContaining({ status: 400 }),
+            }),
+          ],
+        }),
+      }),
+    });
+  });
 });
 
 describe('freshServiceActionService priority writeback', () => {
