@@ -90,6 +90,27 @@ function getTicketPulseCategoryLabel(ticket, recommendation = null) {
   return null;
 }
 
+function getTicketPulseCategoryParts(ticket, recommendation = null) {
+  const migratedCategory = ticket?.internalCategory?.name || ticket?.tpSkill || recommendation?.internalCategoryName || null;
+  const migratedSubcategory = ticket?.internalSubcategory?.name || ticket?.tpSubskill || recommendation?.internalSubcategoryName || null;
+  if (migratedCategory || migratedSubcategory) {
+    return {
+      category: migratedCategory,
+      subcategory: migratedSubcategory,
+      label: [migratedCategory, migratedSubcategory].filter(Boolean).join(' / '),
+    };
+  }
+
+  const label = getTicketPulseCategoryLabel(ticket, recommendation);
+  if (!label) return { category: null, subcategory: null, label: null };
+  const parts = label.split(/\s*\/\s*/).filter(Boolean);
+  return {
+    category: parts[0] || label,
+    subcategory: parts.length > 1 ? parts.slice(1).join(' / ') : null,
+    label,
+  };
+}
+
 function getSuggestedCategoryLabel(ticket, recommendation = null) {
   const category = ticket?.suggestedInternalCategoryName || recommendation?.suggestedInternalCategoryName;
   const subcategory = ticket?.suggestedInternalSubcategoryName || recommendation?.suggestedInternalSubcategoryName;
@@ -1849,6 +1870,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     High: 3,
     Urgent: 4,
   };
+  const PRIORITY_SIGNAL_LABEL = {
+    1: 'LOW',
+    2: 'MED',
+    3: 'HIGH',
+    4: 'URG',
+  };
 
   const getPriorityMeta = (ticket) => {
     const assessedId = Number(ticket?.assessedPriorityId) || PRIORITY_ID_BY_LABEL[ticket?.assessedPriority] || null;
@@ -1914,6 +1941,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const renderSignalIcons = (run, priorityMeta, ctx) => {
     const sourceMeta = getSourceMeta(run);
     const SourceIcon = sourceMeta.Icon;
+    const prioritySignalLabel = PRIORITY_SIGNAL_LABEL[priorityMeta.id] || 'PRI';
     const priorityTitle = [
       `${priorityMeta.source} priority: ${priorityMeta.label || 'Unknown'}`,
       priorityMeta.rationale,
@@ -1922,11 +1950,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     return (
       <div className="flex items-center gap-1">
         <span
-          className={`inline-flex h-5 w-5 items-center justify-center rounded border ${PRIORITY_ICON_CLASS[priorityMeta.id] || 'border-slate-200 bg-slate-50 text-slate-400'}`}
+          className={`inline-flex h-5 min-w-[2rem] items-center justify-center rounded border px-1 text-[9px] font-bold leading-none ${PRIORITY_ICON_CLASS[priorityMeta.id] || 'border-slate-200 bg-slate-50 text-slate-400'}`}
           title={priorityTitle}
           aria-label={priorityTitle}
         >
-          <AlertCircle className="h-3.5 w-3.5" />
+          {prioritySignalLabel}
         </span>
         <span
           className={`inline-flex h-5 w-5 items-center justify-center rounded border ${sourceMeta.className}`}
@@ -2306,7 +2334,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const flag = getTicketFlag(run);
     const recs = run.recommendation?.recommendations || [];
     const priorityMeta = getPriorityMeta(run.ticket);
-    const categoryLabel = getTicketPulseCategoryLabel(run.ticket, run.recommendation);
+    const categoryParts = getTicketPulseCategoryParts(run.ticket, run.recommendation);
+    const categoryLabel = categoryParts.label;
     const suggestedCategoryLabel = getSuggestedCategoryLabel(run.ticket, run.recommendation);
     const categoryNeedsReview = needsCategoryReview(run.ticket, run.recommendation);
     const ctx = run.reboundFrom || run.ticket?.lastReboundContext;
@@ -2977,7 +3006,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                             || (subView !== 'pending' ? run.assignedTech : null);
                           const statusLabel = getStatusLabel(run.ticket?.status);
                           const dd = showDecision ? getDisplayDecision(run) : null;
-                          const categoryLabel = getTicketPulseCategoryLabel(run.ticket, run.recommendation);
+                          const categoryParts = getTicketPulseCategoryParts(run.ticket, run.recommendation);
+                          const categoryLabel = categoryParts.label;
                           const suggestedCategoryLabel = getSuggestedCategoryLabel(run.ticket, run.recommendation);
                           const categoryNeedsReview = needsCategoryReview(run.ticket, run.recommendation);
                           // Use a div role=button instead of a real <button> so the
@@ -3007,7 +3037,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 <div className="mt-1">{renderSignalIcons(run, priorityMeta, ctx)}</div>
                               </div>
 
-                              {/* Ticket: title bold + small muted ID line */}
+                              {/* Ticket: title plus one muted metadata line. */}
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
                                 <div className="flex items-center gap-1.5 min-w-0">
                                   <span
@@ -3020,29 +3050,39 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                     <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />
                                   )}
                                 </div>
-                                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 leading-none truncate">
-                                  <span className="font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                                <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] text-slate-400 leading-none">
+                                  <span className="shrink-0 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                                  {priorityMeta.rationale && (
+                                    <>
+                                      <span className="shrink-0 text-slate-300">·</span>
+                                      <span className="min-w-0 truncate" title={priorityMeta.rationale}>
+                                        {priorityMeta.rationale}
+                                      </span>
+                                    </>
+                                  )}
                                   {run._siblingCount > 0 && (
                                     <span
-                                      className="text-slate-400"
+                                      className="shrink-0 text-slate-400"
                                       title={`${run._siblingCount} earlier run${run._siblingCount > 1 ? 's' : ''} for this ticket — switch to a sub-filter to see all`}
                                     >
                                       · +{run._siblingCount} earlier
                                     </span>
                                   )}
                                 </div>
-                                {priorityMeta.rationale && (
-                                  <div className="mt-1 truncate text-[10px] text-slate-500" title={priorityMeta.rationale}>
-                                    {priorityMeta.rationale}
-                                  </div>
-                                )}
                               </div>
 
                               {/* Category: split from Ticket so scan columns stay clean. */}
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
                                 {categoryLabel ? (
-                                  <div className="truncate text-[11px] font-medium leading-snug text-blue-700" title={categoryLabel}>
-                                    {categoryLabel}
+                                  <div className="min-w-0" title={categoryLabel}>
+                                    <div className="truncate text-[11px] font-semibold leading-snug text-blue-700">
+                                      {categoryParts.category || categoryLabel}
+                                    </div>
+                                    {categoryParts.subcategory && (
+                                      <div className="mt-0.5 truncate text-[10px] font-medium leading-tight text-slate-500">
+                                        {categoryParts.subcategory}
+                                      </div>
+                                    )}
                                   </div>
                                 ) : (
                                   <span className="text-slate-300 text-[12px]">—</span>

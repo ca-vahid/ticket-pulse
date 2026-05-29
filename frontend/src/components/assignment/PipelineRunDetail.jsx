@@ -1107,6 +1107,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
     3: 'border-orange-200 bg-orange-50 text-orange-600',
     4: 'border-red-200 bg-red-50 text-red-600',
   };
+  const PRIORITY_SIGNAL_LABEL = { 1: 'LOW', 2: 'MED', 3: 'HIGH', 4: 'URG' };
   const PRIORITY_ID_BY_LABEL = { Low: 1, Medium: 2, High: 3, Urgent: 4 };
   const assessedPriorityId = Number(ticket?.assessedPriorityId) || PRIORITY_ID_BY_LABEL[ticket?.assessedPriority] || null;
   const assessedPriorityLabel = ticket?.assessedPriority || (assessedPriorityId ? PRIORITY_LABELS[assessedPriorityId] : null);
@@ -1204,11 +1205,11 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span
-                className={`inline-flex h-5 w-5 items-center justify-center rounded border ${PRIORITY_ICON_CLASS[prioritySignalId] || 'border-slate-200 bg-slate-50 text-slate-400'}`}
+                className={`inline-flex h-5 min-w-[2rem] items-center justify-center rounded border px-1 text-[9px] font-bold leading-none ${PRIORITY_ICON_CLASS[prioritySignalId] || 'border-slate-200 bg-slate-50 text-slate-400'}`}
                 title={prioritySignalTitle}
                 aria-label={prioritySignalTitle}
               >
-                <AlertCircle className="h-3.5 w-3.5" />
+                {PRIORITY_SIGNAL_LABEL[prioritySignalId] || 'PRI'}
               </span>
               <span
                 className={`inline-flex h-5 w-5 items-center justify-center rounded border ${sourceSignal.className}`}
