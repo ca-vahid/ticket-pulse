@@ -67,11 +67,11 @@ const PROFICIENCY_LEVELS = [
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const REVIEW_RECOMMENDATION_TABS = [
-  { key: 'prompt', label: 'Prompt', title: 'Prompt Recommendations', icon: FileText, tone: 'indigo', emptyText: 'No prompt changes recommended for this review.' },
-  { key: 'tools_data', label: 'Tools & Data', title: 'Tools & Data Recommendations', icon: Database, tone: 'sky', emptyText: 'No tools or data capability changes recommended for this review.' },
-  { key: 'taxonomy', label: 'Categories', title: 'Category Recommendations', icon: Tags, tone: 'emerald', emptyText: 'No category/subcategory changes recommended for this review.' },
-  { key: 'skill', label: 'Agent Skills', title: 'Agent Skill Recommendations', icon: Award, tone: 'violet', emptyText: 'No agent skill changes recommended for this review.' },
-  { key: 'dev_policy', label: 'Dev / Policy', title: 'Dev / Policy Recommendations', icon: Settings2, tone: 'amber', emptyText: 'No dev or policy changes recommended for this review.' },
+  { key: 'prompt', label: 'Prompt', title: 'Prompt Recommendations', icon: FileText, tone: 'indigo', description: 'Prompt wording and decision guidance.', emptyText: 'No prompt changes recommended for this review.' },
+  { key: 'tools_data', label: 'Tools & Data', title: 'Tools & Data Recommendations', icon: Database, tone: 'sky', description: 'LLM-facing tools, signals, and data gaps.', emptyText: 'No tools or data capability changes recommended for this review.' },
+  { key: 'taxonomy', label: 'Categories', title: 'Category Recommendations', icon: Tags, tone: 'emerald', description: 'Ticket Pulse category and subcategory changes.', emptyText: 'No category/subcategory changes recommended for this review.' },
+  { key: 'skill', label: 'Agent Skills', title: 'Agent Skill Recommendations', icon: Award, tone: 'violet', description: 'Technician skill and competency updates.', emptyText: 'No agent skill changes recommended for this review.' },
+  { key: 'dev_policy', label: 'Dev / Policy', title: 'Dev / Policy Recommendations', icon: Settings2, tone: 'amber', description: 'Engineering, config, observability, and policy work.', emptyText: 'No dev or policy changes recommended for this review.' },
 ];
 
 function recommendationKindLabel(kind) {
@@ -553,6 +553,11 @@ function getReviewRecommendationTone(tone, status) {
       card: 'border-violet-100 bg-violet-50/40 shadow-violet-100/60',
       icon: 'bg-violet-100 text-violet-700',
       accent: 'from-violet-400 to-fuchsia-500',
+    },
+    amber: {
+      card: 'border-amber-100 bg-amber-50/50 shadow-amber-100/60',
+      icon: 'bg-amber-100 text-amber-700',
+      accent: 'from-amber-400 to-orange-500',
     },
   };
 
@@ -1047,60 +1052,63 @@ function RunRecommendationsPanel({
   const activeSection = sections.find((section) => section.key === activeKey) || sections[0];
   const ActiveIcon = activeSection.icon;
   const total = sections.reduce((sum, section) => sum + section.items.length, 0);
+  const activeTone = backlogTabTone(activeSection.tone);
 
   return (
     <section className="overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 bg-slate-50/80 p-3 sm:p-4">
-        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-slate-900">Recommendation Approval</h3>
-            <p className="text-sm text-slate-500">Review one bucket at a time, then approve or decline each item.</p>
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5">
+          <div className="grid min-w-[780px] grid-cols-5 gap-1.5 sm:min-w-0">
+            {sections.map((section) => {
+              const Icon = section.icon;
+              const active = section.key === activeKey;
+              const toneClass = backlogTabTone(section.tone);
+              return (
+                <button
+                  key={section.key}
+                  type="button"
+                  onClick={() => setActiveKey(section.key)}
+                  className={`flex min-h-14 items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-bold transition-all duration-200 ${
+                    active ? toneClass.selected : toneClass.idle
+                  }`}
+                >
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${active ? 'bg-white/20 text-white' : toneClass.icon}`}>
+                    <Icon className="h-4 w-4 shrink-0" />
+                  </span>
+                  <span>{section.label}</span>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                    active ? 'bg-white/20 text-white' : 'bg-white/80 text-slate-500'
+                  }`}>
+                    {section.items.length}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm">
-            {total} item{total === 1 ? '' : 's'}
-          </span>
         </div>
-        <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1 md:grid-cols-4">
-          {sections.map((section) => {
-            const Icon = section.icon;
-            const active = section.key === activeKey;
-            return (
-              <button
-                key={section.key}
-                type="button"
-                onClick={() => setActiveKey(section.key)}
-                className={`flex min-h-[42px] items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-200 ${
-                  active
-                    ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
-                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
-                }`}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span>{section.label}</span>
-                <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
-                  active ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
-                }`}>
-                  {section.items.length}
-                </span>
-              </button>
-            );
-          })}
+
+        <div className="mt-3 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${activeTone.icon}`}>
+              <ActiveIcon className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-slate-900">{activeSection.title}</div>
+              <div className="text-xs text-slate-500">{activeSection.description}</div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-white px-2.5 py-1 font-semibold text-slate-600 shadow-sm">
+              {activeSection.items.length} in this category
+            </span>
+            <span className="rounded-full bg-white px-2.5 py-1 font-semibold text-slate-500 shadow-sm">
+              {total} total
+            </span>
+          </div>
         </div>
       </div>
 
       <div className="p-3 sm:p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${getReviewRecommendationTone(activeSection.tone).icon}`}>
-              <ActiveIcon className="h-4 w-4" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-slate-900">{activeSection.title}</div>
-              <div className="text-xs text-slate-500">{activeSection.items.length} queued for review</div>
-            </div>
-          </div>
-        </div>
-
         {activeSection.items.length > 0 && activeSection.key === 'taxonomy' ? (
           <TaxonomyRecommendationsTable
             items={activeSection.items}
@@ -3890,12 +3898,44 @@ const REVIEW_PAGE_TABS = [
   { key: 'consolidation', label: 'Consolidation', icon: Sparkles },
 ];
 const BACKLOG_KIND_TABS = [
-  { key: 'prompt', label: 'Prompt', icon: FileText },
-  { key: 'tools_data', label: 'Tools & Data', icon: Database },
-  { key: 'taxonomy', label: 'Categories', icon: Tags },
-  { key: 'skill', label: 'Agent Skills', icon: Award },
-  { key: 'dev_policy', label: 'Dev / Policy', icon: Settings2 },
+  { key: 'prompt', label: 'Prompt', icon: FileText, tone: 'indigo', description: 'Prompt wording and decision guidance.' },
+  { key: 'tools_data', label: 'Tools & Data', icon: Database, tone: 'sky', description: 'LLM-facing tools, signals, and data gaps.' },
+  { key: 'taxonomy', label: 'Categories', icon: Tags, tone: 'emerald', description: 'Ticket Pulse category and subcategory changes.' },
+  { key: 'skill', label: 'Agent Skills', icon: Award, tone: 'violet', description: 'Technician skill and competency updates.' },
+  { key: 'dev_policy', label: 'Dev / Policy', icon: Settings2, tone: 'amber', description: 'Engineering, config, observability, and policy work.' },
 ];
+
+const BACKLOG_TAB_TONES = {
+  indigo: {
+    selected: 'border-indigo-500 bg-indigo-600 text-white shadow-sm shadow-indigo-500/20',
+    idle: 'border-indigo-100 bg-indigo-50/50 text-indigo-700 hover:border-indigo-200 hover:bg-indigo-50',
+    icon: 'bg-indigo-500/15 text-indigo-700',
+  },
+  sky: {
+    selected: 'border-sky-500 bg-sky-600 text-white shadow-sm shadow-sky-500/20',
+    idle: 'border-sky-100 bg-sky-50/50 text-sky-700 hover:border-sky-200 hover:bg-sky-50',
+    icon: 'bg-sky-500/15 text-sky-700',
+  },
+  emerald: {
+    selected: 'border-emerald-500 bg-emerald-600 text-white shadow-sm shadow-emerald-500/20',
+    idle: 'border-emerald-100 bg-emerald-50/50 text-emerald-700 hover:border-emerald-200 hover:bg-emerald-50',
+    icon: 'bg-emerald-500/15 text-emerald-700',
+  },
+  violet: {
+    selected: 'border-violet-500 bg-violet-600 text-white shadow-sm shadow-violet-500/20',
+    idle: 'border-violet-100 bg-violet-50/50 text-violet-700 hover:border-violet-200 hover:bg-violet-50',
+    icon: 'bg-violet-500/15 text-violet-700',
+  },
+  amber: {
+    selected: 'border-amber-400 bg-amber-500 text-white shadow-sm shadow-amber-500/20',
+    idle: 'border-amber-100 bg-amber-50/70 text-amber-800 hover:border-amber-200 hover:bg-amber-50',
+    icon: 'bg-amber-500/15 text-amber-700',
+  },
+};
+
+function backlogTabTone(tone) {
+  return BACKLOG_TAB_TONES[tone] || BACKLOG_TAB_TONES.indigo;
+}
 
 function DailyReviewHistoryPanel({
   runs,
@@ -4690,6 +4730,9 @@ export default function DailyReviewManager({ workspaceTimezone }) {
     );
   }
 
+  const activeBacklogTab = BACKLOG_KIND_TABS.find((item) => item.key === backlogKind) || BACKLOG_KIND_TABS[0];
+  const ActiveBacklogIcon = activeBacklogTab.icon;
+
   return (
     <div className="space-y-6">
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -4897,56 +4940,11 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
       {activeTab === 'backlog' && (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-500/20">
-                <Sparkles className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold tracking-tight text-slate-900">Recommendation Review</h3>
-                <p className="text-sm text-slate-500">
-                  Review, approve, reject, and stage AI-generated recommendations for consolidation.
-                </p>
-              </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[460px]">
-              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-blue-600">
-                  <Clock3 className="h-4 w-4" />
-                </div>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pending</div>
-                  <div className="text-2xl font-bold leading-6 text-slate-900">{pendingBacklogTotal}</div>
-                  <div className="text-xs text-slate-500">Needs review</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                  <Layers className="h-4 w-4" />
-                </div>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Staged</div>
-                  <div className="text-2xl font-bold leading-6 text-slate-900">{approvedBacklogTotal}</div>
-                  <div className="text-xs text-slate-500">For consolidation</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-50 text-violet-600">
-                  <CheckCheck className="h-4 w-4" />
-                </div>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Ready to apply</div>
-                  <div className="text-2xl font-bold leading-6 text-slate-900">{readyToApplyCount}</div>
-                  <div className="text-xs text-slate-500">Grouped & ready</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mb-4 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1">
-            <div className="grid min-w-[620px] grid-cols-5 gap-1 sm:min-w-0">
-              {BACKLOG_KIND_TABS.map(({ key, label, icon: Icon }) => {
+          <div className="mb-4 overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50 p-1.5">
+            <div className="grid min-w-[780px] grid-cols-5 gap-1.5 sm:min-w-0">
+              {BACKLOG_KIND_TABS.map(({ key, label, icon: Icon, tone }) => {
                 const selectedKind = backlogKind === key;
+                const toneClass = backlogTabTone(tone);
                 return (
                   <button
                     key={key}
@@ -4955,17 +4953,43 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                       setBacklogKind(key);
                       setBacklogStatus('pending');
                     }}
-                    className={`flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all sm:px-2.5 ${
-                      selectedKind
-                        ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
-                        : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
+                    className={`flex min-h-14 items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-bold transition-all ${
+                      selectedKind ? toneClass.selected : toneClass.idle
                     }`}
                   >
-                    <Icon className="h-3.5 w-3.5" />
-                    {label}
+                    <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${selectedKind ? 'bg-white/20 text-white' : toneClass.icon}`}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span>{label}</span>
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          <div className="mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${backlogTabTone(activeBacklogTab.tone).icon}`}>
+                <ActiveBacklogIcon className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <div className="font-semibold text-slate-900">{activeBacklogTab.label} backlog</div>
+                <div className="text-xs text-slate-500">{activeBacklogTab.description} Approve useful items, reject noise, and send approved items to consolidation.</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700">
+                <Clock3 className="h-3.5 w-3.5" />
+                {pendingBacklogTotal} pending
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
+                <Layers className="h-3.5 w-3.5" />
+                {approvedBacklogTotal} staged
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 font-semibold text-violet-700">
+                <CheckCheck className="h-3.5 w-3.5" />
+                {readyToApplyCount} ready
+              </span>
             </div>
           </div>
 
