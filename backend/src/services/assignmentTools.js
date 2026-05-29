@@ -1155,7 +1155,7 @@ async function getRoutingBoundaryContext(workspaceId, input = {}) {
     try {
       const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
       if (fsConfig?.domain && fsConfig?.apiKey) {
-        const client = createFreshServiceClient(fsConfig);
+        const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
         group = await client.getGroup(Number(ticket.groupId));
         groupLookup = group ? 'freshservice' : 'not_found';
       } else {

@@ -200,6 +200,7 @@ describe('assignmentTools risk and routing helpers', () => {
       candidate_tech_ids: [1, 2],
     }, { workspaceId: 1, ticketId: 900 });
 
+    expect(createFreshServiceClientMock).toHaveBeenCalledWith('example.freshservice.com', 'key');
     expect(result.freshserviceGroup).toMatchObject({
       id: 1000206163,
       name: 'Coreshack',
