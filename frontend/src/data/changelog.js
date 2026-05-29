@@ -1,6 +1,16 @@
-export const APP_VERSION = '2.52.1';
+export const APP_VERSION = '2.55';
 
 export const changelog = [
+  {
+    version: '2.55',
+    date: 'May 29, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>Daily Review recommendation taxonomy</strong> now separates work into Prompt, Tools & Data, Categories, Agent Skills, and Dev / Policy so prompt-only edits do not hide missing tool or engineering requirements.' },
+      { type: 'improved', html: '<strong>Tool-aware review guardrails</strong> give Daily Review and Opus consolidation the current assignment tool list, require prompt recommendations to declare required tool/data dependencies, and route missing capabilities into Tools & Data or Dev / Policy.' },
+      { type: 'improved', html: '<strong>Review backlog and approval UI</strong> promotes the five recommendation categories with clearer tabs, compact status context, and legacy Process rows mapped into the new operational buckets.' },
+      { type: 'database', html: '<strong>Production migration status</strong> is current. Migration 20260529000000_widen_assignment_pipeline_trigger_source is included in this branch, and Prisma reported no pending production migrations during release prep.' },
+    ],
+  },
   {
     version: '2.52.1',
     date: 'May 28, 2026',
