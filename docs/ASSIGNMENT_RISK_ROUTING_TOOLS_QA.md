@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This guide covers QA for the production deployment that added assignment-risk, requester-site, and routing-boundary tooling to the assignment pipeline.
+This guide covers QA for the production deployment that added assignment-risk, requester-site, and routing-boundary tooling to the assignment pipeline, plus the v2.55 Daily Review recommendation taxonomy update.
 
-The change was deployed to the backend on May 28, 2026 from branch `codex/assignment-tools-prod-deploy`, commit `5aaa2b8c`. IT workspace prompt version `29` is published in production.
+The current production release is v2.55, merged to `main` on May 29, 2026 by commit `ffff5d66`. IT workspace prompt version `30` is published in production.
 
 ## What Changed
 
@@ -25,6 +25,16 @@ New global assignment tools are available to the LLM runtime:
 
 The IT assignment prompt now explicitly instructs the model to use those tools. Other workspace prompts were not changed.
 
+Daily Review recommendation buckets were simplified to:
+
+- Prompt
+- Tools & Data
+- Categories
+- Agent Skills
+- Dev / Policy
+
+Review and consolidation prompts now receive the available assignment-tool list. Prompt recommendations that depend on missing data/tooling must declare the dependency and should be paired with a Tools & Data or Dev / Policy recommendation when the capability does not exist yet.
+
 ## Safety Notes
 
 Production IT assignment config currently has `autoAssign=true` and `dryRunMode=false`. A manual pipeline trigger on an eligible IT ticket can create real assignment and Freshservice writeback activity.
@@ -41,20 +51,21 @@ Accounting and Health & Safety currently have `autoAssign=false`; manual runs th
 2. Expected:
    - `status` is `healthy`
    - `app.environment` is `production`
-   - `app.version` is `2.52.1`
+   - `app.version` is `2.55.0`
    - database check is healthy
 
-3. In GitHub Actions, backend workflow run `26607240576` should be successful.
+3. In GitHub Actions, these v2.55 runs should be successful:
+   - Backend App Service deploy: `26617752172`
+   - Azure Static Web Apps deploy: `26617752167`
 
-4. PR for source alignment:
-   - `https://github.com/ca-vahid/ticket-pulse/pull/30`
+4. In the product header, confirm the frontend shows `v2.55`. If the header still shows `v2.52.1`, hard refresh the browser before escalating because the static app may be cached locally.
 
 ## Prompt Checks
 
 Workspace: IT
 
 1. Go to Assignment Review > Prompts.
-2. Confirm the published assignment prompt version is `29` or later.
+2. Confirm the published assignment prompt version is `30` or later.
 3. Search the prompt text for:
    - `get_requester_site_context`
    - `get_assignment_risk_signals`
@@ -64,7 +75,7 @@ Workspace: IT
 Expected:
 
 - All markers are present.
-- Version `28` is archived.
+- Versions `28` and `29` are archived.
 - The prompt says risk/capacity/routing-boundary signals belong in internal reasoning, not in the public technician briefing.
 
 ## Tool Registry Checks
@@ -161,31 +172,41 @@ Expected:
 
 ## Daily Review / Consolidation Checks
 
-The approved Daily Review backlog is not automatically cleared by this deployment. This change gives the runtime the tools that the approved recommendations needed.
+The approved Daily Review backlog is not automatically cleared by this deployment. This change gives the runtime the tools that the approved recommendations needed and makes the review system more explicit about prompt-only limitations.
 
 Steps:
 
-1. Go to Assignment Review > Daily Review > Consolidation.
-2. Confirm approved recommendation items are still visible if they were not explicitly applied.
-3. Run Opus Consolidation only if the team wants a fresh consolidation plan.
-4. Review any prompt recommendation it produces.
+1. Go to Assignment Review > Daily Review > Backlog.
+2. Confirm the category tabs are prominent near the top and show only:
+   - Prompt
+   - Tools & Data
+   - Categories
+   - Agent Skills
+   - Dev / Policy
+3. Confirm old `Process` tabs or labels do not appear in Backlog or Recommendation Approval.
+4. Go to Assignment Review > Daily Review > Consolidation.
+5. Confirm approved recommendation items are still visible if they were not explicitly applied.
+6. Run Opus Consolidation only if the team wants a fresh consolidation plan.
+7. Review any prompt recommendation it produces.
 
 Expected:
 
 - Consolidation should no longer need to ask for impossible "prompt-only" behavior for availability, rejection, site, or group-boundary decisions.
 - If it suggests prompt changes, they should reference the now-existing tools rather than inventing tools.
+- If a prompt update depends on a tool or data feed, the prompt recommendation should say that it only works when that tool/data exists and should list the required tool names.
+- Missing runtime capabilities should appear under Tools & Data or Dev / Policy, not as a prompt-only recommendation.
 - Applying a consolidation item should create a draft/published artifact according to the existing UI flow; verify before publishing.
 
 ## Other Workspace Impact
 
-Production read-only checks on May 28, 2026 found:
+Production prompt checks on May 29, 2026 found:
 
-| Workspace | Published Prompt | Prompt Includes New Tool Guidance | Runtime Tool Smoke |
-| --- | ---: | --- | --- |
-| IT | v29 | Yes | Passed |
-| Accounting Team | v8 | No | Passed |
-| Health & Safety Team | v10 | No | Passed |
-| Field Equipment Team | none | No prompt | Passed |
+| Workspace | Published Prompt | Prompt Includes New Tool Guidance |
+| --- | ---: | --- |
+| IT | v30 | Yes |
+| Accounting Team | v8 | No |
+| Health & Safety Team | v10 | No |
+| Field Equipment Team | none | No prompt |
 
 Expected impact outside IT:
 
@@ -218,9 +239,10 @@ Escalate if any of these occur:
 
 Prompt rollback:
 
-- Restore/publish IT prompt version `28` from Assignment Review > Prompts if prompt behavior is the problem.
+- Restore/publish IT prompt version `29` from Assignment Review > Prompts if the specialty-agent addition in v30 is the problem.
+- Restore/publish IT prompt version `28` only if the new assignment-risk/routing tool guidance itself is the problem.
 
 Code rollback:
 
 - Re-deploy the previous backend commit from `main` only if tool execution itself is faulty.
-- If code is rolled back, do not keep IT prompt v29 published because it instructs the model to call tools that would no longer exist.
+- If code is rolled back before the new tools exist, do not keep IT prompt v29 or v30 published because both instruct the model to call tools that would no longer exist.
