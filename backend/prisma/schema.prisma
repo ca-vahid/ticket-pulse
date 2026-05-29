@@ -1132,7 +1132,7 @@ model AssignmentPipelineRun {
   workspaceId       Int        @map("workspace_id")
   workspace         Workspace  @relation(fields: [workspaceId], references: [id])
   status            String     @default("running") @db.VarChar(20) // queued | running | completed | failed | failed_schema_validation | cancelled | superseded | skipped_stale
-  triggerSource     String     @db.VarChar(20) @map("trigger_source") // webhook | poll | manual | email | rebound
+  triggerSource     String     @db.VarChar(60) @map("trigger_source") // webhook | poll | manual | email | rebound | priority_assessment_after_hours
   reboundFrom       Json?      @map("rebound_from") // { previousTechId, previousTechName, unassignedAt, unassignedByName, reboundCount } — set when this run was triggered because the ticket bounced back from a prior assignee
   llmProvider       String?    @db.VarChar(30) @map("llm_provider")
   llmModel          String?    @db.VarChar(100) @map("llm_model")
