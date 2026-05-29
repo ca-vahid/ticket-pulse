@@ -52,6 +52,7 @@ const ACTIONABLE_TICKET_STATUSES = new Set(['Open', 'Pending']);
 const ACTIONABLE_FRESHSERVICE_STATUS_IDS = new Set([2, 3]);
 const INCREMENTAL_SYNC_OVERLAP_MS = 5 * 60 * 1000;
 const RECENT_ASSIGNED_TICKET_NOTIFICATION_WINDOW_MS = 30 * 60 * 1000;
+const ASSIGNMENT_CLEAR_VERIFICATION_WINDOW_MS = 90 * 1000;
 
 function isRecentDate(value, now = Date.now()) {
   if (!value) return false;
@@ -65,6 +66,20 @@ function shouldQueueFreshServiceAssignmentNotification(existingTicket, upsertedT
     return Number(existingTicket.assignedTechId || 0) !== Number(upsertedTicket.assignedTechId);
   }
   return isRecentDate(upsertedTicket.createdAt) || isRecentDate(upsertedTicket.freshserviceUpdatedAt);
+}
+
+function hasActivityBackedRebound(analysis) {
+  return analysis?.currentEpisode?.endMethod === 'rejected'
+    && Boolean(analysis.currentEpisode.startedAt || analysis.currentEpisode.endedAt);
+}
+
+function isRecentAssignmentClearRisk(existingTicket, now = Date.now()) {
+  const assignedAt = existingTicket?.assignedAt ? new Date(existingTicket.assignedAt).getTime() : NaN;
+  const updatedAt = existingTicket?.updatedAt ? new Date(existingTicket.updatedAt).getTime() : NaN;
+  const lastAssignmentWriteAt = Number.isFinite(assignedAt) ? assignedAt : updatedAt;
+  return Number.isFinite(lastAssignmentWriteAt)
+    && now - lastAssignmentWriteAt >= 0
+    && now - lastAssignmentWriteAt <= ASSIGNMENT_CLEAR_VERIFICATION_WINDOW_MS;
 }
 
 function formatNoiseCategory(category) {
@@ -348,6 +363,16 @@ class SyncService {
   async _handleTicketRebound(upsertedTicket, existingTicket, analysis, workspaceId) {
     const MAX_AUTO_REBOUNDS_PER_TICKET = 3;
     try {
+      if (!hasActivityBackedRebound(analysis)) {
+        logger.warn('Bounce detection skipped: no FreshService rejection activity evidence', {
+          ticketId: upsertedTicket?.id,
+          freshserviceTicketId: upsertedTicket?.freshserviceTicketId?.toString?.(),
+          previousTechId: existingTicket?.assignedTechId || null,
+          currentEpisodeEndMethod: analysis?.currentEpisode?.endMethod || null,
+        });
+        return;
+      }
+
       // Skip if assignment pipeline isn't enabled
       const { default: assignmentRepository } = await import('./assignmentRepository.js');
       const cfg = await assignmentRepository.getConfig(workspaceId);
@@ -414,6 +439,8 @@ class SyncService {
                 unassignedAt: unassignedAt ? new Date(unassignedAt).toISOString() : null,
                 unassignedByName: unassignedByName || null,
                 reboundCount: reboundCount + 1,
+                verifiedByFreshserviceActivity: true,
+                source: 'freshservice_activity',
               },
               // Synthesized empty recommendation so the Awaiting Decision UI
               // renders this as a "no candidates left to try" run rather than
@@ -509,6 +536,8 @@ class SyncService {
         unassignedAt: unassignedAt ? new Date(unassignedAt).toISOString() : null,
         unassignedByName: unassignedByName || null,
         reboundCount: reboundCount + 1,
+        verifiedByFreshserviceActivity: true,
+        source: 'freshservice_activity',
       };
 
       logger.info('Bounce detection: queueing rebound pipeline run', {
@@ -583,6 +612,158 @@ class SyncService {
     } catch (error) {
       logger.error(`Failed to write thread entries for ticket ${ticketId}:`, error);
     }
+  }
+
+  async _verifyAssignedToUnassignedSnapshot({
+    client,
+    ticket,
+    existingTicket,
+    workspaceId,
+    analysisPayload,
+    source,
+  }) {
+    const result = {
+      analysisPayload,
+      confirmedRebound: hasActivityBackedRebound(analysisPayload?.analysis),
+      assignmentClearVerification: null,
+    };
+
+    if (
+      !existingTicket?.assignedTechId
+      || (ticket.assignedTechId !== null && ticket.assignedTechId !== undefined)
+    ) {
+      return result;
+    }
+
+    const freshserviceTicketId = ticket.freshserviceTicketId || existingTicket.freshserviceTicketId;
+    const recentLocalAssignment = isRecentAssignmentClearRisk(existingTicket);
+
+    if (result.confirmedRebound) {
+      result.assignmentClearVerification = {
+        source: 'freshservice_activity',
+        verifiedByFreshserviceActivity: true,
+        reason: 'activity_rejected_episode',
+        recentLocalAssignment,
+      };
+      return result;
+    }
+
+    let currentSnapshot = null;
+    try {
+      if (client?.fetchTicketSnapshot) {
+        currentSnapshot = await client.fetchTicketSnapshot(Number(freshserviceTicketId));
+      } else if (client?.getTicket) {
+        currentSnapshot = await client.getTicket(Number(freshserviceTicketId));
+      }
+    } catch (error) {
+      logger.warn('Assignment clear verification failed; preserving existing local assignee', {
+        ticketId: existingTicket.id,
+        freshserviceTicketId: freshserviceTicketId?.toString?.() || String(freshserviceTicketId),
+        previousTechId: existingTicket.assignedTechId,
+        source,
+        error: error.message,
+      });
+      ticket.assignedTechId = existingTicket.assignedTechId;
+      result.assignmentClearVerification = {
+        source: 'verification_failed',
+        verifiedByFreshserviceActivity: false,
+        reason: 'current_snapshot_fetch_failed',
+        recentLocalAssignment,
+      };
+      return result;
+    }
+
+    if (!currentSnapshot) {
+      logger.warn('Assignment clear verification skipped; preserving existing local assignee because current snapshot is unavailable', {
+        ticketId: existingTicket.id,
+        freshserviceTicketId: freshserviceTicketId?.toString?.() || String(freshserviceTicketId),
+        previousTechId: existingTicket.assignedTechId,
+        source,
+      });
+      ticket.assignedTechId = existingTicket.assignedTechId;
+      result.assignmentClearVerification = {
+        source: 'verification_unavailable',
+        verifiedByFreshserviceActivity: false,
+        reason: 'current_snapshot_unavailable',
+        recentLocalAssignment,
+      };
+      return result;
+    }
+
+    const currentResponderId = currentSnapshot?.responder_id || null;
+    if (currentResponderId) {
+      const resolved = await this._resolveResponderTech(
+        currentResponderId,
+        workspaceId,
+        client,
+      );
+      ticket.assignedFreshserviceId = currentResponderId;
+      ticket.assignedTechId = resolved?.techId || existingTicket.assignedTechId;
+      ticket.assignedAt = ticket.assignedAt || existingTicket.assignedAt || undefined;
+      result.assignmentClearVerification = {
+        source: 'freshservice_current_snapshot',
+        verifiedByFreshserviceActivity: false,
+        reason: 'current_snapshot_has_responder',
+        currentResponderId: Number(currentResponderId),
+        preservedTechId: ticket.assignedTechId,
+        recentLocalAssignment,
+      };
+      logger.info('Ignored stale unassigned snapshot because FreshService current ticket is assigned', {
+        ticketId: existingTicket.id,
+        freshserviceTicketId: freshserviceTicketId?.toString?.() || String(freshserviceTicketId),
+        previousTechId: existingTicket.assignedTechId,
+        currentResponderId: Number(currentResponderId),
+        resolvedTechId: resolved?.techId || null,
+        source,
+      });
+      return result;
+    }
+
+    let effectivePayload = analysisPayload;
+    if (!hasActivityBackedRebound(effectivePayload?.analysis) && client?.fetchTicketActivities) {
+      try {
+        const activities = await client.fetchTicketActivities(Number(freshserviceTicketId));
+        const analysis = analyzeTicketActivities(Array.isArray(activities) ? activities : []);
+        effectivePayload = {
+          analysis,
+          activities: Array.isArray(activities) ? activities : [],
+          activityFetchSucceeded: true,
+          freshserviceUpdatedAt: currentSnapshot?.updated_at
+            ? new Date(currentSnapshot.updated_at)
+            : (ticket.freshserviceUpdatedAt || null),
+        };
+      } catch (error) {
+        logger.warn('Assignment clear activity verification failed; accepting current unassigned snapshot without rebound', {
+          ticketId: existingTicket.id,
+          freshserviceTicketId: freshserviceTicketId?.toString?.() || String(freshserviceTicketId),
+          previousTechId: existingTicket.assignedTechId,
+          source,
+          error: error.message,
+        });
+        effectivePayload = {
+          ...effectivePayload,
+          activityFetchSucceeded: false,
+          errorMessage: error.message || String(error),
+          freshserviceUpdatedAt: currentSnapshot?.updated_at
+            ? new Date(currentSnapshot.updated_at)
+            : (ticket.freshserviceUpdatedAt || null),
+        };
+      }
+    }
+
+    result.analysisPayload = effectivePayload;
+    result.confirmedRebound = hasActivityBackedRebound(effectivePayload?.analysis);
+    result.assignmentClearVerification = {
+      source: result.confirmedRebound ? 'freshservice_activity' : 'freshservice_current_snapshot',
+      verifiedByFreshserviceActivity: result.confirmedRebound,
+      reason: result.confirmedRebound
+        ? 'activity_rejected_episode'
+        : 'current_snapshot_unassigned_without_rejection_activity',
+      currentResponderId: null,
+      recentLocalAssignment,
+    };
+
+    return result;
   }
 
   /**
@@ -1096,16 +1277,29 @@ class SyncService {
     );
     const normalizedNoiseCategory = formatNoiseCategory(noiseCategory);
 
+    let analyzedPayload = options.analysisPayload || null;
+    const assignmentClearCheck = await this._verifyAssignedToUnassignedSnapshot({
+      client,
+      ticket,
+      existingTicket,
+      workspaceId: ticketWorkspaceId,
+      analysisPayload: analyzedPayload,
+      source: options.source || 'freshservice_sync',
+    });
+    analyzedPayload = assignmentClearCheck.analysisPayload;
+    const assignmentClearVerification = assignmentClearCheck.assignmentClearVerification;
+    const confirmedRebound = assignmentClearCheck.confirmedRebound;
+
+    const analysis = analyzedPayload?.analysis || null;
+    const activities = analyzedPayload?.activities || null;
+    const activityFetchSucceeded = analyzedPayload?.activityFetchSucceeded === true;
+    const activityFetchFailed = analyzedPayload?.activityFetchSucceeded === false;
+
     let isSelfPicked = false;
     let assignedBy = null;
     let firstAssignedAt = null;
     let rejectionCount = existingTicket?.rejectionCount || 0;
 
-    const analyzedPayload = options.analysisPayload || null;
-    const analysis = analyzedPayload?.analysis || null;
-    const activities = analyzedPayload?.activities || null;
-    const activityFetchSucceeded = analyzedPayload?.activityFetchSucceeded === true;
-    const activityFetchFailed = analyzedPayload?.activityFetchSucceeded === false;
     if (analysis) {
       isSelfPicked = analysis.currentIsSelfPicked;
       assignedBy = analysis.assignedBy;
@@ -1158,16 +1352,26 @@ class SyncService {
     });
 
     if (existingTicket && existingTicket.assignedTechId !== upsertedTicket.assignedTechId) {
+      const details = {
+        fromTechId: existingTicket.assignedTechId,
+        toTechId: upsertedTicket.assignedTechId,
+        note: 'Ticket reassigned',
+        source: source || 'freshservice_sync',
+      };
+      if (existingTicket.assignedTechId && upsertedTicket.assignedTechId === null) {
+        details.source = assignmentClearVerification?.source || source || 'freshservice_sync_snapshot';
+        details.verifiedByFreshserviceActivity = assignmentClearVerification?.verifiedByFreshserviceActivity === true;
+        details.verificationReason = assignmentClearVerification?.reason || 'snapshot_assignment_clear';
+        if (assignmentClearVerification?.recentLocalAssignment !== undefined) {
+          details.recentLocalAssignment = assignmentClearVerification.recentLocalAssignment;
+        }
+      }
       await ticketActivityRepository.create({
         ticketId: upsertedTicket.id,
         activityType: 'assigned',
         performedBy: 'System',
         performedAt: new Date(),
-        details: {
-          fromTechId: existingTicket.assignedTechId,
-          toTechId: upsertedTicket.assignedTechId,
-          note: 'Ticket reassigned',
-        },
+        details,
       });
     }
 
@@ -1235,20 +1439,9 @@ class SyncService {
       });
     }
 
-    const snapshotBounce = !!(
-      existingTicket
-      && existingTicket.assignedTechId
-      && upsertedTicket.assignedTechId === null
-    );
-    const analyzerBounce = !!(
-      analysis
-      && analysis.currentEpisode
-      && analysis.currentEpisode.endMethod === 'rejected'
-      && upsertedTicket.assignedTechId === null
-    );
-
     if (
-      (snapshotBounce || analyzerBounce)
+      confirmedRebound
+      && upsertedTicket.assignedTechId === null
       && ['Open', 'Pending'].includes(upsertedTicket.status)
       && !upsertedTicket.isNoise
     ) {
@@ -1276,6 +1469,7 @@ class SyncService {
       isNoise,
       noiseRuleMatched: ruleId,
       noiseRuleCategory: normalizedNoiseCategory,
+      assignmentClearVerification,
       assignmentChanged: Boolean(existingTicket && existingTicket.assignedTechId !== upsertedTicket.assignedTechId),
       statusChanged: Boolean(existingTicket && existingTicket.status !== upsertedTicket.status),
     };

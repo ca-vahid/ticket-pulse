@@ -18,10 +18,20 @@ import { formatInTimeZone } from 'date-fns-tz';
  * @param {object}  [args.reboundFrom]   { previousTechName, unassignedAt, reboundCount }
  * @returns {string}
  */
+function hasVerifiedReboundContext(reboundFrom) {
+  return Boolean(
+    reboundFrom
+      && (
+        reboundFrom.verifiedByFreshserviceActivity === true
+        || (reboundFrom.unassignedAt && reboundFrom.previousTechName && reboundFrom.previousTechName !== 'Unknown')
+      ),
+  );
+}
+
 export function buildUserMessage({ ticketId, dayOfWeek, localDate, localTime, wsTz, reboundFrom }) {
   let userMessage = `Current date/time: ${dayOfWeek}, ${localDate} at ${localTime} (${wsTz})\n\nAnalyze ticket ID ${ticketId} (use get_ticket_details to read it) and recommend the best technician for assignment. When you have completed your analysis, you MUST call the submit_recommendation tool with your final recommendation.`;
 
-  if (reboundFrom && (reboundFrom.previousTechName || reboundFrom.reboundCount)) {
+  if (hasVerifiedReboundContext(reboundFrom)) {
     const reboundCount = reboundFrom.reboundCount || 1;
     const prevName = reboundFrom.previousTechName || 'a previous assignee';
     const whenStr = reboundFrom.unassignedAt

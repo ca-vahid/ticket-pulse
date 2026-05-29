@@ -128,10 +128,12 @@ jest.unstable_mockModule('../src/services/dashboardReadCache.js', () => ({
 }));
 
 const { default: syncService } = await import('../src/services/syncService.js');
+const { analyzeTicketActivities } = await import('../src/integrations/freshserviceTransformer.js');
 
 describe('syncService.syncFreshServiceTicketSnapshot', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    analyzeTicketActivities.mockReset();
     syncService._resolveResponderTech = jest.fn().mockResolvedValue(null);
     syncService._ensureNoiseTicketDismissed = jest.fn().mockResolvedValue({ skipped: true });
     syncService._reconcileEpisodes = jest.fn().mockResolvedValue();
@@ -256,6 +258,7 @@ describe('syncService.syncFreshServiceTicketSnapshot', () => {
       details: expect.objectContaining({
         fromTechId: 12,
         toTechId: 77,
+        source: 'freshservice_sync',
       }),
     }));
     expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -266,5 +269,210 @@ describe('syncService.syncFreshServiceTicketSnapshot', () => {
         newStatus: 'Pending',
       }),
     }));
+  });
+
+  test('ignores stale unassigned snapshots when current FreshService ticket still has an assignee', async () => {
+    syncService._resolveResponderTech.mockResolvedValue({ techId: 20 });
+    const client = {
+      fetchTicketSnapshot: jest.fn().mockResolvedValue({ id: 224582, responder_id: 1000008456 }),
+    };
+    const existingTicket = {
+      id: 27186,
+      freshserviceTicketId: BigInt(224582),
+      assignedTechId: 20,
+      assignedAt: new Date(),
+      updatedAt: new Date(),
+      status: 'Open',
+      isSelfPicked: false,
+      assignedBy: 'Ticket Pulse',
+      firstAssignedAt: new Date(),
+      rejectionCount: 0,
+    };
+
+    const result = await syncService.syncFreshServiceTicketSnapshot(1, { id: 224582 }, {
+      client,
+      preparedTicket: {
+        freshserviceTicketId: 224582,
+        subject: 'Cracked Phone Screen',
+        status: 'Open',
+        priority: 2,
+        createdAt: new Date(),
+        assignedFreshserviceId: null,
+        assignedTechId: null,
+        workspaceId: 1,
+      },
+      existingTicket,
+      source: 'freshservice_sync',
+      analysisPayload: {
+        activityFetchSucceeded: true,
+        analysis: {
+          currentIsSelfPicked: false,
+          assignedBy: 'Ticket Pulse',
+          firstAssignedAt: existingTicket.firstAssignedAt,
+          rejectionCount: 0,
+          currentEpisode: {
+            endMethod: 'still_active',
+            startedAt: existingTicket.firstAssignedAt,
+          },
+          events: [],
+          episodes: [],
+        },
+        activities: [],
+      },
+    });
+
+    expect(client.fetchTicketSnapshot).toHaveBeenCalledWith(224582);
+    expect(syncService._resolveResponderTech).toHaveBeenCalledWith(1000008456, 1, client);
+    expect(ticketRepositoryMock.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      assignedTechId: 20,
+      assignedFreshserviceId: 1000008456,
+    }));
+    expect(ticketActivityRepositoryMock.create).not.toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'assigned',
+      details: expect.objectContaining({
+        fromTechId: 20,
+        toTechId: null,
+      }),
+    }));
+    expect(syncService._handleTicketRebound).not.toHaveBeenCalled();
+    expect(result.assignmentChanged).toBe(false);
+    expect(result.assignmentClearVerification).toEqual(expect.objectContaining({
+      reason: 'current_snapshot_has_responder',
+      preservedTechId: 20,
+    }));
+  });
+
+  test('clears assignment without rebound when FreshService is unassigned but activities do not show rejection', async () => {
+    const client = {
+      fetchTicketSnapshot: jest.fn().mockResolvedValue({ id: 224582, responder_id: null }),
+      fetchTicketActivities: jest.fn().mockResolvedValue([]),
+    };
+    analyzeTicketActivities.mockReturnValue({
+      currentIsSelfPicked: false,
+      assignedBy: 'Ticket Pulse',
+      firstAssignedAt: new Date('2026-05-29T17:50:09.000Z'),
+      rejectionCount: 0,
+      currentEpisode: {
+        endMethod: 'still_active',
+        startedAt: new Date('2026-05-29T17:50:09.000Z'),
+      },
+      events: [],
+      episodes: [],
+    });
+    const existingTicket = {
+      id: 27186,
+      freshserviceTicketId: BigInt(224582),
+      assignedTechId: 20,
+      assignedAt: new Date('2026-05-29T17:50:09.000Z'),
+      updatedAt: new Date('2026-05-29T17:50:09.000Z'),
+      status: 'Open',
+      isSelfPicked: false,
+      assignedBy: 'Ticket Pulse',
+      firstAssignedAt: new Date('2026-05-29T17:50:09.000Z'),
+      rejectionCount: 0,
+    };
+
+    const result = await syncService.syncFreshServiceTicketSnapshot(1, { id: 224582 }, {
+      client,
+      preparedTicket: {
+        freshserviceTicketId: 224582,
+        subject: 'Cracked Phone Screen',
+        status: 'Open',
+        priority: 2,
+        createdAt: new Date(),
+        assignedFreshserviceId: null,
+        assignedTechId: null,
+        workspaceId: 1,
+      },
+      existingTicket,
+      source: 'freshservice_sync',
+    });
+
+    expect(client.fetchTicketSnapshot).toHaveBeenCalledWith(224582);
+    expect(client.fetchTicketActivities).toHaveBeenCalledWith(224582);
+    expect(ticketRepositoryMock.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      assignedTechId: null,
+    }));
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'assigned',
+      details: expect.objectContaining({
+        fromTechId: 20,
+        toTechId: null,
+        source: 'freshservice_current_snapshot',
+        verifiedByFreshserviceActivity: false,
+        verificationReason: 'current_snapshot_unassigned_without_rejection_activity',
+      }),
+    }));
+    expect(syncService._handleTicketRebound).not.toHaveBeenCalled();
+    expect(result.assignmentChanged).toBe(true);
+  });
+
+  test('creates rebound only when FreshService activity analysis confirms rejection', async () => {
+    const rejectedAt = new Date('2026-05-29T17:55:00.000Z');
+    const existingTicket = {
+      id: 27186,
+      freshserviceTicketId: BigInt(224582),
+      assignedTechId: 20,
+      assignedAt: new Date('2026-05-29T17:50:09.000Z'),
+      updatedAt: new Date('2026-05-29T17:50:09.000Z'),
+      status: 'Open',
+      isSelfPicked: false,
+      assignedBy: 'Ticket Pulse',
+      firstAssignedAt: new Date('2026-05-29T17:50:09.000Z'),
+      rejectionCount: 0,
+    };
+    const analysis = {
+      currentIsSelfPicked: false,
+      assignedBy: 'Ticket Pulse',
+      firstAssignedAt: existingTicket.firstAssignedAt,
+      rejectionCount: 1,
+      currentEpisode: {
+        agentName: 'Gaby Tonnova',
+        startedAt: existingTicket.firstAssignedAt,
+        endedAt: rejectedAt,
+        endMethod: 'rejected',
+        endActorName: 'Gaby Tonnova',
+      },
+      events: [{ type: 'rejected', timestamp: rejectedAt, actorName: 'Gaby Tonnova' }],
+      episodes: [],
+    };
+
+    await syncService.syncFreshServiceTicketSnapshot(1, { id: 224582 }, {
+      client: {},
+      preparedTicket: {
+        freshserviceTicketId: 224582,
+        subject: 'Cracked Phone Screen',
+        status: 'Open',
+        priority: 2,
+        createdAt: new Date(),
+        assignedFreshserviceId: null,
+        assignedTechId: null,
+        workspaceId: 1,
+      },
+      existingTicket,
+      source: 'freshservice_sync',
+      analysisPayload: {
+        activityFetchSucceeded: true,
+        analysis,
+        activities: [],
+      },
+    });
+
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'assigned',
+      details: expect.objectContaining({
+        fromTechId: 20,
+        toTechId: null,
+        source: 'freshservice_activity',
+        verifiedByFreshserviceActivity: true,
+        verificationReason: 'activity_rejected_episode',
+      }),
+    }));
+    expect(syncService._handleTicketRebound).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 501, assignedTechId: null }),
+      existingTicket,
+      analysis,
+      1,
+    );
   });
 });

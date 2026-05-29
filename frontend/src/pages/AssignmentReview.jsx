@@ -124,6 +124,21 @@ function needsCategoryReview(ticket, recommendation = null) {
     || Boolean(getSuggestedCategoryLabel(ticket, recommendation));
 }
 
+function isVerifiedReboundContext(ctx) {
+  return Boolean(
+    ctx
+      && (
+        ctx.verifiedByFreshserviceActivity === true
+        || (ctx.unassignedAt && ctx.previousTechName && ctx.previousTechName !== 'Unknown')
+      ),
+  );
+}
+
+function formatReturnedContext(ctx, workspaceTimezone) {
+  if (!ctx) return '';
+  return `Returned from ${ctx.previousTechName || 'previous assignee'}${ctx.unassignedAt ? ` at ${formatDateTimeInTimezone(ctx.unassignedAt, workspaceTimezone)}` : ''}${ctx.unassignedByName ? ` by ${ctx.unassignedByName}` : ''}${ctx.reboundCount > 1 ? ` (return #${ctx.reboundCount})` : ''}`;
+}
+
 function getPacificDayStartISOString(reference = new Date()) {
   const ptDate = formatInTimeZone(reference, PACIFIC_TIMEZONE, 'yyyy-MM-dd');
   return formatInTimeZone(
@@ -1901,6 +1916,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const getSourceMeta = (run) => {
     const triggerSource = run?.triggerSource || '';
     const ticket = run?.ticket || {};
+    const reboundCtx = run?.reboundFrom || ticket?.lastReboundContext;
+    const verifiedRebound = isVerifiedReboundContext(reboundCtx);
     const webhookAt = ticket.lastWebhookIngestedAt || (triggerSource === 'webhook' ? ticket.lastIngestedAt || run.createdAt : null);
     if (webhookAt || triggerSource === 'webhook') {
       return {
@@ -1920,10 +1937,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     }
     if (triggerSource === 'rebound' || triggerSource === 'rebound_exhausted') {
       return {
-        label: 'Returned',
+        label: verifiedRebound ? 'Returned' : 'Needs review',
         Icon: RotateCcw,
-        className: 'border-rose-200 bg-rose-50 text-rose-700',
-        tooltip: 'Pipeline run was triggered after a returned ticket.',
+        className: verifiedRebound
+          ? 'border-rose-200 bg-rose-50 text-rose-700'
+          : 'border-amber-200 bg-amber-50 text-amber-700',
+        tooltip: verifiedRebound
+          ? 'Pipeline run was triggered after a FreshService-confirmed returned ticket.'
+          : 'Pipeline run has older rebound metadata without FreshService return evidence.',
       };
     }
     return {
@@ -1934,9 +1955,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     };
   };
 
-  const returnedTooltip = (ctx) => ctx
-    ? `Returned from ${ctx.previousTechName || 'previous assignee'}${ctx.unassignedAt ? ` at ${formatDateTimeInTimezone(ctx.unassignedAt, workspaceTimezone)}` : ''}${ctx.unassignedByName ? ` by ${ctx.unassignedByName}` : ''}${ctx.reboundCount > 1 ? ` (return #${ctx.reboundCount})` : ''}`
-    : '';
+  const returnedTooltip = (ctx) => isVerifiedReboundContext(ctx)
+    ? formatReturnedContext(ctx, workspaceTimezone)
+    : 'Assignment state changed during sync, but FreshService return activity was not verified.';
 
   const renderSignalIcons = (run, priorityMeta, ctx) => {
     const sourceMeta = getSourceMeta(run);
@@ -1963,7 +1984,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         >
           <SourceIcon className="h-3.5 w-3.5" />
         </span>
-        {ctx?.previousTechName && (
+        {isVerifiedReboundContext(ctx) && (
           <span
             className="inline-flex h-5 w-5 items-center justify-center rounded border border-rose-200 bg-white text-rose-700"
             title={returnedTooltip(ctx)}
@@ -2966,7 +2987,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                           const topRec = run.recommendation?.recommendations?.[0];
                           const flag = getTicketFlag(run);
                           const ctx = run.reboundFrom || run.ticket?.lastReboundContext;
-                          const isReturned = !!ctx?.previousTechName;
+                          const isReturned = isVerifiedReboundContext(ctx);
                           // Dim rows that are no longer actionable but still visible
                           // (deleted/closed in FreshService while sitting in our queue).
                           const rowDim = subView === 'pending' && flag === 'deleted'
@@ -3368,10 +3389,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                           TP {run.ticket.assessedPriority}
                         </span>
                       )}
-                      {run.reboundFrom?.previousTechName && (
+                      {isVerifiedReboundContext(run.reboundFrom) && (
                         <span
                           className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none"
-                          title={`Returned from ${run.reboundFrom.previousTechName}${run.reboundFrom.unassignedAt ? ' at ' + new Date(run.reboundFrom.unassignedAt).toLocaleString() : ''}${run.reboundFrom.unassignedByName ? ' by ' + run.reboundFrom.unassignedByName : ''}${run.reboundFrom.reboundCount > 1 ? ' (rebound #' + run.reboundFrom.reboundCount + ')' : ''}`}
+                          title={formatReturnedContext(run.reboundFrom, workspaceTimezone)}
                         >
                           <RotateCcw className="w-2.5 h-2.5" />
                           Returned from {run.reboundFrom.previousTechName?.split(' ')[0]}
@@ -3421,10 +3442,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                             Priority processed: {run.ticket.assessedPriority}
                           </span>
                         )}
-                        {run.reboundFrom?.previousTechName && (
+                        {isVerifiedReboundContext(run.reboundFrom) && (
                           <span
                             className="ml-2 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded align-middle leading-none"
-                            title={`Returned from ${run.reboundFrom.previousTechName}${run.reboundFrom.unassignedAt ? ' at ' + new Date(run.reboundFrom.unassignedAt).toLocaleString() : ''}${run.reboundFrom.unassignedByName ? ' by ' + run.reboundFrom.unassignedByName : ''}${run.reboundFrom.reboundCount > 1 ? ' (rebound #' + run.reboundFrom.reboundCount + ')' : ''}`}
+                            title={formatReturnedContext(run.reboundFrom, workspaceTimezone)}
                           >
                             <RotateCcw className="w-2.5 h-2.5" />
                             Returned from {run.reboundFrom.previousTechName}
