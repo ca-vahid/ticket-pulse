@@ -2,6 +2,7 @@ import {
   normalizeSubmitRecommendationPayload,
   parseLeadingJsonArray,
 } from '../src/services/assignmentRecommendationValidation.js';
+import { buildAnthropicMessageFromOpenAiResponse } from '../src/services/aiProviders/openAiConverters.js';
 
 const basePayload = {
   recommendations: [
@@ -70,5 +71,31 @@ describe('assignment recommendation validation', () => {
     const parsed = parseLeadingJsonArray('[{"rank":1}]<parameter name="overallReasoning">text');
     expect(parsed.array).toEqual([{ rank: 1 }]);
     expect(parsed.tail).toBe('<parameter name="overallReasoning">text');
+  });
+
+  test('normalizes malformed recommendations from the OpenAI function-call adapter path', () => {
+    const rawRecommendations = `${JSON.stringify(basePayload.recommendations)}\n<parameter name="overallReasoning">OpenAI adapter recovered rationale`;
+    const response = {
+      id: 'resp_test',
+      output: [{
+        type: 'function_call',
+        id: 'fc_test',
+        call_id: 'call_test',
+        name: 'submit_recommendation',
+        arguments: JSON.stringify({
+          ...basePayload,
+          recommendations: rawRecommendations,
+          overallReasoning: undefined,
+        }),
+      }],
+    };
+
+    const message = buildAnthropicMessageFromOpenAiResponse(response);
+    const toolInput = message.content.find((block) => block.name === 'submit_recommendation').input;
+    const normalized = normalizeSubmitRecommendationPayload(toolInput);
+
+    expect(message.stop_reason).toBe('tool_use');
+    expect(normalized.recommendations).toEqual(basePayload.recommendations);
+    expect(normalized.overallReasoning).toBe('OpenAI adapter recovered rationale');
   });
 });
