@@ -8,6 +8,7 @@ import {
   ArrowLeft, ExternalLink, Sparkles, Copy, ThumbsUp, AlertTriangle,
   Eye, MessageCircle, TrendingUp, ChevronUp, ChevronDown, Undo2, Trash2,
   Tags, Search, Filter, ArrowUpDown, MoreHorizontal, Clock3, Layers, CheckCheck,
+  Database,
 } from 'lucide-react';
 
 function StatusBadge({ status }) {
@@ -67,10 +68,23 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const REVIEW_RECOMMENDATION_TABS = [
   { key: 'prompt', label: 'Prompt', title: 'Prompt Recommendations', icon: FileText, tone: 'indigo', emptyText: 'No prompt changes recommended for this review.' },
-  { key: 'process', label: 'Process', title: 'Process Recommendations', icon: Settings2, tone: 'sky', emptyText: 'No process changes recommended for this review.' },
+  { key: 'tools_data', label: 'Tools & Data', title: 'Tools & Data Recommendations', icon: Database, tone: 'sky', emptyText: 'No tools or data capability changes recommended for this review.' },
   { key: 'taxonomy', label: 'Categories', title: 'Category Recommendations', icon: Tags, tone: 'emerald', emptyText: 'No category/subcategory changes recommended for this review.' },
   { key: 'skill', label: 'Agent Skills', title: 'Agent Skill Recommendations', icon: Award, tone: 'violet', emptyText: 'No agent skill changes recommended for this review.' },
+  { key: 'dev_policy', label: 'Dev / Policy', title: 'Dev / Policy Recommendations', icon: Settings2, tone: 'amber', emptyText: 'No dev or policy changes recommended for this review.' },
 ];
+
+function recommendationKindLabel(kind) {
+  const labels = {
+    prompt: 'Prompt',
+    tools_data: 'Tools & Data',
+    taxonomy: 'Categories',
+    skill: 'Agent Skills',
+    dev_policy: 'Dev / Policy',
+    process: 'Dev / Policy',
+  };
+  return labels[kind] || String(kind || '').replace(/_/g, ' ');
+}
 
 function formatReviewRunDateLabel(run, workspaceTimezone) {
   if (!run) return '';
@@ -118,18 +132,45 @@ function RecommendationStatusBadge({ status }) {
   );
 }
 
-function isDevBacklogItem(item) {
-  if (item?.kind !== 'process') return false;
+function recommendationSearchText(item) {
   const text = [
-    item.title,
-    item.rationale,
-    item.suggestedAction,
-    ...(Array.isArray(item.skillsAffected) ? item.skillsAffected : []),
+    item?.title,
+    item?.rationale,
+    item?.suggestedAction,
+    item?.metadata?.missingCapability,
+    item?.metadata?.requiredToolName,
+    item?.metadata?.changeType,
+    ...(Array.isArray(item?.skillsAffected) ? item.skillsAffected : []),
   ].filter(Boolean).join(' ').toLowerCase();
-  return /\b(dev|developer|engineering|implementation|implement|code|backend|frontend|schema|database|api|ui|ux|bug|pipeline|tooling|telemetry|integration|automation)\b/.test(text)
-    || text.includes('dev_required')
-    || text.includes('app-side')
-    || text.includes('requires dev');
+  return text;
+}
+
+function isToolsDataBacklogItem(item) {
+  if (item?.kind === 'tools_data') return true;
+  if (item?.kind !== 'process') return false;
+  const text = recommendationSearchText(item);
+  return /\b(tool|tooling|data source|data capability|capability gap|real-time|calendar|graph|freshservice api|api endpoint|external system|integration|availability signal|location signal|routing signal|telemetry|webhook|sync signal)\b/.test(text);
+}
+
+function isDevPolicyBacklogItem(item) {
+  if (item?.kind === 'dev_policy') return true;
+  if (item?.kind !== 'process') return false;
+  return !isToolsDataBacklogItem(item);
+}
+
+function getReviewRecommendationGroups(run = {}) {
+  const legacyProcess = run.processRecommendations || [];
+  const toolsDataRecommendations = run.toolsDataRecommendations
+    || legacyProcess.filter(isToolsDataBacklogItem);
+  const devPolicyRecommendations = run.devPolicyRecommendations
+    || legacyProcess.filter(isDevPolicyBacklogItem);
+  return {
+    promptRecommendations: run.promptRecommendations || [],
+    toolsDataRecommendations,
+    taxonomyRecommendations: run.taxonomyRecommendations || [],
+    skillRecommendations: run.skillRecommendations || [],
+    devPolicyRecommendations,
+  };
 }
 
 function getTaxonomyProposal(item = {}) {
@@ -290,6 +331,29 @@ function RecommendationCard({
       <SmoothCollapse open={expanded}>
         <div className="mt-3 border-t border-slate-200 pt-3">
           <div className="text-xs text-slate-600 mb-2">{item.rationale}</div>
+          {item.metadata?.promptLimitation?.requiredTools?.length > 0 && (
+            <div className="mb-3 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              <div className="font-semibold">Tool dependency</div>
+              <div className="mt-1">
+                Requires {item.metadata.promptLimitation.requiredTools.join(', ')}.
+                {item.metadata.promptLimitation.toolDependencyNote ? ` ${item.metadata.promptLimitation.toolDependencyNote}` : ''}
+              </div>
+            </div>
+          )}
+          {item.kind === 'tools_data' && (
+            <div className="mb-3 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              <div className="font-semibold">{item.metadata?.requiredToolName || 'Tool / data capability'}</div>
+              {item.metadata?.missingCapability && <div className="mt-1">{item.metadata.missingCapability}</div>}
+              {Array.isArray(item.metadata?.dataSources) && item.metadata.dataSources.length > 0 && (
+                <div className="mt-1">Sources: {item.metadata.dataSources.join(', ')}</div>
+              )}
+            </div>
+          )}
+          {item.kind === 'dev_policy' && item.metadata?.changeType && (
+            <div className="mb-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <span className="font-semibold">Dev / policy type:</span> {item.metadata.changeType}
+            </div>
+          )}
           {taxonomyProposal && (
             <div className="mb-3 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
               <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
@@ -404,11 +468,11 @@ function RunSignalCard({ label, value, detail, tone = 'slate', icon: Icon }) {
   );
 }
 
-function ReviewHighlights({ summary, warnings, promptRecommendations, processRecommendations, taxonomyRecommendations, skillRecommendations }) {
+function ReviewHighlights({ summary, warnings, promptRecommendations, toolsDataRecommendations, taxonomyRecommendations, skillRecommendations, devPolicyRecommendations }) {
   const totals = summary.totals || {};
   const totalReviewed = totals.totalTicketsReviewed || 0;
   const resolvedOutcomes = (totals.success || 0) + (totals.partialSuccess || 0) + (totals.failure || 0);
-  const recommendationTotal = promptRecommendations.length + processRecommendations.length + taxonomyRecommendations.length + skillRecommendations.length;
+  const recommendationTotal = promptRecommendations.length + toolsDataRecommendations.length + taxonomyRecommendations.length + skillRecommendations.length + devPolicyRecommendations.length;
   const noEvidence = totalReviewed <= 1 || resolvedOutcomes === 0;
   const threadGaps = summary.collectionDiagnostics?.ticketsWithNoThreadContext || 0;
 
@@ -424,7 +488,7 @@ function ReviewHighlights({ summary, warnings, promptRecommendations, processRec
       <RunSignalCard
         label="Recommendations"
         value={recommendationTotal}
-        detail={`${promptRecommendations.length} prompt · ${processRecommendations.length} process · ${taxonomyRecommendations.length} category · ${skillRecommendations.length} agent skill`}
+        detail={`${promptRecommendations.length} prompt · ${toolsDataRecommendations.length} tools/data · ${taxonomyRecommendations.length} category · ${skillRecommendations.length} agent skill · ${devPolicyRecommendations.length} dev/policy`}
         tone={recommendationTotal > 0 ? 'purple' : 'slate'}
         icon={Sparkles}
       />
@@ -1120,7 +1184,7 @@ function RecommendationMeta({ item, workspaceTimezone }) {
       <span className="text-slate-300">•</span>
       <span>Run #{item.runId}</span>
       <span className="text-slate-300">•</span>
-      <span className="capitalize">{item.kind}</span>
+      <span>{recommendationKindLabel(item.kind)}</span>
       {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
         <>
           <span className="text-slate-300">•</span>
@@ -1147,6 +1211,7 @@ function filterAndSortRecommendations(items = [], search = '', sort = 'newest') 
       item.rationale,
       item.suggestedAction,
       item.kind,
+      recommendationKindLabel(item.kind),
       ...(Array.isArray(item.skillsAffected) ? item.skillsAffected : []),
     ].filter(Boolean).join(' ').toLowerCase().includes(normalizedSearch))
     : items;
@@ -1330,7 +1395,7 @@ function ApprovedBacklogGroup({
 }) {
   const [expanded, setExpanded] = useState(false);
   const runs = [...new Set(group.rows.map((item) => item.runId).filter(Boolean))].sort((a, b) => b - a);
-  const kinds = [...new Set(group.rows.map((item) => item.kind).filter(Boolean))];
+  const kinds = [...new Set(group.rows.map((item) => recommendationKindLabel(item.kind)).filter(Boolean))];
   const ticketCount = group.rows.reduce((sum, item) => sum + (getSupportingTicketIds(item)?.length || 0), 0);
   const hasHigh = group.rows.some((item) => item.severity === 'high');
   const strongestSeverity = hasHigh
@@ -2186,7 +2251,7 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
   const [payload, setPayload] = useState(getItemPayload(item));
   const [includeInApply, setIncludeInApply] = useState(item.includeInApply !== false);
   const isApplied = item.status === 'applied';
-  const isProcess = item.section === 'process';
+  const isDocumented = ['tools_data', 'dev_policy', 'process'].includes(item.section);
 
   useEffect(() => {
     setPayload(getItemPayload(item));
@@ -2218,7 +2283,7 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
           </div>
           {item.section !== 'prompt' && item.rationale && <div className="mt-1 text-xs text-slate-500">{item.rationale}</div>}
         </div>
-        {!isProcess && (
+        {!isDocumented && (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
             {item.section === 'prompt' && (
               <button
@@ -2292,14 +2357,29 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
         />
       )}
 
-      {item.section === 'process' && (
+      {item.section === 'tools_data' && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+          <div className="font-semibold">{payload.requiredToolName || payload.missingCapability || 'Tool or data capability'}</div>
+          {payload.missingCapability && <div className="mt-1 text-xs">{payload.missingCapability}</div>}
+          <div className="mt-1 text-xs">{payload.suggestedAction || item.rationale}</div>
+          {Array.isArray(payload.dataSources) && payload.dataSources.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {payload.dataSources.map((source) => (
+                <span key={source} className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-sky-700">{source}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(item.section === 'dev_policy' || item.section === 'process') && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <div className="font-semibold">{payload.changeType || 'dev_required'}</div>
+          <div className="font-semibold">{payload.changeType || item.actionType || 'dev_or_policy'}</div>
           <div className="mt-1 text-xs">{payload.suggestedAction || item.rationale}</div>
         </div>
       )}
 
-      {!isProcess && item.section !== 'prompt' && item.section !== 'technician_competencies' && item.section !== 'skills' && !isApplied && (
+      {!isDocumented && item.section !== 'prompt' && item.section !== 'technician_competencies' && item.section !== 'skills' && !isApplied && (
         <div className="mt-3 flex justify-end">
           <button
             onClick={save}
@@ -2386,9 +2466,10 @@ function ConsolidationPanel({
 
   const sections = [
     { key: 'prompt', label: 'Prompt Edits', icon: FileText, applyable: true },
+    { key: 'tools_data', label: 'Tools & Data', icon: Database, applyable: false },
     { key: 'skills', label: 'Category Changes', icon: Tags, applyable: true },
     { key: 'technician_competencies', label: 'Agent Skill Changes', icon: Brain, applyable: true },
-    { key: 'process', label: 'Process Changes', icon: Settings2, applyable: false },
+    { key: 'dev_policy', label: 'Dev / Policy', icon: Settings2, applyable: false },
   ];
 
   const confirmDeleteRun = async () => {
@@ -2411,7 +2492,7 @@ function ConsolidationPanel({
             Approved Recommendation Consolidation
           </h3>
           <p className="text-sm text-slate-500">
-            Converts approved, unapplied Review findings into editable prompt, skill, competency, and process recommendations.
+            Converts approved, unapplied Review findings into editable prompt, tools/data, category, agent-skill, and dev/policy recommendations.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
@@ -2485,28 +2566,34 @@ function ConsolidationPanel({
             {queueLoading && <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />}
           </div>
 
-          <div className="mb-3 grid gap-2 sm:grid-cols-3">
+          <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             {[
               { key: 'prompt', label: 'Prompt', tone: 'blue' },
-              { key: 'skill', label: 'Skill', tone: 'emerald' },
-              { key: 'process', label: 'Process', tone: 'amber' },
+              { key: 'tools_data', label: 'Tools & Data', tone: 'sky' },
+              { key: 'taxonomy', label: 'Categories', tone: 'emerald' },
+              { key: 'skill', label: 'Agent Skills', tone: 'emerald' },
+              { key: 'dev_policy', label: 'Dev / Policy', tone: 'amber' },
             ].map((item) => (
               <div
                 key={item.key}
                 className={`rounded-lg border bg-white px-3 py-2 ${
                   item.tone === 'blue'
                     ? 'border-blue-100'
-                    : item.tone === 'emerald'
-                      ? 'border-emerald-100'
-                      : 'border-amber-100'
+                    : item.tone === 'sky'
+                      ? 'border-sky-100'
+                      : item.tone === 'emerald'
+                        ? 'border-emerald-100'
+                        : 'border-amber-100'
                 }`}
               >
                 <div className={`text-xl font-bold ${
                   item.tone === 'blue'
                     ? 'text-blue-700'
-                    : item.tone === 'emerald'
-                      ? 'text-emerald-700'
-                      : 'text-amber-700'
+                    : item.tone === 'sky'
+                      ? 'text-sky-700'
+                      : item.tone === 'emerald'
+                        ? 'text-emerald-700'
+                        : 'text-amber-700'
                 }`}>
                   {queueByKind[item.key]?.total || 0}
                 </div>
@@ -2521,7 +2608,7 @@ function ConsolidationPanel({
                 <div key={item.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs">
                   <CompactSeverity severity={item.severity} />
                   <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">{item.title}</span>
-                  <span className="shrink-0 capitalize text-slate-400">{item.kind}</span>
+                  <span className="shrink-0 text-slate-400">{recommendationKindLabel(item.kind)}</span>
                   <span className="shrink-0 text-slate-400">Run #{item.runId}</span>
                 </div>
               ))}
@@ -2651,7 +2738,7 @@ function ConsolidationPanel({
                     <h4 className="text-lg font-semibold text-slate-900">{label}</h4>
                     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-600">{items.length}</span>
                   </div>
-                  {!applyable && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Dev work only</span>}
+                  {!applyable && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Documented only</span>}
                 </div>
                 <div className="p-3">
                   {items.length === 0 ? (
@@ -3188,10 +3275,13 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
   const summary = run.summaryMetrics || {};
   const totals = summary.totals || {};
   const rates = summary.rates || {};
-  const promptRecommendations = run.promptRecommendations || [];
-  const processRecommendations = run.processRecommendations || [];
-  const taxonomyRecommendations = run.taxonomyRecommendations || [];
-  const skillRecommendations = run.skillRecommendations || [];
+  const {
+    promptRecommendations,
+    toolsDataRecommendations,
+    taxonomyRecommendations,
+    skillRecommendations,
+    devPolicyRecommendations,
+  } = getReviewRecommendationGroups(run);
   const warnings = run.warnings || [];
   const cases = run.evidenceCases || [];
   const navigate = useNavigate();
@@ -3199,9 +3289,10 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
   const summaryIsLong = executiveSummary.length > 320;
   const visibleWarnings = warnings.slice(0, 4);
   const recommendationTotal = promptRecommendations.length
-    + processRecommendations.length
+    + toolsDataRecommendations.length
     + taxonomyRecommendations.length
-    + skillRecommendations.length;
+    + skillRecommendations.length
+    + devPolicyRecommendations.length;
   const patternTotal = (summary.topCategories?.length || 0) + (summary.topTechnicians?.length || 0);
   const detailTabs = [
     { key: 'recommendations', label: 'Recommendations', icon: Sparkles, count: recommendationTotal },
@@ -3214,11 +3305,13 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
     ...tab,
     items: tab.key === 'prompt'
       ? promptRecommendations
-      : tab.key === 'process'
-        ? processRecommendations
+      : tab.key === 'tools_data'
+        ? toolsDataRecommendations
         : tab.key === 'taxonomy'
           ? taxonomyRecommendations
-          : skillRecommendations,
+          : tab.key === 'skill'
+            ? skillRecommendations
+            : devPolicyRecommendations,
   }));
 
   return (
@@ -3248,9 +3341,10 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
             summary={summary}
             warnings={warnings}
             promptRecommendations={promptRecommendations}
-            processRecommendations={processRecommendations}
+            toolsDataRecommendations={toolsDataRecommendations}
             taxonomyRecommendations={taxonomyRecommendations}
             skillRecommendations={skillRecommendations}
+            devPolicyRecommendations={devPolicyRecommendations}
           />
         </div>
         {executiveSummary && (
@@ -3431,7 +3525,7 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
   const [phaseMessage, setPhaseMessage] = useState('');
   const [runId, setRunId] = useState(null);
   const [summary, setSummary] = useState(null);
-  const [counts, setCounts] = useState({ prompt: 0, process: 0, skill: 0 });
+  const [counts, setCounts] = useState({ prompt: 0, toolsData: 0, taxonomy: 0, skill: 0, devPolicy: 0 });
   const [executiveSummary, setExecutiveSummary] = useState('');
   const [progressPct, setProgressPct] = useState(2);
   const [liveStats, setLiveStats] = useState({});
@@ -3494,7 +3588,7 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
     setLiveStats({});
     setActivityLog([]);
     setSummary(null);
-    setCounts({ prompt: 0, process: 0, skill: 0 });
+    setCounts({ prompt: 0, toolsData: 0, taxonomy: 0, skill: 0, devPolicy: 0 });
     setExecutiveSummary('');
     lastMessageRef.current = null;
 
@@ -3558,10 +3652,13 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
         if (!row) return;
         const totals = row.summaryMetrics?.totals || {};
         setSummary(totals);
+        const groups = getReviewRecommendationGroups(row);
         setCounts({
-          prompt: (row.promptRecommendations || []).length,
-          process: (row.processRecommendations || []).length,
-          skill: (row.skillRecommendations || []).length,
+          prompt: groups.promptRecommendations.length,
+          toolsData: groups.toolsDataRecommendations.length,
+          taxonomy: groups.taxonomyRecommendations.length,
+          skill: groups.skillRecommendations.length,
+          devPolicy: groups.devPolicyRecommendations.length,
         });
         setExecutiveSummary(row.summaryMetrics?.executiveSummary || '');
       } catch {
@@ -3615,11 +3712,14 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
       assignmentAPI.getDailyReviewRun(runId).then((res) => {
         const row = res?.data;
         if (!row) return;
+        const groups = getReviewRecommendationGroups(row);
         setSummary(row.summaryMetrics?.totals || null);
         setCounts({
-          prompt: (row.promptRecommendations || []).length,
-          process: (row.processRecommendations || []).length,
-          skill: (row.skillRecommendations || []).length,
+          prompt: groups.promptRecommendations.length,
+          toolsData: groups.toolsDataRecommendations.length,
+          taxonomy: groups.taxonomyRecommendations.length,
+          skill: groups.skillRecommendations.length,
+          devPolicy: groups.devPolicyRecommendations.length,
         });
         setExecutiveSummary(row.summaryMetrics?.executiveSummary || '');
         if (!completionNotifiedRef.current) {
@@ -3737,11 +3837,13 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
         </div>
       )}
 
-      {(counts.prompt > 0 || counts.process > 0 || counts.skill > 0) && (
-        <div className="grid gap-3 sm:grid-cols-3">
+      {(counts.prompt > 0 || counts.toolsData > 0 || counts.taxonomy > 0 || counts.skill > 0 || counts.devPolicy > 0) && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <MetricCard label="Prompt Recs" value={counts.prompt} tone="blue" />
-          <MetricCard label="Process Recs" value={counts.process} tone="amber" />
+          <MetricCard label="Tools & Data" value={counts.toolsData} tone="blue" />
+          <MetricCard label="Category Recs" value={counts.taxonomy} tone="green" />
           <MetricCard label="Skill Recs" value={counts.skill} tone="green" />
+          <MetricCard label="Dev / Policy" value={counts.devPolicy} tone="amber" />
         </div>
       )}
 
@@ -3789,10 +3891,10 @@ const REVIEW_PAGE_TABS = [
 ];
 const BACKLOG_KIND_TABS = [
   { key: 'prompt', label: 'Prompt', icon: FileText },
-  { key: 'process', label: 'Process', icon: Settings2 },
+  { key: 'tools_data', label: 'Tools & Data', icon: Database },
   { key: 'taxonomy', label: 'Categories', icon: Tags },
   { key: 'skill', label: 'Agent Skills', icon: Award },
-  { key: 'dev', label: 'Dev', icon: AlertTriangle, visibilityOnly: true },
+  { key: 'dev_policy', label: 'Dev / Policy', icon: Settings2 },
 ];
 
 function DailyReviewHistoryPanel({
@@ -4088,19 +4190,19 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         runIdParam = hashMatch ? hashMatch[1] : leadingMatch ? leadingMatch[1] : '';
       }
       const baseParams = {
-        limit: ['process', 'dev'].includes(backlogKind) ? 250 : 100,
-        kind: backlogKind === 'dev' ? 'process' : backlogKind,
+        limit: ['tools_data', 'dev_policy'].includes(backlogKind) ? 250 : 100,
+        kind: backlogKind,
         severity: backlogSeverity,
         ...(backlogStartDate ? { startDate: backlogStartDate } : {}),
         ...(backlogEndDate ? { endDate: backlogEndDate } : {}),
         ...(runIdParam ? { runId: runIdParam } : {}),
       };
       const filterForKindTab = (items = []) => {
-        if (backlogKind === 'dev') return items.filter(isDevBacklogItem);
-        if (backlogKind === 'process') return items.filter((item) => !isDevBacklogItem(item));
+        if (backlogKind === 'tools_data') return items.filter(isToolsDataBacklogItem);
+        if (backlogKind === 'dev_policy') return items.filter(isDevPolicyBacklogItem);
         return items;
       };
-      const usesClientFilteredTotals = ['process', 'dev'].includes(backlogKind);
+      const usesClientFilteredTotals = ['tools_data', 'dev_policy'].includes(backlogKind);
       if (backlogStatus === 'pending') {
         const [pendingRes, approvedRes] = await Promise.all([
           assignmentAPI.getDailyReviewRecommendations({ ...baseParams, status: 'pending' }),
@@ -4112,7 +4214,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         setPendingBacklogTotal(usesClientFilteredTotals ? pendingItems.length : pendingRes?.total || 0);
         setApprovedBacklogItems(approvedItems);
         setApprovedBacklogTotal(usesClientFilteredTotals ? approvedItems.length : approvedRes?.total || 0);
-        setBacklogItems(backlogKind === 'dev' ? [...pendingItems, ...approvedItems] : pendingItems);
+        setBacklogItems(pendingItems);
         setBacklogTotal(usesClientFilteredTotals
           ? pendingItems.length + approvedItems.length
           : (pendingRes?.total || 0) + (approvedRes?.total || 0));
@@ -4168,17 +4270,21 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   const loadConsolidationQueue = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoadingConsolidationQueue(true);
     try {
-      const [promptRes, skillRes, processRes] = await Promise.all([
+      const [promptRes, toolsDataRes, taxonomyRes, skillRes, devPolicyRes] = await Promise.all([
         assignmentAPI.getDailyReviewRecommendations({ status: 'approved', kind: 'prompt', limit: 100 }),
+        assignmentAPI.getDailyReviewRecommendations({ status: 'approved', kind: 'tools_data', limit: 100 }),
+        assignmentAPI.getDailyReviewRecommendations({ status: 'approved', kind: 'taxonomy', limit: 100 }),
         assignmentAPI.getDailyReviewRecommendations({ status: 'approved', kind: 'skill', limit: 100 }),
-        assignmentAPI.getDailyReviewRecommendations({ status: 'approved', kind: 'process', limit: 100 }),
+        assignmentAPI.getDailyReviewRecommendations({ status: 'approved', kind: 'dev_policy', limit: 100 }),
       ]);
       const byKind = {
         prompt: { total: promptRes?.total || 0, items: promptRes?.items || [] },
+        tools_data: { total: toolsDataRes?.total || 0, items: toolsDataRes?.items || [] },
+        taxonomy: { total: taxonomyRes?.total || 0, items: taxonomyRes?.items || [] },
         skill: { total: skillRes?.total || 0, items: skillRes?.items || [] },
-        process: { total: processRes?.total || 0, items: processRes?.items || [] },
+        dev_policy: { total: devPolicyRes?.total || 0, items: devPolicyRes?.items || [] },
       };
-      const items = [...byKind.prompt.items, ...byKind.skill.items, ...byKind.process.items]
+      const items = [...byKind.prompt.items, ...byKind.tools_data.items, ...byKind.taxonomy.items, ...byKind.skill.items, ...byKind.dev_policy.items]
         .sort((a, b) => {
           const aTime = new Date(a.reviewedAt || a.createdAt || a.reviewDate || 0).getTime();
           const bTime = new Date(b.reviewedAt || b.createdAt || b.reviewDate || 0).getTime();
@@ -4186,7 +4292,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         })
         .slice(0, 8);
       setConsolidationQueueSummary({
-        total: byKind.prompt.total + byKind.skill.total + byKind.process.total,
+        total: byKind.prompt.total + byKind.tools_data.total + byKind.taxonomy.total + byKind.skill.total + byKind.dev_policy.total,
         byKind,
         items,
       });
@@ -4241,9 +4347,11 @@ export default function DailyReviewManager({ workspaceTimezone }) {
       return {
         ...prev,
         promptRecommendations: updateList(prev.promptRecommendations),
+        toolsDataRecommendations: updateList(prev.toolsDataRecommendations),
         processRecommendations: updateList(prev.processRecommendations),
         taxonomyRecommendations: updateList(prev.taxonomyRecommendations),
         skillRecommendations: updateList(prev.skillRecommendations),
+        devPolicyRecommendations: updateList(prev.devPolicyRecommendations),
       };
     });
   }, []);
@@ -4328,7 +4436,11 @@ export default function DailyReviewManager({ workspaceTimezone }) {
   const allVisiblePendingSelected = visiblePendingBacklogItems.length > 0
     && visiblePendingBacklogItems.every((item) => selectedBacklogIds.includes(item.id));
   const readyToApplyCount = Array.isArray(consolidationRun?.items)
-    ? consolidationRun.items.filter((item) => item.status !== 'applied').length
+    ? consolidationRun.items.filter((item) => (
+      ['prompt', 'skills', 'technician_competencies'].includes(item.section)
+      && item.status !== 'applied'
+      && item.includeInApply !== false
+    )).length
     : 0;
 
   const toggleBacklogSelection = useCallback((id) => {
@@ -4622,7 +4734,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
           Review
           </h3>
           <p className="text-sm text-slate-500 mb-4">
-          Review assignment outcomes and generate prompt, process, and skill-matrix recommendations.
+          Review assignment outcomes and generate prompt, tools/data, category, agent-skill, and dev/policy recommendations.
           </p>
 
           {activeRun && (
@@ -4833,7 +4945,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
           <div className="mb-4 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1">
             <div className="grid min-w-[620px] grid-cols-5 gap-1 sm:min-w-0">
-              {BACKLOG_KIND_TABS.map(({ key, label, icon: Icon, visibilityOnly }) => {
+              {BACKLOG_KIND_TABS.map(({ key, label, icon: Icon }) => {
                 const selectedKind = backlogKind === key;
                 return (
                   <button
@@ -4841,25 +4953,16 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                     type="button"
                     onClick={() => {
                       setBacklogKind(key);
-                      setBacklogStatus(key === 'dev' ? 'all' : 'pending');
+                      setBacklogStatus('pending');
                     }}
                     className={`flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all sm:px-2.5 ${
                       selectedKind
-                        ? visibilityOnly
-                          ? 'bg-amber-100 text-amber-800 shadow-sm ring-1 ring-amber-200'
-                          : 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                        ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
                         : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
                     }`}
                   >
                     <Icon className="h-3.5 w-3.5" />
                     {label}
-                    {visibilityOnly && (
-                      <span className={`rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${
-                        selectedKind ? 'bg-white/70 text-amber-700' : 'bg-amber-50 text-amber-600'
-                      }`}>
-                        read
-                      </span>
-                    )}
                   </button>
                 );
               })}
@@ -4929,7 +5032,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 </div>
               </div>
 
-              {backlogStatus === 'pending' && backlogKind !== 'dev' && (
+              {backlogStatus === 'pending' && (
                 <div className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2 sm:flex-row sm:items-center">
                   <label className="inline-flex h-10 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-600">
                     <input
@@ -5056,37 +5159,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
           ) : (
             <div className={`transition-opacity duration-200 ease-out ${refreshingBacklog ? 'opacity-70' : 'opacity-100'}`}>
-              {backlogKind === 'dev' ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-800">Dev Visibility</h4>
-                      <p className="text-xs text-slate-500">Engineering or app-change recommendations. Visible here, not approved from backlog.</p>
-                    </div>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-700">{backlogTotal}</span>
-                  </div>
-                  {backlogItems.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-amber-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
-                      No dev visibility recommendations matched the current filters.
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {backlogItems.map((item) => (
-                        <RecommendationCard
-                          key={item.id}
-                          item={item}
-                          workspaceTimezone={workspaceTimezone}
-                          onRecommendationAction={handleRecommendationAction}
-                          savingRecommendationId={savingRecommendationId}
-                          showDate
-                          showRunMeta
-                          readOnly
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : backlogStatus === 'pending' ? (
+              {backlogStatus === 'pending' ? (
                 <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),minmax(420px,1fr)]">
                   <div className="min-w-0 rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-4 shadow-sm">
                     <div className="mb-3 flex items-start justify-between gap-3">

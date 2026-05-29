@@ -187,7 +187,7 @@ export const changelog = [
       { type: 'new', text: 'Run Review supports date ranges, compact paginated history, and the restored Opus review workflow.' },
       { type: 'new', text: 'Internal category and subcategory taxonomy is now independent from FreshService categories.' },
       { type: 'new', text: 'Assignment runs store internal category, subcategory, fit feedback, and taxonomy review signals on tickets.' },
-      { type: 'improved', text: 'Backlog is split into Prompt, Process, Skill, and Dev views with pending and approved lanes.' },
+      { type: 'improved', text: 'Backlog is split into Prompt, Tools & Data, Categories, Agent Skills, and Dev / Policy views with pending and approved lanes.' },
       { type: 'improved', text: 'Consolidation apply moved to the top action row and now shows applied-count confirmation.' },
       { type: 'improved', text: 'Skill and technician change reviews use compact matrix-style controls with dropdown selectors.' },
       { type: 'fixed', text: 'Consolidation refreshes immediately after apply and keeps the applied run visible.' },
