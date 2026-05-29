@@ -5,15 +5,19 @@ import logger from '../utils/logger.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import { DEFAULT_OPUS_MODEL, normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import providerGateway from './aiProviders/providerGateway.js';
+import { TOOL_SCHEMAS as ASSIGNMENT_TOOL_SCHEMAS } from './assignmentTools.js';
 
 const ACTIVE_STATUSES = ['collecting', 'analyzing', 'saving'];
 const APPLYABLE_SECTIONS = ['prompt', 'skills', 'technician_competencies'];
 const SECTION_LABELS = {
   prompt: 'Prompt Edits',
+  tools_data: 'Tools & Data Changes',
   skills: 'Category Changes',
   technician_competencies: 'Agent Skill Changes',
-  process: 'Process Changes',
+  dev_policy: 'Dev / Policy Changes',
+  process: 'Dev / Policy Changes',
 };
+const DOCUMENTED_SECTIONS = ['tools_data', 'dev_policy', 'process'];
 
 function toArray(value) {
   return Array.isArray(value) ? value : [];
@@ -45,7 +49,15 @@ function sourceCounts(rows = []) {
     acc.total += 1;
     acc[row.kind] = (acc[row.kind] || 0) + 1;
     return acc;
-  }, { total: 0, prompt: 0, process: 0, skill: 0 });
+  }, { total: 0, prompt: 0, tools_data: 0, taxonomy: 0, skill: 0, dev_policy: 0, process: 0 });
+}
+
+function compactAssignmentToolSchemas() {
+  return ASSIGNMENT_TOOL_SCHEMAS.map((tool) => ({
+    name: tool.name,
+    description: truncate(tool.description, 240),
+    inputs: Object.keys(tool.input_schema?.properties || {}),
+  }));
 }
 
 class AssignmentDailyReviewConsolidationService {
@@ -210,7 +222,6 @@ class AssignmentDailyReviewConsolidationService {
       prompt: !!applyPrompt,
       skills: !!applySkills,
       technician_competencies: !!applyTechnicianCompetencies,
-      process: false,
     };
 
     const items = run.items.filter((item) => (
@@ -254,11 +265,11 @@ class AssignmentDailyReviewConsolidationService {
       });
     }
 
-    // Process items are not directly applyable in the app, but once the
+    // Tools/data and dev/policy items are not directly applyable in the app, but once the
     // consolidation is accepted they should not keep reappearing in the
-    // approved-not-applied source set. The saved process item remains as the
-    // dev-work record.
-    for (const item of run.items.filter((row) => row.section === 'process')) {
+    // approved-not-applied source set. The saved item remains as the
+    // documented implementation/policy record.
+    for (const item of run.items.filter((row) => DOCUMENTED_SECTIONS.includes(row.section))) {
       for (const id of toArray(item.sourceRecommendationIds)) appliedSourceIds.add(id);
     }
 
@@ -499,6 +510,7 @@ class AssignmentDailyReviewConsolidationService {
         systemPrompt: publishedPrompt.systemPrompt,
         toolConfig: publishedPrompt.toolConfig,
       },
+      availableAssignmentTools: compactAssignmentToolSchemas(),
       categories: categories.map((cat) => ({
         id: cat.id,
         name: cat.name,
@@ -568,14 +580,17 @@ class AssignmentDailyReviewConsolidationService {
 
 You will receive approved Daily Review recommendations, the current assignment prompt, current skill categories, technician competency mappings, and limited ticket evidence.
 
-Produce a consolidation plan with exactly four sections:
+Produce a consolidation plan with exactly five sections:
 1. Prompt edits: suggest a complete updated assignment prompt, but do not assume it will be applied automatically.
-2. Category changes: add subcategories, or rename, update, move, merge, or deprecate existing internal categories/subcategories where evidence supports it.
-3. Agent skill changes: suggest technician competency level updates or mappings where evidence supports it.
-4. Process changes: operational or engineering work. These are visible but not directly applyable in the app.
+2. Tools & Data changes: propose LLM-facing tools, data feeds, tool output changes, or missing signals needed before a prompt can reliably do the requested behavior.
+3. Category changes: add subcategories, or rename, update, move, merge, or deprecate existing internal categories/subcategories where evidence supports it.
+4. Agent skill changes: suggest technician competency level updates or mappings where evidence supports it.
+5. Dev / Policy changes: product/backend/UI work, observability, configuration, automation fixes, or human policy/SOP changes that are not LLM tool capabilities.
 
 Rules:
 - The app has a two-level Ticket Pulse category model: top-level category plus optional subcategory. FreshService categories are evidence only.
+- Use contextSnapshot.availableAssignmentTools as the full list of current LLM-facing assignment tools.
+- Prompt limitation gate: do not solve missing data, external action, scoring, persistence, or runtime visibility gaps with prompt text alone. If a prompt edit depends on a tool, state that dependency in the prompt payload and create a matching Tools & Data item when the tool/data does not already exist.
 - Daily Review may propose new subcategories under existing parents, or cleanup/moves for existing categories/subcategories, but they only become active after admin approval through Category Changes.
 - Pay close attention to category-fit evidence from assignment runs. Treat weak/none fit and suggested category/subcategory names as leads, then validate them against ticket evidence and the current categoryTree before proposing changes.
 - The top-level category list is fixed for IT go-live. Do not propose or create a new top-level category. If a gap exists, choose the closest existing top-level parent and propose a new subcategory under it.
@@ -585,7 +600,7 @@ Rules:
 - Preserve useful existing prompt content. Tighten only where findings justify it.
 - Prefer adding narrow guidance over broad rewrites.
 - Reference sourceRecommendationIds on every proposed item.
-- Process changes must not require app-side application; mark them as dev_required or policy_required.
+- Tools & Data and Dev / Policy changes are documented recommendations; they are not directly applyable by the app.
 - Before the final tool call, write a concise visible summary of the plan you are about to submit.
 - Call submit_consolidation_plan with the final structured result.`;
 
@@ -735,9 +750,28 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
               rationale: { type: 'string' },
               changeSummary: { type: 'string' },
               updatedPrompt: { type: 'string' },
+              requiredTools: { type: 'array', items: { type: 'string' }, description: 'Existing or proposed tools the prompt update depends on. Empty if prompt-only.' },
+              toolDependencyNote: { type: ['string', 'null'], description: 'Required when requiredTools is non-empty. State that the prompt works only once those tools/data are available.' },
               sourceRecommendationIds: { type: 'array', items: { type: 'number' } },
             },
             required: ['title', 'rationale', 'changeSummary', 'updatedPrompt', 'sourceRecommendationIds'],
+          },
+          toolsDataChanges: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string' },
+                missingCapability: { type: 'string' },
+                requiredToolName: { type: ['string', 'null'] },
+                dataSources: { type: 'array', items: { type: 'string' } },
+                promptImpact: { type: ['string', 'null'] },
+                rationale: { type: 'string' },
+                suggestedAction: { type: 'string' },
+                sourceRecommendationIds: { type: 'array', items: { type: 'number' } },
+              },
+              required: ['title', 'missingCapability', 'rationale', 'suggestedAction', 'sourceRecommendationIds'],
+            },
           },
           skillChanges: {
             type: 'array',
@@ -776,13 +810,13 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
               required: ['title', 'technicianName', 'categoryName', 'proficiencyLevel', 'rationale', 'sourceRecommendationIds'],
             },
           },
-          processChanges: {
+          devPolicyChanges: {
             type: 'array',
             items: {
               type: 'object',
               properties: {
                 title: { type: 'string' },
-                changeType: { type: 'string' },
+                changeType: { type: 'string', enum: ['dev_required', 'policy_required', 'config_required', 'bug_fix', 'observability'] },
                 rationale: { type: 'string' },
                 suggestedAction: { type: 'string' },
                 sourceRecommendationIds: { type: 'array', items: { type: 'number' } },
@@ -791,7 +825,7 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
             },
           },
         },
-        required: ['executiveSummary', 'prompt', 'skillChanges', 'technicianCompetencyChanges', 'processChanges'],
+        required: ['executiveSummary', 'prompt', 'toolsDataChanges', 'skillChanges', 'technicianCompetencyChanges', 'devPolicyChanges'],
       },
     };
   }
@@ -810,6 +844,21 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
         rationale: prompt.rationale || prompt.changeSummary || null,
         payload: prompt,
         sourceRecommendationIds: toArray(prompt.sourceRecommendationIds).length ? toArray(prompt.sourceRecommendationIds) : allSourceIds,
+      });
+    }
+
+    for (const item of toArray(result?.toolsDataChanges)) {
+      rows.push({
+        runId,
+        workspaceId,
+        section: 'tools_data',
+        actionType: item.requiredToolName || 'tool_or_data_required',
+        title: item.title || `${SECTION_LABELS.tools_data}: ${item.missingCapability || 'Capability gap'}`,
+        rationale: item.rationale || null,
+        payload: item,
+        sourceRecommendationIds: toArray(item.sourceRecommendationIds),
+        includeInApply: false,
+        status: 'documented',
       });
     }
 
@@ -839,13 +888,13 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
       });
     }
 
-    for (const item of toArray(result?.processChanges)) {
+    for (const item of [...toArray(result?.devPolicyChanges), ...toArray(result?.processChanges)]) {
       rows.push({
         runId,
         workspaceId,
-        section: 'process',
+        section: 'dev_policy',
         actionType: item.changeType || 'dev_required',
-        title: item.title || 'Process change',
+        title: item.title || 'Dev / policy change',
         rationale: item.rationale || null,
         payload: item,
         sourceRecommendationIds: toArray(item.sourceRecommendationIds),
@@ -999,10 +1048,11 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
 
   _groupItems(items = []) {
     return items.reduce((acc, item) => {
-      if (!acc[item.section]) acc[item.section] = [];
-      acc[item.section].push(item);
+      const section = item.section === 'process' ? 'dev_policy' : item.section;
+      if (!acc[section]) acc[section] = [];
+      acc[section].push({ ...item, section });
       return acc;
-    }, { prompt: [], skills: [], technician_competencies: [], process: [] });
+    }, { prompt: [], tools_data: [], skills: [], technician_competencies: [], dev_policy: [] });
   }
 
   async _updateProgress(runId, phase, message, percent) {

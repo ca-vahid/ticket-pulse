@@ -20,6 +20,7 @@ import { runJobsInPool } from '../utils/parallelPool.js';
 import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import providerGateway from './aiProviders/providerGateway.js';
+import { TOOL_SCHEMAS as ASSIGNMENT_TOOL_SCHEMAS } from './assignmentTools.js';
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const STALE_RUNNING_MS = 30 * 60 * 1000;
@@ -42,12 +43,14 @@ const MAX_CONVERSATIONS_PER_TICKET = 30;
 const MAX_DESCRIPTION_CHARS_FOR_LLM = 1500;
 const RECOMMENDATION_KIND_CONFIG = [
   { kind: 'prompt', field: 'promptRecommendations' },
-  { kind: 'process', field: 'processRecommendations' },
+  { kind: 'tools_data', field: 'toolsDataRecommendations' },
   { kind: 'taxonomy', field: 'taxonomyRecommendations' },
   { kind: 'skill', field: 'skillRecommendations' },
+  { kind: 'dev_policy', field: 'devPolicyRecommendations' },
 ];
 const RECOMMENDATION_STATUSES = ['pending', 'approved', 'rejected', 'applied'];
 const TAXONOMY_ACTIONS = ['add', 'rename', 'update', 'move', 'merge', 'deprecate'];
+const REVIEW_RECOMMENDATION_KINDS = ['prompt', 'tools_data', 'taxonomy', 'skill', 'dev_policy', 'process', 'all'];
 
 class DailyReviewCancelledError extends Error {
   constructor(message = 'Daily review cancelled by user') {
@@ -194,11 +197,96 @@ function recommendationText(item = {}) {
     item.title,
     item.rationale,
     item.suggestedAction,
+    item.missingCapability,
+    item.requiredToolName,
+    item.toolDependencyNote,
+    item.changeType,
     item.categoryName,
     item.parentCategoryName,
     item.newName,
     ...(Array.isArray(item.skillsAffected) ? item.skillsAffected : []),
+    ...(Array.isArray(item.requiredTools) ? item.requiredTools : []),
+    ...(Array.isArray(item.dataSources) ? item.dataSources : []),
   ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function compactAssignmentToolSchemas() {
+  return ASSIGNMENT_TOOL_SCHEMAS.map((tool) => ({
+    name: tool.name,
+    description: truncate(tool.description, 240),
+    inputs: Object.keys(tool.input_schema?.properties || {}),
+  }));
+}
+
+function normalizeRecommendationKind(kind) {
+  const normalized = String(kind || '').toLowerCase();
+  if (normalized === 'tools' || normalized === 'tool' || normalized === 'tools_data') return 'tools_data';
+  if (normalized === 'dev' || normalized === 'policy' || normalized === 'dev_policy') return 'dev_policy';
+  if (normalized === 'category' || normalized === 'categories') return 'taxonomy';
+  return normalized;
+}
+
+function isToolsDataRecommendation(item = {}) {
+  const metadata = item.metadata || {};
+  const category = String(
+    metadata.reviewCategory
+      || metadata.recommendationCategory
+      || metadata.capabilityType
+      || item.reviewCategory
+      || item.recommendationCategory
+      || item.changeType
+      || '',
+  ).toLowerCase();
+  if (['tools_data', 'tool', 'tools', 'data', 'data_capability', 'capability_gap'].includes(category)) {
+    return true;
+  }
+  if (Array.isArray(item.requiredTools) && item.requiredTools.length > 0) return true;
+  if (item.requiredToolName || item.missingCapability || item.dataSource || item.toolName) return true;
+
+  const text = recommendationText(item);
+  return /\b(tool|tooling|data source|data capability|capability gap|real-time|calendar|graph|freshservice api|api endpoint|external system|integration|availability signal|location signal|routing signal|telemetry|webhook|sync signal)\b/.test(text);
+}
+
+function splitOperationalRecommendations(items = []) {
+  const toolsDataRecommendations = [];
+  const devPolicyRecommendations = [];
+  for (const item of toArray(items)) {
+    if (isToolsDataRecommendation(item)) toolsDataRecommendations.push(item);
+    else devPolicyRecommendations.push(item);
+  }
+  return { toolsDataRecommendations, devPolicyRecommendations };
+}
+
+function metadataFromRecommendation(kind, item = {}) {
+  const existing = item.metadata && typeof item.metadata === 'object' ? { ...item.metadata } : {};
+  const metadata = { ...existing };
+
+  if (kind === 'tools_data') {
+    metadata.reviewCategory = 'tools_data';
+    metadata.missingCapability = item.missingCapability || existing.missingCapability || null;
+    metadata.requiredToolName = item.requiredToolName || item.toolName || existing.requiredToolName || null;
+    metadata.requiredTools = toArray(item.requiredTools || existing.requiredTools);
+    metadata.dataSources = toArray(item.dataSources || existing.dataSources);
+    metadata.promptImpact = item.promptImpact || existing.promptImpact || null;
+  }
+
+  if (kind === 'dev_policy') {
+    metadata.reviewCategory = 'dev_policy';
+    metadata.changeType = item.changeType || existing.changeType || 'dev_or_policy';
+  }
+
+  if (kind === 'prompt') {
+    const requiredTools = toArray(item.requiredTools || existing.requiredTools);
+    if (requiredTools.length > 0 || item.promptOnlyFeasible === false || item.toolDependencyNote) {
+      metadata.promptLimitation = {
+        promptOnlyFeasible: item.promptOnlyFeasible !== undefined ? !!item.promptOnlyFeasible : requiredTools.length === 0,
+        requiredTools,
+        toolDependencyNote: item.toolDependencyNote || existing.toolDependencyNote || null,
+      };
+    }
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
 class AssignmentDailyReviewService {
@@ -264,7 +352,7 @@ class AssignmentDailyReviewService {
   }
 
   _validateRecommendationKind(kind) {
-    if (!['prompt', 'process', 'taxonomy', 'skill', 'all'].includes(kind)) {
+    if (!REVIEW_RECOMMENDATION_KINDS.includes(normalizeRecommendationKind(kind))) {
       throw new Error(`Invalid recommendation kind: ${kind}`);
     }
   }
@@ -391,10 +479,17 @@ class AssignmentDailyReviewService {
       : reviewDateKey(String(run.reviewDate).slice(0, 10));
     const rows = [];
 
+    const splitProcess = splitOperationalRecommendations(recommendationGroups.processRecommendations ?? run.processRecommendations);
+
     for (const { kind, field } of RECOMMENDATION_KIND_CONFIG) {
-      const items = toArray(recommendationGroups[field] ?? run[field]);
+      const fallbackItems = kind === 'tools_data'
+        ? splitProcess.toolsDataRecommendations
+        : kind === 'dev_policy'
+          ? splitProcess.devPolicyRecommendations
+          : run[field];
+      const items = toArray(recommendationGroups[field] ?? fallbackItems);
       items.forEach((item, index) => {
-        const metadata = kind === 'taxonomy' ? this._taxonomyMetadataFromItem(item) : (item.metadata || null);
+        const metadata = kind === 'taxonomy' ? this._taxonomyMetadataFromItem(item) : metadataFromRecommendation(kind, item);
         const taxonomy = metadata?.taxonomy || {};
         const taxonomyDetails = kind === 'taxonomy'
           ? [
@@ -441,9 +536,11 @@ class AssignmentDailyReviewService {
   _groupRecommendations(rows = []) {
     const grouped = {
       promptRecommendations: [],
+      toolsDataRecommendations: [],
       processRecommendations: [],
       taxonomyRecommendations: [],
       skillRecommendations: [],
+      devPolicyRecommendations: [],
       recommendationStatusCounts: {
         pending: 0,
         approved: 0,
@@ -455,7 +552,19 @@ class AssignmentDailyReviewService {
     for (const row of rows) {
       const dto = this._toRecommendationDto(row);
       if (dto.kind === 'prompt') grouped.promptRecommendations.push(dto);
-      if (dto.kind === 'process') grouped.processRecommendations.push(dto);
+      if (dto.kind === 'tools_data') {
+        grouped.toolsDataRecommendations.push(dto);
+        grouped.processRecommendations.push(dto);
+      }
+      if (dto.kind === 'dev_policy') {
+        grouped.devPolicyRecommendations.push(dto);
+        grouped.processRecommendations.push(dto);
+      }
+      if (dto.kind === 'process') {
+        if (isToolsDataRecommendation(dto)) grouped.toolsDataRecommendations.push(dto);
+        else grouped.devPolicyRecommendations.push(dto);
+        grouped.processRecommendations.push(dto);
+      }
       if (dto.kind === 'taxonomy') grouped.taxonomyRecommendations.push(dto);
       if (dto.kind === 'skill') grouped.skillRecommendations.push(dto);
       if (grouped.recommendationStatusCounts[dto.status] !== undefined) {
@@ -1896,7 +2005,8 @@ class AssignmentDailyReviewService {
 
   _buildHeuristicRecommendations(dataset) {
     const promptRecommendations = [];
-    const processRecommendations = [];
+    const toolsDataRecommendations = [];
+    const devPolicyRecommendations = [];
     const skillRecommendations = [];
     const taxonomyRecommendations = this._buildDeterministicTaxonomyRecommendations(dataset);
 
@@ -1916,11 +2026,13 @@ class AssignmentDailyReviewService {
     }
 
     if (reboundCases.length > 0) {
-      processRecommendations.push({
-        title: 'Audit rebound handling and rejection follow-up',
+      toolsDataRecommendations.push({
+        title: 'Verify rebound and rejection signals are exposed to assignment ranking',
         severity: reboundCases.length >= 3 ? 'high' : 'medium',
         rationale: 'Tickets rebounded after assignment, which indicates the system is still routing some tickets to agents who will not keep ownership.',
-        suggestedAction: 'Review rejection notes, group routing, and rebound guardrails. Consider earlier manual review for similar tickets or stronger exclusion logic for recently rejected technician-ticket pairs.',
+        missingCapability: 'Structured same-ticket rejection and recent rejection-context signals must be available to the assignment prompt before prompt wording alone can solve this reliably.',
+        requiredTools: ['get_assignment_risk_signals'],
+        suggestedAction: 'Confirm the assignment runtime exposes same-ticket rejection, same-day rejection pressure, recent same-category rejection history, and busy/unavailable notes to the model. Any prompt change should explicitly depend on those tool signals.',
         supportingTicketIds: reboundCases.slice(0, 5).map((item) => item.ticketId),
         supportingFreshserviceTicketIds: reboundCases.slice(0, 5).map((item) => item.freshserviceTicketId),
       });
@@ -1960,10 +2072,11 @@ class AssignmentDailyReviewService {
     }
 
     if (dataset.summaryMetrics.totals.bypassedTickets > 0) {
-      processRecommendations.push({
+      devPolicyRecommendations.push({
         title: 'Investigate pipeline bypass tickets',
         severity: dataset.summaryMetrics.totals.bypassedTickets >= 3 ? 'high' : 'medium',
         rationale: 'Some tickets were assigned in FreshService without a pipeline run, which reduces the review loop quality and weakens training data.',
+        changeType: 'dev_required',
         suggestedAction: 'Check poll timing, webhook coverage, and manual assignment timing to reduce untracked same-day ownership changes.',
         supportingTicketIds: dataset.cases
           .filter((item) => item.primaryTag === DAILY_REVIEW_PRIMARY_TAGS.pipelineBypassed)
@@ -1979,7 +2092,9 @@ class AssignmentDailyReviewService {
     return {
       executiveSummary: `Reviewed ${dataset.summaryMetrics.totals.totalTicketsReviewed} ticket(s) for ${dataset.reviewDate}. Success rate was ${dataset.summaryMetrics.rates.successRate}% with ${dataset.summaryMetrics.totals.failure} failure-classified case(s) and ${dataset.summaryMetrics.totals.rebounds} rebound(s).`,
       promptRecommendations,
-      processRecommendations,
+      toolsDataRecommendations,
+      devPolicyRecommendations,
+      processRecommendations: [...toolsDataRecommendations, ...devPolicyRecommendations],
       taxonomyRecommendations,
       skillRecommendations,
       warnings: ['Used heuristic recommendations because LLM analysis was unavailable.'],
@@ -2185,6 +2300,7 @@ class AssignmentDailyReviewService {
         })),
         categoryTree: buildDailyReviewCategoryTree(dataset.competencyCategories),
         currentPromptVersion: publishedPrompt?.version || null,
+        availableAssignmentTools: compactAssignmentToolSchemas(),
         allowedSupportingTicketIds: Array.from(allowedInternalIds),
         allowedSupportingFreshserviceTicketIds: Array.from(allowedFreshserviceIds),
       };
@@ -2207,13 +2323,16 @@ class AssignmentDailyReviewService {
                   severity: { type: 'string', enum: ['high', 'medium', 'low'] },
                   rationale: { type: 'string' },
                   suggestedAction: { type: 'string' },
+                  promptOnlyFeasible: { type: 'boolean', description: 'True only when the requested improvement can work with the current prompt and availableAssignmentTools. False if new data/tooling is required.' },
+                  requiredTools: { type: 'array', items: { type: 'string' }, description: 'Existing or proposed tool names the prompt update depends on. Empty for prompt-only changes.' },
+                  toolDependencyNote: { type: ['string', 'null'], description: 'Required when requiredTools is non-empty. Explain that the prompt update only works if these tools/data exist.' },
                   supportingTicketIds: { type: 'array', items: { type: 'integer' } },
                   supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
                 },
                 required: ['title', 'severity', 'rationale', 'suggestedAction'],
               },
             },
-            processRecommendations: {
+            toolsDataRecommendations: {
               type: 'array',
               items: {
                 type: 'object',
@@ -2221,11 +2340,15 @@ class AssignmentDailyReviewService {
                   title: { type: 'string' },
                   severity: { type: 'string', enum: ['high', 'medium', 'low'] },
                   rationale: { type: 'string' },
+                  missingCapability: { type: 'string', description: 'The missing data, tool, or action capability the LLM needs.' },
+                  requiredToolName: { type: ['string', 'null'], description: 'Suggested new tool name, or existing tool name if this is a prompt dependency on an available tool.' },
+                  dataSources: { type: 'array', items: { type: 'string' }, description: 'Likely data sources such as Freshservice, Entra, calendar, Ticket Pulse tables, or external APIs.' },
+                  promptImpact: { type: ['string', 'null'], description: 'How prompt behavior would improve once this capability exists.' },
                   suggestedAction: { type: 'string' },
                   supportingTicketIds: { type: 'array', items: { type: 'integer' } },
                   supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
                 },
-                required: ['title', 'severity', 'rationale', 'suggestedAction'],
+                required: ['title', 'severity', 'rationale', 'missingCapability', 'suggestedAction'],
               },
             },
             taxonomyRecommendations: {
@@ -2266,6 +2389,22 @@ class AssignmentDailyReviewService {
                 required: ['title', 'severity', 'rationale', 'suggestedAction'],
               },
             },
+            devPolicyRecommendations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+                  rationale: { type: 'string' },
+                  changeType: { type: 'string', enum: ['dev_required', 'policy_required', 'config_required', 'bug_fix', 'observability'] },
+                  suggestedAction: { type: 'string' },
+                  supportingTicketIds: { type: 'array', items: { type: 'integer' } },
+                  supportingFreshserviceTicketIds: { type: 'array', items: { type: 'integer' } },
+                },
+                required: ['title', 'severity', 'rationale', 'changeType', 'suggestedAction'],
+              },
+            },
             warnings: {
               type: 'array',
               items: { type: 'string' },
@@ -2274,9 +2413,10 @@ class AssignmentDailyReviewService {
           required: [
             'executiveSummary',
             'promptRecommendations',
-            'processRecommendations',
+            'toolsDataRecommendations',
             'taxonomyRecommendations',
             'skillRecommendations',
+            'devPolicyRecommendations',
             'warnings',
           ],
         },
@@ -2300,14 +2440,20 @@ Strict scoping rules:
 - supportingFreshserviceTicketIds MUST come from the analysisInput.allowedSupportingFreshserviceTicketIds list. Anything else will be discarded as a hallucination.
 - Never invent ticket numbers, technician names, or workflow names that are not present in the supplied cases.
 
-Your job is to recommend improvements in exactly four areas:
+Your job is to recommend improvements in exactly five areas:
 1. Prompt changes
-2. Process changes
+2. Tools & Data changes
 3. Category/subcategory changes
 4. Agent skill changes
+5. Dev / Policy changes
 
 Rules:
 - Base every recommendation on evidence from the supplied cases and metrics.
+- Use analysisInput.availableAssignmentTools as the complete list of tool capabilities the assignment prompt can currently rely on.
+- Prompt limitation gate: before creating a prompt recommendation, decide whether the desired behavior is possible using the current prompt and available tools. If the model would need unavailable real-time data, external-system action, hidden state, scoring logic, persistence, or a new API, do not classify it as prompt-only. Put the missing capability in toolsDataRecommendations or devPolicyRecommendations instead.
+- If a prompt recommendation depends on a tool, set promptOnlyFeasible=false, list requiredTools, and state in suggestedAction/toolDependencyNote that the prompt change only works when those tools/data exist. Also create a matching toolsDataRecommendations item when the tool is not already in availableAssignmentTools.
+- Use toolsDataRecommendations for new or changed LLM-facing tools, data feeds, signals, or tool output shapes.
+- Use devPolicyRecommendations for product/backend/UI bugs, observability, configuration, automation behavior, or human policy/SOP changes that are not LLM tool capabilities.
 - Pay special attention to cases with category review signals: taxonomyFit.reviewNeeded=true, weak/none categoryFit, weak/none subcategoryFit, or suggested internal category/subcategory names.
 - Treat assignment-agent category suggestions as evidence, not truth: compare them against ticket descriptions, thread excerpts, outcomes, and the full categoryTree before recommending category/subcategory changes.
 ${canonicalCategoryReviewRules}
@@ -2361,11 +2507,12 @@ ${canonicalCategoryReviewRules}
       // must be present in the actual analyzedCases set we sent in.
       const sanitizationCtx = { allowedInternalIds, allowedFreshserviceIds };
       const promptSanitized = this._sanitizeRecommendationItems(submission.promptRecommendations, sanitizationCtx);
-      const processSanitized = this._sanitizeRecommendationItems(submission.processRecommendations, sanitizationCtx);
+      const toolsDataSanitized = this._sanitizeRecommendationItems(submission.toolsDataRecommendations, sanitizationCtx);
       const taxonomySanitized = this._sanitizeRecommendationItems(submission.taxonomyRecommendations, sanitizationCtx);
       const skillSanitized = this._sanitizeRecommendationItems(submission.skillRecommendations, sanitizationCtx);
-      const totalDroppedInternal = promptSanitized.droppedInternal + processSanitized.droppedInternal + taxonomySanitized.droppedInternal + skillSanitized.droppedInternal;
-      const totalDroppedExternal = promptSanitized.droppedExternal + processSanitized.droppedExternal + taxonomySanitized.droppedExternal + skillSanitized.droppedExternal;
+      const devPolicySanitized = this._sanitizeRecommendationItems(submission.devPolicyRecommendations, sanitizationCtx);
+      const totalDroppedInternal = promptSanitized.droppedInternal + toolsDataSanitized.droppedInternal + taxonomySanitized.droppedInternal + skillSanitized.droppedInternal + devPolicySanitized.droppedInternal;
+      const totalDroppedExternal = promptSanitized.droppedExternal + toolsDataSanitized.droppedExternal + taxonomySanitized.droppedExternal + skillSanitized.droppedExternal + devPolicySanitized.droppedExternal;
       const sanitizationWarnings = [];
       if (totalDroppedInternal > 0 || totalDroppedExternal > 0) {
         const dropMsg = `Dropped ${totalDroppedInternal + totalDroppedExternal} hallucinated supporting ticket id reference(s) (${totalDroppedInternal} internal, ${totalDroppedExternal} freshservice) returned by the LLM that were not part of this workspace's review cohort.`;
@@ -2376,7 +2523,9 @@ ${canonicalCategoryReviewRules}
       return {
         executiveSummary: submission.executiveSummary || '',
         promptRecommendations: promptSanitized.items,
-        processRecommendations: processSanitized.items,
+        toolsDataRecommendations: toolsDataSanitized.items,
+        devPolicyRecommendations: devPolicySanitized.items,
+        processRecommendations: [...toolsDataSanitized.items, ...devPolicySanitized.items],
         taxonomyRecommendations: taxonomySanitized.items,
         skillRecommendations: skillSanitized.items,
         warnings: [
@@ -2637,7 +2786,7 @@ ${canonicalCategoryReviewRules}
       const analyzingPayload = {
         phase: 'analyzing',
         percent: 92,
-        message: 'Generating prompt, process, category, and agent-skill recommendations...',
+        message: 'Generating prompt, tools/data, category, agent-skill, and dev/policy recommendations...',
         stats: dataset.summaryMetrics.totals || {},
       };
       emit({ type: 'phase_update', ...analyzingPayload });
@@ -2653,6 +2802,9 @@ ${canonicalCategoryReviewRules}
         ...this._buildDeterministicTaxonomyRecommendations(dataset),
       ]);
       const agentSkillRecommendations = skillSplit.skillRecommendations;
+      const toolsDataRecommendations = toArray(analysis.toolsDataRecommendations);
+      const devPolicyRecommendations = toArray(analysis.devPolicyRecommendations);
+      const processRecommendations = [...toolsDataRecommendations, ...devPolicyRecommendations];
       const mergedWarnings = [...dataset.warnings, ...(analysis.warnings || [])];
 
       run = await prisma.$transaction(async (tx) => {
@@ -2668,7 +2820,7 @@ ${canonicalCategoryReviewRules}
             analyzedTicketIds: dataset.analyzedTicketIds,
             evidenceCases: sanitizeJsonForPostgres(dataset.cases),
             promptRecommendations: sanitizeJsonForPostgres(analysis.promptRecommendations),
-            processRecommendations: sanitizeJsonForPostgres(analysis.processRecommendations),
+            processRecommendations: sanitizeJsonForPostgres(processRecommendations),
             skillRecommendations: sanitizeJsonForPostgres(agentSkillRecommendations),
             warnings: sanitizeJsonForPostgres(mergedWarnings),
             fullTranscript: sanitizeJsonForPostgres(analysis.transcript || null),
@@ -2680,9 +2832,10 @@ ${canonicalCategoryReviewRules}
         });
         await this._replaceRecommendationsForRun(tx, updatedRun, {
           promptRecommendations: analysis.promptRecommendations,
-          processRecommendations: analysis.processRecommendations,
+          toolsDataRecommendations,
           taxonomyRecommendations,
           skillRecommendations: agentSkillRecommendations,
+          devPolicyRecommendations,
         });
         return updatedRun;
       });
@@ -2691,9 +2844,10 @@ ${canonicalCategoryReviewRules}
         type: 'recommendations_ready',
         executiveSummary: analysis.executiveSummary,
         promptCount: analysis.promptRecommendations?.length || 0,
-        processCount: analysis.processRecommendations?.length || 0,
+        toolsDataCount: toolsDataRecommendations.length,
         taxonomyCount: taxonomyRecommendations.length,
         skillCount: agentSkillRecommendations.length,
+        devPolicyCount: devPolicyRecommendations.length,
       });
       const completedPayload = {
         phase: 'completed',
@@ -2839,6 +2993,7 @@ ${canonicalCategoryReviewRules}
   } = {}) {
     if (status && status !== 'all') this._validateRecommendationStatus(status);
     if (kind) this._validateRecommendationKind(kind);
+    const normalizedKind = normalizeRecommendationKind(kind);
 
     await this._markStaleRunsFailed(workspaceId);
     await this._migrateRecentTaxonomySkillRecommendations(workspaceId);
@@ -2846,7 +3001,13 @@ ${canonicalCategoryReviewRules}
 
     const where = { workspaceId };
     if (status && status !== 'all') where.status = status;
-    if (kind && kind !== 'all') where.kind = kind;
+    if (normalizedKind && normalizedKind !== 'all') {
+      where.kind = ['tools_data', 'dev_policy'].includes(normalizedKind)
+        ? { in: [normalizedKind, 'process'] }
+        : normalizedKind === 'process'
+          ? { in: ['tools_data', 'dev_policy', 'process'] }
+          : normalizedKind;
+    }
     if (severity && severity !== 'all') where.severity = String(severity).toLowerCase();
     if (startDate || endDate) {
       where.reviewDate = {};
@@ -2862,6 +3023,32 @@ ${canonicalCategoryReviewRules}
         ? runId
         : parseInt(String(runId).replace(/[^0-9]/g, ''), 10);
       where.runId = Number.isInteger(numeric) && numeric > 0 ? numeric : -1;
+    }
+
+    const needsLegacyProcessSplit = ['tools_data', 'dev_policy'].includes(normalizedKind);
+    if (needsLegacyProcessSplit) {
+      const rows = await prisma.assignmentDailyReviewRecommendation.findMany({
+        where,
+        include: {
+          run: {
+            select: { id: true, reviewDate: true, triggeredBy: true, status: true },
+          },
+        },
+        orderBy: [{ reviewDate: 'desc' }, { kind: 'asc' }, { ordinal: 'asc' }],
+        take: 1000,
+      });
+      const filtered = rows
+        .map((item) => this._toRecommendationDto(item))
+        .filter((item) => (
+          item.kind === normalizedKind
+          || (item.kind === 'process' && (normalizedKind === 'tools_data'
+            ? isToolsDataRecommendation(item)
+            : !isToolsDataRecommendation(item)))
+        ));
+      return {
+        items: filtered.slice(offset, offset + limit),
+        total: filtered.length,
+      };
     }
 
     const [items, total] = await Promise.all([
@@ -2980,11 +3167,12 @@ ${canonicalCategoryReviewRules}
   }
 
   // Generates a one-page meeting briefing from a completed daily review.
-  // The briefing is intentionally separate from the structured prompt /
-  // process / skill recommendations: those are *operational* artifacts the
-  // admin acts on; the briefing is a *narrative* summary the team reads at
-  // the next-day standup. We persist it on the run record so it survives
-  // refreshes; regeneration overwrites the previous version.
+  // The briefing is intentionally separate from the structured prompt,
+  // tools/data, category, agent-skill, and dev/policy recommendations:
+  // those are operational artifacts the admin acts on; the briefing is a
+  // *narrative* summary the team reads at the next-day standup. We persist it
+  // on the run record so it survives refreshes; regeneration overwrites the
+  // previous version.
   async generateMeetingBriefing(runId, workspaceId, { actorEmail = 'admin', tone = 'standup' } = {}) {
     const run = await prisma.assignmentDailyReviewRun.findUnique({ where: { id: runId } });
     if (!run) throw new Error('Daily review run not found');
@@ -3023,18 +3211,24 @@ ${canonicalCategoryReviewRules}
         resolvedAt: item.resolvedAt,
       }));
 
+    const splitProcess = splitOperationalRecommendations(run.processRecommendations);
     const recommendationsContext = {
       prompt: (run.promptRecommendations || []).slice(0, 5).map((rec) => ({
         title: rec.title,
         severity: rec.severity,
         rationale: rec.rationale,
       })),
-      process: (run.processRecommendations || []).slice(0, 5).map((rec) => ({
+      toolsData: (splitProcess.toolsDataRecommendations || []).slice(0, 5).map((rec) => ({
         title: rec.title,
         severity: rec.severity,
         rationale: rec.rationale,
       })),
-      skill: (run.skillRecommendations || []).slice(0, 5).map((rec) => ({
+      agentSkill: (run.skillRecommendations || []).slice(0, 5).map((rec) => ({
+        title: rec.title,
+        severity: rec.severity,
+        rationale: rec.rationale,
+      })),
+      devPolicy: (splitProcess.devPolicyRecommendations || []).slice(0, 5).map((rec) => ({
         title: rec.title,
         severity: rec.severity,
         rationale: rec.rationale,

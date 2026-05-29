@@ -31,6 +31,15 @@ jest.unstable_mockModule('../src/services/ticketThreadRepository.js', () => ({
 jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({
   default: {},
 }));
+jest.unstable_mockModule('../src/services/assignmentTools.js', () => ({
+  TOOL_SCHEMAS: [
+    {
+      name: 'get_assignment_risk_signals',
+      description: 'Mock risk signals tool',
+      input_schema: { properties: { ticket_id: {}, candidate_tech_ids: {} } },
+    },
+  ],
+}));
 jest.unstable_mockModule('../src/services/dailyReviewDefinitions.js', () => ({
   DAILY_REVIEW_OUTCOMES: { failure: 'failure', success: 'success', partialSuccess: 'partial_success' },
   DAILY_REVIEW_PRIMARY_TAGS: { stillOpen: 'still_open', pipelineBypassed: 'pipeline_bypassed', awaitingReview: 'awaiting_review', rebounded: 'rebounded' },
@@ -172,5 +181,44 @@ describe('daily review LLM payload — context completeness', () => {
     expect(metadata.taxonomy.parentCategoryId).toBeNull();
     expect(metadata.taxonomy.parentCategoryName).toBeNull();
     expect(metadata.taxonomy.newName).toBeNull();
+  });
+
+  test('recommendation rows support tools/data and dev/policy categories without using process kind', () => {
+    const rows = assignmentDailyReviewService._buildRecommendationCreateData({
+      id: 91,
+      workspaceId: 1,
+      reviewDate: new Date('2026-05-28T00:00:00Z'),
+    }, {
+      promptRecommendations: [{
+        title: 'Use rejection signal in prompt',
+        severity: 'medium',
+        rationale: 'The prompt can use the new risk tool.',
+        suggestedAction: 'Only apply this prompt guidance when get_assignment_risk_signals is available.',
+        promptOnlyFeasible: false,
+        requiredTools: ['get_assignment_risk_signals'],
+        toolDependencyNote: 'Requires get_assignment_risk_signals.',
+      }],
+      toolsDataRecommendations: [{
+        title: 'Expose calendar load signal',
+        severity: 'high',
+        rationale: 'Availability cannot be inferred from prompt text.',
+        missingCapability: 'Calendar load signal',
+        requiredToolName: 'get_calendar_load',
+        dataSources: ['Microsoft Graph'],
+        suggestedAction: 'Add a read-only calendar load tool.',
+      }],
+      devPolicyRecommendations: [{
+        title: 'Add observability for skipped runs',
+        severity: 'low',
+        rationale: 'Admins need to see why a run was skipped.',
+        changeType: 'observability',
+        suggestedAction: 'Log skip reasons in the run detail.',
+      }],
+    });
+
+    expect(rows.map((row) => row.kind)).toEqual(['prompt', 'tools_data', 'dev_policy']);
+    expect(rows[0].metadata.promptLimitation.requiredTools).toEqual(['get_assignment_risk_signals']);
+    expect(rows[1].metadata.reviewCategory).toBe('tools_data');
+    expect(rows[2].metadata.reviewCategory).toBe('dev_policy');
   });
 });
