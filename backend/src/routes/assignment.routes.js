@@ -535,6 +535,12 @@ function parseCsvInt(raw) {
   return ints.length > 0 ? ints : undefined;
 }
 
+function parseIngestSources(raw) {
+  const allowed = new Set(['webhook', 'poll', 'manual', 'rebound']);
+  const parts = parseCsv(raw)?.filter((part) => allowed.has(part));
+  return parts && parts.length > 0 ? parts : undefined;
+}
+
 // Sanitize free-text search to keep accidental load-balancer rejection at bay.
 // 200 chars is more than enough for ticket subject / requester name / #ID.
 function parseSearch(raw) {
@@ -615,6 +621,7 @@ router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
     statuses: parseCsv(req.query.statuses),
     assignedTechIds: parseCsvInt(req.query.assignedTechIds),
     reboundFromTechIds: parseCsvInt(req.query.reboundFromTechIds),
+    ingestSources: parseIngestSources(req.query.ingestSources),
     search: parseSearch(req.query.search),
   });
   res.json({ success: true, ...result });
@@ -642,6 +649,7 @@ router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
     statuses: parseCsv(req.query.statuses),
     assignedTechIds: parseCsvInt(req.query.assignedTechIds),
     reboundFromTechIds: parseCsvInt(req.query.reboundFromTechIds),
+    ingestSources: parseIngestSources(req.query.ingestSources),
     search: parseSearch(req.query.search),
   });
   res.json({ success: true, ...result });
@@ -1289,7 +1297,8 @@ router.get('/ticket/:ticketId/latest-run', requireReviewer, asyncHandler(async (
           id: true, freshserviceTicketId: true, subject: true, status: true, priority: true,
           assessedPriority: true, assessedPriorityId: true, priorityRationale: true,
           priorityConfidence: true, priorityEvidence: true, priorityAssessedAt: true,
-          category: true, ticketCategory: true,
+          lastIngestSource: true, lastIngestedAt: true, lastWebhookIngestedAt: true, webhookIngestCount: true,
+          category: true, ticketCategory: true, tpSkill: true, tpSubskill: true,
           internalCategory: { select: { id: true, name: true } },
           internalSubcategory: { select: { id: true, name: true, parentId: true } },
           internalCategoryConfidence: true,

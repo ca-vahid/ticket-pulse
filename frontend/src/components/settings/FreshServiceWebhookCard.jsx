@@ -101,7 +101,13 @@ export default function FreshServiceWebhookCard({ workspaceTimezone = 'America/L
 
   const enabled = Boolean(config.enabled);
   const statusClass = enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500';
-  const requestBody = '{"ticket_id":"{{ticket.id}}"}';
+  const requestBody = '{"ticket_id":"{{ticket.id_numeric}}"}';
+  const counters = [
+    ['Received', config.receivedCount || 0, config.lastReceivedAt],
+    ['Accepted', config.acceptedCount || 0, config.lastAcceptedAt],
+    ['Rejected', config.rejectedCount || 0, config.lastRejectedAt],
+    ['Errors', config.errorCount || 0, config.lastErrorAt],
+  ];
 
   return (
     <div className="py-3 space-y-3">
@@ -180,11 +186,14 @@ export default function FreshServiceWebhookCard({ workspaceTimezone = 'America/L
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2 text-xs text-slate-500 sm:grid-cols-4">
-          <div><span className="block font-medium text-slate-700">Received</span>{timestamp(config.lastReceivedAt)}</div>
-          <div><span className="block font-medium text-slate-700">Accepted</span>{timestamp(config.lastAcceptedAt)}</div>
-          <div><span className="block font-medium text-slate-700">Rejected</span>{timestamp(config.lastRejectedAt)}</div>
-          <div><span className="block font-medium text-slate-700">Errors</span>{timestamp(config.lastErrorAt)}</div>
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          {counters.map(([label, count, at]) => (
+            <div key={label} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+              <span className="mt-0.5 block text-base font-bold text-slate-800">{count}</span>
+              <span className="mt-0.5 block truncate text-[10px] text-slate-500" title={timestamp(at)}>{timestamp(at)}</span>
+            </div>
+          ))}
         </div>
 
         <div className="flex flex-wrap gap-2">

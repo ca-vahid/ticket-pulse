@@ -8,6 +8,7 @@ import {
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
   ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag, Sparkles,
   RotateCcw, OctagonAlert, ShieldCheck, UserCog, Search, X, PhoneCall,
+  Webhook, RefreshCw, Play,
 } from 'lucide-react';
 import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
@@ -1100,10 +1101,61 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
 
   const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
   const PRIORITY_PILL = { 1: 'bg-slate-100 text-slate-600', 2: 'bg-yellow-100 text-yellow-800', 3: 'bg-orange-100 text-orange-800', 4: 'bg-red-100 text-red-800' };
+  const PRIORITY_ICON_CLASS = {
+    1: 'border-slate-200 bg-slate-50 text-slate-400',
+    2: 'border-amber-200 bg-amber-50 text-amber-600',
+    3: 'border-orange-200 bg-orange-50 text-orange-600',
+    4: 'border-red-200 bg-red-50 text-red-600',
+  };
   const PRIORITY_ID_BY_LABEL = { Low: 1, Medium: 2, High: 3, Urgent: 4 };
   const assessedPriorityId = Number(ticket?.assessedPriorityId) || PRIORITY_ID_BY_LABEL[ticket?.assessedPriority] || null;
   const assessedPriorityLabel = ticket?.assessedPriority || (assessedPriorityId ? PRIORITY_LABELS[assessedPriorityId] : null);
   const freshservicePriorityLabel = PRIORITY_LABELS[ticket?.priority] || (ticket?.priority ? `P${ticket.priority}` : '—');
+  const prioritySignalId = assessedPriorityId || Number(ticket?.priority) || null;
+  const prioritySignalTitle = [
+    assessedPriorityLabel ? `Ticket Pulse priority: ${assessedPriorityLabel}` : `FreshService priority: ${freshservicePriorityLabel}`,
+    ticket?.priorityRationale,
+    assessedPriorityId && Number(ticket?.priority) && assessedPriorityId !== Number(ticket.priority)
+      ? `FreshService: ${freshservicePriorityLabel}`
+      : null,
+  ].filter(Boolean).join(' - ');
+  const webhookIngestedAt = ticket?.lastWebhookIngestedAt || (run.triggerSource === 'webhook' ? ticket?.lastIngestedAt || run.createdAt : null);
+  const sourceSignal = (() => {
+    if (webhookIngestedAt || run.triggerSource === 'webhook') {
+      return {
+        label: 'Webhook',
+        Icon: Webhook,
+        className: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+        tooltip: `Ingested by FreshService webhook${webhookIngestedAt ? ` at ${formatDateTimeInTimezone(webhookIngestedAt, workspaceTimezone)}` : ''}${ticket?.webhookIngestCount ? ` (${ticket.webhookIngestCount} accepted webhook ingest${ticket.webhookIngestCount === 1 ? '' : 's'})` : ''}`,
+      };
+    }
+    if (run.triggerSource === 'manual') {
+      return {
+        label: 'Manual',
+        Icon: Play,
+        className: 'border-blue-200 bg-blue-50 text-blue-700',
+        tooltip: 'Pipeline run was triggered manually.',
+      };
+    }
+    if (run.triggerSource === 'rebound' || run.triggerSource === 'rebound_exhausted') {
+      return {
+        label: 'Returned',
+        Icon: RotateCcw,
+        className: 'border-rose-200 bg-rose-50 text-rose-700',
+        tooltip: 'Pipeline run was triggered after a returned ticket.',
+      };
+    }
+    return {
+      label: 'Polling',
+      Icon: RefreshCw,
+      className: 'border-slate-200 bg-slate-50 text-slate-500',
+      tooltip: `Pipeline run source: ${run.triggerSource || ticket?.lastIngestSource || 'scheduled polling'}.`,
+    };
+  })();
+  const SourceSignalIcon = sourceSignal.Icon;
+  const returnedSignalTitle = run.reboundFrom
+    ? `Returned from ${run.reboundFrom.previousTechName || 'previous assignee'}${run.reboundFrom.unassignedAt ? ` at ${formatDateTimeInTimezone(run.reboundFrom.unassignedAt, workspaceTimezone)}` : ''}${run.reboundFrom.unassignedByName ? ` by ${run.reboundFrom.unassignedByName}` : ''}${run.reboundFrom.reboundCount > 1 ? ` (return #${run.reboundFrom.reboundCount})` : ''}`
+    : null;
 
   const ticketUrl = fsDomain && ticket?.freshserviceTicketId ? `https://${fsDomain}/a/tickets/${ticket.freshserviceTicketId}` : null;
   const latestSyncedCorrection = Array.isArray(run.corrections)
@@ -1151,6 +1203,29 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span
+                className={`inline-flex h-5 w-5 items-center justify-center rounded border ${PRIORITY_ICON_CLASS[prioritySignalId] || 'border-slate-200 bg-slate-50 text-slate-400'}`}
+                title={prioritySignalTitle}
+                aria-label={prioritySignalTitle}
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+              </span>
+              <span
+                className={`inline-flex h-5 w-5 items-center justify-center rounded border ${sourceSignal.className}`}
+                title={sourceSignal.tooltip}
+                aria-label={sourceSignal.label}
+              >
+                <SourceSignalIcon className="h-3.5 w-3.5" />
+              </span>
+              {returnedSignalTitle && (
+                <span
+                  className="inline-flex h-5 w-5 items-center justify-center rounded border border-rose-200 bg-white text-rose-700"
+                  title={returnedSignalTitle}
+                  aria-label="Returned ticket"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </span>
+              )}
               <span className="text-xs text-slate-400 font-mono">#{ticket?.freshserviceTicketId}</span>
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${PRIORITY_PILL[ticket?.priority] || 'bg-slate-100 text-slate-500'}`}>
                 FS {freshservicePriorityLabel}

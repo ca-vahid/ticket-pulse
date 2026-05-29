@@ -27,7 +27,7 @@ import {
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
   ShieldCheck, Users, Bot, Sparkles, Clock, X, CalendarDays,
-  MessageSquare, PhoneCall, Copy, KeyRound,
+  MessageSquare, PhoneCall, Copy, KeyRound, Webhook,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -1097,6 +1097,13 @@ const PRIORITY_SOURCE_OPTIONS = [
   { id: 'freshservice', label: 'FreshService' },
 ];
 
+const INGEST_SOURCE_OPTIONS = [
+  { id: 'webhook', label: 'Webhook', dotClass: 'bg-cyan-500' },
+  { id: 'poll', label: 'Polling', dotClass: 'bg-slate-400' },
+  { id: 'manual', label: 'Manual', dotClass: 'bg-blue-500' },
+  { id: 'rebound', label: 'Returned', dotClass: 'bg-rose-500' },
+];
+
 const SOURCE_OPTIONS = [
   { id: 'all', label: 'All sources' },
   { id: 'via_pipeline', label: 'Pipeline', dotClass: 'bg-emerald-500' },
@@ -1149,6 +1156,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const [selectedDecisions, setSelectedDecisions] = useState([]);
   const [selectedPriorities, setSelectedPriorities] = useState([]); // number[] (1..4)
   const [prioritySource, setPrioritySource] = useState('assessed');
+  const [selectedIngestSources, setSelectedIngestSources] = useState([]);
   const [selectedReboundFromTechIds, setSelectedReboundFromTechIds] = useState([]); // tech ids
   const [selectedAssignedToTechIds, setSelectedAssignedToTechIds] = useState([]); // tech ids
   const [searchQuery, setSearchQuery] = useState('');
@@ -1168,6 +1176,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       statuses: selectedStatuses,
       priorities: selectedPriorities,
       prioritySource,
+      ingest: selectedIngestSources,
       returnedFrom: selectedReboundFromTechIds,
       assignedTo: selectedAssignedToTechIds,
       diffAgent: differentAgentOnly,
@@ -1179,6 +1188,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       statuses: setSelectedStatuses,
       priorities: setSelectedPriorities,
       prioritySource: setPrioritySource,
+      ingest: setSelectedIngestSources,
       returnedFrom: setSelectedReboundFromTechIds,
       assignedTo: setSelectedAssignedToTechIds,
       diffAgent: setDifferentAgentOnly,
@@ -1190,6 +1200,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       statuses: { type: 'csv', default: [] },
       priorities: { type: 'csvInt', default: [] },
       prioritySource: { type: 'string', default: 'assessed' },
+      ingest: { type: 'csv', default: [] },
       returnedFrom: { type: 'csvInt', default: [] },
       assignedTo: { type: 'csvInt', default: [] },
       diffAgent: { type: 'bool', default: false },
@@ -1332,6 +1343,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         priorities: selectedPriorities.length > 0 ? selectedPriorities.join(',') : undefined,
         prioritySource,
         statuses: statusesCsv,
+        ingestSources: selectedIngestSources.length > 0 ? selectedIngestSources.join(',') : undefined,
         assignedTechIds: selectedAssignedToTechIds.length > 0 ? selectedAssignedToTechIds.join(',') : undefined,
         reboundFromTechIds: selectedReboundFromTechIds.length > 0 ? selectedReboundFromTechIds.join(',') : undefined,
         search: searchQuery.trim() || undefined,
@@ -1430,6 +1442,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     selectedDecisions,
     selectedPriorities,
     prioritySource,
+    selectedIngestSources,
     selectedReboundFromTechIds,
     selectedAssignedToTechIds,
     searchQuery,
@@ -1573,6 +1586,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     selectedStatuses,
     selectedDecisions,
     selectedPriorities,
+    prioritySource,
+    selectedIngestSources,
     selectedReboundFromTechIds,
     selectedAssignedToTechIds,
     searchQuery,
@@ -1822,6 +1837,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     3: 'border-l-orange-400',
     4: 'border-l-red-500',
   };
+  const PRIORITY_ICON_CLASS = {
+    1: 'border-slate-200 bg-slate-50 text-slate-400',
+    2: 'border-amber-200 bg-amber-50 text-amber-600',
+    3: 'border-orange-200 bg-orange-50 text-orange-600',
+    4: 'border-red-200 bg-red-50 text-red-600',
+  };
   const PRIORITY_ID_BY_LABEL = {
     Low: 1,
     Medium: 2,
@@ -1846,6 +1867,86 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       freshserviceLabel,
       differsFromFreshservice: assessedId && freshserviceId && assessedId !== freshserviceId,
     };
+  };
+
+  const getRunTimestamp = (run) => run.decidedAt || run.updatedAt || run.createdAt;
+
+  const getSourceMeta = (run) => {
+    const triggerSource = run?.triggerSource || '';
+    const ticket = run?.ticket || {};
+    const webhookAt = ticket.lastWebhookIngestedAt || (triggerSource === 'webhook' ? ticket.lastIngestedAt || run.createdAt : null);
+    if (webhookAt || triggerSource === 'webhook') {
+      return {
+        label: 'Webhook',
+        Icon: Webhook,
+        className: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+        tooltip: `Ingested by FreshService webhook${webhookAt ? ` at ${formatDateTimeInTimezone(webhookAt, workspaceTimezone)}` : ''}${ticket.webhookIngestCount ? ` (${ticket.webhookIngestCount} accepted webhook ingest${ticket.webhookIngestCount === 1 ? '' : 's'})` : ''}`,
+      };
+    }
+    if (triggerSource === 'manual') {
+      return {
+        label: 'Manual',
+        Icon: Play,
+        className: 'border-blue-200 bg-blue-50 text-blue-700',
+        tooltip: 'Pipeline run was triggered manually.',
+      };
+    }
+    if (triggerSource === 'rebound' || triggerSource === 'rebound_exhausted') {
+      return {
+        label: 'Returned',
+        Icon: RotateCcw,
+        className: 'border-rose-200 bg-rose-50 text-rose-700',
+        tooltip: 'Pipeline run was triggered after a returned ticket.',
+      };
+    }
+    return {
+      label: 'Polling',
+      Icon: RefreshCw,
+      className: 'border-slate-200 bg-slate-50 text-slate-500',
+      tooltip: `Pipeline run source: ${triggerSource || ticket.lastIngestSource || 'scheduled polling'}.`,
+    };
+  };
+
+  const returnedTooltip = (ctx) => ctx
+    ? `Returned from ${ctx.previousTechName || 'previous assignee'}${ctx.unassignedAt ? ` at ${formatDateTimeInTimezone(ctx.unassignedAt, workspaceTimezone)}` : ''}${ctx.unassignedByName ? ` by ${ctx.unassignedByName}` : ''}${ctx.reboundCount > 1 ? ` (return #${ctx.reboundCount})` : ''}`
+    : '';
+
+  const renderSignalIcons = (run, priorityMeta, ctx) => {
+    const sourceMeta = getSourceMeta(run);
+    const SourceIcon = sourceMeta.Icon;
+    const priorityTitle = [
+      `${priorityMeta.source} priority: ${priorityMeta.label || 'Unknown'}`,
+      priorityMeta.rationale,
+      priorityMeta.differsFromFreshservice ? `FreshService: ${priorityMeta.freshserviceLabel}` : null,
+    ].filter(Boolean).join(' - ');
+    return (
+      <div className="flex items-center gap-1">
+        <span
+          className={`inline-flex h-5 w-5 items-center justify-center rounded border ${PRIORITY_ICON_CLASS[priorityMeta.id] || 'border-slate-200 bg-slate-50 text-slate-400'}`}
+          title={priorityTitle}
+          aria-label={priorityTitle}
+        >
+          <AlertCircle className="h-3.5 w-3.5" />
+        </span>
+        <span
+          className={`inline-flex h-5 w-5 items-center justify-center rounded border ${sourceMeta.className}`}
+          title={sourceMeta.tooltip}
+          aria-label={sourceMeta.label}
+        >
+          <SourceIcon className="h-3.5 w-3.5" />
+        </span>
+        {ctx?.previousTechName && (
+          <span
+            className="inline-flex h-5 w-5 items-center justify-center rounded border border-rose-200 bg-white text-rose-700"
+            title={returnedTooltip(ctx)}
+            aria-label="Returned ticket"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </span>
+        )}
+      </div>
+    );
   };
 
   // Compact "Apr 23, 4:13 PM" — drops weekday & year that crowded the original
@@ -1904,7 +2005,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const filteredItems = [...queue.items]
     .sort((a, b) => {
       let av, bv;
-      if (sortField === 'createdAt') { av = new Date(a.createdAt); bv = new Date(b.createdAt); }
+      if (sortField === 'createdAt') { av = new Date(getRunTimestamp(a)); bv = new Date(getRunTimestamp(b)); }
       else if (sortField === 'priority') { av = getPriorityMeta(a.ticket).id || 0; bv = getPriorityMeta(b.ticket).id || 0; }
       else if (sortField === 'requester') { av = a.ticket?.requester?.name || ''; bv = b.ticket?.requester?.name || ''; }
       else { av = a.ticket?.subject || ''; bv = b.ticket?.subject || ''; }
@@ -2054,6 +2155,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     (selectedStatuses.length > 0 ? 1 : 0) +
     (selectedPriorities.length > 0 ? 1 : 0) +
     (prioritySource !== 'assessed' ? 1 : 0) +
+    (selectedIngestSources.length > 0 ? 1 : 0) +
     (selectedReboundFromTechIds.length > 0 ? 1 : 0) +
     (selectedAssignedToTechIds.length > 0 ? 1 : 0) +
     (differentAgentOnly ? 1 : 0);
@@ -2070,6 +2172,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     setSelectedStatuses([]);
     setSelectedPriorities([]);
     setPrioritySource('assessed');
+    setSelectedIngestSources([]);
     setSelectedReboundFromTechIds([]);
     setSelectedAssignedToTechIds([]);
     setDifferentAgentOnly(false);
@@ -2206,6 +2309,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const categoryLabel = getTicketPulseCategoryLabel(run.ticket, run.recommendation);
     const suggestedCategoryLabel = getSuggestedCategoryLabel(run.ticket, run.recommendation);
     const categoryNeedsReview = needsCategoryReview(run.ticket, run.recommendation);
+    const ctx = run.reboundFrom || run.ticket?.lastReboundContext;
     const rowBg = flag === 'deleted' ? 'opacity-40 bg-red-50/30' : flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
     const isNew = newIds.has(run.id);
     const cardBorder = isNew
@@ -2221,50 +2325,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         onClick={() => handleSelectRun(run.id)}
         className={`min-w-0 px-3.5 py-3 active:bg-blue-50/60 touch-manipulation cursor-pointer border ${cardBorder} rounded-xl bg-white shadow-sm ${rowBg} transition-[border-color,box-shadow] duration-[2000ms] ${isNew ? 'shadow-emerald-100 shadow-md' : ''}`}
       >
-        {/* Row 1: priority + ticket ID + category + decision (non-pending) + chevron */}
+        {/* Row 1: signal icons + ticket ID + decision (non-pending) + chevron */}
         <div className="flex min-w-0 items-center gap-1.5 flex-wrap">
-          <span
-            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${priorityMeta.pill}`}
-            title={[
-              `${priorityMeta.source} priority`,
-              priorityMeta.rationale,
-              priorityMeta.differsFromFreshservice ? `FreshService: ${priorityMeta.freshserviceLabel}` : null,
-            ].filter(Boolean).join(' - ')}
-          >
-            {priorityMeta.label || '—'}
-          </span>
-          {priorityMeta.source === 'Ticket Pulse' && (
-            <span className="shrink-0 rounded bg-blue-50 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-blue-600">
-              TP
-            </span>
-          )}
+          {renderSignalIcons(run, priorityMeta, ctx)}
           <span className="text-slate-400 font-mono text-[11px]">#{run.ticket?.freshserviceTicketId}</span>
-          {categoryLabel && (
-            <span className="max-w-full truncate rounded bg-blue-50 px-1 py-0.5 text-[10px] font-semibold text-blue-700" title={categoryLabel}>
-              {categoryLabel}
-            </span>
-          )}
-          {categoryNeedsReview && (
-            <span
-              className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-semibold text-amber-700"
-              title={suggestedCategoryLabel ? `Suggested: ${suggestedCategoryLabel}` : 'Category/subcategory fit should be reviewed'}
-            >
-              Review category
-            </span>
-          )}
-          {(run.reboundFrom || run.ticket?.lastReboundContext)?.previousTechName && (() => {
-            const ctx = run.reboundFrom || run.ticket.lastReboundContext;
-            return (
-              <span
-                className="inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none"
-                title={`Returned from ${ctx.previousTechName}${ctx.unassignedAt ? ' at ' + new Date(ctx.unassignedAt).toLocaleString() : ''}${ctx.unassignedByName ? ' by ' + ctx.unassignedByName : ''}${ctx.reboundCount > 1 ? ' (rebound #' + ctx.reboundCount + ')' : ''}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <RotateCcw className="w-2.5 h-2.5" />
-                Returned from {ctx.previousTechName?.split(' ')[0]}
-              </span>
-            );
-          })()}
           <span className="ml-auto" />
           {subView !== 'pending' && run.decision && (() => {
             const dd = getDisplayDecision(run);
@@ -2285,6 +2349,23 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-slate-500">
             <span className="font-semibold text-slate-600">{priorityMeta.source} priority:</span> {priorityMeta.rationale}
           </p>
+        )}
+        {(categoryLabel || categoryNeedsReview) && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] leading-none">
+            {categoryLabel && (
+              <span className="max-w-full truncate rounded bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-700" title={categoryLabel}>
+                {categoryLabel}
+              </span>
+            )}
+            {categoryNeedsReview && (
+              <span
+                className="rounded bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-700"
+                title={suggestedCategoryLabel ? `Suggested: ${suggestedCategoryLabel}` : 'Category/subcategory fit should be reviewed'}
+              >
+                Review category
+              </span>
+            )}
+          </div>
         )}
 
         {/* Row 3: requester + date */}
@@ -2563,6 +2644,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 options={PRIORITY_OPTIONS}
                 onChange={setSelectedPriorities}
               />
+              <FilterDropdown
+                label="Trigger"
+                multi
+                value={selectedIngestSources}
+                options={INGEST_SOURCE_OPTIONS}
+                onChange={setSelectedIngestSources}
+              />
 
               {/* Returned From — every tab where rebound context is meaningful */}
               {(subView === 'pending' || subView === 'assigned' || subView === 'dismissed' || subView === 'rejected') && (
@@ -2807,12 +2895,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   // Track which header columns are present so the template
                   // updates atomically with the cells below it.
                   const cols = [
-                    'minmax(280px, 1.6fr)',  // Ticket (title + #ID/category)
-                    'minmax(160px, 0.85fr)', // Requester
-                    'minmax(150px, 0.85fr)', // Status (+ assignee inline)
-                    'minmax(160px, 0.95fr)', // AI Suggestion
+                    '120px',                  // Signal (time + priority/source/return icons)
+                    'minmax(240px, 1.25fr)',  // Ticket (title + #ID)
+                    'minmax(180px, 0.85fr)',  // Category
+                    'minmax(145px, 0.75fr)',  // Requester
+                    'minmax(150px, 0.85fr)',  // AI Suggestion
+                    'minmax(135px, 0.7fr)',   // Assigned
+                    '105px',                  // Status
                     showDecision ? '120px' : null,
-                    '125px',                  // Time
                     showActions ? '76px' : null,
                   ].filter(Boolean).join(' ');
 
@@ -2824,18 +2914,20 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                         className="grid items-center bg-slate-50/80 border-y border-slate-200 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
                         style={{ gridTemplateColumns: cols }}
                       >
-                        <button type="button" onClick={() => toggleSort('subject')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
-                          Ticket <SortIcon field="subject" />
-                        </button>
-                        <button type="button" onClick={() => toggleSort('requester')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
-                          Requester <SortIcon field="requester" />
-                        </button>
-                        <span className="px-3 py-2">Status</span>
-                        <span className="px-3 py-2">AI Suggestion</span>
-                        {showDecision && <span className="px-3 py-2">Decision</span>}
                         <button type="button" onClick={() => toggleSort('createdAt')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
                           {subView === 'pending' ? 'Analyzed' : 'Decided'} <SortIcon field="createdAt" />
                         </button>
+                        <button type="button" onClick={() => toggleSort('subject')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
+                          Ticket <SortIcon field="subject" />
+                        </button>
+                        <span className="px-3 py-2">Category</span>
+                        <button type="button" onClick={() => toggleSort('requester')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
+                          Requester <SortIcon field="requester" />
+                        </button>
+                        <span className="px-3 py-2">AI Suggestion</span>
+                        <span className="px-3 py-2">Assigned</span>
+                        <span className="px-3 py-2">Status</span>
+                        {showDecision && <span className="px-3 py-2">Decision</span>}
                         {showActions && <span className="px-3 py-2 text-right" />}
                       </div>
 
@@ -2907,7 +2999,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                               className={`relative grid items-center border-b border-slate-100 border-l-[3px] ${priClass} ${bgClass} hover:bg-blue-50/60 cursor-pointer group transition-[opacity,background-color] duration-[240ms] ${removingIds.has(run.id) ? 'opacity-0' : ''} focus:outline-none focus-visible:bg-blue-50`}
                               style={{ gridTemplateColumns: cols, minHeight: '52px' }}
                             >
-                              {/* Ticket: title bold + small muted ID/category line */}
+                              {/* Signal: compact timestamp + icon-only priority/source/return indicators */}
+                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                <div className="text-[11px] font-medium leading-tight text-slate-600">
+                                  {fmtDate(getRunTimestamp(run))}
+                                </div>
+                                <div className="mt-1">{renderSignalIcons(run, priorityMeta, ctx)}</div>
+                              </div>
+
+                              {/* Ticket: title bold + small muted ID line */}
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
                                 <div className="flex items-center gap-1.5 min-w-0">
                                   <span
@@ -2919,47 +3019,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                   {flag === 'deleted' && (
                                     <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />
                                   )}
-                                  {isReturned && (
-                                    <span
-                                      className="inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none flex-shrink-0"
-                                      title={`Returned from ${ctx.previousTechName}${ctx.unassignedAt ? ' at ' + new Date(ctx.unassignedAt).toLocaleString() : ''}${ctx.unassignedByName ? ' by ' + ctx.unassignedByName : ''}${ctx.reboundCount > 1 ? ' (rebound #' + ctx.reboundCount + ')' : ''}`}
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <RotateCcw className="w-2.5 h-2.5" />
-                                      Returned
-                                    </span>
-                                  )}
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 leading-none truncate">
                                   <span className="font-mono">#{run.ticket?.freshserviceTicketId}</span>
-                                  <span className="text-slate-300">·</span>
-                                  <span
-                                    className={`shrink-0 rounded px-1.5 py-0.5 font-semibold ${priorityMeta.pill}`}
-                                    title={[
-                                      `${priorityMeta.source} priority`,
-                                      priorityMeta.rationale,
-                                      priorityMeta.differsFromFreshservice ? `FreshService: ${priorityMeta.freshserviceLabel}` : null,
-                                    ].filter(Boolean).join(' - ')}
-                                  >
-                                    {priorityMeta.source === 'Ticket Pulse' ? 'TP ' : ''}{priorityMeta.label || '—'}
-                                  </span>
-                                  {categoryLabel && (
-                                    <>
-                                      <span className="text-slate-300">·</span>
-                                      <span className="truncate font-medium text-blue-600" title={categoryLabel}>{categoryLabel}</span>
-                                    </>
-                                  )}
-                                  {categoryNeedsReview && (
-                                    <>
-                                      <span className="text-slate-300">·</span>
-                                      <span
-                                        className="shrink-0 font-semibold text-amber-700"
-                                        title={suggestedCategoryLabel ? `Suggested: ${suggestedCategoryLabel}` : 'Category/subcategory fit should be reviewed'}
-                                      >
-                                        review category
-                                      </span>
-                                    </>
-                                  )}
                                   {run._siblingCount > 0 && (
                                     <span
                                       className="text-slate-400"
@@ -2972,6 +3034,25 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 {priorityMeta.rationale && (
                                   <div className="mt-1 truncate text-[10px] text-slate-500" title={priorityMeta.rationale}>
                                     {priorityMeta.rationale}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Category: split from Ticket so scan columns stay clean. */}
+                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                {categoryLabel ? (
+                                  <div className="truncate text-[11px] font-medium leading-snug text-blue-700" title={categoryLabel}>
+                                    {categoryLabel}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-300 text-[12px]">—</span>
+                                )}
+                                {categoryNeedsReview && (
+                                  <div
+                                    className="mt-1 inline-flex rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700"
+                                    title={suggestedCategoryLabel ? `Suggested: ${suggestedCategoryLabel}` : 'Category/subcategory fit should be reviewed'}
+                                  >
+                                    Review
                                   </div>
                                 )}
                               </div>
@@ -2995,30 +3076,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                       </div>
                                     )}
                                   </div>
-                                </div>
-                              </div>
-
-                              {/* Status pill + current assignee inline (avatar/text
-                                  follows the avatarView toggle). */}
-                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
-                                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none ${getStatusPillStyle(statusLabel)}`}>
-                                    {statusLabel}
-                                  </span>
-                                  {assignee ? (
-                                    avatarView ? (
-                                      <span className="inline-flex items-center gap-1 min-w-0" title={assignee.name}>
-                                        <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
-                                        <span className="text-[10px] text-slate-600 truncate max-w-[80px]">{assignee.name?.split(' ')[0]}</span>
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] text-amber-700 font-medium truncate max-w-[110px]" title={assignee.name}>
-                                        {assignee.name}
-                                      </span>
-                                    )
-                                  ) : run.ticket?.assignedTechId ? (
-                                    <span className="text-[10px] text-slate-400 italic">External</span>
-                                  ) : null}
                                 </div>
                               </div>
 
@@ -3046,6 +3103,33 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 )}
                               </div>
 
+                              {/* Assigned: current FreshService owner only. */}
+                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                {assignee ? (
+                                  avatarView ? (
+                                    <span className="inline-flex items-center gap-1.5 min-w-0" title={assignee.name}>
+                                      <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
+                                      <span className="text-[11px] text-slate-700 truncate max-w-[90px]">{assignee.name}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="block truncate text-[11px] font-medium text-amber-700" title={assignee.name}>
+                                      {assignee.name}
+                                    </span>
+                                  )
+                                ) : run.ticket?.assignedTechId ? (
+                                  <span className="text-[11px] text-slate-400 italic">External</span>
+                                ) : (
+                                  <span className="text-[11px] text-slate-300">Unassigned</span>
+                                )}
+                              </div>
+
+                              {/* Status: FreshService status only. */}
+                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none ${getStatusPillStyle(statusLabel)}`}>
+                                  {statusLabel}
+                                </span>
+                              </div>
+
                               {/* Decision pill (non-pending tabs only) */}
                               {showDecision && (
                                 <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
@@ -3057,11 +3141,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                   </span>
                                 </div>
                               )}
-
-                              {/* Compact timestamp ("Apr 23, 4:13 PM") */}
-                              <div className={`min-w-0 px-3 py-2 text-[11px] text-slate-500 whitespace-nowrap truncate ${rowDim}`}>
-                                {fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}
-                              </div>
 
                               {/* Actions (pending tab only): Quick Approve ✓,
                                   Dismiss, Delete — appear on row hover, identical
@@ -4468,7 +4547,13 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
 
   const enabled = Boolean(config.enabled);
   const statusClass = enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500';
-  const requestBody = '{"ticket_id":"{{ticket.id}}"}';
+  const requestBody = '{"ticket_id":"{{ticket.id_numeric}}"}';
+  const counters = [
+    ['Received', config.receivedCount || 0, config.lastReceivedAt],
+    ['Accepted', config.acceptedCount || 0, config.lastAcceptedAt],
+    ['Rejected', config.rejectedCount || 0, config.lastRejectedAt],
+    ['Errors', config.errorCount || 0, config.lastErrorAt],
+  ];
 
   return (
     <div className="py-3 space-y-3">
@@ -4547,11 +4632,14 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2 text-xs text-slate-500 sm:grid-cols-4">
-          <div><span className="block font-medium text-slate-700">Received</span>{timestamp(config.lastReceivedAt)}</div>
-          <div><span className="block font-medium text-slate-700">Accepted</span>{timestamp(config.lastAcceptedAt)}</div>
-          <div><span className="block font-medium text-slate-700">Rejected</span>{timestamp(config.lastRejectedAt)}</div>
-          <div><span className="block font-medium text-slate-700">Errors</span>{timestamp(config.lastErrorAt)}</div>
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          {counters.map(([label, count, at]) => (
+            <div key={label} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+              <span className="mt-0.5 block text-base font-bold text-slate-800">{count}</span>
+              <span className="mt-0.5 block truncate text-[10px] text-slate-500" title={timestamp(at)}>{timestamp(at)}</span>
+            </div>
+          ))}
         </div>
 
         <div className="flex flex-wrap gap-2">

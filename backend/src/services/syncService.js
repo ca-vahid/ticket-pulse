@@ -1117,6 +1117,10 @@ class SyncService {
       firstAssignedAt = existingTicket.firstAssignedAt;
     }
 
+    const source = options.source || 'freshservice_sync';
+    const ingestRecordedAt = new Date();
+    const isWebhookIngest = source === 'freshservice_webhook';
+
     const upsertedTicket = await ticketRepository.upsert({
       ...ticket,
       workspaceId: ticketWorkspaceId,
@@ -1124,13 +1128,16 @@ class SyncService {
       noiseRuleMatched: ruleId,
       ticketCategory: ticket.ticketCategory || normalizedNoiseCategory,
       freshserviceUpdatedAt: ticket.freshserviceUpdatedAt || null,
+      lastIngestSource: source,
+      lastIngestedAt: ingestRecordedAt,
+      lastWebhookIngestedAt: isWebhookIngest ? ingestRecordedAt : undefined,
+      incrementWebhookIngestCount: isWebhookIngest,
       isSelfPicked,
       assignedBy,
       firstAssignedAt,
       rejectionCount,
     });
 
-    const source = options.source || 'freshservice_sync';
     await ticketPriorityEventService.recordFreshServicePriorityChange({
       existingTicket,
       upsertedTicket,

@@ -184,6 +184,10 @@ describe('syncService.syncFreshServiceTicketSnapshot', () => {
       noiseRuleMatched: 'auto-spam',
       ticketCategory: 'Spam Noise',
       workspaceId: 2,
+      lastIngestSource: 'freshservice_webhook',
+      lastIngestedAt: expect.any(Date),
+      lastWebhookIngestedAt: expect.any(Date),
+      incrementWebhookIngestCount: true,
     }));
     expect(ticketPriorityEventServiceMock.recordFreshServicePriorityChange).toHaveBeenCalledWith(expect.objectContaining({
       source: 'freshservice_webhook',
