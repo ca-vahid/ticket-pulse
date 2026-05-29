@@ -114,6 +114,35 @@ function buildAdvancedTicketFilter({
   return clause;
 }
 
+function compactAnd(clauses) {
+  const filtered = clauses.filter(Boolean).filter((clause) => Object.keys(clause).length > 0);
+  return filtered.length > 1 ? { AND: filtered } : filtered[0] || {};
+}
+
+function buildIngestSourceFilter(ingestSources) {
+  if (!Array.isArray(ingestSources) || ingestSources.length === 0) return {};
+  const normalized = new Set(ingestSources.map((source) => String(source || '').trim()).filter(Boolean));
+  const orClauses = [];
+
+  if (normalized.has('webhook')) {
+    orClauses.push(
+      { triggerSource: 'webhook' },
+      { ticket: { is: { lastWebhookIngestedAt: { not: null } } } },
+    );
+  }
+  if (normalized.has('poll')) {
+    orClauses.push({ triggerSource: { in: ['poll', 'assignment_fast_sync', 'freshservice_sync'] } });
+  }
+  if (normalized.has('manual')) {
+    orClauses.push({ triggerSource: 'manual' });
+  }
+  if (normalized.has('rebound')) {
+    orClauses.push({ triggerSource: { in: ['rebound', 'rebound_exhausted'] } });
+  }
+
+  return orClauses.length > 0 ? { OR: orClauses } : {};
+}
+
 class AssignmentRepository {
   // ─── Assignment Config ────────────────────────────────────────────────
 
@@ -226,8 +255,14 @@ class AssignmentRepository {
               priorityEvidence: true,
               priorityAssessedAt: true,
               priorityAssessedByRunId: true,
+              lastIngestSource: true,
+              lastIngestedAt: true,
+              lastWebhookIngestedAt: true,
+              webhookIngestCount: true,
               category: true,
               ticketCategory: true,
+              tpSkill: true,
+              tpSubskill: true,
               internalCategory: { select: { id: true, name: true } },
               internalSubcategory: { select: { id: true, name: true, parentId: true } },
               internalCategoryConfidence: true,
@@ -314,6 +349,7 @@ class AssignmentRepository {
     statuses,
     assignedTechIds,
     reboundFromTechIds,
+    ingestSources,
     search,
   } = {}) {
     try {
@@ -357,6 +393,8 @@ class AssignmentRepository {
         const merged = { ...itemsWhere.ticket.is, ...advancedTicketClause };
         itemsWhere.ticket = { is: merged };
       }
+      const ingestSourceFilter = buildIngestSourceFilter(ingestSources);
+      const filteredItemsWhere = compactAnd([itemsWhere, ingestSourceFilter]);
 
       // For the Awaiting Review tab count, restrict to ACTIVE tickets (open or pending) - excludes
       // closed/resolved tickets that are technically still in our pending_review queue but no
@@ -368,15 +406,15 @@ class AssignmentRepository {
       // these tickets right now. Returned as a separate `inProgress` array
       // so the UI can show "Analyzing..." indicators without inflating the
       // Awaiting Decision count or messing with the existing filters.
-      const inProgressWhere = {
+      const inProgressWhere = compactAnd([{
         workspaceId,
         status: 'running',
         ...activeTicketFilter,
-      };
+      }, ingestSourceFilter]);
 
       const [items, totalAll, totalUnassigned, totalOutsideAssigned, filteredTotal, inProgress] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({
-          where: itemsWhere,
+          where: filteredItemsWhere,
           include: {
             ticket: {
               select: {
@@ -390,8 +428,14 @@ class AssignmentRepository {
                 priorityRationale: true,
                 priorityConfidence: true,
                 priorityAssessedAt: true,
+                lastIngestSource: true,
+                lastIngestedAt: true,
+                lastWebhookIngestedAt: true,
+                webhookIngestCount: true,
                 category: true,
                 ticketCategory: true,
+                tpSkill: true,
+                tpSubskill: true,
                 internalCategory: { select: { id: true, name: true } },
                 internalSubcategory: { select: { id: true, name: true, parentId: true } },
                 internalCategoryConfidence: true,
@@ -421,7 +465,7 @@ class AssignmentRepository {
         prisma.assignmentPipelineRun.count({
           where: { ...baseWhere, ticket: { is: { ...baseTicketFilter.ticket.is, assignedTechId: { not: null } } } },
         }),
-        prisma.assignmentPipelineRun.count({ where: itemsWhere }),
+        prisma.assignmentPipelineRun.count({ where: filteredItemsWhere }),
         prisma.assignmentPipelineRun.findMany({
           where: inProgressWhere,
           select: {
@@ -436,6 +480,10 @@ class AssignmentRepository {
                 priority: true,
                 assessedPriority: true,
                 assessedPriorityId: true,
+                lastIngestSource: true,
+                lastIngestedAt: true,
+                lastWebhookIngestedAt: true,
+                webhookIngestCount: true,
                 requester: { select: { name: true, email: true } },
               },
             },
@@ -477,6 +525,7 @@ class AssignmentRepository {
     statuses,
     assignedTechIds,
     reboundFromTechIds,
+    ingestSources,
     search,
   } = {}) {
     try {
@@ -500,10 +549,11 @@ class AssignmentRepository {
         const baseTicketIs = where.ticket?.is || {};
         where.ticket = { is: { ...baseTicketIs, ...advancedTicketClause } };
       }
+      const filteredWhere = compactAnd([where, buildIngestSourceFilter(ingestSources)]);
 
       const [items, total] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({
-          where,
+          where: filteredWhere,
           include: {
             ticket: {
               select: {
@@ -517,8 +567,14 @@ class AssignmentRepository {
                 priorityRationale: true,
                 priorityConfidence: true,
                 priorityAssessedAt: true,
+                lastIngestSource: true,
+                lastIngestedAt: true,
+                lastWebhookIngestedAt: true,
+                webhookIngestCount: true,
                 category: true,
                 ticketCategory: true,
+                tpSkill: true,
+                tpSubskill: true,
                 internalCategory: { select: { id: true, name: true } },
                 internalSubcategory: { select: { id: true, name: true, parentId: true } },
                 internalCategoryConfidence: true,
@@ -541,7 +597,7 @@ class AssignmentRepository {
           take: limit,
           skip: offset,
         }),
-        prisma.assignmentPipelineRun.count({ where }),
+        prisma.assignmentPipelineRun.count({ where: filteredWhere }),
       ]);
       await this._enrichRunsWithReboundContext(items);
       return { items, total };
@@ -666,7 +722,13 @@ class AssignmentRepository {
               priorityRationale: true,
               priorityConfidence: true,
               priorityAssessedAt: true,
+              lastIngestSource: true,
+              lastIngestedAt: true,
+              lastWebhookIngestedAt: true,
+              webhookIngestCount: true,
               category: true,
+              tpSkill: true,
+              tpSubskill: true,
               status: true,
               assignedTechId: true,
               createdAt: true,

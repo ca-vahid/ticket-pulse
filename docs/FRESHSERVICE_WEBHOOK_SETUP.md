@@ -58,9 +58,11 @@ Recommended body:
 
 ```json
 {
-  "ticket_id": "{{ticket.id}}"
+  "ticket_id": "{{ticket.id_numeric}}"
 }
 ```
+
+Use the numeric ticket ID placeholder from FreshService. If `ticket.id_numeric` is not available in the placeholder picker, choose the ticket ID placeholder that resolves to digits only, such as `224183`, not `SR-224183`.
 
 ## Local Curl Smoke Test
 
