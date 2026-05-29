@@ -10,6 +10,7 @@ import {
 import {
   CopyBadge, mdComponents, StreamContent, cleanTranscript, processStreamEvent,
 } from './StreamingComponents';
+import { getRecommendationList } from '../../utils/assignmentRecommendations';
 
 /** Strip obvious script/event-handler vectors before rendering FreshService HTML. Not a full sanitizer. */
 function sanitizeBriefingHtml(html) {
@@ -33,8 +34,9 @@ function sanitizeBriefingHtml(html) {
 function AgentBriefingPreview({ recommendation, decision }) {
   if (!recommendation) return null;
 
+  const recommendations = getRecommendationList(recommendation);
   const isNoise = decision === 'noise_dismissed'
-    || (Array.isArray(recommendation.recommendations) && recommendation.recommendations.length === 0);
+    || recommendations.length === 0;
   const briefing = isNoise ? recommendation.closureNoticeHtml : recommendation.agentBriefingHtml;
   const fieldName = isNoise ? 'closureNoticeHtml' : 'agentBriefingHtml';
 
@@ -130,7 +132,9 @@ export function RecommendationCards({
   const techMap = {};
   for (const t of allTechs) techMap[t.id] = t;
 
-  if (!data?.recommendations?.length) {
+  const recommendations = getRecommendationList(data);
+
+  if (!recommendations.length) {
     return (
       <div className="mt-4 border-t pt-4 space-y-3">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
@@ -158,11 +162,11 @@ export function RecommendationCards({
     );
   }
 
-  const topRec = data.recommendations[0];
-  const recTechIds = new Set(data.recommendations.map((r) => r.techId));
+  const topRec = recommendations[0];
+  const recTechIds = new Set(recommendations.map((r) => r.techId));
   const isOverride = selectedOverrideTech != null;
   const effectiveTechId = isOverride ? selectedTechId : (selectedTechId || topRec?.techId);
-  const effectiveTechName = isOverride ? selectedOverrideTech.name : (data.recommendations.find((r) => r.techId === effectiveTechId)?.techName || topRec?.techName);
+  const effectiveTechName = isOverride ? selectedOverrideTech.name : (recommendations.find((r) => r.techId === effectiveTechId)?.techName || topRec?.techName);
   const displayAssignedTechId = currentAssignedTechId || effectiveTechId;
   const assignmentWasCorrected = currentAssignedTechId && originalAssignedTechId && Number(currentAssignedTechId) !== Number(originalAssignedTechId);
 
@@ -180,7 +184,7 @@ export function RecommendationCards({
         {/* LEFT: Candidates (3/5 width) */}
         <div className="lg:col-span-3 space-y-2 sm:space-y-2.5">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Recommendations</h4>
-          {data.recommendations.map((rec, i) => {
+          {recommendations.map((rec, i) => {
             const isSelected = (onDecide ? effectiveTechId : displayAssignedTechId) === rec.techId && !isOverride;
             const isTopPick = i === 0;
             const isCurrentAssignee = currentAssignedTechId && Number(currentAssignedTechId) === Number(rec.techId);

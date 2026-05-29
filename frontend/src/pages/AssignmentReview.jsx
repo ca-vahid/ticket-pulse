@@ -21,6 +21,7 @@ import LivePipelineView from '../components/assignment/LivePipelineView';
 import FilterDropdown from '../components/FilterDropdown';
 import FilterBar from '../components/FilterBar';
 import useFilterUrlSync from '../hooks/useFilterUrlSync';
+import { getRecommendationList } from '../utils/assignmentRecommendations';
 import {
   ArrowLeft, Inbox, History, Settings2, Award, RefreshCw, Loader2,
   ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
@@ -447,7 +448,7 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
 }
 
 function QuickApprovePopover({ run, align = 'right', quickApproveId, popoverRef, ...innerProps }) {
-  const recs = run.recommendation?.recommendations || [];
+  const recs = getRecommendationList(run.recommendation);
   if (quickApproveId !== run.id || !recs.length) return null;
   return (
     <div
@@ -1091,7 +1092,7 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
   if (!quickApproveId) return null;
   const run = activeItems.find((r) => r.id === quickApproveId);
   if (!run) return null;
-  const recs = run.recommendation?.recommendations || [];
+  const recs = getRecommendationList(run.recommendation);
   if (!recs.length) return null;
   return (
     <div className="md:hidden fixed inset-0 z-[100]" onClick={() => { guardRef.current = Date.now(); onClose(); }}>
@@ -1758,7 +1759,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   const openQuickApprove = (e, run) => {
     e.stopPropagation();
-    const topTech = run.recommendation?.recommendations?.[0]?.techId || null;
+    const topTech = getRecommendationList(run.recommendation)[0]?.techId || null;
     if (quickApproveId === run.id) { setQuickApproveId(null); return; }
     setQuickApproveId(run.id);
     setQuickApproveTechId(topTech);
@@ -1768,7 +1769,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   const submitQuickApprove = async (e, run) => {
     e.stopPropagation();
     if (!quickApproveTechId) return;
-    const recs = run.recommendation?.recommendations || [];
+    const recs = getRecommendationList(run.recommendation);
     const isTopPick = recs[0]?.techId === quickApproveTechId;
     animateOut(run.id);
     quickApproveGuardRef.current = Date.now();
@@ -2118,7 +2119,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   // Heuristic: was a "different agent" (not the AI's top suggestion) chosen?
   const wasDifferentAgentChosen = (run) => {
-    const topTechId = run.recommendation?.recommendations?.[0]?.techId;
+    const topTechId = getRecommendationList(run.recommendation)[0]?.techId;
     const finalTechId = run.assignedTech?.id || run.ticket?.assignedTech?.id || run.ticket?.assignedTechId;
     if (!topTechId || !finalTechId) return false;
     return Number(topTechId) !== Number(finalTechId);
@@ -2351,9 +2352,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   })();
 
   const renderRunCard = (run) => {
-    const topRec = run.recommendation?.recommendations?.[0];
+    const recs = getRecommendationList(run.recommendation);
+    const topRec = recs[0];
     const flag = getTicketFlag(run);
-    const recs = run.recommendation?.recommendations || [];
     const priorityMeta = getPriorityMeta(run.ticket);
     const categoryParts = getTicketPulseCategoryParts(run.ticket, run.recommendation);
     const categoryLabel = categoryParts.label;
@@ -2984,7 +2985,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                       {/* Rows */}
                       <div>
                         {activeItems.map((run) => {
-                          const topRec = run.recommendation?.recommendations?.[0];
+                          const recs = getRecommendationList(run.recommendation);
+                          const topRec = recs[0];
                           const flag = getTicketFlag(run);
                           const ctx = run.reboundFrom || run.ticket?.lastReboundContext;
                           const isReturned = isVerifiedReboundContext(ctx);
@@ -3144,17 +3146,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                   for additional candidates. AvatarView swaps in the
                                   AiPicks visual stack (existing component). */}
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
-                                {run.recommendation?.recommendations?.length > 0 ? (
+                                {recs.length > 0 ? (
                                   avatarView ? (
-                                    <AiPicks recommendations={run.recommendation.recommendations} />
+                                    <AiPicks recommendations={recs} />
                                   ) : (
                                     <div className="flex items-center gap-1.5 min-w-0 text-[12px] leading-snug">
                                       <span className="text-blue-700 font-medium truncate" title={topRec?.techName}>
                                         {topRec?.techName}
                                       </span>
-                                      {run.recommendation.recommendations.length > 1 && (
+                                      {recs.length > 1 && (
                                         <span className="flex-shrink-0 text-[10px] text-blue-400 font-semibold">
-                                          +{run.recommendation.recommendations.length - 1}
+                                          +{recs.length - 1}
                                         </span>
                                       )}
                                     </div>
@@ -3209,7 +3211,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                               {showActions && (
                                 <div className="px-3 py-2 relative">
                                   <div className={`flex items-center justify-end gap-0.5 transition-opacity ${quickApproveId === run.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
-                                    {run.recommendation?.recommendations?.length > 0 && flag !== 'deleted' && (
+                                    {recs.length > 0 && flag !== 'deleted' && (
                                       <button onClick={(e) => openQuickApprove(e, run)} className={`p-1 rounded transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 hover:text-green-700 hover:bg-green-50'}`} title="Quick approve"><Check className="w-3.5 h-3.5" /></button>
                                     )}
                                     {isAdmin && (

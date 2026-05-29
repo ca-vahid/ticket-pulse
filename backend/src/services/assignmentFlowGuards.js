@@ -23,6 +23,14 @@ export function shouldTriggerAssignmentForLatestRun(latestRun) {
     if (latestRun.decision === 'priority_only') {
       return true;
     }
+    if (
+      latestRun.decision === 'auto_assigned'
+      && !latestRun.assignedTechId
+      && ['skipped', 'failed'].includes(latestRun.syncStatus)
+      && latestRun.syncError === 'missing_fs_agent_id'
+    ) {
+      return true;
+    }
     return false;
   }
 

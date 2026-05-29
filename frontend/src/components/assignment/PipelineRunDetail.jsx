@@ -13,6 +13,7 @@ import {
 import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
 import HandoffHistoryStrip from './HandoffHistoryStrip';
+import { getRecommendationList, withNormalizedRecommendations } from '../../utils/assignmentRecommendations';
 
 const ticketDescriptionMdComponents = {
   ...transcriptMdComponents,
@@ -237,7 +238,8 @@ function ReasoningCard({ reasoning, recommendations: _recommendations }) {
 function AgentBriefingCard({ recommendation, decision }) {
   if (!recommendation) return null;
 
-  const isNoise = decision === 'noise_dismissed' || (Array.isArray(recommendation.recommendations) && recommendation.recommendations.length === 0);
+  const recommendations = getRecommendationList(recommendation);
+  const isNoise = decision === 'noise_dismissed' || recommendations.length === 0;
   const briefing = isNoise ? recommendation.closureNoticeHtml : recommendation.agentBriefingHtml;
   const fieldName = isNoise ? 'closureNoticeHtml' : 'agentBriefingHtml';
 
@@ -814,7 +816,7 @@ function ReassignTicketModal({ run, onClose, onComplete }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
-  const recommendations = run?.recommendation?.recommendations || [];
+  const recommendations = getRecommendationList(run?.recommendation);
   const currentTechId = run?.ticket?.assignedTechId || run?.assignedTechId || null;
   const currentTechName = run?.ticket?.assignedTech?.name || run?.assignedTech?.name || 'Unassigned';
   const recommendedTechIds = new Set(recommendations.map((rec) => Number(rec.techId)).filter(Boolean));
@@ -1095,6 +1097,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   if (!run) return null;
 
   const ticket = run.ticket;
+  const normalizedRecommendation = withNormalizedRecommendations(run.recommendation);
   const verifiedRebound = isVerifiedReboundContext(run.reboundFrom);
   const unverifiedRebound = Boolean(run.reboundFrom) && !verifiedRebound;
   // If the run is pending_review but the ticket has been assigned externally
@@ -1477,19 +1480,19 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         <div className="lg:col-span-3">
           <TicketDetailsCard ticket={ticket} />
         </div>
-        {run.recommendation?.overallReasoning && (
+        {normalizedRecommendation?.overallReasoning && (
           <div className="lg:col-span-2">
             <ReasoningCard
-              reasoning={run.recommendation.overallReasoning}
-              recommendations={run.recommendation?.recommendations}
+              reasoning={normalizedRecommendation.overallReasoning}
+              recommendations={normalizedRecommendation.recommendations}
             />
           </div>
         )}
       </div>
 
       {/* Public note preview — exactly what gets posted to FreshService for the assignee. */}
-      {run.recommendation && (run.decision === 'auto_assigned' || run.decision === 'pending_review' || run.decision === 'approved' || run.decision === 'modified' || run.decision === 'noise_dismissed') && (
-        <AgentBriefingCard recommendation={run.recommendation} decision={run.decision} />
+      {normalizedRecommendation && (run.decision === 'auto_assigned' || run.decision === 'pending_review' || run.decision === 'approved' || run.decision === 'modified' || run.decision === 'noise_dismissed') && (
+        <AgentBriefingCard recommendation={normalizedRecommendation} decision={run.decision} />
       )}
 
       {/* Handoff history strip — shows every pickup/rejection/reassignment for this ticket */}
@@ -1617,12 +1620,12 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
       )}
 
       {/* Recommendations + Decision (shared component) */}
-      {run.recommendation && (
+      {normalizedRecommendation && (
         <RecommendationCards
-          data={run.recommendation}
+          data={normalizedRecommendation}
           onDecide={isPending ? onDecide : null}
           deciding={deciding}
-          hideReasoning={!!run.recommendation?.overallReasoning}
+          hideReasoning={!!normalizedRecommendation?.overallReasoning}
           hideAgentBriefing
           decision={run.decision}
           currentAssignedTechId={currentAssignedTechId}

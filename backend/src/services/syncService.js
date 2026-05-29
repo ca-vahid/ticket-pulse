@@ -3265,7 +3265,7 @@ class SyncService {
         freshserviceTicketId: true,
         subject: true,
         pipelineRuns: {
-          select: { id: true, status: true, decision: true, createdAt: true },
+          select: { id: true, status: true, decision: true, createdAt: true, syncStatus: true, syncError: true, assignedTechId: true },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },

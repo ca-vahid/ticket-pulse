@@ -26,11 +26,25 @@ describe('assignment flow guards', () => {
     expect(shouldTriggerAssignmentForLatestRun({ status: 'superseded' })).toBe(true);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'failed_schema_validation' })).toBe(true);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'completed', decision: 'priority_only' })).toBe(true);
+    expect(shouldTriggerAssignmentForLatestRun({
+      status: 'completed',
+      decision: 'auto_assigned',
+      assignedTechId: null,
+      syncStatus: 'skipped',
+      syncError: 'missing_fs_agent_id',
+    })).toBe(true);
 
     expect(shouldTriggerAssignmentForLatestRun({ status: 'queued' })).toBe(false);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'running' })).toBe(false);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'completed', decision: 'pending_review' })).toBe(false);
     expect(shouldTriggerAssignmentForLatestRun({ status: 'completed', decision: 'approved' })).toBe(false);
+    expect(shouldTriggerAssignmentForLatestRun({
+      status: 'completed',
+      decision: 'auto_assigned',
+      assignedTechId: 648411,
+      syncStatus: 'skipped',
+      syncError: 'missing_fs_agent_id',
+    })).toBe(false);
   });
 
   test('allows classification polling only when the latest run is missing or retryable', () => {

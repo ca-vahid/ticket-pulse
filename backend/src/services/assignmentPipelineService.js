@@ -25,8 +25,8 @@ import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import providerGateway from './aiProviders/providerGateway.js';
 import {
   buildPriorityTicketUpdateFields,
-  validateRecommendationPriorityFields,
 } from './priorityAssessment.js';
+import { normalizeSubmitRecommendationPayload } from './assignmentRecommendationValidation.js';
 
 const MAX_TURNS = 20;
 
@@ -810,13 +810,15 @@ class AssignmentPipelineService {
             if (block.name === 'submit_recommendation') {
               let accepted = true;
               let validationError = null;
+              let normalizedFromString = false;
               try {
-                validateRecommendationPriorityFields(block.input);
-                recommendation = block.input;
+                recommendation = normalizeSubmitRecommendationPayload(block.input);
+                normalizedFromString = Boolean(recommendation.__normalizedFromString);
+                delete recommendation.__normalizedFromString;
               } catch (err) {
                 accepted = false;
                 validationError = err.message;
-                logger.warn('submit_recommendation rejected by priority schema validation', {
+                logger.warn('submit_recommendation rejected by schema validation', {
                   runId,
                   ticketId,
                   error: validationError,
@@ -829,13 +831,13 @@ class AssignmentPipelineService {
                 stepName: 'submit_recommendation',
                 status: accepted ? 'completed' : 'failed',
                 input: block.input,
-                output: accepted ? { accepted: true } : { accepted: false, error: validationError },
+                output: accepted ? { accepted: true, normalizedFromString } : { accepted: false, error: validationError },
                 errorMessage: validationError,
                 durationMs: 0,
               });
 
               emit({ type: 'tool_call', name: block.name, input: block.input, toolUseId: block.id });
-              const toolResult = accepted ? { accepted: true } : { accepted: false, error: validationError };
+              const toolResult = accepted ? { accepted: true, normalizedFromString } : { accepted: false, error: validationError };
               toolResultMap.set(block.id, toolResult);
               emit({ type: 'tool_result', name: block.name, data: toolResult, durationMs: 0, toolUseId: block.id });
               continue;
