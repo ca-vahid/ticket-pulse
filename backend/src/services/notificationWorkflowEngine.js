@@ -725,6 +725,41 @@ function llmEmailFromState(state) {
   };
 }
 
+function nodeOutputKey(node) {
+  const configured = String(node?.data?.outputKey || '').trim();
+  const raw = configured || node?.id || 'node';
+  const normalized = raw.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^([0-9])/, '_$1');
+  return normalized || 'node';
+}
+
+function shouldPromoteLlmEmail(node) {
+  return node?.data?.promoteToEmail !== false;
+}
+
+function recordNodeOutput(state, node, output) {
+  const key = nodeOutputKey(node);
+  state.outputs = {
+    ...(state.outputs || {}),
+    [key]: output,
+  };
+  return key;
+}
+
+function recordLlmOutput(state, node, llm, email = null) {
+  const key = nodeOutputKey(node);
+  state.llmRuns = {
+    ...(state.llmRuns || {}),
+    [key]: llm,
+  };
+  recordNodeOutput(state, node, {
+    nodeId: node.id,
+    nodeType: node.type,
+    llm,
+    email,
+  });
+  return key;
+}
+
 async function renderLiquid(template, context) {
   if (!template) return null;
   return liquid.parseAndRender(String(template), context);
@@ -1073,9 +1108,12 @@ async function executeNode({
         reason: 'LLM generation skipped during preview',
         prompt,
         context: contextSummary,
+        outputMode: node.data?.outputMode || 'draft_email',
+        promotedToEmail: false,
       };
       state.llm = skipped;
-      return skipped;
+      const outputKey = recordLlmOutput(state, node, skipped, null);
+      return { ...skipped, outputKey };
     }
 
     let response = null;
@@ -1107,20 +1145,31 @@ async function executeNode({
           maxTokens,
           recordToolEvent: (event) => recordNotificationToolEvent({ workflow, run, event }),
         });
-        state.email = {
-          ...(state.email || {}),
-          ...pipelineResult.email,
+        const generatedEmail = {
+          ...(pipelineResult.email || {}),
         };
+        if (shouldPromoteLlmEmail(node)) {
+          state.email = {
+            ...(state.email || {}),
+            ...generatedEmail,
+          };
+        }
         tokenDiagnostics = llmTokenDiagnostics({ usage: pipelineResult.llm.usage }, maxTokens);
         state.llm = {
           ...pipelineResult.llm,
           tokenDiagnostics,
           tokenLimitHit: tokenDiagnostics.tokenLimitHit,
           context: contextSummary,
+          email: generatedEmail,
+          outputMode: node.data?.outputMode || 'draft_email',
+          promotedToEmail: shouldPromoteLlmEmail(node),
         };
+        const outputKey = recordLlmOutput(state, node, state.llm, generatedEmail);
         return {
-          email: state.email,
+          email: shouldPromoteLlmEmail(node) ? state.email : generatedEmail,
           llm: state.llm,
+          outputKey,
+          promotedToEmail: shouldPromoteLlmEmail(node),
         };
       }
       response = await providerGateway.sendJson({
@@ -1152,12 +1201,17 @@ async function executeNode({
       const html = sanitizeEmailHtml(payload.html || payload.bodyHtml)
         || sanitizeEmailHtml(textToEmailHtml(payload.text || payload.body));
       const text = String(payload.text || payload.body || stripHtml(html)).trim() || null;
-      state.email = {
-        ...(state.email || {}),
+      const generatedEmail = {
         subject: String(payload.subject || '').trim(),
         html,
         text,
       };
+      if (shouldPromoteLlmEmail(node)) {
+        state.email = {
+          ...(state.email || {}),
+          ...generatedEmail,
+        };
+      }
       state.llm = {
         provider: response.provider,
         model: response.model,
@@ -1173,16 +1227,24 @@ async function executeNode({
         raw: normalized.repairedFields.length > 0 ? safeJson(parsed) : null,
         context: contextSummary,
         guard,
+        outputMode: node.data?.outputMode || 'draft_email',
+        promotedToEmail: shouldPromoteLlmEmail(node),
         email: {
-          subject: state.email.subject || null,
-          html: state.email.html || null,
-          text: state.email.text || null,
+          subject: generatedEmail.subject || null,
+          html: generatedEmail.html || null,
+          text: generatedEmail.text || null,
           extra: extraFieldsFromPayload(payload, schema),
         },
       };
+      const outputKey = recordLlmOutput(state, node, state.llm, {
+        ...generatedEmail,
+        extra: state.llm.email.extra,
+      });
       return {
-        email: state.email,
+        email: shouldPromoteLlmEmail(node) ? state.email : generatedEmail,
         llm: state.llm,
+        outputKey,
+        promotedToEmail: shouldPromoteLlmEmail(node),
       };
     } catch (error) {
       state.llm = {
@@ -1200,14 +1262,18 @@ async function executeNode({
           : null,
         raw: parsed ? safeJson(parsed) : null,
         context: contextSummary,
+        outputMode: node.data?.outputMode || 'draft_email',
+        promotedToEmail: false,
         email: null,
       };
+      const outputKey = recordLlmOutput(state, node, state.llm, null);
       if (node.data?.failWorkflowOnError === true) throw error;
       return {
         failed: true,
         error: state.llm.error,
         prompt,
         context: contextSummary,
+        outputKey,
       };
     }
   }

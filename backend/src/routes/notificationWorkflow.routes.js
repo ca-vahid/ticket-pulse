@@ -51,6 +51,40 @@ function parseId(value, label = 'id') {
   return id;
 }
 
+function parseOptionalId(value, label = 'id') {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  return parseId(value, label);
+}
+
+function parseFreshserviceTicketId(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) throw new ValidationError('Invalid FreshService ticket number');
+  try {
+    const id = BigInt(text);
+    if (id <= 0n) throw new ValidationError('Invalid FreshService ticket number');
+    return id;
+  } catch (error) {
+    if (error instanceof ValidationError) throw error;
+    throw new ValidationError('Invalid FreshService ticket number');
+  }
+}
+
+function previewContextTicketWhere(workspaceId, body = {}) {
+  const ticketId = parseOptionalId(body.ticketId, 'ticket id');
+  const freshserviceTicketId = parseFreshserviceTicketId(body.freshserviceTicketId);
+
+  if (!ticketId && !freshserviceTicketId) {
+    throw new ValidationError('Select a ticket by Ticket Pulse ID or FreshService ticket number');
+  }
+
+  return {
+    workspaceId,
+    ...(ticketId ? { id: ticketId } : {}),
+    ...(freshserviceTicketId ? { freshserviceTicketId } : {}),
+  };
+}
+
 function formatAuditId(runId) {
   return `TP-NWF-${runId}`;
 }
@@ -446,7 +480,7 @@ router.put(
 router.post(
   '/llm-tools/context-preview',
   asyncHandler(async (req, res) => {
-    const ticketId = parseId(req.body?.ticketId, 'ticket id');
+    const ticketWhere = previewContextTicketWhere(req.workspaceId, req.body || {});
     const workflowId = req.body?.workflowId ? parseId(req.body.workflowId, 'workflow id') : null;
     const workflow = workflowId
       ? await notificationWorkflowRepository.getWorkflow(req.workspaceId, workflowId)
@@ -459,7 +493,7 @@ router.post(
         publishedVersion: 0,
       };
     const ticket = await prisma.ticket.findFirst({
-      where: { id: ticketId, workspaceId: req.workspaceId },
+      where: ticketWhere,
       include: {
         workspace: true,
         requester: { select: { id: true, name: true, email: true, department: true, jobTitle: true } },

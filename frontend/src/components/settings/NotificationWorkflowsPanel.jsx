@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Background, Controls, ReactFlow } from '@xyflow/react';
+import { Background, Controls, Handle, Position, ReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -49,25 +49,81 @@ const EVENT_LABELS = {
   'ticket.resolved_closed': 'Resolved or closed',
 };
 
-const NODE_LABELS = {
-  trigger: 'Trigger',
-  condition: 'Condition',
-  recipient_resolver: 'Recipients',
-  llm_generate: 'LLM generate',
-  template_render: 'Template',
-  send_email: 'Send email',
-  stop: 'Stop',
+const WORKFLOW_NODE_REGISTRY = {
+  trigger: {
+    label: 'Trigger',
+    icon: Send,
+    color: '#2563eb',
+    terminal: false,
+    inputHandles: [],
+    outputHandles: ['default'],
+  },
+  condition: {
+    label: 'Condition',
+    icon: FileJson,
+    color: '#d97706',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['true', 'false'],
+    addable: true,
+  },
+  recipient_resolver: {
+    label: 'Recipients',
+    icon: Mail,
+    color: '#059669',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  llm_generate: {
+    label: 'LLM generate',
+    icon: Bot,
+    color: '#7c3aed',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  template_render: {
+    label: 'Template',
+    icon: Type,
+    color: '#0f766e',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  send_email: {
+    label: 'Send email',
+    icon: UploadCloud,
+    color: '#dc2626',
+    terminal: true,
+    inputHandles: ['default'],
+    outputHandles: [],
+    addable: true,
+  },
+  stop: {
+    label: 'Stop',
+    icon: XCircle,
+    color: '#6b7280',
+    terminal: true,
+    inputHandles: ['default'],
+    outputHandles: [],
+    addable: true,
+  },
 };
 
-const NODE_COLORS = {
-  trigger: '#2563eb',
-  condition: '#d97706',
-  recipient_resolver: '#059669',
-  llm_generate: '#7c3aed',
-  template_render: '#0f766e',
-  send_email: '#dc2626',
-  stop: '#6b7280',
-};
+const NODE_LABELS = Object.fromEntries(
+  Object.entries(WORKFLOW_NODE_REGISTRY).map(([type, config]) => [type, config.label]),
+);
+
+const NODE_COLORS = Object.fromEntries(
+  Object.entries(WORKFLOW_NODE_REGISTRY).map(([type, config]) => [type, config.color]),
+);
+
+const ADDABLE_NODE_TYPES = Object.entries(WORKFLOW_NODE_REGISTRY)
+  .filter(([, config]) => config.addable)
+  .map(([type]) => type);
 
 const DEFAULT_LLM_MAX_TOKENS = 10000;
 const AFTER_HOURS_WORKFLOW_KEY = 'ticket_created_after_hours';
@@ -160,6 +216,28 @@ const LLM_TOOL_POLICY_MODES = [
   { value: 'tools_enabled', label: 'Context + tools', description: 'Allow bounded read-only Ticket Pulse evidence tools before final email submission.' },
 ];
 
+const CONDITION_FIELD_OPTIONS = [
+  { value: 'ticket.status', label: 'Ticket status', example: 'Open' },
+  { value: 'ticket.priorityLabel', label: 'Ticket priority', example: 'High' },
+  { value: 'ticket.assessedPriority', label: 'Assessed priority', example: 'Urgent' },
+  { value: 'ticket.category', label: 'Category', example: 'Access' },
+  { value: 'ticket.subCategory', label: 'Subcategory', example: 'VPN' },
+  { value: 'ticket.ticketCategory', label: 'Ticket category', example: 'IT' },
+  { value: 'requester.department', label: 'Requester department', example: 'Finance' },
+  { value: 'assignedAgent.email', label: 'Assigned agent exists', example: 'agent@example.com' },
+  { value: 'ticket.isNoise', label: 'Noise ticket', example: 'true' },
+  { value: 'availability.isAfterHours', label: 'After-hours state', example: 'true' },
+];
+
+const CONDITION_OPERATOR_OPTIONS = [
+  { value: 'equals', label: 'equals' },
+  { value: 'not_equals', label: 'does not equal' },
+  { value: 'contains', label: 'contains' },
+  { value: 'exists', label: 'exists' },
+  { value: 'is_true', label: 'is true' },
+  { value: 'is_false', label: 'is false' },
+];
+
 const DEFAULT_LLM_TOOL_POLICY = {
   mode: 'context_only',
   enabledTools: ['get_notification_context', 'get_ticket_thread_summary', 'find_similar_tickets', 'detect_related_ticket_spike'],
@@ -249,24 +327,6 @@ function auditDeliveryForRun(run) {
     || null;
 }
 
-function auditLlmForRun(run) {
-  const attempt = (run?.aiProviderAttempts || []).find((entry) => entry.operation === 'notification_workflow_generation')
-    || run?.aiProviderAttempts?.[0]
-    || null;
-  if (attempt) {
-    return {
-      provider: attempt.provider,
-      model: attempt.model,
-      status: attempt.status,
-      inputTokens: attempt.inputTokens,
-      outputTokens: attempt.outputTokens,
-      durationMs: attempt.durationMs,
-    };
-  }
-  const llmStep = (run?.steps || []).find((step) => step.nodeType === 'llm_generate');
-  return llmStep?.output?.llm || null;
-}
-
 function recipientLine(label, values) {
   const items = values || [];
   return `${label}: ${items.length ? items.join(', ') : 'None'}`;
@@ -320,28 +380,74 @@ function displayPositionForNode(node, definition, index) {
   return node.position || byId[node.id] || { x: index * 280, y: 80 };
 }
 
+function WorkflowGraphNode({ id, data }) {
+  const registry = WORKFLOW_NODE_REGISTRY[data.nodeType] || {};
+  const NodeIcon = registry.icon;
+  const color = registry.color || '#6b7280';
+  const isTrigger = data.nodeType === 'trigger';
+  const isTerminal = registry.terminal === true;
+  const isCondition = data.nodeType === 'condition';
+  return (
+    <div
+      className={cls(
+        'relative min-h-[62px] w-[180px] rounded-lg border bg-white px-3 py-2 shadow-sm',
+        data.selected ? 'border-slate-950 shadow-lg' : 'border-gray-300',
+      )}
+      style={{ borderLeft: `5px solid ${color}` }}
+    >
+      {!isTrigger && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-700"
+        />
+      )}
+      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-gray-500">
+        {NodeIcon && <NodeIcon className="h-3 w-3" />}
+        {registry.label || data.nodeType}
+      </div>
+      <div className="truncate text-sm font-semibold text-gray-900">{data.label || id}</div>
+      {isCondition && (
+        <>
+          <Handle
+            id="true"
+            type="source"
+            position={Position.Right}
+            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-emerald-600"
+            style={{ top: 22 }}
+          />
+          <Handle
+            id="false"
+            type="source"
+            position={Position.Right}
+            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500"
+            style={{ top: 48 }}
+          />
+        </>
+      )}
+      {!isCondition && !isTerminal && (
+        <Handle
+          id="default"
+          type="source"
+          position={Position.Right}
+          className="!h-2.5 !w-2.5 !border-2 !border-white !bg-blue-600"
+        />
+      )}
+    </div>
+  );
+}
+
+const FLOW_NODE_TYPES = { workflowNode: WorkflowGraphNode };
+
 function flowNodesFromDefinition(definition, selectedNodeId) {
   return (definition?.nodes || []).map((node, index) => ({
     id: node.id,
-    type: 'default',
+    type: 'workflowNode',
     position: displayPositionForNode(node, definition, index),
     data: {
       nodeType: node.type,
-      label: (
-        <div className="min-w-[140px]">
-          <div className="text-[11px] uppercase tracking-wide text-gray-500">{NODE_LABELS[node.type] || node.type}</div>
-          <div className="truncate text-sm font-semibold text-gray-900">{node.data?.label || node.data?.notificationType || node.id}</div>
-        </div>
-      ),
-    },
-    style: {
-      border: selectedNodeId === node.id ? `2px solid ${NODE_COLORS[node.type] || '#2563eb'}` : '1px solid #d1d5db',
-      borderLeft: `5px solid ${NODE_COLORS[node.type] || '#6b7280'}`,
-      borderRadius: 8,
-      background: '#ffffff',
-      width: 180,
-      minHeight: 62,
-      boxShadow: selectedNodeId === node.id ? '0 8px 24px rgba(15, 23, 42, 0.14)' : '0 1px 2px rgba(15, 23, 42, 0.08)',
+      label: node.data?.label || node.data?.notificationType || node.id,
+      selected: selectedNodeId === node.id,
     },
   }));
 }
@@ -450,11 +556,277 @@ function validateSchemaClient(schema) {
   return errors;
 }
 
-function applyDisplayLayoutToDraft(definition) {
-  const hasLlm = (definition?.nodes || []).some((node) => node.type === 'llm_generate');
-  for (const [index, node] of (definition?.nodes || []).entries()) {
-    node.position = displayPositionForNode(node, { nodes: hasLlm ? [{ type: 'llm_generate' }] : [] }, index);
+function slugForNodeType(type) {
+  return String(type || 'node').replace(/_/g, '-');
+}
+
+function uniqueNodeId(definition, type) {
+  const base = slugForNodeType(type);
+  const ids = new Set((definition?.nodes || []).map((node) => node.id));
+  if (!ids.has(base)) return base;
+  let index = 2;
+  while (ids.has(`${base}-${index}`)) index += 1;
+  return `${base}-${index}`;
+}
+
+function uniqueEdgeId(definition, source, target, sourceHandle = null) {
+  const handle = sourceHandle && sourceHandle !== 'default' ? `-${sourceHandle}` : '';
+  const base = `${source}${handle}-to-${target}`;
+  const ids = new Set((definition?.edges || []).map((edge) => edge.id));
+  if (!ids.has(base)) return base;
+  let index = 2;
+  while (ids.has(`${base}-${index}`)) index += 1;
+  return `${base}-${index}`;
+}
+
+function nodeOutputKey(node) {
+  const configured = String(node?.data?.outputKey || '').trim();
+  const raw = configured || node?.id || 'node';
+  return raw.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^([0-9])/, '_$1') || 'node';
+}
+
+function defaultNodeData(type, triggerType = 'ticket.created') {
+  if (type === 'condition') {
+    return {
+      label: 'New condition',
+      rule: { '==': [{ var: 'ticket.status' }, 'Open'] },
+    };
   }
+  if (type === 'llm_generate') {
+    return {
+      label: 'Generate email text',
+      prompt: 'Use the ticket context below to improve this notification email. Return JSON with subject, html, and text fields.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nRequester: {{ requester.name }} <{{ requester.email }}>\nAssigned agent: {{ assignedAgent.name }}',
+      systemPrompt: 'You write concise, professional IT helpdesk notification emails. Return JSON only.',
+      outputSchema: DEFAULT_LLM_OUTPUT_SCHEMA,
+      maxTokens: DEFAULT_LLM_MAX_TOKENS,
+      temperature: 0.3,
+      outputMode: 'draft_email',
+      promoteToEmail: true,
+    };
+  }
+  if (type === 'template_render') {
+    return {
+      label: 'Template',
+      subject: 'Ticket update: #{{ ticket.freshserviceTicketId }}',
+      html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong>: {{ ticket.subject }}</p>',
+      text: 'Ticket #{{ ticket.freshserviceTicketId }}: {{ ticket.subject }}',
+      contentSource: 'template_only',
+      plainTextMode: 'auto',
+      appendPublicStatusLink: false,
+      appendRaiseUrgencyLink: false,
+      appendAfterHoursSupportLink: false,
+    };
+  }
+  if (type === 'send_email') {
+    return {
+      label: 'Send email',
+      provider: 'sendgrid',
+      notificationType: triggerType,
+      appendPublicStatusLink: true,
+      appendRaiseUrgencyLink: triggerType === 'ticket.created',
+      appendAfterHoursSupportLink: false,
+    };
+  }
+  if (type === 'stop') {
+    return { reason: 'Workflow stopped' };
+  }
+  return {};
+}
+
+function coerceConditionValue(value, field) {
+  if (field === 'ticket.isNoise' || field === 'availability.isAfterHours') {
+    return String(value).toLowerCase() === 'true';
+  }
+  if (field === 'ticket.priority' && String(value).trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  return value;
+}
+
+export function buildConditionRule({ field, operator, value }) {
+  const variable = { var: field || 'ticket.status' };
+  const normalizedValue = coerceConditionValue(value, field);
+  if (operator === 'not_equals') return { '!=': [variable, normalizedValue] };
+  if (operator === 'contains') return { in: [normalizedValue, variable] };
+  if (operator === 'exists') return { '!=': [variable, null] };
+  if (operator === 'is_true') return { '==': [variable, true] };
+  if (operator === 'is_false') return { '==': [variable, false] };
+  return { '==': [variable, normalizedValue] };
+}
+
+export function conditionBuilderFromRule(rule) {
+  if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+    return { field: 'ticket.status', operator: 'equals', value: 'Open' };
+  }
+  const [[operator, args] = []] = Object.entries(rule);
+  const values = Array.isArray(args) ? args : [args];
+  const varArg = values.find((item) => item && typeof item === 'object' && item.var);
+  const literalArg = values.find((item) => item !== varArg);
+  const field = varArg?.var || 'ticket.status';
+  if (operator === '!=') {
+    return {
+      field,
+      operator: literalArg === null ? 'exists' : 'not_equals',
+      value: literalArg === null ? '' : String(literalArg ?? ''),
+    };
+  }
+  if (operator === 'in') {
+    return {
+      field,
+      operator: 'contains',
+      value: String(literalArg ?? ''),
+    };
+  }
+  if (operator === '==' && literalArg === true) return { field, operator: 'is_true', value: 'true' };
+  if (operator === '==' && literalArg === false) return { field, operator: 'is_false', value: 'false' };
+  return {
+    field,
+    operator: 'equals',
+    value: String(literalArg ?? ''),
+  };
+}
+
+export function describeCondition({ field, operator, value }) {
+  const fieldLabel = CONDITION_FIELD_OPTIONS.find((option) => option.value === field)?.label || field;
+  const operatorLabel = CONDITION_OPERATOR_OPTIONS.find((option) => option.value === operator)?.label || 'equals';
+  if (operator === 'exists') return `${fieldLabel} exists`;
+  if (operator === 'is_true' || operator === 'is_false') return `${fieldLabel} ${operatorLabel}`;
+  return `${fieldLabel} ${operatorLabel} "${value}"`;
+}
+
+function isTerminalNode(node) {
+  return WORKFLOW_NODE_REGISTRY[node?.type]?.terminal === true;
+}
+
+function normalizedHandle(value) {
+  return String(value || 'default').trim().toLowerCase() || 'default';
+}
+
+function graphMaps(definition) {
+  const nodes = new Map((definition?.nodes || []).map((node) => [node.id, node]));
+  const outgoing = new Map((definition?.nodes || []).map((node) => [node.id, []]));
+  const incoming = new Map((definition?.nodes || []).map((node) => [node.id, []]));
+  for (const edge of definition?.edges || []) {
+    if (outgoing.has(edge.source)) outgoing.get(edge.source).push(edge);
+    if (incoming.has(edge.target)) incoming.get(edge.target).push(edge);
+  }
+  return { nodes, outgoing, incoming };
+}
+
+function reachableIds(trigger, outgoing) {
+  const reachable = new Set();
+  const stack = trigger ? [trigger.id] : [];
+  while (stack.length > 0) {
+    const nodeId = stack.pop();
+    if (reachable.has(nodeId)) continue;
+    reachable.add(nodeId);
+    for (const edge of outgoing.get(nodeId) || []) stack.push(edge.target);
+  }
+  return reachable;
+}
+
+function upstreamTypes(nodeId, nodes, incoming) {
+  const types = new Set();
+  const seen = new Set();
+  const stack = [...(incoming.get(nodeId) || []).map((edge) => edge.source)];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    const node = nodes.get(current);
+    if (!node) continue;
+    types.add(node.type);
+    for (const edge of incoming.get(current) || []) stack.push(edge.source);
+  }
+  return types;
+}
+
+function graphCycleDescriptions(definition, outgoing) {
+  const cycles = [];
+  const visiting = new Set();
+  const visited = new Set();
+  function visit(nodeId, path) {
+    if (visiting.has(nodeId)) {
+      const start = path.indexOf(nodeId);
+      cycles.push([...path.slice(start), nodeId].join(' -> '));
+      return;
+    }
+    if (visited.has(nodeId)) return;
+    visiting.add(nodeId);
+    for (const edge of outgoing.get(nodeId) || []) visit(edge.target, [...path, edge.target]);
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+  }
+  for (const node of definition?.nodes || []) visit(node.id, [node.id]);
+  return cycles;
+}
+
+export function validateWorkflowDefinitionClient(definition, triggerType = null) {
+  const errors = [];
+  const nodes = definition?.nodes || [];
+  const edges = definition?.edges || [];
+  const ids = new Set();
+  for (const node of nodes) {
+    if (!node.id) errors.push('Every node needs an id');
+    if (ids.has(node.id)) errors.push(`Duplicate node id: ${node.id}`);
+    ids.add(node.id);
+    if (!WORKFLOW_NODE_REGISTRY[node.type]) errors.push(`Unsupported node type: ${node.type}`);
+  }
+
+  const triggers = nodes.filter((node) => node.type === 'trigger');
+  if (triggers.length !== 1) errors.push('Workflow must have exactly one trigger node');
+  if (triggerType && triggers[0]?.data?.triggerType && triggers[0].data.triggerType !== triggerType) {
+    errors.push(`Trigger node must use triggerType ${triggerType}`);
+  }
+  if (!nodes.some((node) => node.type === 'send_email')) errors.push('Workflow must include at least one send email node');
+
+  for (const edge of edges) {
+    if (!ids.has(edge.source)) errors.push(`Edge ${edge.id || '(new edge)'} has unknown source ${edge.source}`);
+    if (!ids.has(edge.target)) errors.push(`Edge ${edge.id || '(new edge)'} has unknown target ${edge.target}`);
+  }
+  if (errors.length > 0) return errors;
+
+  const maps = graphMaps(definition);
+  for (const edge of edges) {
+    const sourceNode = maps.nodes.get(edge.source);
+    const targetNode = maps.nodes.get(edge.target);
+    const sourceRegistry = WORKFLOW_NODE_REGISTRY[sourceNode.type];
+    const targetRegistry = WORKFLOW_NODE_REGISTRY[targetNode.type];
+    if (sourceRegistry.terminal) errors.push(`Terminal node ${sourceNode.id} cannot route to another node`);
+    if (!sourceRegistry.outputHandles.includes(normalizedHandle(edge.sourceHandle))) {
+      errors.push(`Edge ${edge.id || '(new edge)'} uses an invalid ${sourceNode.type} output handle`);
+    }
+    if (!(targetRegistry.inputHandles || ['default']).includes(normalizedHandle(edge.targetHandle))) {
+      errors.push(`Edge ${edge.id || '(new edge)'} uses an invalid ${targetNode.type} input handle`);
+    }
+  }
+
+  const reachable = reachableIds(triggers[0], maps.outgoing);
+  for (const node of nodes) {
+    const registry = WORKFLOW_NODE_REGISTRY[node.type];
+    const outgoing = maps.outgoing.get(node.id) || [];
+    if (triggers[0] && !reachable.has(node.id)) errors.push(`Node ${node.id} is unreachable from the trigger`);
+    if (reachable.has(node.id) && !registry.terminal && outgoing.length === 0) {
+      errors.push(`Node ${node.id} must route to another node or a stop node`);
+    }
+    if (node.type === 'condition' && reachable.has(node.id)) {
+      const handles = new Set(outgoing.map((edge) => normalizedHandle(edge.sourceHandle)));
+      if (!handles.has('true')) errors.push(`Condition node ${node.id} must define a true branch`);
+      if (!handles.has('false')) errors.push(`Condition node ${node.id} must define a false branch`);
+    }
+  }
+  for (const cycle of graphCycleDescriptions(definition, maps.outgoing)) {
+    errors.push(`Workflow graph contains a cycle: ${cycle}`);
+  }
+  for (const node of nodes.filter((candidate) => candidate.type === 'send_email')) {
+    const upstream = upstreamTypes(node.id, maps.nodes, maps.incoming);
+    if (!upstream.has('recipient_resolver')) errors.push(`Send email node ${node.id} must have an upstream recipient resolver`);
+    if (!upstream.has('template_render') && !upstream.has('llm_generate')) {
+      errors.push(`Send email node ${node.id} must have an upstream template or LLM email source`);
+    }
+  }
+  return [...new Set(errors)];
 }
 
 function formatJson(value) {
@@ -468,7 +840,7 @@ function formatJson(value) {
 function summarizePreviewStep(step) {
   const output = step?.output || {};
   if (step?.nodeType === 'trigger') return output.eventType || 'Workflow started';
-  if (step?.nodeType === 'condition') return output.passed ? 'Condition passed' : 'Condition failed';
+  if (step?.nodeType === 'condition') return output.passed ? 'Condition passed - true branch' : 'Condition failed - false branch';
   if (step?.nodeType === 'recipient_resolver') {
     const recipients = output.recipients || {};
     return `To: ${(recipients.to || []).join(', ') || 'none'}`;
@@ -550,9 +922,97 @@ function previewToneClasses(tone) {
   };
 }
 
-function llmFromPreview(preview, steps) {
-  const llmStep = steps.find((step) => step.nodeType === 'llm_generate');
-  return llmStep?.output?.llm || preview?.state?.llm || llmStep?.output || null;
+function llmStepDiagnostic(step) {
+  if (step?.nodeType !== 'llm_generate') return null;
+  const output = step.output || {};
+  const llm = output.llm || (
+    output.provider || output.model || output.email || output.failed || output.skipped
+      ? output
+      : null
+  );
+  if (!llm) return null;
+  return {
+    nodeId: step.nodeId,
+    nodeType: step.nodeType,
+    outputKey: output.outputKey || llm.outputKey || nodeOutputKey({ id: step.nodeId }),
+    llm,
+    email: output.email || llm.email || null,
+    rawOutput: output,
+    prompt: output.prompt || null,
+    status: step.status,
+    durationMs: step.durationMs,
+  };
+}
+
+function llmDiagnosticsFromState(state, existingKeys = new Set()) {
+  const diagnostics = [];
+  for (const [outputKey, llm] of Object.entries(state?.llmRuns || {})) {
+    if (existingKeys.has(outputKey)) continue;
+    const output = state?.outputs?.[outputKey] || {};
+    diagnostics.push({
+      nodeId: output.nodeId || outputKey,
+      nodeType: output.nodeType || 'llm_generate',
+      outputKey,
+      llm,
+      email: output.email || llm?.email || null,
+      rawOutput: output,
+      prompt: output.prompt || null,
+      status: llm?.failed ? 'failed' : 'completed',
+      durationMs: null,
+    });
+  }
+  if (!diagnostics.length && state?.llm && existingKeys.size === 0) {
+    diagnostics.push({
+      nodeId: 'llm_generate',
+      nodeType: 'llm_generate',
+      outputKey: 'llm_generate',
+      llm: state.llm,
+      email: state.llm?.email || null,
+      rawOutput: state.llm,
+      prompt: state.llm?.prompt || null,
+      status: state.llm?.failed ? 'failed' : 'completed',
+      durationMs: null,
+    });
+  }
+  return diagnostics;
+}
+
+function llmDiagnosticsFromPreview(preview, steps = []) {
+  const diagnostics = steps.map(llmStepDiagnostic).filter(Boolean);
+  const keys = new Set(diagnostics.map((diagnostic) => diagnostic.outputKey).filter(Boolean));
+  return [
+    ...diagnostics,
+    ...llmDiagnosticsFromState(preview?.state, keys),
+  ];
+}
+
+function auditLlmsForRun(run) {
+  const diagnostics = (run?.steps || []).map(llmStepDiagnostic).filter(Boolean);
+  const keys = new Set(diagnostics.map((diagnostic) => diagnostic.outputKey).filter(Boolean));
+  const fromState = llmDiagnosticsFromState(run?.state, keys);
+  const combined = [...diagnostics, ...fromState];
+  if (combined.length > 0) return combined;
+
+  return (run?.aiProviderAttempts || [])
+    .filter((entry) => !entry.operation || entry.operation === 'notification_workflow_generation')
+    .map((attempt, index) => ({
+      nodeId: attempt.nodeId || `provider-attempt-${index + 1}`,
+      nodeType: 'llm_generate',
+      outputKey: attempt.nodeId || `provider_attempt_${index + 1}`,
+      llm: {
+        provider: attempt.provider,
+        model: attempt.model,
+        status: attempt.status,
+        inputTokens: attempt.inputTokens,
+        outputTokens: attempt.outputTokens,
+        durationMs: attempt.durationMs,
+      },
+      email: null,
+      rawOutput: attempt,
+      prompt: null,
+      status: attempt.status || 'completed',
+      durationMs: attempt.durationMs || null,
+    }));
 }
 
 function collectPreviewIssues(preview, steps, email, recipients) {
@@ -573,33 +1033,36 @@ function collectPreviewIssues(preview, steps, email, recipients) {
       });
     }
   }
-  const llm = llmFromPreview(preview, steps);
-  if (llm?.failed && !issues.some((issue) => issue.detail === llm.error)) {
-    issues.push({
-      tone: 'red',
-      title: 'LLM output failed validation',
-      detail: llm.error || 'The LLM response did not match the required output schema.',
-    });
-  }
-  if (llm?.tokenLimitHit) {
-    issues.push({
-      tone: 'amber',
-      title: 'LLM output hit token limit',
-      detail: llm.tokenLimitWarning || 'The provider reported that generation reached the configured output token cap.',
-    });
-  } else if (llm?.tokenDiagnostics?.nearTokenLimit) {
-    issues.push({
-      tone: 'amber',
-      title: 'LLM output near token limit',
-      detail: `The response used ${llm.tokenDiagnostics.outputLimitPercent}% of the configured output token cap.`,
-    });
-  }
-  if ((llm?.repairedFields || []).length > 0) {
-    issues.push({
-      tone: 'amber',
-      title: 'LLM output was repaired',
-      detail: `Missing field${llm.repairedFields.length === 1 ? '' : 's'} repaired from available output: ${llm.repairedFields.join(', ')}.`,
-    });
+  for (const diagnostic of llmDiagnosticsFromPreview(preview, steps)) {
+    const llm = diagnostic.llm;
+    const titlePrefix = diagnostic.nodeId ? `LLM ${diagnostic.nodeId}` : 'LLM output';
+    if (llm?.failed && !issues.some((issue) => issue.detail === llm.error)) {
+      issues.push({
+        tone: 'red',
+        title: `${titlePrefix} failed validation`,
+        detail: llm.error || 'The LLM response did not match the required output schema.',
+      });
+    }
+    if (llm?.tokenLimitHit) {
+      issues.push({
+        tone: 'amber',
+        title: `${titlePrefix} hit token limit`,
+        detail: llm.tokenLimitWarning || 'The provider reported that generation reached the configured output token cap.',
+      });
+    } else if (llm?.tokenDiagnostics?.nearTokenLimit) {
+      issues.push({
+        tone: 'amber',
+        title: `${titlePrefix} near token limit`,
+        detail: `The response used ${llm.tokenDiagnostics.outputLimitPercent}% of the configured output token cap.`,
+      });
+    }
+    if ((llm?.repairedFields || []).length > 0) {
+      issues.push({
+        tone: 'amber',
+        title: `${titlePrefix} was repaired`,
+        detail: `Missing field${llm.repairedFields.length === 1 ? '' : 's'} repaired from available output: ${llm.repairedFields.join(', ')}.`,
+      });
+    }
   }
   if (preview && !email) {
     issues.push({
@@ -698,6 +1161,117 @@ function ActionLinkDiagnostics({ diagnostics }) {
   );
 }
 
+export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflow has no LLM step, or the LLM step has not completed yet.' }) {
+  if (!diagnostics.length) {
+    return <p className="text-sm text-gray-500">{emptyText}</p>;
+  }
+  return (
+    <div className="space-y-3 text-sm">
+      {diagnostics.map((diagnostic, index) => {
+        const llm = diagnostic.llm || {};
+        const email = diagnostic.email || llm.email || null;
+        const toolCount = Array.isArray(llm.toolEvents) ? llm.toolEvents.length : 0;
+        return (
+          <div key={`${diagnostic.outputKey || diagnostic.nodeId || 'llm'}-${index}`} className="rounded-md border border-violet-100 bg-white p-3">
+            <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">
+                  {diagnostic.outputKey ? `Output ${diagnostic.outputKey}` : 'LLM output'}
+                </div>
+                <div className="truncate text-sm font-semibold text-slate-950">{diagnostic.nodeId || 'LLM node'}</div>
+              </div>
+              <span className={cls(
+                'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
+                llm.failed || diagnostic.status === 'failed'
+                  ? 'border-red-200 bg-red-50 text-red-700'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+              )}
+              >
+                {llm.failed || diagnostic.status === 'failed' ? 'Failed' : diagnostic.status || 'Completed'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-md bg-gray-50 p-2 text-gray-500">Provider<br /><strong className="text-gray-800">{llm.provider || 'unknown'}</strong></div>
+              <div className="rounded-md bg-gray-50 p-2 text-gray-500">Model<br /><strong className="text-gray-800">{llm.model || 'unknown'}</strong></div>
+            </div>
+            {llm.tokenDiagnostics && (
+              <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                <div className="rounded-md bg-gray-50 p-2 text-gray-500">Output tokens<br /><strong className="text-gray-800">{llm.tokenDiagnostics.outputTokens || 0}</strong></div>
+                <div className="rounded-md bg-gray-50 p-2 text-gray-500">Token cap<br /><strong className="text-gray-800">{llm.tokenDiagnostics.requestedMaxTokens || 'unknown'}</strong></div>
+                <div className={cls(
+                  'rounded-md p-2',
+                  llm.tokenLimitHit ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-500',
+                )}
+                >
+                  Limit status<br /><strong>{llm.tokenLimitHit ? 'Hit limit' : 'OK'}</strong>
+                </div>
+              </div>
+            )}
+            <div className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+              <div className="rounded-md bg-slate-50 p-2 text-slate-500">Promoted<br /><strong className="text-slate-800">{llm.promotedToEmail === false ? 'No' : 'Yes/legacy'}</strong></div>
+              <div className="rounded-md bg-slate-50 p-2 text-slate-500">Output mode<br /><strong className="text-slate-800">{llm.outputMode || 'draft_email'}</strong></div>
+              <div className="rounded-md bg-slate-50 p-2 text-slate-500">Tool calls<br /><strong className="text-slate-800">{toolCount}</strong></div>
+            </div>
+            {(llm.failed || llm.error) && (
+              <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <div className="font-semibold">Schema or provider issue</div>
+                <div className="mt-0.5">{llm.error || 'LLM output did not pass validation.'}</div>
+              </div>
+            )}
+            {llm.tokenLimitWarning && (
+              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {llm.tokenLimitWarning}
+              </div>
+            )}
+            {llm.fallbackUsed && (
+              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Fallback provider was used{llm.fallbackReason ? `: ${llm.fallbackReason}` : '.'}
+              </div>
+            )}
+            {llm.guard && (
+              <div className={cls(
+                'mt-2 rounded-md border px-3 py-2 text-xs',
+                llm.guard.accepted === false
+                  ? 'border-red-200 bg-red-50 text-red-700'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+              )}
+              >
+                <div className="font-semibold">Guardrail {llm.guard.accepted === false ? 'blocked output' : 'passed'}</div>
+                <div className="mt-0.5">
+                  {(llm.guard.issues || []).length
+                    ? (llm.guard.issues || []).join('; ')
+                    : 'No requester-facing claim issues detected.'}
+                </div>
+              </div>
+            )}
+            {(llm.repairedFields || []).length > 0 && (
+              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Missing LLM field{llm.repairedFields.length === 1 ? '' : 's'} repaired from available output: {llm.repairedFields.join(', ')}.
+              </div>
+            )}
+            <details open className="mt-2 rounded-md border border-gray-200">
+              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Validated email fields</summary>
+              <pre className="max-h-52 overflow-auto border-t border-gray-100 bg-gray-950 p-2 text-[11px] leading-5 text-gray-100">{formatJson(email)}</pre>
+            </details>
+            {(llm.raw || diagnostic.rawOutput) && (
+              <details className="mt-2 rounded-md border border-gray-200">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Raw LLM step output</summary>
+                <pre className="max-h-56 overflow-auto border-t border-gray-100 bg-gray-950 p-2 text-[11px] leading-5 text-gray-100">{formatJson(llm.raw || diagnostic.rawOutput)}</pre>
+              </details>
+            )}
+            {diagnostic.prompt && (
+              <details className="mt-2 rounded-md border border-gray-200">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Rendered prompt</summary>
+                <pre className="max-h-44 overflow-auto border-t border-gray-100 bg-gray-50 p-2 text-[11px] leading-5 text-gray-700">{diagnostic.prompt}</pre>
+              </details>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PreviewMetric({ label, value, tone = 'gray' }) {
   const toneClass = tone === 'red'
     ? 'border-red-200 bg-red-50 text-red-800'
@@ -723,6 +1297,142 @@ function ticketPreviewSubtitle(ticket) {
     ticket?.priorityLabel,
     ticket?.status,
   ].filter(Boolean).join(' | ');
+}
+
+export function TicketContextPicker({
+  title = 'Ticket Context',
+  description = 'Search current-workspace tickets and choose the real ticket context.',
+  tickets,
+  ticketsLoading,
+  ticketSearch,
+  ticketPage,
+  ticketPriority,
+  ticketStatus,
+  selectedTicket,
+  onTicketSearchChange,
+  onTicketPriorityChange,
+  onTicketStatusChange,
+  onTicketPageChange,
+  onSelectTicket,
+  onRun,
+  running = false,
+  runLabel = 'Run with selected ticket',
+  showRunButton = true,
+  className = '',
+}) {
+  const items = tickets?.items || [];
+  const totalPages = tickets?.totalPages || 1;
+  return (
+    <section className={cls('rounded-md border border-gray-200 bg-white p-4', className)}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold text-gray-900">{title}</h4>
+          <p className="text-xs text-gray-500">{description}</p>
+        </div>
+        {showRunButton && (
+          <button
+            type="button"
+            onClick={onRun}
+            disabled={running || !selectedTicket}
+            className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+          >
+            {running ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            {runLabel}
+          </button>
+        )}
+      </div>
+      <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_180px_170px]">
+        <label className="relative min-w-0">
+          <span className="sr-only">Search tickets</span>
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+          <input
+            value={ticketSearch}
+            onChange={(event) => onTicketSearchChange(event.target.value)}
+            placeholder="Search by FreshService #, subject, requester, assignee, or category"
+            className="w-full rounded-md border border-gray-200 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          />
+        </label>
+        <label>
+          <span className="sr-only">Filter by priority</span>
+          <select
+            value={ticketPriority}
+            onChange={(event) => onTicketPriorityChange(event.target.value)}
+            className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          >
+            {PREVIEW_TICKET_PRIORITY_FILTERS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">Filter by status</span>
+          <select
+            value={ticketStatus}
+            onChange={(event) => onTicketStatusChange(event.target.value)}
+            className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          >
+            {PREVIEW_TICKET_STATUS_FILTERS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {ticketsLoading && (
+          <div className="rounded-md border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-500">
+            Loading tickets...
+          </div>
+        )}
+        {!ticketsLoading && items.length === 0 && (
+          <div className="rounded-md border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-500">
+            No matching tickets in this workspace.
+          </div>
+        )}
+        {!ticketsLoading && items.map((ticket) => (
+          <button
+            key={ticket.id}
+            type="button"
+            onClick={() => onSelectTicket(ticket)}
+            className={cls(
+              'min-w-0 rounded-md border px-3 py-2 text-left transition hover:bg-gray-50',
+              selectedTicket?.id === ticket.id ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-100' : 'border-gray-200 bg-white',
+            )}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-gray-900">#{ticket.freshserviceTicketId} {ticket.subject || 'No subject'}</div>
+                <div className="mt-1 truncate text-xs text-gray-500">{ticketPreviewSubtitle(ticket)}</div>
+              </div>
+              {ticket.isNoise && <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">Noise</span>}
+            </div>
+            <div className="mt-2 text-[11px] text-gray-400">Created {formatDate(ticket.createdAt || ticket.updatedAt)}</div>
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+        <span>{tickets?.total || 0} tickets</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onTicketPageChange(Math.max(1, ticketPage - 1))}
+            disabled={ticketPage <= 1 || ticketsLoading}
+            className="rounded-md border border-gray-200 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <span>Page {ticketPage} of {totalPages}</span>
+          <button
+            type="button"
+            onClick={() => onTicketPageChange(Math.min(totalPages, ticketPage + 1))}
+            disabled={ticketPage >= totalPages || ticketsLoading}
+            className="rounded-md border border-gray-200 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function PreviewStepCard({ step }) {
@@ -999,8 +1709,8 @@ function PreviewModal({
   const steps = preview?.steps || [];
   const email = preview?.state?.email || null;
   const recipients = preview?.state?.recipients || {};
-  const llmStep = steps.find((step) => step.nodeType === 'llm_generate');
-  const llmOutput = llmFromPreview(preview, steps);
+  const llmDiagnostics = llmDiagnosticsFromPreview(preview, steps);
+  const llmOutput = llmDiagnostics[0]?.llm || null;
   const auditId = previewAuditId(preview);
   const issues = collectPreviewIssues(preview, steps, email, recipients);
   const failedSteps = steps.filter((step) => step.status === 'failed' || step.output?.failed).length;
@@ -1121,7 +1831,13 @@ function PreviewModal({
                 <PreviewMetric label="Run status" value={preview.status} tone={healthTone} />
                 <PreviewMetric label="Audit ID" value={auditId} tone="gray" />
                 <PreviewMetric label="Steps" value={`${completedSteps}/${steps.length} completed`} tone={failedSteps ? 'red' : warningSteps ? 'amber' : 'emerald'} />
-                <PreviewMetric label="LLM" value={[llmOutput?.provider, llmOutput?.model].filter(Boolean).join(' / ') || 'Not recorded'} tone={llmOutput?.failed ? 'red' : 'gray'} />
+                <PreviewMetric
+                  label="LLM"
+                  value={llmDiagnostics.length > 1
+                    ? `${llmDiagnostics.length} LLM nodes`
+                    : [llmOutput?.provider, llmOutput?.model].filter(Boolean).join(' / ') || 'Not recorded'}
+                  tone={llmDiagnostics.some((diagnostic) => diagnostic.llm?.failed) ? 'red' : 'gray'}
+                />
                 <PreviewMetric label="Recipients" value={(recipients.to || []).join(', ') || 'None'} tone={(recipients.to || []).length ? 'gray' : 'amber'} />
               </div>
               {issues.length > 0 && (
@@ -1165,115 +1881,29 @@ function PreviewModal({
           )}
 
           {showPicker && (
-            <section className="mb-4 rounded-md border border-gray-200 bg-white p-4">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h4 className="text-sm font-semibold text-gray-900">Preview Ticket</h4>
-                  <p className="text-xs text-gray-500">Search current-workspace tickets and choose the real ticket context for this preview.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={onRunPreview}
-                  disabled={running || !selectedTicket}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
-                >
-                  {running ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                Run with selected ticket
-                </button>
-              </div>
-              <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_180px_170px]">
-                <label className="min-w-0">
-                  <span className="sr-only">Search preview tickets</span>
-                  <input
-                    value={ticketSearch}
-                    onChange={(event) => onTicketSearchChange(event.target.value)}
-                    placeholder="Search by ticket number, subject, requester, assignee, or category"
-                    className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
-                </label>
-                <label>
-                  <span className="sr-only">Filter by priority</span>
-                  <select
-                    value={ticketPriority}
-                    onChange={(event) => onTicketPriorityChange(event.target.value)}
-                    className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  >
-                    {PREVIEW_TICKET_PRIORITY_FILTERS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span className="sr-only">Filter by status</span>
-                  <select
-                    value={ticketStatus}
-                    onChange={(event) => onTicketStatusChange(event.target.value)}
-                    className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  >
-                    {PREVIEW_TICKET_STATUS_FILTERS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {ticketsLoading && (
-                  <div className="rounded-md border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-500">
-                  Loading tickets...
-                  </div>
-                )}
-                {!ticketsLoading && (tickets?.items || []).length === 0 && (
-                  <div className="rounded-md border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-500">
-                  No matching tickets in this workspace.
-                  </div>
-                )}
-                {!ticketsLoading && (tickets?.items || []).map((ticket) => (
-                  <button
-                    key={ticket.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectTicket(ticket);
-                      setShowTicketPicker(false);
-                    }}
-                    className={cls(
-                      'min-w-0 rounded-md border px-3 py-2 text-left transition hover:bg-gray-50',
-                      selectedTicket?.id === ticket.id ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-100' : 'border-gray-200 bg-white',
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-gray-900">#{ticket.freshserviceTicketId} {ticket.subject || 'No subject'}</div>
-                        <div className="mt-1 truncate text-xs text-gray-500">{ticketPreviewSubtitle(ticket)}</div>
-                      </div>
-                      {ticket.isNoise && <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">Noise</span>}
-                    </div>
-                    <div className="mt-2 text-[11px] text-gray-400">Created {formatDate(ticket.createdAt || ticket.updatedAt)}</div>
-                  </button>
-                ))}
-              </div>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
-                <span>{tickets?.total || 0} tickets</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onTicketPageChange(Math.max(1, ticketPage - 1))}
-                    disabled={ticketPage <= 1 || ticketsLoading}
-                    className="rounded-md border border-gray-200 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                  Previous
-                  </button>
-                  <span>Page {ticketPage} of {tickets?.totalPages || 1}</span>
-                  <button
-                    type="button"
-                    onClick={() => onTicketPageChange(Math.min(tickets?.totalPages || 1, ticketPage + 1))}
-                    disabled={ticketPage >= (tickets?.totalPages || 1) || ticketsLoading}
-                    className="rounded-md border border-gray-200 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                  Next
-                  </button>
-                </div>
-              </div>
-            </section>
+            <TicketContextPicker
+              className="mb-4"
+              title="Preview Ticket"
+              description="Search current-workspace tickets and choose the real ticket context for this preview."
+              tickets={tickets}
+              ticketsLoading={ticketsLoading}
+              ticketSearch={ticketSearch}
+              ticketPage={ticketPage}
+              ticketPriority={ticketPriority}
+              ticketStatus={ticketStatus}
+              selectedTicket={selectedTicket}
+              onTicketSearchChange={onTicketSearchChange}
+              onTicketPriorityChange={onTicketPriorityChange}
+              onTicketStatusChange={onTicketStatusChange}
+              onTicketPageChange={onTicketPageChange}
+              onSelectTicket={(ticket) => {
+                onSelectTicket(ticket);
+                setShowTicketPicker(false);
+              }}
+              onRun={onRunPreview}
+              running={running}
+              runLabel="Run with selected ticket"
+            />
           )}
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(390px,0.85fr)]">
@@ -1302,66 +1932,7 @@ function PreviewModal({
                   <Bot className="h-4 w-4 text-violet-600" />
                   <h4 className="text-sm font-semibold text-gray-900">LLM Diagnostics</h4>
                 </div>
-                {llmOutput ? (
-                  <div className="space-y-2 text-sm">
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-md bg-gray-50 p-2 text-gray-500">Provider<br /><strong className="text-gray-800">{llmOutput.provider || 'unknown'}</strong></div>
-                      <div className="rounded-md bg-gray-50 p-2 text-gray-500">Model<br /><strong className="text-gray-800">{llmOutput.model || 'unknown'}</strong></div>
-                    </div>
-                    {llmOutput.tokenDiagnostics && (
-                      <div className="grid grid-cols-3 gap-2 text-xs">
-                        <div className="rounded-md bg-gray-50 p-2 text-gray-500">Output tokens<br /><strong className="text-gray-800">{llmOutput.tokenDiagnostics.outputTokens || 0}</strong></div>
-                        <div className="rounded-md bg-gray-50 p-2 text-gray-500">Token cap<br /><strong className="text-gray-800">{llmOutput.tokenDiagnostics.requestedMaxTokens || 'unknown'}</strong></div>
-                        <div className={cls(
-                          'rounded-md p-2',
-                          llmOutput.tokenLimitHit ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-500',
-                        )}
-                        >
-                          Limit status<br /><strong>{llmOutput.tokenLimitHit ? 'Hit limit' : 'OK'}</strong>
-                        </div>
-                      </div>
-                    )}
-                    {(llmOutput.failed || llmOutput.error) && (
-                      <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                        <div className="font-semibold">Schema or provider issue</div>
-                        <div className="mt-0.5">{llmOutput.error || 'LLM output did not pass validation.'}</div>
-                      </div>
-                    )}
-                    {llmOutput.tokenLimitWarning && (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        {llmOutput.tokenLimitWarning}
-                      </div>
-                    )}
-                    {llmOutput.fallbackUsed && (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        Fallback provider was used{llmOutput.fallbackReason ? `: ${llmOutput.fallbackReason}` : '.'}
-                      </div>
-                    )}
-                    {(llmOutput.repairedFields || []).length > 0 && (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        Missing LLM field{llmOutput.repairedFields.length === 1 ? '' : 's'} repaired from available output: {llmOutput.repairedFields.join(', ')}.
-                      </div>
-                    )}
-                    <details open className="rounded-md border border-gray-200">
-                      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Validated email fields</summary>
-                      <pre className="max-h-52 overflow-auto border-t border-gray-100 bg-gray-950 p-2 text-[11px] leading-5 text-gray-100">{formatJson(llmOutput.email || llmStep?.output?.email || null)}</pre>
-                    </details>
-                    {(llmOutput.raw || llmStep?.output) && (
-                      <details className="rounded-md border border-gray-200">
-                        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Raw LLM step output</summary>
-                        <pre className="max-h-56 overflow-auto border-t border-gray-100 bg-gray-950 p-2 text-[11px] leading-5 text-gray-100">{formatJson(llmOutput.raw || llmStep?.output)}</pre>
-                      </details>
-                    )}
-                    {llmStep?.output?.prompt && (
-                      <details className="rounded-md border border-gray-200">
-                        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Rendered prompt</summary>
-                        <pre className="max-h-44 overflow-auto border-t border-gray-100 bg-gray-50 p-2 text-[11px] leading-5 text-gray-700">{llmStep.output.prompt}</pre>
-                      </details>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500">This workflow has no LLM step, or the LLM step has not completed yet.</p>
-                )}
+                <LlmDiagnosticsList diagnostics={llmDiagnostics} />
               </div>
 
               <div className="rounded-md border border-gray-200 bg-white p-4">
@@ -2042,14 +2613,24 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
   );
 }
 
-function LlmContextToolsPanel({
+export function LlmContextToolsPanel({
   policy,
   draft,
   catalog,
   saving,
   message,
-  previewTicketId,
-  onPreviewTicketIdChange,
+  tickets,
+  ticketsLoading,
+  ticketSearch,
+  ticketPage,
+  ticketPriority,
+  ticketStatus,
+  selectedTicket,
+  onTicketSearchChange,
+  onTicketPriorityChange,
+  onTicketStatusChange,
+  onTicketPageChange,
+  onSelectTicket,
   preview,
   previewLoading,
   testRun,
@@ -2069,6 +2650,9 @@ function LlmContextToolsPanel({
   const mode = draft?.mode || 'context_only';
   const summary = preview?.summary || null;
   const bundle = preview?.bundle || null;
+  const manualFreshserviceTicketNumber = /^\d+$/.test(String(ticketSearch || '').trim());
+  const hasContextTicket = Boolean(selectedTicket?.id || manualFreshserviceTicketNumber);
+  const canRunToolTest = Boolean(selectedTicket?.id);
 
   const sourceRows = [
     {
@@ -2337,35 +2921,60 @@ function LlmContextToolsPanel({
         </div>
 
         <div className="min-w-0 rounded-md border border-violet-100 bg-slate-50 p-3">
-          <div className="mb-3 flex flex-wrap items-end gap-2">
-            <label className="min-w-[180px] flex-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Preview ticket ID
-              <input
-                value={previewTicketId}
-                onChange={(event) => onPreviewTicketIdChange(event.target.value)}
-                placeholder="Internal Ticket Pulse ID"
-                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={onPreview}
-              disabled={previewLoading || mode === 'off'}
-              className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
-            >
-              {previewLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
-              Preview context
-            </button>
-            <button
-              type="button"
-              onClick={onTestRun}
-              disabled={testLoading || mode !== 'tools_enabled' || !previewTicketId}
-              className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-            >
-              {testLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              Run tool test
-            </button>
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Preview ticket context</div>
+              <div className="mt-0.5 text-xs text-slate-500">
+                Search by visible FreshService ticket number or choose a recent ticket.
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onPreview}
+                disabled={previewLoading || mode === 'off' || !hasContextTicket}
+                className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+              >
+                {previewLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+                Preview context
+              </button>
+              <button
+                type="button"
+                onClick={onTestRun}
+                disabled={testLoading || mode !== 'tools_enabled' || !canRunToolTest}
+                title={!canRunToolTest ? 'Select a ticket before running the full tool test.' : undefined}
+                className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {testLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                Run tool test
+              </button>
+            </div>
           </div>
+
+          {manualFreshserviceTicketNumber && !selectedTicket && (
+            <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              Preview will resolve FreshService ticket #{String(ticketSearch || '').trim()} directly. Select the ticket below to enable the full tool test.
+            </div>
+          )}
+
+          <TicketContextPicker
+            title="Ticket picker"
+            description="Search by FreshService #, subject, requester, assignee, or category."
+            tickets={tickets}
+            ticketsLoading={ticketsLoading}
+            ticketSearch={ticketSearch}
+            ticketPage={ticketPage}
+            ticketPriority={ticketPriority}
+            ticketStatus={ticketStatus}
+            selectedTicket={selectedTicket}
+            onTicketSearchChange={onTicketSearchChange}
+            onTicketPriorityChange={onTicketPriorityChange}
+            onTicketStatusChange={onTicketStatusChange}
+            onTicketPageChange={onTicketPageChange}
+            onSelectTicket={onSelectTicket}
+            showRunButton={false}
+            className="mb-3 border-slate-200"
+          />
 
           {!preview && (
             <div className="flex min-h-[210px] items-center justify-center rounded-md border border-dashed border-slate-200 bg-white px-4 text-center text-sm text-slate-500">
@@ -2461,10 +3070,11 @@ function MockAuditPanel({
 }) {
   const activeRun = selectedRun || runs?.[0] || null;
   const activeDelivery = auditDeliveryForRun(activeRun);
-  const activeLlm = auditLlmForRun(activeRun);
+  const activeLlmDiagnostics = auditLlmsForRun(activeRun);
+  const activeLlm = activeLlmDiagnostics[0]?.llm || null;
   const activeSteps = activeRun?.steps || [];
   const actionDiagnostics = activeDelivery?.payload?.actionLinks || activeDelivery?.payload?.diagnostics?.actionLinks || null;
-  const activeContext = activeSteps.find((step) => step.nodeType === 'llm_generate')?.output?.llm?.context
+  const activeContext = activeLlmDiagnostics.find((diagnostic) => diagnostic.llm?.context)?.llm?.context
     || activeSteps.find((step) => step.nodeType === 'llm_generate')?.output?.context
     || null;
   const activeEventLabel = EVENT_LABELS[activeRun?.eventType] || activeRun?.eventType || 'Workflow event';
@@ -2590,7 +3200,8 @@ function MockAuditPanel({
           )}
           {!loading && runs?.map((run) => {
             const delivery = auditDeliveryForRun(run);
-            const llm = auditLlmForRun(run);
+            const llmDiagnostics = auditLlmsForRun(run);
+            const llm = llmDiagnostics[0]?.llm || null;
             const contextStep = (run.steps || []).find((step) => step.nodeType === 'llm_generate' && (step.output?.llm?.context || step.output?.context));
             const toolCount = (run.steps || []).filter((step) => step.nodeType === 'llm_tool').length
               || (Array.isArray(llm?.toolEvents) ? llm.toolEvents.length : 0);
@@ -2621,7 +3232,11 @@ function MockAuditPanel({
                 </div>
                 <div className="grid gap-1 text-[11px] leading-4 text-slate-500">
                   <span className="truncate">Subject: <span className="font-medium text-slate-700">{delivery?.subject || 'No email rendered'}</span></span>
-                  <span className="truncate">Recipients: {deliveryRecipientCount(delivery)} | LLM: {[llm?.provider, llm?.model].filter(Boolean).join(' / ') || 'Not recorded'}</span>
+                  <span className="truncate">
+                    Recipients: {deliveryRecipientCount(delivery)} | LLM: {llmDiagnostics.length > 1
+                      ? `${llmDiagnostics.length} nodes`
+                      : [llm?.provider, llm?.model].filter(Boolean).join(' / ') || 'Not recorded'}
+                  </span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {contextStep && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Context</span>}
@@ -2658,7 +3273,13 @@ function MockAuditPanel({
               <div className="grid gap-2 md:grid-cols-3">
                 <PreviewMetric label="Would send" value={activeDelivery ? 'Yes, suppressed' : 'No delivery row'} tone={activeDelivery ? 'blue' : 'amber'} />
                 <PreviewMetric label="Recipients" value={String(deliveryRecipientCount(activeDelivery))} tone={deliveryRecipientCount(activeDelivery) ? 'gray' : 'amber'} />
-                <PreviewMetric label="LLM" value={[activeLlm?.provider, activeLlm?.model].filter(Boolean).join(' / ') || 'Not recorded'} tone={activeLlm?.status === 'failed' ? 'red' : 'gray'} />
+                <PreviewMetric
+                  label="LLM"
+                  value={activeLlmDiagnostics.length > 1
+                    ? `${activeLlmDiagnostics.length} LLM nodes`
+                    : [activeLlm?.provider, activeLlm?.model].filter(Boolean).join(' / ') || 'Not recorded'}
+                  tone={activeLlmDiagnostics.some((diagnostic) => diagnostic.llm?.failed || diagnostic.llm?.status === 'failed') ? 'red' : 'gray'}
+                />
               </div>
 
               {activeContext && (
@@ -2711,6 +3332,17 @@ function MockAuditPanel({
               </section>
 
               <ActionLinkDiagnostics diagnostics={actionDiagnostics} />
+
+              <section className="rounded-md border border-violet-100 bg-violet-50/50 p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <Bot className="h-4 w-4 text-violet-600" />
+                  <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">LLM Diagnostics</div>
+                </div>
+                <LlmDiagnosticsList
+                  diagnostics={activeLlmDiagnostics}
+                  emptyText="No LLM diagnostics were captured for this mock run."
+                />
+              </section>
 
               <section>
                 <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -2811,20 +3443,50 @@ function FlowMiniMap({ visible, nodes, selectedNodeId, onClose }) {
   );
 }
 
-function NodePalette({ definition, onAddLlm, onRemoveNode, showMiniMap, onToggleMiniMap }) {
-  const hasLlm = definition?.nodes?.some((node) => node.type === 'llm_generate');
+function NodePalette({ onAddNode, onRemoveNode, showMiniMap, onToggleMiniMap }) {
+  const [addOpen, setAddOpen] = useState(false);
   return (
     <div className="border-b border-gray-100 px-4 py-3">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Workflow Steps</div>
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onAddLlm}
-          className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          {hasLlm ? 'Select LLM' : 'Add LLM'}
-        </button>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setAddOpen((current) => !current)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add step
+          </button>
+          {addOpen && (
+            <div className="absolute left-0 top-9 z-20 w-52 overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg">
+              {ADDABLE_NODE_TYPES.map((type) => {
+                const Icon = WORKFLOW_NODE_REGISTRY[type]?.icon;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => {
+                      onAddNode(type);
+                      setAddOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    {Icon ? (
+                      <Icon className="h-3.5 w-3.5" style={{ color: NODE_COLORS[type] || '#6b7280' }} />
+                    ) : (
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: NODE_COLORS[type] || '#6b7280' }}
+                      />
+                    )}
+                    {NODE_LABELS[type] || type}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={onRemoveNode}
@@ -2874,6 +3536,7 @@ export default function NotificationWorkflowsPanel() {
   const [previewTestSending, setPreviewTestSending] = useState(false);
   const [previewTestResult, setPreviewTestResult] = useState(null);
   const [conditionText, setConditionText] = useState('');
+  const [conditionBuilder, setConditionBuilder] = useState({ field: 'ticket.status', operator: 'equals', value: 'Open' });
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2903,7 +3566,13 @@ export default function NotificationWorkflowsPanel() {
   const [llmToolDraft, setLlmToolDraft] = useState(DEFAULT_LLM_TOOL_POLICY);
   const [llmToolSaving, setLlmToolSaving] = useState(false);
   const [llmToolMessage, setLlmToolMessage] = useState(null);
-  const [llmContextPreviewTicketId, setLlmContextPreviewTicketId] = useState('');
+  const [llmContextTickets, setLlmContextTickets] = useState({ items: [], page: 1, pageSize: 10, total: 0, totalPages: 1 });
+  const [llmContextTicketsLoading, setLlmContextTicketsLoading] = useState(false);
+  const [llmContextTicketSearch, setLlmContextTicketSearch] = useState('');
+  const [llmContextTicketPriority, setLlmContextTicketPriority] = useState('all');
+  const [llmContextTicketStatus, setLlmContextTicketStatus] = useState('all');
+  const [llmContextTicketPage, setLlmContextTicketPage] = useState(1);
+  const [selectedLlmContextTicket, setSelectedLlmContextTicket] = useState(null);
   const [llmContextPreview, setLlmContextPreview] = useState(null);
   const [llmContextPreviewLoading, setLlmContextPreviewLoading] = useState(false);
   const [llmToolTestRun, setLlmToolTestRun] = useState(null);
@@ -3014,7 +3683,9 @@ export default function NotificationWorkflowsPanel() {
 
   useEffect(() => {
     if (selectedNode?.type === 'condition') {
-      setConditionText(JSON.stringify(selectedNode.data?.rule || true, null, 2));
+      const rule = selectedNode.data?.rule || true;
+      setConditionText(JSON.stringify(rule, null, 2));
+      setConditionBuilder(conditionBuilderFromRule(rule));
     } else {
       setConditionText('');
     }
@@ -3198,6 +3869,21 @@ export default function NotificationWorkflowsPanel() {
     for (const node of draft?.nodes || []) {
       if (node.type !== 'llm_generate') continue;
       const schema = node.data?.outputSchema || DEFAULT_LLM_OUTPUT_SCHEMA;
+      const outputKey = nodeOutputKey(node);
+      const group = `LLM Output: ${node.data?.label || node.id}`;
+      for (const field of ['subject', 'html', 'text']) {
+        const path = `state.outputs.${outputKey}.email.${field}`;
+        if (!byPath.has(path)) {
+          byPath.set(path, {
+            path,
+            token: `{{ ${path} }}`,
+            label: `${node.data?.label || node.id} ${field}`,
+            group,
+            description: `${field} returned by the LLM node "${node.data?.label || node.id}".`,
+            example: '',
+          });
+        }
+      }
       for (const field of Object.keys(schema.properties || {})) {
         if (['subject', 'html', 'text'].includes(field)) continue;
         const path = `state.llm.email.extra.${field}`;
@@ -3211,10 +3897,51 @@ export default function NotificationWorkflowsPanel() {
             example: '',
           });
         }
+        const nodePath = `state.outputs.${outputKey}.email.extra.${field}`;
+        if (!byPath.has(nodePath)) {
+          byPath.set(nodePath, {
+            path: nodePath,
+            token: `{{ ${nodePath} }}`,
+            label: `${node.data?.label || node.id} ${field}`,
+            group,
+            description: `Optional custom field "${field}" returned by the LLM node "${node.data?.label || node.id}".`,
+            example: '',
+          });
+        }
       }
     }
     return [...byPath.values()];
   }, [draft, variableCatalog]);
+  const conditionFieldOptions = useMemo(() => {
+    const byValue = new Map(CONDITION_FIELD_OPTIONS.map((option) => [option.value, option]));
+    for (const node of draft?.nodes || []) {
+      if (node.type !== 'llm_generate') continue;
+      const outputKey = nodeOutputKey(node);
+      const labelPrefix = node.data?.label || node.id;
+      for (const field of ['subject', 'text']) {
+        const value = `state.outputs.${outputKey}.email.${field}`;
+        if (!byValue.has(value)) {
+          byValue.set(value, {
+            value,
+            label: `${labelPrefix} ${field}`,
+            example: field === 'subject' ? 'Generated subject' : 'Generated text',
+          });
+        }
+      }
+      for (const field of Object.keys(node.data?.outputSchema?.properties || {})) {
+        if (['subject', 'html', 'text'].includes(field)) continue;
+        const value = `state.outputs.${outputKey}.email.extra.${field}`;
+        if (!byValue.has(value)) {
+          byValue.set(value, {
+            value,
+            label: `${labelPrefix} ${field}`,
+            example: 'high',
+          });
+        }
+      }
+    }
+    return [...byValue.values()];
+  }, [draft]);
   const selectedIsAfterHoursWorkflow = selected?.key === (afterHoursPolicy.offHoursWorkflowKey || AFTER_HOURS_WORKFLOW_KEY)
     || selected?.draftDefinition?.metadata?.scheduleMode === 'after_hours'
     || selected?.publishedDefinition?.metadata?.scheduleMode === 'after_hours';
@@ -3222,6 +3949,11 @@ export default function NotificationWorkflowsPanel() {
   const draftFingerprint = useMemo(() => definitionFingerprint(draft), [draft]);
   const publishedFingerprint = useMemo(() => definitionFingerprint(selected?.publishedDefinition), [selected?.publishedDefinition]);
   const hasPublishableChanges = Boolean(selected && draft && (!selectedIsPublished || draftFingerprint !== publishedFingerprint));
+  const draftValidationIssues = useMemo(
+    () => (draft ? validateWorkflowDefinitionClient(draft, selected?.triggerType) : []),
+    [draft, selected?.triggerType],
+  );
+  const hasBlockingGraphErrors = draftValidationIssues.length > 0;
   const mockAuditOpen = activeGlobalTab === 'mock-audit';
   const workflowTabActive = activeGlobalTab === 'workflows';
   const llmModeLabel = llmToolPolicy?.mode === 'tools_enabled'
@@ -3347,6 +4079,29 @@ export default function NotificationWorkflowsPanel() {
     }
   }
 
+  async function loadLlmContextTickets({
+    page = llmContextTicketPage,
+    search = llmContextTicketSearch,
+    priority = llmContextTicketPriority,
+    status = llmContextTicketStatus,
+  } = {}) {
+    setLlmContextTicketsLoading(true);
+    try {
+      const response = await notificationWorkflowAPI.getPreviewTickets({
+        page,
+        pageSize: 9,
+        search,
+        priority,
+        status,
+      });
+      setLlmContextTickets(response.data || { items: [], page, pageSize: 9, total: 0, totalPages: 1 });
+    } catch (error) {
+      setLlmToolMessage({ type: 'error', text: error.message || 'Ticket search failed' });
+    } finally {
+      setLlmContextTicketsLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!previewModalOpen) return undefined;
     const handle = window.setTimeout(() => {
@@ -3360,6 +4115,20 @@ export default function NotificationWorkflowsPanel() {
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewModalOpen, previewTicketPage, previewTicketSearch, previewTicketPriority, previewTicketStatus]);
+
+  useEffect(() => {
+    if (activeGlobalTab !== 'llm-context') return undefined;
+    const handle = window.setTimeout(() => {
+      loadLlmContextTickets({
+        page: llmContextTicketPage,
+        search: llmContextTicketSearch,
+        priority: llmContextTicketPriority,
+        status: llmContextTicketStatus,
+      });
+    }, 250);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGlobalTab, llmContextTicketPage, llmContextTicketSearch, llmContextTicketPriority, llmContextTicketStatus]);
 
   useEffect(() => {
     if (!mockAuditOpen) return undefined;
@@ -3391,6 +4160,10 @@ export default function NotificationWorkflowsPanel() {
 
   async function publishWorkflow() {
     if (!selected) return;
+    if (hasBlockingGraphErrors) {
+      setMessage({ type: 'error', text: `Fix workflow validation before publishing: ${draftValidationIssues[0]}` });
+      return;
+    }
     if (!hasPublishableChanges) {
       setMessage({ type: 'success', text: 'No draft changes to publish' });
       return;
@@ -3506,43 +4279,115 @@ export default function NotificationWorkflowsPanel() {
     }
   }
 
-  function addLlmNode() {
-    if (!draft) return;
-    const existing = draft.nodes.find((node) => node.type === 'llm_generate');
-    if (existing) {
-      updateDraft((next) => applyDisplayLayoutToDraft(next));
-      setSelectedNodeId(existing.id);
+  function addWorkflowNode(type) {
+    if (!draft || !WORKFLOW_NODE_REGISTRY[type]) return;
+    const newId = uniqueNodeId(draft, type);
+    const activeNode = selectedNode || draft.nodes.find((node) => node.id === 'trigger') || draft.nodes[0];
+    const triggerType = draft.nodes.find((node) => node.type === 'trigger')?.data?.triggerType || selected?.triggerType || 'ticket.created';
+
+    updateDraft((next) => {
+      const sourceNode = next.nodes.find((node) => node.id === activeNode?.id) || next.nodes[0];
+      const sourcePosition = sourceNode?.position || displayPositionForNode(sourceNode, next, 0);
+      const newNode = {
+        id: newId,
+        type,
+        position: {
+          x: Math.max(0, Number(sourcePosition?.x || 0) + (isTerminalNode(sourceNode) ? -260 : 260)),
+          y: Number(sourcePosition?.y || 80),
+        },
+        data: defaultNodeData(type, triggerType),
+      };
+      next.nodes.push(newNode);
+
+      if (!sourceNode) return;
+
+      if (isTerminalNode(sourceNode)) {
+        const incomingEdge = next.edges.find((edge) => edge.target === sourceNode.id);
+        if (incomingEdge) {
+          next.edges = next.edges.filter((edge) => edge.id !== incomingEdge.id);
+          next.edges.push({
+            id: uniqueEdgeId(next, incomingEdge.source, newId, incomingEdge.sourceHandle),
+            source: incomingEdge.source,
+            sourceHandle: incomingEdge.sourceHandle || null,
+            target: newId,
+          });
+          next.edges.push({
+            id: uniqueEdgeId(next, newId, sourceNode.id),
+            source: newId,
+            target: sourceNode.id,
+          });
+        }
+        return;
+      }
+
+      let sourceHandle = 'default';
+      if (sourceNode.type === 'condition') {
+        const handles = new Set(next.edges.filter((edge) => edge.source === sourceNode.id).map((edge) => edge.sourceHandle || 'default'));
+        sourceHandle = handles.has('true') && !handles.has('false') ? 'false' : 'true';
+      }
+      const outgoingEdge = next.edges.find((edge) => (
+        edge.source === sourceNode.id
+        && String(edge.sourceHandle || 'default') === sourceHandle
+      ));
+      if (outgoingEdge) {
+        next.edges = next.edges.filter((edge) => edge.id !== outgoingEdge.id);
+      }
+      next.edges.push({
+        id: uniqueEdgeId(next, sourceNode.id, newId, sourceHandle),
+        source: sourceNode.id,
+        sourceHandle: sourceHandle === 'default' ? null : sourceHandle,
+        target: newId,
+      });
+      if (outgoingEdge) {
+        next.edges.push({
+          id: uniqueEdgeId(next, newId, outgoingEdge.target),
+          source: newId,
+          target: outgoingEdge.target,
+        });
+      }
+
+      if (type === 'llm_generate') {
+        const templateNode = next.nodes.find((node) => node.id === 'template');
+        if (templateNode && !templateUsesLlm(templateNode.data)) {
+          templateNode.data = addLlmFallbacksToTemplate(templateNode.data);
+        }
+      }
+    });
+    setSelectedNodeId(newId);
+  }
+
+  function isValidWorkflowConnection(connection) {
+    if (!draft || !connection?.source || !connection?.target) return false;
+    if (connection.source === connection.target) return false;
+    const source = draft.nodes.find((node) => node.id === connection.source);
+    const target = draft.nodes.find((node) => node.id === connection.target);
+    if (!source || !target || target.type === 'trigger' || isTerminalNode(source)) return false;
+    const sourceHandle = normalizedHandle(connection.sourceHandle);
+    const targetHandle = normalizedHandle(connection.targetHandle);
+    return (WORKFLOW_NODE_REGISTRY[source.type]?.outputHandles || []).includes(sourceHandle)
+      && (WORKFLOW_NODE_REGISTRY[target.type]?.inputHandles || ['default']).includes(targetHandle);
+  }
+
+  function handleFlowConnect(connection) {
+    if (!isValidWorkflowConnection(connection)) {
+      setMessage({ type: 'error', text: 'That connection is not valid for this node type' });
       return;
     }
     updateDraft((next) => {
-      next.nodes.push({
-        id: 'llm-generate',
-        type: 'llm_generate',
-        position: { x: 840, y: 80 },
-        data: {
-          label: 'Generate email text',
-          prompt: 'Use the ticket context below to improve this notification email. Return JSON with subject, html, and text fields.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nRequester: {{ requester.name }} <{{ requester.email }}>\nAssigned agent: {{ assignedAgent.name }}',
-          systemPrompt: 'You write concise, professional IT helpdesk notification emails. Return JSON only.',
-          outputSchema: DEFAULT_LLM_OUTPUT_SCHEMA,
-          maxTokens: DEFAULT_LLM_MAX_TOKENS,
-          temperature: 0.3,
-        },
+      const sourceHandle = connection.sourceHandle || null;
+      const normalizedHandle = String(sourceHandle || 'default');
+      next.edges = (next.edges || []).filter((edge) => !(
+        edge.source === connection.source
+        && String(edge.sourceHandle || 'default') === normalizedHandle
+      ));
+      next.edges.push({
+        id: uniqueEdgeId(next, connection.source, connection.target, sourceHandle),
+        source: connection.source,
+        target: connection.target,
+        sourceHandle,
+        targetHandle: connection.targetHandle || null,
       });
-      const edgeIndex = next.edges.findIndex((edge) => edge.source === 'recipients' && edge.target === 'template');
-      if (edgeIndex >= 0) {
-        next.edges.splice(edgeIndex, 1,
-          { id: 'recipients-to-llm', source: 'recipients', target: 'llm-generate' },
-          { id: 'llm-to-template', source: 'llm-generate', target: 'template' });
-      } else {
-        next.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
-      }
-      const templateNode = next.nodes.find((node) => node.id === 'template');
-      if (templateNode && !templateUsesLlm(templateNode.data)) {
-        templateNode.data = addLlmFallbacksToTemplate(templateNode.data);
-      }
-      applyDisplayLayoutToDraft(next);
     });
-    setSelectedNodeId('llm-generate');
   }
 
   function removeSelectedNode() {
@@ -3568,6 +4413,32 @@ export default function NotificationWorkflowsPanel() {
     } catch {
       setMessage({ type: 'error', text: 'Condition must be valid JSONLogic JSON' });
     }
+  }
+
+  function applyVisualConditionRule() {
+    const rule = buildConditionRule(conditionBuilder);
+    setConditionText(JSON.stringify(rule, null, 2));
+    updateNodeData({ rule });
+    setMessage({ type: 'success', text: 'Condition updated' });
+  }
+
+  function updateConditionBranch(handle, targetId) {
+    if (!selectedNode || selectedNode.type !== 'condition' || !targetId) return;
+    updateDraft((next) => {
+      const source = next.nodes.find((node) => node.id === selectedNode.id);
+      const target = next.nodes.find((node) => node.id === targetId);
+      if (!source || !target || target.id === source.id || target.type === 'trigger') return;
+      next.edges = (next.edges || []).filter((edge) => !(
+        edge.source === source.id
+        && normalizedHandle(edge.sourceHandle) === handle
+      ));
+      next.edges.push({
+        id: uniqueEdgeId(next, source.id, target.id, handle),
+        source: source.id,
+        sourceHandle: handle,
+        target: target.id,
+      });
+    });
   }
 
   async function copyVariable(variable) {
@@ -3794,19 +4665,23 @@ export default function NotificationWorkflowsPanel() {
   }
 
   async function previewLlmContext() {
-    const ticketId = Number.parseInt(llmContextPreviewTicketId || selectedPreviewTicket?.id, 10);
-    if (!Number.isFinite(ticketId) || ticketId <= 0) {
-      setLlmToolMessage({ type: 'error', text: 'Enter an internal Ticket Pulse ticket ID for context preview' });
+    const manualFreshserviceTicketId = String(llmContextTicketSearch || '').trim();
+    const payload = {
+      workflowId: selected?.id || null,
+      policy: llmToolDraft,
+    };
+    if (selectedLlmContextTicket?.id) {
+      payload.ticketId = selectedLlmContextTicket.id;
+    } else if (/^\d+$/.test(manualFreshserviceTicketId)) {
+      payload.freshserviceTicketId = manualFreshserviceTicketId;
+    } else {
+      setLlmToolMessage({ type: 'error', text: 'Search by FreshService ticket number or select a ticket for context preview' });
       return;
     }
     setLlmContextPreviewLoading(true);
     setLlmToolMessage(null);
     try {
-      const response = await notificationWorkflowAPI.previewLlmContext({
-        ticketId,
-        workflowId: selected?.id || null,
-        policy: llmToolDraft,
-      });
+      const response = await notificationWorkflowAPI.previewLlmContext(payload);
       setLlmContextPreview(response.data || null);
     } catch (error) {
       setLlmToolMessage({ type: 'error', text: error.message || 'Context preview failed' });
@@ -3816,9 +4691,9 @@ export default function NotificationWorkflowsPanel() {
   }
 
   async function runLlmToolTest() {
-    const ticketId = Number.parseInt(llmContextPreviewTicketId || selectedPreviewTicket?.id, 10);
+    const ticketId = Number.parseInt(selectedLlmContextTicket?.id, 10);
     if (!selected?.id || !Number.isFinite(ticketId) || ticketId <= 0) {
-      setLlmToolMessage({ type: 'error', text: 'Select a workflow and enter an internal Ticket Pulse ticket ID for the tool test' });
+      setLlmToolMessage({ type: 'error', text: 'Select a workflow and ticket before running the tool test' });
       return;
     }
     setLlmToolTestLoading(true);
@@ -3868,9 +4743,95 @@ export default function NotificationWorkflowsPanel() {
     }
 
     if (selectedNode.type === 'condition') {
+      const fieldExample = conditionFieldOptions.find((option) => option.value === conditionBuilder.field)?.example || '';
+      const valueDisabled = ['exists', 'is_true', 'is_false'].includes(conditionBuilder.operator);
+      const branchTargets = (draft?.nodes || []).filter((node) => node.id !== selectedNode.id && node.type !== 'trigger');
+      const targetForBranch = (handle) => (draft?.edges || []).find((edge) => (
+        edge.source === selectedNode.id
+        && normalizedHandle(edge.sourceHandle) === handle
+      ))?.target || '';
       return (
-        <div className="space-y-3">
-          <label className="text-xs font-medium uppercase text-gray-500">JSONLogic Rule</label>
+        <div className="space-y-4">
+          <div className="rounded-md border border-amber-100 bg-amber-50 p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">Visual condition</div>
+            <div className="grid gap-2">
+              <label className="text-xs font-medium uppercase text-amber-900">
+                Field
+                <select
+                  value={conditionBuilder.field}
+                  onChange={(event) => setConditionBuilder((current) => ({ ...current, field: event.target.value }))}
+                  className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                >
+                  {conditionFieldOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="grid gap-2 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)]">
+                <label className="text-xs font-medium uppercase text-amber-900">
+                  Operator
+                  <select
+                    value={conditionBuilder.operator}
+                    onChange={(event) => setConditionBuilder((current) => ({ ...current, operator: event.target.value }))}
+                    className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                  >
+                    {CONDITION_OPERATOR_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-medium uppercase text-amber-900">
+                  Value
+                  <input
+                    value={conditionBuilder.value}
+                    onChange={(event) => setConditionBuilder((current) => ({ ...current, value: event.target.value }))}
+                    disabled={valueDisabled}
+                    placeholder={fieldExample}
+                    className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 disabled:bg-amber-100 disabled:text-amber-500"
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="mt-3 rounded-md bg-white/80 px-3 py-2 text-xs text-amber-900">
+              {describeCondition(conditionBuilder)}
+            </div>
+            <button
+              type="button"
+              onClick={applyVisualConditionRule}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-amber-700 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-800"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Apply visual rule
+            </button>
+          </div>
+
+          <div className="rounded-md border border-gray-200 bg-white p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Branch routes</div>
+            <div className="grid gap-2">
+              {[
+                ['true', 'True branch'],
+                ['false', 'False branch'],
+              ].map(([handle, label]) => (
+                <label key={handle} className="text-xs font-medium uppercase text-gray-500">
+                  {label}
+                  <select
+                    value={targetForBranch(handle)}
+                    onChange={(event) => updateConditionBranch(handle, event.target.value)}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                  >
+                    <option value="">Choose target node</option>
+                    {branchTargets.map((node) => (
+                      <option key={node.id} value={node.id}>
+                        {NODE_LABELS[node.type] || node.type}: {node.data?.label || node.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <label className="text-xs font-medium uppercase text-gray-500">Advanced JSONLogic Rule</label>
           <textarea
             value={conditionText}
             onChange={(event) => setConditionText(event.target.value)}
@@ -4072,6 +5033,31 @@ export default function NotificationWorkflowsPanel() {
               </div>
               <div className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
                 Workspace LLM context mode: <span className="font-semibold">{llmToolPolicy.mode || 'context_only'}</span>. This node uses the workspace policy unless context enrichment is disabled below.
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="text-xs font-medium uppercase text-gray-500">
+                  Output mode
+                  <select
+                    value={selectedNode.data?.outputMode || 'draft_email'}
+                    onChange={(event) => updateNodeData({ outputMode: event.target.value })}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                  >
+                    <option value="draft_email">Draft email</option>
+                    <option value="classify">Classify or score</option>
+                    <option value="extract">Extract structured fields</option>
+                    <option value="critique">Critique or guardrail review</option>
+                    <option value="rewrite_final_email">Rewrite final email</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={selectedNode.data?.promoteToEmail !== false}
+                    onChange={(event) => updateNodeData({ promoteToEmail: event.target.checked })}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                  />
+                  Promote output to final email
+                </label>
               </div>
               <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
                 <input
@@ -4555,12 +5541,14 @@ export default function NotificationWorkflowsPanel() {
               <button
                 type="button"
                 onClick={publishWorkflow}
-                title={!hasPublishableChanges
-                  ? 'No draft changes to publish.'
-                  : selected?.isEnabled
-                    ? 'Publish the current draft update and keep this workflow enabled.'
-                    : 'Publish the current draft without enabling live execution.'}
-                disabled={saving || !selected || !hasPublishableChanges}
+                title={hasBlockingGraphErrors
+                  ? draftValidationIssues[0]
+                  : !hasPublishableChanges
+                    ? 'No draft changes to publish.'
+                    : selected?.isEnabled
+                      ? 'Publish the current draft update and keep this workflow enabled.'
+                      : 'Publish the current draft without enabling live execution.'}
+                disabled={saving || !selected || !hasPublishableChanges || hasBlockingGraphErrors}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
               >
                 <Upload className="h-4 w-4" />
@@ -4617,8 +5605,31 @@ export default function NotificationWorkflowsPanel() {
               catalog={llmToolCatalog}
               saving={llmToolSaving}
               message={llmToolMessage}
-              previewTicketId={llmContextPreviewTicketId}
-              onPreviewTicketIdChange={setLlmContextPreviewTicketId}
+              tickets={llmContextTickets}
+              ticketsLoading={llmContextTicketsLoading}
+              ticketSearch={llmContextTicketSearch}
+              ticketPage={llmContextTicketPage}
+              ticketPriority={llmContextTicketPriority}
+              ticketStatus={llmContextTicketStatus}
+              selectedTicket={selectedLlmContextTicket}
+              onTicketSearchChange={(value) => {
+                setLlmContextTicketSearch(value);
+                setLlmContextTicketPage(1);
+              }}
+              onTicketPriorityChange={(value) => {
+                setLlmContextTicketPriority(value);
+                setLlmContextTicketPage(1);
+              }}
+              onTicketStatusChange={(value) => {
+                setLlmContextTicketStatus(value);
+                setLlmContextTicketPage(1);
+              }}
+              onTicketPageChange={setLlmContextTicketPage}
+              onSelectTicket={(ticket) => {
+                setSelectedLlmContextTicket(ticket);
+                setLlmContextPreview(null);
+                setLlmToolTestRun(null);
+              }}
               preview={llmContextPreview}
               previewLoading={llmContextPreviewLoading}
               testRun={llmToolTestRun}
@@ -4689,20 +5700,40 @@ export default function NotificationWorkflowsPanel() {
                 <Panel id="workflow-canvas" minSize="50%" defaultSize="62%">
                   <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200">
                     <NodePalette
-                      definition={draft}
-                      onAddLlm={addLlmNode}
+                      onAddNode={addWorkflowNode}
                       onRemoveNode={removeSelectedNode}
                       showMiniMap={showMiniMap}
                       onToggleMiniMap={() => setShowMiniMap((current) => !current)}
                     />
+                    {hasBlockingGraphErrors && (
+                      <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                          <div className="min-w-0">
+                            <div className="font-semibold">Workflow needs fixes before publish</div>
+                            <ul className="mt-1 space-y-0.5">
+                              {draftValidationIssues.slice(0, 4).map((issue) => (
+                                <li key={issue} className="truncate">- {issue}</li>
+                              ))}
+                              {draftValidationIssues.length > 4 && (
+                                <li>{draftValidationIssues.length - 4} more validation issues</li>
+                              )}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <div className="relative min-h-[360px] flex-1 overflow-hidden bg-gray-50">
                       {draft ? (
                         <ReactFlow
                           nodes={flowNodes}
                           edges={flowEdges}
+                          nodeTypes={FLOW_NODE_TYPES}
                           fitView
                           minZoom={0.25}
                           maxZoom={1.6}
+                          isValidConnection={isValidWorkflowConnection}
+                          onConnect={handleFlowConnect}
                           onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
                           onNodesChange={handleFlowNodesChange}
                         >

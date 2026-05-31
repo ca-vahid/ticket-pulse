@@ -18,15 +18,52 @@ export const DEFAULT_WORKFLOW_SPECS = [
   { key: defaultWorkflowKey('ticket.resolved_closed'), triggerType: 'ticket.resolved_closed', scheduleMode: 'standard' },
 ];
 
-export const NOTIFICATION_NODE_TYPES = [
-  'trigger',
-  'condition',
-  'recipient_resolver',
-  'llm_generate',
-  'template_render',
-  'send_email',
-  'stop',
-];
+export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
+  trigger: {
+    label: 'Trigger',
+    terminal: false,
+    inputHandles: [],
+    outputHandles: ['default'],
+  },
+  condition: {
+    label: 'Condition',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['true', 'false'],
+  },
+  recipient_resolver: {
+    label: 'Recipients',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  llm_generate: {
+    label: 'LLM generate',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  template_render: {
+    label: 'Template',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  send_email: {
+    label: 'Send email',
+    terminal: true,
+    inputHandles: ['default'],
+    outputHandles: [],
+  },
+  stop: {
+    label: 'Stop',
+    terminal: true,
+    inputHandles: ['default'],
+    outputHandles: [],
+  },
+});
+
+export const NOTIFICATION_NODE_TYPES = Object.keys(NOTIFICATION_NODE_REGISTRY);
 
 export const DEFAULT_LLM_OUTPUT_SCHEMA = {
   type: 'object',
@@ -106,6 +143,85 @@ export const workflowDefinitionSchema = z.object({
   metadata: z.record(z.any()).default({}),
 });
 
+function normalizedSourceHandle(edge) {
+  return String(edge.sourceHandle || 'default').trim().toLowerCase() || 'default';
+}
+
+function graphIndexes(definition) {
+  const nodes = new Map(definition.nodes.map((node) => [node.id, node]));
+  const outgoing = new Map(definition.nodes.map((node) => [node.id, []]));
+  const incoming = new Map(definition.nodes.map((node) => [node.id, []]));
+
+  for (const edge of definition.edges) {
+    if (outgoing.has(edge.source)) outgoing.get(edge.source).push(edge);
+    if (incoming.has(edge.target)) incoming.get(edge.target).push(edge);
+  }
+
+  return { nodes, outgoing, incoming };
+}
+
+function reachableNodeIds(triggerNode, outgoing) {
+  const reachable = new Set();
+  const stack = [triggerNode.id];
+  while (stack.length > 0) {
+    const nodeId = stack.pop();
+    if (reachable.has(nodeId)) continue;
+    reachable.add(nodeId);
+    for (const edge of outgoing.get(nodeId) || []) {
+      stack.push(edge.target);
+    }
+  }
+  return reachable;
+}
+
+function detectCycles(definition, outgoing) {
+  const cycles = [];
+  const visiting = new Set();
+  const visited = new Set();
+
+  function visit(nodeId, path) {
+    if (visiting.has(nodeId)) {
+      const start = path.indexOf(nodeId);
+      cycles.push([...path.slice(start), nodeId].join(' -> '));
+      return;
+    }
+    if (visited.has(nodeId)) return;
+
+    visiting.add(nodeId);
+    for (const edge of outgoing.get(nodeId) || []) {
+      visit(edge.target, [...path, edge.target]);
+    }
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+  }
+
+  for (const node of definition.nodes) {
+    visit(node.id, [node.id]);
+  }
+
+  return cycles;
+}
+
+function upstreamNodeTypes(nodeId, nodes, incoming) {
+  const types = new Set();
+  const seen = new Set();
+  const stack = [...(incoming.get(nodeId) || []).map((edge) => edge.source)];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    const node = nodes.get(current);
+    if (!node) continue;
+    types.add(node.type);
+    for (const edge of incoming.get(current) || []) {
+      stack.push(edge.source);
+    }
+  }
+
+  return types;
+}
+
 function validateGraph(definition, triggerType) {
   const errors = [];
   const ids = new Set();
@@ -129,6 +245,63 @@ function validateGraph(definition, triggerType) {
   for (const edge of definition.edges) {
     if (!ids.has(edge.source)) errors.push(`Edge ${edge.id} has unknown source ${edge.source}`);
     if (!ids.has(edge.target)) errors.push(`Edge ${edge.id} has unknown target ${edge.target}`);
+  }
+
+  if (errors.length > 0) return errors;
+
+  const { nodes, outgoing, incoming } = graphIndexes(definition);
+
+  for (const edge of definition.edges) {
+    const sourceNode = nodes.get(edge.source);
+    const registry = NOTIFICATION_NODE_REGISTRY[sourceNode.type];
+    const handle = normalizedSourceHandle(edge);
+    if (registry.terminal) {
+      errors.push(`Terminal node ${sourceNode.id} cannot have outgoing edge ${edge.id}`);
+      continue;
+    }
+    if (!registry.outputHandles.includes(handle)) {
+      errors.push(`Edge ${edge.id} uses unsupported sourceHandle ${handle} for ${sourceNode.type} node ${sourceNode.id}`);
+    }
+    const targetNode = nodes.get(edge.target);
+    const targetHandle = String(edge.targetHandle || 'default').trim().toLowerCase() || 'default';
+    const allowedInputHandles = NOTIFICATION_NODE_REGISTRY[targetNode.type]?.inputHandles || ['default'];
+    if (!allowedInputHandles.includes(targetHandle)) {
+      errors.push(`Edge ${edge.id} uses unsupported targetHandle ${targetHandle} for ${targetNode.type} node ${targetNode.id}`);
+    }
+  }
+
+  const trigger = triggerNodes[0] || null;
+  const reachable = trigger ? reachableNodeIds(trigger, outgoing) : new Set();
+  for (const node of definition.nodes) {
+    if (trigger && !reachable.has(node.id)) {
+      errors.push(`Node ${node.id} is unreachable from the trigger`);
+    }
+
+    const registry = NOTIFICATION_NODE_REGISTRY[node.type];
+    const edges = outgoing.get(node.id) || [];
+    if (reachable.has(node.id) && !registry.terminal && edges.length === 0) {
+      errors.push(`Node ${node.id} must route to another node or a stop node`);
+    }
+
+    if (node.type === 'condition' && reachable.has(node.id)) {
+      const handles = new Set(edges.map((edge) => normalizedSourceHandle(edge)));
+      if (!handles.has('true')) errors.push(`Condition node ${node.id} must define a true branch`);
+      if (!handles.has('false')) errors.push(`Condition node ${node.id} must define a false branch`);
+    }
+  }
+
+  for (const cycle of detectCycles(definition, outgoing)) {
+    errors.push(`Workflow graph contains a cycle: ${cycle}`);
+  }
+
+  for (const node of definition.nodes.filter((candidate) => candidate.type === 'send_email')) {
+    const upstream = upstreamNodeTypes(node.id, nodes, incoming);
+    if (!upstream.has('recipient_resolver')) {
+      errors.push(`Send email node ${node.id} must have an upstream recipient resolver`);
+    }
+    if (!upstream.has('template_render') && !upstream.has('llm_generate')) {
+      errors.push(`Send email node ${node.id} must have an upstream template or LLM email source`);
+    }
   }
 
   for (const node of definition.nodes) {

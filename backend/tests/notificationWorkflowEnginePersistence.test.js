@@ -119,6 +119,27 @@ const eventContext = {
   previousAgent: null,
 };
 
+function llmResponse({ provider = 'openai', model = 'gpt-test', subject, html, text, extra = {} }) {
+  return {
+    provider,
+    model,
+    parsed: {
+      subject,
+      html,
+      text,
+      ...extra,
+    },
+    usage: {
+      inputTokens: 45,
+      outputTokens: 18,
+      totalTokens: 63,
+    },
+    metadata: {
+      stopReason: 'complete',
+    },
+  };
+}
+
 describe('notification workflow engine persistence', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -711,6 +732,271 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.llm.failed).toBe(true);
     expect(providerRunToolTurnMock).toHaveBeenCalledTimes(1);
     expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
+    expect(processDeliveryMock).not.toHaveBeenCalled();
+  });
+
+  test('condition true branch runs the recipient, template, and send path', async () => {
+    const result = await executeDefinition({
+      workflow,
+      definition: buildDefaultWorkflowDefinition('ticket.created'),
+      eventContext: {
+        ...eventContext,
+        ticket: {
+          ...eventContext.ticket,
+          isNoise: false,
+        },
+      },
+      dryRun: true,
+      triggerSource: 'preview',
+    });
+
+    const executedNodeIds = result.steps.map((step) => step.nodeId);
+    expect(result.status).toBe('completed');
+    expect(executedNodeIds).toEqual(expect.arrayContaining(['trigger', 'skip-noise', 'recipients', 'template', 'send']));
+    expect(executedNodeIds).not.toContain('stop-skipped');
+    expect(result.steps.find((step) => step.nodeId === 'skip-noise').output.passed).toBe(true);
+  });
+
+  test('condition false branch runs the stop path and skips email nodes', async () => {
+    const result = await executeDefinition({
+      workflow,
+      definition: buildDefaultWorkflowDefinition('ticket.created'),
+      eventContext: {
+        ...eventContext,
+        ticket: {
+          ...eventContext.ticket,
+          isNoise: true,
+        },
+      },
+      dryRun: true,
+      triggerSource: 'preview',
+    });
+
+    const executedNodeIds = result.steps.map((step) => step.nodeId);
+    expect(result.status).toBe('completed');
+    expect(executedNodeIds).toEqual(expect.arrayContaining(['trigger', 'skip-noise', 'stop-skipped']));
+    expect(executedNodeIds).not.toContain('recipients');
+    expect(executedNodeIds).not.toContain('template');
+    expect(executedNodeIds).not.toContain('send');
+    expect(result.steps.find((step) => step.nodeId === 'skip-noise').output.passed).toBe(false);
+  });
+
+  test('multiple LLM nodes persist separate output buckets', async () => {
+    providerSendJsonMock
+      .mockResolvedValueOnce(llmResponse({
+        subject: 'Classifier output',
+        html: '<p>Classification only.</p>',
+        text: 'Classification only.',
+        extra: { confidence: 'high' },
+      }))
+      .mockResolvedValueOnce(llmResponse({
+        subject: 'Final LLM email',
+        html: '<p>Final generated email.</p>',
+        text: 'Final generated email.',
+        extra: { confidence: 'medium' },
+      }));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push(
+      {
+        id: 'classify-llm',
+        type: 'llm_generate',
+        position: { x: 700, y: 120 },
+        data: {
+          label: 'Classify ticket',
+          outputKey: 'classification',
+          outputMode: 'classify',
+          promoteToEmail: false,
+          prompt: 'Classify {{ ticket.subject }}',
+        },
+      },
+      {
+        id: 'draft-llm',
+        type: 'llm_generate',
+        position: { x: 960, y: 120 },
+        data: {
+          label: 'Draft email',
+          outputKey: 'draft',
+          outputMode: 'draft_email',
+          promoteToEmail: true,
+          prompt: 'Draft email using {{ state.outputs.classification.email.extra.confidence }}',
+        },
+      },
+    );
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-classify', target: 'classify-llm' }
+        : edge
+    ));
+    definition.edges.push(
+      { id: 'classify-to-draft', source: 'classify-llm', target: 'draft-llm' },
+      { id: 'draft-to-template', source: 'draft-llm', target: 'template' },
+    );
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(providerSendJsonMock).toHaveBeenCalledTimes(2);
+    expect(result.state.outputs.classification.email.subject).toBe('Classifier output');
+    expect(result.state.outputs.classification.llm.outputMode).toBe('classify');
+    expect(result.state.outputs.classification.llm.promotedToEmail).toBe(false);
+    expect(result.state.outputs.draft.email.subject).toBe('Final LLM email');
+    expect(result.state.outputs.draft.llm.promotedToEmail).toBe(true);
+    expect(result.state.llmRuns).toEqual(expect.objectContaining({
+      classification: expect.objectContaining({ outputMode: 'classify' }),
+      draft: expect.objectContaining({ outputMode: 'draft_email' }),
+    }));
+    const persistedOutputKeys = prismaMock.notificationWorkflowStepRun.update.mock.calls
+      .map((call) => call[0].data.output?.outputKey)
+      .filter(Boolean);
+    expect(persistedOutputKeys).toEqual(expect.arrayContaining(['classification', 'draft']));
+  });
+
+  test('template can reference a specific LLM node output', async () => {
+    providerSendJsonMock.mockResolvedValueOnce(llmResponse({
+      subject: 'Specific LLM subject',
+      html: '<p>Specific body.</p>',
+      text: 'Specific body.',
+    }));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'evidence-llm',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        outputKey: 'evidence',
+        outputMode: 'extract',
+        promoteToEmail: false,
+        prompt: 'Extract a requester-safe summary for {{ ticket.subject }}',
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'advanced_liquid';
+    templateNode.data.subject = 'Specific: {{ state.outputs.evidence.email.subject }}';
+    templateNode.data.html = '<div>{{ state.outputs.evidence.email.html }}</div>';
+    templateNode.data.text = 'Specific text: {{ state.outputs.evidence.email.text }}';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-evidence', target: 'evidence-llm' }
+        : edge
+    ));
+    definition.edges.push({ id: 'evidence-to-template', source: 'evidence-llm', target: 'template' });
+
+    await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+
+    const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(deliveryData.subject).toBe('Specific: Specific LLM subject');
+    expect(deliveryData.htmlBody).toContain('Specific body');
+    expect(deliveryData.textBody).toContain('Specific body');
+  });
+
+  test('multiple send nodes create separate deduped deliveries', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'send-secondary',
+      type: 'send_email',
+      position: { x: 1040, y: 160 },
+      data: {
+        provider: 'sendgrid',
+        notificationType: 'secondary_notice',
+      },
+    });
+    definition.edges.push({
+      id: 'template-to-send-secondary',
+      source: 'template',
+      target: 'send-secondary',
+    });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      triggerSource: 'test',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledTimes(2);
+    const dedupeKeys = prismaMock.notificationDelivery.create.mock.calls.map((call) => call[0].data.dedupeKey);
+    expect(dedupeKeys).toEqual(expect.arrayContaining([
+      expect.stringContaining(':email:send'),
+      expect.stringContaining(':email:send-secondary'),
+    ]));
+    expect(new Set(dedupeKeys).size).toBe(2);
+    expect(processDeliveryMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('mock mode suppresses provider delivery with advanced LLM and multi-send graph', async () => {
+    providerSendJsonMock.mockResolvedValueOnce(llmResponse({
+      subject: 'Mock advanced subject',
+      html: '<p>Advanced mock body.</p>',
+      text: 'Advanced mock body.',
+    }));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push(
+      {
+        id: 'draft-llm',
+        type: 'llm_generate',
+        position: { x: 700, y: 120 },
+        data: {
+          outputKey: 'draft',
+          outputMode: 'draft_email',
+          promoteToEmail: true,
+          prompt: 'Draft a mock-mode email for {{ ticket.subject }}',
+        },
+      },
+      {
+        id: 'send-secondary',
+        type: 'send_email',
+        position: { x: 1040, y: 160 },
+        data: {
+          provider: 'sendgrid',
+          notificationType: 'secondary_notice',
+        },
+      },
+    );
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-draft', target: 'draft-llm' }
+        : edge
+    ));
+    definition.edges.push(
+      { id: 'draft-to-template', source: 'draft-llm', target: 'template' },
+      { id: 'template-to-send-secondary', source: 'template', target: 'send-secondary' },
+    );
+
+    const result = await executeWorkflow({
+      ...workflow,
+      mockModeEnabled: true,
+      publishedDefinition: definition,
+    }, eventContext, { triggerSource: 'freshservice_poll' });
+
+    expect(result.status).toBe('completed');
+    expect(result.executionMode).toBe('mock');
+    expect(providerSendJsonMock).toHaveBeenCalledTimes(1);
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledTimes(2);
+    expect(prismaMock.notificationDelivery.create.mock.calls.every((call) => call[0].data.status === 'mocked')).toBe(true);
+    expect(prismaMock.notificationDelivery.create.mock.calls.every((call) => call[0].data.payload.mockMode === true)).toBe(true);
     expect(processDeliveryMock).not.toHaveBeenCalled();
   });
 });

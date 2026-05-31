@@ -123,6 +123,55 @@ describe('notification workflow definitions', () => {
     expect(result.errors.join(' ')).toContain('ticket.assigned');
   });
 
+  test('validation rejects condition nodes without true and false branches', () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.edges = definition.edges.filter((edge) => edge.sourceHandle !== 'false');
+
+    const result = validateWorkflowDefinition(definition, { triggerType: 'ticket.created' });
+
+    expect(result.success).toBe(false);
+    expect(result.errors).toContain('Condition node skip-noise must define a false branch');
+  });
+
+  test('validation rejects unreachable nodes', () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'unused-stop',
+      type: 'stop',
+      position: { x: 1200, y: 240 },
+      data: { reason: 'Unused' },
+    });
+
+    const result = validateWorkflowDefinition(definition, { triggerType: 'ticket.created' });
+
+    expect(result.success).toBe(false);
+    expect(result.errors).toContain('Node unused-stop is unreachable from the trigger');
+  });
+
+  test('validation rejects accidental cycles', () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.edges.push({ id: 'template-back-to-recipients', source: 'template', target: 'recipients' });
+
+    const result = validateWorkflowDefinition(definition, { triggerType: 'ticket.created' });
+
+    expect(result.success).toBe(false);
+    expect(result.errors.join(' ')).toContain('Workflow graph contains a cycle');
+  });
+
+  test('validation rejects send nodes without recipients or email content upstream', () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.edges = [
+      { id: 'trigger-to-send', source: 'trigger', target: 'send' },
+    ];
+    definition.nodes = definition.nodes.filter((node) => ['trigger', 'send'].includes(node.id));
+
+    const result = validateWorkflowDefinition(definition, { triggerType: 'ticket.created' });
+
+    expect(result.success).toBe(false);
+    expect(result.errors).toContain('Send email node send must have an upstream recipient resolver');
+    expect(result.errors).toContain('Send email node send must have an upstream template or LLM email source');
+  });
+
   test('variable catalog includes ticket category fields and LLM output fields', () => {
     const variables = notificationVariableCatalog(['summary']);
     const paths = variables.map((variable) => variable.path);
