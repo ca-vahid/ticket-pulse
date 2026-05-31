@@ -182,6 +182,8 @@ export async function publishWorkflow(workspaceId, id, data = {}, actor = null) 
         publishedDefinition: definition,
         publishedVersion: nextVersion,
         lastPublishedAt: version.publishedAt,
+        isEnabled: true,
+        enabledAt: version.publishedAt,
         lastChangedBy: changedBy,
       },
     });
@@ -212,6 +214,9 @@ export async function setWorkflowMockMode(workspaceId, id, enabled, actor = null
   const isEnabled = enabled === true || enabled === 'true';
   if (isEnabled && !workflow.publishedDefinition) {
     throw new ValidationError('Publish the workflow before enabling mock mode');
+  }
+  if (isEnabled && workflow.isEnabled !== true) {
+    throw new ValidationError('Enable the workflow before enabling mock mode');
   }
 
   return prisma.notificationWorkflow.update({

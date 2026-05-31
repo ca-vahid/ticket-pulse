@@ -2449,10 +2449,18 @@ export default function NotificationWorkflowsPanel() {
 
   async function toggleMockMode() {
     if (!selected) return;
+    const nextEnabled = !selected.mockModeEnabled;
+    if (nextEnabled && !(selected?.publishedVersion > 0)) {
+      setMessage({ type: 'error', text: 'Publish the workflow before enabling mock mode' });
+      return;
+    }
+    if (nextEnabled && !selected?.isEnabled) {
+      setMessage({ type: 'error', text: 'Enable the workflow before enabling mock mode' });
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {
-      const nextEnabled = !selected.mockModeEnabled;
       const response = await notificationWorkflowAPI.setMockMode(selected.id, nextEnabled);
       applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
       setMessage({
@@ -2505,6 +2513,16 @@ export default function NotificationWorkflowsPanel() {
   const selectedIsAfterHoursWorkflow = selected?.key === (afterHoursPolicy.offHoursWorkflowKey || AFTER_HOURS_WORKFLOW_KEY)
     || selected?.draftDefinition?.metadata?.scheduleMode === 'after_hours'
     || selected?.publishedDefinition?.metadata?.scheduleMode === 'after_hours';
+  const selectedIsPublished = Number(selected?.publishedVersion || 0) > 0;
+  const canEnableMockMode = selectedIsPublished && selected?.isEnabled === true;
+  const canToggleMockMode = Boolean(selected?.mockModeEnabled || canEnableMockMode);
+  const mockModeButtonTitle = selected?.mockModeEnabled
+    ? 'Turn mock mode off.'
+    : !selectedIsPublished
+      ? 'Publish and enable the workflow before turning on mock mode.'
+      : selected?.isEnabled !== true
+        ? 'Enable the published workflow before turning on mock mode.'
+        : 'Run real workflow and LLM, but do not send email.';
   const afterHoursScheduleDraft = useMemo(() => ({
     afterHoursEnabled: afterHoursDraft.afterHoursEnabled,
     holidaysEnabled: afterHoursDraft.holidaysEnabled,
@@ -2605,7 +2623,7 @@ export default function NotificationWorkflowsPanel() {
         definition: draft,
       });
       applyWorkflowUpdate(response.data);
-      setMessage({ type: 'success', text: 'Draft saved' });
+      setMessage({ type: 'success', text: 'Saved' });
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
     } finally {
@@ -2625,7 +2643,7 @@ export default function NotificationWorkflowsPanel() {
       });
       const response = await notificationWorkflowAPI.publish(selected.id, { changeNote: 'Published from Settings workflow editor' });
       applyWorkflowUpdate(response.data.workflow);
-      setMessage({ type: 'success', text: `Published version ${response.data.version.version}` });
+      setMessage({ type: 'success', text: `Published and enabled version ${response.data.version.version}` });
       await refreshHealth();
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
@@ -3601,7 +3619,7 @@ export default function NotificationWorkflowsPanel() {
               className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
-              Save draft
+              Save
             </button>
             <button
               type="button"
@@ -3619,7 +3637,7 @@ export default function NotificationWorkflowsPanel() {
               className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
             >
               <Upload className="h-4 w-4" />
-              Publish
+              {selected?.isEnabled ? 'Publish update' : 'Publish & enable'}
             </button>
             <button
               type="button"
@@ -3637,8 +3655,8 @@ export default function NotificationWorkflowsPanel() {
             <button
               type="button"
               onClick={toggleMockMode}
-              disabled={saving || !selected || !(selected?.publishedVersion > 0)}
-              title="Run real workflow and LLM, but do not send email."
+              disabled={saving || !selected || !canToggleMockMode}
+              title={mockModeButtonTitle}
               className={cls(
                 'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50',
                 selected?.mockModeEnabled ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
@@ -3653,14 +3671,15 @@ export default function NotificationWorkflowsPanel() {
             <button
               type="button"
               onClick={toggleEnabled}
-              disabled={saving || !selected}
+              disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
+              title={selected?.isEnabled ? 'Disable live workflow execution.' : 'Enable the latest published workflow version.'}
               className={cls(
                 'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50',
                 selected?.isEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
               )}
             >
               {selected?.isEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
-              {selected?.isEnabled ? 'Disable' : 'Enable'}
+              {selected?.isEnabled ? 'Disable' : 'Enable published'}
             </button>
           </div>
         </div>
