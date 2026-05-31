@@ -709,6 +709,23 @@ function VariablePicker({
   );
 }
 
+const PROSE_EDITOR_OPTIONS = {
+  minimap: { enabled: false },
+  wordWrap: 'on',
+  fontSize: 14,
+  lineNumbers: 'on',
+  scrollBeyondLastLine: false,
+  quickSuggestions: false,
+  suggestOnTriggerCharacters: false,
+  acceptSuggestionOnEnter: 'off',
+  tabCompletion: 'off',
+  wordBasedSuggestions: 'off',
+  parameterHints: { enabled: false },
+  hover: { enabled: false },
+  links: false,
+  inlineSuggest: { enabled: false },
+};
+
 function FullContentEditorModal({
   open,
   title,
@@ -770,13 +787,7 @@ function FullContentEditorModal({
                 editorRef.current = editorInstance;
               }}
               onChange={(next) => onChange(next || '')}
-              options={{
-                minimap: { enabled: true },
-                wordWrap: 'on',
-                fontSize: 14,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-              }}
+              options={PROSE_EDITOR_OPTIONS}
             />
           </div>
           <aside className="min-h-0 overflow-auto border-l border-gray-200 bg-gray-50 p-3">
@@ -2570,8 +2581,8 @@ export default function NotificationWorkflowsPanel() {
     if (selectedNode.type === 'recipient_resolver') {
       const to = selectedNode.data?.to || [];
       const cc = selectedNode.data?.cc || [];
-      const bcc = selectedNode.data?.bcc || [];
       const customEmails = (selectedNode.data?.customEmails || []).join(', ');
+      const showCustomEmailInput = to.includes('custom_emails') || customEmails.length > 0;
       const recipientGroups = [
         {
           key: 'to',
@@ -2589,19 +2600,6 @@ export default function NotificationWorkflowsPanel() {
           values: cc,
           options: [
             ['original_ccs', 'Original CCs'],
-            ['requester', 'Requester'],
-            ['assigned_agent', 'Assigned agent'],
-            ['custom_emails', 'Custom emails'],
-          ],
-        },
-        {
-          key: 'bcc',
-          label: 'Bcc Recipients',
-          values: bcc,
-          options: [
-            ['custom_emails', 'Custom emails'],
-            ['assigned_agent', 'Assigned agent'],
-            ['requester', 'Requester'],
           ],
         },
       ];
@@ -2625,17 +2623,19 @@ export default function NotificationWorkflowsPanel() {
               </div>
             </div>
           ))}
-          <div>
-            <label className="text-xs font-medium uppercase text-gray-500">Custom Emails</label>
-            <input
-              value={customEmails}
-              onChange={(event) => updateNodeData({
-                customEmails: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
-              })}
-              placeholder="ops@example.com, lead@example.com"
-              className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
+          {showCustomEmailInput && (
+            <div>
+              <label className="text-xs font-medium uppercase text-gray-500">Custom Emails</label>
+              <input
+                value={customEmails}
+                onChange={(event) => updateNodeData({
+                  customEmails: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                })}
+                placeholder="ops@example.com, lead@example.com"
+                className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          )}
         </div>
       );
     }
