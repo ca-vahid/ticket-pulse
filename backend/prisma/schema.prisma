@@ -66,6 +66,7 @@ model Workspace {
   notificationDeliveries NotificationDelivery[]
   notificationWorkflows NotificationWorkflow[]
   notificationWorkflowPolicy NotificationWorkflowPolicy?
+  notificationLlmToolPolicy NotificationLlmToolPolicy?
   notificationWorkflowVersions NotificationWorkflowVersion[]
   notificationWorkflowRuns NotificationWorkflowRun[]
   notificationWorkflowStepRuns NotificationWorkflowStepRun[]
@@ -1052,6 +1053,28 @@ model NotificationWorkflowPolicy {
 
   @@map("notification_workflow_policies")
   @@index([workspaceId])
+}
+
+model NotificationLlmToolPolicy {
+  id                  Int       @id @default(autoincrement())
+  workspaceId         Int       @unique @map("workspace_id")
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  mode                String    @default("context_only") @db.VarChar(30)
+  enabledTools        Json      @default("[]") @map("enabled_tools")
+  toolSettings        Json      @default("{}") @map("tool_settings")
+  maxTurns            Int       @default(4) @map("max_turns")
+  maxToolCalls        Int       @default(6) @map("max_tool_calls")
+  totalTimeoutMs      Int       @default(20000) @map("total_timeout_ms")
+  perToolTimeoutMs    Int       @default(3000) @map("per_tool_timeout_ms")
+  includePrivateNotes Boolean   @default(false) @map("include_private_notes")
+  redactionEnabled    Boolean   @default(true) @map("redaction_enabled")
+  policyVersion       Int       @default(1) @map("policy_version")
+  updatedBy           String?   @db.VarChar(255) @map("updated_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@map("notification_llm_tool_policies")
+  @@index([workspaceId, mode])
 }
 
 model NotificationWorkflowVersion {

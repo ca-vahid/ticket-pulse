@@ -12,6 +12,9 @@ const prismaMock = {
   notificationDelivery: {
     create: jest.fn(),
   },
+  notificationLlmToolPolicy: {
+    findUnique: jest.fn(),
+  },
   notificationEmailSignature: {
     findUnique: jest.fn(),
   },
@@ -24,6 +27,10 @@ const prismaMock = {
   },
   ticket: {
     findFirst: jest.fn(),
+    findMany: jest.fn(),
+  },
+  ticketThreadEntry: {
+    findMany: jest.fn(),
   },
 };
 
@@ -71,6 +78,7 @@ describe('notification workflow definitions', () => {
       ...data,
     }));
     prismaMock.notificationWorkflowStepRun.update.mockResolvedValue({});
+    prismaMock.notificationLlmToolPolicy.findUnique.mockResolvedValue(null);
     prismaMock.notificationEmailSignature.findUnique.mockResolvedValue(null);
     prismaMock.publicTicketStatusSettings.upsert.mockResolvedValue({
       enabled: true,
@@ -87,6 +95,8 @@ describe('notification workflow definitions', () => {
       etaPercentile: 75,
     });
     prismaMock.ticket.findFirst.mockResolvedValue({ id: 100, workspaceId: 1 });
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
     prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue({
       id: 200,
       workspaceId: 1,

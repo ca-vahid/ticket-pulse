@@ -48,6 +48,24 @@ export const DEFAULT_LLM_OUTPUT_SCHEMA = {
       title: 'Plain text body',
       description: 'Plain-text fallback body without the workspace signature.',
     },
+    confidence: {
+      type: 'string',
+      enum: ['low', 'medium', 'high'],
+      title: 'Confidence',
+      description: 'Optional confidence in the generated email content.',
+    },
+    citedSignals: {
+      type: 'array',
+      title: 'Cited signals',
+      description: 'Optional evidence IDs or signal names used to shape the response.',
+      items: { type: 'string' },
+    },
+    unsupportedClaimsRemoved: {
+      type: 'array',
+      title: 'Unsupported claims removed',
+      description: 'Optional unsupported outage or impact claims removed from requester-facing copy.',
+      items: { type: 'string' },
+    },
   },
 };
 

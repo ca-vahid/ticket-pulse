@@ -20,6 +20,16 @@ import {
   getNotificationWorkflowPolicy,
   updateNotificationWorkflowPolicy,
 } from '../services/notificationWorkflowPolicyService.js';
+import {
+  buildNotificationLlmContext,
+  summarizeNotificationLlmContext,
+} from '../services/notificationContextEnrichmentService.js';
+import {
+  getNotificationLlmToolPolicy,
+  notificationLlmToolCatalog,
+  normalizeNotificationLlmToolPolicy,
+  updateNotificationLlmToolPolicy,
+} from '../services/notificationLlmToolPolicyService.js';
 
 const router = express.Router();
 
@@ -406,6 +416,146 @@ router.post(
   asyncHandler(async (req, res) => {
     const preview = await getNotificationWorkflowSchedulePreview(req.workspaceId, req.body || {});
     res.json({ success: true, data: preview });
+  }),
+);
+
+router.get(
+  '/llm-tools/catalog',
+  asyncHandler(async (_req, res) => {
+    res.json({ success: true, data: notificationLlmToolCatalog() });
+  }),
+);
+
+router.get(
+  '/llm-tools/policy',
+  asyncHandler(async (req, res) => {
+    const policy = await getNotificationLlmToolPolicy(req.workspaceId);
+    res.json({ success: true, data: policy });
+  }),
+);
+
+router.put(
+  '/llm-tools/policy',
+  asyncHandler(async (req, res) => {
+    const policy = await updateNotificationLlmToolPolicy(req.workspaceId, req.body || {}, requestActor(req));
+    res.json({ success: true, data: policy });
+  }),
+);
+
+router.post(
+  '/llm-tools/context-preview',
+  asyncHandler(async (req, res) => {
+    const ticketId = parseId(req.body?.ticketId, 'ticket id');
+    const workflowId = req.body?.workflowId ? parseId(req.body.workflowId, 'workflow id') : null;
+    const workflow = workflowId
+      ? await notificationWorkflowRepository.getWorkflow(req.workspaceId, workflowId)
+      : {
+        id: null,
+        workspaceId: req.workspaceId,
+        key: 'context_preview',
+        name: 'Context preview',
+        triggerType: 'ticket.created',
+        publishedVersion: 0,
+      };
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId: req.workspaceId },
+      include: {
+        workspace: true,
+        requester: { select: { id: true, name: true, email: true, department: true, jobTitle: true } },
+        assignedTech: { select: { id: true, name: true, email: true, location: true, timezone: true } },
+        internalCategory: { select: { id: true, name: true } },
+        internalSubcategory: { select: { id: true, name: true } },
+      },
+    });
+    if (!ticket) throw new NotFoundError('Context preview ticket not found in this workspace');
+
+    const eventContext = await buildPreviewEventContext({ ticket, triggerType: workflow.triggerType || 'ticket.created' });
+    const currentPolicy = await getNotificationLlmToolPolicy(req.workspaceId);
+    const policyOverride = req.body?.policy
+      ? normalizeNotificationLlmToolPolicy({
+        ...currentPolicy,
+        ...req.body.policy,
+        workspaceId: req.workspaceId,
+        toolSettings: {
+          ...(currentPolicy.toolSettings || {}),
+          ...(req.body.policy.toolSettings || {}),
+          context: {
+            ...(currentPolicy.toolSettings?.context || {}),
+            ...(req.body.policy.toolSettings?.context || {}),
+          },
+          outageSignals: {
+            ...(currentPolicy.toolSettings?.outageSignals || {}),
+            ...(req.body.policy.toolSettings?.outageSignals || {}),
+          },
+          safety: {
+            ...(currentPolicy.toolSettings?.safety || {}),
+            ...(req.body.policy.toolSettings?.safety || {}),
+          },
+        },
+      })
+      : currentPolicy;
+    const bundle = await buildNotificationLlmContext({
+      workspaceId: req.workspaceId,
+      workflow,
+      eventContext,
+      state: eventContext.state || {},
+      policyOverride,
+    });
+    res.json({
+      success: true,
+      data: {
+        summary: summarizeNotificationLlmContext(bundle),
+        bundle,
+        policy: policyOverride,
+      },
+    });
+  }),
+);
+
+router.post(
+  '/llm-tools/test-run',
+  asyncHandler(async (req, res) => {
+    const workflowId = parseId(req.body.workflowId, 'workflow id');
+    const workflow = await notificationWorkflowRepository.getWorkflow(req.workspaceId, workflowId);
+    const ticketId = parseId(req.body.ticketId, 'ticket id');
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId: req.workspaceId },
+      include: {
+        workspace: true,
+        requester: true,
+        assignedTech: true,
+        internalCategory: true,
+        internalSubcategory: true,
+      },
+    });
+    if (!ticket) throw new NotFoundError('Preview ticket not found in this workspace');
+    const eventContext = await buildPreviewEventContext({ ticket, triggerType: workflow.triggerType });
+    const result = await notificationWorkflowEngine.executePreview({
+      workflow,
+      definition: req.body.definition || workflow.draftDefinition,
+      eventContext,
+      executeLlm: true,
+      forceActionLinks: req.body.forceActionLinks !== false,
+    });
+    const toolSteps = (result.steps || []).filter((step) => step.nodeType === 'llm_tool');
+    const inlineToolEvents = Array.isArray(result.state?.llm?.toolEvents)
+      ? result.state.llm.toolEvents.map((event) => ({
+        nodeId: `${event.name || 'tool'}:${event.toolUseId || event.turn || ''}`,
+        nodeType: 'llm_tool',
+        status: event.status,
+        input: event.input,
+        output: event.output,
+        durationMs: event.durationMs,
+        error: event.error || null,
+      }))
+      : [];
+    res.json({
+      success: true,
+      data: {
+        ...result,
+        toolSteps: toolSteps.length > 0 ? toolSteps : inlineToolEvents,
+      },
+    });
   }),
 );
 

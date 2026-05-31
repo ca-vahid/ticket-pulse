@@ -12,6 +12,16 @@ const prismaMock = {
   notificationDelivery: {
     create: jest.fn(),
   },
+  notificationLlmToolPolicy: {
+    findUnique: jest.fn(),
+  },
+  ticket: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+  },
+  ticketThreadEntry: {
+    findMany: jest.fn(),
+  },
   notificationEmailSignature: {
     findUnique: jest.fn(),
   },
@@ -19,6 +29,7 @@ const prismaMock = {
 
 const processDeliveryMock = jest.fn();
 const providerSendJsonMock = jest.fn();
+const providerRunToolTurnMock = jest.fn();
 const publicStatusUrl = 'https://ticketpulse.example/ticket-status/sample-token';
 const raiseUrgencyUrl = 'https://ticketpulse.example/ticket-urgency/sample-token';
 const immediateSupportUrl = 'https://ticketpulse.example/ticket-escalation/sample-token';
@@ -34,6 +45,7 @@ jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () =>
 jest.unstable_mockModule('../src/services/aiProviders/providerGateway.js', () => ({
   default: {
     sendJson: providerSendJsonMock,
+    runToolTurn: providerRunToolTurnMock,
   },
 }));
 
@@ -111,6 +123,7 @@ describe('notification workflow engine persistence', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     providerSendJsonMock.mockReset();
+    providerRunToolTurnMock.mockReset();
     prismaMock.notificationWorkflowRun.create.mockImplementation(({ data }) => Promise.resolve({
       id: 900,
       ...data,
@@ -125,6 +138,39 @@ describe('notification workflow engine persistence', () => {
       id: 1234,
       ...data,
     }));
+    prismaMock.notificationLlmToolPolicy.findUnique.mockResolvedValue(null);
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      id: 501,
+      workspaceId: 1,
+      freshserviceTicketId: BigInt(225001),
+      subject: 'VPN access problem',
+      descriptionText: 'User cannot connect to VPN from home.',
+      status: 'Open',
+      priority: 3,
+      assessedPriority: 'High',
+      toEmails: ['helpdesk@example.com'],
+      ccEmails: ['manager@example.com'],
+      replyCcEmails: [],
+      fwdEmails: [],
+      category: 'Access',
+      subCategory: 'VPN',
+      ticketCategory: 'IT',
+      tpSkill: 'Network',
+      tpSubskill: 'VPN',
+      isNoise: false,
+      createdAt: new Date('2026-05-29T18:30:00.000Z'),
+      assignedAt: null,
+      resolvedAt: null,
+      closedAt: null,
+      freshserviceUpdatedAt: new Date('2026-05-29T19:00:00.000Z'),
+      workspace: { id: 1, name: 'IT', defaultTimezone: 'America/Vancouver' },
+      requester: { id: 40, name: 'Requester', email: 'requester@example.com', department: 'Operations', jobTitle: 'Lead' },
+      assignedTech: null,
+      internalCategory: { id: 5, name: 'Network' },
+      internalSubcategory: { id: 6, name: 'VPN' },
+    });
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
     prismaMock.notificationEmailSignature.findUnique.mockResolvedValue(null);
     processDeliveryMock.mockResolvedValue({ success: true, result: { provider: 'sendgrid' } });
   });
@@ -466,5 +512,205 @@ describe('notification workflow engine persistence', () => {
     expect(deliveryData.htmlBody).toContain('<p>It should be the visible email content.</p>');
     expect(deliveryData.htmlBody).not.toContain('We received your ticket');
     expect(deliveryData.textBody).toContain('LLM wrote this body.');
+  });
+
+  test('tool-enabled LLM mode requires final email tool and persists tool audit rows', async () => {
+    prismaMock.notificationLlmToolPolicy.findUnique.mockResolvedValue({
+      id: 5,
+      workspaceId: 1,
+      mode: 'tools_enabled',
+      enabledTools: ['get_notification_context'],
+      toolSettings: {
+        context: {
+          includeThreadHistory: true,
+          includeSimilarTickets: true,
+          includeOutageSignals: true,
+          maxThreadEntries: 6,
+          maxSimilarTickets: 5,
+          lookbackHours: [1, 4, 24],
+        },
+        outageSignals: {
+          watchThreshold: 3,
+          possibleBroaderIssueThreshold: 5,
+          distinctRequesterThreshold: 3,
+          distinctDepartmentThreshold: 2,
+        },
+        safety: {
+          maxContextBytes: 40000,
+          maxToolOutputBytes: 12000,
+        },
+      },
+      maxTurns: 4,
+      maxToolCalls: 6,
+      totalTimeoutMs: 20000,
+      perToolTimeoutMs: 3000,
+      includePrivateNotes: false,
+      redactionEnabled: true,
+      policyVersion: 1,
+      updatedBy: null,
+    });
+    providerRunToolTurnMock
+      .mockResolvedValueOnce({
+        provider: 'anthropic',
+        model: 'claude-sonnet-test',
+        usage: { inputTokens: 120, outputTokens: 25, totalTokens: 145 },
+        message: {
+          stop_reason: 'tool_use',
+          content: [
+            { type: 'tool_use', id: 'toolu_context', name: 'get_notification_context', input: {} },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        provider: 'anthropic',
+        model: 'claude-sonnet-test',
+        usage: { inputTokens: 140, outputTokens: 50, totalTokens: 190 },
+        message: {
+          stop_reason: 'tool_use',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_submit',
+              name: 'submit_notification_email',
+              input: {
+                subject: 'Tool final ticket update',
+                html: '<p>We are reviewing your VPN request.</p>',
+                text: 'We are reviewing your VPN request.',
+                confidence: 'high',
+                citedSignals: ['notification_context'],
+              },
+            },
+          ],
+        },
+      });
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.state.llm).toEqual(expect.objectContaining({ toolMode: true }));
+    expect(providerSendJsonMock).not.toHaveBeenCalled();
+    expect(providerRunToolTurnMock).toHaveBeenCalledTimes(2);
+    expect(prismaMock.notificationWorkflowStepRun.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        nodeId: 'llm-generate:get_notification_context:1',
+        nodeType: 'llm_tool',
+      }),
+    }));
+    expect(prismaMock.notificationWorkflowStepRun.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        nodeId: 'llm-generate:submit_notification_email:2',
+        nodeType: 'llm_tool',
+      }),
+    }));
+    const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(deliveryData.subject).toBe('Tool final ticket update');
+    expect(deliveryData.htmlBody).toContain('We are reviewing your VPN request');
+    expect(processDeliveryMock).toHaveBeenCalled();
+  });
+
+  test('tool-enabled LLM mode does not create a delivery when final email is missing and no template body exists', async () => {
+    prismaMock.notificationLlmToolPolicy.findUnique.mockResolvedValue({
+      id: 6,
+      workspaceId: 1,
+      mode: 'tools_enabled',
+      enabledTools: ['get_notification_context'],
+      toolSettings: {
+        context: {
+          includeThreadHistory: true,
+          includeSimilarTickets: true,
+          includeOutageSignals: true,
+          maxThreadEntries: 6,
+          maxSimilarTickets: 5,
+          lookbackHours: [1, 4, 24],
+        },
+        outageSignals: {
+          watchThreshold: 3,
+          possibleBroaderIssueThreshold: 5,
+          distinctRequesterThreshold: 3,
+          distinctDepartmentThreshold: 2,
+        },
+        safety: {
+          maxContextBytes: 40000,
+          maxToolOutputBytes: 12000,
+        },
+      },
+      maxTurns: 1,
+      maxToolCalls: 2,
+      totalTimeoutMs: 20000,
+      perToolTimeoutMs: 3000,
+      includePrivateNotes: false,
+      redactionEnabled: true,
+      policyVersion: 1,
+      updatedBy: null,
+    });
+    providerRunToolTurnMock.mockResolvedValueOnce({
+      provider: 'anthropic',
+      model: 'claude-sonnet-test',
+      usage: { inputTokens: 120, outputTokens: 25, totalTokens: 145 },
+      message: {
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'I forgot to call the final tool.' }],
+      },
+    });
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    templateNode.data.subject = '';
+    templateNode.data.html = '';
+    templateNode.data.text = '';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.llm.failed).toBe(true);
+    expect(providerRunToolTurnMock).toHaveBeenCalledTimes(1);
+    expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
+    expect(processDeliveryMock).not.toHaveBeenCalled();
   });
 });

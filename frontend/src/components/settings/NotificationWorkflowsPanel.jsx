@@ -104,6 +104,24 @@ const DEFAULT_LLM_OUTPUT_SCHEMA = {
       title: 'Plain text body',
       description: 'Plain-text fallback body without the workspace signature.',
     },
+    confidence: {
+      type: 'string',
+      enum: ['low', 'medium', 'high'],
+      title: 'Confidence',
+      description: 'Optional confidence in the generated email content.',
+    },
+    citedSignals: {
+      type: 'array',
+      title: 'Cited signals',
+      description: 'Optional evidence IDs or signal names used to shape the response.',
+      items: { type: 'string' },
+    },
+    unsupportedClaimsRemoved: {
+      type: 'array',
+      title: 'Unsupported claims removed',
+      description: 'Optional unsupported outage or impact claims removed from requester-facing copy.',
+      items: { type: 'string' },
+    },
   },
 };
 
@@ -136,6 +154,43 @@ const MOCK_AUDIT_RANGES = [
   { value: '30d', label: 'Last 30d' },
   { value: 'all', label: 'All time' },
 ];
+
+const LLM_TOOL_POLICY_MODES = [
+  { value: 'off', label: 'Off', description: 'Use only the workflow prompt and template.' },
+  { value: 'context_only', label: 'Context only', description: 'Add redacted ticket, thread, similar-ticket, and signal context.' },
+  { value: 'tools_enabled', label: 'Context + tools', description: 'Allow bounded read-only Ticket Pulse evidence tools before final email submission.' },
+];
+
+const DEFAULT_LLM_TOOL_POLICY = {
+  mode: 'context_only',
+  enabledTools: ['get_notification_context', 'get_ticket_thread_summary', 'find_similar_tickets', 'detect_related_ticket_spike'],
+  toolSettings: {
+    context: {
+      includeThreadHistory: true,
+      includeSimilarTickets: true,
+      includeOutageSignals: true,
+      maxThreadEntries: 6,
+      maxSimilarTickets: 5,
+      lookbackHours: [1, 4, 24],
+    },
+    outageSignals: {
+      watchThreshold: 3,
+      possibleBroaderIssueThreshold: 5,
+      distinctRequesterThreshold: 3,
+      distinctDepartmentThreshold: 2,
+    },
+    safety: {
+      maxContextBytes: 40000,
+      maxToolOutputBytes: 12000,
+    },
+  },
+  maxTurns: 4,
+  maxToolCalls: 6,
+  totalTimeoutMs: 20000,
+  perToolTimeoutMs: 3000,
+  includePrivateNotes: false,
+  redactionEnabled: true,
+};
 
 const MOCK_AUDIT_STATUSES = [
   { value: 'all', label: 'All statuses' },
@@ -1803,6 +1858,409 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
   );
 }
 
+function LlmContextToolsPanel({
+  policy,
+  draft,
+  catalog,
+  saving,
+  message,
+  previewTicketId,
+  onPreviewTicketIdChange,
+  preview,
+  previewLoading,
+  testRun,
+  testLoading,
+  onChange,
+  onSettingChange,
+  onToggleTool,
+  onSave,
+  onPreview,
+  onTestRun,
+}) {
+  const context = draft?.toolSettings?.context || DEFAULT_LLM_TOOL_POLICY.toolSettings.context;
+  const outage = draft?.toolSettings?.outageSignals || DEFAULT_LLM_TOOL_POLICY.toolSettings.outageSignals;
+  const safety = draft?.toolSettings?.safety || DEFAULT_LLM_TOOL_POLICY.toolSettings.safety;
+  const enabledTools = Array.isArray(draft?.enabledTools) ? draft.enabledTools : [];
+  const hasChanges = JSON.stringify(policy || {}) !== JSON.stringify(draft || {});
+  const mode = draft?.mode || 'context_only';
+  const summary = preview?.summary || null;
+  const bundle = preview?.bundle || null;
+
+  const sourceRows = [
+    {
+      key: 'includeThreadHistory',
+      label: 'Thread history',
+      description: 'Recent redacted public ticket conversation entries.',
+      enabled: context.includeThreadHistory !== false,
+    },
+    {
+      key: 'includeSimilarTickets',
+      label: 'Similar tickets',
+      description: 'Recent workspace tickets matching category, department, and keywords.',
+      enabled: context.includeSimilarTickets !== false,
+    },
+    {
+      key: 'includeOutageSignals',
+      label: 'Outage signals',
+      description: 'Deterministic ticket-volume signals and allowed public phrasing.',
+      enabled: context.includeOutageSignals !== false,
+    },
+  ];
+
+  return (
+    <section className="shrink-0 border-b border-violet-100 bg-white px-6 py-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.9fr)_minmax(420px,1.1fr)]">
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Bot className="h-4 w-4 text-violet-700" />
+                <h3 className="text-sm font-semibold text-slate-950">LLM context and tools</h3>
+                <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">
+                  Workspace
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Run richer, redacted evidence and approved read-only tools into notification LLMs before any email is sent.</p>
+            </div>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !hasChanges}
+              className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+            >
+              {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Save policy
+            </button>
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-3">
+            {LLM_TOOL_POLICY_MODES.map((option) => {
+              const active = mode === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => onChange({ mode: option.value })}
+                  className={cls(
+                    'min-h-[76px] rounded-md border px-3 py-2 text-left transition',
+                    active ? 'border-violet-300 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                  )}
+                >
+                  <span className="block text-sm font-semibold">{option.label}</span>
+                  <span className="mt-1 block text-xs leading-4 text-slate-500">{option.description}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-3">
+            {sourceRows.map((row) => (
+              <button
+                key={row.key}
+                type="button"
+                onClick={() => onSettingChange('context', { [row.key]: !row.enabled })}
+                disabled={mode === 'off'}
+                className={cls(
+                  'rounded-md border px-3 py-2 text-left transition disabled:opacity-50',
+                  row.enabled && mode !== 'off' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-200 bg-slate-50 text-slate-600',
+                )}
+              >
+                <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
+                  {row.label}
+                  {row.enabled && mode !== 'off' ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                </span>
+                <span className="mt-1 block text-xs leading-4 text-slate-500">{row.description}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-4">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Thread entries
+              <input
+                type="number"
+                min="0"
+                max="20"
+                value={context.maxThreadEntries ?? 6}
+                onChange={(event) => onSettingChange('context', { maxThreadEntries: Number(event.target.value) })}
+                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+              />
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Similar tickets
+              <input
+                type="number"
+                min="0"
+                max="20"
+                value={context.maxSimilarTickets ?? 5}
+                onChange={(event) => onSettingChange('context', { maxSimilarTickets: Number(event.target.value) })}
+                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+              />
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Watch threshold
+              <input
+                type="number"
+                min="2"
+                max="100"
+                value={outage.watchThreshold ?? 3}
+                onChange={(event) => onSettingChange('outageSignals', { watchThreshold: Number(event.target.value) })}
+                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+              />
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Context KB
+              <input
+                type="number"
+                min="5"
+                max="100"
+                value={Math.round((safety.maxContextBytes || 40000) / 1000)}
+                onChange={(event) => onSettingChange('safety', { maxContextBytes: Number(event.target.value) * 1000 })}
+                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+              />
+            </label>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Safety budget</div>
+              <div className="text-[11px] font-medium text-slate-500">Hard limits for every tool-mode generation</div>
+            </div>
+            <div className="grid gap-2 md:grid-cols-5">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Turns
+                <input
+                  type="number"
+                  min="1"
+                  max="8"
+                  value={draft.maxTurns ?? 4}
+                  onChange={(event) => onChange({ maxTurns: Number(event.target.value) })}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                />
+              </label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Tool calls
+                <input
+                  type="number"
+                  min="1"
+                  max="12"
+                  value={draft.maxToolCalls ?? 6}
+                  onChange={(event) => onChange({ maxToolCalls: Number(event.target.value) })}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                />
+              </label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Total sec
+                <input
+                  type="number"
+                  min="2"
+                  max="60"
+                  value={Math.round((draft.totalTimeoutMs || 20000) / 1000)}
+                  onChange={(event) => onChange({ totalTimeoutMs: Number(event.target.value) * 1000 })}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                />
+              </label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Tool sec
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={Math.round((draft.perToolTimeoutMs || 3000) / 1000)}
+                  onChange={(event) => onChange({ perToolTimeoutMs: Number(event.target.value) * 1000 })}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                />
+              </label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Tool KB
+                <input
+                  type="number"
+                  min="2"
+                  max="50"
+                  value={Math.round((safety.maxToolOutputBytes || 12000) / 1000)}
+                  onChange={(event) => onSettingChange('safety', { maxToolOutputBytes: Number(event.target.value) * 1000 })}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+            <div className="font-semibold uppercase tracking-wide">Claim controls</div>
+            <div>Global, company-wide, confirmed outage, private-note, tool, provider, and audit wording is blocked from requester-facing fields. Similar-report wording is allowed only after threshold evidence.</div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
+              className={cls(
+                'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
+                draft.redactionEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700',
+              )}
+            >
+              {draft.redactionEnabled ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
+              Redaction {draft.redactionEnabled ? 'on' : 'off'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
+              className={cls(
+                'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
+                draft.includePrivateNotes ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-600',
+              )}
+            >
+              {draft.includePrivateNotes ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
+              Private notes {draft.includePrivateNotes ? 'internal evidence' : 'excluded'}
+            </button>
+          </div>
+
+          {mode === 'tools_enabled' && (
+            <div className="grid gap-2 md:grid-cols-2">
+              {(catalog || []).map((tool) => {
+                const enabled = enabledTools.includes(tool.name);
+                return (
+                  <button
+                    key={tool.name}
+                    type="button"
+                    onClick={() => onToggleTool(tool.name)}
+                    className={cls(
+                      'rounded-md border px-3 py-2 text-left transition',
+                      enabled ? 'border-violet-200 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+                    )}
+                  >
+                    <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
+                      {tool.label}
+                      <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-slate-500 ring-1 ring-slate-200">{tool.riskLevel}</span>
+                    </span>
+                    <span className="mt-1 block text-xs leading-4 text-slate-500">{tool.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {message && (
+            <div className={cls(
+              'flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold',
+              message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+            )}
+            >
+              {message.type === 'error' ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              {message.text}
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0 rounded-md border border-violet-100 bg-slate-50 p-3">
+          <div className="mb-3 flex flex-wrap items-end gap-2">
+            <label className="min-w-[180px] flex-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Preview ticket ID
+              <input
+                value={previewTicketId}
+                onChange={(event) => onPreviewTicketIdChange(event.target.value)}
+                placeholder="Internal Ticket Pulse ID"
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={onPreview}
+              disabled={previewLoading || mode === 'off'}
+              className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+            >
+              {previewLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+              Preview context
+            </button>
+            <button
+              type="button"
+              onClick={onTestRun}
+              disabled={testLoading || mode !== 'tools_enabled' || !previewTicketId}
+              className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {testLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+              Run tool test
+            </button>
+          </div>
+
+          {!preview && (
+            <div className="flex min-h-[210px] items-center justify-center rounded-md border border-dashed border-slate-200 bg-white px-4 text-center text-sm text-slate-500">
+              Preview a real ticket to inspect the evidence bundle, similar-ticket counts, allowed outage wording, and redaction behavior.
+            </div>
+          )}
+
+          {preview && (
+            <div className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-4">
+                <PreviewMetric label="Mode" value={summary?.mode || mode} tone="gray" />
+                <PreviewMetric label="Signal" value={summary?.signalLevel || 'none'} tone={summary?.signalLevel === 'possible_broader_issue' ? 'amber' : 'gray'} />
+                <PreviewMetric label="Thread" value={String(summary?.threadEntryCount || 0)} tone="gray" />
+                <PreviewMetric label="Redactions" value={String(summary?.redactionCount || 0)} tone={summary?.redactionCount ? 'amber' : 'gray'} />
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Similar-ticket windows</div>
+                <div className="flex flex-wrap gap-2">
+                  {(summary?.similarTicketWindows || []).map((window) => (
+                    <span key={window.hours} className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                      {window.hours}h: {window.count}
+                    </span>
+                  ))}
+                  {(summary?.similarTicketWindows || []).length === 0 && <span className="text-xs text-slate-500">No windows returned.</span>}
+                </div>
+                {(summary?.allowedPublicPhrases || []).length > 0 && (
+                  <div className="mt-2 text-xs leading-5 text-slate-600">
+                    Allowed wording: {summary.allowedPublicPhrases.join('; ')}
+                  </div>
+                )}
+              </div>
+              <pre className="max-h-[220px] overflow-auto rounded-md bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
+                {formatJson(bundle)}
+              </pre>
+            </div>
+          )}
+
+          {testRun && (
+            <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tool test run</div>
+                  <div className="text-sm font-semibold text-slate-950">{testRun.status || 'completed'} {testRun.auditId ? `| ${testRun.auditId}` : ''}</div>
+                </div>
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                  {(testRun.toolSteps || []).length} tool steps
+                </span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {(testRun.toolSteps || []).map((step) => (
+                  <div key={step.stepRunId || step.nodeId} className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 font-semibold text-slate-800">
+                      <span>{String(step.nodeId || '').split(':')[1] || step.nodeId}</span>
+                      <span className={cls('rounded-full px-2 py-0.5', step.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>
+                        {step.status}
+                      </span>
+                    </div>
+                    <div className="mt-1 truncate text-slate-500">
+                      {step.output?.accepted ? 'Final email accepted' : JSON.stringify(step.output || {}).slice(0, 180)}
+                    </div>
+                  </div>
+                ))}
+                {(testRun.toolSteps || []).length === 0 && (
+                  <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">No tool steps were returned.</div>
+                )}
+              </div>
+              {testRun.state?.email?.subject && (
+                <div className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                  Final subject: <span className="font-semibold">{testRun.state.email.subject}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function MockAuditPanel({
   workflows,
   selectedWorkflow,
@@ -1821,6 +2279,9 @@ function MockAuditPanel({
   const activeLlm = auditLlmForRun(activeRun);
   const activeSteps = activeRun?.steps || [];
   const actionDiagnostics = activeDelivery?.payload?.actionLinks || activeDelivery?.payload?.diagnostics?.actionLinks || null;
+  const activeContext = activeSteps.find((step) => step.nodeType === 'llm_generate')?.output?.llm?.context
+    || activeSteps.find((step) => step.nodeType === 'llm_generate')?.output?.context
+    || null;
   const activeEventLabel = EVENT_LABELS[activeRun?.eventType] || activeRun?.eventType || 'Workflow event';
   const bodyHtml = activeDelivery?.htmlBody || null;
   const bodyText = activeDelivery?.textBody || null;
@@ -1933,6 +2394,10 @@ function MockAuditPanel({
           {!loading && runs?.map((run) => {
             const delivery = auditDeliveryForRun(run);
             const llm = auditLlmForRun(run);
+            const contextStep = (run.steps || []).find((step) => step.nodeType === 'llm_generate' && (step.output?.llm?.context || step.output?.context));
+            const toolCount = (run.steps || []).filter((step) => step.nodeType === 'llm_tool').length
+              || (Array.isArray(llm?.toolEvents) ? llm.toolEvents.length : 0);
+            const claimGuard = llm?.guard?.accepted === true;
             const selected = activeRun?.id === run.id;
             return (
               <button
@@ -1960,6 +2425,12 @@ function MockAuditPanel({
                 <div className="grid gap-1 text-[11px] leading-4 text-slate-500">
                   <span className="truncate">Subject: <span className="font-medium text-slate-700">{delivery?.subject || 'No email rendered'}</span></span>
                   <span className="truncate">Recipients: {deliveryRecipientCount(delivery)} | LLM: {[llm?.provider, llm?.model].filter(Boolean).join(' / ') || 'Not recorded'}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {contextStep && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Context</span>}
+                  {toolCount > 0 && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">Tools {toolCount}</span>}
+                  {claimGuard && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Claim guard</span>}
+                  {(contextStep || toolCount > 0 || claimGuard) && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">Evidence</span>}
                 </div>
               </button>
             );
@@ -1992,6 +2463,30 @@ function MockAuditPanel({
                 <PreviewMetric label="Recipients" value={String(deliveryRecipientCount(activeDelivery))} tone={deliveryRecipientCount(activeDelivery) ? 'gray' : 'amber'} />
                 <PreviewMetric label="LLM" value={[activeLlm?.provider, activeLlm?.model].filter(Boolean).join(' / ') || 'Not recorded'} tone={activeLlm?.status === 'failed' ? 'red' : 'gray'} />
               </div>
+
+              {activeContext && (
+                <section className="rounded-md border border-violet-200 bg-violet-50 p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">LLM evidence</div>
+                    {activeContext.contextHash && (
+                      <span className="max-w-[220px] truncate rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-200">
+                        {activeContext.contextHash}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid gap-2 text-xs text-slate-700 sm:grid-cols-4">
+                    <div>Mode: <span className="font-semibold">{activeContext.mode || 'context_only'}</span></div>
+                    <div>Signal: <span className="font-semibold">{activeContext.signalLevel || 'none'}</span></div>
+                    <div>Thread: <span className="font-semibold">{activeContext.threadEntryCount || 0}</span></div>
+                    <div>Redactions: <span className="font-semibold">{activeContext.redactionCount || 0}</span></div>
+                  </div>
+                  {(activeContext.allowedPublicPhrases || []).length > 0 && (
+                    <div className="mt-2 text-xs leading-5 text-violet-900">
+                      Allowed wording: {activeContext.allowedPublicPhrases.join('; ')}
+                    </div>
+                  )}
+                </section>
+              )}
 
               <section className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Recipients</div>
@@ -2205,6 +2700,17 @@ export default function NotificationWorkflowsPanel() {
   const [afterHoursMessage, setAfterHoursMessage] = useState(null);
   const [afterHoursSchedule, setAfterHoursSchedule] = useState(null);
   const [afterHoursScheduleLoading, setAfterHoursScheduleLoading] = useState(false);
+  const [llmToolCatalog, setLlmToolCatalog] = useState([]);
+  const [llmToolPolicy, setLlmToolPolicy] = useState(DEFAULT_LLM_TOOL_POLICY);
+  const [llmToolDraft, setLlmToolDraft] = useState(DEFAULT_LLM_TOOL_POLICY);
+  const [llmToolSaving, setLlmToolSaving] = useState(false);
+  const [llmToolMessage, setLlmToolMessage] = useState(null);
+  const [llmToolsOpen, setLlmToolsOpen] = useState(false);
+  const [llmContextPreviewTicketId, setLlmContextPreviewTicketId] = useState('');
+  const [llmContextPreview, setLlmContextPreview] = useState(null);
+  const [llmContextPreviewLoading, setLlmContextPreviewLoading] = useState(false);
+  const [llmToolTestRun, setLlmToolTestRun] = useState(null);
+  const [llmToolTestLoading, setLlmToolTestLoading] = useState(false);
   const [contentEditor, setContentEditor] = useState(null);
   const [contentEditorValue, setContentEditorValue] = useState('');
   const [mockAuditOpen, setMockAuditOpen] = useState(false);
@@ -2338,16 +2844,22 @@ export default function NotificationWorkflowsPanel() {
     setLoading(true);
     setMessage(null);
     try {
-      const [response, healthResponse, variablesResponse, signatureResponse, afterHoursResponse] = await Promise.all([
+      const [response, healthResponse, variablesResponse, signatureResponse, afterHoursResponse, llmCatalogResponse, llmPolicyResponse] = await Promise.all([
         notificationWorkflowAPI.list(),
         notificationWorkflowAPI.health(),
         notificationWorkflowAPI.variables(),
         notificationWorkflowAPI.getSignature(),
         notificationWorkflowAPI.getAfterHoursPolicy(),
+        notificationWorkflowAPI.getLlmToolCatalog(),
+        notificationWorkflowAPI.getLlmToolPolicy(),
       ]);
       const items = response.data || [];
       const policy = { ...DEFAULT_AFTER_HOURS_POLICY, ...(afterHoursResponse.data || {}) };
+      const llmPolicy = { ...DEFAULT_LLM_TOOL_POLICY, ...(llmPolicyResponse.data || {}) };
       setVariableCatalog(variablesResponse.data || []);
+      setLlmToolCatalog(llmCatalogResponse.data || []);
+      setLlmToolPolicy(llmPolicy);
+      setLlmToolDraft(llmPolicy);
       setSignature(signatureResponse.data || { enabled: false, html: '', text: '' });
       setSignatureDraft({
         enabled: signatureResponse.data?.enabled || false,
@@ -2956,6 +3468,109 @@ export default function NotificationWorkflowsPanel() {
     }
   }
 
+  function updateLlmToolDraft(patch) {
+    setLlmToolDraft((current) => ({
+      ...current,
+      ...patch,
+      toolSettings: {
+        ...(current.toolSettings || DEFAULT_LLM_TOOL_POLICY.toolSettings),
+        ...(patch.toolSettings || {}),
+        context: {
+          ...(current.toolSettings?.context || DEFAULT_LLM_TOOL_POLICY.toolSettings.context),
+          ...(patch.toolSettings?.context || {}),
+        },
+        outageSignals: {
+          ...(current.toolSettings?.outageSignals || DEFAULT_LLM_TOOL_POLICY.toolSettings.outageSignals),
+          ...(patch.toolSettings?.outageSignals || {}),
+        },
+        safety: {
+          ...(current.toolSettings?.safety || DEFAULT_LLM_TOOL_POLICY.toolSettings.safety),
+          ...(patch.toolSettings?.safety || {}),
+        },
+      },
+    }));
+  }
+
+  function updateLlmToolSetting(section, patch) {
+    updateLlmToolDraft({
+      toolSettings: {
+        [section]: patch,
+      },
+    });
+  }
+
+  function toggleLlmTool(toolName) {
+    setLlmToolDraft((current) => {
+      const enabledTools = Array.isArray(current.enabledTools) ? current.enabledTools : [];
+      const next = enabledTools.includes(toolName)
+        ? enabledTools.filter((item) => item !== toolName)
+        : [...enabledTools, toolName];
+      return { ...current, enabledTools: next };
+    });
+  }
+
+  async function saveLlmToolPolicy() {
+    setLlmToolSaving(true);
+    setLlmToolMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.updateLlmToolPolicy(llmToolDraft);
+      const saved = { ...DEFAULT_LLM_TOOL_POLICY, ...(response.data || {}) };
+      setLlmToolPolicy(saved);
+      setLlmToolDraft(saved);
+      setLlmToolMessage({ type: 'success', text: 'LLM context policy saved' });
+    } catch (error) {
+      setLlmToolMessage({ type: 'error', text: error.message || 'LLM context policy save failed' });
+    } finally {
+      setLlmToolSaving(false);
+    }
+  }
+
+  async function previewLlmContext() {
+    const ticketId = Number.parseInt(llmContextPreviewTicketId || selectedPreviewTicket?.id, 10);
+    if (!Number.isFinite(ticketId) || ticketId <= 0) {
+      setLlmToolMessage({ type: 'error', text: 'Enter an internal Ticket Pulse ticket ID for context preview' });
+      return;
+    }
+    setLlmContextPreviewLoading(true);
+    setLlmToolMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.previewLlmContext({
+        ticketId,
+        workflowId: selected?.id || null,
+        policy: llmToolDraft,
+      });
+      setLlmContextPreview(response.data || null);
+    } catch (error) {
+      setLlmToolMessage({ type: 'error', text: error.message || 'Context preview failed' });
+    } finally {
+      setLlmContextPreviewLoading(false);
+    }
+  }
+
+  async function runLlmToolTest() {
+    const ticketId = Number.parseInt(llmContextPreviewTicketId || selectedPreviewTicket?.id, 10);
+    if (!selected?.id || !Number.isFinite(ticketId) || ticketId <= 0) {
+      setLlmToolMessage({ type: 'error', text: 'Select a workflow and enter an internal Ticket Pulse ticket ID for the tool test' });
+      return;
+    }
+    setLlmToolTestLoading(true);
+    setLlmToolMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.testLlmTools({
+        workflowId: selected.id,
+        ticketId,
+        definition: draft,
+        forceActionLinks: true,
+      });
+      setLlmToolTestRun(response.data || response);
+      setLlmToolMessage({ type: 'success', text: 'LLM tool test completed' });
+    } catch (error) {
+      setLlmToolMessage({ type: 'error', text: error.message || 'LLM tool test failed' });
+    } finally {
+      setLlmToolTestLoading(false);
+    }
+  }
+
   async function importSignatureFile(file) {
     if (!file) return;
     const html = await file.text();
@@ -3186,6 +3801,35 @@ export default function NotificationWorkflowsPanel() {
             <div className="space-y-3">
               <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
                 Provider and fallback are controlled in <span className="font-semibold">{'Settings > AI Providers > Mail Workflow Generation'}</span>.
+              </div>
+              <div className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+                Workspace LLM context mode: <span className="font-semibold">{llmToolPolicy.mode || 'context_only'}</span>. This node uses the workspace policy unless context enrichment is disabled below.
+              </div>
+              <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={selectedNode.data?.contextEnrichmentEnabled !== false}
+                  onChange={(event) => updateNodeData({ contextEnrichmentEnabled: event.target.checked })}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                />
+                Use workspace LLM context enrichment
+              </label>
+              <div className="grid gap-2 md:grid-cols-3">
+                {[
+                  ['includeThreadHistory', 'Thread history'],
+                  ['includeSimilarTickets', 'Similar tickets'],
+                  ['includeOutageSignals', 'Outage signals'],
+                ].map(([field, label]) => (
+                  <label key={field} className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedNode.data?.[field] !== false}
+                      onChange={(event) => updateNodeData({ [field]: event.target.checked })}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                    />
+                    {label}
+                  </label>
+                ))}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -3606,6 +4250,21 @@ export default function NotificationWorkflowsPanel() {
             </button>
             <button
               type="button"
+              onClick={() => setLlmToolsOpen((current) => !current)}
+              className={cls(
+                'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium',
+                llmToolsOpen ? 'border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50',
+              )}
+            >
+              <Bot className="h-4 w-4" />
+              LLM context
+              <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                {llmToolPolicy?.mode === 'tools_enabled' ? 'Tools' : llmToolPolicy?.mode === 'off' ? 'Off' : 'Context'}
+              </span>
+              {llmToolsOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              type="button"
               onClick={() => loadWorkflows(selected?.id)}
               className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
@@ -3709,6 +4368,28 @@ export default function NotificationWorkflowsPanel() {
               message={afterHoursMessage}
             />
           </section>
+        )}
+
+        {llmToolsOpen && (
+          <LlmContextToolsPanel
+            policy={llmToolPolicy}
+            draft={llmToolDraft}
+            catalog={llmToolCatalog}
+            saving={llmToolSaving}
+            message={llmToolMessage}
+            previewTicketId={llmContextPreviewTicketId}
+            onPreviewTicketIdChange={setLlmContextPreviewTicketId}
+            preview={llmContextPreview}
+            previewLoading={llmContextPreviewLoading}
+            testRun={llmToolTestRun}
+            testLoading={llmToolTestLoading}
+            onChange={updateLlmToolDraft}
+            onSettingChange={updateLlmToolSetting}
+            onToggleTool={toggleLlmTool}
+            onSave={saveLlmToolPolicy}
+            onPreview={previewLlmContext}
+            onTestRun={runLlmToolTest}
+          />
         )}
 
         {mockAuditOpen && (
