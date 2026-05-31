@@ -120,6 +120,8 @@ describe('notification workflow definitions', () => {
     expect(paths).toContain('ticket.subCategory');
     expect(paths).toContain('ticket.ticketCategory');
     expect(paths).toContain('ticket.tpSkill');
+    expect(paths).toContain('ticket.ccEmails');
+    expect(paths).toContain('ticket.replyCcEmails');
     expect(paths).toContain('ticket.publicStatusUrl');
     expect(paths).toContain('ticket.selfEscalationUrl');
     expect(paths).toContain('publicStatusUrl');
@@ -209,6 +211,47 @@ describe('notification workflow definitions', () => {
     expect(result.state.recipients.to).toEqual(['requester@example.com']);
     expect(result.state.email.subject).toContain('#225001');
     expect(result.steps.some((step) => step.nodeType === 'send_email' && step.output.skipped)).toBe(true);
+  });
+
+  test('recipient resolver can copy original FreshService CCs', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const recipientsNode = definition.nodes.find((node) => node.id === 'recipients');
+    recipientsNode.data.cc = ['original_ccs'];
+
+    const result = await notificationWorkflowEngine.executePreview({
+      workflow: {
+        id: 13,
+        workspaceId: 1,
+        triggerType: 'ticket.created',
+        draftDefinition: definition,
+        publishedVersion: 0,
+        versions: [],
+      },
+      definition,
+      eventContext: {
+        event: { type: 'ticket.created', source: 'test', occurredAt: '2026-05-29T19:00:00.000Z' },
+        workspace: { id: 1, name: 'IT', timezone: 'America/Vancouver' },
+        ticket: {
+          id: 100,
+          freshserviceTicketId: 225001,
+          subject: 'VPN access problem',
+          status: 'Open',
+          priorityLabel: 'High',
+          isNoise: false,
+          ccEmails: ['manager@example.com', 'requester@example.com'],
+          replyCcEmails: ['lead@example.com', 'Manager@example.com'],
+        },
+        requester: { name: 'Requester', email: 'requester@example.com' },
+        assignedAgent: null,
+        previousAgent: null,
+      },
+    });
+
+    const sendStep = result.steps.find((step) => step.nodeType === 'send_email');
+    expect(result.status).toBe('completed');
+    expect(result.state.recipients.to).toEqual(['requester@example.com']);
+    expect(result.state.recipients.cc).toEqual(['manager@example.com', 'lead@example.com']);
+    expect(sendStep.output.ccRecipients).toEqual(['manager@example.com', 'lead@example.com']);
   });
 
   test('template render uses LLM output with template fallback without Liquid if statements', async () => {

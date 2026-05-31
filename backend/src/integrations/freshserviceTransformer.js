@@ -49,6 +49,18 @@ function normalizeCustomFieldValue(value, lookupMap = null) {
   return String(value);
 }
 
+function normalizeEmailList(value) {
+  const items = Array.isArray(value) ? value : [value];
+  const emails = [];
+  for (const item of items) {
+    const email = String(item || '').trim();
+    if (!email || !email.includes('@')) continue;
+    if (emails.some((candidate) => candidate.toLowerCase() === email.toLowerCase())) continue;
+    emails.push(email);
+  }
+  return emails;
+}
+
 /**
  * Transform FreshService ticket to our database format
  * @param {Object} fsTicket - FreshService ticket object
@@ -96,6 +108,10 @@ export function transformTicket(fsTicket, {
       updatedAt: fsTicket.updated_at ? new Date(fsTicket.updated_at) : new Date(),
       freshserviceUpdatedAt: fsTicket.updated_at ? new Date(fsTicket.updated_at) : null,
       source: fsTicket.source || null,
+      toEmails: normalizeEmailList(fsTicket.to_emails),
+      ccEmails: normalizeEmailList(fsTicket.cc_emails),
+      replyCcEmails: normalizeEmailList(fsTicket.reply_cc_emails),
+      fwdEmails: normalizeEmailList(fsTicket.fwd_emails),
       category: fsTicket.category || null,
       subCategory: fsTicket.sub_category || null,
       ticketCategory: fsTicket.custom_fields?.[categoryCustomField] || null,

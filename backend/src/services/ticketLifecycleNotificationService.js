@@ -32,6 +32,10 @@ function priorityLabel(ticket) {
   }[Number(ticket?.priority)] || String(ticket?.priority || '');
 }
 
+function emailList(value) {
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
 function eventStamp(eventType, upsertedTicket, existingTicket = null) {
   if (eventType === 'ticket.created') return dateIso(upsertedTicket.createdAt) || dateIso(upsertedTicket.freshserviceUpdatedAt);
   if (eventType === 'ticket.assigned' || eventType === 'ticket.reassigned') {
@@ -157,6 +161,10 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       priority: ticket.priority,
       priorityLabel: priorityLabel(ticket),
       assessedPriority: ticket.assessedPriority || null,
+      toEmails: emailList(ticket.toEmails),
+      ccEmails: emailList(ticket.ccEmails),
+      replyCcEmails: emailList(ticket.replyCcEmails),
+      fwdEmails: emailList(ticket.fwdEmails),
       category: ticket.category,
       subCategory: ticket.subCategory,
       ticketCategory: ticket.ticketCategory,

@@ -12,7 +12,6 @@ import {
 } from 'react-resizable-panels';
 import {
   AlertCircle,
-  ArrowLeft,
   Bot,
   CalendarClock,
   CheckCircle2,
@@ -1844,7 +1843,6 @@ export default function NotificationWorkflowsPanel() {
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [fullEditorOpen, setFullEditorOpen] = useState(false);
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [variableCatalog, setVariableCatalog] = useState([]);
   const [variableSearch, setVariableSearch] = useState('');
@@ -2571,29 +2569,62 @@ export default function NotificationWorkflowsPanel() {
 
     if (selectedNode.type === 'recipient_resolver') {
       const to = selectedNode.data?.to || [];
+      const cc = selectedNode.data?.cc || [];
+      const bcc = selectedNode.data?.bcc || [];
       const customEmails = (selectedNode.data?.customEmails || []).join(', ');
+      const recipientGroups = [
+        {
+          key: 'to',
+          label: 'To Recipients',
+          values: to,
+          options: [
+            ['requester', 'Requester'],
+            ['assigned_agent', 'Assigned agent'],
+            ['custom_emails', 'Custom emails'],
+          ],
+        },
+        {
+          key: 'cc',
+          label: 'Cc Recipients',
+          values: cc,
+          options: [
+            ['original_ccs', 'Original CCs'],
+            ['requester', 'Requester'],
+            ['assigned_agent', 'Assigned agent'],
+            ['custom_emails', 'Custom emails'],
+          ],
+        },
+        {
+          key: 'bcc',
+          label: 'Bcc Recipients',
+          values: bcc,
+          options: [
+            ['custom_emails', 'Custom emails'],
+            ['assigned_agent', 'Assigned agent'],
+            ['requester', 'Requester'],
+          ],
+        },
+      ];
       return (
         <div className="space-y-4">
-          <div>
-            <label className="text-xs font-medium uppercase text-gray-500">To Recipients</label>
-            <div className="mt-2 grid grid-cols-1 gap-2 text-sm">
-              {[
-                ['requester', 'Requester'],
-                ['assigned_agent', 'Assigned agent'],
-                ['custom_emails', 'Custom emails'],
-              ].map(([value, label]) => (
-                <label key={value} className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2">
-                  <input
-                    type="checkbox"
-                    checked={to.includes(value)}
-                    onChange={(event) => setRecipientList('to', value, event.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
+          {recipientGroups.map((group) => (
+            <div key={group.key}>
+              <label className="text-xs font-medium uppercase text-gray-500">{group.label}</label>
+              <div className="mt-2 grid grid-cols-1 gap-2 text-sm">
+                {group.options.map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={group.values.includes(value)}
+                      onChange={(event) => setRecipientList(group.key, value, event.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
+          ))}
           <div>
             <label className="text-xs font-medium uppercase text-gray-500">Custom Emails</label>
             <input
@@ -3141,15 +3172,6 @@ export default function NotificationWorkflowsPanel() {
             </button>
             <button
               type="button"
-              onClick={() => setFullEditorOpen(true)}
-              disabled={!selected}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              <Maximize2 className="h-4 w-4" />
-              Full editor
-            </button>
-            <button
-              type="button"
               onClick={() => loadWorkflows(selected?.id)}
               className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
@@ -3210,9 +3232,9 @@ export default function NotificationWorkflowsPanel() {
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {selectedIsAfterHoursWorkflow && (
-          <section className="border-b border-amber-100 bg-amber-50/40 px-6 py-4">
+          <section className="shrink-0 overflow-y-auto border-b border-amber-100 bg-amber-50/40 px-6 py-4 lg:max-h-[250px]">
             <AfterHoursRoutingPanel
               afterHoursDraft={afterHoursDraft}
               setAfterHoursDraft={setAfterHoursDraft}
@@ -3225,164 +3247,21 @@ export default function NotificationWorkflowsPanel() {
           </section>
         )}
 
-        <div
-          className={cls(
-            'grid grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)_520px]',
-            selectedIsAfterHoursWorkflow ? 'min-h-[620px]' : 'h-full min-h-0',
-          )}
-        >
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)]">
           <aside className="z-10 min-h-0 overflow-y-auto border-r border-gray-200 bg-slate-50/90">
             <div className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">Workspace Workflows</div>
             <WorkflowList workflows={workflows} selectedId={selected?.id} onSelect={loadWorkflow} />
           </aside>
-
-          <main className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200">
-            <NodePalette
-              definition={draft}
-              onAddLlm={addLlmNode}
-              onRemoveNode={removeSelectedNode}
-              showMiniMap={showMiniMap}
-              onToggleMiniMap={() => setShowMiniMap((current) => !current)}
-            />
-            <div className="relative min-h-[360px] flex-1 overflow-hidden bg-gray-50">
-              {draft ? (
-                <ReactFlow
-                  nodes={flowNodes}
-                  edges={flowEdges}
-                  fitView
-                  minZoom={0.35}
-                  maxZoom={1.4}
-                  onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-                  onNodesChange={handleFlowNodesChange}
-                >
-                  <FlowMiniMap
-                    visible={showMiniMap}
-                    nodes={flowNodes}
-                    selectedNodeId={selectedNodeId}
-                    onClose={() => setShowMiniMap(false)}
-                  />
-                  <Controls />
-                  <Background gap={18} color="#e5e7eb" />
-                </ReactFlow>
-              ) : (
-                <div className="flex h-full items-center justify-center text-sm text-gray-500">Select a workflow</div>
-              )}
-            </div>
-          </main>
-
-          <aside className="flex min-h-0 flex-col overflow-hidden bg-white">
-            <div className="shrink-0 border-b border-gray-200 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Inspector</div>
-                  <h3 className="text-sm font-semibold text-gray-900">{selectedNode ? NODE_LABELS[selectedNode.type] || selectedNode.type : 'No node selected'}</h3>
-                </div>
-                {selectedNode?.type === 'llm_generate' && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
-                    <Bot className="h-3.5 w-3.5" />
-                  Auto send
-                  </span>
-                )}
-                {selectedNode?.type === 'send_email' && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-                    <Send className="h-3.5 w-3.5" />
-                  Email
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-              {renderInspector()}
-            </div>
-          </aside>
-        </div>
-      </div>
-      {fullEditorOpen && (
-        <div className="fixed inset-0 z-40 flex flex-col bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setFullEditorOpen(false)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </button>
-              <div className="min-w-0">
-                <div className="truncate text-lg font-semibold text-gray-900">{selected?.name || 'Notification workflow'}</div>
-                <div className="truncate text-xs text-gray-500">{selected ? EVENT_LABELS[selected.triggerType] || selected.triggerType : 'Workflow editor'}</div>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setSignatureModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <Mail className="h-4 w-4" />
-                Signature
-                {signature?.enabled && <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">On</span>}
-              </button>
-              <button
-                type="button"
-                onClick={() => loadWorkflows(selected?.id)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={saveDraft}
-                disabled={saving || !selected}
-                className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-              >
-                <Save className="h-4 w-4" />
-                Save draft
-              </button>
-              <button
-                type="button"
-                onClick={openPreviewModal}
-                disabled={saving || previewRunning || !selected}
-                className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {previewRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {previewRunning ? 'Previewing' : 'Preview'}
-              </button>
-              <button
-                type="button"
-                onClick={publishWorkflow}
-                disabled={saving || !selected}
-                className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
-              >
-                <Upload className="h-4 w-4" />
-                Publish
-              </button>
-              <button
-                type="button"
-                onClick={toggleEnabled}
-                disabled={saving || !selected}
-                className={cls(
-                  'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50',
-                  selected?.isEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-                )}
-              >
-                {selected?.isEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
-                {selected?.isEnabled ? 'Disable' : 'Enable'}
-              </button>
-            </div>
-          </div>
 
           <PanelGroup
             id="ticket-pulse-notification-workflow-editor"
             orientation="horizontal"
             defaultLayout={editorLayout.defaultLayout}
             onLayoutChanged={editorLayout.onLayoutChanged}
-            className="min-h-0 flex-1"
+            className="min-h-0 min-w-0"
           >
-            <Panel id="workflow-canvas" minSize="45%" defaultSize="64%">
-              <main className="h-full min-w-0 border-r border-gray-200">
+            <Panel id="workflow-canvas" minSize="50%" defaultSize="62%">
+              <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200">
                 <NodePalette
                   definition={draft}
                   onAddLlm={addLlmNode}
@@ -3390,7 +3269,7 @@ export default function NotificationWorkflowsPanel() {
                   showMiniMap={showMiniMap}
                   onToggleMiniMap={() => setShowMiniMap((current) => !current)}
                 />
-                <div className="h-[calc(100vh-135px)] bg-gray-50">
+                <div className="relative min-h-[360px] flex-1 overflow-hidden bg-gray-50">
                   {draft ? (
                     <ReactFlow
                       nodes={flowNodes}
@@ -3419,9 +3298,9 @@ export default function NotificationWorkflowsPanel() {
 
             <PanelResizeHandle id="workflow-editor-resizer" className="w-1 bg-gray-100 transition hover:bg-blue-300" />
 
-            <Panel id="workflow-inspector" minSize="28%" maxSize="55%" defaultSize="36%">
-              <aside className="h-full min-h-0 bg-white">
-                <div className="border-b border-gray-200 px-4 py-3">
+            <Panel id="workflow-inspector" minSize="30%" maxSize="50%" defaultSize="38%">
+              <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-white">
+                <div className="shrink-0 border-b border-gray-200 px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Inspector</div>
@@ -3430,25 +3309,25 @@ export default function NotificationWorkflowsPanel() {
                     {selectedNode?.type === 'llm_generate' && (
                       <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                         <Bot className="h-3.5 w-3.5" />
-                      Auto send
+                        Auto send
                       </span>
                     )}
                     {selectedNode?.type === 'send_email' && (
                       <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
                         <Send className="h-3.5 w-3.5" />
-                      Email
+                        Email
                       </span>
                     )}
                   </div>
                 </div>
-                <div className="h-[calc(100vh-132px)] overflow-auto px-4 py-4">
+                <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
                   {renderInspector()}
                 </div>
               </aside>
             </Panel>
           </PanelGroup>
         </div>
-      )}
+      </div>
       <FullContentEditorModal
         open={Boolean(contentEditor)}
         title={contentEditor?.title}

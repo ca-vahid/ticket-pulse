@@ -94,6 +94,11 @@ function uniqueEmails(values) {
   return result;
 }
 
+function excludeExistingEmails(values, existingValues) {
+  const existing = new Set((existingValues || []).map((email) => String(email || '').trim().toLowerCase()).filter(Boolean));
+  return (values || []).filter((email) => !existing.has(String(email || '').trim().toLowerCase()));
+}
+
 function stripHtml(value) {
   return String(value || '')
     .replace(/<br\s*\/?>/gi, '\n')
@@ -172,160 +177,221 @@ function afterHoursSupportUrlFromContext(context) {
   ).trim();
 }
 
-function actionBlockTableHtml({
-  tone = 'blue',
-  title,
-  body,
-  buttonLabel,
-  url,
-  rows = [],
-  footnote = null,
-}) {
-  const escapedUrl = escapeHtml(url);
-  const palette = {
-    blue: {
-      border: '#bfdbfe',
-      background: '#eff6ff',
-      heading: '#1e3a8a',
-      text: '#334155',
-      button: '#1d4ed8',
-      buttonText: '#ffffff',
-      rowBackground: '#ffffff',
-    },
-    amber: {
-      border: '#fed7aa',
-      background: '#fff7ed',
-      heading: '#7c2d12',
-      text: '#7c2d12',
-      button: '#c2410c',
-      buttonText: '#ffffff',
-      rowBackground: '#ffffff',
-    },
-    red: {
-      border: '#fecaca',
-      background: '#fef2f2',
-      heading: '#7f1d1d',
-      text: '#7f1d1d',
-      button: '#dc2626',
-      buttonText: '#ffffff',
-      rowBackground: '#ffffff',
-    },
-  }[tone] || {};
-  const rowHtml = rows
-    .filter((row) => row?.label && row?.value)
-    .map((row) => [
-      '<tr>',
-      `<td style="padding:10px 12px;border-top:1px solid ${palette.border};font-size:13px;font-weight:700;color:${palette.heading};width:34%;">${escapeHtml(row.label)}</td>`,
-      `<td style="padding:10px 12px;border-top:1px solid ${palette.border};font-size:13px;color:${palette.text};">${row.html || escapeHtml(row.value)}</td>`,
-      '</tr>',
-    ].join(''))
-    .join('');
+function emailActionButtonHtml({ url, label, background = '#1d4ed8', border = '#1d4ed8', color = '#ffffff' }) {
   return [
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;margin:22px 0 16px;">',
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;">',
     '<tr>',
-    `<td style="border:2px solid ${palette.border};background:${palette.background};padding:0;">`,
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">',
-    '<tr>',
-    `<td style="padding:16px 18px 10px;font-family:Arial,Helvetica,sans-serif;color:${palette.text};">`,
-    `<div style="font-size:16px;font-weight:700;color:${palette.heading};line-height:1.35;">${escapeHtml(title)}</div>`,
-    `<div style="margin-top:8px;font-size:14px;line-height:1.55;">${escapeHtml(body)}</div>`,
-    '</td>',
-    '</tr>',
-    rowHtml ? `<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:${palette.rowBackground};">${rowHtml}</table></td></tr>` : '',
-    '<tr>',
-    '<td style="padding:14px 18px 16px;font-family:Arial,Helvetica,sans-serif;">',
-    `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:${palette.button};color:${palette.buttonText};font-size:14px;font-weight:700;line-height:20px;text-decoration:none;padding:10px 16px;border-radius:4px;">${escapeHtml(buttonLabel)}</a>`,
-    footnote ? `<div style="margin-top:12px;font-size:12px;line-height:1.5;color:#64748b;">${escapeHtml(footnote)}</div>` : '',
-    '</td>',
-    '</tr>',
-    '</table>',
+    `<td bgcolor="${background}" style="background:${background};border:1px solid ${border};mso-padding-alt:9px 14px;">`,
+    `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;line-height:18px;color:${color};text-decoration:none;padding:9px 14px;">${escapeHtml(label)}</a>`,
     '</td>',
     '</tr>',
     '</table>',
   ].join('');
 }
 
-function publicStatusLinkBlockHtml(url) {
-  return actionBlockTableHtml({
+function outlookCappedActionTable(innerHtml) {
+  return [
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:20px 0 14px;">',
+    '<tr><td align="left" style="padding:0;">',
+    '<!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td><![endif]-->',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;max-width:640px;">',
+    innerHtml,
+    '</table>',
+    '<!--[if mso]></td></tr></table><![endif]-->',
+    '</td></tr>',
+    '</table>',
+  ].join('');
+}
+
+function publicStatusAction(url) {
+  return {
+    key: 'publicStatus',
     tone: 'blue',
-    title: 'Check the latest ticket status',
-    body: 'Use this Ticket Pulse link to see the latest status, current assignee, and estimated resolution window for your ticket.',
-    buttonLabel: 'View ticket status and estimate',
+    title: 'Check latest status',
+    body: 'See the current status, assignee, timeline, and estimated resolution window.',
+    buttonLabel: 'Open status page',
     url,
-    rows: [
-      { label: 'Status page', value: 'Always shows the latest Ticket Pulse status for this ticket.' },
-      { label: 'Assignment', value: 'The assigned person may change as the team works through the request.' },
-    ],
-    footnote: 'This link stays with the ticket even if it moves between people.',
-  });
+  };
 }
 
-function publicStatusLinkBlockText(url) {
-  return [
-    'Check the latest ticket status',
-    '',
-    'You can use this link to see the latest status, current assignee, and estimated resolution window for your ticket:',
-    url,
-    '',
-    'The assigned person may change as the team works through the request. This link will keep showing the latest Ticket Pulse status for this ticket.',
-  ].join('\n');
-}
-
-function raiseUrgencyLinkBlockHtml(url) {
-  return actionBlockTableHtml({
+function raiseUrgencyAction(url) {
+  return {
+    key: 'raiseUrgency',
     tone: 'amber',
-    title: 'Need this reviewed as urgent?',
-    body: 'If this ticket needs priority attention during business hours, you can raise it to Urgent from Ticket Pulse.',
-    buttonLabel: 'Raise ticket urgency',
+    title: 'Raise priority',
+    body: 'Mark this ticket Urgent during business hours. This does not page after-hours support.',
+    buttonLabel: 'Raise urgency',
     url,
-    rows: [
-      { label: 'Business-hours only', value: 'This does not request after-hours emergency support.' },
-      { label: 'Notification path', value: 'The assigned agent may be notified through their High/Urgent preferences.' },
-    ],
-  });
+  };
 }
 
-function raiseUrgencyLinkBlockText(url) {
-  return [
-    'Need this reviewed as urgent?',
-    '',
-    'If this ticket needs priority attention during business hours, you can raise it to Urgent from Ticket Pulse. This does not request after-hours emergency support:',
-    url,
-  ].join('\n');
-}
-
-function afterHoursSupportLinkBlockHtml(url, context = {}) {
+function afterHoursSupportAction(url, context = {}) {
   const activeContact = context?.afterHoursSupport?.activeContact || {};
   const phone = String(activeContact.phone || '').trim();
-  const phoneHtml = phone
-    ? `<a href="tel:${escapeHtml(phone.replace(/[^\d+]/g, ''))}" style="color:#991b1b;font-weight:700;text-decoration:none;">${escapeHtml(phone)}</a>`
-    : '<span style="color:#991b1b;font-weight:700;">Phone not configured</span>';
-  return actionBlockTableHtml({
+  return {
+    key: 'afterHoursSupport',
     tone: 'red',
-    title: 'Need immediate after-hours support?',
-    body: 'If this cannot wait until the next business-hours window, use this Ticket Pulse link to review the after-hours response window and request immediate support.',
-    buttonLabel: 'Request immediate support',
+    title: 'Request immediate support',
+    body: 'If this cannot wait until the next business-hours window, review the after-hours response window and request immediate support.',
+    buttonLabel: 'Request support',
     url,
-    rows: [
-      { label: 'Active contact', value: activeContact.name || 'After-hours support' },
-      { label: 'Phone', value: phone || 'Phone not configured', html: phoneHtml },
-      { label: 'Response window', value: 'The request is sent to the configured after-hours escalation roster after confirmation.' },
-    ],
-    footnote: activeContact.rotationLabel || null,
-  });
+    activeContact,
+    phone,
+    phoneHref: phone ? phone.replace(/[^\d+]/g, '') : null,
+    rotationLabel: activeContact.rotationLabel || null,
+  };
 }
 
-function afterHoursSupportLinkBlockText(url, context = {}) {
-  const activeContact = context?.afterHoursSupport?.activeContact || {};
-  const phone = String(activeContact.phone || '').trim();
+function regularActionRowHtml(action, index) {
+  const tone = {
+    publicStatus: { color: '#1e3a8a', accent: '#2563eb', button: '#1d4ed8', border: '#dbeafe' },
+    raiseUrgency: { color: '#7c2d12', accent: '#d97706', button: '#b45309', border: '#fed7aa' },
+    afterHoursSupport: { color: '#7f1d1d', accent: '#dc2626', button: '#dc2626', border: '#fecaca' },
+  }[action.key] || { color: '#111827', accent: '#64748b', button: '#1d4ed8', border: '#e2e8f0' };
+  const topBorder = index === 0 ? '1px solid #dbeafe' : '1px solid #e5e7eb';
   return [
-    'Need immediate after-hours support?',
-    '',
-    'If this cannot wait until the next business-hours window, use this Ticket Pulse link to review the after-hours response window and request immediate support:',
-    phone ? `Active after-hours phone: ${phone}` : 'Active after-hours phone: not configured',
-    url,
-    activeContact.rotationLabel ? `Contact selection: ${activeContact.rotationLabel}` : null,
-  ].join('\n');
+    '<tr>',
+    `<td style="border-top:${topBorder};padding:12px 14px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">`,
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+    '<tr>',
+    `<td width="8" valign="top" style="width:8px;border-left:3px solid ${tone.accent};font-size:1px;line-height:1px;">&nbsp;</td>`,
+    '<td valign="top" style="padding:0 12px 0 0;">',
+    `<div style="font-size:14px;line-height:18px;font-weight:700;color:${tone.color};">${escapeHtml(action.title)}</div>`,
+    `<div style="font-size:13px;line-height:18px;color:#475569;margin-top:3px;">${escapeHtml(action.body)}</div>`,
+    '</td>',
+    '<td valign="middle" align="right" width="150" style="width:150px;">',
+    emailActionButtonHtml({
+      url: action.url,
+      label: action.buttonLabel,
+      background: tone.button,
+      border: tone.button,
+    }),
+    '</td>',
+    '</tr>',
+    '</table>',
+    '</td>',
+    '</tr>',
+  ].join('');
+}
+
+function regularActionAppendixHtml(actions = []) {
+  const rows = actions.map((action, index) => regularActionRowHtml(action, index)).join('');
+  return outlookCappedActionTable([
+    '<tr>',
+    '<td style="border:1px solid #c7d8f5;background:#f8fbff;padding:0;font-family:Arial,Helvetica,sans-serif;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+    '<tr>',
+    '<td style="padding:14px 16px 10px;">',
+    '<div style="font-size:15px;line-height:20px;font-weight:700;color:#172554;">Helpful ticket links</div>',
+    '<div style="font-size:13px;line-height:18px;color:#475569;margin-top:4px;">Use these Ticket Pulse links to follow this request or update its priority.</div>',
+    '</td>',
+    '</tr>',
+    rows,
+    '<tr>',
+    '<td style="border-top:1px solid #dbeafe;padding:9px 16px 12px;font-size:12px;line-height:17px;color:#64748b;font-family:Arial,Helvetica,sans-serif;">These links stay with the ticket even if the assigned person changes.</td>',
+    '</tr>',
+    '</table>',
+    '</td>',
+    '</tr>',
+  ].join(''));
+}
+
+function emergencyActionAppendixHtml(actions = []) {
+  const immediate = actions.find((action) => action.key === 'afterHoursSupport');
+  const secondary = actions.filter((action) => action.key !== 'afterHoursSupport');
+  if (!immediate) return regularActionAppendixHtml(actions);
+  const phoneHtml = immediate.phone
+    ? `<a href="tel:${escapeHtml(immediate.phoneHref)}" style="color:#7f1d1d;font-weight:700;text-decoration:none;">${escapeHtml(immediate.phone)}</a>`
+    : '<span style="color:#7f1d1d;font-weight:700;">not configured</span>';
+  const secondaryRows = secondary.map((action, index) => [
+    '<tr>',
+    `<td style="border-top:${index === 0 ? '1px solid #fed7aa' : '1px solid #f3e5d7'};padding:10px 12px;font-family:Arial,Helvetica,sans-serif;">`,
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+    '<tr>',
+    '<td valign="top" style="padding-right:10px;">',
+    `<div style="font-size:13px;line-height:17px;font-weight:700;color:${action.key === 'raiseUrgency' ? '#7c2d12' : '#1e3a8a'};">${escapeHtml(action.title)}</div>`,
+    `<div style="font-size:12px;line-height:16px;color:#64748b;margin-top:2px;">${escapeHtml(action.body)}</div>`,
+    '</td>',
+    `<td valign="top" align="right" width="118" style="width:118px;font-size:12px;line-height:16px;"><a href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer" style="font-weight:700;color:${action.key === 'raiseUrgency' ? '#b45309' : '#1d4ed8'};text-decoration:underline;">${escapeHtml(action.buttonLabel)}</a></td>`,
+    '</tr>',
+    '</table>',
+    '</td>',
+    '</tr>',
+  ].join('')).join('');
+  return outlookCappedActionTable([
+    '<tr>',
+    '<td style="border:1px solid #f3c6ba;background:#fffaf7;padding:0;font-family:Arial,Helvetica,sans-serif;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+    '<tr>',
+    '<td style="padding:16px 16px 14px;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+    '<tr>',
+    '<td valign="top" style="padding-right:16px;">',
+    '<div style="font-size:16px;line-height:21px;font-weight:700;color:#7f1d1d;">Need immediate after-hours support?</div>',
+    `<div style="font-size:13px;line-height:19px;color:#57534e;margin-top:6px;">${escapeHtml(immediate.body)}</div>`,
+    `<div style="font-size:13px;line-height:18px;color:#57534e;margin-top:8px;">Active support phone: ${phoneHtml}</div>`,
+    '</td>',
+    '<td valign="middle" align="right" width="180" style="width:180px;">',
+    emailActionButtonHtml({
+      url: immediate.url,
+      label: immediate.buttonLabel,
+      background: '#dc2626',
+      border: '#b91c1c',
+    }),
+    '</td>',
+    '</tr>',
+    '</table>',
+    '</td>',
+    '</tr>',
+    secondaryRows ? [
+      '<tr>',
+      '<td style="border-top:1px solid #fed7aa;background:#ffffff;">',
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+      secondaryRows,
+      '</table>',
+      '</td>',
+      '</tr>',
+    ].join('') : '',
+    immediate.rotationLabel ? `<tr><td style="border-top:1px solid #fed7aa;padding:9px 16px 12px;font-size:12px;line-height:17px;color:#78716c;font-family:Arial,Helvetica,sans-serif;">${escapeHtml(immediate.rotationLabel)}</td></tr>` : '',
+    '</table>',
+    '</td>',
+    '</tr>',
+  ].join(''));
+}
+
+function actionAppendixHtml(actions = []) {
+  const regularActions = actions.filter((action) => action.key !== 'afterHoursSupport');
+  const emergencyActions = actions.filter((action) => action.key === 'afterHoursSupport');
+  return [
+    regularActions.length > 0 ? regularActionAppendixHtml(regularActions) : null,
+    ...emergencyActions.map((action) => emergencyActionAppendixHtml([action])),
+  ].filter(Boolean).join('\n');
+}
+
+function actionAppendixText(actions = []) {
+  const regularActions = actions.filter((action) => action.key !== 'afterHoursSupport');
+  const emergencyActions = actions.filter((action) => action.key === 'afterHoursSupport');
+  const sections = [];
+  if (regularActions.length > 0) {
+    sections.push([
+      'Helpful ticket links',
+      'Use these Ticket Pulse links to follow this request or update its priority.',
+      '',
+      ...regularActions.map((action) => `${action.title}: ${action.url}`),
+      '',
+      'These links stay with the ticket even if the assigned person changes.',
+    ].filter(Boolean).join('\n'));
+  }
+  for (const immediate of emergencyActions) {
+    sections.push([
+      'Need immediate after-hours support?',
+      immediate.body,
+      immediate.phone ? `Active support phone: ${immediate.phone}` : 'Active support phone: not configured',
+      `${immediate.buttonLabel}: ${immediate.url}`,
+      immediate.rotationLabel ? `Contact selection: ${immediate.rotationLabel}` : null,
+    ].filter(Boolean).join('\n'));
+  }
+  return sections.join('\n\n');
 }
 
 function actionLinkOptions(options = {}) {
@@ -381,14 +447,10 @@ function skipActionLink(email, key, legacyPrefix, reason, extra = {}) {
   });
 }
 
-function applyActionLink(email, key, legacyFields, url, htmlBlock, textBlock, diagnostic = {}) {
-  const html = [email.html, htmlBlock].filter(Boolean).join('\n');
-  const text = [email.text || stripHtml(email.html), textBlock].filter(Boolean).join('\n\n');
+function recordAppliedActionLink(email, key, legacyFields, url, diagnostic = {}) {
   return actionLinkDiagnostic({
     ...email,
     ...legacyFields,
-    html: html || null,
-    text: text || null,
   }, key, {
     requested: true,
     applied: true,
@@ -411,13 +473,11 @@ function appendPublicStatusLinkToEmail(email = {}, context = {}, enabled = false
     );
   }
 
-  return applyActionLink(
+  return recordAppliedActionLink(
     email,
     'publicStatus',
     { publicStatusLinkApplied: true, publicStatusUrl: url },
     url,
-    publicStatusLinkBlockHtml(url),
-    publicStatusLinkBlockText(url),
     { actionLinkRenderMode: actionLinkOptions(options).actionLinkRenderMode },
   );
 }
@@ -446,13 +506,11 @@ function appendRaiseUrgencyLinkToEmail(email = {}, context = {}, enabled = false
     });
   }
 
-  return applyActionLink(
+  return recordAppliedActionLink(
     email,
     'raiseUrgency',
     { raiseUrgencyLinkApplied: true, raiseUrgencyUrl: url },
     url,
-    raiseUrgencyLinkBlockHtml(url),
-    raiseUrgencyLinkBlockText(url),
     {
       forced: effectiveOptions.forceActionLinks && Boolean(liveWouldSkipReason),
       liveWouldSkipReason,
@@ -491,13 +549,11 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
     });
   }
 
-  return applyActionLink(
+  return recordAppliedActionLink(
     email,
     'afterHoursSupport',
     { afterHoursSupportLinkApplied: true, afterHoursSupportUrl: url },
     url,
-    afterHoursSupportLinkBlockHtml(url, context),
-    afterHoursSupportLinkBlockText(url, context),
     {
       activeContact,
       missingActiveContactPhone: Boolean(missingPhoneReason),
@@ -511,9 +567,28 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
 
 function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {}, options = {}) {
   const effectiveOptions = actionLinkOptions(options);
+  const actions = [];
   let next = appendPublicStatusLinkToEmail(email, context, nodeData?.appendPublicStatusLink === true, effectiveOptions);
+  if (next.publicStatusLinkApplied === true && email.publicStatusLinkApplied !== true) {
+    actions.push(publicStatusAction(next.publicStatusUrl));
+  }
   next = appendRaiseUrgencyLinkToEmail(next, context, nodeData?.appendRaiseUrgencyLink === true, effectiveOptions);
+  if (next.raiseUrgencyLinkApplied === true && email.raiseUrgencyLinkApplied !== true) {
+    actions.push(raiseUrgencyAction(next.raiseUrgencyUrl));
+  }
   next = appendAfterHoursSupportLinkToEmail(next, context, nodeData?.appendAfterHoursSupportLink === true, effectiveOptions);
+  if (next.afterHoursSupportLinkApplied === true && email.afterHoursSupportLinkApplied !== true) {
+    actions.push(afterHoursSupportAction(next.afterHoursSupportUrl, context));
+  }
+  if (actions.length > 0) {
+    const appendixHtml = actionAppendixHtml(actions);
+    const appendixText = actionAppendixText(actions);
+    next = {
+      ...next,
+      html: [next.html, appendixHtml].filter(Boolean).join('\n') || null,
+      text: [next.text || stripHtml(next.html), appendixText].filter(Boolean).join('\n\n') || null,
+    };
+  }
   return next;
 }
 
@@ -647,6 +722,12 @@ function recipientFromToken(token, context, customEmails) {
   if (value === 'requester') return [context.requester?.email];
   if (value === 'assigned_agent') return [context.assignedAgent?.email];
   if (value === 'previous_agent') return [context.previousAgent?.email];
+  if (value === 'original_ccs') {
+    return [
+      ...(Array.isArray(context.ticket?.ccEmails) ? context.ticket.ccEmails : []),
+      ...(Array.isArray(context.ticket?.replyCcEmails) ? context.ticket.replyCcEmails : []),
+    ];
+  }
   if (value === 'custom_emails') return customEmails;
   if (value.includes('@')) return [value];
   return [];
@@ -796,10 +877,13 @@ async function executeNode({
 
   if (node.type === 'recipient_resolver') {
     const customEmails = Array.isArray(node.data?.customEmails) ? node.data.customEmails : [];
+    const to = resolveRecipientList(node.data?.to || ['requester'], eventContext, customEmails);
+    const cc = excludeExistingEmails(resolveRecipientList(node.data?.cc || [], eventContext, customEmails), to);
+    const bcc = excludeExistingEmails(resolveRecipientList(node.data?.bcc || [], eventContext, customEmails), [...to, ...cc]);
     const recipients = {
-      to: resolveRecipientList(node.data?.to || ['requester'], eventContext, customEmails),
-      cc: resolveRecipientList(node.data?.cc || [], eventContext, customEmails),
-      bcc: resolveRecipientList(node.data?.bcc || [], eventContext, customEmails),
+      to,
+      cc,
+      bcc,
     };
     state.recipients = recipients;
     return { recipients };
@@ -961,8 +1045,8 @@ async function executeNode({
     const email = appendSignatureToEmail(state.email || {}, signature);
     state.email = email;
     const toRecipients = uniqueEmails(recipients.to || []);
-    const ccRecipients = uniqueEmails(recipients.cc || []);
-    const bccRecipients = uniqueEmails(recipients.bcc || []);
+    const ccRecipients = excludeExistingEmails(uniqueEmails(recipients.cc || []), toRecipients);
+    const bccRecipients = excludeExistingEmails(uniqueEmails(recipients.bcc || []), [...toRecipients, ...ccRecipients]);
     const subject = email.subject || node.data?.subject || 'Ticket Pulse notification';
     const htmlBody = email.html || null;
     const textBody = email.text || stripHtml(htmlBody);

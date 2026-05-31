@@ -233,6 +233,9 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.actionLinks.raiseUrgency.applied).toBe(true);
     expect(result.state.email.actionLinks.afterHoursSupport.skipped).toBe(true);
     expect(result.state.email.actionLinks.afterHoursSupport.reason).toContain('hidden during business hours');
+    expect(result.state.email.html).toContain('Helpful ticket links');
+    expect(result.state.email.html).toContain('Open status page');
+    expect(result.state.email.html).toContain('Raise urgency');
     expect(result.state.email.html).toContain(publicStatusUrl);
     expect(result.state.email.html).toContain(raiseUrgencyUrl);
     expect(result.state.email.html).not.toContain(immediateSupportUrl);
@@ -259,6 +262,8 @@ describe('notification workflow engine persistence', () => {
 
     expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
     expect(result.state.email.actionLinks.afterHoursSupport.forced).toBe(true);
+    expect(result.state.email.html).toContain('Helpful ticket links');
+    expect(result.state.email.html).toContain('Need immediate after-hours support?');
     expect(result.state.email.html).toContain(immediateSupportUrl);
     expect(result.state.email.html).toContain('+16045551234');
   });
