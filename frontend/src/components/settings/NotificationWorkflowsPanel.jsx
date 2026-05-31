@@ -294,6 +294,11 @@ function cloneDefinition(definition) {
   return JSON.parse(JSON.stringify(definition || { version: 1, nodes: [], edges: [], metadata: {} }));
 }
 
+function definitionFingerprint(definition) {
+  if (!definition) return '';
+  return JSON.stringify(normalizeEditorDefinition(definition));
+}
+
 function displayPositionForNode(node, definition, index) {
   const hasLlm = (definition?.nodes || []).some((candidate) => candidate.type === 'llm_generate');
   const byId = hasLlm ? {
@@ -1696,17 +1701,89 @@ function AfterHoursSchedulePreview({ schedule, loading }) {
   );
 }
 
+function AfterHoursRoutingSummary({
+  workflow,
+  afterHoursDraft,
+  afterHoursSchedule,
+  afterHoursScheduleLoading,
+  onConfigure,
+}) {
+  const workflowEnabled = workflow?.isEnabled === true;
+  const workflowPublished = Number(workflow?.publishedVersion || 0) > 0;
+  const current = afterHoursSchedule?.current || null;
+  const activeWindow = afterHoursSchedule?.activeNow === true;
+  const statusText = !workflowPublished
+    ? 'Publish first'
+    : workflowEnabled
+      ? 'Live routing on'
+      : 'Workflow disabled';
+  const statusClass = workflowEnabled
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : workflowPublished
+      ? 'border-slate-200 bg-slate-50 text-slate-600'
+      : 'border-amber-200 bg-amber-50 text-amber-700';
+
+  return (
+    <section className="shrink-0 border-b border-amber-100 bg-amber-50/35 px-4 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-amber-200 bg-white text-amber-700">
+            <CalendarClock className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-950">After-hours routing</h3>
+              <span className={cls('rounded-full border px-2 py-0.5 text-[11px] font-semibold', statusClass)}>
+                {statusText}
+              </span>
+              <span className={cls(
+                'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
+                activeWindow ? 'border-amber-200 bg-white text-amber-700' : 'border-slate-200 bg-white text-slate-600',
+              )}
+              >
+                {afterHoursScheduleLoading ? 'Checking window' : activeWindow ? 'Window active now' : current?.label || 'Window preview'}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                {afterHoursDraft.holidaysEnabled ? 'Holidays included' : 'Holidays excluded'}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                {afterHoursDraft.suppressStandardTicketCreated ? 'Replaces normal received email' : 'Also sends normal received email'}
+              </span>
+            </div>
+            <p className="mt-0.5 truncate text-xs text-slate-500">
+              Uses this workflow Enable state as the live on/off switch. Options only control holidays, replacement behavior, and requester copy.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onConfigure}
+          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-amber-200 bg-white px-3 text-sm font-semibold text-amber-800 shadow-sm hover:bg-amber-50"
+        >
+          <PanelRight className="h-4 w-4" />
+          Configure
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function AfterHoursRoutingPanel({
+  workflow,
   afterHoursDraft,
   setAfterHoursDraft,
   afterHoursSchedule,
   afterHoursScheduleLoading,
   onSave,
+  onToggleWorkflow,
   saving,
   message,
 }) {
+  const workflowEnabled = workflow?.isEnabled === true;
+  const workflowPublished = Number(workflow?.publishedVersion || 0) > 0;
+
   return (
-    <div className="rounded-lg border border-amber-200 bg-white p-4 shadow-sm">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -1716,7 +1793,7 @@ function AfterHoursRoutingPanel({
             <div>
               <h3 className="text-sm font-semibold text-slate-950">After-hours workflow options</h3>
               <p className="text-xs text-slate-500">
-                These controls decide when this workflow receives ticket-arrived events before the workflow steps run.
+                Live after-hours routing uses this workflow Enable state. These options refine what happens once the workflow is enabled.
               </p>
             </div>
           </div>
@@ -1732,21 +1809,37 @@ function AfterHoursRoutingPanel({
         </button>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <button
-          type="button"
-          onClick={() => setAfterHoursDraft((current) => ({ ...current, afterHoursEnabled: !current.afterHoursEnabled }))}
-          className={cls(
-            'rounded-md border px-3 py-3 text-left transition',
-            afterHoursDraft.afterHoursEnabled ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
-          )}
-        >
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            {afterHoursDraft.afterHoursEnabled ? <ToggleRight className="h-5 w-5 text-amber-700" /> : <ToggleLeft className="h-5 w-5 text-slate-400" />}
-            Enable off-hours support
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+              {workflowEnabled ? <ToggleRight className="h-5 w-5 text-emerald-700" /> : <ToggleLeft className="h-5 w-5 text-slate-500" />}
+              Live after-hours routing
+            </div>
+            <p className="mt-1 text-xs leading-5 text-amber-900">
+              {workflowEnabled
+                ? 'On because this workflow is enabled. Ticket arrivals can use this workflow when the window matches.'
+                : workflowPublished
+                  ? 'Off because this workflow is disabled. The window preview is still shown for configuration.'
+                  : 'Publish this workflow before it can be enabled for live after-hours routing.'}
+            </p>
           </div>
-          <p className="mt-1 text-xs leading-5 text-slate-500">Turn this off for workspaces that do not offer after-hours support.</p>
-        </button>
+          <button
+            type="button"
+            onClick={onToggleWorkflow}
+            disabled={saving || !workflowPublished}
+            className={cls(
+              'inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
+              workflowEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+            )}
+          >
+            {workflowEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
+            {workflowEnabled ? 'Disable workflow' : workflowPublished ? 'Enable workflow' : 'Publish first'}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
         <button
           type="button"
           onClick={() => setAfterHoursDraft((current) => ({ ...current, holidaysEnabled: !current.holidaysEnabled }))}
@@ -1777,7 +1870,7 @@ function AfterHoursRoutingPanel({
         </button>
       </div>
 
-      <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <AfterHoursSchedulePreview schedule={afterHoursSchedule} loading={afterHoursScheduleLoading} />
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">How this workflow is selected</div>
@@ -1839,6 +1932,63 @@ function AfterHoursRoutingPanel({
           {message.text}
         </div>
       )}
+    </div>
+  );
+}
+
+function AfterHoursRoutingDrawer({
+  open,
+  onClose,
+  workflow,
+  afterHoursDraft,
+  setAfterHoursDraft,
+  afterHoursSchedule,
+  afterHoursScheduleLoading,
+  onSave,
+  onToggleWorkflow,
+  saving,
+  message,
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35">
+      <button
+        type="button"
+        aria-label="Close after-hours options"
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+      />
+      <aside className="relative z-10 flex h-full w-full max-w-3xl flex-col border-l border-slate-200 bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">Workflow-specific</div>
+            <h3 className="text-lg font-semibold text-slate-950">After-hours routing</h3>
+            <p className="mt-1 text-sm text-slate-500">Configure the selected Ticket arrived after-hours workflow without covering the diagram.</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            title="Close"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <AfterHoursRoutingPanel
+            workflow={workflow}
+            afterHoursDraft={afterHoursDraft}
+            setAfterHoursDraft={setAfterHoursDraft}
+            afterHoursSchedule={afterHoursSchedule}
+            afterHoursScheduleLoading={afterHoursScheduleLoading}
+            onSave={onSave}
+            onToggleWorkflow={onToggleWorkflow}
+            saving={saving}
+            message={message}
+          />
+        </div>
+      </aside>
     </div>
   );
 }
@@ -2737,6 +2887,7 @@ export default function NotificationWorkflowsPanel() {
   const [llmSchemaText, setLlmSchemaText] = useState(formatJson(DEFAULT_LLM_OUTPUT_SCHEMA));
   const [llmSchemaError, setLlmSchemaError] = useState(null);
   const [activeGlobalTab, setActiveGlobalTab] = useState('workflows');
+  const [afterHoursDrawerOpen, setAfterHoursDrawerOpen] = useState(false);
   const [signature, setSignature] = useState({ enabled: false, html: '', text: '', maxHtmlBytes: 524288 });
   const [signatureDraft, setSignatureDraft] = useState({ enabled: false, html: '', text: '' });
   const [signatureSaving, setSignatureSaving] = useState(false);
@@ -3024,9 +3175,6 @@ export default function NotificationWorkflowsPanel() {
         type: 'success',
         text: nextEnabled ? 'Mock mode enabled for this workflow' : 'Mock mode disabled for this workflow',
       });
-      if (nextEnabled) {
-        setActiveGlobalTab('mock-audit');
-      }
       await Promise.all([
         refreshHealth(),
         nextEnabled || mockAuditOpen ? loadMockAuditRuns(mockAuditFilters) : Promise.resolve(),
@@ -3071,6 +3219,9 @@ export default function NotificationWorkflowsPanel() {
     || selected?.draftDefinition?.metadata?.scheduleMode === 'after_hours'
     || selected?.publishedDefinition?.metadata?.scheduleMode === 'after_hours';
   const selectedIsPublished = Number(selected?.publishedVersion || 0) > 0;
+  const draftFingerprint = useMemo(() => definitionFingerprint(draft), [draft]);
+  const publishedFingerprint = useMemo(() => definitionFingerprint(selected?.publishedDefinition), [selected?.publishedDefinition]);
+  const hasPublishableChanges = Boolean(selected && draft && (!selectedIsPublished || draftFingerprint !== publishedFingerprint));
   const mockAuditOpen = activeGlobalTab === 'mock-audit';
   const workflowTabActive = activeGlobalTab === 'workflows';
   const llmModeLabel = llmToolPolicy?.mode === 'tools_enabled'
@@ -3130,11 +3281,12 @@ export default function NotificationWorkflowsPanel() {
         ? 'Enable the published workflow before turning on mock mode.'
         : 'Run real workflow and LLM, but do not send email.';
   const afterHoursScheduleDraft = useMemo(() => ({
-    afterHoursEnabled: afterHoursDraft.afterHoursEnabled,
+    afterHoursEnabled: selectedIsAfterHoursWorkflow ? true : afterHoursDraft.afterHoursEnabled,
     holidaysEnabled: afterHoursDraft.holidaysEnabled,
     suppressStandardTicketCreated: afterHoursDraft.suppressStandardTicketCreated,
     offHoursWorkflowKey: afterHoursDraft.offHoursWorkflowKey || AFTER_HOURS_WORKFLOW_KEY,
   }), [
+    selectedIsAfterHoursWorkflow,
     afterHoursDraft.afterHoursEnabled,
     afterHoursDraft.holidaysEnabled,
     afterHoursDraft.suppressStandardTicketCreated,
@@ -3239,6 +3391,10 @@ export default function NotificationWorkflowsPanel() {
 
   async function publishWorkflow() {
     if (!selected) return;
+    if (!hasPublishableChanges) {
+      setMessage({ type: 'success', text: 'No draft changes to publish' });
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {
@@ -3269,11 +3425,16 @@ export default function NotificationWorkflowsPanel() {
 
   async function toggleEnabled() {
     if (!selected) return;
+    const nextEnabled = !selected.isEnabled;
     setSaving(true);
     setMessage(null);
     try {
-      const response = await notificationWorkflowAPI.setEnabled(selected.id, !selected.isEnabled);
+      const response = await notificationWorkflowAPI.setEnabled(selected.id, nextEnabled);
       applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      if (selectedIsAfterHoursWorkflow) {
+        setAfterHoursPolicy((current) => ({ ...current, afterHoursEnabled: response.data.isEnabled === true }));
+        setAfterHoursDraft((current) => ({ ...current, afterHoursEnabled: response.data.isEnabled === true }));
+      }
       setMessage({ type: 'success', text: response.data.isEnabled ? 'Workflow enabled' : 'Workflow disabled' });
       await refreshHealth();
     } catch (error) {
@@ -3556,12 +3717,16 @@ export default function NotificationWorkflowsPanel() {
     setAfterHoursSaving(true);
     setAfterHoursMessage(null);
     try {
-      const response = await notificationWorkflowAPI.updateAfterHoursPolicy(afterHoursDraft);
+      const payload = {
+        ...afterHoursDraft,
+        afterHoursEnabled: selectedIsAfterHoursWorkflow ? selected?.isEnabled === true : afterHoursDraft.afterHoursEnabled,
+      };
+      const response = await notificationWorkflowAPI.updateAfterHoursPolicy(payload);
       const saved = { ...DEFAULT_AFTER_HOURS_POLICY, ...(response.data || {}) };
       setAfterHoursPolicy(saved);
       setAfterHoursDraft(saved);
       setAfterHoursMessage({ type: 'success', text: 'After-hours workflow routing saved' });
-      await refreshAfterHoursSchedule(saved);
+      await refreshAfterHoursSchedule({ ...saved, afterHoursEnabled: selectedIsAfterHoursWorkflow ? true : saved.afterHoursEnabled });
       const listResponse = await notificationWorkflowAPI.list();
       setWorkflows(listResponse.data || []);
     } catch (error) {
@@ -4390,12 +4555,16 @@ export default function NotificationWorkflowsPanel() {
               <button
                 type="button"
                 onClick={publishWorkflow}
-                title={selected?.isEnabled ? 'Publish the current draft update and keep this workflow enabled.' : 'Publish the current draft without enabling live execution.'}
-                disabled={saving || !selected}
+                title={!hasPublishableChanges
+                  ? 'No draft changes to publish.'
+                  : selected?.isEnabled
+                    ? 'Publish the current draft update and keep this workflow enabled.'
+                    : 'Publish the current draft without enabling live execution.'}
+                disabled={saving || !selected || !hasPublishableChanges}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
               >
                 <Upload className="h-4 w-4" />
-              Publish
+                {hasPublishableChanges ? 'Publish' : 'Published'}
               </button>
               <button
                 type="button"
@@ -4495,17 +4664,13 @@ export default function NotificationWorkflowsPanel() {
         {activeGlobalTab === 'workflows' && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {selectedIsAfterHoursWorkflow && (
-              <section className="shrink-0 overflow-y-auto border-b border-amber-100 bg-amber-50/40 px-6 py-4 lg:max-h-[250px]">
-                <AfterHoursRoutingPanel
-                  afterHoursDraft={afterHoursDraft}
-                  setAfterHoursDraft={setAfterHoursDraft}
-                  afterHoursSchedule={afterHoursSchedule}
-                  afterHoursScheduleLoading={afterHoursScheduleLoading}
-                  onSave={saveAfterHoursPolicy}
-                  saving={afterHoursSaving}
-                  message={afterHoursMessage}
-                />
-              </section>
+              <AfterHoursRoutingSummary
+                workflow={selected}
+                afterHoursDraft={afterHoursDraft}
+                afterHoursSchedule={afterHoursSchedule}
+                afterHoursScheduleLoading={afterHoursScheduleLoading}
+                onConfigure={() => setAfterHoursDrawerOpen(true)}
+              />
             )}
 
             <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)]">
@@ -4591,6 +4756,19 @@ export default function NotificationWorkflowsPanel() {
           </div>
         )}
       </div>
+      <AfterHoursRoutingDrawer
+        open={afterHoursDrawerOpen && selectedIsAfterHoursWorkflow}
+        onClose={() => setAfterHoursDrawerOpen(false)}
+        workflow={selected}
+        afterHoursDraft={afterHoursDraft}
+        setAfterHoursDraft={setAfterHoursDraft}
+        afterHoursSchedule={afterHoursSchedule}
+        afterHoursScheduleLoading={afterHoursScheduleLoading}
+        onSave={saveAfterHoursPolicy}
+        onToggleWorkflow={toggleEnabled}
+        saving={saving || afterHoursSaving}
+        message={afterHoursMessage}
+      />
       <FullContentEditorModal
         open={Boolean(contentEditor)}
         title={contentEditor?.title}

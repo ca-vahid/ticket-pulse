@@ -159,6 +159,12 @@ export async function publishWorkflow(workspaceId, id, data = {}, actor = null) 
   const definition = assertValidWorkflowDefinition(workflow.draftDefinition, {
     triggerType: workflow.triggerType,
   });
+  if (
+    workflow.publishedDefinition
+    && JSON.stringify(definition) === JSON.stringify(workflow.publishedDefinition)
+  ) {
+    throw new ValidationError('No draft changes to publish');
+  }
   const validationResult = validateWorkflowDefinition(definition, { triggerType: workflow.triggerType });
   const nextVersion = workflow.publishedVersion + 1;
   const changedBy = actorEmail(actor);

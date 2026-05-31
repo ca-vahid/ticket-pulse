@@ -18,6 +18,7 @@ import {
   enrichEventContextWithNotificationPolicy,
   getNotificationWorkflowSchedulePreview,
   getNotificationWorkflowPolicy,
+  isOffHoursWorkflow,
   updateNotificationWorkflowPolicy,
 } from '../services/notificationWorkflowPolicyService.js';
 import {
@@ -853,6 +854,13 @@ router.post(
       req.body,
       requestActor(req),
     );
+    const policy = await getNotificationWorkflowPolicy(req.workspaceId);
+    if (isOffHoursWorkflow(result.workflow, policy)) {
+      await updateNotificationWorkflowPolicy(req.workspaceId, {
+        ...policy,
+        afterHoursEnabled: result.workflow.isEnabled === true,
+      }, requestActor(req));
+    }
     res.json({ success: true, data: result });
   }),
 );
@@ -873,12 +881,20 @@ router.put(
 router.put(
   '/:id/enabled',
   asyncHandler(async (req, res) => {
+    const nextEnabled = req.body?.enabled === true;
     const workflow = await notificationWorkflowRepository.setWorkflowEnabled(
       req.workspaceId,
       req.params.id,
-      req.body?.enabled === true,
+      nextEnabled,
       requestActor(req),
     );
+    const policy = await getNotificationWorkflowPolicy(req.workspaceId);
+    if (isOffHoursWorkflow(workflow, policy)) {
+      await updateNotificationWorkflowPolicy(req.workspaceId, {
+        ...policy,
+        afterHoursEnabled: workflow.isEnabled === true,
+      }, requestActor(req));
+    }
     res.json({ success: true, data: workflow });
   }),
 );
