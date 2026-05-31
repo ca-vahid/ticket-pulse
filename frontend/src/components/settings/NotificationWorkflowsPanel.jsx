@@ -15,7 +15,6 @@ import {
   Bot,
   CalendarClock,
   CheckCircle2,
-  ChevronDown,
   ChevronUp,
   Code,
   Clipboard,
@@ -1430,125 +1429,122 @@ function PreviewModal({
   );
 }
 
-function SignatureModal({
-  open,
+function SignaturePanel({
   signature,
   draft,
   saving,
   message,
-  onClose,
   onChange,
   onSave,
   onImport,
 }) {
-  if (!open) return null;
   const htmlBytes = new Blob([draft.html || '']).size;
   const maxBytes = signature?.maxHtmlBytes || 524288;
   const tooLarge = htmlBytes > maxBytes;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/45 p-4">
-      <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-md bg-white shadow-2xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Workspace Signature</div>
-            <h3 className="text-lg font-semibold text-gray-900">Email signature HTML</h3>
-            <p className="text-sm text-gray-500">This signature is appended to workflow emails for the current workspace.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-              <UploadCloud className="h-4 w-4" />
-              Upload HTML
-              <input
-                type="file"
-                accept=".html,.htm,text/html"
-                onChange={(event) => onImport(event.target.files?.[0])}
-                className="hidden"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={onSave}
-              disabled={saving || tooLarge}
-              className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+    <section className="min-h-0 flex-1 overflow-auto bg-white px-6 py-4">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <Mail className="h-4 w-4 text-slate-700" />
+            <h3 className="text-sm font-semibold text-slate-950">Workspace signature</h3>
+            <span className={cls(
+              'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+              draft.enabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600',
+            )}
             >
-              {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save signature
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              <XCircle className="h-4 w-4" />
-              Close
-            </button>
+              {draft.enabled ? 'On' : 'Off'}
+            </span>
           </div>
+          <p className="mt-1 text-xs text-slate-500">This signature is appended to workflow emails for the current workspace.</p>
         </div>
-        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
-          <section className="min-h-0 border-r border-gray-200 p-4">
-            <label className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-700">
-              <input
-                type="checkbox"
-                checked={draft.enabled}
-                onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600"
-              />
-              Enable workspace signature
-            </label>
-            <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
-              <span>HTML source</span>
-              <span className={tooLarge ? 'font-semibold text-red-600' : ''}>{Math.round(htmlBytes / 1024)} KB / {Math.round(maxBytes / 1024)} KB</span>
-            </div>
-            <div className="overflow-hidden rounded-md border border-gray-200">
-              <MonacoEditor
-                height="calc(100vh - 280px)"
-                defaultLanguage="html"
-                value={draft.html || ''}
-                onChange={(value) => onChange({ ...draft, html: value || '', text: draft.text || stripHtmlClient(value || '') })}
-                options={{
-                  minimap: { enabled: false },
-                  wordWrap: 'on',
-                  fontSize: 12,
-                  lineNumbers: 'off',
-                  scrollBeyondLastLine: false,
-                }}
-              />
-            </div>
-            <label className="mt-3 block text-xs font-medium uppercase text-gray-500">Plain text fallback</label>
-            <textarea
-              value={draft.text || ''}
-              onChange={(event) => onChange({ ...draft, text: event.target.value })}
-              className="mt-1 h-24 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+        <div className="flex flex-wrap gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            <UploadCloud className="h-4 w-4" />
+            Upload HTML
+            <input
+              type="file"
+              accept=".html,.htm,text/html"
+              onChange={(event) => onImport(event.target.files?.[0])}
+              className="hidden"
             />
-          </section>
-          <section className="min-h-0 overflow-auto p-4">
-            {message && (
-              <div className={cls(
-                'mb-3 rounded-md border px-3 py-2 text-sm',
-                message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
-              )}
-              >
-                {message.text}
-              </div>
-            )}
-            {tooLarge && (
-              <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                Signature HTML is too large. Reduce embedded image size before saving.
-              </div>
-            )}
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Preview</div>
-            <div className="min-h-[420px] rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-800">
-              {draft.html ? (
-                <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(draft.html) }} />
-              ) : (
-                <div className="flex h-64 items-center justify-center text-gray-500">Upload or paste signature HTML.</div>
-              )}
-            </div>
-          </section>
+          </label>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving || tooLarge}
+            className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+          >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save signature
+          </button>
         </div>
       </div>
-    </div>
+
+      <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(360px,0.95fr)_minmax(420px,1.05fr)]">
+        <section className="min-h-0 rounded-md border border-slate-200 bg-slate-50 p-4">
+          <label className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-700">
+            <input
+              type="checkbox"
+              checked={draft.enabled}
+              onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600"
+            />
+              Enable workspace signature
+          </label>
+          <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
+            <span>HTML source</span>
+            <span className={tooLarge ? 'font-semibold text-red-600' : ''}>{Math.round(htmlBytes / 1024)} KB / {Math.round(maxBytes / 1024)} KB</span>
+          </div>
+          <div className="overflow-hidden rounded-md border border-gray-200">
+            <MonacoEditor
+              height="360px"
+              defaultLanguage="html"
+              value={draft.html || ''}
+              onChange={(value) => onChange({ ...draft, html: value || '', text: draft.text || stripHtmlClient(value || '') })}
+              options={{
+                minimap: { enabled: false },
+                wordWrap: 'on',
+                fontSize: 12,
+                lineNumbers: 'off',
+                scrollBeyondLastLine: false,
+              }}
+            />
+          </div>
+          <label className="mt-3 block text-xs font-medium uppercase text-gray-500">Plain text fallback</label>
+          <textarea
+            value={draft.text || ''}
+            onChange={(event) => onChange({ ...draft, text: event.target.value })}
+            className="mt-1 h-24 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          />
+        </section>
+        <section className="min-h-0 rounded-md border border-slate-200 bg-white p-4">
+          {message && (
+            <div className={cls(
+              'mb-3 rounded-md border px-3 py-2 text-sm',
+              message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+            )}
+            >
+              {message.text}
+            </div>
+          )}
+          {tooLarge && (
+            <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                Signature HTML is too large. Reduce embedded image size before saving.
+            </div>
+          )}
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Preview</div>
+          <div className="min-h-[360px] rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-800">
+            {draft.html ? (
+              <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(draft.html) }} />
+            ) : (
+              <div className="flex h-64 items-center justify-center text-gray-500">Upload or paste signature HTML.</div>
+            )}
+          </div>
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -1580,6 +1576,44 @@ function WorkflowStatus({ workflow }) {
         {isEnabled ? 'Enabled' : 'Disabled'}
       </span>
     </span>
+  );
+}
+
+function MailSettingsTabButton({ tab, active, onClick }) {
+  const Icon = tab.icon;
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cls(
+        'group flex h-[70px] min-w-0 items-center gap-3 rounded-lg border-2 px-3 py-2 text-left transition',
+        active
+          ? 'border-slate-900 bg-white text-slate-950 shadow-md ring-2 ring-slate-900/10'
+          : 'border-slate-300 bg-white/65 text-slate-600 shadow-sm hover:border-slate-400 hover:bg-white hover:text-slate-900',
+      )}
+    >
+      <span
+        className={cls(
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-md border',
+          active ? tab.activeIconClass : 'border-slate-200 bg-white text-slate-500 group-hover:text-slate-700',
+        )}
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold">{tab.label}</span>
+          {tab.badge && (
+            <span className={cls('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', tab.badgeClass)}>
+              {tab.badge}
+            </span>
+          )}
+        </span>
+        <span className="mt-0.5 hidden truncate text-xs text-slate-500 xl:block">{tab.description}</span>
+      </span>
+    </button>
   );
 }
 
@@ -1908,7 +1942,7 @@ function LlmContextToolsPanel({
   ];
 
   return (
-    <section className="shrink-0 border-b border-violet-100 bg-white px-6 py-4">
+    <section className="min-h-0 flex-1 bg-white px-6 py-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.9fr)_minmax(420px,1.1fr)]">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2273,6 +2307,7 @@ function MockAuditPanel({
   onRefresh,
   onSelectRun,
   onClose,
+  tabbed = false,
 }) {
   const activeRun = selectedRun || runs?.[0] || null;
   const activeDelivery = auditDeliveryForRun(activeRun);
@@ -2287,7 +2322,12 @@ function MockAuditPanel({
   const bodyText = activeDelivery?.textBody || null;
 
   return (
-    <section className="shrink-0 border-b border-sky-100 bg-gradient-to-r from-sky-50 via-white to-slate-50 px-6 py-4">
+    <section
+      className={cls(
+        'bg-gradient-to-r from-sky-50 via-white to-slate-50 px-6 py-4',
+        tabbed ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'shrink-0 border-b border-sky-100',
+      )}
+    >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -2309,14 +2349,16 @@ function MockAuditPanel({
             {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Refresh
           </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-          >
-            <ChevronUp className="h-3.5 w-3.5" />
-            Collapse
-          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <ChevronUp className="h-3.5 w-3.5" />
+              Collapse
+            </button>
+          )}
         </div>
       </div>
 
@@ -2378,7 +2420,12 @@ function MockAuditPanel({
         </div>
       )}
 
-      <div className="grid min-h-[300px] max-h-[430px] gap-4 overflow-hidden xl:grid-cols-[minmax(330px,0.9fr)_minmax(0,1.3fr)]">
+      <div
+        className={cls(
+          'grid gap-4 overflow-hidden xl:grid-cols-[minmax(330px,0.9fr)_minmax(0,1.3fr)]',
+          tabbed ? 'min-h-0 flex-1' : 'min-h-[300px] max-h-[430px]',
+        )}
+      >
         <div className="min-h-0 overflow-auto rounded-md border border-sky-100 bg-white/80">
           {loading && (
             <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-500">
@@ -2689,7 +2736,7 @@ export default function NotificationWorkflowsPanel() {
   const [templateTab, setTemplateTab] = useState('rich');
   const [llmSchemaText, setLlmSchemaText] = useState(formatJson(DEFAULT_LLM_OUTPUT_SCHEMA));
   const [llmSchemaError, setLlmSchemaError] = useState(null);
-  const [signatureModalOpen, setSignatureModalOpen] = useState(false);
+  const [activeGlobalTab, setActiveGlobalTab] = useState('workflows');
   const [signature, setSignature] = useState({ enabled: false, html: '', text: '', maxHtmlBytes: 524288 });
   const [signatureDraft, setSignatureDraft] = useState({ enabled: false, html: '', text: '' });
   const [signatureSaving, setSignatureSaving] = useState(false);
@@ -2705,7 +2752,6 @@ export default function NotificationWorkflowsPanel() {
   const [llmToolDraft, setLlmToolDraft] = useState(DEFAULT_LLM_TOOL_POLICY);
   const [llmToolSaving, setLlmToolSaving] = useState(false);
   const [llmToolMessage, setLlmToolMessage] = useState(null);
-  const [llmToolsOpen, setLlmToolsOpen] = useState(false);
   const [llmContextPreviewTicketId, setLlmContextPreviewTicketId] = useState('');
   const [llmContextPreview, setLlmContextPreview] = useState(null);
   const [llmContextPreviewLoading, setLlmContextPreviewLoading] = useState(false);
@@ -2713,13 +2759,12 @@ export default function NotificationWorkflowsPanel() {
   const [llmToolTestLoading, setLlmToolTestLoading] = useState(false);
   const [contentEditor, setContentEditor] = useState(null);
   const [contentEditorValue, setContentEditorValue] = useState('');
-  const [mockAuditOpen, setMockAuditOpen] = useState(false);
   const [mockAuditRuns, setMockAuditRuns] = useState([]);
   const [mockAuditLoading, setMockAuditLoading] = useState(false);
   const [mockAuditError, setMockAuditError] = useState(null);
   const [selectedMockRun, setSelectedMockRun] = useState(null);
   const [mockAuditFilters, setMockAuditFilters] = useState({
-    workflowId: 'selected',
+    workflowId: 'all',
     range: '7d',
     status: 'all',
     search: '',
@@ -2980,7 +3025,7 @@ export default function NotificationWorkflowsPanel() {
         text: nextEnabled ? 'Mock mode enabled for this workflow' : 'Mock mode disabled for this workflow',
       });
       if (nextEnabled) {
-        setMockAuditOpen(true);
+        setActiveGlobalTab('mock-audit');
       }
       await Promise.all([
         refreshHealth(),
@@ -3026,6 +3071,55 @@ export default function NotificationWorkflowsPanel() {
     || selected?.draftDefinition?.metadata?.scheduleMode === 'after_hours'
     || selected?.publishedDefinition?.metadata?.scheduleMode === 'after_hours';
   const selectedIsPublished = Number(selected?.publishedVersion || 0) > 0;
+  const mockAuditOpen = activeGlobalTab === 'mock-audit';
+  const workflowTabActive = activeGlobalTab === 'workflows';
+  const llmModeLabel = llmToolPolicy?.mode === 'tools_enabled'
+    ? 'Tools'
+    : llmToolPolicy?.mode === 'off'
+      ? 'Off'
+      : 'Context';
+  const globalTabs = [
+    {
+      id: 'workflows',
+      label: 'Notification Workflows',
+      description: 'Build, preview, publish, and enable live workflow diagrams.',
+      icon: Send,
+      activeIconClass: 'border-blue-200 bg-blue-50 text-blue-700',
+      badge: workflows.length ? String(workflows.length) : null,
+      badgeClass: 'bg-blue-50 text-blue-700',
+    },
+    {
+      id: 'llm-context',
+      label: 'LLM Context',
+      description: 'Workspace evidence and read-only tools for generated mail.',
+      icon: Bot,
+      activeIconClass: 'border-violet-200 bg-violet-50 text-violet-700',
+      badge: llmModeLabel,
+      badgeClass: llmToolPolicy?.mode === 'tools_enabled'
+        ? 'bg-violet-50 text-violet-700'
+        : llmToolPolicy?.mode === 'off'
+          ? 'bg-slate-100 text-slate-500'
+          : 'bg-violet-50 text-violet-700',
+    },
+    {
+      id: 'signature',
+      label: 'Signature',
+      description: 'Workspace footer appended to notification emails.',
+      icon: Mail,
+      activeIconClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      badge: signatureDraft?.enabled ? 'On' : 'Off',
+      badgeClass: signatureDraft?.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
+    },
+    {
+      id: 'mock-audit',
+      label: 'Mock Audit',
+      description: 'Review suppressed live sends across workflows.',
+      icon: FlaskConical,
+      activeIconClass: 'border-sky-200 bg-sky-50 text-sky-700',
+      badge: `${health?.mockedDeliveries7d || 0} 7d`,
+      badgeClass: 'bg-sky-50 text-sky-700',
+    },
+  ];
   const canEnableMockMode = selectedIsPublished && selected?.isEnabled === true;
   const canToggleMockMode = Boolean(selected?.mockModeEnabled || canEnableMockMode);
   const mockModeButtonTitle = selected?.mockModeEnabled
@@ -4215,13 +4309,13 @@ export default function NotificationWorkflowsPanel() {
   return (
     <div className="tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-white/70 sm:m-4">
       <div className="shrink-0 border-b border-white/70 px-6 py-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-gray-900">Notification Workflows</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Mail Settings</h2>
               {selected?.mockModeEnabled && <MockModeBadge />}
             </div>
-            <p className="text-sm text-gray-500">Workspace-scoped email workflows for ticket lifecycle events.</p>
+            <p className="text-sm text-gray-500">Workspace-scoped notification workflows, LLM evidence, signature, and mock audit.</p>
           </div>
           {health && (
             <div className="grid grid-cols-2 gap-2 text-xs xl:grid-cols-4">
@@ -4247,107 +4341,90 @@ export default function NotificationWorkflowsPanel() {
               </div>
             </div>
           )}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setSignatureModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              <Mail className="h-4 w-4" />
-              Signature
-              {signature?.enabled && <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">On</span>}
-            </button>
-            <button
-              type="button"
-              onClick={() => setLlmToolsOpen((current) => !current)}
-              className={cls(
-                'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium',
-                llmToolsOpen ? 'border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50',
-              )}
-            >
-              <Bot className="h-4 w-4" />
-              LLM context
-              <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-                {llmToolPolicy?.mode === 'tools_enabled' ? 'Tools' : llmToolPolicy?.mode === 'off' ? 'Off' : 'Context'}
-              </span>
-              {llmToolsOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => loadWorkflows(selected?.id)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </button>
-            <button
-              type="button"
-              onClick={saveDraft}
-              disabled={saving || !selected}
-              className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-            >
-              <Save className="h-4 w-4" />
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={openPreviewModal}
-              disabled={saving || previewRunning || !selected}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              {previewRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {previewRunning ? 'Previewing' : 'Preview'}
-            </button>
-            <button
-              type="button"
-              onClick={publishWorkflow}
-              title={selected?.isEnabled ? 'Publish the current draft update and keep this workflow enabled.' : 'Publish the current draft without enabling live execution.'}
-              disabled={saving || !selected}
-              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
-            >
-              <Upload className="h-4 w-4" />
-              {selected?.isEnabled ? 'Publish update' : 'Publish'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setMockAuditOpen((current) => !current)}
-              disabled={!selected}
-              className={cls(
-                'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-semibold disabled:opacity-50',
-                mockAuditOpen ? 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50',
-              )}
-            >
-              <History className="h-4 w-4" />
-              Mock Audit
-              {mockAuditOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            </button>
-            <button
-              type="button"
-              onClick={toggleMockMode}
-              disabled={saving || !selected || !canToggleMockMode}
-              title={mockModeButtonTitle}
-              className={cls(
-                'inline-flex h-10 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
-                selected?.mockModeEnabled ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-              )}
-            >
-              {selected?.mockModeEnabled ? <ToggleRight className="h-4 w-4" /> : <FlaskConical className="h-4 w-4" />}
-              <span>{selected?.mockModeEnabled ? 'Mock on' : 'Mock mode'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={toggleEnabled}
-              disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
-              title={selected?.isEnabled ? 'Disable live workflow execution.' : selectedIsPublished ? 'Enable the latest published workflow version.' : 'Publish the workflow before enabling live execution.'}
-              className={cls(
-                'inline-flex h-10 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
-                selected?.isEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-              )}
-            >
-              {selected?.isEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
-              {selected?.isEnabled ? 'Disable' : selectedIsPublished ? 'Enable' : 'Publish first'}
-            </button>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <div
+            role="tablist"
+            aria-label="Mail settings sections"
+            className="grid grid-cols-1 gap-2 rounded-xl border-2 border-slate-300 bg-slate-100/90 p-2 shadow-inner sm:grid-cols-2 xl:grid-cols-4"
+          >
+            {globalTabs.map((tab) => (
+              <MailSettingsTabButton
+                key={tab.id}
+                tab={tab}
+                active={activeGlobalTab === tab.id}
+                onClick={() => setActiveGlobalTab(tab.id)}
+              />
+            ))}
           </div>
+
+          {workflowTabActive && (
+            <div className="flex min-h-[42px] flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => loadWorkflows(selected?.id)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <RefreshCw className="h-4 w-4" />
+              Refresh
+              </button>
+              <button
+                type="button"
+                onClick={saveDraft}
+                disabled={saving || !selected}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+              Save
+              </button>
+              <button
+                type="button"
+                onClick={openPreviewModal}
+                disabled={saving || previewRunning || !selected}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {previewRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                {previewRunning ? 'Previewing' : 'Preview'}
+              </button>
+              <button
+                type="button"
+                onClick={publishWorkflow}
+                title={selected?.isEnabled ? 'Publish the current draft update and keep this workflow enabled.' : 'Publish the current draft without enabling live execution.'}
+                disabled={saving || !selected}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+              >
+                <Upload className="h-4 w-4" />
+              Publish
+              </button>
+              <button
+                type="button"
+                onClick={toggleMockMode}
+                disabled={saving || !selected || !canToggleMockMode}
+                title={mockModeButtonTitle}
+                className={cls(
+                  'inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
+                  selected?.mockModeEnabled ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+                )}
+              >
+                {selected?.mockModeEnabled ? <ToggleRight className="h-4 w-4" /> : <FlaskConical className="h-4 w-4" />}
+                <span>{selected?.mockModeEnabled ? 'Mock on' : 'Mock mode'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={toggleEnabled}
+                disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
+                title={selected?.isEnabled ? 'Disable live workflow execution.' : selectedIsPublished ? 'Enable the latest published workflow version.' : 'Publish the workflow before enabling live execution.'}
+                className={cls(
+                  'inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
+                  selected?.isEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+                )}
+              >
+                {selected?.isEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
+                {selected?.isEnabled ? 'Disable' : selectedIsPublished ? 'Enable' : 'Publish first'}
+              </button>
+            </div>
+          )}
         </div>
         {message && (
           <div
@@ -4362,44 +4439,44 @@ export default function NotificationWorkflowsPanel() {
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-        {selectedIsAfterHoursWorkflow && (
-          <section className="shrink-0 overflow-y-auto border-b border-amber-100 bg-amber-50/40 px-6 py-4 lg:max-h-[250px]">
-            <AfterHoursRoutingPanel
-              afterHoursDraft={afterHoursDraft}
-              setAfterHoursDraft={setAfterHoursDraft}
-              afterHoursSchedule={afterHoursSchedule}
-              afterHoursScheduleLoading={afterHoursScheduleLoading}
-              onSave={saveAfterHoursPolicy}
-              saving={afterHoursSaving}
-              message={afterHoursMessage}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {activeGlobalTab === 'llm-context' && (
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <LlmContextToolsPanel
+              policy={llmToolPolicy}
+              draft={llmToolDraft}
+              catalog={llmToolCatalog}
+              saving={llmToolSaving}
+              message={llmToolMessage}
+              previewTicketId={llmContextPreviewTicketId}
+              onPreviewTicketIdChange={setLlmContextPreviewTicketId}
+              preview={llmContextPreview}
+              previewLoading={llmContextPreviewLoading}
+              testRun={llmToolTestRun}
+              testLoading={llmToolTestLoading}
+              onChange={updateLlmToolDraft}
+              onSettingChange={updateLlmToolSetting}
+              onToggleTool={toggleLlmTool}
+              onSave={saveLlmToolPolicy}
+              onPreview={previewLlmContext}
+              onTestRun={runLlmToolTest}
             />
-          </section>
+          </div>
         )}
 
-        {llmToolsOpen && (
-          <LlmContextToolsPanel
-            policy={llmToolPolicy}
-            draft={llmToolDraft}
-            catalog={llmToolCatalog}
-            saving={llmToolSaving}
-            message={llmToolMessage}
-            previewTicketId={llmContextPreviewTicketId}
-            onPreviewTicketIdChange={setLlmContextPreviewTicketId}
-            preview={llmContextPreview}
-            previewLoading={llmContextPreviewLoading}
-            testRun={llmToolTestRun}
-            testLoading={llmToolTestLoading}
-            onChange={updateLlmToolDraft}
-            onSettingChange={updateLlmToolSetting}
-            onToggleTool={toggleLlmTool}
-            onSave={saveLlmToolPolicy}
-            onPreview={previewLlmContext}
-            onTestRun={runLlmToolTest}
+        {activeGlobalTab === 'signature' && (
+          <SignaturePanel
+            signature={signature}
+            draft={signatureDraft}
+            saving={signatureSaving}
+            message={signatureMessage}
+            onChange={setSignatureDraft}
+            onSave={saveSignature}
+            onImport={importSignatureFile}
           />
         )}
 
-        {mockAuditOpen && (
+        {activeGlobalTab === 'mock-audit' && (
           <MockAuditPanel
             workflows={workflows}
             selectedWorkflow={selected}
@@ -4411,95 +4488,108 @@ export default function NotificationWorkflowsPanel() {
             onFiltersChange={setMockAuditFilters}
             onRefresh={() => loadMockAuditRuns(mockAuditFilters)}
             onSelectRun={setSelectedMockRun}
-            onClose={() => setMockAuditOpen(false)}
+            tabbed
           />
         )}
 
-        <div className={cls(
-          'grid min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)]',
-          llmToolsOpen || mockAuditOpen || selectedIsAfterHoursWorkflow
-            ? 'h-[560px] shrink-0'
-            : 'flex-1',
-        )}>
-          <aside className="z-10 min-h-0 overflow-y-auto border-r border-gray-200 bg-slate-50/90">
-            <div className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">Workspace Workflows</div>
-            <WorkflowList workflows={workflows} selectedId={selected?.id} onSelect={loadWorkflow} />
-          </aside>
-
-          <PanelGroup
-            id="ticket-pulse-notification-workflow-editor"
-            orientation="horizontal"
-            defaultLayout={editorLayout.defaultLayout}
-            onLayoutChanged={editorLayout.onLayoutChanged}
-            className="min-h-0 min-w-0"
-          >
-            <Panel id="workflow-canvas" minSize="50%" defaultSize="62%">
-              <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200">
-                <NodePalette
-                  definition={draft}
-                  onAddLlm={addLlmNode}
-                  onRemoveNode={removeSelectedNode}
-                  showMiniMap={showMiniMap}
-                  onToggleMiniMap={() => setShowMiniMap((current) => !current)}
+        {activeGlobalTab === 'workflows' && (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {selectedIsAfterHoursWorkflow && (
+              <section className="shrink-0 overflow-y-auto border-b border-amber-100 bg-amber-50/40 px-6 py-4 lg:max-h-[250px]">
+                <AfterHoursRoutingPanel
+                  afterHoursDraft={afterHoursDraft}
+                  setAfterHoursDraft={setAfterHoursDraft}
+                  afterHoursSchedule={afterHoursSchedule}
+                  afterHoursScheduleLoading={afterHoursScheduleLoading}
+                  onSave={saveAfterHoursPolicy}
+                  saving={afterHoursSaving}
+                  message={afterHoursMessage}
                 />
-                <div className="relative min-h-[360px] flex-1 overflow-hidden bg-gray-50">
-                  {draft ? (
-                    <ReactFlow
-                      nodes={flowNodes}
-                      edges={flowEdges}
-                      fitView
-                      minZoom={0.25}
-                      maxZoom={1.6}
-                      onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-                      onNodesChange={handleFlowNodesChange}
-                    >
-                      <FlowMiniMap
-                        visible={showMiniMap}
-                        nodes={flowNodes}
-                        selectedNodeId={selectedNodeId}
-                        onClose={() => setShowMiniMap(false)}
-                      />
-                      <Controls />
-                      <Background gap={18} color="#e5e7eb" />
-                    </ReactFlow>
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-sm text-gray-500">Select a workflow</div>
-                  )}
-                </div>
-              </main>
-            </Panel>
+              </section>
+            )}
 
-            <PanelResizeHandle id="workflow-editor-resizer" className="w-1 bg-gray-100 transition hover:bg-blue-300" />
-
-            <Panel id="workflow-inspector" minSize="30%" maxSize="50%" defaultSize="38%">
-              <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-white">
-                <div className="shrink-0 border-b border-gray-200 px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Inspector</div>
-                      <h3 className="text-sm font-semibold text-gray-900">{selectedNode ? NODE_LABELS[selectedNode.type] || selectedNode.type : 'No node selected'}</h3>
-                    </div>
-                    {selectedNode?.type === 'llm_generate' && (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
-                        <Bot className="h-3.5 w-3.5" />
-                        Auto send
-                      </span>
-                    )}
-                    {selectedNode?.type === 'send_email' && (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-                        <Send className="h-3.5 w-3.5" />
-                        Email
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-                  {renderInspector()}
-                </div>
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)]">
+              <aside className="z-10 min-h-0 overflow-y-auto border-r border-gray-200 bg-slate-50/90">
+                <div className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">Workspace Workflows</div>
+                <WorkflowList workflows={workflows} selectedId={selected?.id} onSelect={loadWorkflow} />
               </aside>
-            </Panel>
-          </PanelGroup>
-        </div>
+
+              <PanelGroup
+                id="ticket-pulse-notification-workflow-editor"
+                orientation="horizontal"
+                defaultLayout={editorLayout.defaultLayout}
+                onLayoutChanged={editorLayout.onLayoutChanged}
+                className="min-h-0 min-w-0"
+              >
+                <Panel id="workflow-canvas" minSize="50%" defaultSize="62%">
+                  <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200">
+                    <NodePalette
+                      definition={draft}
+                      onAddLlm={addLlmNode}
+                      onRemoveNode={removeSelectedNode}
+                      showMiniMap={showMiniMap}
+                      onToggleMiniMap={() => setShowMiniMap((current) => !current)}
+                    />
+                    <div className="relative min-h-[360px] flex-1 overflow-hidden bg-gray-50">
+                      {draft ? (
+                        <ReactFlow
+                          nodes={flowNodes}
+                          edges={flowEdges}
+                          fitView
+                          minZoom={0.25}
+                          maxZoom={1.6}
+                          onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
+                          onNodesChange={handleFlowNodesChange}
+                        >
+                          <FlowMiniMap
+                            visible={showMiniMap}
+                            nodes={flowNodes}
+                            selectedNodeId={selectedNodeId}
+                            onClose={() => setShowMiniMap(false)}
+                          />
+                          <Controls />
+                          <Background gap={18} color="#e5e7eb" />
+                        </ReactFlow>
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-sm text-gray-500">Select a workflow</div>
+                      )}
+                    </div>
+                  </main>
+                </Panel>
+
+                <PanelResizeHandle id="workflow-editor-resizer" className="w-1 bg-gray-100 transition hover:bg-blue-300" />
+
+                <Panel id="workflow-inspector" minSize="30%" maxSize="50%" defaultSize="38%">
+                  <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-white">
+                    <div className="shrink-0 border-b border-gray-200 px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Inspector</div>
+                          <h3 className="text-sm font-semibold text-gray-900">{selectedNode ? NODE_LABELS[selectedNode.type] || selectedNode.type : 'No node selected'}</h3>
+                        </div>
+                        {selectedNode?.type === 'llm_generate' && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
+                            <Bot className="h-3.5 w-3.5" />
+                        Auto send
+                          </span>
+                        )}
+                        {selectedNode?.type === 'send_email' && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+                            <Send className="h-3.5 w-3.5" />
+                        Email
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+                      {renderInspector()}
+                    </div>
+                  </aside>
+                </Panel>
+              </PanelGroup>
+            </div>
+          </div>
+        )}
       </div>
       <FullContentEditorModal
         open={Boolean(contentEditor)}
@@ -4553,17 +4643,6 @@ export default function NotificationWorkflowsPanel() {
         onSendTestEmail={sendPreviewTestEmail}
         forceActionLinks={forcePreviewActionLinks}
         onForceActionLinksChange={setForcePreviewActionLinks}
-      />
-      <SignatureModal
-        open={signatureModalOpen}
-        signature={signature}
-        draft={signatureDraft}
-        saving={signatureSaving}
-        message={signatureMessage}
-        onClose={() => setSignatureModalOpen(false)}
-        onChange={setSignatureDraft}
-        onSave={saveSignature}
-        onImport={importSignatureFile}
       />
     </div>
   );
