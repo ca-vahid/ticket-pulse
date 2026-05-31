@@ -94,6 +94,11 @@ function uniqueEmails(values) {
   return result;
 }
 
+function excludeExistingEmails(values, existingValues) {
+  const existing = new Set((existingValues || []).map((email) => String(email || '').trim().toLowerCase()).filter(Boolean));
+  return (values || []).filter((email) => !existing.has(String(email || '').trim().toLowerCase()));
+}
+
 function stripHtml(value) {
   return String(value || '')
     .replace(/<br\s*\/?>/gi, '\n')
@@ -717,6 +722,12 @@ function recipientFromToken(token, context, customEmails) {
   if (value === 'requester') return [context.requester?.email];
   if (value === 'assigned_agent') return [context.assignedAgent?.email];
   if (value === 'previous_agent') return [context.previousAgent?.email];
+  if (value === 'original_ccs') {
+    return [
+      ...(Array.isArray(context.ticket?.ccEmails) ? context.ticket.ccEmails : []),
+      ...(Array.isArray(context.ticket?.replyCcEmails) ? context.ticket.replyCcEmails : []),
+    ];
+  }
   if (value === 'custom_emails') return customEmails;
   if (value.includes('@')) return [value];
   return [];
@@ -866,10 +877,13 @@ async function executeNode({
 
   if (node.type === 'recipient_resolver') {
     const customEmails = Array.isArray(node.data?.customEmails) ? node.data.customEmails : [];
+    const to = resolveRecipientList(node.data?.to || ['requester'], eventContext, customEmails);
+    const cc = excludeExistingEmails(resolveRecipientList(node.data?.cc || [], eventContext, customEmails), to);
+    const bcc = excludeExistingEmails(resolveRecipientList(node.data?.bcc || [], eventContext, customEmails), [...to, ...cc]);
     const recipients = {
-      to: resolveRecipientList(node.data?.to || ['requester'], eventContext, customEmails),
-      cc: resolveRecipientList(node.data?.cc || [], eventContext, customEmails),
-      bcc: resolveRecipientList(node.data?.bcc || [], eventContext, customEmails),
+      to,
+      cc,
+      bcc,
     };
     state.recipients = recipients;
     return { recipients };
@@ -1031,8 +1045,8 @@ async function executeNode({
     const email = appendSignatureToEmail(state.email || {}, signature);
     state.email = email;
     const toRecipients = uniqueEmails(recipients.to || []);
-    const ccRecipients = uniqueEmails(recipients.cc || []);
-    const bccRecipients = uniqueEmails(recipients.bcc || []);
+    const ccRecipients = excludeExistingEmails(uniqueEmails(recipients.cc || []), toRecipients);
+    const bccRecipients = excludeExistingEmails(uniqueEmails(recipients.bcc || []), [...toRecipients, ...ccRecipients]);
     const subject = email.subject || node.data?.subject || 'Ticket Pulse notification';
     const htmlBody = email.html || null;
     const textBody = email.text || stripHtml(htmlBody);

@@ -78,6 +78,10 @@ function priorityLabel(ticket) {
   }[Number(ticket?.priority)] || String(ticket?.priority || '');
 }
 
+function emailList(value) {
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
 function parsePriorityFilter(value) {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw || raw === 'all') return null;
@@ -120,6 +124,10 @@ function serializePreviewTicket(ticket) {
     priority: ticket.priority,
     priorityLabel: priorityLabel(ticket),
     isNoise: ticket.isNoise === true,
+    toEmails: emailList(ticket.toEmails),
+    ccEmails: emailList(ticket.ccEmails),
+    replyCcEmails: emailList(ticket.replyCcEmails),
+    fwdEmails: emailList(ticket.fwdEmails),
     category: ticket.ticketCategory || ticket.category || null,
     subCategory: ticket.subCategory || null,
     tpSkill: ticket.tpSkill || null,
@@ -205,6 +213,10 @@ async function buildPreviewEventContext({ ticket, triggerType }) {
       priority: ticket.priority,
       priorityLabel: priorityLabel(ticket),
       assessedPriority: ticket.assessedPriority || null,
+      toEmails: emailList(ticket.toEmails),
+      ccEmails: emailList(ticket.ccEmails),
+      replyCcEmails: emailList(ticket.replyCcEmails),
+      fwdEmails: emailList(ticket.fwdEmails),
       category: ticket.category,
       subCategory: ticket.subCategory,
       ticketCategory: ticket.ticketCategory,

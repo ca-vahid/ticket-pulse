@@ -238,6 +238,10 @@ model Ticket {
 
   // Additional metadata
   source                Int?      // 1=Email, 2=Portal, 3=Phone, etc.
+  toEmails              String[]  @default([]) @map("to_emails")
+  ccEmails              String[]  @default([]) @map("cc_emails")
+  replyCcEmails         String[]  @default([]) @map("reply_cc_emails")
+  fwdEmails             String[]  @default([]) @map("fwd_emails")
   category              String?   @db.VarChar(255)
   subCategory           String?   @db.VarChar(255) @map("sub_category")
   ticketCategory        String?   @db.VarChar(100) @map("ticket_category") // Custom field: security (e.g., BST, GIS, etc.)
