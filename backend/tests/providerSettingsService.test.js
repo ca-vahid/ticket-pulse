@@ -21,6 +21,7 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({
 }));
 
 const { default: providerSettingsService } = await import('../src/services/aiProviders/providerSettingsService.js');
+const { AI_OPERATIONS } = await import('../src/utils/aiProviders.js');
 
 describe('providerSettingsService', () => {
   beforeEach(() => {
@@ -33,12 +34,12 @@ describe('providerSettingsService', () => {
     prismaMock.aiProviderSetting.findMany
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
-    prismaMock.aiProviderSetting.createMany.mockResolvedValue({ count: 8 });
+    prismaMock.aiProviderSetting.createMany.mockResolvedValue({ count: AI_OPERATIONS.length });
 
     await providerSettingsService.listSettings(7);
 
     const created = prismaMock.aiProviderSetting.createMany.mock.calls[0][0].data;
-    expect(created).toHaveLength(8);
+    expect(created).toHaveLength(AI_OPERATIONS.length);
     expect(created.every((row) => row.workspaceId === 7)).toBe(true);
     expect(created.find((row) => row.operation === 'assignment_pipeline')).toMatchObject({
       primaryProvider: 'anthropic',
@@ -51,6 +52,12 @@ describe('providerSettingsService', () => {
       primaryModel: 'claude-haiku-4-5-20251001',
     });
     expect(created.find((row) => row.operation === 'autoresponse_generation')).toMatchObject({
+      primaryProvider: 'openai',
+      primaryModel: 'gpt-5.5',
+      fallbackProvider: 'anthropic',
+      fallbackModel: 'claude-sonnet-4-6',
+    });
+    expect(created.find((row) => row.operation === 'notification_workflow_generation')).toMatchObject({
       primaryProvider: 'openai',
       primaryModel: 'gpt-5.5',
       fallbackProvider: 'anthropic',

@@ -1,6 +1,6 @@
 {
   "name": "ticket-pulse-backend",
-  "version": "2.55.0",
+  "version": "2.60.0",
   "type": "module",
   "description": "FreshService Real-Time IT Dashboard - Backend API",
   "main": "src/app.js",
@@ -38,12 +38,15 @@
     "express": "^4.19.2",
     "express-session": "^1.18.0",
     "helmet": "^7.1.0",
+    "json-logic-js": "^2.0.5",
     "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^3.2.2",
+    "liquidjs": "^10.27.0",
     "node-cron": "^3.0.3",
     "nodemailer": "^7.0.10",
     "openai": "^6.9.0",
     "pg": "^8.16.3",
+    "sanitize-html": "^2.17.4",
     "winston": "^3.14.2",
     "zod": "^3.23.8"
   },

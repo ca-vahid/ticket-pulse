@@ -2,6 +2,36 @@
 
 All notable changes and improvements to Ticket Pulse.
 
+## [Unreleased]
+
+- No unreleased changes.
+
+## [2.6] - 2026-05-30
+
+### Major Features
+
+- **Mail Workflows** added workspace-admin configurable email workflows for ticket arrived, assigned, reassigned, and resolved/closed lifecycle events.
+- **Public ticket status and urgency links** added branded requester pages for latest ticket status, assignee, timeline, ETA, business-hours urgency, and after-hours immediate support.
+- **Urgent Escalation settings** moved after-hours escalation into main Settings with workspace rosters, selected users, active contact support, response-window copy, and auditable self-escalation events.
+
+### Improvements
+
+- **Workflow editor and preview** now include a resizable inspector, richer variable picker, schema-aware LLM generation, live step audits, ticket filters, forced test action blocks, and test email diagnostics.
+- **SendGrid delivery path** now supports generic workflow email fields including to/cc/bcc, HTML, text fallback, subject, provider metadata, retry classification, public action blocks, and signatures.
+- **Shared AI provider routing** now includes `notification_workflow_generation` for optional LLM-generated workflow email content.
+- **Settings refresh** introduces the polished settings shell, collapsible dock navigation, full editor entry points, and clearer workflow/action-link controls.
+
+### Database
+
+- **Notification workflow persistence** added workflow definitions, published versions, workflow runs, step runs, and generic delivery fields linked to ticket events.
+- **Requester-facing link persistence** added public ticket tokens, public status settings, branding, urgent escalation policy, urgent escalation recipients, and self-escalation event history.
+
+### Security
+
+- **Workspace-admin workflow control** limits workflow editing, publishing, enablement, previews, run audit, and delivery retry to workspace admins.
+- **Safe rollout defaults** keep workflow delivery disabled until a workspace admin publishes and enables a workflow; previews can be tested without emailing requesters.
+- **Backfill-safe notification dispatch** prevents historical sync/backfill from sending workflow emails; only live events after enablement are eligible.
+
 ## [2.3] - 2026-05-10
 
 ### Major Features

@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 214 32% 91%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 215 20% 93%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 214 95% 94%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 88%;
+    --input: 214 32% 88%;
+    --ring: 221 83% 53%;
+    --success: 158 64% 40%;
+    --warning: 38 92% 50%;
+    --danger: 0 72% 51%;
+    --surface: 0 0% 100%;
+    --surface-muted: 210 40% 96%;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+}
+
 html {
   overflow-y: scroll;
   scrollbar-gutter: stable;
@@ -9,6 +43,8 @@ html {
 
 body {
   margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
@@ -19,6 +55,69 @@ body {
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
+}
+
+@layer components {
+  .tp-page-backdrop {
+    background:
+      linear-gradient(180deg, rgb(248 250 252) 0%, rgb(241 245 249) 44%, rgb(248 250 252) 100%);
+  }
+
+  .tp-glass {
+    background: rgb(255 255 255 / 0.68);
+    border-color: rgb(255 255 255 / 0.62);
+    box-shadow: 0 18px 45px rgb(15 23 42 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.65);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25);
+    backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  .tp-glass-strong {
+    background: rgb(255 255 255 / 0.82);
+    border-color: rgb(255 255 255 / 0.74);
+    box-shadow: 0 22px 60px rgb(15 23 42 / 0.10), inset 0 1px 0 rgb(255 255 255 / 0.72);
+    -webkit-backdrop-filter: blur(22px) saturate(1.35);
+    backdrop-filter: blur(22px) saturate(1.35);
+  }
+
+  .tp-surface {
+    @apply rounded-xl border border-white/70 bg-white/78 shadow-subtle;
+  }
+
+  .tp-card {
+    @apply rounded-xl border border-slate-200/80 bg-white shadow-subtle;
+  }
+
+  .tp-focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white;
+  }
+
+  .settings-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(148 163 184 / 0.65) transparent;
+  }
+
+  .settings-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .settings-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(148 163 184 / 0.55);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+
+  .settings-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .tp-glass,
+  .tp-glass-strong {
+    background: rgb(255 255 255 / 0.96);
+  }
 }
 
 /* Smooth view transition animations */

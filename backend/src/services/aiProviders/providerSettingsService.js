@@ -89,6 +89,7 @@ class ProviderSettingsService {
       daily_review: assignmentConfig?.llmModel,
       autoresponse_classification: llmConfig?.model,
       autoresponse_generation: llmConfig?.model,
+      notification_workflow_generation: llmConfig?.model,
     });
   }
 

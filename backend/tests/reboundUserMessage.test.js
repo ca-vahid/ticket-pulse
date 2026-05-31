@@ -28,6 +28,17 @@ describe('buildUserMessage — non-rebound runs', () => {
     const msg = buildUserMessage({ ...baseArgs, reboundFrom: {} });
     expect(msg).not.toContain('Rebound Context');
   });
+
+  test('omits Rebound Context when rebound metadata has no FreshService return evidence', () => {
+    const msg = buildUserMessage({
+      ...baseArgs,
+      reboundFrom: {
+        previousTechName: 'Andrew Smith',
+        reboundCount: 1,
+      },
+    });
+    expect(msg).not.toContain('Rebound Context');
+  });
 });
 
 describe('buildUserMessage — rebound runs', () => {
@@ -52,19 +63,19 @@ describe('buildUserMessage — rebound runs', () => {
   test('uses correct ordinals for 2nd / 3rd attempts', () => {
     const m2 = buildUserMessage({
       ...baseArgs,
-      reboundFrom: { previousTechName: 'Bob', reboundCount: 2 },
+      reboundFrom: { previousTechName: 'Bob', reboundCount: 2, verifiedByFreshserviceActivity: true },
     });
     expect(m2).toContain('2nd attempt');
 
     const m3 = buildUserMessage({
       ...baseArgs,
-      reboundFrom: { previousTechName: 'Carol', reboundCount: 3 },
+      reboundFrom: { previousTechName: 'Carol', reboundCount: 3, verifiedByFreshserviceActivity: true },
     });
     expect(m3).toContain('3rd attempt');
 
     const m5 = buildUserMessage({
       ...baseArgs,
-      reboundFrom: { previousTechName: 'Dee', reboundCount: 5 },
+      reboundFrom: { previousTechName: 'Dee', reboundCount: 5, verifiedByFreshserviceActivity: true },
     });
     expect(m5).toContain('5th attempt');
   });
@@ -72,7 +83,7 @@ describe('buildUserMessage — rebound runs', () => {
   test('falls back gracefully when previousTechName is missing', () => {
     const msg = buildUserMessage({
       ...baseArgs,
-      reboundFrom: { reboundCount: 2 },
+      reboundFrom: { reboundCount: 2, verifiedByFreshserviceActivity: true },
     });
     expect(msg).toContain('## Rebound Context');
     expect(msg).toContain('a previous assignee');

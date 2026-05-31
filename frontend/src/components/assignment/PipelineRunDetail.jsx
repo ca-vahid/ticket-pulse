@@ -81,6 +81,21 @@ function ticketPulseCategoryLabel(ticket) {
   return null;
 }
 
+function isVerifiedReboundContext(ctx) {
+  return Boolean(
+    ctx
+      && (
+        ctx.verifiedByFreshserviceActivity === true
+        || (ctx.unassignedAt && ctx.previousTechName && ctx.previousTechName !== 'Unknown')
+      ),
+  );
+}
+
+function formatReturnedContext(ctx, workspaceTimezone) {
+  if (!ctx) return '';
+  return `Returned from ${ctx.previousTechName || 'previous assignee'}${ctx.unassignedAt ? ` at ${formatDateTimeInTimezone(ctx.unassignedAt, workspaceTimezone)}` : ''}${ctx.unassignedByName ? ` by ${ctx.unassignedByName}` : ''}${ctx.reboundCount > 1 ? ` (return #${ctx.reboundCount})` : ''}`;
+}
+
 function ticketCategoryReviewNeeded(ticket) {
   if (!ticket) return false;
   return Boolean(ticket.taxonomyReviewNeeded)
@@ -1080,6 +1095,8 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   if (!run) return null;
 
   const ticket = run.ticket;
+  const verifiedRebound = isVerifiedReboundContext(run.reboundFrom);
+  const unverifiedRebound = Boolean(run.reboundFrom) && !verifiedRebound;
   // If the run is pending_review but the ticket has been assigned externally
   // in FS, show a clearer "Handled in FS" badge instead of the misleading
   // "Pending Review" — no human action is needed in the app. This stays
@@ -1139,10 +1156,14 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
     }
     if (run.triggerSource === 'rebound' || run.triggerSource === 'rebound_exhausted') {
       return {
-        label: 'Returned',
+        label: verifiedRebound ? 'Returned' : 'Needs review',
         Icon: RotateCcw,
-        className: 'border-rose-200 bg-rose-50 text-rose-700',
-        tooltip: 'Pipeline run was triggered after a returned ticket.',
+        className: verifiedRebound
+          ? 'border-rose-200 bg-rose-50 text-rose-700'
+          : 'border-amber-200 bg-amber-50 text-amber-700',
+        tooltip: verifiedRebound
+          ? 'Pipeline run was triggered after a FreshService-confirmed returned ticket.'
+          : 'Pipeline run was triggered from older rebound metadata that did not include FreshService return evidence.',
       };
     }
     return {
@@ -1153,8 +1174,8 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
     };
   })();
   const SourceSignalIcon = sourceSignal.Icon;
-  const returnedSignalTitle = run.reboundFrom
-    ? `Returned from ${run.reboundFrom.previousTechName || 'previous assignee'}${run.reboundFrom.unassignedAt ? ` at ${formatDateTimeInTimezone(run.reboundFrom.unassignedAt, workspaceTimezone)}` : ''}${run.reboundFrom.unassignedByName ? ` by ${run.reboundFrom.unassignedByName}` : ''}${run.reboundFrom.reboundCount > 1 ? ` (return #${run.reboundFrom.reboundCount})` : ''}`
+  const returnedSignalTitle = verifiedRebound
+    ? formatReturnedContext(run.reboundFrom, workspaceTimezone)
     : null;
 
   const ticketUrl = fsDomain && ticket?.freshserviceTicketId ? `https://${fsDomain}/a/tickets/${ticket.freshserviceTicketId}` : null;
@@ -1392,13 +1413,13 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
             </p>
             <p className="text-xs text-red-700 mt-1">
               This ticket has been rejected by every technician auto-assigned so far. The system stopped re-routing it automatically. Please assign it manually or dismiss it.
-              {run.reboundFrom?.previousTechName && run.reboundFrom.previousTechName !== 'Unknown' && (
+              {verifiedRebound && run.reboundFrom?.previousTechName && run.reboundFrom.previousTechName !== 'Unknown' && (
                 <> Most recently returned by <span className="font-semibold">{run.reboundFrom.previousTechName}</span>{run.reboundFrom.unassignedAt && <> at {formatDateTimeInTimezone(run.reboundFrom.unassignedAt, workspaceTimezone)}</>}.</>
               )}
             </p>
           </div>
         </div>
-      ) : run.reboundFrom && (run.reboundFrom.previousTechName || run.reboundFrom.reboundCount) ? (
+      ) : verifiedRebound && (run.reboundFrom.previousTechName || run.reboundFrom.reboundCount) ? (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2.5">
           <RotateCcw className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
@@ -1414,6 +1435,18 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
               {run.reboundFrom.unassignedByName && run.reboundFrom.unassignedByName !== run.reboundFrom.previousTechName && (
                 <> Unassigned by <span className="font-semibold">{run.reboundFrom.unassignedByName}</span>.</>
               )}
+            </p>
+          </div>
+        </div>
+      ) : unverifiedRebound ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2.5">
+          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">
+              Assignment state changed during sync
+            </p>
+            <p className="text-xs text-amber-700 mt-1">
+              This older run has rebound metadata, but no FreshService return activity was recorded. Treat FreshService as the source of truth before acting on this recommendation.
             </p>
           </div>
         </div>

@@ -110,6 +110,77 @@ function buildResponseUser({ email, name, role, selectedWorkspaceId, agentProfil
   };
 }
 
+function issueAuthToken({ email, name, role, selectedWorkspaceId }) {
+  return jwt.sign(
+    buildTokenUser({ email, name, role, selectedWorkspaceId }),
+    config.session.secret,
+    {
+      algorithm: 'HS256',
+      expiresIn: '8h',
+    },
+  );
+}
+
+function isLocalDevRequest(req) {
+  if (config.devAuth.allowRemote) return true;
+  const host = String(req.headers.host || req.hostname || '').toLowerCase();
+  const remoteCandidates = [
+    req.ip,
+    req.socket?.remoteAddress,
+    req.connection?.remoteAddress,
+  ].filter(Boolean).map((value) => String(value).toLowerCase());
+
+  return host.startsWith('localhost:')
+    || host.startsWith('127.0.0.1:')
+    || host.startsWith('[::1]:')
+    || host === 'localhost'
+    || host === '127.0.0.1'
+    || host === '::1'
+    || remoteCandidates.some((value) => (
+      value === '127.0.0.1'
+      || value === '::1'
+      || value === '::ffff:127.0.0.1'
+      || value.startsWith('::ffff:127.')
+    ));
+}
+
+async function resolveLoginAccess({ email, role, selectedWorkspaceId }) {
+  let availableWorkspaces = [];
+  let agentProfiles = [];
+  let resolvedRole = role;
+
+  if (resolvedRole === 'admin') {
+    availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
+      id: ws.id,
+      name: ws.name,
+      slug: ws.slug,
+      role: 'admin',
+    }));
+  } else {
+    availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
+  }
+
+  agentProfiles = await agentCompetencyService.getAgentProfiles(email);
+  if (resolvedRole !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
+    resolvedRole = 'agent';
+  }
+
+  const requestedWorkspaceId = selectedWorkspaceId ? Number(selectedWorkspaceId) : null;
+  const selectedWorkspace = requestedWorkspaceId
+    ? availableWorkspaces.find(ws => Number(ws.id) === requestedWorkspaceId) || null
+    : null;
+  const fallbackWorkspace = availableWorkspaces.length === 1 ? availableWorkspaces[0] : null;
+
+  return {
+    role: resolvedRole,
+    availableWorkspaces,
+    agentProfiles,
+    selectedWorkspaceId: selectedWorkspace?.id || fallbackWorkspace?.id || null,
+    selectedWorkspaceName: selectedWorkspace?.name || fallbackWorkspace?.name || null,
+    selectedWorkspaceSlug: selectedWorkspace?.slug || fallbackWorkspace?.slug || null,
+  };
+}
+
 /**
  * POST /api/auth/sso
  * Validate Azure AD ID token and create session
@@ -230,6 +301,99 @@ router.post(
       authToken,
       availableWorkspaces,
       selectedWorkspaceId,
+    });
+  }),
+);
+
+/**
+ * POST /api/auth/dev-login
+ * Development-only SSO bypass for local visual testing.
+ */
+router.post(
+  '/dev-login',
+  asyncHandler(async (req, res) => {
+    if (config.isProduction || !config.devAuth.enabled || !isLocalDevRequest(req)) {
+      throw new AuthenticationError('Development auth bypass is not available');
+    }
+
+    const adminEmails = await getAdminEmails();
+    const email = String(config.devAuth.email || adminEmails[0] || 'dev-admin@ticketpulse.local').trim().toLowerCase();
+    const name = String(config.devAuth.name || 'Dev Admin').trim() || 'Dev Admin';
+    const roleFromConfig = String(config.devAuth.role || '').trim().toLowerCase();
+    const role = ['admin', 'viewer', 'agent'].includes(roleFromConfig)
+      ? roleFromConfig
+      : 'admin';
+    const requestedWorkspaceId = req.body?.workspaceId || config.devAuth.workspaceId || null;
+
+    let access;
+    try {
+      access = await resolveLoginAccess({ email, role, selectedWorkspaceId: requestedWorkspaceId });
+      if (!access.selectedWorkspaceId && access.availableWorkspaces.length > 0) {
+        const firstWorkspace = access.availableWorkspaces[0];
+        access.selectedWorkspaceId = firstWorkspace.id;
+        access.selectedWorkspaceName = firstWorkspace.name;
+        access.selectedWorkspaceSlug = firstWorkspace.slug;
+      }
+    } catch (err) {
+      logger.warn('Failed to resolve workspaces during dev login:', err.message);
+      access = {
+        role,
+        availableWorkspaces: [],
+        agentProfiles: [],
+        selectedWorkspaceId: null,
+        selectedWorkspaceName: null,
+        selectedWorkspaceSlug: null,
+      };
+    }
+
+    const sanitizedAgentProfiles = sanitizeAgentProfiles(access.agentProfiles);
+    req.session.user = {
+      email,
+      name,
+      username: name,
+      role: access.role,
+      oid: 'dev-auth-bypass',
+      loginTime: new Date().toISOString(),
+      authMethod: 'dev-bypass',
+      availableWorkspaces: access.availableWorkspaces,
+      agentProfiles: sanitizedAgentProfiles,
+      agentProfile: sanitizedAgentProfiles[0] || null,
+      selectedWorkspaceId: access.selectedWorkspaceId,
+      selectedWorkspaceName: access.selectedWorkspaceName,
+      selectedWorkspaceSlug: access.selectedWorkspaceSlug,
+    };
+
+    const authToken = issueAuthToken({
+      email,
+      name,
+      role: access.role,
+      selectedWorkspaceId: access.selectedWorkspaceId,
+    });
+    const userPayload = buildResponseUser({
+      email,
+      name,
+      role: access.role,
+      selectedWorkspaceId: access.selectedWorkspaceId,
+      agentProfiles: access.agentProfiles,
+    });
+
+    logger.warn('Development auth bypass login used', {
+      email,
+      role: access.role,
+      selectedWorkspaceId: access.selectedWorkspaceId,
+      ip: req.ip,
+    });
+
+    res.json({
+      success: true,
+      message: 'Development login successful',
+      user: userPayload,
+      authToken,
+      availableWorkspaces: access.availableWorkspaces,
+      selectedWorkspaceId: access.selectedWorkspaceId,
+      selectedWorkspaceName: access.selectedWorkspaceName,
+      selectedWorkspaceSlug: access.selectedWorkspaceSlug,
+      devBypass: true,
     });
   }),
 );

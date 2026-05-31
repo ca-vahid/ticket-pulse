@@ -349,26 +349,58 @@ class SettingsRepository {
    * app_settings wins; environment variables are a deployment fallback.
    */
   async getSendGridConfig() {
+    const trimOrNull = (value) => {
+      const trimmed = String(value || '').trim();
+      return trimmed || null;
+    };
+    const parsePort = (value) => {
+      const port = Number.parseInt(value, 10);
+      return Number.isFinite(port) && port > 0 ? port : 587;
+    };
+    const smtpConfig = {
+      smtpHost: trimOrNull(process.env.SMTP_HOST),
+      smtpPort: parsePort(process.env.SMTP_PORT),
+      smtpUser: trimOrNull(process.env.SMTP_USER),
+      smtpPassword: trimOrNull(process.env.SMTP_PASSWORD),
+      smtpFromEmail: trimOrNull(process.env.SMTP_FROM_EMAIL),
+    };
+    const smtpConfigured = Boolean(
+      smtpConfig.smtpHost
+      && smtpConfig.smtpUser
+      && smtpConfig.smtpPassword
+      && smtpConfig.smtpFromEmail,
+    );
+
     try {
       const [apiKey, fromEmail] = await Promise.all([
         this.get('sendgrid_api_key'),
         this.get('sendgrid_from_email'),
       ]);
 
-      const trimOrNull = (value) => {
-        const trimmed = String(value || '').trim();
-        return trimmed || null;
-      };
+      const effectiveApiKey = trimOrNull(apiKey) || trimOrNull(process.env.SENDGRID_API_KEY);
+      const effectiveFromEmail = trimOrNull(fromEmail) || trimOrNull(process.env.SENDGRID_FROM_EMAIL);
+      const apiConfigured = Boolean(effectiveApiKey && effectiveFromEmail);
 
       return {
-        apiKey: trimOrNull(apiKey) || trimOrNull(process.env.SENDGRID_API_KEY),
-        fromEmail: trimOrNull(fromEmail) || trimOrNull(process.env.SENDGRID_FROM_EMAIL),
+        apiKey: effectiveApiKey,
+        fromEmail: effectiveFromEmail,
+        ...smtpConfig,
+        smtpConfigured,
+        configured: apiConfigured || smtpConfigured,
+        mode: apiConfigured ? 'api' : (smtpConfigured ? 'smtp' : 'missing'),
       };
     } catch (error) {
       logger.error('Error fetching SendGrid config:', error);
+      const fallbackApiKey = trimOrNull(process.env.SENDGRID_API_KEY);
+      const fallbackFromEmail = trimOrNull(process.env.SENDGRID_FROM_EMAIL);
+      const apiConfigured = Boolean(fallbackApiKey && fallbackFromEmail);
       return {
-        apiKey: process.env.SENDGRID_API_KEY || null,
-        fromEmail: process.env.SENDGRID_FROM_EMAIL || null,
+        apiKey: fallbackApiKey,
+        fromEmail: fallbackFromEmail,
+        ...smtpConfig,
+        smtpConfigured,
+        configured: apiConfigured || smtpConfigured,
+        mode: apiConfigured ? 'api' : (smtpConfigured ? 'smtp' : 'missing'),
       };
     }
   }

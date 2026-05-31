@@ -9,6 +9,7 @@ import settingsRepository from './settingsRepository.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import logger from '../utils/logger.js';
+import { normalizeFreshServiceGroupMemberIds } from './freshServiceGroupGuard.js';
 
 /**
  * Tool schemas for Claude tool_use. Each tool has a name, description, and input_schema.
@@ -44,8 +45,35 @@ export const TOOL_SCHEMAS = [
     },
   },
   {
+    name: 'get_requester_site_context',
+    description: 'Get requester and ticket-location context for the ticket being analyzed. Returns requester department/title/timezone, optional Azure AD office profile, location keywords found in the ticket text, and a preferredLocation hint when the evidence is strong enough for physical/site-aware routing.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticket_id: { type: 'integer', description: 'Internal ticket ID. Defaults to the current ticket.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_routing_boundary_context',
+    description: 'Check whether this ticket sits in a FreshService group or internal category with special routing ownership, such as SharePoint/Coreshack work that should not be assigned as normal IT pool work. Returns FreshService group name/member compatibility when available, excluded-group status, and manual-review or owner-group routing advice.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticket_id: { type: 'integer', description: 'Internal ticket ID. Defaults to the current ticket.' },
+        candidate_tech_ids: {
+          type: 'array',
+          items: { type: 'integer' },
+          description: 'Optional candidate technician IDs to check for current FreshService group compatibility.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'find_matching_agents',
-    description: 'Find agents that match specific criteria. Combines competency matching, availability, location, and workload into a single ranked result. Use this after you have classified the ticket and determined requirements.',
+    description: 'Find agents that match specific criteria. Combines competency matching, availability, location, workload, and recent rejection/capacity risk into a single ranked result. Use this after you have classified the ticket and determined requirements.',
     input_schema: {
       type: 'object',
       properties: {
@@ -57,6 +85,25 @@ export const TOOL_SCHEMAS = [
         requires_physical_presence: { type: 'boolean', description: 'If true, excludes WFH and remote agents' },
         preferred_location: { type: 'string', description: 'Preferred agent location for physical tasks (e.g., "Vancouver", "Calgary")' },
         min_proficiency: { type: 'string', enum: ['basic', 'intermediate', 'advanced', 'expert'], description: 'Minimum active competency level required. No experience is represented by the absence of a competency mapping and is not an eligible skill match.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_assignment_risk_signals',
+    description: 'Get structured capacity and rejection-risk signals for candidate technicians before final assignment ranking. Returns same-ticket, same-day, same-subcategory, workload, leave/shift, and recent busy/unavailable rejection signals with ranking advice. Use this after find_matching_agents when there are viable candidates.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticket_id: { type: 'integer', description: 'Internal ticket ID. Defaults to the current ticket.' },
+        categoryId: { type: 'integer', description: 'Internal top-level category ID from get_ticket_categories, if known.' },
+        subcategoryId: { type: 'integer', description: 'Internal subcategory ID from get_ticket_categories, if known.' },
+        candidate_tech_ids: {
+          type: 'array',
+          items: { type: 'integer' },
+          description: 'Candidate technician IDs to assess. If omitted, all active technicians are assessed.',
+        },
+        lookback_days: { type: 'integer', description: 'How many days of rejection history to inspect. Default 5, max 30.' },
       },
       required: [],
     },
@@ -293,8 +340,20 @@ export async function executeTool(toolName, toolInput, context) {
     return await getAgentAvailability(workspaceId);
   case 'get_ticket_categories':
     return await getTicketCategories(workspaceId);
+  case 'get_requester_site_context':
+    return await getRequesterSiteContext(workspaceId, toolInput.ticket_id || ticketId);
+  case 'get_routing_boundary_context':
+    return await getRoutingBoundaryContext(workspaceId, {
+      ...toolInput,
+      ticket_id: toolInput.ticket_id || ticketId,
+    });
   case 'find_matching_agents':
     return await findMatchingAgents(workspaceId, toolInput, ticketId);
+  case 'get_assignment_risk_signals':
+    return await getAssignmentRiskSignals(workspaceId, {
+      ...toolInput,
+      ticket_id: toolInput.ticket_id || ticketId,
+    });
   case 'get_technicians':
     return await getTechnicians(workspaceId);
   case 'get_workload_stats':
@@ -324,6 +383,90 @@ async function getWorkspaceTimezone(workspaceId) {
     select: { defaultTimezone: true },
   });
   return workspace?.defaultTimezone || 'America/Los_Angeles';
+}
+
+const RISK_REASON_PATTERN = /\b(busy|no time|meeting|unavailable|not available|ooo|out of office|away|vacation|time off|on leave|back tomorrow|until tomorrow|few days off|fully booked|booked solid)\b/i;
+
+const SITE_KEYWORDS = [
+  'Vancouver',
+  'Calgary',
+  'Toronto',
+  'Ottawa',
+  'Montreal',
+  'Victoria',
+  'Kamloops',
+  'Kelowna',
+  'Edmonton',
+  'Winnipeg',
+  'Halifax',
+  'Canada',
+];
+
+function clampScore(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function truncateText(value, max = 180) {
+  const text = normalizeText(value);
+  return text.length > max ? `${text.slice(0, max - 1)}...` : text;
+}
+
+function minutesUntilEndOfLocalDay(timezone) {
+  const now = new Date();
+  const localTimeStr = now.toLocaleTimeString('en-US', {
+    timeZone: timezone,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const [hour, minute] = localTimeStr.split(':').map(Number);
+  return Math.max(0, (24 * 60) - ((hour * 60) + minute));
+}
+
+function riskLevelFromPenalty(penalty) {
+  if (penalty >= 0.75) return 'critical';
+  if (penalty >= 0.45) return 'high';
+  if (penalty >= 0.2) return 'medium';
+  return 'low';
+}
+
+function buildRiskAdvice({ riskLevel, sameTicketRejected, activeSuppression, sameDayRejectedCount, sameSubcategoryRejectedCount }) {
+  if (sameTicketRejected) {
+    return 'Do not rank first. This technician already rejected this ticket unless there is no viable alternative.';
+  }
+  if (activeSuppression?.active) {
+    return 'Do not rank first unless every alternative is materially less qualified.';
+  }
+  if (sameDayRejectedCount >= 2) {
+    return 'Down-rank for the rest of the business day unless the ticket is an unusually strong fit.';
+  }
+  if (sameSubcategoryRejectedCount > 0) {
+    return 'Apply a soft penalty for recent same-subcategory rejection history.';
+  }
+  if (riskLevel === 'medium') return 'Use as a tie-breaker against this candidate when alternatives are similarly qualified.';
+  return 'No meaningful rejection/capacity penalty detected.';
+}
+
+function extractLocationSignals(...parts) {
+  const text = parts.map((part) => String(part || '')).join(' ');
+  const lower = text.toLowerCase();
+  const signals = [];
+  for (const keyword of SITE_KEYWORDS) {
+    if (lower.includes(keyword.toLowerCase())) signals.push(keyword);
+  }
+  return Array.from(new Set(signals));
+}
+
+function groupCount(row) {
+  if (typeof row?._count === 'number') return row._count;
+  if (typeof row?._count?._all === 'number') return row._count._all;
+  const first = Object.values(row?._count || {}).find((value) => typeof value === 'number');
+  return first || 0;
 }
 
 function getAgentShiftStatus(tech, hqTimezone) {
@@ -881,6 +1024,557 @@ async function getTicketCategories(workspaceId) {
   };
 }
 
+async function getRequesterSiteContext(workspaceId, ticketId) {
+  if (!ticketId) return { error: 'ticket_id is required' };
+
+  const ticket = await prisma.ticket.findFirst({
+    where: { id: Number(ticketId), workspaceId },
+    select: {
+      id: true,
+      freshserviceTicketId: true,
+      subject: true,
+      descriptionText: true,
+      requester: {
+        select: {
+          name: true,
+          email: true,
+          department: true,
+          jobTitle: true,
+          timeZone: true,
+        },
+      },
+    },
+  });
+
+  if (!ticket) return { error: `Ticket ${ticketId} not found in this workspace` };
+
+  let graphProfile = null;
+  if (ticket.requester?.email && graphMailClient.isConfigured()) {
+    try {
+      const result = await graphMailClient.getUserProfile(ticket.requester.email);
+      if (!result.error) {
+        graphProfile = {
+          officeLocation: result.officeLocation || null,
+          city: result.city || null,
+          state: result.state || null,
+          country: result.country || null,
+          department: result.department || null,
+          jobTitle: result.jobTitle || null,
+        };
+      }
+    } catch (error) {
+      logger.debug('Requester Graph profile lookup failed', { workspaceId, ticketId, error: error.message });
+    }
+  }
+
+  const ticketLocationSignals = extractLocationSignals(ticket.subject, ticket.descriptionText);
+  const requesterLocationSignals = extractLocationSignals(
+    ticket.requester?.department,
+    ticket.requester?.jobTitle,
+    ticket.requester?.timeZone,
+    graphProfile?.officeLocation,
+    graphProfile?.city,
+    graphProfile?.state,
+    graphProfile?.country,
+  );
+  const combinedSignals = Array.from(new Set([
+    ...requesterLocationSignals,
+    ...ticketLocationSignals,
+  ]));
+  const preferredLocation = (
+    graphProfile?.officeLocation
+    || graphProfile?.city
+    || combinedSignals.find((signal) => signal !== 'Canada')
+    || null
+  );
+
+  return {
+    ticket: {
+      id: ticket.id,
+      freshserviceTicketId: ticket.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null,
+      subject: ticket.subject,
+    },
+    requester: ticket.requester || null,
+    graphProfile,
+    ticketLocationSignals,
+    requesterLocationSignals,
+    preferredLocation,
+    confidence: graphProfile?.officeLocation || graphProfile?.city
+      ? 'high'
+      : preferredLocation ? 'medium' : 'low',
+    instruction: preferredLocation
+      ? `Use preferred_location="${preferredLocation}" when the ticket appears to require physical/site-aware work.`
+      : 'No strong requester/site location signal found. Do not force a location preference unless the ticket text requires physical presence.',
+  };
+}
+
+async function getRoutingBoundaryContext(workspaceId, input = {}) {
+  const ticketId = Number(input.ticket_id);
+  if (!ticketId) return { error: 'ticket_id is required' };
+
+  const ticket = await prisma.ticket.findFirst({
+    where: { id: ticketId, workspaceId },
+    select: {
+      id: true,
+      freshserviceTicketId: true,
+      groupId: true,
+      subject: true,
+      descriptionText: true,
+      category: true,
+      subCategory: true,
+      ticketCategory: true,
+      internalCategory: { select: { id: true, name: true } },
+      internalSubcategory: { select: { id: true, name: true } },
+    },
+  });
+
+  if (!ticket) return { error: `Ticket ${ticketId} not found in this workspace` };
+
+  const [assignmentConfig, candidateTechs] = await Promise.all([
+    prisma.assignmentConfig.findUnique({
+      where: { workspaceId },
+      select: { excludedGroupIds: true },
+    }).catch(() => null),
+    prisma.technician.findMany({
+      where: {
+        workspaceId,
+        isActive: true,
+        ...(Array.isArray(input.candidate_tech_ids) && input.candidate_tech_ids.length
+          ? { id: { in: input.candidate_tech_ids.map(Number).filter(Number.isFinite) } }
+          : {}),
+      },
+      select: { id: true, name: true, freshserviceId: true, location: true },
+      orderBy: { name: 'asc' },
+      take: 50,
+    }),
+  ]);
+
+  let group = null;
+  let groupLookup = 'not_applicable';
+  if (ticket.groupId) {
+    try {
+      const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+      if (fsConfig?.domain && fsConfig?.apiKey) {
+        const client = createFreshServiceClient(fsConfig);
+        group = await client.getGroup(Number(ticket.groupId));
+        groupLookup = group ? 'freshservice' : 'not_found';
+      } else {
+        groupLookup = 'freshservice_not_configured';
+      }
+    } catch (error) {
+      groupLookup = `error: ${error.message}`;
+    }
+  }
+
+  const excludedGroupIds = (assignmentConfig?.excludedGroupIds || []).map(Number);
+  const groupId = ticket.groupId ? Number(ticket.groupId) : null;
+  const excludedFromAutoAssign = !!(groupId && excludedGroupIds.includes(groupId));
+  const memberIds = normalizeFreshServiceGroupMemberIds(group);
+  const groupName = group?.name || (groupId ? `#${groupId}` : null);
+  const text = [
+    ticket.subject,
+    ticket.descriptionText,
+    ticket.ticketCategory,
+    ticket.category,
+    ticket.subCategory,
+    ticket.internalCategory?.name,
+    ticket.internalSubcategory?.name,
+    groupName,
+  ].join(' ').toLowerCase();
+  const isSharePointBoundary = /\bshare\s*point\b|sharepoint|coreshack|core shack/.test(text);
+  const matched = excludedFromAutoAssign || isSharePointBoundary;
+  const policy = excludedFromAutoAssign
+    ? 'manual_review_required'
+    : isSharePointBoundary ? 'owner_group_or_manual_review' : 'normal_assignment';
+
+  return {
+    ticket: {
+      id: ticket.id,
+      freshserviceTicketId: ticket.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null,
+      groupId,
+      groupName,
+      ticketCategory: ticket.ticketCategory,
+      internalCategory: ticket.internalCategory,
+      internalSubcategory: ticket.internalSubcategory,
+    },
+    freshserviceGroup: groupId ? {
+      id: groupId,
+      name: groupName,
+      lookup: groupLookup,
+      memberIdsKnown: Array.isArray(memberIds),
+      memberCount: Array.isArray(memberIds) ? memberIds.length : null,
+      excludedFromAutoAssign,
+    } : null,
+    routingBoundary: {
+      matched,
+      policy,
+      ownerGroupName: groupName,
+      reason: excludedFromAutoAssign
+        ? 'The ticket group is configured for manual approval instead of direct auto-assignment.'
+        : isSharePointBoundary
+          ? 'The ticket appears to be SharePoint/Coreshack-owned work rather than normal IT pool work.'
+          : 'No special routing boundary detected.',
+    },
+    candidateGroupCompatibility: candidateTechs.map((tech) => {
+      const freshserviceId = tech.freshserviceId ? Number(tech.freshserviceId) : null;
+      const memberOfCurrentGroup = Array.isArray(memberIds) && freshserviceId
+        ? memberIds.includes(freshserviceId)
+        : null;
+      return {
+        techId: tech.id,
+        techName: tech.name,
+        freshserviceId,
+        location: tech.location || 'Not set',
+        memberOfCurrentGroup,
+      };
+    }),
+    rankingAdvice: matched
+      ? 'Prefer owner-group compatible candidates or force manual review. Do not treat this as ordinary IT pool routing.'
+      : 'No routing-boundary penalty is required.',
+  };
+}
+
+function indexThreadEntriesByTicket(entries = []) {
+  const byTicket = new Map();
+  for (const entry of entries) {
+    if (!byTicket.has(entry.ticketId)) byTicket.set(entry.ticketId, []);
+    byTicket.get(entry.ticketId).push(entry);
+  }
+  return byTicket;
+}
+
+function findRiskReasonForEpisode(episode, entriesByTicket) {
+  const entries = entriesByTicket.get(episode.ticketId) || [];
+  if (!entries.length) return null;
+  const endedAt = episode.endedAt ? new Date(episode.endedAt).getTime() : null;
+  const actorName = String(episode.technician?.name || episode.endActorName || '').toLowerCase();
+  const sorted = [...entries].sort((a, b) => {
+    if (!endedAt) return 0;
+    return Math.abs(new Date(a.occurredAt).getTime() - endedAt) - Math.abs(new Date(b.occurredAt).getTime() - endedAt);
+  });
+
+  for (const entry of sorted) {
+    const text = normalizeText([entry.title, entry.bodyText, entry.content].filter(Boolean).join(' '));
+    if (!text || !RISK_REASON_PATTERN.test(text)) continue;
+    const entryActor = String(entry.actorName || '').toLowerCase();
+    if (actorName && entryActor && !entryActor.includes(actorName.split(/\s+/)[0])) {
+      continue;
+    }
+    return truncateText(text, 180);
+  }
+
+  return null;
+}
+
+function sameClassification(episodeTicket, target) {
+  const sameSubcategory = !!(
+    target.subcategoryId
+    && episodeTicket?.internalSubcategoryId
+    && Number(episodeTicket.internalSubcategoryId) === Number(target.subcategoryId)
+  );
+  const sameCategory = !!(
+    target.categoryId
+    && episodeTicket?.internalCategoryId
+    && Number(episodeTicket.internalCategoryId) === Number(target.categoryId)
+  );
+  const targetLegacy = String(target.ticketCategory || target.category || '').trim().toLowerCase();
+  const episodeLegacy = String(episodeTicket?.ticketCategory || episodeTicket?.category || '').trim().toLowerCase();
+  const sameLegacyCategory = !!(targetLegacy && episodeLegacy && targetLegacy === episodeLegacy);
+
+  return { sameSubcategory, sameCategory, sameLegacyCategory };
+}
+
+async function getAssignmentRiskSignals(workspaceId, input = {}) {
+  const ticketId = Number(input.ticket_id);
+  const timezone = await getWorkspaceTimezone(workspaceId);
+  const lookbackDays = Math.max(1, Math.min(Number(input.lookback_days) || 5, 30));
+  const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const { start: todayStart, end: todayEnd } = getTodayRange(timezone);
+  const { start: leaveStart, end: leaveEnd } = getLocalDateBounds(timezone);
+
+  const targetTicket = ticketId
+    ? await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      select: {
+        id: true,
+        freshserviceTicketId: true,
+        internalCategoryId: true,
+        internalSubcategoryId: true,
+        ticketCategory: true,
+        category: true,
+        subject: true,
+      },
+    })
+    : null;
+
+  const target = {
+    ticketId: targetTicket?.id || ticketId || null,
+    categoryId: Number(input.categoryId) || targetTicket?.internalCategoryId || null,
+    subcategoryId: Number(input.subcategoryId) || targetTicket?.internalSubcategoryId || null,
+    ticketCategory: targetTicket?.ticketCategory || null,
+    category: targetTicket?.category || null,
+  };
+
+  let candidateIds = Array.isArray(input.candidate_tech_ids)
+    ? input.candidate_tech_ids.map(Number).filter(Number.isFinite)
+    : [];
+  candidateIds = Array.from(new Set(candidateIds));
+
+  const techs = await prisma.technician.findMany({
+    where: {
+      workspaceId,
+      isActive: true,
+      ...(candidateIds.length ? { id: { in: candidateIds } } : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      location: true,
+      timezone: true,
+      workStartTime: true,
+      workEndTime: true,
+    },
+    orderBy: { name: 'asc' },
+    ...(candidateIds.length ? {} : { take: 80 }),
+  });
+  candidateIds = techs.map((tech) => tech.id);
+
+  if (!candidateIds.length) {
+    return {
+      ticket: targetTicket ? {
+        id: targetTicket.id,
+        freshserviceTicketId: targetTicket.freshserviceTicketId ? Number(targetTicket.freshserviceTicketId) : null,
+        subject: targetTicket.subject,
+      } : null,
+      candidates: [],
+      summary: { highRiskCount: 0, suppressedCount: 0 },
+      note: 'No active candidate technicians were available to assess.',
+    };
+  }
+
+  const [episodes, openTickets, todayTickets, leaves] = await Promise.all([
+    prisma.ticketAssignmentEpisode.findMany({
+      where: {
+        workspaceId,
+        technicianId: { in: candidateIds },
+        endMethod: 'rejected',
+        endedAt: { gte: since },
+      },
+      include: {
+        technician: { select: { id: true, name: true } },
+        ticket: {
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            subject: true,
+            internalCategoryId: true,
+            internalSubcategoryId: true,
+            ticketCategory: true,
+            category: true,
+          },
+        },
+      },
+      orderBy: { endedAt: 'desc' },
+    }),
+    prisma.ticket.groupBy({
+      by: ['assignedTechId'],
+      where: { workspaceId, assignedTechId: { in: candidateIds }, status: { in: ['Open', 'Pending', 'open', 'pending', '2', '3'] } },
+      _count: true,
+    }),
+    prisma.ticket.groupBy({
+      by: ['assignedTechId'],
+      where: { workspaceId, assignedTechId: { in: candidateIds }, createdAt: { gte: todayStart, lte: todayEnd } },
+      _count: true,
+    }),
+    prisma.technicianLeave.findMany({
+      where: {
+        workspaceId,
+        technicianId: { in: candidateIds },
+        leaveDate: { gte: leaveStart, lte: leaveEnd },
+        status: 'APPROVED',
+      },
+    }),
+  ]);
+
+  let reasonEntriesByTicket = new Map();
+  const rejectionTicketIds = Array.from(new Set(episodes.map((episode) => episode.ticketId)));
+  if (rejectionTicketIds.length) {
+    try {
+      const entries = await prisma.ticketThreadEntry.findMany({
+        where: {
+          workspaceId,
+          ticketId: { in: rejectionTicketIds },
+          occurredAt: { gte: since },
+        },
+        select: { ticketId: true, title: true, bodyText: true, content: true, actorName: true, occurredAt: true },
+        orderBy: { occurredAt: 'desc' },
+        take: 300,
+      });
+      reasonEntriesByTicket = indexThreadEntriesByTicket(entries);
+    } catch (error) {
+      logger.debug('Risk signal thread lookup failed', { workspaceId, ticketId, error: error.message });
+    }
+  }
+
+  const openMap = Object.fromEntries(openTickets.map((row) => [row.assignedTechId, groupCount(row)]));
+  const todayMap = Object.fromEntries(todayTickets.map((row) => [row.assignedTechId, groupCount(row)]));
+  const leaveMap = new Map();
+  for (const leave of leaves) {
+    if (!leaveMap.has(leave.technicianId)) leaveMap.set(leave.technicianId, []);
+    leaveMap.get(leave.technicianId).push(leave);
+  }
+
+  const episodesByTech = new Map();
+  for (const episode of episodes) {
+    if (!episodesByTech.has(episode.technicianId)) episodesByTech.set(episode.technicianId, []);
+    episodesByTech.get(episode.technicianId).push(episode);
+  }
+
+  const candidates = techs.map((tech) => {
+    const techEpisodes = episodesByTech.get(tech.id) || [];
+    const sameTicketRejected = !!(target.ticketId && techEpisodes.some((episode) => episode.ticketId === target.ticketId));
+    const sameDayEpisodes = techEpisodes.filter((episode) => episode.endedAt && episode.endedAt >= todayStart && episode.endedAt <= todayEnd);
+    const classificationMatches = techEpisodes.map((episode) => ({
+      episode,
+      ...sameClassification(episode.ticket, target),
+    }));
+    const sameSubcategoryEpisodes = classificationMatches.filter((row) => row.sameSubcategory);
+    const sameCategoryEpisodes = classificationMatches.filter((row) => row.sameCategory || row.sameLegacyCategory);
+    const recentReasons = [];
+    for (const episode of techEpisodes) {
+      const reason = findRiskReasonForEpisode(episode, reasonEntriesByTicket);
+      if (reason && !recentReasons.includes(reason)) recentReasons.push(reason);
+      if (recentReasons.length >= 3) break;
+    }
+
+    const busyReason = recentReasons.find((reason) => RISK_REASON_PATTERN.test(reason));
+    const techLeaves = leaveMap.get(tech.id) || [];
+    const fullDayOff = techLeaves.some((leave) => leave.isFullDay !== false && leave.category === 'OFF');
+    const fullDayWfh = techLeaves.some((leave) => leave.isFullDay !== false && leave.category === 'WFH');
+    const shift = getAgentShiftStatus(tech, timezone);
+    const openTickets = openMap[tech.id] || 0;
+    const todayAssigned = todayMap[tech.id] || 0;
+
+    let riskPenalty = 0;
+    if (sameTicketRejected) riskPenalty = Math.max(riskPenalty, 0.95);
+    if (fullDayOff) riskPenalty = Math.max(riskPenalty, 0.9);
+    if (busyReason) riskPenalty = Math.max(riskPenalty, 0.65);
+    if (sameDayEpisodes.length >= 2) riskPenalty = Math.max(riskPenalty, 0.45);
+    else if (sameDayEpisodes.length === 1) riskPenalty = Math.max(riskPenalty, 0.22);
+    if (sameSubcategoryEpisodes.length > 0) riskPenalty = Math.max(riskPenalty, 0.3);
+    if (!shift.onShift) riskPenalty = Math.max(riskPenalty, 0.15);
+    if (openTickets >= 15) riskPenalty = Math.max(riskPenalty, 0.25);
+    else if (openTickets >= 10) riskPenalty = Math.max(riskPenalty, 0.15);
+
+    const activeSuppression = sameTicketRejected || fullDayOff || !!busyReason
+      ? {
+        active: true,
+        reason: sameTicketRejected
+          ? 'same_ticket_rejected'
+          : fullDayOff ? 'full_day_leave' : 'recent_busy_or_unavailable_rejection',
+        until: new Date(Date.now() + minutesUntilEndOfLocalDay(timezone) * 60 * 1000).toISOString(),
+      }
+      : { active: false, reason: null, until: null };
+    const riskLevel = riskLevelFromPenalty(riskPenalty);
+
+    return {
+      techId: tech.id,
+      techName: tech.name,
+      location: tech.location || 'Not set',
+      sameTicketRejected,
+      sameDayRejectedCount: sameDayEpisodes.length,
+      sameShiftRejectedCount: sameDayEpisodes.length,
+      sameCategoryRejectedCount: sameCategoryEpisodes.length,
+      sameSubcategoryRejectedCount: sameSubcategoryEpisodes.length,
+      lastRejectedAt: techEpisodes[0]?.endedAt?.toISOString?.() || null,
+      recentRejectionReasons: recentReasons,
+      availability: {
+        fullDayOff,
+        fullDayWfh,
+        onShift: shift.onShift,
+        shiftStatus: shift.shiftNote,
+      },
+      workload: {
+        openTickets,
+        todayAssigned,
+      },
+      riskPenalty: Number(riskPenalty.toFixed(2)),
+      riskLevel,
+      availabilitySuppression: activeSuppression,
+      rankingAdvice: buildRiskAdvice({
+        riskLevel,
+        sameTicketRejected,
+        activeSuppression,
+        sameDayRejectedCount: sameDayEpisodes.length,
+        sameSubcategoryRejectedCount: sameSubcategoryEpisodes.length,
+      }),
+    };
+  }).sort((a, b) => b.riskPenalty - a.riskPenalty || b.sameDayRejectedCount - a.sameDayRejectedCount);
+
+  return {
+    ticket: targetTicket ? {
+      id: targetTicket.id,
+      freshserviceTicketId: targetTicket.freshserviceTicketId ? Number(targetTicket.freshserviceTicketId) : null,
+      subject: targetTicket.subject,
+      categoryId: target.categoryId,
+      subcategoryId: target.subcategoryId,
+      ticketCategory: target.ticketCategory,
+    } : null,
+    lookbackDays,
+    workspaceTimezone: timezone,
+    candidates,
+    summary: {
+      assessedCandidates: candidates.length,
+      highRiskCount: candidates.filter((candidate) => ['high', 'critical'].includes(candidate.riskLevel)).length,
+      suppressedCount: candidates.filter((candidate) => candidate.availabilitySuppression.active).length,
+    },
+    note: 'Use these signals as internal ranking context. Do not expose rejection/capacity details in agentBriefingHtml.',
+  };
+}
+
+function scoreCandidate(candidate, allCandidates, weights) {
+  const openMax = Math.max(1, ...allCandidates.map((item) => item.openTickets || 0));
+  const competencyScore = candidate.competencyMatch?.matchType === 'subcategory_exact'
+    ? 1
+    : candidate.competencyMatch?.matchType === 'parent_fallback'
+      ? 0.72
+      : candidate.competencyMatch?.matchType === 'category_exact' ? 0.65 : 0.25;
+  const workloadScore = clampScore(1 - ((candidate.openTickets || 0) / openMax));
+  const locationScore = candidate.locationMatch === null ? 0.55 : candidate.locationMatch ? 1 : 0.2;
+  const recencyScore = clampScore(1 - (candidate.assignmentRisk?.riskPenalty || 0));
+  const baseScore = clampScore(
+    (weights.competency * competencyScore)
+    + (weights.workload * workloadScore)
+    + (weights.location * locationScore)
+    + (weights.recency * recencyScore),
+  );
+  const riskAdjustedScore = clampScore(baseScore - ((candidate.assignmentRisk?.riskPenalty || 0) * 0.45));
+
+  return {
+    baseScore: Number(baseScore.toFixed(3)),
+    riskAdjustedScore: Number(riskAdjustedScore.toFixed(3)),
+    scoreFactors: {
+      competency: Number(competencyScore.toFixed(3)),
+      workload: Number(workloadScore.toFixed(3)),
+      location: Number(locationScore.toFixed(3)),
+      recency: Number(recencyScore.toFixed(3)),
+      riskPenalty: candidate.assignmentRisk?.riskPenalty || 0,
+      weights,
+    },
+  };
+}
+
+function normalizeScoringWeights(raw = {}) {
+  const defaults = { competency: 0.35, workload: 0.30, location: 0.20, recency: 0.15 };
+  const merged = Object.fromEntries(Object.entries(defaults).map(([key, fallback]) => {
+    const value = Number(raw?.[key]);
+    return [key, Number.isFinite(value) && value >= 0 ? value : fallback];
+  }));
+  const total = Object.values(merged).reduce((sum, value) => sum + value, 0) || 1;
+  return Object.fromEntries(Object.entries(merged).map(([key, value]) => [key, Number((value / total).toFixed(3))]));
+}
+
 async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
   const {
     category,
@@ -910,7 +1604,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     subcategoryName,
   });
 
-  const [techs, competencies, leaves, openTickets, todayTickets] = await Promise.all([
+  const [techs, competencies, leaves, openTickets, todayTickets, assignmentConfig] = await Promise.all([
     prisma.technician.findMany({
       where: { workspaceId, isActive: true },
       select: { id: true, name: true, location: true, timezone: true, workStartTime: true, workEndTime: true },
@@ -932,6 +1626,10 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
       where: { workspaceId, createdAt: { gte: todayStart, lte: todayEnd } },
       _count: true,
     }),
+    prisma.assignmentConfig.findUnique({
+      where: { workspaceId },
+      select: { scoringWeights: true },
+    }).catch(() => null),
   ]);
 
   const leaveMap = {};
@@ -951,8 +1649,8 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     });
   }
 
-  const openMap = Object.fromEntries(openTickets.map((r) => [r.assignedTechId, r._count]));
-  const todayMap = Object.fromEntries(todayTickets.map((r) => [r.assignedTechId, r._count]));
+  const openMap = Object.fromEntries(openTickets.map((r) => [r.assignedTechId, groupCount(r)]));
+  const todayMap = Object.fromEntries(todayTickets.map((r) => [r.assignedTechId, groupCount(r)]));
 
   const results = [];
   const excluded = [];
@@ -1015,8 +1713,66 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     });
   }
 
-  // Sort: competency match first, then by lowest workload
+  let riskSummary = null;
+  try {
+    const riskSignals = await getAssignmentRiskSignals(workspaceId, {
+      ticket_id: ticketId,
+      categoryId: categorySelection.category?.id || categoryId,
+      subcategoryId: categorySelection.subcategory?.id || subcategoryId,
+      candidate_tech_ids: results.map((result) => result.techId),
+      lookback_days: 5,
+    });
+    const byTech = new Map((riskSignals.candidates || []).map((candidate) => [candidate.techId, candidate]));
+    for (const result of results) {
+      const risk = byTech.get(result.techId) || null;
+      result.assignmentRisk = risk ? {
+        sameTicketRejected: risk.sameTicketRejected,
+        sameDayRejectedCount: risk.sameDayRejectedCount,
+        sameSubcategoryRejectedCount: risk.sameSubcategoryRejectedCount,
+        sameCategoryRejectedCount: risk.sameCategoryRejectedCount,
+        lastRejectedAt: risk.lastRejectedAt,
+        recentRejectionReasons: risk.recentRejectionReasons,
+        riskPenalty: risk.riskPenalty,
+        riskLevel: risk.riskLevel,
+        availabilitySuppression: risk.availabilitySuppression,
+        rankingAdvice: risk.rankingAdvice,
+      } : null;
+      result.previouslyRejectedThisTicket = !!risk?.sameTicketRejected;
+      if (risk?.sameTicketRejected && risk.lastRejectedAt) result.rejectedAt = risk.lastRejectedAt;
+    }
+    riskSummary = riskSignals.summary || null;
+  } catch (error) {
+    logger.debug('find_matching_agents risk signal enrichment failed', { workspaceId, ticketId, error: error.message });
+    if (ticketId) {
+      try {
+        const rejections = await prisma.ticketAssignmentEpisode.findMany({
+          where: { ticketId, endMethod: 'rejected' },
+          select: { technicianId: true, endedAt: true },
+        });
+        const rejMap = new Map(rejections.map((r) => [r.technicianId, r.endedAt]));
+        for (const r of results) {
+          const rejectedAt = rejMap.get(r.techId);
+          r.previouslyRejectedThisTicket = !!rejectedAt;
+          if (rejectedAt) r.rejectedAt = rejectedAt.toISOString();
+        }
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  const scoringWeights = normalizeScoringWeights(assignmentConfig?.scoringWeights);
+  for (const result of results) {
+    Object.assign(result, scoreCandidate(result, results, scoringWeights));
+  }
+
   results.sort((a, b) => {
+    if (!!a.assignmentRisk?.availabilitySuppression?.active !== !!b.assignmentRisk?.availabilitySuppression?.active) {
+      return a.assignmentRisk?.availabilitySuppression?.active ? 1 : -1;
+    }
+    if (!!a.previouslyRejectedThisTicket !== !!b.previouslyRejectedThisTicket) {
+      return a.previouslyRejectedThisTicket ? 1 : -1;
+    }
+    if (b.riskAdjustedScore !== a.riskAdjustedScore) return b.riskAdjustedScore - a.riskAdjustedScore;
+
     const aPriority = a.competencyMatch?.matchPriority || 0;
     const bPriority = b.competencyMatch?.matchPriority || 0;
     if (bPriority !== aPriority) return bPriority - aPriority;
@@ -1025,28 +1781,8 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     const bLevel = b.competencyMatch ? (proficiencyOrder[b.competencyMatch.level] || 0) : 0;
     if (bLevel !== aLevel) return bLevel - aLevel;
 
-    if (a.locationMatch !== b.locationMatch && a.locationMatch !== null) {
-      return a.locationMatch ? -1 : 1;
-    }
-
     return a.openTickets - b.openTickets;
   });
-
-  // Annotate with rejection history for this specific ticket
-  if (ticketId) {
-    try {
-      const rejections = await prisma.ticketAssignmentEpisode.findMany({
-        where: { ticketId, endMethod: 'rejected' },
-        select: { technicianId: true, endedAt: true },
-      });
-      const rejMap = new Map(rejections.map((r) => [r.technicianId, r.endedAt]));
-      for (const r of results) {
-        const rejectedAt = rejMap.get(r.techId);
-        r.previouslyRejectedThisTicket = !!rejectedAt;
-        if (rejectedAt) r.rejectedAt = rejectedAt.toISOString();
-      }
-    } catch { /* non-fatal */ }
-  }
 
   const competencyCoverage = {
     selectedCategoryId: categorySelection.category?.id || null,
@@ -1076,13 +1812,15 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
       min_proficiency,
     },
     competencyCoverage,
+    riskSummary,
+    scoringWeights,
     matchCount: results.length,
     matches: results,
     excludedCount: excluded.length,
     excluded,
     note: results.length === 0
       ? 'No agents match all criteria. Consider relaxing requirements (e.g., remove physical presence, lower proficiency, or broaden category).'
-      : `Found ${results.length} matching agent(s). Sorted by exact subcategory competency, then parent-category fallback, then workload.`,
+      : `Found ${results.length} matching agent(s). Sorted by risk-adjusted score using competency, workload, location, and recent rejection/capacity signals.`,
   };
 }
 

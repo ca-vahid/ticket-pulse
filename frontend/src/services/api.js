@@ -127,8 +127,9 @@ const errorInterceptor = (error) => {
     const status = error.response.status;
     const requestUrl = error.config?.url || '';
     const isPublicSummitRequest = requestUrl.startsWith('/summit/public/');
+    const isPublicTicketStatusRequest = requestUrl.startsWith('/ticket-status/public/');
 
-    if (status === 401 && !isPublicSummitRequest && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout' && requestUrl !== '/auth/sso' && !error.config?._speculative) {
+    if (status === 401 && !isPublicSummitRequest && !isPublicTicketStatusRequest && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout' && requestUrl !== '/auth/sso' && requestUrl !== '/auth/dev-login' && !error.config?._speculative) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: { url: requestUrl },
       }));
@@ -179,6 +180,10 @@ apiAnalytics.interceptors.response.use(
 export const authAPI = {
   ssoLogin: async (idToken) => {
     return await api.post('/auth/sso', { idToken });
+  },
+
+  devLogin: async (workspaceId = null) => {
+    return await api.post('/auth/dev-login', workspaceId ? { workspaceId } : {});
   },
 
   logout: async () => {
@@ -352,6 +357,18 @@ export const settingsAPI = {
 
   getTechnicians: () => api.get('/settings/technicians'),
   setTechnicianActive: (id, isActive) => api.put(`/settings/technicians/${id}/active`, { isActive }),
+  getPublicTicketStatusSettings: (config = {}) => api.get('/settings/public-ticket-status', config),
+  updatePublicTicketStatusSettings: (data, config = {}) => api.put('/settings/public-ticket-status', data, config),
+  getPublicTicketStatusTickets: (params = {}, config = {}) => api.get('/settings/public-ticket-status/tickets', { ...config, params }),
+  previewPublicTicketStatus: (ticketId, config = {}) => api.get(`/settings/public-ticket-status/tickets/${ticketId}/preview`, config),
+  ensurePublicTicketStatusLink: (ticketId, config = {}) => api.post(`/settings/public-ticket-status/tickets/${ticketId}/ensure-link`, undefined, config),
+  resetPublicTicketStatusLink: (ticketId, config = {}) => api.post(`/settings/public-ticket-status/tickets/${ticketId}/reset-link`, undefined, config),
+  revokePublicTicketStatusLink: (ticketId, config = {}) => api.post(`/settings/public-ticket-status/tickets/${ticketId}/revoke-link`, undefined, config),
+  resetPublicTicketStatusLinkByNumber: (ticketNumber, config = {}) => api.post(`/settings/public-ticket-status/tickets/by-number/${encodeURIComponent(ticketNumber)}/reset-link`, undefined, config),
+  revokePublicTicketStatusLinkByNumber: (ticketNumber, config = {}) => api.post(`/settings/public-ticket-status/tickets/by-number/${encodeURIComponent(ticketNumber)}/revoke-link`, undefined, config),
+  getUrgentEscalationPolicy: (config = {}) => api.get('/settings/urgent-escalation', config),
+  updateUrgentEscalationPolicy: (data, config = {}) => api.put('/settings/urgent-escalation', data, config),
+  getUrgentEscalationCandidates: (config = {}) => api.get('/settings/urgent-escalation/candidates', config),
 };
 
 /**
@@ -725,6 +742,27 @@ export const aiProviderAPI = {
   testProvider: (data) => api.post('/ai-providers/test', data),
 };
 
+export const notificationWorkflowAPI = {
+  list: () => api.get('/notification-workflows'),
+  health: () => api.get('/notification-workflows/health'),
+  variables: () => api.get('/notification-workflows/variables'),
+  getSignature: () => api.get('/notification-workflows/signature'),
+  updateSignature: (data) => api.put('/notification-workflows/signature', data),
+  getAfterHoursPolicy: () => api.get('/notification-workflows/after-hours-policy'),
+  updateAfterHoursPolicy: (data) => api.put('/notification-workflows/after-hours-policy', data),
+  previewAfterHoursPolicy: (data = {}) => api.post('/notification-workflows/after-hours-policy/preview', data),
+  get: (id) => api.get(`/notification-workflows/${id}`),
+  saveDraft: (id, data) => api.put(`/notification-workflows/${id}/draft`, data),
+  publish: (id, data = {}) => api.post(`/notification-workflows/${id}/publish`, data),
+  setEnabled: (id, enabled) => api.put(`/notification-workflows/${id}/enabled`, { enabled }),
+  getPreviewTickets: (params = {}) => api.get('/notification-workflows/preview-tickets', { params }),
+  test: (data) => apiLongTimeout.post('/notification-workflows/test', data),
+  sendTestEmail: (data) => api.post('/notification-workflows/test-email', data),
+  getAudit: (auditId) => api.get(`/notification-workflows/audits/${encodeURIComponent(auditId)}`),
+  getRuns: (id, params = {}) => api.get(`/notification-workflows/${id}/runs`, { params }),
+  retryDelivery: (id) => api.post(`/notification-workflows/deliveries/${id}/retry`),
+};
+
 /**
  * Agent self-service API
  */
@@ -792,6 +830,20 @@ export const summitAPI = {
   votePublicFeedback: (token, itemId, data) => api.post(`/summit/public/${token}/feedback/items/${encodeURIComponent(itemId)}/vote`, data),
   commentPublicFeedback: (token, itemId, data) => api.post(`/summit/public/${token}/feedback/items/${encodeURIComponent(itemId)}/comments`, data),
   getPublicEventSource: (token) => new EventSource(`${API_BASE_URL}/summit/public/${token}/events`, { withCredentials: true }),
+};
+
+export const publicTicketStatusAPI = {
+  get: (token) => api.get(`/ticket-status/public/${encodeURIComponent(token)}`),
+};
+
+export const publicTicketEscalationAPI = {
+  get: (token) => api.get(`/ticket-status/public/${encodeURIComponent(token)}/escalation`),
+  submit: (token) => api.post(`/ticket-status/public/${encodeURIComponent(token)}/escalation`),
+};
+
+export const publicTicketUrgencyAPI = {
+  get: (token) => api.get(`/ticket-status/public/${encodeURIComponent(token)}/urgency`),
+  submit: (token) => api.post(`/ticket-status/public/${encodeURIComponent(token)}/urgency`),
 };
 
 /**

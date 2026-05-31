@@ -15,10 +15,12 @@ import noiseRoutes from './noise.routes.js';
 import vacationTrackerRoutes from './vacationTracker.routes.js';
 import calendarLeaveRoutes from './calendarLeave.routes.js';
 import notificationsRoutes from './notifications.routes.js';
+import notificationWorkflowRoutes from './notificationWorkflow.routes.js';
 import assignmentRoutes from './assignment.routes.js';
 import aiProviderRoutes from './aiProvider.routes.js';
 import analyticsRoutes from './analytics.routes.js';
 import summitRoutes, { summitPublicRouter } from './summit.routes.js';
+import { publicTicketStatusPublicRouter } from './publicTicketStatus.routes.js';
 import agentRoutes from './agent.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
@@ -45,6 +47,10 @@ router.use('/freshservice-webhooks', freshserviceWebhookRoutes);
 // Temporary IT Summit voting links intentionally bypass app auth but require
 // an expiring workshop token.
 router.use('/summit/public', summitPublicRouter);
+
+// Public requester-facing ticket status pages bypass app auth but require the
+// per-ticket bearer token in the URL.
+router.use('/ticket-status/public', publicTicketStatusPublicRouter);
 
 // Promote JWT from query param for SSE requests (EventSource can't set headers).
 // Must run before requireAuth so the token is available for authentication.
@@ -79,6 +85,7 @@ router.use('/noise-rules', noiseRoutes);
 router.use('/vacation-tracker', vacationTrackerRoutes);
 router.use('/calendar-leave', calendarLeaveRoutes);
 router.use('/notifications', notificationsRoutes);
+router.use('/notification-workflows', notificationWorkflowRoutes);
 router.use('/ai-providers', aiProviderRoutes);
 router.use('/assignment', assignmentRoutes);
 router.use('/analytics', analyticsRoutes);

@@ -1,6 +1,19 @@
-export const APP_VERSION = '2.55';
+export const APP_VERSION = '2.6';
 
 export const changelog = [
+  {
+    version: '2.6',
+    date: 'May 30, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>Mail Workflows</strong> adds workspace-scoped notification workflows for ticket arrived, assigned, reassigned, and resolved/closed events with drafts, publishing, preview, audit IDs, and SendGrid delivery.' },
+      { type: 'new', html: '<mark>Major</mark> <strong>Public ticket status and urgency links</strong> give requesters branded pages for current status, assignee, timeline, ETA, business-hours urgency, and after-hours immediate support.' },
+      { type: 'new', html: '<strong>Urgent Escalation settings</strong> moves after-hours escalation into main Settings with workspace rosters, selected users, active contact support, response-window copy, and auditable self-escalation events.' },
+      { type: 'improved', html: '<strong>Workflow editor and preview</strong> now include a resizable inspector, richer variable picker, schema-aware LLM generation, live step audits, ticket filters, forced test action blocks, and test email diagnostics.' },
+      { type: 'improved', html: '<strong>Settings refresh</strong> introduces the new polished settings shell, collapsible dock navigation, full editor entry points, and clearer workflow/action-link controls.' },
+      { type: 'database', html: '<strong>Database updates</strong> add notification workflow storage, workflow run audit, email signatures, public ticket tokens, branding settings, urgent escalation policy, and public escalation event history.' },
+      { type: 'security', html: '<strong>Safe rollout</strong> keeps workflow delivery disabled until a workspace admin publishes and enables a workflow; previews can be tested without emailing requesters.' },
+    ],
+  },
   {
     version: '2.55',
     date: 'May 29, 2026',

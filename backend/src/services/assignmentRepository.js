@@ -817,7 +817,9 @@ class AssignmentRepository {
    * catches the gap where the process restarted between "decision saved"
    * and "syncStatus updated" — the fire-and-forget execute() call dies
    * mid-flight and the run is left permanently stuck (decision saved in
-   * our DB, but FS was never told).
+   * our DB, but FS was never told). Noise-dismissal runs also recover known
+   * transient/optional FreshService write failures so open noise tickets do
+   * not remain stuck after the close path is made more tolerant.
    *
    * Returns the orphan runs so the caller can re-trigger
    * freshServiceActionService.execute() for each one. Threshold is
@@ -841,7 +843,14 @@ class AssignmentRepository {
           {
             decision: 'noise_dismissed',
             syncStatus: 'failed',
-            syncError: { contains: 'Validation failed', mode: 'insensitive' },
+            OR: [
+              { syncError: { contains: 'Validation failed', mode: 'insensitive' } },
+              { syncError: { contains: 'ECONNRESET', mode: 'insensitive' } },
+              { syncError: { contains: 'ETIMEDOUT', mode: 'insensitive' } },
+              { syncError: { contains: 'ECONNABORTED', mode: 'insensitive' } },
+              { syncError: { contains: 'socket hang up', mode: 'insensitive' } },
+              { syncError: { contains: 'timeout', mode: 'insensitive' } },
+            ],
             updatedAt: { lt: cutoff },
           },
         ],

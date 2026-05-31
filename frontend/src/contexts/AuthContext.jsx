@@ -22,6 +22,27 @@ export function AuthProvider({ children }) {
   const recoveryCooldownRef = useRef(null);
   const lastAuthSuccessRef = useRef(0);
 
+  const applyAuthenticatedResponse = useCallback((response) => {
+    if (response.success && response.user) {
+      if (response.authToken) {
+        setAuthToken(response.authToken);
+      }
+      lastAuthSuccessRef.current = Date.now();
+      setUser(response.user);
+      setIsAuthenticated(true);
+      setError(null);
+      recoveryAttemptsRef.current = 0;
+      setWorkspaceData({
+        availableWorkspaces: response.availableWorkspaces || [],
+        selectedWorkspaceId: response.selectedWorkspaceId || null,
+        selectedWorkspaceName: response.selectedWorkspaceName || null,
+        selectedWorkspaceSlug: response.selectedWorkspaceSlug || null,
+      });
+      return true;
+    }
+    return false;
+  }, []);
+
   const checkSession = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -67,23 +88,7 @@ export function AuthProvider({ children }) {
 
       if (tokenResponse?.idToken) {
         const response = await authAPI.ssoLogin(tokenResponse.idToken);
-        if (response.success && response.user) {
-          if (response.authToken) {
-            setAuthToken(response.authToken);
-          }
-          lastAuthSuccessRef.current = Date.now();
-          setUser(response.user);
-          setIsAuthenticated(true);
-          setError(null);
-          recoveryAttemptsRef.current = 0;
-          setWorkspaceData({
-            availableWorkspaces: response.availableWorkspaces || [],
-            selectedWorkspaceId: response.selectedWorkspaceId || null,
-            selectedWorkspaceName: response.selectedWorkspaceName || null,
-            selectedWorkspaceSlug: response.selectedWorkspaceSlug || null,
-          });
-          return true;
-        }
+        return applyAuthenticatedResponse(response);
       }
       return false;
     } catch (err) {
@@ -93,7 +98,7 @@ export function AuthProvider({ children }) {
     } finally {
       isExchangingRef.current = false;
     }
-  }, [instance, inProgress, accounts]);
+  }, [instance, inProgress, accounts, applyAuthenticatedResponse]);
 
   useEffect(() => {
     if (accounts.length > 0 && !isAuthenticated && inProgress === InteractionStatus.None) {
@@ -152,6 +157,25 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const loginWithDevBypass = async () => {
+    if (!import.meta.env.DEV) {
+      setError('Development login is only available in local development.');
+      return;
+    }
+    try {
+      setError(null);
+      setIsLoading(true);
+      const response = await authAPI.devLogin();
+      if (!applyAuthenticatedResponse(response)) {
+        setError('Development login failed');
+      }
+    } catch (err) {
+      setError(err.message || 'Development login failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const logout = async () => {
     try {
       await authAPI.logout();
@@ -180,6 +204,7 @@ export function AuthProvider({ children }) {
     error,
     workspaceData,
     loginWithSSO,
+    loginWithDevBypass,
     logout,
     checkSession,
   };

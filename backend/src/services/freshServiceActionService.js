@@ -10,6 +10,7 @@ import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
+import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
@@ -74,6 +75,19 @@ function isFreshServiceReadOnlyError(error) {
 
 function readOnlyTicketSyncMessage() {
   return 'FreshService marked this ticket read-only, spam, deleted, or otherwise GET-only before Ticket Pulse could write back. No further action needed.';
+}
+
+async function findTicketForNotificationMirror(ticketId, context) {
+  try {
+    return await prisma.ticket.findUnique({ where: { id: ticketId } });
+  } catch (error) {
+    logger.warn('FreshService sync: failed to load ticket for workflow notification mirror', {
+      ticketId,
+      ...context,
+      error: error.message,
+    });
+    return null;
+  }
 }
 
 class FreshServiceActionService {
@@ -380,6 +394,104 @@ class FreshServiceActionService {
     }
   }
 
+  async executeDirectPriorityWriteback({
+    workspaceId,
+    ticketId,
+    priorityId,
+    priorityLabel = null,
+    source = 'freshservice-priority-writeback',
+    dryRun = false,
+  } = {}) {
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: Number(ticketId), workspaceId: Number(workspaceId) },
+      select: {
+        id: true,
+        freshserviceTicketId: true,
+      },
+    });
+
+    const fsTicketId = Number(ticket?.freshserviceTicketId);
+    if (!ticket || !fsTicketId) {
+      return { success: false, skipped: true, error: 'missing_fs_ticket_id' };
+    }
+
+    const parsedPriorityId = Number(priorityId);
+    const label = priorityLabel || PRIORITY_ID_TO_LABEL[parsedPriorityId] || `P${parsedPriorityId}`;
+    const actions = [{
+      type: 'update_priority',
+      ticketId: fsTicketId,
+      priorityId: parsedPriorityId,
+      priorityLabel: label,
+      localFields: {
+        priority: parsedPriorityId,
+      },
+    }];
+    const preview = buildActionPreview(actions);
+
+    if (!Number.isInteger(parsedPriorityId) || parsedPriorityId < 1 || parsedPriorityId > 4) {
+      return { success: false, skipped: true, error: 'invalid_priority', preview, actions };
+    }
+
+    if (dryRun) {
+      return { success: true, dryRun: true, preview, actions };
+    }
+
+    try {
+      const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+      if (!fsConfig?.domain || !fsConfig?.apiKey) {
+        throw new Error('FreshService not configured for this workspace');
+      }
+
+      const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+        priority: 'high',
+        source,
+      });
+
+      await client.updateTicketPriority(fsTicketId, parsedPriorityId);
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: {
+          priority: parsedPriorityId,
+          updatedAt: new Date(),
+        },
+      }).catch((updateError) => {
+        logger.warn('FreshService direct priority sync: priority updated but local mirror update failed', {
+          ticketId: ticket.id,
+          freshserviceTicketId: fsTicketId,
+          source,
+          error: updateError.message,
+        });
+      });
+
+      logger.info('FreshService direct priority sync completed', {
+        ticketId: ticket.id,
+        freshserviceTicketId: fsTicketId,
+        priorityId: parsedPriorityId,
+        source,
+      });
+      return { success: true, preview, actions };
+    } catch (err) {
+      const freshserviceError = extractFreshServiceError(err);
+      if (isFreshServiceReadOnlyError(err)) {
+        const skippedReason = readOnlyTicketSyncMessage();
+        logger.info('FreshService direct priority sync skipped for read-only ticket', {
+          ticketId: ticket.id,
+          preview,
+          source,
+          freshserviceError,
+        });
+        return { success: true, skipped: true, error: skippedReason, preview, freshserviceError };
+      }
+      logger.error('FreshService direct priority sync failed', {
+        ticketId: ticket.id,
+        source,
+        error: err.message,
+        freshserviceError,
+      });
+      return { success: false, error: err.message, preview, freshserviceError };
+    }
+  }
+
   /**
    * Execute FreshService write-back for a pipeline run.
    * Includes preflight validation against live FS state unless force=true.
@@ -569,6 +681,7 @@ class FreshServiceActionService {
       }
 
       let ticketGone = false;
+      const optionalActionFailures = [];
 
       for (const action of actions) {
         if (ticketGone) {
@@ -579,7 +692,30 @@ class FreshServiceActionService {
         if (action.type === 'assign') {
           const result = await client.assignTicket(action.ticketId, action.agentId);
           if (result?.alreadyClosed) { ticketGone = true; continue; }
+          const existingTicket = await findTicketForNotificationMirror(run.ticketId, {
+            freshserviceTicketId: action.ticketId,
+            runId,
+          });
           await this._mirrorLocalAssignment(run, action);
+          const upsertedTicket = await findTicketForNotificationMirror(run.ticketId, {
+            freshserviceTicketId: action.ticketId,
+            runId,
+          });
+          if (upsertedTicket) {
+            await ticketLifecycleNotificationService.emitTicketLifecycleNotifications({
+              existingTicket,
+              upsertedTicket,
+              source: 'assignment_pipeline',
+              allowNotificationWorkflows: true,
+            }).catch((notificationError) => {
+              logger.warn('FreshService sync: assignment succeeded but workflow notification dispatch failed', {
+                ticketId: run.ticketId,
+                freshserviceTicketId: action.ticketId,
+                runId,
+                error: notificationError.message,
+              });
+            });
+          }
           await notificationPreferenceService.queueNotificationsForAssignment(run, action).catch((notificationError) => {
             logger.warn('FreshService sync: assignment succeeded but notification queueing failed', {
               ticketId: run.ticketId,
@@ -613,25 +749,51 @@ class FreshServiceActionService {
             runId,
           });
         } else if (action.type === 'update_custom_fields') {
-          const customFields = await this._resolveTicketPulseLookupFields(client, action, fsConfig);
-          action.sentCustomFields = customFields;
-          const result = await client.updateTicketCustomFields(action.ticketId, customFields);
-          if (result?.alreadyClosed) { ticketGone = true; continue; }
-          await prisma.ticket.update({
-            where: { id: run.ticketId },
-            data: action.localFields,
-          }).catch((updateError) => {
-            logger.warn('FreshService sync: custom fields updated but local mirror update failed', {
-              ticketId: run.ticketId,
-              freshserviceTicketId: action.ticketId,
-              runId,
-              error: updateError.message,
+          try {
+            const customFields = await this._resolveTicketPulseLookupFields(client, action, fsConfig);
+            action.sentCustomFields = customFields;
+            const result = await client.updateTicketCustomFields(action.ticketId, customFields);
+            if (result?.alreadyClosed) { ticketGone = true; continue; }
+            await prisma.ticket.update({
+              where: { id: run.ticketId },
+              data: action.localFields,
+            }).catch((updateError) => {
+              logger.warn('FreshService sync: custom fields updated but local mirror update failed', {
+                ticketId: run.ticketId,
+                freshserviceTicketId: action.ticketId,
+                runId,
+                error: updateError.message,
+              });
             });
-          });
-          logger.info('FreshService: Ticket Pulse skill fields updated', { ticketId: action.ticketId, runId });
+            logger.info('FreshService: Ticket Pulse skill fields updated', { ticketId: action.ticketId, runId });
+          } catch (customFieldError) {
+            if (run.decision !== 'noise_dismissed') {
+              throw customFieldError;
+            }
+
+            const optionalFailure = {
+              type: action.type,
+              ticketId: action.ticketId,
+              error: customFieldError.message,
+              freshserviceError: extractFreshServiceError(customFieldError),
+            };
+            optionalActionFailures.push(optionalFailure);
+            action.optionalFailure = optionalFailure;
+            payloadData = buildSyncPayload(actions, preview, dryRun, { optionalActionFailures });
+            logger.warn('FreshService sync: optional noise category write failed; continuing to close ticket', {
+              ticketId: action.ticketId,
+              runId,
+              error: customFieldError.message,
+              freshserviceError: optionalFailure.freshserviceError,
+            });
+          }
         } else if (action.type === 'close') {
           const result = await client.closeTicket(action.ticketId, action.status);
           if (result?.alreadyClosed) { ticketGone = true; }
+          const existingTicket = await findTicketForNotificationMirror(run.ticketId, {
+            freshserviceTicketId: action.ticketId,
+            runId,
+          });
           await prisma.ticket.update({
             where: { id: run.ticketId },
             data: {
@@ -647,6 +809,25 @@ class FreshServiceActionService {
               error: updateError.message,
             });
           });
+          const upsertedTicket = await findTicketForNotificationMirror(run.ticketId, {
+            freshserviceTicketId: action.ticketId,
+            runId,
+          });
+          if (upsertedTicket) {
+            await ticketLifecycleNotificationService.emitTicketLifecycleNotifications({
+              existingTicket,
+              upsertedTicket,
+              source: 'assignment_pipeline',
+              allowNotificationWorkflows: true,
+            }).catch((notificationError) => {
+              logger.warn('FreshService sync: close succeeded but workflow notification dispatch failed', {
+                ticketId: run.ticketId,
+                freshserviceTicketId: action.ticketId,
+                runId,
+                error: notificationError.message,
+              });
+            });
+          }
           logger.info('FreshService: ticket closed', { ticketId: action.ticketId, runId });
         } else if (action.type === 'note') {
           const result = await client.addPrivateNote(action.ticketId, action.body);
@@ -655,7 +836,12 @@ class FreshServiceActionService {
         }
       }
 
-      const syncNote = ticketGone ? 'Ticket already deleted or closed in FreshService — no action needed' : null;
+      const syncNotes = [];
+      if (ticketGone) syncNotes.push('Ticket already deleted or closed in FreshService — no action needed');
+      if (optionalActionFailures.length > 0) {
+        syncNotes.push('Optional Ticket Pulse category write failed; continued with remaining FreshService actions');
+      }
+      const syncNote = syncNotes.length > 0 ? syncNotes.join(' ') : null;
 
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },

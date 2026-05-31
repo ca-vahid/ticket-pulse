@@ -47,9 +47,9 @@ app.use(
   }),
 );
 
-// Body parsing middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parsing middleware. Public status branding stores small uploaded logos as data URLs.
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Session configuration with PostgreSQL store
 const pgPool = new Pool({

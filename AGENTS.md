@@ -82,12 +82,24 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ### Assignment Review and Automation
 - **Assignment Review**: `/assignments` includes review queue, history, daily review, competencies, prompts, and configuration.
+- **AI Provider Settings**: Workspace admins can select primary/fallback providers and models per operation through `/api/ai-providers/*`; Anthropic and OpenAI are supported, with automatic fallback through the shared provider gateway.
 - **Pipeline Storage**: `assignment_pipeline_runs` and `assignment_pipeline_steps` capture AI recommendations, decisions, sync state, errors, tool steps, token usage, and duration telemetry.
+- **Provider Audit/Health**: `ai_provider_settings`, `ai_provider_attempts`, and `ai_provider_health_events` track operation routing, provider/model attempts, fallback reasons, token counts, and rolling provider health.
 - **Daily Review**: `assignment_daily_review_runs`, recommendations, consolidation runs/items/events support day-level review and approval workflows.
 - **Ticket Threads**: `ticket_thread_entries` caches FreshService activity/conversation bodies for review evidence.
 - **Assignment Episodes**: `ticket_assignment_episodes` tracks ownership windows, reassignments, rejected/bounced tickets, and active ownership state.
 - **Noise Filtering**: `noise_rules` and ticket `isNoise` fields identify low-value tickets that should not distort operational metrics.
 - **Vacation/Availability**: Vacation Tracker tables and technician schedule fields provide leave/capacity context.
+
+### Custom Mail Notification Workflows
+- **Settings Surface**: Workspace admins manage mail workflows from Settings > Mail Workflows.
+- **API**: `/api/notification-workflows/*`
+- **Provider**: SendGrid is the v1 outbound provider. Microsoft Graph sending, FreshService public replies, and FreshService private notes are deferred.
+- **Events**: V1 workflows trigger on live `ticket.created`, `ticket.assigned`, `ticket.reassigned`, and `ticket.resolved_closed` events. Resolved and closed are intentionally treated as one event.
+- **Execution**: Historical sync and backfill paths must not trigger notifications. Live FreshService polling, FreshService webhook ingest, and confirmed assignment-pipeline writebacks may trigger workflows after a workflow is enabled.
+- **Workflow Nodes**: Definitions are JSON graphs validated with Zod. Supported v1 nodes are trigger, condition, recipient resolver, optional LLM generation, Liquid template render, SendGrid email send, and stop.
+- **Recipients**: V1 recipient resolvers are requester, assigned agent, and custom email addresses.
+- **Audit**: `notification_workflow_runs`, `notification_workflow_step_runs`, and `notification_deliveries` record run status, step output, delivery status, provider IDs, dedupe keys, and retry metadata.
 
 ## Planned Architecture
 
@@ -162,10 +174,13 @@ ticket-pulse/
 - **ticket_assignment_episodes**: Ownership windows with start/end method, rejected/reassigned tracking, and active ownership state.
 - **assignment_pipeline_runs / assignment_pipeline_steps**: AI assignment recommendation, decision, sync, error, and tool-step telemetry.
 - **assignment_daily_review_runs / recommendations / consolidation tables**: Daily assignment review outputs, approval state, and consolidation workflow.
+- **notification_workflows / versions / runs / step runs**: Workspace-scoped email workflow draft/published definitions and execution audit.
+- **notification_deliveries**: Generic notification outbox/audit records for workflow emails and existing priority notifications.
 - **sync_logs / backfill_runs**: Incremental sync, Vacation Tracker sync, and long-running historical backfill observability.
 - **noise_rules**: Workspace-scoped noise matching rules.
 - **technician_leaves / Vacation Tracker tables**: Leave and availability context.
 - **competency tables**: Internal category taxonomy, technician competencies, prompt versions, analysis and calibration runs.
+- **ai_provider_settings / ai_provider_attempts / ai_provider_health_events**: Workspace operation-level provider configuration, per-run attempt audit, fallback details, and rolling health event history.
 
 ### Important Relationships
 - Tickets → Technicians (many-to-one via assignedTechId)
@@ -282,6 +297,8 @@ npm run lint
 ### Workspace, Assignment, Visuals, and Integrations
 - `GET/POST/PUT /api/workspaces*` - Workspace selection, discovery, activation, and access management
 - `GET/POST/PUT/DELETE /api/assignment*` - Review queue, assignment runs, prompt management, competencies, daily review, and consolidation workflows
+- `GET/PUT/POST /api/ai-providers*` - Provider model metadata, workspace operation settings, health, and provider test calls
+- `GET/POST/PUT /api/notification-workflows*` - Workspace-admin mail workflow drafts, publishing, enablement, previews, health, run audit, and delivery retry
 - `GET/PATCH/POST /api/visuals*` - Agent map/location/visibility/schedule data
 - `GET/POST/PUT /api/vacation-tracker*` - Vacation Tracker config, sync, leave types, and user mappings
 - `GET/POST/PUT/DELETE /api/noise-rules*` - Noise rule management, test, seed, and backfill
