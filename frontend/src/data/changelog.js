@@ -1,6 +1,17 @@
-export const APP_VERSION = '2.6';
+export const APP_VERSION = '2.65';
 
 export const changelog = [
+  {
+    version: '2.65',
+    date: 'May 31, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>LLM evidence and read-only tools</strong> adds workspace policy modes for no extra evidence, a redacted evidence bundle, or that bundle plus approved Ticket Pulse evidence tools.' },
+      { type: 'improved', html: '<strong>Mail Workflow LLM settings</strong> now separate workspace evidence, read-only tool use, source opt-outs, output-as-draft behavior, token limits, and failure handling with clearer labels.' },
+      { type: 'improved', html: '<strong>Inline help</strong> adds clickable explanations for every LLM evidence mode, source, safety budget, claim guard, redaction/private-note control, tool, preview, and node-level setting.' },
+      { type: 'security', html: '<strong>Requester-safe generation</strong> keeps tool names, provider/model details, audit wording, private-note references, and unsupported outage claims out of requester-facing email drafts.' },
+      { type: 'database', html: '<strong>Database updates</strong> add notification LLM tool policy storage, workflow mock-mode audit fields, and ticket recipient email arrays needed by Mail Workflow previews and recipient context.' },
+    ],
+  },
   {
     version: '2.6',
     date: 'May 30, 2026',

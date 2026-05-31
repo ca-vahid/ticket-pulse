@@ -16,6 +16,7 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronUp,
+  CircleHelp,
   Code,
   Clipboard,
   Eye,
@@ -211,9 +212,9 @@ const MOCK_AUDIT_RANGES = [
 ];
 
 const LLM_TOOL_POLICY_MODES = [
-  { value: 'off', label: 'Off', description: 'Use only the workflow prompt and template.' },
-  { value: 'context_only', label: 'Context only', description: 'Add redacted ticket, thread, similar-ticket, and signal context.' },
-  { value: 'tools_enabled', label: 'Context + tools', description: 'Allow bounded read-only Ticket Pulse evidence tools before final email submission.' },
+  { value: 'off', label: 'Off', description: 'No extra evidence or tools. LLM steps use only their prompt and workflow data.', helpTopic: 'policyOff' },
+  { value: 'context_only', label: 'Evidence bundle', description: 'Attach one redacted ticket, thread, similar-ticket, and signal bundle to LLM steps.', helpTopic: 'policyContextOnly' },
+  { value: 'tools_enabled', label: 'Evidence + tools', description: 'Attach the evidence bundle and allow enabled read-only tools during drafting.', helpTopic: 'policyToolsEnabled' },
 ];
 
 const CONDITION_FIELD_OPTIONS = [
@@ -269,6 +270,427 @@ const DEFAULT_LLM_TOOL_POLICY = {
   redactionEnabled: true,
 };
 
+const LLM_TOOL_POLICY_MODE_LABELS = Object.fromEntries(
+  LLM_TOOL_POLICY_MODES.map((mode) => [mode.value, mode.label]),
+);
+
+const LLM_HELP_TOPICS = {
+  workspacePolicy: {
+    title: 'Workspace LLM evidence policy',
+    summary: 'This sets the default evidence and tool policy for every Mail Workflow LLM Generate step in this workspace.',
+    sections: [
+      {
+        heading: 'What it changes',
+        items: [
+          'Off means the LLM receives only the workflow prompt, workflow variables, and template data.',
+          'Evidence bundle means the LLM also receives one redacted Ticket Pulse context bundle before it writes.',
+          'Evidence + tools means the LLM receives the bundle and can call enabled read-only evidence tools while drafting.',
+        ],
+      },
+      {
+        heading: 'What it does not do',
+        items: [
+          'It does not send email by itself.',
+          'It does not update tickets, workflow settings, or FreshService data.',
+          'It only affects LLM Generate nodes that use the workspace evidence/tool policy.',
+        ],
+      },
+    ],
+  },
+  policyOff: {
+    title: 'Mode: Off',
+    summary: 'Use this when a workflow should rely only on its prompt/template data.',
+    sections: [
+      {
+        heading: 'Behavior',
+        items: [
+          'No extra thread history, similar-ticket search, outage signal bundle, or read-only tools are supplied.',
+          'The LLM can still use variables already present in the workflow event context.',
+        ],
+      },
+    ],
+  },
+  policyContextOnly: {
+    title: 'Mode: Evidence bundle',
+    summary: 'Adds a single redacted evidence package to LLM Generate steps.',
+    sections: [
+      {
+        heading: 'Included evidence',
+        items: [
+          'Current ticket details, requester, assignee, recipient state, business-window state, action links, and priority signals.',
+          'Optional thread history, similar tickets, and outage signal summaries, based on the source toggles below.',
+          'The LLM cannot call extra tools in this mode; it only sees the prebuilt bundle.',
+        ],
+      },
+    ],
+  },
+  policyToolsEnabled: {
+    title: 'Mode: Evidence + tools',
+    summary: 'Allows LLM Generate steps to call approved read-only Ticket Pulse tools while drafting.',
+    sections: [
+      {
+        heading: 'How it works',
+        items: [
+          'The app sends tool schemas to the AI provider separately from your prompt.',
+          'The model can call only the tools enabled in this workspace panel.',
+          'The model must submit the final draft through a controlled final-email tool before the workflow can use it.',
+        ],
+      },
+      {
+        heading: 'Safety limits',
+        items: [
+          'Tool calls are capped by turns, call count, timeout, and output-size budgets.',
+          'Tools are read-only evidence lookups; they cannot send email or update tickets.',
+        ],
+      },
+    ],
+  },
+  evidenceSources: {
+    title: 'Evidence sources',
+    summary: 'These toggles decide which evidence categories are allowed in the workspace evidence bundle.',
+    sections: [
+      {
+        heading: 'How to read them',
+        items: [
+          'A source enabled here is allowed by default for LLM Generate nodes.',
+          'A specific LLM Generate node can still opt out of a source in its own settings.',
+          'Turning a source off globally prevents it from being included by default.',
+        ],
+      },
+    ],
+  },
+  threadHistory: {
+    title: 'Thread history evidence',
+    summary: 'Adds recent ticket conversation entries from Ticket Pulse thread cache.',
+    sections: [
+      {
+        heading: 'What it helps with',
+        items: [
+          'Avoids repeating information the requester already received.',
+          'Lets the LLM reference current ticket state more accurately.',
+          'Private/internal notes are excluded unless the private-notes policy is explicitly enabled.',
+        ],
+      },
+    ],
+  },
+  similarTickets: {
+    title: 'Similar-ticket evidence',
+    summary: 'Finds recent workspace tickets that look related by category, department, and keywords.',
+    sections: [
+      {
+        heading: 'What it helps with',
+        items: [
+          'Gives the LLM context that a request may resemble other recent cases.',
+          'Feeds conservative signal checks for broader-issue wording.',
+          'It is not semantic/vector search yet; it uses deterministic matching and scoring.',
+        ],
+      },
+    ],
+  },
+  outageSignals: {
+    title: 'Broader-issue wording signals',
+    summary: 'Counts similar tickets and decides which public wording is allowed.',
+    sections: [
+      {
+        heading: 'What it allows',
+        items: [
+          'With enough related evidence, the email may use softer language such as reviewing similar reports.',
+          'It does not allow unsupported claims like global outage, company-wide outage, or confirmed outage.',
+          'Allowed phrases are generated deterministically, then enforced by the output guard.',
+        ],
+      },
+    ],
+  },
+  threadEntries: {
+    title: 'Thread entries limit',
+    summary: 'Maximum recent thread entries to include in the evidence bundle or thread tool output.',
+    sections: [
+      { heading: 'Default', items: ['Six entries is enough for recent context without overloading the prompt.'] },
+    ],
+  },
+  similarTicketLimit: {
+    title: 'Similar tickets limit',
+    summary: 'Maximum similar-ticket examples to include per lookback window.',
+    sections: [
+      { heading: 'Default', items: ['Five examples keeps the model grounded without making the email depend on too much old data.'] },
+    ],
+  },
+  watchThreshold: {
+    title: 'Watch threshold',
+    summary: 'Minimum related-ticket count before softer similar-report wording can be used.',
+    sections: [
+      {
+        heading: 'Requester-facing impact',
+        items: [
+          'Below the threshold, the email should talk only about the current ticket.',
+          'At or above the threshold, the app can allow cautious wording about similar reports.',
+        ],
+      },
+    ],
+  },
+  contextKb: {
+    title: 'Context KB',
+    summary: 'Maximum size of the full evidence bundle sent into the model.',
+    sections: [
+      {
+        heading: 'Why it exists',
+        items: [
+          'Keeps prompts bounded, faster, and cheaper.',
+          'If the bundle is too large, long thread entries and similar-ticket lists are trimmed.',
+        ],
+      },
+    ],
+  },
+  toolBudget: {
+    title: 'Tool-mode safety budget',
+    summary: 'Hard limits for every Evidence + tools LLM generation.',
+    sections: [
+      {
+        heading: 'What is limited',
+        items: [
+          'Turns limit the number of LLM/tool back-and-forth rounds.',
+          'Tool calls limit the total read-only lookups allowed.',
+          'Total seconds, per-tool seconds, and tool output KB stop slow or oversized runs.',
+        ],
+      },
+    ],
+  },
+  claimControls: {
+    title: 'Requester-facing claim controls',
+    summary: 'Blocks unsafe wording before generated email content can be used.',
+    sections: [
+      {
+        heading: 'Blocked wording',
+        items: [
+          'Global, company-wide, or confirmed outage claims without confirmed evidence.',
+          'Private/internal note mentions or quotes.',
+          'Tool names, provider/model names, and audit identifiers.',
+        ],
+      },
+    ],
+  },
+  redaction: {
+    title: 'Redaction',
+    summary: 'Removes common secrets before evidence is sent to the LLM.',
+    sections: [
+      {
+        heading: 'Currently redacted',
+        items: [
+          'Passwords and password-like fields.',
+          'API keys, secrets, tokens, bearer strings, and session identifiers.',
+          'The preview panel shows how many redactions were applied for a selected ticket.',
+        ],
+      },
+    ],
+  },
+  privateNotes: {
+    title: 'Private notes policy',
+    summary: 'Controls whether internal FreshService notes can be used as internal evidence.',
+    sections: [
+      {
+        heading: 'Important behavior',
+        items: [
+          'Excluded is the safest default.',
+          'If enabled, private notes may inform the model internally.',
+          'Requester-facing email is still blocked from quoting or mentioning private/internal notes.',
+        ],
+      },
+    ],
+  },
+  toolCatalog: {
+    title: 'Tool availability',
+    summary: 'These are the read-only tools available when workspace mode is Evidence + tools.',
+    sections: [
+      {
+        heading: 'How tool use is enabled',
+        items: [
+          'Workspace mode must be Evidence + tools.',
+          'The specific tool must be enabled in this list.',
+          'The LLM Generate node must have its read-only tools setting enabled.',
+        ],
+      },
+    ],
+  },
+  get_notification_context: {
+    title: 'Tool: Notification context',
+    summary: 'Returns the current redacted evidence bundle for the workflow run.',
+    sections: [
+      { heading: 'Use case', items: ['Best when the model needs the full ticket, recipient, thread, similar-ticket, and signal bundle again during tool mode.'] },
+    ],
+  },
+  get_ticket_thread_summary: {
+    title: 'Tool: Ticket thread',
+    summary: 'Returns bounded ticket thread entries for the current ticket.',
+    sections: [
+      { heading: 'Use case', items: ['Best when the model needs to check recent requester/agent conversation before wording the email.'] },
+    ],
+  },
+  find_similar_tickets: {
+    title: 'Tool: Similar tickets',
+    summary: 'Searches recent workspace tickets related by category, department, and keywords.',
+    sections: [
+      { heading: 'Use case', items: ['Best when the model needs examples of related cases before deciding how specific or cautious to be.'] },
+    ],
+  },
+  detect_related_ticket_spike: {
+    title: 'Tool: Related ticket spike',
+    summary: 'Counts recent similar tickets and returns exact public phrases allowed by the thresholds.',
+    sections: [
+      { heading: 'Use case', items: ['Best when the model wants to know whether it can mention similar reports or a possible broader issue.'] },
+    ],
+  },
+  search_recent_tickets: {
+    title: 'Tool: Recent ticket search',
+    summary: 'Runs a bounded workspace search over recent tickets.',
+    sections: [
+      {
+        heading: 'Use case',
+        items: [
+          'Best for broader checks like whether a keyword or category is appearing today.',
+          'Off by default because it is more flexible than the narrower evidence tools.',
+        ],
+      },
+    ],
+  },
+  previewContext: {
+    title: 'Preview context',
+    summary: 'Builds the evidence bundle for a real selected ticket without sending an email.',
+    sections: [
+      {
+        heading: 'What to inspect',
+        items: [
+          'Redacted ticket/thread data.',
+          'Similar-ticket counts by time window.',
+          'Allowed public wording and redaction count.',
+        ],
+      },
+    ],
+  },
+  runToolTest: {
+    title: 'Run tool test',
+    summary: 'Runs a full preview using the selected workflow, selected ticket, and current tool policy.',
+    sections: [
+      {
+        heading: 'What it verifies',
+        items: [
+          'The LLM can call enabled tools.',
+          'The final email is submitted through the controlled final-email tool.',
+          'Tool calls and outputs show in the preview/audit details.',
+        ],
+      },
+    ],
+  },
+  llmStepSettings: {
+    title: 'LLM Generate step settings',
+    summary: 'These settings control how this one LLM node uses the workspace policy and what happens to its output.',
+    sections: [
+      {
+        heading: 'Workspace vs node',
+        items: [
+          'The workspace panel sets the default policy.',
+          'This node can opt out of the evidence bundle, tools, or individual evidence sources.',
+          'You do not need to mention tool names in the prompt; the app injects tool schemas automatically.',
+        ],
+      },
+    ],
+  },
+  outputMode: {
+    title: 'Output mode',
+    summary: 'Describes what this LLM step is intended to produce.',
+    sections: [
+      {
+        heading: 'Mail workflow default',
+        items: [
+          'Draft email is the normal choice for requester-facing email generation.',
+          'Other modes are helper modes for classification, extraction, critique, or rewrite workflows.',
+        ],
+      },
+    ],
+  },
+  promoteToEmail: {
+    title: 'Promote output to final email',
+    summary: 'Controls whether this LLM output becomes the email body used by later send/template steps.',
+    sections: [
+      {
+        heading: 'If enabled',
+        items: ['The generated subject, HTML, and text become the current workflow email content.'],
+      },
+      {
+        heading: 'If disabled',
+        items: ['The LLM result is stored for workflow outputs/preview, but it does not become the sendable email by itself.'],
+      },
+    ],
+  },
+  nodeContextEnrichment: {
+    title: 'Use workspace evidence bundle',
+    summary: 'Allows this LLM node to receive the redacted workspace evidence bundle.',
+    sections: [
+      {
+        heading: 'Per-node behavior',
+        items: [
+          'Enabled means this node uses the workspace evidence policy.',
+          'Disabled means this node does not get the prebuilt evidence bundle.',
+          'The individual source toggles below can remove thread, similar-ticket, or outage signal data for this node.',
+        ],
+      },
+    ],
+  },
+  nodeToolMode: {
+    title: 'Use workspace read-only tools',
+    summary: 'Allows this LLM node to use enabled read-only tools when the workspace mode is Evidence + tools.',
+    sections: [
+      {
+        heading: 'Prompt behavior',
+        items: [
+          'Tool schemas are injected by the app, not by your prompt text.',
+          'The prompt should describe the business task, not list tool names.',
+          'The app adds internal instructions requiring the model to use only approved read-only tools and submit the final email through the final-email tool.',
+        ],
+      },
+    ],
+  },
+  maxTokens: {
+    title: 'Max tokens',
+    summary: 'Maximum size of the LLM output for this node.',
+    sections: [
+      {
+        heading: 'Different from Context KB',
+        items: [
+          'Context KB limits how much evidence goes into the model.',
+          'Max tokens limits how much generated text/JSON can come out.',
+        ],
+      },
+    ],
+  },
+  temperature: {
+    title: 'Temperature',
+    summary: 'Controls how varied the generated wording can be.',
+    sections: [
+      {
+        heading: 'Recommended default',
+        items: [
+          '0.3 keeps helpdesk emails consistent while still allowing natural wording.',
+          'Higher values can make wording less predictable.',
+        ],
+      },
+    ],
+  },
+  failWorkflowOnError: {
+    title: 'Fail workflow if LLM generation fails',
+    summary: 'Controls whether the workflow stops when this LLM node errors.',
+    sections: [
+      {
+        heading: 'If enabled',
+        items: ['The workflow fails closed when LLM generation fails. No later send step should proceed.'],
+      },
+      {
+        heading: 'If disabled',
+        items: ['The workflow can continue to template fallback or later nodes, depending on how the workflow is built.'],
+      },
+    ],
+  },
+};
+
 const MOCK_AUDIT_STATUSES = [
   { value: 'all', label: 'All statuses' },
   { value: 'completed', label: 'Completed' },
@@ -278,6 +700,105 @@ const MOCK_AUDIT_STATUSES = [
 
 function cls(...parts) {
   return parts.filter(Boolean).join(' ');
+}
+
+function llmPolicyModeLabel(mode) {
+  return LLM_TOOL_POLICY_MODE_LABELS[mode] || mode || 'Evidence bundle';
+}
+
+function LlmHelpButton({ topic, label = 'Open help', onOpenHelp, className = '' }) {
+  if (!topic || !onOpenHelp) return null;
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenHelp(topic);
+      }}
+      className={cls(
+        'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-sm hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700',
+        className,
+      )}
+      aria-label={label}
+      title={label}
+    >
+      <CircleHelp className="h-4 w-4" />
+    </button>
+  );
+}
+
+function LabelWithHelp({ children, topic, onOpenHelp, className = '' }) {
+  return (
+    <span className={cls('inline-flex items-center gap-1.5', className)}>
+      <span>{children}</span>
+      <LlmHelpButton topic={topic} onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+    </span>
+  );
+}
+
+function LlmHelpModal({ topic, onClose }) {
+  const help = topic ? LLM_HELP_TOPICS[topic] : null;
+  if (!help) return null;
+
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4">
+      <button
+        type="button"
+        aria-label="Close help"
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+      />
+      <section
+        className="relative z-10 flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-md bg-white shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="llm-help-title"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Mail workflow help</div>
+            <h3 id="llm-help-title" className="mt-1 text-lg font-semibold text-slate-950">{help.title}</h3>
+            <p className="mt-1 text-sm leading-6 text-slate-600">{help.summary}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            title="Close"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div className="space-y-4">
+            {(help.sections || []).map((section) => (
+              <div key={section.heading} className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+                <h4 className="text-sm font-semibold text-slate-900">{section.heading}</h4>
+                <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-600">
+                  {(section.items || []).map((item) => (
+                    <li key={item} className="flex gap-2">
+                      <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex justify-end border-t border-slate-200 px-5 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Got it
+          </button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function statusClass(status) {
@@ -2641,6 +3162,7 @@ export function LlmContextToolsPanel({
   onSave,
   onPreview,
   onTestRun,
+  onOpenHelp,
 }) {
   const context = draft?.toolSettings?.context || DEFAULT_LLM_TOOL_POLICY.toolSettings.context;
   const outage = draft?.toolSettings?.outageSignals || DEFAULT_LLM_TOOL_POLICY.toolSettings.outageSignals;
@@ -2658,19 +3180,22 @@ export function LlmContextToolsPanel({
     {
       key: 'includeThreadHistory',
       label: 'Thread history',
-      description: 'Recent redacted public ticket conversation entries.',
+      description: 'Recent redacted ticket conversation entries.',
+      helpTopic: 'threadHistory',
       enabled: context.includeThreadHistory !== false,
     },
     {
       key: 'includeSimilarTickets',
       label: 'Similar tickets',
       description: 'Recent workspace tickets matching category, department, and keywords.',
+      helpTopic: 'similarTickets',
       enabled: context.includeSimilarTickets !== false,
     },
     {
       key: 'includeOutageSignals',
-      label: 'Outage signals',
+      label: 'Broader-issue wording',
       description: 'Deterministic ticket-volume signals and allowed public phrasing.',
+      helpTopic: 'outageSignals',
       enabled: context.includeOutageSignals !== false,
     },
   ];
@@ -2683,12 +3208,15 @@ export function LlmContextToolsPanel({
             <div>
               <div className="flex items-center gap-2">
                 <Bot className="h-4 w-4 text-violet-700" />
-                <h3 className="text-sm font-semibold text-slate-950">LLM context and tools</h3>
+                <h3 className="text-sm font-semibold text-slate-950">LLM evidence and tools policy</h3>
                 <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">
                   Workspace
                 </span>
+                <LlmHelpButton topic="workspacePolicy" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
               </div>
-              <p className="mt-1 text-xs text-slate-500">Run richer, redacted evidence and approved read-only tools into notification LLMs before any email is sent.</p>
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
+                Set what Mail Workflow LLM steps can use by default: no extra evidence, a redacted evidence bundle, or that bundle plus approved read-only tools.
+              </p>
             </div>
             <button
               type="button"
@@ -2705,46 +3233,63 @@ export function LlmContextToolsPanel({
             {LLM_TOOL_POLICY_MODES.map((option) => {
               const active = mode === option.value;
               return (
-                <button
+                <div
                   key={option.value}
-                  type="button"
-                  onClick={() => onChange({ mode: option.value })}
                   className={cls(
-                    'min-h-[76px] rounded-md border px-3 py-2 text-left transition',
+                    'relative min-h-[86px] rounded-md border transition',
                     active ? 'border-violet-300 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
                   )}
                 >
-                  <span className="block text-sm font-semibold">{option.label}</span>
-                  <span className="mt-1 block text-xs leading-4 text-slate-500">{option.description}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => onChange({ mode: option.value })}
+                    className="h-full w-full px-3 py-2 pr-10 text-left"
+                  >
+                    <span className="block text-sm font-semibold">{option.label}</span>
+                    <span className="mt-1 block text-xs leading-4 text-slate-500">{option.description}</span>
+                  </button>
+                  <LlmHelpButton topic={option.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
+                </div>
               );
             })}
           </div>
 
-          <div className="grid gap-2 md:grid-cols-3">
-            {sourceRows.map((row) => (
-              <button
-                key={row.key}
-                type="button"
-                onClick={() => onSettingChange('context', { [row.key]: !row.enabled })}
-                disabled={mode === 'off'}
-                className={cls(
-                  'rounded-md border px-3 py-2 text-left transition disabled:opacity-50',
-                  row.enabled && mode !== 'off' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-200 bg-slate-50 text-slate-600',
-                )}
-              >
-                <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
-                  {row.label}
-                  {row.enabled && mode !== 'off' ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
-                </span>
-                <span className="mt-1 block text-xs leading-4 text-slate-500">{row.description}</span>
-              </button>
-            ))}
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Evidence sources
+              <LlmHelpButton topic="evidenceSources" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+            </div>
+            <div className="grid gap-2 md:grid-cols-3">
+              {sourceRows.map((row) => (
+                <div
+                  key={row.key}
+                  className={cls(
+                    'relative rounded-md border transition',
+                    mode === 'off' ? 'opacity-50' : '',
+                    row.enabled && mode !== 'off' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-200 bg-slate-50 text-slate-600',
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSettingChange('context', { [row.key]: !row.enabled })}
+                    disabled={mode === 'off'}
+                    className="w-full px-3 py-2 pr-10 text-left disabled:cursor-not-allowed"
+                  >
+                    <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
+                      {row.label}
+                      {row.enabled && mode !== 'off' ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                    </span>
+                    <span className="mt-1 block text-xs leading-4 text-slate-500">{row.description}</span>
+                  </button>
+                  <LlmHelpButton topic={row.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="grid gap-2 md:grid-cols-4">
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Thread entries
+              <LabelWithHelp topic="threadEntries" onOpenHelp={onOpenHelp}>Thread entries</LabelWithHelp>
               <input
                 type="number"
                 min="0"
@@ -2755,7 +3300,7 @@ export function LlmContextToolsPanel({
               />
             </label>
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Similar tickets
+              <LabelWithHelp topic="similarTicketLimit" onOpenHelp={onOpenHelp}>Similar tickets</LabelWithHelp>
               <input
                 type="number"
                 min="0"
@@ -2766,7 +3311,7 @@ export function LlmContextToolsPanel({
               />
             </label>
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Watch threshold
+              <LabelWithHelp topic="watchThreshold" onOpenHelp={onOpenHelp}>Watch threshold</LabelWithHelp>
               <input
                 type="number"
                 min="2"
@@ -2777,7 +3322,7 @@ export function LlmContextToolsPanel({
               />
             </label>
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Context KB
+              <LabelWithHelp topic="contextKb" onOpenHelp={onOpenHelp}>Context KB</LabelWithHelp>
               <input
                 type="number"
                 min="5"
@@ -2791,12 +3336,15 @@ export function LlmContextToolsPanel({
 
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Safety budget</div>
-              <div className="text-[11px] font-medium text-slate-500">Hard limits for every tool-mode generation</div>
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Tool-mode safety budget
+                <LlmHelpButton topic="toolBudget" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+              </div>
+              <div className="text-[11px] font-medium text-slate-500">Hard limits for every Evidence + tools generation</div>
             </div>
             <div className="grid gap-2 md:grid-cols-5">
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Turns
+                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Turns</LabelWithHelp>
                 <input
                   type="number"
                   min="1"
@@ -2807,7 +3355,7 @@ export function LlmContextToolsPanel({
                 />
               </label>
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Tool calls
+                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool calls</LabelWithHelp>
                 <input
                   type="number"
                   min="1"
@@ -2818,7 +3366,7 @@ export function LlmContextToolsPanel({
                 />
               </label>
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Total sec
+                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Total sec</LabelWithHelp>
                 <input
                   type="number"
                   min="2"
@@ -2829,7 +3377,7 @@ export function LlmContextToolsPanel({
                 />
               </label>
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Tool sec
+                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool sec</LabelWithHelp>
                 <input
                   type="number"
                   min="1"
@@ -2840,7 +3388,7 @@ export function LlmContextToolsPanel({
                 />
               </label>
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Tool KB
+                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool KB</LabelWithHelp>
                 <input
                   type="number"
                   min="2"
@@ -2854,57 +3402,77 @@ export function LlmContextToolsPanel({
           </div>
 
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-            <div className="font-semibold uppercase tracking-wide">Claim controls</div>
-            <div>Global, company-wide, confirmed outage, private-note, tool, provider, and audit wording is blocked from requester-facing fields. Similar-report wording is allowed only after threshold evidence.</div>
+            <div className="flex items-center gap-1.5 font-semibold uppercase tracking-wide">
+              Requester-facing claim controls
+              <LlmHelpButton topic="claimControls" onOpenHelp={onOpenHelp} className="h-6 w-6 border-amber-200 text-amber-700 shadow-none hover:border-amber-300 hover:bg-amber-100" />
+            </div>
+            <div>Unsupported outage claims, private/internal note mentions, tool names, provider/model names, and audit wording are blocked from requester-facing fields. Similar-report wording is allowed only after threshold evidence.</div>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
-              className={cls(
-                'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                draft.redactionEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700',
-              )}
-            >
-              {draft.redactionEnabled ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
-              Redaction {draft.redactionEnabled ? 'on' : 'off'}
-            </button>
-            <button
-              type="button"
-              onClick={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
-              className={cls(
-                'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                draft.includePrivateNotes ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-600',
-              )}
-            >
-              {draft.includePrivateNotes ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
-              Private notes {draft.includePrivateNotes ? 'internal evidence' : 'excluded'}
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
+                className={cls(
+                  'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
+                  draft.redactionEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700',
+                )}
+              >
+                {draft.redactionEnabled ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
+                Redaction {draft.redactionEnabled ? 'on' : 'off'}
+              </button>
+              <LlmHelpButton topic="redaction" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
+                className={cls(
+                  'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
+                  draft.includePrivateNotes ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-600',
+                )}
+              >
+                {draft.includePrivateNotes ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
+                Private notes {draft.includePrivateNotes ? 'internal evidence' : 'excluded'}
+              </button>
+              <LlmHelpButton topic="privateNotes" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
+            </div>
           </div>
 
           {mode === 'tools_enabled' && (
-            <div className="grid gap-2 md:grid-cols-2">
-              {(catalog || []).map((tool) => {
-                const enabled = enabledTools.includes(tool.name);
-                return (
-                  <button
-                    key={tool.name}
-                    type="button"
-                    onClick={() => onToggleTool(tool.name)}
-                    className={cls(
-                      'rounded-md border px-3 py-2 text-left transition',
-                      enabled ? 'border-violet-200 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
-                    )}
-                  >
-                    <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
-                      {tool.label}
-                      <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-slate-500 ring-1 ring-slate-200">{tool.riskLevel}</span>
-                    </span>
-                    <span className="mt-1 block text-xs leading-4 text-slate-500">{tool.description}</span>
-                  </button>
-                );
-              })}
+            <div>
+              <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Read-only tool availability
+                <LlmHelpButton topic="toolCatalog" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {(catalog || []).map((tool) => {
+                  const enabled = enabledTools.includes(tool.name);
+                  return (
+                    <div
+                      key={tool.name}
+                      className={cls(
+                        'relative rounded-md border transition',
+                        enabled ? 'border-violet-200 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onToggleTool(tool.name)}
+                        className="w-full px-3 py-2 pr-10 text-left"
+                      >
+                        <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
+                          {tool.label}
+                          <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-slate-500 ring-1 ring-slate-200">{tool.riskLevel}</span>
+                        </span>
+                        <span className="mt-1 block text-xs leading-4 text-slate-500">{tool.description}</span>
+                      </button>
+                      <LlmHelpButton topic={tool.name} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -2923,7 +3491,10 @@ export function LlmContextToolsPanel({
         <div className="min-w-0 rounded-md border border-violet-100 bg-slate-50 p-3">
           <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Preview ticket context</div>
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Preview ticket evidence
+                <LlmHelpButton topic="previewContext" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+              </div>
               <div className="mt-0.5 text-xs text-slate-500">
                 Search by visible FreshService ticket number or choose a recent ticket.
               </div>
@@ -2948,6 +3519,7 @@ export function LlmContextToolsPanel({
                 {testLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
                 Run tool test
               </button>
+              <LlmHelpButton topic="runToolTest" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
             </div>
           </div>
 
@@ -3577,6 +4149,7 @@ export default function NotificationWorkflowsPanel() {
   const [llmContextPreviewLoading, setLlmContextPreviewLoading] = useState(false);
   const [llmToolTestRun, setLlmToolTestRun] = useState(null);
   const [llmToolTestLoading, setLlmToolTestLoading] = useState(false);
+  const [llmHelpTopic, setLlmHelpTopic] = useState(null);
   const [contentEditor, setContentEditor] = useState(null);
   const [contentEditorValue, setContentEditorValue] = useState('');
   const [mockAuditRuns, setMockAuditRuns] = useState([]);
@@ -4913,6 +5486,10 @@ export default function NotificationWorkflowsPanel() {
 
     if (selectedNode.type === 'llm_generate') {
       const outputFields = Object.keys((selectedNode.data?.outputSchema || DEFAULT_LLM_OUTPUT_SCHEMA).properties || {});
+      const workspaceLlmMode = llmToolPolicy.mode || 'context_only';
+      const workspaceToolsAvailable = workspaceLlmMode === 'tools_enabled';
+      const nodeContextEnabled = selectedNode.data?.contextEnrichmentEnabled !== false;
+      const nodeToolModeEnabled = workspaceToolsAvailable && selectedNode.data?.useWorkspaceToolPolicy !== false;
       return (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-1 rounded-md bg-gray-100 p-1">
@@ -4935,6 +5512,7 @@ export default function NotificationWorkflowsPanel() {
                 {label}
               </button>
             ))}
+            <LlmHelpButton topic="llmStepSettings" onOpenHelp={setLlmHelpTopic} className="ml-auto h-7 w-7 shadow-none" />
           </div>
 
           {llmTab === 'prompt' && (
@@ -5032,11 +5610,23 @@ export default function NotificationWorkflowsPanel() {
                 Provider and fallback are controlled in <span className="font-semibold">{'Settings > AI Providers > Mail Workflow Generation'}</span>.
               </div>
               <div className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
-                Workspace LLM context mode: <span className="font-semibold">{llmToolPolicy.mode || 'context_only'}</span>. This node uses the workspace policy unless context enrichment is disabled below.
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Workspace evidence policy</div>
+                    <div className="mt-1">
+                      Mode: <span className="font-semibold">{llmPolicyModeLabel(workspaceLlmMode)}</span>.
+                      {' '}
+                      {workspaceToolsAvailable
+                        ? 'Read-only tools are available to this node when the tools toggle below is enabled.'
+                        : 'Read-only tools are not available unless the workspace mode is Evidence + tools.'}
+                    </div>
+                  </div>
+                  <LlmHelpButton topic="llmStepSettings" onOpenHelp={setLlmHelpTopic} className="h-7 w-7 shadow-none" />
+                </div>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
                 <label className="text-xs font-medium uppercase text-gray-500">
-                  Output mode
+                  <LabelWithHelp topic="outputMode" onOpenHelp={setLlmHelpTopic}>Output mode</LabelWithHelp>
                   <select
                     value={selectedNode.data?.outputMode || 'draft_email'}
                     onChange={(event) => updateNodeData({ outputMode: event.target.value })}
@@ -5049,45 +5639,86 @@ export default function NotificationWorkflowsPanel() {
                     <option value="rewrite_final_email">Rewrite final email</option>
                   </select>
                 </label>
-                <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={selectedNode.data?.promoteToEmail !== false}
-                    onChange={(event) => updateNodeData({ promoteToEmail: event.target.checked })}
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                  />
-                  Promote output to final email
-                </label>
-              </div>
-              <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selectedNode.data?.contextEnrichmentEnabled !== false}
-                  onChange={(event) => updateNodeData({ contextEnrichmentEnabled: event.target.checked })}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                />
-                Use workspace LLM context enrichment
-              </label>
-              <div className="grid gap-2 md:grid-cols-3">
-                {[
-                  ['includeThreadHistory', 'Thread history'],
-                  ['includeSimilarTickets', 'Similar tickets'],
-                  ['includeOutageSignals', 'Outage signals'],
-                ].map(([field, label]) => (
-                  <label key={field} className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                <div className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                  <label className="flex min-w-0 items-center gap-2">
                     <input
                       type="checkbox"
-                      checked={selectedNode.data?.[field] !== false}
-                      onChange={(event) => updateNodeData({ [field]: event.target.checked })}
+                      checked={selectedNode.data?.promoteToEmail !== false}
+                      onChange={(event) => updateNodeData({ promoteToEmail: event.target.checked })}
                       className="h-4 w-4 rounded border-gray-300 text-blue-600"
                     />
-                    {label}
+                    <span>Use this LLM output as the email draft</span>
                   </label>
+                  <LlmHelpButton topic="promoteToEmail" onOpenHelp={setLlmHelpTopic} className="h-7 w-7 shadow-none" />
+                </div>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="flex items-start justify-between gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                  <label className="flex min-w-0 items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={nodeContextEnabled}
+                      onChange={(event) => updateNodeData({ contextEnrichmentEnabled: event.target.checked })}
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+                    />
+                    <span>
+                      <span className="block font-medium text-gray-900">Use workspace evidence bundle</span>
+                      <span className="mt-0.5 block text-xs leading-4 text-gray-500">Adds redacted ticket/thread/similar-ticket evidence according to the workspace policy.</span>
+                    </span>
+                  </label>
+                  <LlmHelpButton topic="nodeContextEnrichment" onOpenHelp={setLlmHelpTopic} className="h-7 w-7 shadow-none" />
+                </div>
+                <div
+                  className={cls(
+                    'flex items-start justify-between gap-2 rounded-md border px-3 py-2 text-sm',
+                    workspaceToolsAvailable ? 'border-gray-200' : 'border-gray-200 bg-gray-50 text-gray-500',
+                  )}
+                >
+                  <label className="flex min-w-0 items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={nodeToolModeEnabled}
+                      disabled={!workspaceToolsAvailable}
+                      onChange={(event) => updateNodeData({ useWorkspaceToolPolicy: event.target.checked })}
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 disabled:opacity-50"
+                    />
+                    <span>
+                      <span className="block font-medium text-gray-900">Use workspace read-only tools</span>
+                      <span className="mt-0.5 block text-xs leading-4 text-gray-500">
+                        {workspaceToolsAvailable
+                          ? 'Tool schemas are injected automatically; prompts do not need tool names.'
+                          : 'Enable Evidence + tools in the workspace policy to make tools available here.'}
+                      </span>
+                    </span>
+                  </label>
+                  <LlmHelpButton topic="nodeToolMode" onOpenHelp={setLlmHelpTopic} className="h-7 w-7 shadow-none" />
+                </div>
+              </div>
+              <div className="grid gap-2 md:grid-cols-3">
+                {[
+                  ['includeThreadHistory', 'Thread history', 'threadHistory'],
+                  ['includeSimilarTickets', 'Similar tickets', 'similarTickets'],
+                  ['includeOutageSignals', 'Broader-issue wording', 'outageSignals'],
+                ].map(([field, label, helpTopic]) => (
+                  <div key={field} className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                    <label className="flex min-w-0 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedNode.data?.[field] !== false}
+                        onChange={(event) => updateNodeData({ [field]: event.target.checked })}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                      />
+                      <span>{label}</span>
+                    </label>
+                    <LlmHelpButton topic={helpTopic} onOpenHelp={setLlmHelpTopic} className="h-7 w-7 shadow-none" />
+                  </div>
                 ))}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium uppercase text-gray-500">Max tokens</label>
+                  <label className="text-xs font-medium uppercase text-gray-500">
+                    <LabelWithHelp topic="maxTokens" onOpenHelp={setLlmHelpTopic}>Max tokens</LabelWithHelp>
+                  </label>
                   <input
                     type="number"
                     min="200"
@@ -5098,7 +5729,9 @@ export default function NotificationWorkflowsPanel() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium uppercase text-gray-500">Temperature</label>
+                  <label className="text-xs font-medium uppercase text-gray-500">
+                    <LabelWithHelp topic="temperature" onOpenHelp={setLlmHelpTopic}>Temperature</LabelWithHelp>
+                  </label>
                   <input
                     type="number"
                     min="0"
@@ -5110,15 +5743,18 @@ export default function NotificationWorkflowsPanel() {
                   />
                 </div>
               </div>
-              <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selectedNode.data?.failWorkflowOnError === true}
-                  onChange={(event) => updateNodeData({ failWorkflowOnError: event.target.checked })}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                />
-                Fail workflow if LLM generation fails
-              </label>
+              <div className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                <label className="flex min-w-0 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={selectedNode.data?.failWorkflowOnError === true}
+                    onChange={(event) => updateNodeData({ failWorkflowOnError: event.target.checked })}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                  />
+                  <span>Stop workflow if this LLM step fails</span>
+                </label>
+                <LlmHelpButton topic="failWorkflowOnError" onOpenHelp={setLlmHelpTopic} className="h-7 w-7 shadow-none" />
+              </div>
             </div>
           )}
 
@@ -5640,6 +6276,7 @@ export default function NotificationWorkflowsPanel() {
               onSave={saveLlmToolPolicy}
               onPreview={previewLlmContext}
               onTestRun={runLlmToolTest}
+              onOpenHelp={setLlmHelpTopic}
             />
           </div>
         )}
@@ -5766,7 +6403,7 @@ export default function NotificationWorkflowsPanel() {
                         {selectedNode?.type === 'llm_generate' && (
                           <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                             <Bot className="h-3.5 w-3.5" />
-                        Auto send
+                        Drafts email
                           </span>
                         )}
                         {selectedNode?.type === 'send_email' && (
@@ -5813,6 +6450,10 @@ export default function NotificationWorkflowsPanel() {
         onChange={setContentEditorValue}
         onSave={applyContentEditor}
         onClose={() => setContentEditor(null)}
+      />
+      <LlmHelpModal
+        topic={llmHelpTopic}
+        onClose={() => setLlmHelpTopic(null)}
       />
       <PreviewModal
         open={previewModalOpen}
