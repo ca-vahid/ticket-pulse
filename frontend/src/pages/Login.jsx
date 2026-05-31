@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck } from 'lucide-react';
+import { FlaskConical, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
-  const { loginWithSSO, isAuthenticated, isLoading, error } = useAuth();
+  const { loginWithSSO, loginWithDevBypass, isAuthenticated, isLoading, error } = useAuth();
   const navigate = useNavigate();
+  const showDevBypass = import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEV_AUTH_BYPASS !== 'false';
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -70,6 +71,18 @@ export default function Login() {
             </svg>
             <span className="relative">{isLoading ? 'Signing you in...' : 'Sign in with your BGC Account'}</span>
           </button>
+
+          {showDevBypass && (
+            <button
+              type="button"
+              onClick={loginWithDevBypass}
+              disabled={isLoading}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-200/40 bg-amber-400/12 px-5 py-3 text-sm font-semibold text-amber-50 shadow-[0_18px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-100/70 hover:bg-amber-300/18 focus:outline-none focus:ring-2 focus:ring-amber-200/70 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FlaskConical className="h-4 w-4" />
+              <span>{isLoading ? 'Opening dev session...' : 'Use local dev login'}</span>
+            </button>
+          )}
 
           <div className="mx-auto mt-4 max-w-[22rem] rounded-xl bg-slate-950/28 px-4 py-3 text-center shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-sm">
             <p className="space-y-0.5 overflow-hidden text-xs leading-5 text-cyan-50/76 [text-shadow:0_2px_18px_rgba(0,0,0,0.65)]">

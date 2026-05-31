@@ -16,6 +16,9 @@ import Analytics from './pages/Analytics';
 import SummitTaxonomyWorkshop from './pages/SummitTaxonomyWorkshop';
 import SummitVote from './pages/SummitVote';
 import SummitReport from './pages/SummitReport';
+import PublicTicketStatus from './pages/PublicTicketStatus';
+import PublicTicketEscalation from './pages/PublicTicketEscalation';
+import PublicTicketUrgency from './pages/PublicTicketUrgency';
 import MyCompetencies from './pages/MyCompetencies';
 import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
@@ -181,6 +184,21 @@ function App() {
                 <Route
                   path="/summit/report/:token"
                   element={<SummitReport />}
+                />
+
+                <Route
+                  path="/ticket-status/:token"
+                  element={<PublicTicketStatus />}
+                />
+
+                <Route
+                  path="/ticket-escalation/:token"
+                  element={<PublicTicketEscalation />}
+                />
+
+                <Route
+                  path="/ticket-urgency/:token"
+                  element={<PublicTicketUrgency />}
                 />
 
                 <Route

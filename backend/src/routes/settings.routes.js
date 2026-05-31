@@ -4,12 +4,23 @@ import { requireAuth, requireAdmin, requireWorkspaceAccess } from '../middleware
 import { requireWorkspace } from '../middleware/workspace.js';
 import { ValidationError } from '../utils/errors.js';
 import settingsRepository from '../services/settingsRepository.js';
+import prisma from '../services/prisma.js';
 import technicianRepository from '../services/technicianRepository.js';
 import syncService from '../services/syncService.js';
 import scheduledSyncService from '../services/scheduledSyncService.js';
 import { clearReadCache } from '../services/dashboardReadCache.js';
 import { sendAssignmentEmail } from '../services/sendgridNotificationService.js';
 import { placeVoiceCall, sendSms, sendWhatsApp } from '../services/twilioNotificationService.js';
+import {
+  buildPublicTicketStatusUrl,
+  ensurePublicTicketStatusLink,
+  getPublicTicketStatusSettings,
+  previewPublicTicketStatus,
+  resetPublicTicketStatusLink,
+  revokePublicTicketStatusLink,
+  updatePublicTicketStatusSettings,
+} from '../services/publicTicketStatusService.js';
+import urgentEscalationService from '../services/afterHoursUrgentEscalationService.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -61,6 +72,70 @@ function attachWorkspaceIdIfPresent(req, _res, next) {
     if (!Number.isNaN(workspaceId)) req.workspaceId = workspaceId;
   }
   next();
+}
+
+function requestActor(req) {
+  return req.session?.user || req.user || null;
+}
+
+function parsePositiveId(value, label = 'id') {
+  const id = Number.parseInt(value, 10);
+  if (!Number.isFinite(id) || id <= 0) throw new ValidationError(`Invalid ${label}`);
+  return id;
+}
+
+function parsePositiveBigInt(value, label = 'id') {
+  const text = String(value || '').trim();
+  if (!/^\d+$/.test(text)) throw new ValidationError(`Invalid ${label}`);
+  return BigInt(text);
+}
+
+async function ticketIdForFreshserviceNumber(workspaceId, freshserviceTicketId) {
+  const ticket = await prisma.ticket.findFirst({
+    where: { workspaceId, freshserviceTicketId },
+    select: { id: true },
+  });
+  if (!ticket) throw new ValidationError('Ticket number was not found in this workspace');
+  return ticket.id;
+}
+
+function serializePublicStatusTicketRow(ticket, baseUrl = null) {
+  const link = ticket.publicStatusLinks?.[0] || null;
+  const ticketPulseCategory = ticket.internalCategory?.name || ticket.tpSkill || null;
+  const ticketPulseSubcategory = ticket.internalSubcategory?.name || ticket.tpSubskill || null;
+  return {
+    id: ticket.id,
+    workspaceId: ticket.workspaceId,
+    freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || String(ticket.freshserviceTicketId || ''),
+    subject: ticket.subject || 'No subject',
+    status: ticket.status || null,
+    priority: ticket.assessedPriority || ({
+      1: 'Low',
+      2: 'Medium',
+      3: 'High',
+      4: 'Urgent',
+    }[Number(ticket.priority)] || String(ticket.priority || '')),
+    requesterName: ticket.requester?.name || null,
+    assignedAgentName: ticket.assignedTech?.name || null,
+    createdAt: ticket.createdAt?.toISOString?.() || null,
+    updatedAt: (ticket.freshserviceUpdatedAt || ticket.updatedAt)?.toISOString?.() || null,
+    ticketPulseCategory,
+    ticketPulseSubcategory,
+    classificationSource: ticket.internalCategory?.name || ticket.internalSubcategory?.name
+      ? 'internal_taxonomy'
+      : ticket.tpSkill || ticket.tpSubskill
+        ? 'ticket_pulse_fields'
+        : 'not_classified',
+    publicLink: link ? {
+      id: link.id,
+      enabled: link.enabled,
+      revoked: Boolean(link.revokedAt),
+      expiresAt: link.expiresAt?.toISOString?.() || null,
+      viewCount: link.viewCount || 0,
+      lastViewedAt: link.lastViewedAt?.toISOString?.() || null,
+      url: link.enabled && !link.revokedAt ? buildPublicTicketStatusUrl(link.token, baseUrl) : null,
+    } : null,
+  };
 }
 
 // Protect all settings routes with authentication
@@ -161,6 +236,295 @@ router.put(
       success: true,
       message: `${count} settings updated successfully`,
     });
+  }),
+);
+
+/**
+ * GET /api/settings/public-ticket-status
+ * Get workspace-scoped public ticket status settings.
+ */
+router.get(
+  '/public-ticket-status',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const settings = await getPublicTicketStatusSettings(req.workspaceId);
+    res.json({ success: true, data: settings });
+  }),
+);
+
+/**
+ * PUT /api/settings/public-ticket-status
+ * Update workspace-scoped public ticket status settings.
+ */
+router.put(
+  '/public-ticket-status',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const settings = await updatePublicTicketStatusSettings(
+      req.workspaceId,
+      req.body || {},
+      requestActor(req),
+    );
+    res.json({ success: true, data: settings });
+  }),
+);
+
+router.get(
+  '/public-ticket-status/tickets',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const workspaceId = Number(req.workspaceId);
+    if (!Number.isInteger(workspaceId) || workspaceId <= 0) {
+      throw new ValidationError('Workspace selection required');
+    }
+    const search = String(req.query.search || '').trim();
+    const page = Math.max(1, Number.parseInt(req.query.page || '1', 10) || 1);
+    const pageSize = Math.min(25, Math.max(5, Number.parseInt(req.query.pageSize || '10', 10) || 10));
+    const skip = (page - 1) * pageSize;
+    const classification = String(req.query.classification || 'all');
+
+    const where = { workspaceId };
+    const and = [];
+    if (search) {
+      const or = [
+        { subject: { contains: search, mode: 'insensitive' } },
+        { status: { contains: search, mode: 'insensitive' } },
+        { ticketCategory: { contains: search, mode: 'insensitive' } },
+        { tpSkill: { contains: search, mode: 'insensitive' } },
+        { tpSubskill: { contains: search, mode: 'insensitive' } },
+        { internalCategory: { name: { contains: search, mode: 'insensitive' } } },
+        { internalSubcategory: { name: { contains: search, mode: 'insensitive' } } },
+        { requester: { name: { contains: search, mode: 'insensitive' } } },
+        { assignedTech: { name: { contains: search, mode: 'insensitive' } } },
+      ];
+      if (/^\d+$/.test(search)) {
+        or.push({ freshserviceTicketId: BigInt(search) });
+      }
+      and.push({ OR: or });
+    }
+    if (classification === 'classified') {
+      and.push({
+        OR: [
+          { internalCategoryId: { not: null } },
+          { internalSubcategoryId: { not: null } },
+          { tpSkill: { not: null } },
+          { tpSubskill: { not: null } },
+        ],
+      });
+    } else if (classification === 'unclassified') {
+      and.push({
+        internalCategoryId: null,
+        internalSubcategoryId: null,
+        tpSkill: null,
+        tpSubskill: null,
+      });
+    }
+    if (and.length > 0) where.AND = and;
+
+    const [workspace, total, rows] = await Promise.all([
+      prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { id: true, name: true, slug: true },
+      }),
+      prisma.ticket.count({ where }),
+      prisma.ticket.findMany({
+        where,
+        orderBy: [
+          { freshserviceUpdatedAt: 'desc' },
+          { updatedAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          freshserviceTicketId: true,
+          workspaceId: true,
+          subject: true,
+          status: true,
+          priority: true,
+          assessedPriority: true,
+          ticketCategory: true,
+          tpSkill: true,
+          tpSubskill: true,
+          internalCategoryId: true,
+          internalSubcategoryId: true,
+          createdAt: true,
+          updatedAt: true,
+          freshserviceUpdatedAt: true,
+          requester: { select: { name: true } },
+          assignedTech: { select: { name: true } },
+          internalCategory: { select: { name: true } },
+          internalSubcategory: { select: { name: true } },
+          publicStatusLinks: {
+            where: { workspaceId },
+            orderBy: { updatedAt: 'desc' },
+            take: 1,
+            select: {
+              id: true,
+              token: true,
+              enabled: true,
+              expiresAt: true,
+              revokedAt: true,
+              viewCount: true,
+              lastViewedAt: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        workspace,
+        tickets: rows.map(ticket => serializePublicStatusTicketRow(ticket, req.headers.origin)),
+        page,
+        pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      },
+    });
+  }),
+);
+
+router.get(
+  '/public-ticket-status/tickets/:ticketId/preview',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const ticketId = parsePositiveId(req.params.ticketId, 'ticket id');
+    const preview = await previewPublicTicketStatus(req.workspaceId, ticketId);
+    res.json({ success: true, data: preview });
+  }),
+);
+
+router.post(
+  '/public-ticket-status/tickets/:ticketId/ensure-link',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const ticketId = parsePositiveId(req.params.ticketId, 'ticket id');
+    const result = await ensurePublicTicketStatusLink({
+      workspaceId: req.workspaceId,
+      ticketId,
+      actor: requestActor(req),
+      baseUrl: req.headers.origin,
+    });
+    res.json({ success: true, data: result });
+  }),
+);
+
+router.post(
+  '/public-ticket-status/tickets/:ticketId/reset-link',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const ticketId = parsePositiveId(req.params.ticketId, 'ticket id');
+    const result = await resetPublicTicketStatusLink({
+      workspaceId: req.workspaceId,
+      ticketId,
+      actor: requestActor(req),
+      baseUrl: req.headers.origin,
+    });
+    res.json({ success: true, data: result });
+  }),
+);
+
+router.post(
+  '/public-ticket-status/tickets/by-number/:freshserviceTicketId/reset-link',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const freshserviceTicketId = parsePositiveBigInt(req.params.freshserviceTicketId, 'ticket number');
+    const ticketId = await ticketIdForFreshserviceNumber(req.workspaceId, freshserviceTicketId);
+    const result = await resetPublicTicketStatusLink({
+      workspaceId: req.workspaceId,
+      ticketId,
+      actor: requestActor(req),
+      baseUrl: req.headers.origin,
+    });
+    res.json({ success: true, data: result });
+  }),
+);
+
+router.post(
+  '/public-ticket-status/tickets/:ticketId/revoke-link',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const ticketId = parsePositiveId(req.params.ticketId, 'ticket id');
+    const result = await revokePublicTicketStatusLink({
+      workspaceId: req.workspaceId,
+      ticketId,
+      actor: requestActor(req),
+    });
+    res.json({ success: true, data: result });
+  }),
+);
+
+router.post(
+  '/public-ticket-status/tickets/by-number/:freshserviceTicketId/revoke-link',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const freshserviceTicketId = parsePositiveBigInt(req.params.freshserviceTicketId, 'ticket number');
+    const ticketId = await ticketIdForFreshserviceNumber(req.workspaceId, freshserviceTicketId);
+    const result = await revokePublicTicketStatusLink({
+      workspaceId: req.workspaceId,
+      ticketId,
+      actor: requestActor(req),
+    });
+    res.json({ success: true, data: result });
+  }),
+);
+
+router.get(
+  '/urgent-escalation',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const data = await urgentEscalationService.getPolicyWithDependencies(req.workspaceId);
+    res.json({ success: true, data });
+  }),
+);
+
+router.put(
+  '/urgent-escalation',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const data = await urgentEscalationService.updatePolicy(
+      req.workspaceId,
+      req.body || {},
+      requestActor(req),
+    );
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/urgent-escalation/candidates',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const data = await urgentEscalationService.listCandidates(req.workspaceId);
+    res.json({ success: true, data });
   }),
 );
 

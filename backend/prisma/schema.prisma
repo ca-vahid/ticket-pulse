@@ -64,6 +64,18 @@ model Workspace {
   ticketReclassificationRuns TicketReclassificationRun[]
   technicianNotificationPreferences TechnicianNotificationPreference[]
   notificationDeliveries NotificationDelivery[]
+  notificationWorkflows NotificationWorkflow[]
+  notificationWorkflowPolicy NotificationWorkflowPolicy?
+  notificationWorkflowVersions NotificationWorkflowVersion[]
+  notificationWorkflowRuns NotificationWorkflowRun[]
+  notificationWorkflowStepRuns NotificationWorkflowStepRun[]
+  notificationEmailSignature NotificationEmailSignature?
+  publicTicketStatusSettings PublicTicketStatusSettings?
+  publicTicketStatusLinks PublicTicketStatusLink[]
+  publicTicketStatusViews PublicTicketStatusView[]
+  urgentEscalationPolicy UrgentEscalationPolicy?
+  urgentEscalationRecipients UrgentEscalationRecipient[]
+  urgentEscalationEvents UrgentEscalationEvent[]
   ticketPriorityEvents TicketPriorityEvent[]
   aiProviderSettings AiProviderSetting[]
   aiProviderAttempts AiProviderAttempt[]
@@ -142,6 +154,7 @@ model Technician {
   assignmentEpisodes   TicketAssignmentEpisode[]
   notificationPreference TechnicianNotificationPreference?
   notificationDeliveries NotificationDelivery[]
+  urgentEscalationRecipients UrgentEscalationRecipient[]
 
   @@unique([freshserviceId, workspaceId])
   @@map("technicians")
@@ -283,6 +296,10 @@ model Ticket {
   assignmentEpisodes   TicketAssignmentEpisode[]
   threadEntries        TicketThreadEntry[]
   notificationDeliveries NotificationDelivery[]
+  notificationWorkflowRuns NotificationWorkflowRun[]
+  publicStatusLinks    PublicTicketStatusLink[]
+  publicStatusViews    PublicTicketStatusView[]
+  urgentEscalationEvents UrgentEscalationEvent[]
   priorityEvents       TicketPriorityEvent[]
 
   @@map("tickets")
@@ -875,6 +892,8 @@ model AiProviderAttempt {
   dailyReviewConsolidationRun   AssignmentDailyReviewConsolidationRun? @relation(fields: [dailyReviewConsolidationRunId], references: [id], onDelete: Cascade)
   ticketReclassificationRunId   Int?      @map("ticket_reclassification_run_id")
   ticketReclassificationRun     TicketReclassificationRun? @relation(fields: [ticketReclassificationRunId], references: [id], onDelete: Cascade)
+  notificationWorkflowRunId     Int?      @map("notification_workflow_run_id")
+  notificationWorkflowRun       NotificationWorkflowRun? @relation(fields: [notificationWorkflowRunId], references: [id], onDelete: Cascade)
 
   @@map("ai_provider_attempts")
   @@index([workspaceId, operation, startedAt])
@@ -885,6 +904,7 @@ model AiProviderAttempt {
   @@index([assignmentDailyReviewRunId])
   @@index([dailyReviewConsolidationRunId])
   @@index([ticketReclassificationRunId])
+  @@index([notificationWorkflowRunId])
 }
 
 model AiProviderHealthEvent {
@@ -981,6 +1001,311 @@ model TechnicianNotificationPreference {
   @@index([technicianId])
 }
 
+model NotificationWorkflow {
+  id                  Int       @id @default(autoincrement())
+  workspaceId         Int       @map("workspace_id")
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  key                 String    @db.VarChar(80)
+  name                String    @db.VarChar(160)
+  description         String?   @db.Text
+  triggerType         String    @db.VarChar(60) @map("trigger_type")
+  isEnabled           Boolean   @default(false) @map("is_enabled")
+  enabledAt           DateTime? @map("enabled_at")
+  draftDefinition     Json      @map("draft_definition")
+  publishedDefinition Json?     @map("published_definition")
+  publishedVersion    Int       @default(0) @map("published_version")
+  lastPublishedAt     DateTime? @map("last_published_at")
+  lastChangedBy       String?   @db.VarChar(255) @map("last_changed_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  versions            NotificationWorkflowVersion[]
+  runs                NotificationWorkflowRun[]
+
+  @@map("notification_workflows")
+  @@unique([workspaceId, key])
+  @@index([workspaceId, triggerType, isEnabled])
+}
+
+model NotificationWorkflowPolicy {
+  id                              Int       @id @default(autoincrement())
+  workspaceId                     Int       @unique @map("workspace_id")
+  workspace                       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  afterHoursEnabled               Boolean   @default(false) @map("after_hours_enabled")
+  holidaysEnabled                 Boolean   @default(true) @map("holidays_enabled")
+  suppressStandardTicketCreated   Boolean   @default(true) @map("suppress_standard_ticket_created")
+  offHoursWorkflowKey             String    @default("ticket_created_after_hours") @db.VarChar(80) @map("off_hours_workflow_key")
+  emergencySupportUrl             String?   @db.Text @map("emergency_support_url")
+  emergencySupportLabel           String?   @db.VarChar(160) @map("emergency_support_label")
+  offHoursMessage                 String?   @db.Text @map("off_hours_message")
+  holidayMessage                  String?   @db.Text @map("holiday_message")
+  updatedBy                       String?   @db.VarChar(255) @map("updated_by")
+  createdAt                       DateTime  @default(now()) @map("created_at")
+  updatedAt                       DateTime  @updatedAt @map("updated_at")
+
+  @@map("notification_workflow_policies")
+  @@index([workspaceId])
+}
+
+model NotificationWorkflowVersion {
+  id               Int       @id @default(autoincrement())
+  workspaceId      Int       @map("workspace_id")
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflowId       Int       @map("workflow_id")
+  workflow         NotificationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version          Int
+  definition       Json
+  validationResult Json?     @map("validation_result")
+  changeNote       String?   @db.Text @map("change_note")
+  publishedBy      String?   @db.VarChar(255) @map("published_by")
+  publishedAt      DateTime  @default(now()) @map("published_at")
+
+  runs             NotificationWorkflowRun[]
+
+  @@map("notification_workflow_versions")
+  @@unique([workflowId, version])
+  @@index([workspaceId, workflowId])
+}
+
+model NotificationWorkflowRun {
+  id                Int       @id @default(autoincrement())
+  workspaceId       Int       @map("workspace_id")
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflowId        Int       @map("workflow_id")
+  workflow          NotificationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersionId Int?      @map("workflow_version_id")
+  workflowVersion   NotificationWorkflowVersion? @relation(fields: [workflowVersionId], references: [id], onDelete: SetNull)
+  ticketId          Int?      @map("ticket_id")
+  ticket            Ticket?   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  eventType         String    @db.VarChar(60) @map("event_type")
+  eventContext      Json      @map("event_context")
+  status            String    @default("running") @db.VarChar(30)
+  triggerSource     String?   @db.VarChar(80) @map("trigger_source")
+  startedAt         DateTime  @default(now()) @map("started_at")
+  completedAt       DateTime? @map("completed_at")
+  durationMs        Int?      @map("duration_ms")
+  error             String?   @db.Text
+  dedupeKey         String    @unique @db.VarChar(255) @map("dedupe_key")
+  dryRun            Boolean   @default(false) @map("dry_run")
+
+  steps             NotificationWorkflowStepRun[]
+  deliveries        NotificationDelivery[]
+  aiProviderAttempts AiProviderAttempt[]
+
+  @@map("notification_workflow_runs")
+  @@index([workspaceId, eventType, startedAt])
+  @@index([workflowId, startedAt])
+  @@index([ticketId])
+  @@index([status])
+}
+
+model NotificationWorkflowStepRun {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runId       Int      @map("run_id")
+  run         NotificationWorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  nodeId      String   @db.VarChar(120) @map("node_id")
+  nodeType    String   @db.VarChar(60) @map("node_type")
+  status      String   @default("running") @db.VarChar(30)
+  input       Json?
+  output      Json?
+  startedAt   DateTime @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  durationMs  Int?     @map("duration_ms")
+  error       String?  @db.Text
+
+  deliveries  NotificationDelivery[]
+
+  @@map("notification_workflow_step_runs")
+  @@index([workspaceId, runId])
+  @@index([runId, nodeId])
+  @@index([status])
+}
+
+model NotificationEmailSignature {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int      @unique @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  enabled     Boolean   @default(false)
+  html        String?   @db.Text
+  text        String?   @db.Text
+  updatedBy   String?   @db.VarChar(255) @map("updated_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("notification_email_signatures")
+  @@index([workspaceId])
+}
+
+model PublicTicketStatusSettings {
+  id                      Int       @id @default(autoincrement())
+  workspaceId             Int       @unique @map("workspace_id")
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  enabled                 Boolean   @default(true)
+  expiryDays              Int?      @default(60) @map("expiry_days")
+  showRequesterName       Boolean   @default(false) @map("show_requester_name")
+  showRequesterEmail      Boolean   @default(false) @map("show_requester_email")
+  showAssignedAgent       Boolean   @default(true) @map("show_assigned_agent")
+  showAssignedAgentAvatar Boolean   @default(true) @map("show_assigned_agent_avatar")
+  showSummary             Boolean   @default(true) @map("show_summary")
+  showPriority            Boolean   @default(true) @map("show_priority")
+  showCategory            Boolean   @default(true) @map("show_category")
+  showWorkspaceStats      Boolean   @default(true) @map("show_workspace_stats")
+  etaLookbackDays         Int       @default(180) @map("eta_lookback_days")
+  etaMinSampleSize        Int       @default(8) @map("eta_min_sample_size")
+  etaPercentile           Int       @default(75) @map("eta_percentile")
+  brandName               String?   @db.VarChar(120) @map("brand_name")
+  logoDataUrl             String?   @db.Text @map("logo_data_url")
+  logoAltText             String?   @db.VarChar(160) @map("logo_alt_text")
+  trademarkText           String?   @db.VarChar(300) @map("trademark_text")
+  accentColor             String?   @db.VarChar(24) @map("accent_color")
+  updatedBy               String?   @db.VarChar(255) @map("updated_by")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  @@map("public_ticket_status_settings")
+  @@index([workspaceId])
+}
+
+model PublicTicketStatusLink {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ticketId      Int       @map("ticket_id")
+  ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  token         String    @unique @db.VarChar(90)
+  tokenHash     String    @unique @db.VarChar(64) @map("token_hash")
+  tokenPrefix   String?   @db.VarChar(12) @map("token_prefix")
+  enabled       Boolean   @default(true)
+  expiresAt     DateTime? @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  revokedBy     String?   @db.VarChar(255) @map("revoked_by")
+  createdBy     String?   @db.VarChar(255) @map("created_by")
+  lastViewedAt  DateTime? @map("last_viewed_at")
+  viewCount     Int       @default(0) @map("view_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  views         PublicTicketStatusView[]
+  urgentEscalationEvents UrgentEscalationEvent[]
+
+  @@unique([workspaceId, ticketId])
+  @@map("public_ticket_status_links")
+  @@index([workspaceId, enabled])
+  @@index([ticketId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
+model PublicTicketStatusView {
+  id           Int       @id @default(autoincrement())
+  workspaceId  Int       @map("workspace_id")
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ticketId     Int       @map("ticket_id")
+  ticket       Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  linkId       Int       @map("link_id")
+  link         PublicTicketStatusLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  viewedAt     DateTime  @default(now()) @map("viewed_at")
+  ipHash       String?   @db.VarChar(64) @map("ip_hash")
+  userAgent    String?   @db.VarChar(500) @map("user_agent")
+  statusAtView String?   @db.VarChar(50) @map("status_at_view")
+  payload      Json?
+
+  @@map("public_ticket_status_views")
+  @@index([workspaceId, viewedAt])
+  @@index([ticketId, viewedAt])
+  @@index([linkId, viewedAt])
+}
+
+model UrgentEscalationPolicy {
+  id                    Int       @id @default(autoincrement())
+  workspaceId           Int       @unique @map("workspace_id")
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automaticEnabled      Boolean   @default(false) @map("automatic_enabled")
+  selfServiceEnabled    Boolean   @default(false) @map("self_service_enabled")
+  businessUrgencyEnabled Boolean  @default(true) @map("business_urgency_enabled")
+  businessUrgencyNotifyAssigned Boolean @default(true) @map("business_urgency_notify_assigned")
+  businessUrgencyNotifySupervisors Boolean @default(false) @map("business_urgency_notify_supervisors")
+  cooldownMinutes       Int       @default(60) @map("cooldown_minutes")
+  confirmationTitle     String    @default("Request urgent after-hours assistance") @db.VarChar(160) @map("confirmation_title")
+  confirmationBody      String?   @db.Text @map("confirmation_body")
+  afterHoursResponseCopy Json?     @map("after_hours_response_copy")
+  afterHoursResponseTable Json?    @map("after_hours_response_table")
+  afterHoursContactMode String     @default("manual") @db.VarChar(30) @map("after_hours_contact_mode")
+  afterHoursManualTechnicianId Int? @map("after_hours_manual_technician_id")
+  afterHoursRotationOrder Int[]    @default([]) @map("after_hours_rotation_order")
+  afterHoursRotationAnchorDate DateTime? @map("after_hours_rotation_anchor_date")
+  showAfterHoursPhoneInEmail Boolean @default(true) @map("show_after_hours_phone_in_email")
+  legacyChannels        String[]  @default([]) @map("legacy_channels")
+  legacyEmails          String[]  @default([]) @map("legacy_emails")
+  legacyPhones          String[]  @default([]) @map("legacy_phones")
+  updatedBy             String?   @db.VarChar(255) @map("updated_by")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  recipients            UrgentEscalationRecipient[]
+  events                UrgentEscalationEvent[]
+
+  @@map("urgent_escalation_policies")
+  @@index([workspaceId])
+  @@index([afterHoursManualTechnicianId])
+}
+
+model UrgentEscalationRecipient {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  policyId      Int       @map("policy_id")
+  policy        UrgentEscalationPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  technicianId  Int       @map("technician_id")
+  technician    Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  scope         String    @default("base") @db.VarChar(30)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("urgent_escalation_recipients")
+  @@unique([workspaceId, technicianId, scope])
+  @@index([workspaceId, scope])
+  @@index([policyId])
+  @@index([technicianId])
+}
+
+model UrgentEscalationEvent {
+  id                      Int       @id @default(autoincrement())
+  workspaceId             Int       @map("workspace_id")
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  policyId                Int?      @map("policy_id")
+  policy                  UrgentEscalationPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  ticketId                Int       @map("ticket_id")
+  ticket                  Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  publicStatusLinkId      Int?      @map("public_status_link_id")
+  publicStatusLink        PublicTicketStatusLink? @relation(fields: [publicStatusLinkId], references: [id], onDelete: SetNull)
+  pipelineRunId           Int?      @map("pipeline_run_id")
+  pipelineRun             AssignmentPipelineRun? @relation(fields: [pipelineRunId], references: [id], onDelete: SetNull)
+  source                  String    @db.VarChar(30)
+  status                  String    @default("submitted") @db.VarChar(30)
+  triggeredBy             String?   @db.VarChar(120) @map("triggered_by")
+  ipHash                  String?   @db.VarChar(64) @map("ip_hash")
+  userAgent               String?   @db.VarChar(500) @map("user_agent")
+  priorityWritebackStatus String?   @db.VarChar(30) @map("priority_writeback_status")
+  priorityWritebackError  String?   @db.Text @map("priority_writeback_error")
+  notificationSummary     Json?     @map("notification_summary")
+  cooldownUntil           DateTime? @map("cooldown_until")
+  payload                 Json?
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  notificationDeliveries  NotificationDelivery[]
+
+  @@map("urgent_escalation_events")
+  @@index([workspaceId, createdAt])
+  @@index([ticketId, createdAt])
+  @@index([publicStatusLinkId])
+  @@index([pipelineRunId])
+  @@index([source, status])
+}
+
 model NotificationDelivery {
   id                Int        @id @default(autoincrement())
   workspaceId       Int        @map("workspace_id")
@@ -993,10 +1318,25 @@ model NotificationDelivery {
   pipelineRun       AssignmentPipelineRun? @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
   priorityEventId   Int?       @map("priority_event_id")
   priorityEvent     TicketPriorityEvent? @relation(fields: [priorityEventId], references: [id], onDelete: Cascade)
+  urgentEscalationEventId Int?  @map("urgent_escalation_event_id")
+  urgentEscalationEvent UrgentEscalationEvent? @relation(fields: [urgentEscalationEventId], references: [id], onDelete: Cascade)
+  workflowRunId     Int?       @map("workflow_run_id")
+  workflowRun       NotificationWorkflowRun? @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+  workflowStepRunId Int?       @map("workflow_step_run_id")
+  workflowStepRun   NotificationWorkflowStepRun? @relation(fields: [workflowStepRunId], references: [id], onDelete: SetNull)
   channel           String     @db.VarChar(20)
   status            String     @default("queued") @db.VarChar(30)
-  assessedPriority  String     @db.VarChar(20) @map("assessed_priority")
+  assessedPriority  String?    @db.VarChar(20) @map("assessed_priority")
+  eventType         String?    @db.VarChar(60) @map("event_type")
+  notificationType  String?    @db.VarChar(80) @map("notification_type")
   recipient         String?    @db.VarChar(255)
+  toRecipients      String[]   @default([]) @map("to_recipients")
+  ccRecipients      String[]   @default([]) @map("cc_recipients")
+  bccRecipients     String[]   @default([]) @map("bcc_recipients")
+  subject           String?    @db.Text
+  htmlBody          String?    @db.Text @map("html_body")
+  textBody          String?    @db.Text @map("text_body")
+  fromAddress       String?    @db.VarChar(255) @map("from_address")
   provider          String?    @db.VarChar(50)
   providerMessageId String?    @db.VarChar(255) @map("provider_message_id")
   retryCount        Int        @default(0) @map("retry_count")
@@ -1014,6 +1354,11 @@ model NotificationDelivery {
   @@index([ticketId])
   @@index([pipelineRunId])
   @@index([priorityEventId])
+  @@index([urgentEscalationEventId])
+  @@index([workflowRunId])
+  @@index([workflowStepRunId])
+  @@index([eventType])
+  @@index([notificationType])
   @@index([channel])
 }
 
@@ -1178,6 +1523,7 @@ model AssignmentPipelineRun {
   ticketAssignments TicketAssignment[]
   corrections       AssignmentCorrection[]
   notificationDeliveries NotificationDelivery[]
+  urgentEscalationEvents UrgentEscalationEvent[]
   aiProviderAttempts AiProviderAttempt[]
 
   @@map("assignment_pipeline_runs")

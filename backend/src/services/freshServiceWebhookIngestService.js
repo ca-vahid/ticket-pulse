@@ -109,6 +109,7 @@ class FreshServiceWebhookIngestService {
         waitForNoiseSync: true,
         assignmentChangeNotificationSource: 'freshservice_webhook_assignment_change',
         initialAssignmentNotificationSource: 'freshservice_webhook_initial_assignment',
+        allowNotificationWorkflows: true,
       });
 
       const polling = await syncService._pollForUnassignedTickets(workspace.id, {

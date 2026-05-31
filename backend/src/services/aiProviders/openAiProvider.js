@@ -7,6 +7,18 @@ import {
   convertAnthropicToolsToOpenAiResponses,
 } from './openAiConverters.js';
 
+function metadataFromResponse(response, usage, maxTokens) {
+  const incompleteReason = response.incomplete_details?.reason || null;
+  return {
+    status: response.status || null,
+    incompleteReason,
+    requestedMaxTokens: maxTokens,
+    tokenLimitHit: incompleteReason === 'max_output_tokens'
+      || response.status === 'incomplete'
+      || (maxTokens > 0 && usage.outputTokens >= maxTokens),
+  };
+}
+
 class OpenAiProvider {
   constructor() {
     this.client = null;
@@ -50,10 +62,12 @@ class OpenAiProvider {
       ...(temperature === null ? {} : { temperature }),
     }, signal ? { signal } : undefined);
     const content = response.output_text || this._flattenResponseOutput(response);
+    const usage = this._usage(response);
     return {
       content,
       parsed: this._parseJson(content),
-      usage: this._usage(response),
+      usage,
+      metadata: metadataFromResponse(response, usage, maxTokens),
       raw: response,
     };
   }

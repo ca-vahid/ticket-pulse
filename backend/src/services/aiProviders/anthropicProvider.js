@@ -2,6 +2,26 @@ import Anthropic from '@anthropic-ai/sdk';
 import config from '../../config/index.js';
 import { normalizeAiModel, shouldOmitAnthropicTemperature } from '../../utils/aiProviders.js';
 
+function usageFromResponse(response) {
+  const inputTokens = response.usage?.input_tokens || 0;
+  const outputTokens = response.usage?.output_tokens || 0;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  };
+}
+
+function metadataFromResponse(response, maxTokens) {
+  const usage = usageFromResponse(response);
+  return {
+    stopReason: response.stop_reason || null,
+    stopSequence: response.stop_sequence || null,
+    requestedMaxTokens: maxTokens,
+    tokenLimitHit: response.stop_reason === 'max_tokens' || (maxTokens > 0 && usage.outputTokens >= maxTokens),
+  };
+}
+
 class AnthropicProvider {
   constructor() {
     this.client = null;
@@ -28,6 +48,7 @@ class AnthropicProvider {
     maxTokens = 2048,
     temperature = 0.3,
     signal = null,
+    extra = {},
   }) {
     const selectedModel = normalizeAiModel(model || config.anthropic.defaultModel, 'anthropic');
     const request = {
@@ -37,10 +58,28 @@ class AnthropicProvider {
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     };
+    if (extra.jsonSchema) {
+      request.tools = [{
+        name: 'emit_notification_json',
+        description: 'Return the notification workflow email content using the exact requested schema.',
+        input_schema: extra.jsonSchema,
+      }];
+      request.tool_choice = { type: 'tool', name: 'emit_notification_json' };
+    }
     if (!shouldOmitAnthropicTemperature(selectedModel)) {
       request.temperature = temperature;
     }
     const response = await this.getClient().messages.create(request, signal ? { signal } : undefined);
+    const toolUse = response.content?.find((block) => block.type === 'tool_use' && block.name === 'emit_notification_json');
+    if (toolUse?.input) {
+      return {
+        content: JSON.stringify(toolUse.input),
+        parsed: toolUse.input,
+        usage: usageFromResponse(response),
+        metadata: metadataFromResponse(response, maxTokens),
+        raw: response,
+      };
+    }
     const content = response.content
       ?.filter((block) => block.type === 'text')
       .map((block) => block.text)
@@ -48,11 +87,8 @@ class AnthropicProvider {
     return {
       content,
       parsed: this._parseJson(content),
-      usage: {
-        inputTokens: response.usage?.input_tokens || 0,
-        outputTokens: response.usage?.output_tokens || 0,
-        totalTokens: (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0),
-      },
+      usage: usageFromResponse(response),
+      metadata: metadataFromResponse(response, maxTokens),
       raw: response,
     };
   }

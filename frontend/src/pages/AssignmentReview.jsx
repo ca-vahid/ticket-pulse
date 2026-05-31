@@ -28,7 +28,7 @@ import {
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
   ShieldCheck, Users, Bot, Sparkles, Clock, X, CalendarDays,
-  MessageSquare, PhoneCall, Copy, KeyRound, Webhook,
+  MessageSquare, Copy, KeyRound, Webhook,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -4879,6 +4879,7 @@ const AI_OPERATION_OPTIONS = [
   { value: 'calendar_leave', label: 'Calendar Leave' },
   { value: 'autoresponse_classification', label: 'Auto-response Classify' },
   { value: 'autoresponse_generation', label: 'Auto-response Generate' },
+  { value: 'notification_workflow_generation', label: 'Mail Workflow Generation' },
 ];
 
 export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
@@ -5150,15 +5151,11 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         excludedGroupIds: [],
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
         dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false,
-        afterHoursUrgentEscalationEnabled: false,
-        afterHoursUrgentEscalationChannels: [],
-        afterHoursUrgentEscalationEmails: [],
-        afterHoursUrgentEscalationPhones: [],
         ...cfg,
       });
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false, afterHoursUrgentEscalationEnabled: false, afterHoursUrgentEscalationChannels: [], afterHoursUrgentEscalationEmails: [], afterHoursUrgentEscalationPhones: [] });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false });
     } finally { setLoading(false); }
   }, []);
 
@@ -5170,12 +5167,6 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
     finally { setSaving(false); }
   };
 
-  const toggleEscalationChannel = (channel) => {
-    const current = new Set(config.afterHoursUrgentEscalationChannels || []);
-    if (current.has(channel)) current.delete(channel); else current.add(channel);
-    setConfig({ ...config, afterHoursUrgentEscalationChannels: [...current] });
-  };
-
   if (loading || !config) return <div className="flex items-center justify-center p-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>;
 
   return (
@@ -5183,9 +5174,17 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       {/* Section 1: Pipeline */}
       <ConfigSection icon={Brain} title="Pipeline">
         <ConfigToggle label="Enable Assignment Pipeline" description="When enabled, incoming tickets will be analyzed for technician assignment" checked={config.isEnabled} onChange={() => setConfig({ ...config, isEnabled: !config.isEnabled })} />
-        <AiProviderSettingsPanel
-          onAssignmentModelChange={(model) => setConfig((current) => ({ ...current, llmModel: model }))}
-        />
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-3 text-sm text-blue-800">
+          <div className="font-medium">AI provider fallback moved to Settings.</div>
+          <p className="mt-1 text-xs text-blue-700">Model and fallback routing now applies to assignment, review, auto-response, calendar, and mail workflow generation.</p>
+          <button
+            type="button"
+            onClick={() => { window.location.href = '/settings#ai-providers'; }}
+            className="mt-2 rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800"
+          >
+            Open AI Providers
+          </button>
+        </div>
       </ConfigSection>
 
       {/* Section 2: Assignment Behavior */}
@@ -5222,7 +5221,19 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       {/* Section 4: Ticket Detection */}
       <ConfigSection icon={Search} title="Ticket Detection">
         <ConfigToggle label="Poll for Unassigned Tickets" description="Safety net: check for unassigned tickets after each sync cycle" checked={config.pollForUnassigned} onChange={() => setConfig({ ...config, pollForUnassigned: !config.pollForUnassigned })} />
-        <ConfigToggle label="Assess Priority After Hours" description="Immediately assess and write ticket priority after hours, then queue full assignment for the next business-hours reassessment" checked={config.priorityAssessmentAfterHoursEnabled} onChange={() => setConfig({ ...config, priorityAssessmentAfterHoursEnabled: !config.priorityAssessmentAfterHoursEnabled })} />
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-3 text-sm text-blue-800">
+          <div className="font-medium">After-hours priority assessment is controlled in Settings &gt; Urgent Escalation.</div>
+          <p className="mt-1 text-xs text-blue-700">
+            Turn on Automatic urgent detection there to run priority-only assessment after hours and alert the escalation roster.
+          </p>
+          <button
+            type="button"
+            onClick={() => { window.location.href = '/settings#urgent-escalation'; }}
+            className="mt-2 rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800"
+          >
+            Open Urgent Escalation
+          </button>
+        </div>
         <div className="py-3">
           <h4 className="font-medium text-sm text-slate-800 mb-1.5">Max Tickets Per Poll Cycle</h4>
           <input type="number" min="1" max="20" value={config.pollMaxPerCycle || 5} onChange={(e) => setConfig({ ...config, pollMaxPerCycle: parseInt(e.target.value) || 5 })} className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
@@ -5230,54 +5241,20 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         <WebhookConfigCard workspaceTimezone={workspaceTimezone} />
       </ConfigSection>
 
-      {/* Section 5: After-hours urgent escalation */}
-      <ConfigSection icon={AlertCircle} title="After-Hours Urgent Escalation">
-        <ConfigToggle label="Enable Urgent Escalation" description="When an after-hours priority-only run assesses a ticket as Urgent, notify the workspace escalation recipients before assignment is finalized" checked={config.afterHoursUrgentEscalationEnabled} onChange={() => setConfig({ ...config, afterHoursUrgentEscalationEnabled: !config.afterHoursUrgentEscalationEnabled })} color="text-red-500" />
-        <div className="py-3 space-y-3">
-          <div>
-            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Channels</h4>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {[
-                { id: 'email', label: 'Email', icon: Mail },
-                { id: 'sms', label: 'SMS', icon: MessageSquare },
-                { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
-                { id: 'phone_call', label: 'Voice', icon: PhoneCall },
-              ].map(({ id, label, icon: Icon }) => {
-                const checked = (config.afterHoursUrgentEscalationChannels || []).includes(id);
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => toggleEscalationChannel(id)}
-                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${checked ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <div>
-            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Email Recipients</h4>
-            <textarea
-              value={(config.afterHoursUrgentEscalationEmails || []).join('\n')}
-              onChange={(e) => setConfig({ ...config, afterHoursUrgentEscalationEmails: e.target.value.split(/[\n,]+/).map((v) => v.trim()).filter(Boolean) })}
-              placeholder="manager@example.com"
-              className="w-full min-h-20 border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y"
-            />
-            <p className="text-xs text-slate-500 mt-1">One email per line or comma-separated. Used only when Email is selected.</p>
-          </div>
-          <div>
-            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Phone Recipients</h4>
-            <textarea
-              value={(config.afterHoursUrgentEscalationPhones || []).join('\n')}
-              onChange={(e) => setConfig({ ...config, afterHoursUrgentEscalationPhones: e.target.value.split(/[\n,]+/).map((v) => v.trim()).filter(Boolean) })}
-              placeholder="+16045551234"
-              className="w-full min-h-20 border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y"
-            />
-            <p className="text-xs text-slate-500 mt-1">Use E.164 format. Used by SMS, WhatsApp, and voice.</p>
-          </div>
+      {/* Section 5: Urgent escalation moved to workspace settings. */}
+      <ConfigSection icon={AlertCircle} title="Urgent Escalation">
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-3 text-sm text-blue-800">
+          <div className="font-medium">Moved to Settings &gt; Urgent Escalation.</div>
+          <p className="mt-1 text-xs text-blue-700">
+            Escalation recipients now use selected workspace users and their verified notification preferences.
+          </p>
+          <button
+            type="button"
+            onClick={() => { window.location.href = '/settings#urgent-escalation'; }}
+            className="mt-2 rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800"
+          >
+            Open Urgent Escalation
+          </button>
         </div>
       </ConfigSection>
 

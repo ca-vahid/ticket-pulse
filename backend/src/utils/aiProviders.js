@@ -12,6 +12,7 @@ export const AI_OPERATIONS = [
   'calendar_leave',
   'autoresponse_classification',
   'autoresponse_generation',
+  'notification_workflow_generation',
 ];
 
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
@@ -160,7 +161,9 @@ export function getModelMetadata({ provider = null, operation = null } = {}) {
 }
 
 export function getDefaultProviderSetting(operation = 'assignment_pipeline', legacyModel = null) {
-  const defaultPrimaryProvider = operation === 'autoresponse_classification' || operation === 'autoresponse_generation'
+  const defaultPrimaryProvider = operation === 'autoresponse_classification'
+    || operation === 'autoresponse_generation'
+    || operation === 'notification_workflow_generation'
     ? AI_PROVIDER_OPENAI
     : AI_PROVIDER_ANTHROPIC;
   const primaryProvider = providerForModel(legacyModel, defaultPrimaryProvider);

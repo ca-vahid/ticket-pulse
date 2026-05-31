@@ -43,6 +43,12 @@ const envSchema = z.object({
   TWILIO_WHATSAPP_MESSAGING_SERVICE_SID: z.string().optional(),
   TWILIO_WHATSAPP_CONTENT_SID: z.string().optional(),
   TWILIO_WHATSAPP_CONTENT_VARIABLES: z.string().optional(),
+  ENABLE_DEV_AUTH_BYPASS: z.string().optional(),
+  DEV_AUTH_EMAIL: z.string().optional(),
+  DEV_AUTH_NAME: z.string().optional(),
+  DEV_AUTH_ROLE: z.string().optional(),
+  DEV_AUTH_WORKSPACE_ID: z.string().optional(),
+  DEV_AUTH_BYPASS_ALLOW_REMOTE: z.string().optional(),
 });
 
 // Validate environment variables
@@ -59,6 +65,13 @@ const explicitEnableScheduledSync = config.ENABLE_SCHEDULED_SYNC?.trim().toLower
 const enableScheduledSync = explicitEnableScheduledSync
   ? ['1', 'true', 'yes', 'on'].includes(explicitEnableScheduledSync)
   : config.NODE_ENV === 'production';
+
+const explicitDevAuthBypass = config.ENABLE_DEV_AUTH_BYPASS?.trim().toLowerCase();
+const devAuthBypassEnabled = config.NODE_ENV !== 'production'
+  && (explicitDevAuthBypass ? ['1', 'true', 'yes', 'on'].includes(explicitDevAuthBypass) : config.NODE_ENV === 'development');
+const devAuthBypassAllowRemote = ['1', 'true', 'yes', 'on'].includes(
+  config.DEV_AUTH_BYPASS_ALLOW_REMOTE?.trim().toLowerCase() || '',
+);
 
 export default {
   // Node environment
@@ -102,6 +115,16 @@ export default {
   // Admin
   admin: {
     passwordHash: config.ADMIN_PASSWORD_HASH,
+  },
+
+  // Development-only SSO bypass for local visual testing.
+  devAuth: {
+    enabled: devAuthBypassEnabled,
+    email: config.DEV_AUTH_EMAIL,
+    name: config.DEV_AUTH_NAME,
+    role: config.DEV_AUTH_ROLE,
+    workspaceId: config.DEV_AUTH_WORKSPACE_ID ? Number(config.DEV_AUTH_WORKSPACE_ID) : null,
+    allowRemote: devAuthBypassAllowRemote,
   },
 
   // Azure

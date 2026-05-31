@@ -2,10 +2,12 @@ import settingsRepository from './settingsRepository.js';
 
 export async function getNotificationProviderStatus() {
   const sendgridConfig = await settingsRepository.getSendGridConfig();
-  const sendgridConfigured = Boolean(sendgridConfig.apiKey && sendgridConfig.fromEmail);
+  const sendgridConfigured = Boolean(sendgridConfig.configured || (sendgridConfig.apiKey && sendgridConfig.fromEmail));
   const sendgridMissing = [
-    !sendgridConfig.apiKey ? 'sendgrid_api_key' : null,
-    !sendgridConfig.fromEmail ? 'sendgrid_from_email' : null,
+    !sendgridConfig.apiKey && !sendgridConfig.smtpConfigured ? 'sendgrid_api_key_or_smtp_host' : null,
+    !sendgridConfig.fromEmail && !sendgridConfig.smtpFromEmail ? 'sendgrid_from_email_or_smtp_from_email' : null,
+    sendgridConfig.smtpHost && !sendgridConfig.smtpUser ? 'smtp_user' : null,
+    sendgridConfig.smtpHost && !sendgridConfig.smtpPassword ? 'smtp_password' : null,
   ].filter(Boolean);
   const twilioConfig = await settingsRepository.getTwilioConfig();
   const twilioSmsConfigured = Boolean(twilioConfig.accountSid && twilioConfig.authToken && twilioConfig.fromNumber);
@@ -33,6 +35,7 @@ export async function getNotificationProviderStatus() {
     email: {
       provider: 'sendgrid',
       configured: sendgridConfigured,
+      mode: sendgridConfig.mode || (sendgridConfigured ? 'api' : 'missing'),
       missing: sendgridConfigured ? [] : sendgridMissing,
     },
     sms: {

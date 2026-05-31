@@ -23,6 +23,7 @@ import assignmentPipelineService from './assignmentPipelineService.js';
 import freshServiceActionService from './freshServiceActionService.js';
 import ticketPriorityEventService from './ticketPriorityEventService.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
+import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import {
   shouldTriggerAssignmentForLatestRun,
   shouldTriggerClassificationForLatestRun,
@@ -1457,6 +1458,21 @@ class SyncService {
       });
     }
 
+    await ticketLifecycleNotificationService.emitTicketLifecycleNotifications({
+      existingTicket,
+      upsertedTicket,
+      source,
+      allowNotificationWorkflows: options.allowNotificationWorkflows === true,
+    }).catch((err) => {
+      logger.warn('Ticket lifecycle notification workflow dispatch failed (non-fatal)', {
+        workspaceId: ticketWorkspaceId,
+        ticketId: upsertedTicket.id,
+        freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
+        source,
+        error: err.message,
+      });
+    });
+
     if (options.clearReadCache) {
       clearReadCache();
     }
@@ -1743,6 +1759,7 @@ class SyncService {
             analysisPayload: activityAnalysisMap.get(ticket.freshserviceTicketId.toString()) || null,
             techNameMap,
             waitForNoiseSync: false,
+            allowNotificationWorkflows: true,
           });
           syncedCount++;
         } catch (error) {
@@ -1871,6 +1888,7 @@ class SyncService {
           waitForNoiseSync: true,
           assignmentChangeNotificationSource: 'assignment_fast_sync_assignment_change',
           initialAssignmentNotificationSource: 'assignment_fast_sync_initial_assignment',
+          allowNotificationWorkflows: true,
         });
         upsertedIds.push(result.ticket.id);
         syncedCount++;
