@@ -1015,6 +1015,9 @@ model NotificationWorkflow {
   triggerType         String    @db.VarChar(60) @map("trigger_type")
   isEnabled           Boolean   @default(false) @map("is_enabled")
   enabledAt           DateTime? @map("enabled_at")
+  mockModeEnabled     Boolean   @default(false) @map("mock_mode_enabled")
+  mockModeEnabledAt   DateTime? @map("mock_mode_enabled_at")
+  mockModeUpdatedBy   String?   @db.VarChar(255) @map("mock_mode_updated_by")
   draftDefinition     Json      @map("draft_definition")
   publishedDefinition Json?     @map("published_definition")
   publishedVersion    Int       @default(0) @map("published_version")
@@ -1091,6 +1094,7 @@ model NotificationWorkflowRun {
   error             String?   @db.Text
   dedupeKey         String    @unique @db.VarChar(255) @map("dedupe_key")
   dryRun            Boolean   @default(false) @map("dry_run")
+  executionMode     String    @default("live") @db.VarChar(20) @map("execution_mode")
 
   steps             NotificationWorkflowStepRun[]
   deliveries        NotificationDelivery[]
@@ -1098,6 +1102,7 @@ model NotificationWorkflowRun {
 
   @@map("notification_workflow_runs")
   @@index([workspaceId, eventType, startedAt])
+  @@index([workspaceId, executionMode, startedAt])
   @@index([workflowId, startedAt])
   @@index([ticketId])
   @@index([status])

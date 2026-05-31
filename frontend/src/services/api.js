@@ -755,10 +755,12 @@ export const notificationWorkflowAPI = {
   saveDraft: (id, data) => api.put(`/notification-workflows/${id}/draft`, data),
   publish: (id, data = {}) => api.post(`/notification-workflows/${id}/publish`, data),
   setEnabled: (id, enabled) => api.put(`/notification-workflows/${id}/enabled`, { enabled }),
+  setMockMode: (id, enabled) => api.put(`/notification-workflows/${id}/mock-mode`, { enabled }),
   getPreviewTickets: (params = {}) => api.get('/notification-workflows/preview-tickets', { params }),
   test: (data) => apiLongTimeout.post('/notification-workflows/test', data),
   sendTestEmail: (data) => api.post('/notification-workflows/test-email', data),
   getAudit: (auditId) => api.get(`/notification-workflows/audits/${encodeURIComponent(auditId)}`),
+  getAuditRuns: (params = {}) => api.get('/notification-workflows/runs', { params }),
   getRuns: (id, params = {}) => api.get(`/notification-workflows/${id}/runs`, { params }),
   retryDelivery: (id) => api.post(`/notification-workflows/deliveries/${id}/retry`),
 };

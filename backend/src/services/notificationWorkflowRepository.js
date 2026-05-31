@@ -21,6 +21,37 @@ function normalizeId(value, label = 'workflow id') {
   return id;
 }
 
+function parseLimit(value, fallback = 50, max = 100) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+function safeDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function runSearchFilter(search) {
+  const trimmed = String(search || '').trim();
+  if (!trimmed) return null;
+  const or = [
+    { workflow: { is: { name: { contains: trimmed, mode: 'insensitive' } } } },
+    { workflow: { is: { key: { contains: trimmed, mode: 'insensitive' } } } },
+    { ticket: { is: { subject: { contains: trimmed, mode: 'insensitive' } } } },
+    { eventType: { contains: trimmed, mode: 'insensitive' } },
+  ];
+  if (/^\d+$/.test(trimmed)) {
+    try {
+      or.push({ ticket: { is: { freshserviceTicketId: BigInt(trimmed) } } });
+    } catch {
+      // Ignore invalid bigint values even if they are numeric-looking.
+    }
+  }
+  return { OR: or };
+}
+
 async function getWorkflowOrThrow(workspaceId, id) {
   const workflow = await prisma.notificationWorkflow.findFirst({
     where: { id: normalizeId(id), workspaceId },
@@ -78,6 +109,8 @@ export async function listWorkflows(workspaceId) {
           startedAt: true,
           completedAt: true,
           error: true,
+          dryRun: true,
+          executionMode: true,
         },
       },
       _count: {
@@ -174,6 +207,24 @@ export async function setWorkflowEnabled(workspaceId, id, enabled, actor = null)
   });
 }
 
+export async function setWorkflowMockMode(workspaceId, id, enabled, actor = null) {
+  const workflow = await getWorkflowOrThrow(workspaceId, id);
+  const isEnabled = enabled === true || enabled === 'true';
+  if (isEnabled && !workflow.publishedDefinition) {
+    throw new ValidationError('Publish the workflow before enabling mock mode');
+  }
+
+  return prisma.notificationWorkflow.update({
+    where: { id: workflow.id },
+    data: {
+      mockModeEnabled: isEnabled,
+      mockModeEnabledAt: isEnabled ? new Date() : null,
+      mockModeUpdatedBy: actorEmail(actor),
+      lastChangedBy: actorEmail(actor),
+    },
+  });
+}
+
 export async function listEnabledForEvent(workspaceId, eventType) {
   if (!DEFAULT_WORKFLOW_SPECS.some((spec) => spec.triggerType === eventType)) return [];
   return prisma.notificationWorkflow.findMany({
@@ -192,13 +243,77 @@ export async function listEnabledForEvent(workspaceId, eventType) {
   });
 }
 
+export async function listAuditRuns(workspaceId, {
+  executionMode = 'mock',
+  workflowId = null,
+  from = null,
+  to = null,
+  status = null,
+  search = null,
+  limit = 50,
+} = {}) {
+  const where = { workspaceId };
+  const mode = String(executionMode || '').trim().toLowerCase();
+  if (mode && mode !== 'all') where.executionMode = mode;
+  if (workflowId && String(workflowId) !== 'all') where.workflowId = normalizeId(workflowId);
+  const parsedFrom = safeDate(from);
+  const parsedTo = safeDate(to);
+  if (parsedFrom || parsedTo) {
+    where.startedAt = {};
+    if (parsedFrom) where.startedAt.gte = parsedFrom;
+    if (parsedTo) where.startedAt.lte = parsedTo;
+  }
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  if (normalizedStatus && normalizedStatus !== 'all') where.status = normalizedStatus;
+  const searchFilter = runSearchFilter(search);
+  if (searchFilter) where.AND = [searchFilter];
+
+  return prisma.notificationWorkflowRun.findMany({
+    where,
+    orderBy: { startedAt: 'desc' },
+    take: parseLimit(limit),
+    include: {
+      workflow: {
+        select: {
+          id: true,
+          name: true,
+          key: true,
+          triggerType: true,
+          isEnabled: true,
+          mockModeEnabled: true,
+          publishedVersion: true,
+        },
+      },
+      ticket: {
+        select: {
+          id: true,
+          freshserviceTicketId: true,
+          subject: true,
+          status: true,
+          priority: true,
+          assessedPriority: true,
+        },
+      },
+      steps: {
+        orderBy: { startedAt: 'asc' },
+      },
+      deliveries: {
+        orderBy: { queuedAt: 'asc' },
+      },
+      aiProviderAttempts: {
+        orderBy: { startedAt: 'asc' },
+      },
+    },
+  });
+}
+
 export async function listRuns(workspaceId, workflowId, { limit = 50 } = {}) {
   const id = normalizeId(workflowId);
   await getWorkflowOrThrow(workspaceId, id);
   return prisma.notificationWorkflowRun.findMany({
     where: { workspaceId, workflowId: id },
     orderBy: { startedAt: 'desc' },
-    take: Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 100),
+    take: parseLimit(limit),
     include: {
       steps: {
         orderBy: { startedAt: 'asc' },
@@ -221,7 +336,9 @@ export default {
   saveDraft,
   publishWorkflow,
   setWorkflowEnabled,
+  setWorkflowMockMode,
   listEnabledForEvent,
+  listAuditRuns,
   listRuns,
   getSampleContext,
 };

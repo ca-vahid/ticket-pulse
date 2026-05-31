@@ -34,6 +34,9 @@ const MAX_EMAIL_RECIPIENTS = 25;
 const DEFAULT_LLM_MAX_TOKENS = 10000;
 const MAX_LLM_MAX_TOKENS = 10000;
 const EMAIL_NODE_TYPES = new Set(['send_email']);
+const EXECUTION_MODE_LIVE = 'live';
+const EXECUTION_MODE_PREVIEW = 'preview';
+const EXECUTION_MODE_MOCK = 'mock';
 
 function safeJson(value) {
   return JSON.parse(JSON.stringify(value ?? null, (_key, item) => {
@@ -771,11 +774,39 @@ function buildPreviewDedupeKey(workflow, eventContext) {
   ].join(':').slice(0, 255);
 }
 
+function buildMockDedupeKey(workflow, eventContext) {
+  const event = eventContext.event || {};
+  const ticket = eventContext.ticket || {};
+  const stamp = event.dedupeStamp || event.occurredAt || new Date().toISOString();
+  return [
+    'notification-workflow-mock',
+    workflow.id,
+    workflow.publishedVersion || 0,
+    event.type || workflow.triggerType,
+    ticket.id || ticket.freshserviceTicketId || 'ticket',
+    stamp,
+  ].join(':').slice(0, 255);
+}
+
+function normalizeExecutionMode(mode, dryRun) {
+  const normalized = String(mode || '').trim().toLowerCase();
+  if ([EXECUTION_MODE_LIVE, EXECUTION_MODE_PREVIEW, EXECUTION_MODE_MOCK].includes(normalized)) {
+    return normalized;
+  }
+  return dryRun ? EXECUTION_MODE_PREVIEW : EXECUTION_MODE_LIVE;
+}
+
+function dedupeKeyForExecutionMode(workflow, eventContext, executionMode) {
+  if (executionMode === EXECUTION_MODE_PREVIEW) return buildPreviewDedupeKey(workflow, eventContext);
+  if (executionMode === EXECUTION_MODE_MOCK) return buildMockDedupeKey(workflow, eventContext);
+  return buildDedupeKey(workflow, eventContext);
+}
+
 function auditIdForRun(run) {
   return run?.id ? `TP-NWF-${run.id}` : null;
 }
 
-async function createRun({ workflow, version, eventContext, dryRun, triggerSource }) {
+async function createRun({ workflow, version, eventContext, dryRun, triggerSource, executionMode }) {
   return prisma.notificationWorkflowRun.create({
     data: {
       workspaceId: workflow.workspaceId,
@@ -785,8 +816,9 @@ async function createRun({ workflow, version, eventContext, dryRun, triggerSourc
       eventType: eventContext.event?.type || workflow.triggerType,
       eventContext: safeJson(eventContext),
       triggerSource: triggerSource || eventContext.event?.source || null,
-      dedupeKey: dryRun ? buildPreviewDedupeKey(workflow, eventContext) : buildDedupeKey(workflow, eventContext),
+      dedupeKey: dedupeKeyForExecutionMode(workflow, eventContext, executionMode),
       dryRun,
+      executionMode,
     },
   });
 }
@@ -855,6 +887,7 @@ async function executeNode({
   state,
   eventContext,
   dryRun,
+  executionMode,
   executeLlm,
   actionLinkRenderMode = 'live',
   workflowScheduleMode = null,
@@ -1036,7 +1069,7 @@ async function executeNode({
     try {
       signature = await getWorkspaceSignature(workflow.workspaceId);
     } catch (error) {
-      if (!dryRun) throw error;
+      if (executionMode !== EXECUTION_MODE_PREVIEW) throw error;
       logger.debug('Skipping notification signature during preview because it could not be loaded', {
         workspaceId: workflow.workspaceId,
         error: error.message,
@@ -1074,10 +1107,11 @@ async function executeNode({
       throw new Error(`Email recipient count exceeds the ${MAX_EMAIL_RECIPIENTS} recipient limit`);
     }
 
-    if (dryRun) {
+    if (executionMode === EXECUTION_MODE_PREVIEW) {
       return { ...output, skipped: true, reason: 'Preview only' };
     }
 
+    const isMock = executionMode === EXECUTION_MODE_MOCK;
     const delivery = await prisma.notificationDelivery.create({
       data: {
         workspaceId: workflow.workspaceId,
@@ -1085,7 +1119,7 @@ async function executeNode({
         workflowRunId: run.id,
         workflowStepRunId: step.row?.id || null,
         channel: 'email',
-        status: 'queued',
+        status: isMock ? 'mocked' : 'queued',
         provider: output.provider,
         eventType: eventContext.event?.type || workflow.triggerType,
         notificationType: output.notificationType,
@@ -1100,13 +1134,26 @@ async function executeNode({
         fromAddress: node.data?.fromAddress || null,
         dedupeKey: `${run.dedupeKey}:email:${node.id}`.slice(0, 255),
         payload: safeJson({
+          mockMode: isMock,
+          wouldSend: isMock,
           workflowId: workflow.id,
           workflowVersion: workflow.publishedVersion,
           nodeId: node.id,
           event: eventContext.event,
+          actionLinks: output.actionLinks || {},
         }),
       },
     });
+
+    if (isMock) {
+      return {
+        ...output,
+        deliveryId: delivery.id,
+        mocked: true,
+        skipped: true,
+        reason: 'Mock mode - email not sent',
+      };
+    }
 
     const deliveryResult = await processDelivery(delivery);
     if (!deliveryResult.success) {
@@ -1127,11 +1174,14 @@ export async function executeDefinition({
   definition,
   eventContext,
   dryRun = false,
+  executionMode = null,
   executeLlm = false,
   triggerSource = null,
   actionLinkRenderMode = 'live',
   forceActionLinks = false,
 }) {
+  const normalizedExecutionMode = normalizeExecutionMode(executionMode, dryRun);
+  const effectiveDryRun = dryRun || normalizedExecutionMode === EXECUTION_MODE_PREVIEW || normalizedExecutionMode === EXECUTION_MODE_MOCK;
   const normalizedDefinition = assertValidWorkflowDefinition(definition, {
     triggerType: workflow.triggerType,
   });
@@ -1153,8 +1203,9 @@ export async function executeDefinition({
       workflow,
       version,
       eventContext: normalizedContext,
-      dryRun,
+      dryRun: effectiveDryRun,
       triggerSource,
+      executionMode: normalizedExecutionMode,
     });
   } catch (error) {
     if (error?.code === 'P2002') {
@@ -1162,6 +1213,7 @@ export async function executeDefinition({
         status: 'skipped',
         reason: 'Duplicate workflow event',
         workflowId: workflow.id,
+        executionMode: normalizedExecutionMode,
       };
     }
     throw error;
@@ -1187,7 +1239,7 @@ export async function executeDefinition({
         run,
         node,
         input: { event: normalizedContext.event, state },
-        dryRun,
+        dryRun: effectiveDryRun,
         previews,
       });
 
@@ -1199,7 +1251,8 @@ export async function executeDefinition({
           node,
           state,
           eventContext: normalizedContext,
-          dryRun,
+          dryRun: effectiveDryRun,
+          executionMode: normalizedExecutionMode,
           executeLlm,
           actionLinkRenderMode: effectiveActionLinkRenderMode,
           workflowScheduleMode,
@@ -1232,8 +1285,9 @@ export async function executeDefinition({
       runId: run?.id || null,
       auditId: auditIdForRun(run),
       workflowId: workflow.id,
+      executionMode: normalizedExecutionMode,
       state: safeJson(state),
-      steps: dryRun ? previews : executed,
+      steps: effectiveDryRun ? previews : executed,
     };
   } catch (error) {
     if (run) {
@@ -1247,12 +1301,13 @@ export async function executeDefinition({
         },
       });
     }
-    if (dryRun) {
+    if (effectiveDryRun) {
       return {
         status: 'failed',
         runId: run?.id || null,
         auditId: auditIdForRun(run),
         workflowId: workflow.id,
+        executionMode: normalizedExecutionMode,
         error: error.message,
         state: safeJson(state),
         steps: previews,
@@ -1281,11 +1336,14 @@ export async function executeWorkflow(workflow, eventContext, options = {}) {
     };
   }
 
+  const mockMode = workflow.mockModeEnabled === true;
   return executeDefinition({
     workflow,
     definition: workflow.publishedDefinition,
     eventContext,
-    dryRun: false,
+    dryRun: mockMode,
+    executionMode: mockMode ? EXECUTION_MODE_MOCK : EXECUTION_MODE_LIVE,
+    executeLlm: mockMode ? true : options.executeLlm === true,
     triggerSource: options.triggerSource,
   });
 }
@@ -1345,6 +1403,7 @@ export async function executePreview({
     definition: definition || workflow.draftDefinition,
     eventContext: eventContext || sampleEventContext(workflow.triggerType),
     dryRun: true,
+    executionMode: EXECUTION_MODE_PREVIEW,
     executeLlm,
     triggerSource: 'preview',
     forceActionLinks,

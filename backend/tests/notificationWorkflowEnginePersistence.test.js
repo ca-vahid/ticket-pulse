@@ -75,7 +75,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
-const { executeDefinition } = await import('../src/services/notificationWorkflowEngine.js');
+const { executeDefinition, executeWorkflow } = await import('../src/services/notificationWorkflowEngine.js');
 const { buildDefaultWorkflowDefinition } = await import('../src/services/notificationWorkflowDefinition.js');
 
 const workflow = {
@@ -111,12 +111,10 @@ describe('notification workflow engine persistence', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     providerSendJsonMock.mockReset();
-    prismaMock.notificationWorkflowRun.create.mockResolvedValue({
+    prismaMock.notificationWorkflowRun.create.mockImplementation(({ data }) => Promise.resolve({
       id: 900,
-      workspaceId: 1,
-      workflowId: 7,
-      dedupeKey: 'notification-workflow:7:1:ticket.created:501:2026-05-29T19:00:00.000Z',
-    });
+      ...data,
+    }));
     prismaMock.notificationWorkflowRun.update.mockResolvedValue({});
     prismaMock.notificationWorkflowStepRun.create.mockImplementation(({ data }) => Promise.resolve({
       id: Math.floor(Math.random() * 10000) + 1,
@@ -148,6 +146,8 @@ describe('notification workflow engine persistence', () => {
         workflowVersionId: 70,
         ticketId: 501,
         eventType: 'ticket.created',
+        dryRun: false,
+        executionMode: 'live',
       }),
     }));
     expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -161,6 +161,127 @@ describe('notification workflow engine persistence', () => {
       }),
     }));
     expect(processDeliveryMock).toHaveBeenCalled();
+  });
+
+  test('preview execution records preview run state without creating delivery rows', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      triggerSource: 'preview',
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'completed',
+      executionMode: 'preview',
+    }));
+    expect(prismaMock.notificationWorkflowRun.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        dryRun: true,
+        executionMode: 'preview',
+      }),
+    }));
+    expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
+    expect(processDeliveryMock).not.toHaveBeenCalled();
+  });
+
+  test('mock execution creates a mocked delivery and does not process provider delivery', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      executionMode: 'mock',
+      triggerSource: 'freshservice_poll',
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'completed',
+      executionMode: 'mock',
+    }));
+    const runData = prismaMock.notificationWorkflowRun.create.mock.calls[0][0].data;
+    expect(runData).toEqual(expect.objectContaining({
+      dryRun: true,
+      executionMode: 'mock',
+      dedupeKey: 'notification-workflow-mock:7:1:ticket.created:501:2026-05-29T19:00:00.000Z',
+    }));
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'mocked',
+        toRecipients: ['requester@example.com'],
+        payload: expect.objectContaining({
+          mockMode: true,
+          wouldSend: true,
+          workflowId: 7,
+          workflowVersion: 1,
+        }),
+      }),
+    }));
+    expect(processDeliveryMock).not.toHaveBeenCalled();
+    const sendStep = result.steps.find((step) => step.nodeType === 'send_email');
+    expect(sendStep.output).toEqual(expect.objectContaining({
+      mocked: true,
+      skipped: true,
+      reason: 'Mock mode - email not sent',
+    }));
+  });
+
+  test('mock workflow execution runs the configured LLM but suppresses email send', async () => {
+    providerSendJsonMock.mockResolvedValue({
+      provider: 'openai',
+      model: 'gpt-test',
+      parsed: {
+        subject: 'Mock LLM ticket update',
+        html: '<p>Mock-generated body.</p>',
+        text: 'Mock-generated body.',
+      },
+      usage: {
+        inputTokens: 50,
+        outputTokens: 20,
+        totalTokens: 70,
+      },
+      metadata: {
+        stopReason: 'complete',
+      },
+    });
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeWorkflow({
+      ...workflow,
+      mockModeEnabled: true,
+      publishedDefinition: definition,
+    }, eventContext, { triggerSource: 'freshservice_poll' });
+
+    expect(result.executionMode).toBe('mock');
+    expect(providerSendJsonMock).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'notification_workflow_generation',
+      runLinks: { notificationWorkflowRunId: 900 },
+    }));
+    const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(deliveryData.status).toBe('mocked');
+    expect(deliveryData.subject).toBe('Mock LLM ticket update');
+    expect(deliveryData.htmlBody).toContain('Mock-generated body');
+    expect(processDeliveryMock).not.toHaveBeenCalled();
   });
 
   test('skips duplicate workflow events through the run dedupe key', async () => {

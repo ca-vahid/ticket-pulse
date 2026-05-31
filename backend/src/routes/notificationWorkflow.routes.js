@@ -311,7 +311,7 @@ router.get(
 router.get(
   '/health',
   asyncHandler(async (req, res) => {
-    const [sendgridConfig, workflows, recentFailures] = await Promise.all([
+    const [sendgridConfig, workflows, recentFailures, mockEnabledWorkflows, mockedDeliveries7d] = await Promise.all([
       settingsRepository.getSendGridConfig(),
       prisma.notificationWorkflow.groupBy({
         by: ['isEnabled'],
@@ -326,6 +326,20 @@ router.get(
           queuedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
         },
       }),
+      prisma.notificationWorkflow.count({
+        where: {
+          workspaceId: req.workspaceId,
+          mockModeEnabled: true,
+        },
+      }),
+      prisma.notificationDelivery.count({
+        where: {
+          workspaceId: req.workspaceId,
+          channel: 'email',
+          status: 'mocked',
+          queuedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+        },
+      }),
     ]);
 
     res.json({
@@ -336,6 +350,8 @@ router.get(
         sendgridMode: sendgridConfig.mode || 'missing',
         enabledWorkflows: workflows.find((row) => row.isEnabled)?._count?._all || 0,
         disabledWorkflows: workflows.find((row) => !row.isEnabled)?._count?._all || 0,
+        mockEnabledWorkflows,
+        mockedDeliveries7d,
         failedEmailDeliveries24h: recentFailures,
       },
     });
@@ -441,6 +457,22 @@ router.get(
 );
 
 router.get(
+  '/runs',
+  asyncHandler(async (req, res) => {
+    const runs = await notificationWorkflowRepository.listAuditRuns(req.workspaceId, {
+      executionMode: req.query.executionMode,
+      workflowId: req.query.workflowId,
+      from: req.query.from,
+      to: req.query.to,
+      status: req.query.status,
+      search: req.query.search,
+      limit: req.query.limit,
+    });
+    res.json({ success: true, data: runs.map(redactRun) });
+  }),
+);
+
+router.get(
   '/audits/:auditId',
   asyncHandler(async (req, res) => {
     const runId = parseAuditRunId(req.params.auditId);
@@ -453,6 +485,7 @@ router.get(
             name: true,
             triggerType: true,
             isEnabled: true,
+            mockModeEnabled: true,
             publishedVersion: true,
           },
         },
@@ -613,6 +646,9 @@ router.post(
       where: { id, workspaceId: req.workspaceId },
     });
     if (!delivery) throw new NotFoundError('Notification delivery not found');
+    if (delivery.status === 'mocked') {
+      throw new ValidationError('Mocked deliveries cannot be retried because no email was sent');
+    }
 
     await prisma.notificationDelivery.update({
       where: { id },
@@ -668,6 +704,19 @@ router.post(
       requestActor(req),
     );
     res.json({ success: true, data: result });
+  }),
+);
+
+router.put(
+  '/:id/mock-mode',
+  asyncHandler(async (req, res) => {
+    const workflow = await notificationWorkflowRepository.setWorkflowMockMode(
+      req.workspaceId,
+      req.params.id,
+      req.body?.enabled === true,
+      requestActor(req),
+    );
+    res.json({ success: true, data: workflow });
   }),
 );
 
