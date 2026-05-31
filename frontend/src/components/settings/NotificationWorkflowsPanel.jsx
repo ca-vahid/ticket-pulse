@@ -3031,7 +3031,7 @@ export default function NotificationWorkflowsPanel() {
   const mockModeButtonTitle = selected?.mockModeEnabled
     ? 'Turn mock mode off.'
     : !selectedIsPublished
-      ? 'Publish and enable the workflow before turning on mock mode.'
+      ? 'Publish the workflow, then enable it before turning on mock mode.'
       : selected?.isEnabled !== true
         ? 'Enable the published workflow before turning on mock mode.'
         : 'Run real workflow and LLM, but do not send email.';
@@ -3153,9 +3153,18 @@ export default function NotificationWorkflowsPanel() {
         description: selected.description,
         definition: draft,
       });
-      const response = await notificationWorkflowAPI.publish(selected.id, { changeNote: 'Published from Settings workflow editor' });
+      const shouldStayEnabled = selected.isEnabled === true;
+      const response = await notificationWorkflowAPI.publish(selected.id, {
+        changeNote: 'Published from Settings workflow editor',
+        enabled: shouldStayEnabled,
+      });
       applyWorkflowUpdate(response.data.workflow);
-      setMessage({ type: 'success', text: `Published and enabled version ${response.data.version.version}` });
+      setMessage({
+        type: 'success',
+        text: shouldStayEnabled
+          ? `Published version ${response.data.version.version}. Workflow remains enabled.`
+          : `Published version ${response.data.version.version}. Enable it when you are ready for live execution.`,
+      });
       await refreshHealth();
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
@@ -4204,7 +4213,7 @@ export default function NotificationWorkflowsPanel() {
   }
 
   return (
-    <div className="tp-glass-strong m-3 flex h-[calc(100vh-6.5rem)] min-h-[620px] max-h-[calc(100vh-6.5rem)] flex-col overflow-hidden rounded-2xl border border-white/70 sm:m-4">
+    <div className="tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-white/70 sm:m-4">
       <div className="shrink-0 border-b border-white/70 px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -4292,11 +4301,12 @@ export default function NotificationWorkflowsPanel() {
             <button
               type="button"
               onClick={publishWorkflow}
+              title={selected?.isEnabled ? 'Publish the current draft update and keep this workflow enabled.' : 'Publish the current draft without enabling live execution.'}
               disabled={saving || !selected}
-              className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
             >
               <Upload className="h-4 w-4" />
-              {selected?.isEnabled ? 'Publish update' : 'Publish & enable'}
+              {selected?.isEnabled ? 'Publish update' : 'Publish'}
             </button>
             <button
               type="button"
@@ -4317,28 +4327,25 @@ export default function NotificationWorkflowsPanel() {
               disabled={saving || !selected || !canToggleMockMode}
               title={mockModeButtonTitle}
               className={cls(
-                'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50',
+                'inline-flex h-10 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
                 selected?.mockModeEnabled ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
               )}
             >
               {selected?.mockModeEnabled ? <ToggleRight className="h-4 w-4" /> : <FlaskConical className="h-4 w-4" />}
-              <span className="flex flex-col items-start leading-tight">
-                <span>{selected?.mockModeEnabled ? 'Mock on' : 'Mock mode'}</span>
-                <span className="max-w-[180px] text-left text-[11px] font-medium opacity-80">Run real workflow and LLM; do not send email.</span>
-              </span>
+              <span>{selected?.mockModeEnabled ? 'Mock on' : 'Mock mode'}</span>
             </button>
             <button
               type="button"
               onClick={toggleEnabled}
               disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
-              title={selected?.isEnabled ? 'Disable live workflow execution.' : 'Enable the latest published workflow version.'}
+              title={selected?.isEnabled ? 'Disable live workflow execution.' : selectedIsPublished ? 'Enable the latest published workflow version.' : 'Publish the workflow before enabling live execution.'}
               className={cls(
-                'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50',
+                'inline-flex h-10 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
                 selected?.isEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
               )}
             >
               {selected?.isEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
-              {selected?.isEnabled ? 'Disable' : 'Enable published'}
+              {selected?.isEnabled ? 'Disable' : selectedIsPublished ? 'Enable' : 'Publish first'}
             </button>
           </div>
         </div>
@@ -4355,7 +4362,7 @@ export default function NotificationWorkflowsPanel() {
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
         {selectedIsAfterHoursWorkflow && (
           <section className="shrink-0 overflow-y-auto border-b border-amber-100 bg-amber-50/40 px-6 py-4 lg:max-h-[250px]">
             <AfterHoursRoutingPanel
@@ -4408,7 +4415,12 @@ export default function NotificationWorkflowsPanel() {
           />
         )}
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)]">
+        <div className={cls(
+          'grid min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)]',
+          llmToolsOpen || mockAuditOpen || selectedIsAfterHoursWorkflow
+            ? 'h-[560px] shrink-0'
+            : 'flex-1',
+        )}>
           <aside className="z-10 min-h-0 overflow-y-auto border-r border-gray-200 bg-slate-50/90">
             <div className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">Workspace Workflows</div>
             <WorkflowList workflows={workflows} selectedId={selected?.id} onSelect={loadWorkflow} />

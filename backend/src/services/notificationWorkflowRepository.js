@@ -162,6 +162,10 @@ export async function publishWorkflow(workspaceId, id, data = {}, actor = null) 
   const validationResult = validateWorkflowDefinition(definition, { triggerType: workflow.triggerType });
   const nextVersion = workflow.publishedVersion + 1;
   const changedBy = actorEmail(actor);
+  const hasEnabledOverride = Object.prototype.hasOwnProperty.call(data || {}, 'enabled');
+  const nextIsEnabled = hasEnabledOverride
+    ? data.enabled === true || data.enabled === 'true'
+    : true;
 
   return prisma.$transaction(async (tx) => {
     const version = await tx.notificationWorkflowVersion.create({
@@ -182,8 +186,8 @@ export async function publishWorkflow(workspaceId, id, data = {}, actor = null) 
         publishedDefinition: definition,
         publishedVersion: nextVersion,
         lastPublishedAt: version.publishedAt,
-        isEnabled: true,
-        enabledAt: version.publishedAt,
+        isEnabled: nextIsEnabled,
+        enabledAt: nextIsEnabled ? version.publishedAt : workflow.enabledAt,
         lastChangedBy: changedBy,
       },
     });
