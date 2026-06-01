@@ -36,12 +36,27 @@ function emailList(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
+function hasPriorAssignmentEvidence(ticket) {
+  if (!ticket) return false;
+  return Boolean(
+    asNumber(ticket.assignedTechId)
+    || ticket.firstAssignedAt
+    || ticket.assignedAt,
+  );
+}
+
 function eventStamp(eventType, upsertedTicket, existingTicket = null) {
   if (eventType === 'ticket.created') return dateIso(upsertedTicket.createdAt) || dateIso(upsertedTicket.freshserviceUpdatedAt);
-  if (eventType === 'ticket.assigned' || eventType === 'ticket.reassigned') {
-    return dateIso(upsertedTicket.assignedAt)
-      || dateIso(upsertedTicket.firstAssignedAt)
+  if (eventType === 'ticket.assigned') {
+    return dateIso(upsertedTicket.firstAssignedAt)
+      || dateIso(upsertedTicket.assignedAt)
       || dateIso(upsertedTicket.freshserviceUpdatedAt)
+      || `${asNumber(existingTicket?.assignedTechId) || 'none'}-${asNumber(upsertedTicket.assignedTechId) || 'none'}`;
+  }
+  if (eventType === 'ticket.reassigned') {
+    return dateIso(upsertedTicket.assignedAt)
+      || dateIso(upsertedTicket.freshserviceUpdatedAt)
+      || dateIso(upsertedTicket.firstAssignedAt)
       || `${asNumber(existingTicket?.assignedTechId) || 'none'}-${asNumber(upsertedTicket.assignedTechId) || 'none'}`;
   }
   if (eventType === 'ticket.resolved_closed') {
@@ -89,7 +104,7 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
   const oldTechId = asNumber(existingTicket.assignedTechId);
   const newTechId = asNumber(upsertedTicket.assignedTechId);
   if (newTechId && oldTechId !== newTechId) {
-    const type = oldTechId ? 'ticket.reassigned' : 'ticket.assigned';
+    const type = hasPriorAssignmentEvidence(existingTicket) ? 'ticket.reassigned' : 'ticket.assigned';
     events.push({
       type,
       occurredAt: dateIso(upsertedTicket.assignedAt)

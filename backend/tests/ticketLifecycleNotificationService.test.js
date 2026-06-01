@@ -27,6 +27,40 @@ describe('ticket lifecycle notification event derivation', () => {
     ).map((event) => event.type)).toEqual(['ticket.reassigned']);
   });
 
+  test('assignment after prior unassignment is treated as reassignment', () => {
+    const events = deriveTicketLifecycleEvents(
+      {
+        assignedTechId: null,
+        firstAssignedAt: new Date('2026-05-29T18:00:00.000Z'),
+        status: 'Open',
+      },
+      {
+        assignedTechId: 21,
+        firstAssignedAt: new Date('2026-05-29T18:00:00.000Z'),
+        assignedAt: new Date('2026-05-29T19:00:00.000Z'),
+        status: 'Open',
+      },
+    );
+
+    expect(events.map((event) => event.type)).toEqual(['ticket.reassigned']);
+    expect(events[0].dedupeStamp).toBe('2026-05-29T19:00:00.000Z');
+  });
+
+  test('assigned event uses stable first-assignment stamp when available', () => {
+    const events = deriveTicketLifecycleEvents(
+      { assignedTechId: null, status: 'Open' },
+      {
+        assignedTechId: 21,
+        firstAssignedAt: new Date('2026-05-29T18:59:00.000Z'),
+        assignedAt: new Date('2026-05-29T19:00:00.000Z'),
+        status: 'Open',
+      },
+    );
+
+    expect(events.map((event) => event.type)).toEqual(['ticket.assigned']);
+    expect(events[0].dedupeStamp).toBe('2026-05-29T18:59:00.000Z');
+  });
+
   test('resolved and closed statuses share one terminal event', () => {
     expect(deriveTicketLifecycleEvents(
       { assignedTechId: 20, status: 'Open' },
