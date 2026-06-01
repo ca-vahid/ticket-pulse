@@ -517,7 +517,7 @@ router.get(
 router.get(
   '/health',
   asyncHandler(async (req, res) => {
-    const [sendgridConfig, workflows, recentFailures, mockEnabledWorkflows, mockRuns7d, mockedDeliveries7d] = await Promise.all([
+    const [sendgridConfig, workflows, recentFailures, mockEnabledWorkflows, workflowAuditRuns7d, mockRuns7d, mockedDeliveries7d] = await Promise.all([
       settingsRepository.getSendGridConfig(),
       prisma.notificationWorkflow.groupBy({
         by: ['isEnabled'],
@@ -536,6 +536,13 @@ router.get(
         where: {
           workspaceId: req.workspaceId,
           mockModeEnabled: true,
+        },
+      }),
+      prisma.notificationWorkflowRun.count({
+        where: {
+          workspaceId: req.workspaceId,
+          executionMode: { in: ['live', 'mock'] },
+          startedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
         },
       }),
       prisma.notificationWorkflowRun.count({
@@ -564,6 +571,7 @@ router.get(
         enabledWorkflows: workflows.find((row) => row.isEnabled)?._count?._all || 0,
         disabledWorkflows: workflows.find((row) => !row.isEnabled)?._count?._all || 0,
         mockEnabledWorkflows,
+        workflowAuditRuns7d,
         mockRuns7d,
         mockedDeliveries7d,
         failedEmailDeliveries24h: recentFailures,

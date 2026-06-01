@@ -259,7 +259,7 @@ export async function listEnabledForEvent(workspaceId, eventType) {
 }
 
 export async function listAuditRuns(workspaceId, {
-  executionMode = 'mock',
+  executionMode = 'live_mock',
   workflowId = null,
   from = null,
   to = null,
@@ -269,7 +269,11 @@ export async function listAuditRuns(workspaceId, {
 } = {}) {
   const where = { workspaceId };
   const mode = String(executionMode || '').trim().toLowerCase();
-  if (mode && mode !== 'all') where.executionMode = mode;
+  if (mode && mode !== 'all') {
+    where.executionMode = mode === 'live_mock' || mode === 'live+mock'
+      ? { in: ['live', 'mock'] }
+      : mode;
+  }
   if (workflowId && String(workflowId) !== 'all') where.workflowId = normalizeId(workflowId);
   const parsedFrom = safeDate(from);
   const parsedTo = safeDate(to);
