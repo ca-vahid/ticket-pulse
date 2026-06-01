@@ -3153,9 +3153,12 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
                   : 'border-l-slate-200 bg-slate-50/70 hover:bg-slate-100',
             )}
           >
-            <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="flex min-w-0 flex-col gap-1">
               <div className="min-w-0">
-                <div className={cls('truncate text-sm font-semibold leading-5', isEnabled ? 'text-slate-950' : 'text-slate-700')}>
+                <div
+                  className={cls('break-words text-sm font-semibold leading-5', isEnabled ? 'text-slate-950' : 'text-slate-700')}
+                  title={workflow.name}
+                >
                   {workflow.name}
                 </div>
               </div>
@@ -6407,8 +6410,11 @@ export default function NotificationWorkflowsPanel() {
                     <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700 ring-1 ring-blue-200">
                       {workflows.length}
                     </span>
-                    <span className="hidden rotate-180 text-[10px] font-bold uppercase tracking-wide [writing-mode:vertical-rl] lg:block">
-                      Workflows
+                    <span
+                      className="hidden min-h-0 rotate-180 break-words text-[10px] font-bold uppercase leading-4 tracking-wide text-slate-600 [writing-mode:vertical-rl] lg:block"
+                      title={selected?.name || 'Workflows'}
+                    >
+                      {selected?.name || 'Workflows'}
                     </span>
                   </div>
                 ) : (
