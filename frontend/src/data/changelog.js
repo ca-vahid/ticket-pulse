@@ -1,6 +1,20 @@
-export const APP_VERSION = '2.65';
+export const APP_VERSION = '2.66';
 
 export const changelog = [
+  {
+    version: '2.66',
+    date: 'June 1, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Mail Workflow workspace layout</strong> gives the editor more working room with a narrower inspector, collapsible workflow list, stronger selection state, smarter scrolling, and clearer after-hours labels.' },
+      { type: 'improved', html: '<strong>Mock Audit review</strong> now shows context enrichment, read-only tool use, rendered email fields, recipients, and tool-call evidence in a more legible detail view.' },
+      { type: 'improved', html: '<strong>Requester location context</strong> adds available Entra-backed requester profile fields to workflow variables and LLM evidence for location-aware generated mail.' },
+      { type: 'fixed', html: '<strong>Send test to me</strong> lets admins email themselves the rendered mock result, including audit runs where live delivery was suppressed.' },
+      { type: 'fixed', html: '<strong>Webhook-created ticket notifications</strong> now link requester details before workflow dispatch so after-hours sends do not skip because recipient context arrived late.' },
+      { type: 'fixed', html: '<strong>Prompt editor typing</strong> no longer swallows spaces while composing normal text in the full-screen workflow editor.' },
+      { type: 'database', html: '<strong>Database updates</strong> add requester profile/location fields for workflow variables and LLM context; mock test replay reuses existing audit and delivery tables.' },
+      { type: 'security', html: '<strong>Mock replay remains requester-safe</strong>: test emails go only to the logged-in user, while internal tools, private notes, and provider details remain guarded from requester-facing output.' },
+    ],
+  },
   {
     version: '2.65',
     date: 'May 31, 2026',

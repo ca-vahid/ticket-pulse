@@ -6,6 +6,28 @@ All notable changes and improvements to Ticket Pulse.
 
 - No unreleased changes.
 
+## [2.66] - 2026-06-01
+
+### Improvements
+
+- **Mail workflow workspace layout** gives the workflow editor more working room with a narrower inspector, collapsible workflow list, stronger selected-workflow highlighting, smarter scrolling, and clearer after-hours workflow labels.
+- **Mock Audit review** now shows context enrichment, read-only tool use, rendered email fields, recipients, and tool-call evidence in a more legible right-side audit view.
+- **Requester location context** adds available Entra-backed requester profile fields to workflow variables and LLM evidence so generated mail can account for location, country, state/province, city, and timezone.
+
+### Fixes
+
+- **Mock audit test delivery** adds a "Send test to me" action that sends the rendered mock email only to the logged-in user, including runs where live delivery was intentionally suppressed.
+- **Webhook-created ticket notifications** now link or fetch requester details before workflow dispatch so after-hours mock/live sends do not skip because the recipient context arrived late.
+- **Prompt editor typing** prevents the full-screen workflow prompt editor from swallowing spaces while composing normal text.
+
+### Database
+
+- **Requester profile enrichment** adds persisted requester location/profile fields used by mail workflow variables and LLM context. Existing workflow audit and delivery tables are reused for mock test replay.
+
+### Security
+
+- **Mock replay remains requester-safe**: test emails go only to the logged-in user, original recipients are kept as audit context, and requester-facing LLM guardrails still hide internal tools, private notes, and provider details.
+
 ## [2.6] - 2026-05-30
 
 ### Major Features
