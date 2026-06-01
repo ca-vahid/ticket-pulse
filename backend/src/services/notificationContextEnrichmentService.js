@@ -4,6 +4,11 @@ import {
   getNotificationLlmToolPolicy,
   normalizeNotificationLlmToolPolicy,
 } from './notificationLlmToolPolicyService.js';
+import {
+  REQUESTER_PROFILE_SELECT,
+  enrichEventContextWithRequesterProfile,
+  requesterContextFromSource,
+} from './requesterProfileService.js';
 
 const BUNDLE_VERSION = 1;
 const OPEN_STATUSES = new Set(['open', 'pending']);
@@ -116,7 +121,7 @@ async function loadTicket(workspaceId, eventContext) {
     where: { workspaceId, OR: or },
     include: {
       workspace: { select: { id: true, name: true, defaultTimezone: true } },
-      requester: { select: { id: true, name: true, email: true, department: true, jobTitle: true } },
+      requester: { select: REQUESTER_PROFILE_SELECT },
       assignedTech: { select: { id: true, name: true, email: true, location: true, timezone: true } },
       internalCategory: { select: { id: true, name: true } },
       internalSubcategory: { select: { id: true, name: true } },
@@ -159,13 +164,7 @@ function ticketFromSource(ticket, eventContext, redactionEnabled, redactionState
 
 function requesterFromSource(ticket, eventContext) {
   const requester = ticket?.requester || eventContext.requester || null;
-  return requester ? {
-    id: requester.id || null,
-    name: requester.name || null,
-    email: requester.email || null,
-    department: requester.department || ticket?.department || null,
-    jobTitle: requester.jobTitle || null,
-  } : null;
+  return requesterContextFromSource(requester, ticket);
 }
 
 function assignedAgentFromSource(ticket, eventContext) {
@@ -466,6 +465,7 @@ export async function buildNotificationLlmContext({
   state = {},
   policyOverride = null,
 } = {}) {
+  eventContext = await enrichEventContextWithRequesterProfile(eventContext || {});
   const rawPolicy = policyOverride
     ? normalizeNotificationLlmToolPolicy({ workspaceId, ...policyOverride })
     : await getNotificationLlmToolPolicy(workspaceId);

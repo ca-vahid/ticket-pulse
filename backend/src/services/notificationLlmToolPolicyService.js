@@ -8,7 +8,7 @@ export const NOTIFICATION_LLM_TOOL_CATALOG = [
   {
     name: 'get_notification_context',
     label: 'Notification context',
-    description: 'Provides the redacted ticket, recipient, business-window, thread, similar-ticket, and signal bundle for the current workflow run.',
+    description: 'Provides the redacted ticket, requester location profile, recipient, business-window, thread, similar-ticket, and signal bundle for the current workflow run.',
     riskLevel: 'read_only',
     defaultEnabled: true,
     phase: 1,
@@ -24,7 +24,7 @@ export const NOTIFICATION_LLM_TOOL_CATALOG = [
   {
     name: 'find_similar_tickets',
     label: 'Similar tickets',
-    description: 'Searches recent workspace tickets by category, requester department, and keywords to find related cases.',
+    description: 'Searches recent workspace tickets by category, requester FreshService department/location, and keywords to find related cases.',
     riskLevel: 'read_only',
     defaultEnabled: true,
     phase: 2,

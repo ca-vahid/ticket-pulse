@@ -175,6 +175,15 @@ model Requester {
   jobTitle          String?   @db.VarChar(255) @map("job_title")
   timeZone          String?   @db.VarChar(100) @map("time_zone")
   language          String?   @db.VarChar(50)
+  entraOfficeLocation String? @db.VarChar(255) @map("entra_office_location")
+  entraCity         String?   @db.VarChar(255) @map("entra_city")
+  entraState        String?   @db.VarChar(100) @map("entra_state")
+  entraCountry      String?   @db.VarChar(100) @map("entra_country")
+  entraCountryCode  String?   @db.VarChar(10) @map("entra_country_code")
+  entraDepartment   String?   @db.VarChar(255) @map("entra_department")
+  entraJobTitle     String?   @db.VarChar(255) @map("entra_job_title")
+  entraPreferredLanguage String? @db.VarChar(50) @map("entra_preferred_language")
+  entraProfileSyncedAt DateTime? @map("entra_profile_synced_at")
   isActive          Boolean   @default(true) @map("is_active")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
@@ -184,6 +193,8 @@ model Requester {
   @@map("requesters")
   @@index([freshserviceId])
   @@index([email])
+  @@index([entraOfficeLocation])
+  @@index([entraCountry])
 }
 
 model Ticket {

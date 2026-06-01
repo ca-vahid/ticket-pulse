@@ -189,6 +189,12 @@ describe('notification workflow definitions', () => {
     expect(paths).toContain('availability.isHoliday');
     expect(paths).toContain('availability.nextBusinessTimeLocal');
     expect(paths).toContain('afterHoursSupport.emergencySupportUrl');
+    expect(paths).toContain('requester.officeLocation');
+    expect(paths).toContain('requester.city');
+    expect(paths).toContain('requester.state');
+    expect(paths).toContain('requester.country');
+    expect(paths).toContain('requester.locationSummary');
+    expect(paths).toContain('requester.timeZoneIana');
     expect(paths).toContain('afterHoursSupport.selfEscalationUrl');
     expect(paths).toContain('state.llm.email.subject');
     expect(paths).toContain('state.llm.email.extra.summary');

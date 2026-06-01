@@ -228,7 +228,11 @@ const CONDITION_FIELD_OPTIONS = [
   { value: 'ticket.category', label: 'Category', example: 'Access' },
   { value: 'ticket.subCategory', label: 'Subcategory', example: 'VPN' },
   { value: 'ticket.ticketCategory', label: 'Ticket category', example: 'IT' },
-  { value: 'requester.department', label: 'Requester department', example: 'Finance' },
+  { value: 'requester.department', label: 'Requester FS department/location', example: 'Vancouver' },
+  { value: 'requester.officeLocation', label: 'Requester office location', example: 'Vancouver' },
+  { value: 'requester.city', label: 'Requester city', example: 'Vancouver' },
+  { value: 'requester.country', label: 'Requester country', example: 'Canada' },
+  { value: 'requester.timeZoneIana', label: 'Requester timezone', example: 'America/Vancouver' },
   { value: 'assignedAgent.email', label: 'Assigned agent exists', example: 'agent@example.com' },
   { value: 'ticket.isNoise', label: 'Noise ticket', example: 'true' },
   { value: 'availability.isAfterHours', label: 'After-hours state', example: 'true' },
@@ -321,7 +325,7 @@ const LLM_HELP_TOPICS = {
       {
         heading: 'Included evidence',
         items: [
-          'Current ticket details, requester, assignee, recipient state, business-window state, action links, and priority signals.',
+          'Current ticket details, requester profile and location, assignee, recipient state, business-window state, action links, and priority signals.',
           'Optional thread history, similar tickets, and outage signal summaries, based on the source toggles below.',
           'The LLM cannot call extra tools in this mode; it only sees the prebuilt bundle.',
         ],
@@ -519,7 +523,7 @@ const LLM_HELP_TOPICS = {
     title: 'Tool: Notification context',
     summary: 'Returns the current redacted evidence bundle for the workflow run.',
     sections: [
-      { heading: 'Use case', items: ['Best when the model needs the full ticket, recipient, thread, similar-ticket, and signal bundle again during tool mode.'] },
+      { heading: 'Use case', items: ['Best when the model needs the full ticket, requester location profile, recipient, thread, similar-ticket, and signal bundle again during tool mode.'] },
     ],
   },
   get_ticket_thread_summary: {
@@ -564,6 +568,7 @@ const LLM_HELP_TOPICS = {
         heading: 'What to inspect',
         items: [
           'Redacted ticket/thread data.',
+          'Requester profile and location fields when Entra or FreshService has them.',
           'Similar-ticket counts by time window.',
           'Allowed public wording and redaction count.',
         ],
@@ -633,6 +638,7 @@ const LLM_HELP_TOPICS = {
         heading: 'Per-node behavior',
         items: [
           'Enabled means this node uses the workspace evidence policy.',
+          'Requester location fields are still normal Liquid variables; the evidence bundle additionally gives the LLM the same requester profile in JSON context.',
           'Disabled means this node does not get the prebuilt evidence bundle.',
           'The individual source toggles below can remove thread, similar-ticket, or outage signal data for this node.',
         ],
@@ -1120,7 +1126,7 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
   if (type === 'llm_generate') {
     return {
       label: 'Generate email text',
-      prompt: 'Use the ticket context below to improve this notification email. Return JSON with subject, html, and text fields.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nRequester: {{ requester.name }} <{{ requester.email }}>\nAssigned agent: {{ assignedAgent.name }}',
+      prompt: 'Use the ticket context below to improve this notification email. Return JSON with subject, html, and text fields.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nRequester: {{ requester.name }} <{{ requester.email }}>\nRequester location: {{ requester.locationSummary }}\nRequester timezone: {{ requester.timeZoneIana }}\nAssigned agent: {{ assignedAgent.name }}',
       systemPrompt: 'You write concise, professional IT helpdesk notification emails. Return JSON only.',
       outputSchema: DEFAULT_LLM_OUTPUT_SCHEMA,
       maxTokens: DEFAULT_LLM_MAX_TOKENS,

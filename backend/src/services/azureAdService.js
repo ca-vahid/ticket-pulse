@@ -143,9 +143,9 @@ class AzureAdService {
   }
 
   /**
-   * Get user profile from Azure AD (officeLocation, city, department, jobTitle).
+   * Get user profile from Azure AD (officeLocation, city, department, jobTitle, location fields).
    * @param {string} email - User email address
-   * @returns {Promise<{officeLocation, city, department, jobTitle}|null>}
+   * @returns {Promise<{officeLocation, city, department, jobTitle, state, country, usageLocation, preferredLanguage}|null>}
    */
   async getUserProfile(email) {
     if (!email) return null;
@@ -156,7 +156,7 @@ class AzureAdService {
         `${this.graphApiUrl}/users/${encodeURIComponent(email)}`,
         {
           headers: { Authorization: `Bearer ${token}` },
-          params: { $select: 'officeLocation,city,department,jobTitle,state,country' },
+          params: { $select: 'officeLocation,city,department,jobTitle,state,country,usageLocation,preferredLanguage' },
         },
       );
       return {
@@ -166,6 +166,8 @@ class AzureAdService {
         jobTitle: response.data.jobTitle || null,
         state: response.data.state || null,
         country: response.data.country || null,
+        usageLocation: response.data.usageLocation || null,
+        preferredLanguage: response.data.preferredLanguage || null,
       };
     } catch (error) {
       if (error.response?.status === 404) {
@@ -178,7 +180,7 @@ class AzureAdService {
   }
 
   /**
-   * Get profiles for multiple users (officeLocation, city, etc.)
+   * Get profiles for multiple users (officeLocation, city, state/country, etc.)
    * @param {Array<{email: string, id: number}>} users
    * @param {number} concurrency
    * @returns {Promise<Array<{id, email, officeLocation, city}>>}

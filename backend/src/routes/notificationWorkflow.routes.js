@@ -31,6 +31,11 @@ import {
   normalizeNotificationLlmToolPolicy,
   updateNotificationLlmToolPolicy,
 } from '../services/notificationLlmToolPolicyService.js';
+import {
+  REQUESTER_PROFILE_SELECT,
+  enrichEventContextWithRequesterProfile,
+  requesterContextFromSource,
+} from '../services/requesterProfileService.js';
 
 const router = express.Router();
 
@@ -182,8 +187,7 @@ function serializePreviewTicket(ticket) {
     createdAt: dateIso(ticket.createdAt),
     updatedAt: dateIso(ticket.freshserviceUpdatedAt || ticket.updatedAt),
     requester: ticket.requester ? {
-      name: ticket.requester.name,
-      email: ticket.requester.email,
+      ...requesterContextFromSource(ticket.requester, ticket),
     } : null,
     assignedAgent: ticket.assignedTech ? {
       name: ticket.assignedTech.name,
@@ -237,7 +241,7 @@ function previewTicketSearchWhere(workspaceId, search, filters = {}) {
 
 async function buildPreviewEventContext({ ticket, triggerType }) {
   const occurredAt = ticketEventTimestamp(ticket, triggerType) || new Date().toISOString();
-  return enrichEventContextWithNotificationPolicy({
+  const policyContext = await enrichEventContextWithNotificationPolicy({
     event: {
       type: triggerType,
       source: 'preview',
@@ -282,13 +286,7 @@ async function buildPreviewEventContext({ ticket, triggerType }) {
       closedAt: dateIso(ticket.closedAt),
       freshserviceUpdatedAt: dateIso(ticket.freshserviceUpdatedAt),
     },
-    requester: ticket.requester ? {
-      id: ticket.requester.id,
-      name: ticket.requester.name,
-      email: ticket.requester.email,
-      department: ticket.requester.department,
-      jobTitle: ticket.requester.jobTitle,
-    } : null,
+    requester: ticket.requester ? requesterContextFromSource(ticket.requester, ticket) : null,
     assignedAgent: ticket.assignedTech ? {
       id: ticket.assignedTech.id,
       name: ticket.assignedTech.name,
@@ -296,6 +294,7 @@ async function buildPreviewEventContext({ ticket, triggerType }) {
     } : null,
     previousAgent: null,
   });
+  return enrichEventContextWithRequesterProfile(policyContext);
 }
 
 function truncateString(value, max = 2000) {
@@ -496,7 +495,7 @@ router.post(
       where: ticketWhere,
       include: {
         workspace: true,
-        requester: { select: { id: true, name: true, email: true, department: true, jobTitle: true } },
+        requester: { select: REQUESTER_PROFILE_SELECT },
         assignedTech: { select: { id: true, name: true, email: true, location: true, timezone: true } },
         internalCategory: { select: { id: true, name: true } },
         internalSubcategory: { select: { id: true, name: true } },
@@ -615,7 +614,7 @@ router.get(
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
-          requester: { select: { name: true, email: true, department: true, jobTitle: true } },
+          requester: { select: REQUESTER_PROFILE_SELECT },
           assignedTech: { select: { name: true, email: true } },
           internalCategory: { select: { id: true, name: true } },
           internalSubcategory: { select: { id: true, name: true } },

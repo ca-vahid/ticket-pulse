@@ -30,6 +30,7 @@ import {
 } from './notificationContextEnrichmentService.js';
 import { runNotificationWorkflowLlmPipeline } from './notificationWorkflowLlmPipelineService.js';
 import { guardNotificationEmailPayload } from './notificationWorkflowOutputGuard.js';
+import { enrichEventContextWithRequesterProfile } from './requesterProfileService.js';
 
 const liquid = new Liquid({
   strictFilters: false,
@@ -1419,6 +1420,7 @@ export async function executeDefinition({
     triggerType: workflow.triggerType,
   });
   let normalizedContext = safeJson(eventContext || sampleEventContext(workflow.triggerType));
+  normalizedContext = await enrichEventContextWithRequesterProfile(normalizedContext);
   normalizedContext = await enrichEventContextWithPublicStatusUrl(normalizedContext);
   const effectiveActionLinkRenderMode = forceActionLinks ? 'force_all_enabled' : actionLinkRenderMode;
   const workflowScheduleMode = normalizedDefinition.metadata?.scheduleMode
