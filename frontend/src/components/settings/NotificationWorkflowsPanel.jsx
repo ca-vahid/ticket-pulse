@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// eslint-disable-next-line no-unused-vars
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Background, Controls, Handle, Position, ReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { EditorContent, useEditor } from '@tiptap/react';
@@ -858,6 +859,90 @@ function auditDeliveryForRun(run) {
     || null;
 }
 
+function isAfterHoursWorkflow(workflow) {
+  return workflow?.key === AFTER_HOURS_WORKFLOW_KEY
+    || workflow?.metadata?.scheduleMode === 'after_hours'
+    || workflow?.draftDefinition?.metadata?.scheduleMode === 'after_hours'
+    || workflow?.publishedDefinition?.metadata?.scheduleMode === 'after_hours';
+}
+
+function workflowDisplayName(workflow) {
+  if (!workflow) return 'Workflow';
+  if (isAfterHoursWorkflow(workflow)) return 'Ticket arrived after-hours / holiday';
+  if (workflow.triggerType === 'ticket.created') return 'Ticket arrived during business hours';
+  return workflow.name || EVENT_LABELS[workflow.triggerType] || workflow.triggerType || 'Workflow';
+}
+
+function workflowEventLabelForRun(run) {
+  if (isAfterHoursWorkflow(run?.workflow)) return 'Ticket arrived after-hours / holiday';
+  if (run?.eventType === 'ticket.created') return 'Ticket arrived during business hours';
+  return EVENT_LABELS[run?.eventType] || run?.eventType || 'Workflow event';
+}
+
+function normalizeEmailFields(value = {}) {
+  const subject = String(value?.subject || '').trim();
+  const html = typeof value?.html === 'string' ? value.html : (typeof value?.htmlBody === 'string' ? value.htmlBody : '');
+  const text = typeof value?.text === 'string' ? value.text : (typeof value?.textBody === 'string' ? value.textBody : '');
+  if (!subject && !html && !text) return null;
+  return {
+    subject: subject || 'No subject rendered',
+    html: html || '',
+    text: text || (html ? stripHtmlClient(html) : ''),
+  };
+}
+
+function emailFromStep(step) {
+  const output = step?.output || {};
+  return normalizeEmailFields(output.email)
+    || normalizeEmailFields(output.llm?.email)
+    || normalizeEmailFields(output);
+}
+
+function auditEmailForRun(run, delivery = auditDeliveryForRun(run)) {
+  return normalizeEmailFields({
+    subject: delivery?.subject,
+    htmlBody: delivery?.htmlBody,
+    textBody: delivery?.textBody,
+  }) || [...(run?.steps || [])]
+    .reverse()
+    .map(emailFromStep)
+    .find(Boolean)
+    || null;
+}
+
+function auditToolRecordsForRun(run, diagnostics = []) {
+  const records = [];
+  for (const step of run?.steps || []) {
+    if (step.nodeType === 'llm_tool') {
+      records.push({
+        name: step.nodeId?.split(':')[1] || step.output?.name || 'tool',
+        status: step.status,
+        durationMs: step.durationMs,
+        input: step.input,
+        output: step.output,
+      });
+    }
+  }
+  for (const diagnostic of diagnostics || []) {
+    for (const event of diagnostic.llm?.toolEvents || []) {
+      records.push({
+        name: event.name || 'tool',
+        status: event.status,
+        durationMs: event.durationMs,
+        input: event.input,
+        output: event.output,
+      });
+    }
+  }
+  const seen = new Set();
+  return records.filter((record) => {
+    const key = `${record.name}:${record.status}:${record.durationMs}:${JSON.stringify(record.input || {})}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function recipientLine(label, values) {
   const items = values || [];
   return `${label}: ${items.length ? items.join(', ') : 'None'}`;
@@ -1692,6 +1777,37 @@ function ActionLinkDiagnostics({ diagnostics }) {
   );
 }
 
+function EmailFieldsView({ email }) {
+  const normalized = normalizeEmailFields(email);
+  if (!normalized) {
+    return <div className="px-3 py-2 text-sm text-slate-500">No email fields were captured.</div>;
+  }
+  return (
+    <div className="space-y-3 border-t border-gray-100 bg-white p-3">
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Subject</div>
+        <div className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-950">
+          {normalized.subject}
+        </div>
+      </div>
+      {normalized.html && (
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">HTML preview</div>
+          <div className="mt-1 max-h-56 overflow-auto rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-800">
+            <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(normalized.html) }} />
+          </div>
+        </div>
+      )}
+      {normalized.text && (
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Plain text</div>
+          <pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-sans text-sm leading-6 text-slate-800">{normalized.text}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflow has no LLM step, or the LLM step has not completed yet.' }) {
   if (!diagnostics.length) {
     return <p className="text-sm text-gray-500">{emptyText}</p>;
@@ -1782,7 +1898,7 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
             )}
             <details open className="mt-2 rounded-md border border-gray-200">
               <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Validated email fields</summary>
-              <pre className="max-h-52 overflow-auto border-t border-gray-100 bg-gray-950 p-2 text-[11px] leading-5 text-gray-100">{formatJson(email)}</pre>
+              <EmailFieldsView email={email} />
             </details>
             {(llm.raw || diagnostic.rawOutput) && (
               <details className="mt-2 rounded-md border border-gray-200">
@@ -3144,6 +3260,11 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
         const isEnabled = !!workflow.isEnabled;
         const runs = workflow._count?.runs || 0;
         const lastText = lastRun ? `${lastRun.status} ${formatDate(lastRun.startedAt)}` : 'No runs yet';
+        const scheduleLabel = isAfterHoursWorkflow(workflow)
+          ? 'After-hours / holiday'
+          : workflow.triggerType === 'ticket.created'
+            ? 'Business-hours arrival'
+            : EVENT_LABELS[workflow.triggerType] || workflow.triggerType;
         return (
           <button
             key={workflow.id}
@@ -3165,16 +3286,16 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
                   className={cls('break-words text-sm font-semibold leading-5', isEnabled ? 'text-slate-950' : 'text-slate-700')}
                   title={workflow.name}
                 >
-                  {workflow.name}
+                  {workflowDisplayName(workflow)}
                 </div>
               </div>
               <WorkflowStatus workflow={workflow} />
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-slate-500">
-              <span className="truncate">{EVENT_LABELS[workflow.triggerType] || workflow.triggerType}</span>
+              <span className="truncate">{scheduleLabel}</span>
               {workflow.key === AFTER_HOURS_WORKFLOW_KEY && (
                 <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                  Off-hours
+                  Separate after-hours copy
                 </span>
               )}
               <span className="rounded-full bg-white/80 px-1.5 py-0.5 font-medium text-slate-500 ring-1 ring-slate-200">v{workflow.publishedVersion || 0}</span>
@@ -3695,6 +3816,9 @@ function MockAuditPanel({
   onRefresh,
   onSelectRun,
   onClose,
+  onSendTestToMe,
+  testSending = false,
+  testResult = null,
   tabbed = false,
 }) {
   const activeRun = selectedRun || runs?.[0] || null;
@@ -3702,13 +3826,29 @@ function MockAuditPanel({
   const activeLlmDiagnostics = auditLlmsForRun(activeRun);
   const activeLlm = activeLlmDiagnostics[0]?.llm || null;
   const activeSteps = activeRun?.steps || [];
+  const activeToolRecords = auditToolRecordsForRun(activeRun, activeLlmDiagnostics);
   const actionDiagnostics = activeDelivery?.payload?.actionLinks || activeDelivery?.payload?.diagnostics?.actionLinks || null;
   const activeContext = activeLlmDiagnostics.find((diagnostic) => diagnostic.llm?.context)?.llm?.context
     || activeSteps.find((step) => step.nodeType === 'llm_generate')?.output?.context
     || null;
-  const activeEventLabel = EVENT_LABELS[activeRun?.eventType] || activeRun?.eventType || 'Workflow event';
-  const bodyHtml = activeDelivery?.htmlBody || null;
-  const bodyText = activeDelivery?.textBody || null;
+  const activeEventLabel = workflowEventLabelForRun(activeRun);
+  const activeEmail = auditEmailForRun(activeRun, activeDelivery);
+  const bodyHtml = activeEmail?.html || null;
+  const bodyText = activeEmail?.text || null;
+  const recipientStep = activeSteps.find((step) => step.nodeType === 'recipient_resolver');
+  const activeRecipients = activeDelivery
+    ? {
+      to: activeDelivery.toRecipients || [],
+      cc: activeDelivery.ccRecipients || [],
+      bcc: activeDelivery.bccRecipients || [],
+    }
+    : (recipientStep?.output?.recipients || { to: [], cc: [], bcc: [] });
+  const activeRecipientCount = [
+    ...(activeRecipients.to || []),
+    ...(activeRecipients.cc || []),
+    ...(activeRecipients.bcc || []),
+  ].length;
+  const canSendTest = Boolean(activeRun && activeEmail && onSendTestToMe);
 
   return (
     <section
@@ -3729,6 +3869,16 @@ function MockAuditPanel({
           <p className="mt-1 text-xs text-slate-500">Real live events and LLM output, with email delivery suppressed.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => onSendTestToMe?.(activeRun)}
+            disabled={!canSendTest || testSending}
+            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            title={activeEmail ? 'Send this rendered mock email only to your account' : 'No rendered email was captured for this run'}
+          >
+            {testSending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            Send test to me
+          </button>
           <button
             type="button"
             onClick={onRefresh}
@@ -3762,7 +3912,7 @@ function MockAuditPanel({
             <option value="selected">Selected workflow</option>
             <option value="all">All workflows</option>
             {workflows.map((workflow) => (
-              <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
+              <option key={workflow.id} value={workflow.id}>{workflowDisplayName(workflow)}</option>
             ))}
           </select>
         </label>
@@ -3808,10 +3958,22 @@ function MockAuditPanel({
           {error}
         </div>
       )}
+      {testResult && (
+        <div className={cls(
+          'mb-3 flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold',
+          testResult.type === 'error'
+            ? 'border-red-200 bg-red-50 text-red-700'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        )}
+        >
+          {testResult.type === 'error' ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          {testResult.text}
+        </div>
+      )}
 
       <div
         className={cls(
-          'grid gap-4 overflow-hidden xl:grid-cols-[minmax(330px,0.9fr)_minmax(0,1.3fr)]',
+          'grid gap-4 overflow-hidden xl:grid-cols-[minmax(280px,0.65fr)_minmax(0,1.65fr)]',
           tabbed ? 'min-h-0 flex-1' : 'min-h-[300px] max-h-[430px]',
         )}
       >
@@ -3829,11 +3991,11 @@ function MockAuditPanel({
           )}
           {!loading && runs?.map((run) => {
             const delivery = auditDeliveryForRun(run);
+            const auditEmail = auditEmailForRun(run, delivery);
             const llmDiagnostics = auditLlmsForRun(run);
             const llm = llmDiagnostics[0]?.llm || null;
             const contextStep = (run.steps || []).find((step) => step.nodeType === 'llm_generate' && (step.output?.llm?.context || step.output?.context));
-            const toolCount = (run.steps || []).filter((step) => step.nodeType === 'llm_tool').length
-              || (Array.isArray(llm?.toolEvents) ? llm.toolEvents.length : 0);
+            const toolCount = auditToolRecordsForRun(run, llmDiagnostics).length;
             const claimGuard = llm?.guard?.accepted === true;
             const selected = activeRun?.id === run.id;
             return (
@@ -3852,7 +4014,7 @@ function MockAuditPanel({
                       {auditTicketLabel(run)} {auditTicketSubject(run)}
                     </div>
                     <div className="mt-0.5 truncate text-xs text-slate-500">
-                      {EVENT_LABELS[run.eventType] || run.eventType} | {formatDate(run.startedAt)}
+                      {workflowEventLabelForRun(run)} | {formatDate(run.startedAt)}
                     </div>
                   </div>
                   <span className={cls('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold', statusClass(run.status))}>
@@ -3860,7 +4022,7 @@ function MockAuditPanel({
                   </span>
                 </div>
                 <div className="grid gap-1 text-[11px] leading-4 text-slate-500">
-                  <span className="truncate">Subject: <span className="font-medium text-slate-700">{delivery?.subject || 'No email rendered'}</span></span>
+                  <span className="truncate">Subject: <span className="font-medium text-slate-700">{auditEmail?.subject || 'No email rendered'}</span></span>
                   <span className="truncate">
                     Recipients: {deliveryRecipientCount(delivery)} | LLM: {llmDiagnostics.length > 1
                       ? `${llmDiagnostics.length} nodes`
@@ -3893,15 +4055,19 @@ function MockAuditPanel({
                   </div>
                   <h4 className="mt-1 truncate text-base font-semibold text-slate-950">{auditTicketLabel(activeRun)} {auditTicketSubject(activeRun)}</h4>
                   <div className="mt-0.5 text-xs text-slate-500">
-                    {activeRun.auditId || `TP-NWF-${activeRun.id}`} | {activeRun.workflow?.name || selectedWorkflow?.name || 'Workflow'} | {formatDate(activeRun.startedAt)}
+                    {activeRun.auditId || `TP-NWF-${activeRun.id}`} | {workflowDisplayName(activeRun.workflow || selectedWorkflow)} | {formatDate(activeRun.startedAt)}
                   </div>
                 </div>
                 <MockModeBadge />
               </div>
 
               <div className="grid gap-2 md:grid-cols-3">
-                <PreviewMetric label="Would send" value={activeDelivery ? 'Yes, suppressed' : 'No delivery row'} tone={activeDelivery ? 'blue' : 'amber'} />
-                <PreviewMetric label="Recipients" value={String(deliveryRecipientCount(activeDelivery))} tone={deliveryRecipientCount(activeDelivery) ? 'gray' : 'amber'} />
+                <PreviewMetric
+                  label="Would send"
+                  value={activeEmail ? (activeDelivery ? 'Yes, suppressed' : 'Email captured') : 'No email captured'}
+                  tone={activeEmail ? 'blue' : 'amber'}
+                />
+                <PreviewMetric label="Recipients" value={String(activeRecipientCount)} tone={activeRecipientCount ? 'gray' : 'amber'} />
                 <PreviewMetric
                   label="LLM"
                   value={activeLlmDiagnostics.length > 1
@@ -3910,26 +4076,45 @@ function MockAuditPanel({
                   tone={activeLlmDiagnostics.some((diagnostic) => diagnostic.llm?.failed || diagnostic.llm?.status === 'failed') ? 'red' : 'gray'}
                 />
               </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <PreviewMetric label="Context" value={activeContext ? (activeContext.mode || 'context used') : 'Not recorded'} tone={activeContext ? 'emerald' : 'gray'} />
+                <PreviewMetric label="Tool calls" value={String(activeToolRecords.length)} tone={activeToolRecords.length ? 'emerald' : 'gray'} />
+              </div>
 
-              {activeContext && (
+              {(activeContext || activeToolRecords.length > 0) && (
                 <section className="rounded-md border border-violet-200 bg-violet-50 p-3">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">LLM evidence</div>
-                    {activeContext.contextHash && (
+                    <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">LLM evidence and tools</div>
+                    {activeContext?.contextHash && (
                       <span className="max-w-[220px] truncate rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-200">
                         {activeContext.contextHash}
                       </span>
                     )}
                   </div>
                   <div className="grid gap-2 text-xs text-slate-700 sm:grid-cols-4">
-                    <div>Mode: <span className="font-semibold">{activeContext.mode || 'context_only'}</span></div>
-                    <div>Signal: <span className="font-semibold">{activeContext.signalLevel || 'none'}</span></div>
-                    <div>Thread: <span className="font-semibold">{activeContext.threadEntryCount || 0}</span></div>
-                    <div>Redactions: <span className="font-semibold">{activeContext.redactionCount || 0}</span></div>
+                    <div>Mode: <span className="font-semibold">{activeContext?.mode || 'not recorded'}</span></div>
+                    <div>Signal: <span className="font-semibold">{activeContext?.signalLevel || 'none'}</span></div>
+                    <div>Thread: <span className="font-semibold">{activeContext?.threadEntryCount || 0}</span></div>
+                    <div>Redactions: <span className="font-semibold">{activeContext?.redactionCount || 0}</span></div>
                   </div>
-                  {(activeContext.allowedPublicPhrases || []).length > 0 && (
+                  {(activeContext?.allowedPublicPhrases || []).length > 0 && (
                     <div className="mt-2 text-xs leading-5 text-violet-900">
                       Allowed wording: {activeContext.allowedPublicPhrases.join('; ')}
+                    </div>
+                  )}
+                  {activeToolRecords.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-700">Tool calls</div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {activeToolRecords.map((tool, index) => (
+                          <details key={`${tool.name}-${index}`} className="rounded-md border border-violet-100 bg-white">
+                            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700">
+                              {tool.name} <span className="ml-1 text-slate-400">{tool.status || 'completed'}{Number.isFinite(tool.durationMs) ? `, ${tool.durationMs} ms` : ''}</span>
+                            </summary>
+                            <pre className="max-h-40 overflow-auto border-t border-violet-50 bg-slate-950 p-2 text-[11px] leading-5 text-slate-100">{formatJson(tool.output || tool.input)}</pre>
+                          </details>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </section>
@@ -3938,16 +4123,16 @@ function MockAuditPanel({
               <section className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Recipients</div>
                 <div className="space-y-1 text-xs leading-5 text-slate-700">
-                  <div>{recipientLine('To', activeDelivery?.toRecipients)}</div>
-                  <div>{recipientLine('Cc', activeDelivery?.ccRecipients)}</div>
-                  <div>{recipientLine('Bcc', activeDelivery?.bccRecipients)}</div>
+                  <div>{recipientLine('To', activeRecipients.to)}</div>
+                  <div>{recipientLine('Cc', activeRecipients.cc)}</div>
+                  <div>{recipientLine('Bcc', activeRecipients.bcc)}</div>
                 </div>
               </section>
 
               <section className="rounded-md border border-slate-200 bg-white">
                 <div className="border-b border-slate-200 px-3 py-2">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Rendered Email</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-950">{activeDelivery?.subject || 'No subject rendered'}</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-950">{activeEmail?.subject || 'No subject rendered'}</div>
                 </div>
                 <div className="max-h-64 overflow-auto p-3 text-sm leading-6 text-slate-800">
                   {bodyHtml ? (
@@ -4214,6 +4399,8 @@ export default function NotificationWorkflowsPanel() {
   const [mockAuditLoading, setMockAuditLoading] = useState(false);
   const [mockAuditError, setMockAuditError] = useState(null);
   const [selectedMockRun, setSelectedMockRun] = useState(null);
+  const [mockAuditTestSending, setMockAuditTestSending] = useState(false);
+  const [mockAuditTestResult, setMockAuditTestResult] = useState(null);
   const [mockAuditFilters, setMockAuditFilters] = useState({
     workflowId: 'all',
     range: '7d',
@@ -4388,6 +4575,7 @@ export default function NotificationWorkflowsPanel() {
     setPreviewError(null);
     setPreviewTestResult(null);
     setSelectedMockRun(null);
+    setMockAuditTestResult(null);
     if (refreshList) {
       const listResponse = await notificationWorkflowAPI.list();
       setWorkflows(listResponse.data || []);
@@ -4459,6 +4647,25 @@ export default function NotificationWorkflowsPanel() {
       setMockAuditError(error.message);
     } finally {
       setMockAuditLoading(false);
+    }
+  }
+
+  async function sendMockAuditTestEmail(run = selectedMockRun) {
+    if (!run) return;
+    setMockAuditTestSending(true);
+    setMockAuditTestResult(null);
+    try {
+      const auditId = run.auditId || `TP-NWF-${run.id}`;
+      const response = await notificationWorkflowAPI.sendAuditTestEmail(auditId);
+      setMockAuditTestResult({
+        type: 'success',
+        text: `Test email sent to ${response.data?.sentTo || 'your account'}${response.data?.deliveryId ? ` (delivery #${response.data.deliveryId})` : ''}`,
+      });
+      await loadMockAuditRuns(mockAuditFilters);
+    } catch (error) {
+      setMockAuditTestResult({ type: 'error', text: error.message || 'Test email failed' });
+    } finally {
+      setMockAuditTestSending(false);
     }
   }
 
@@ -6368,6 +6575,9 @@ export default function NotificationWorkflowsPanel() {
             onFiltersChange={setMockAuditFilters}
             onRefresh={() => loadMockAuditRuns(mockAuditFilters)}
             onSelectRun={setSelectedMockRun}
+            onSendTestToMe={sendMockAuditTestEmail}
+            testSending={mockAuditTestSending}
+            testResult={mockAuditTestResult}
             tabbed
           />
         )}

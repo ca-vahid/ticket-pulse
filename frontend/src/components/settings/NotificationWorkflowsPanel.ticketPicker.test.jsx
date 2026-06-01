@@ -1,4 +1,6 @@
 /** @vitest-environment jsdom */
+// eslint-disable-next-line no-unused-vars
+import React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -258,7 +260,7 @@ describe('condition rule helpers', () => {
       operator: 'not_equals',
       value: 'Finance',
     });
-    expect(describeCondition(builder)).toBe('Requester department does not equal "Finance"');
+    expect(describeCondition(builder)).toBe('Requester FS department/location does not equal "Finance"');
   });
 });
 

@@ -329,8 +329,8 @@ function redactRun(run) {
     deliveries: (run.deliveries || []).map((delivery) => ({
       ...delivery,
       payload: redactPayload(delivery.payload),
-      htmlBody: truncateString(delivery.htmlBody, 800),
-      textBody: truncateString(delivery.textBody, 800),
+      htmlBody: truncateString(delivery.htmlBody, 5000),
+      textBody: truncateString(delivery.textBody, 5000),
     })),
   };
 }
@@ -342,6 +342,120 @@ function testEmailBanner(auditId) {
 
 function testEmailTextPrefix(auditId) {
   return `Ticket Pulse workflow preview. This test email was sent only to you.${auditId ? ` Audit ID: ${auditId}.` : ''}`;
+}
+
+function normalizeEmailPayload(value = {}) {
+  const subject = String(value.subject || '').trim();
+  const html = typeof value.html === 'string' ? value.html : (typeof value.htmlBody === 'string' ? value.htmlBody : null);
+  const text = typeof value.text === 'string' ? value.text : (typeof value.textBody === 'string' ? value.textBody : null);
+  if (!subject && !html && !text) return null;
+  return {
+    subject: subject || 'Ticket Pulse notification preview',
+    html: html || null,
+    text: text || null,
+  };
+}
+
+function emailFromWorkflowStep(step) {
+  const output = step?.output || {};
+  return normalizeEmailPayload(output.email)
+    || normalizeEmailPayload(output.llm?.email)
+    || normalizeEmailPayload(output);
+}
+
+function emailFromAuditRun(run) {
+  const delivery = (run?.deliveries || []).find((item) => item.notificationType !== 'notification_workflow_test_email')
+    || run?.deliveries?.[0]
+    || null;
+  const deliveryEmail = normalizeEmailPayload({
+    subject: delivery?.subject,
+    htmlBody: delivery?.htmlBody,
+    textBody: delivery?.textBody,
+  });
+  if (deliveryEmail) return deliveryEmail;
+
+  const stepPriority = ['template_render', 'llm_generate'];
+  for (const nodeType of stepPriority) {
+    const steps = (run?.steps || []).filter((step) => step.nodeType === nodeType).reverse();
+    for (const step of steps) {
+      const email = emailFromWorkflowStep(step);
+      if (email) return email;
+    }
+  }
+  return null;
+}
+
+function recipientsFromAuditRun(run) {
+  const delivery = (run?.deliveries || []).find((item) => item.notificationType !== 'notification_workflow_test_email')
+    || run?.deliveries?.[0]
+    || null;
+  if (delivery) {
+    return {
+      to: delivery.toRecipients || [],
+      cc: delivery.ccRecipients || [],
+      bcc: delivery.bccRecipients || [],
+    };
+  }
+  const recipientStep = (run?.steps || []).find((step) => step.nodeType === 'recipient_resolver');
+  return recipientStep?.output?.recipients || { to: [], cc: [], bcc: [] };
+}
+
+async function createTestEmailDelivery({
+  req,
+  ticket,
+  run = null,
+  workflow = null,
+  email,
+  payload = {},
+}) {
+  const actorEmail = requestActorEmail(req);
+  if (!actorEmail) {
+    throw new ValidationError('Your session does not include an email address for test delivery');
+  }
+  if (!email?.html && !email?.text) {
+    throw new ValidationError('Preview email body is required');
+  }
+  const auditId = run ? formatAuditId(run.id) : null;
+  const sendStep = (run?.steps || []).find((step) => step.nodeType === 'send_email');
+  const sourceStep = sendStep
+    || [...(run?.steps || [])].reverse().find((step) => ['template_render', 'llm_generate'].includes(step.nodeType))
+    || null;
+
+  const delivery = await prisma.notificationDelivery.create({
+    data: {
+      workspaceId: req.workspaceId,
+      ticketId: ticket.id,
+      workflowRunId: run?.id || null,
+      workflowStepRunId: sourceStep?.id || null,
+      channel: 'email',
+      status: 'queued',
+      provider: 'sendgrid',
+      eventType: run?.eventType || workflow?.triggerType || null,
+      notificationType: 'notification_workflow_test_email',
+      assessedPriority: ticket.assessedPriority || priorityLabel(ticket) || null,
+      recipient: actorEmail,
+      toRecipients: [actorEmail],
+      subject: `[TEST] ${email.subject || 'Ticket Pulse notification preview'}`,
+      htmlBody: email.html ? `${testEmailBanner(auditId)}${email.html}` : null,
+      textBody: `${testEmailTextPrefix(auditId)}\n\n${email.text || ''}`.trim(),
+      dedupeKey: [
+        'notification-workflow-test',
+        run?.id || workflow?.id || 'workflow',
+        ticket.id,
+        Date.now(),
+        Math.random().toString(36).slice(2),
+      ].join(':').slice(0, 255),
+      payload: {
+        preview: true,
+        actorEmail,
+        workflowId: workflow?.id || run?.workflowId || null,
+        auditId,
+        ...payload,
+      },
+    },
+  });
+  const result = await processDelivery(delivery);
+  return { delivery, result, actorEmail, auditId };
 }
 
 router.get(
@@ -700,6 +814,76 @@ router.get(
 );
 
 router.post(
+  '/audits/:auditId/send-test-email',
+  asyncHandler(async (req, res) => {
+    const actorEmail = requestActorEmail(req);
+    if (!actorEmail) {
+      throw new ValidationError('Your session does not include an email address for test delivery');
+    }
+
+    const runId = parseAuditRunId(req.params.auditId);
+    const run = await prisma.notificationWorkflowRun.findFirst({
+      where: { id: runId, workspaceId: req.workspaceId },
+      include: {
+        workflow: {
+          select: {
+            id: true,
+            name: true,
+            key: true,
+            triggerType: true,
+            publishedVersion: true,
+          },
+        },
+        ticket: {
+          select: {
+            id: true,
+            assessedPriority: true,
+            priority: true,
+          },
+        },
+        steps: {
+          orderBy: { startedAt: 'asc' },
+        },
+        deliveries: {
+          orderBy: { queuedAt: 'asc' },
+        },
+      },
+    });
+    if (!run) throw new NotFoundError('Workflow audit run not found in this workspace');
+    if (!run.ticket) throw new ValidationError('Audit run is not linked to a ticket');
+
+    const email = emailFromAuditRun(run);
+    if (!email?.html && !email?.text) {
+      throw new ValidationError('No rendered email content was captured for this audit run');
+    }
+
+    const originalRecipients = recipientsFromAuditRun(run);
+    const { delivery, result, auditId } = await createTestEmailDelivery({
+      req,
+      ticket: run.ticket,
+      run,
+      workflow: run.workflow,
+      email,
+      payload: {
+        mockAuditReplay: true,
+        originalRecipients,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        sentTo: actorEmail,
+        deliveryId: delivery.id,
+        auditId,
+        originalRecipients,
+        result,
+      },
+    });
+  }),
+);
+
+router.post(
   '/test',
   asyncHandler(async (req, res) => {
     const workflowId = parseId(req.body.workflowId, 'workflow id');
@@ -775,40 +959,20 @@ router.post(
     });
     if (!ticket) throw new NotFoundError('Preview ticket not found in this workspace');
 
-    const auditId = run ? formatAuditId(run.id) : null;
-    const delivery = await prisma.notificationDelivery.create({
-      data: {
-        workspaceId: req.workspaceId,
-        ticketId: ticket.id,
-        workflowRunId: run?.id || null,
-        workflowStepRunId: run?.steps?.[0]?.id || null,
-        channel: 'email',
-        status: 'queued',
-        provider: 'sendgrid',
-        eventType: run?.eventType || workflow?.triggerType || null,
-        notificationType: 'notification_workflow_test_email',
-        assessedPriority: ticket.assessedPriority || priorityLabel(ticket) || null,
-        recipient: actorEmail,
-        toRecipients: [actorEmail],
-        subject: `[TEST] ${subject}`,
-        htmlBody: html ? `${testEmailBanner(auditId)}${html}` : null,
-        textBody: `${testEmailTextPrefix(auditId)}\n\n${text || ''}`.trim(),
-        dedupeKey: [
-          'notification-workflow-test',
-          run?.id || workflowId || 'workflow',
-          ticket.id,
-          Date.now(),
-          Math.random().toString(36).slice(2),
-        ].join(':').slice(0, 255),
-        payload: {
-          preview: true,
-          actorEmail,
-          workflowId,
-          auditId,
-        },
+    const { delivery, result, auditId } = await createTestEmailDelivery({
+      req,
+      ticket,
+      run,
+      workflow,
+      email: {
+        subject,
+        html,
+        text,
+      },
+      payload: {
+        previewRunTest: true,
       },
     });
-    const result = await processDelivery(delivery);
 
     res.json({
       success: true,

@@ -8,6 +8,12 @@ const prismaMock = {
     findMany: jest.fn(),
     findFirst: jest.fn(),
   },
+  notificationWorkflowRun: {
+    findFirst: jest.fn(),
+  },
+  notificationDelivery: {
+    create: jest.fn(),
+  },
 };
 
 const repositoryMock = {
@@ -17,6 +23,7 @@ const repositoryMock = {
 const buildNotificationLlmContextMock = jest.fn();
 const summarizeNotificationLlmContextMock = jest.fn();
 const getNotificationLlmToolPolicyMock = jest.fn();
+const processDeliveryMock = jest.fn();
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
   default: prismaMock,
@@ -35,7 +42,7 @@ jest.unstable_mockModule('../src/services/notificationWorkflowEngine.js', () => 
 }));
 
 jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () => ({
-  processDelivery: jest.fn(),
+  processDelivery: processDeliveryMock,
 }));
 
 jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({
@@ -145,6 +152,9 @@ describe('notification workflow routes', () => {
     prismaMock.ticket.count.mockResolvedValue(1);
     prismaMock.ticket.findMany.mockResolvedValue([sampleTicket]);
     prismaMock.ticket.findFirst.mockResolvedValue(sampleTicket);
+    prismaMock.notificationWorkflowRun.findFirst.mockResolvedValue(null);
+    prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 900, ...data }));
+    processDeliveryMock.mockResolvedValue({ success: true, providerMessageId: 'sg-test' });
     repositoryMock.getWorkflow.mockResolvedValue({
       id: 7,
       workspaceId: 1,
@@ -244,6 +254,79 @@ describe('notification workflow routes', () => {
         freshserviceTicketId: BigInt(225001),
         workspaceId: 2,
       },
+    }));
+  });
+
+  test('sends a test email from a mock audit run even when no delivery row was created', async () => {
+    prismaMock.notificationWorkflowRun.findFirst.mockResolvedValueOnce({
+      id: 77,
+      workspaceId: 1,
+      workflowId: 7,
+      eventType: 'ticket.created',
+      workflow: {
+        id: 7,
+        name: 'Ticket arrived after-hours / holiday',
+        key: 'ticket_created_after_hours',
+        triggerType: 'ticket.created',
+        publishedVersion: 1,
+      },
+      ticket: {
+        id: 501,
+        assessedPriority: 'High',
+        priority: 3,
+      },
+      steps: [
+        {
+          id: 701,
+          nodeType: 'recipient_resolver',
+          output: { recipients: { to: [], cc: [], bcc: [] } },
+        },
+        {
+          id: 702,
+          nodeType: 'template_render',
+          output: {
+            email: {
+              subject: 'Ticket #225001 received',
+              html: '<p>We received it.</p>',
+              text: 'We received it.',
+            },
+          },
+        },
+        {
+          id: 703,
+          nodeType: 'send_email',
+          output: { skipped: true, reason: 'No recipient email address resolved' },
+        },
+      ],
+      deliveries: [],
+    });
+
+    const response = await request(buildApp())
+      .post('/api/notification-workflows/audits/TP-NWF-77/send-test-email')
+      .send({})
+      .expect(200);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.sentTo).toBe('admin@example.com');
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        workflowRunId: 77,
+        workflowStepRunId: 703,
+        ticketId: 501,
+        recipient: 'admin@example.com',
+        toRecipients: ['admin@example.com'],
+        notificationType: 'notification_workflow_test_email',
+        subject: '[TEST] Ticket #225001 received',
+        htmlBody: expect.stringContaining('<p>We received it.</p>'),
+        payload: expect.objectContaining({
+          mockAuditReplay: true,
+          auditId: 'TP-NWF-77',
+        }),
+      }),
+    }));
+    expect(processDeliveryMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 900,
+      recipient: 'admin@example.com',
     }));
   });
 });

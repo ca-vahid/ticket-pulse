@@ -16,6 +16,13 @@ const ticketPriorityEventServiceMock = {
 const notificationPreferenceServiceMock = {
   queueNotificationsForFreshServiceAssignment: jest.fn(),
 };
+const requesterRepositoryMock = {
+  findByFreshserviceId: jest.fn(),
+  upsert: jest.fn(),
+};
+const ticketLifecycleNotificationServiceMock = {
+  emitTicketLifecycleNotifications: jest.fn(),
+};
 const prismaMock = {
   ticket: {
     update: jest.fn(),
@@ -54,7 +61,7 @@ jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({
 }));
 
 jest.unstable_mockModule('../src/services/requesterRepository.js', () => ({
-  default: {},
+  default: requesterRepositoryMock,
 }));
 
 jest.unstable_mockModule('../src/services/ticketThreadRepository.js', () => ({
@@ -99,6 +106,10 @@ jest.unstable_mockModule('../src/services/ticketPriorityEventService.js', () => 
 
 jest.unstable_mockModule('../src/services/notificationPreferenceService.js', () => ({
   default: notificationPreferenceServiceMock,
+}));
+
+jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js', () => ({
+  default: ticketLifecycleNotificationServiceMock,
 }));
 
 jest.unstable_mockModule('../src/services/assignmentFlowGuards.js', () => ({
@@ -155,6 +166,17 @@ describe('syncService.syncFreshServiceTicketSnapshot', () => {
     noiseRuleServiceMock.evaluate.mockResolvedValue({ isNoise: false, ruleId: null, category: null });
     ticketPriorityEventServiceMock.recordFreshServicePriorityChange.mockResolvedValue({ recorded: true });
     notificationPreferenceServiceMock.queueNotificationsForFreshServiceAssignment.mockResolvedValue({ queued: 1 });
+    requesterRepositoryMock.findByFreshserviceId.mockResolvedValue(null);
+    requesterRepositoryMock.upsert.mockResolvedValue({ id: 40, email: 'requester@example.com' });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({
+      id: 501,
+      freshserviceTicketId: BigInt(224749),
+      assignedTechId: null,
+      requesterId: data.requesterId,
+      status: 'Open',
+      priority: 3,
+    }));
+    ticketLifecycleNotificationServiceMock.emitTicketLifecycleNotifications.mockResolvedValue({ status: 'completed' });
   });
 
   test('resolves unknown responders, evaluates noise, records priority, and dismisses noise through shared ingest', async () => {
@@ -227,6 +249,65 @@ describe('syncService.syncFreshServiceTicketSnapshot', () => {
         source: 'freshservice_webhook_initial_assignment',
       }),
     );
+  });
+
+  test('links requester before dispatching notification workflows for webhook-created tickets', async () => {
+    const fetchRequester = jest.fn().mockResolvedValue({
+      id: 1000011793,
+      first_name: 'Vahid',
+      last_name: 'Haeri',
+      primary_email: 'vhaeri@example.com',
+      department_names: ['Vancouver'],
+      job_title: 'IT Manager',
+      active: true,
+    });
+    ticketRepositoryMock.upsert.mockResolvedValueOnce({
+      id: 501,
+      freshserviceTicketId: BigInt(224749),
+      requesterFreshserviceId: BigInt(1000011793),
+      requesterId: null,
+      assignedTechId: null,
+      isNoise: false,
+      status: 'Open',
+      priority: 3,
+      createdAt: new Date(),
+    });
+
+    await syncService.syncFreshServiceTicketSnapshot(2, {
+      id: 224749,
+      requester_id: 1000011793,
+      requester: { name: 'Vahid Haeri' },
+    }, {
+      client: { fetchRequester },
+      preparedTicket: {
+        freshserviceTicketId: 224749,
+        subject: 'Urgent Help',
+        status: 'Open',
+        priority: 3,
+        createdAt: new Date(),
+        requesterId: BigInt(1000011793),
+        requesterName: 'Vahid Haeri',
+        workspaceId: 2,
+      },
+      existingTicket: null,
+      source: 'freshservice_webhook',
+      allowNotificationWorkflows: true,
+    });
+
+    expect(requesterRepositoryMock.findByFreshserviceId).toHaveBeenCalledWith(BigInt(1000011793));
+    expect(fetchRequester).toHaveBeenCalledWith(1000011793);
+    expect(requesterRepositoryMock.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      primary_email: 'vhaeri@example.com',
+    }), { embeddedName: 'Vahid Haeri' });
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 501 },
+      data: { requesterId: 40 },
+    }));
+    expect(ticketLifecycleNotificationServiceMock.emitTicketLifecycleNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      upsertedTicket: expect.objectContaining({ requesterId: 40 }),
+      source: 'freshservice_webhook',
+      allowNotificationWorkflows: true,
+    }));
   });
 
   test('records assignment-change activity for existing ticket updates', async () => {

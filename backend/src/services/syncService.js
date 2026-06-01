@@ -1018,6 +1018,53 @@ class SyncService {
     return ticketsWithTechIds;
   }
 
+  async _ensureRequesterLinkedForNotification(upsertedTicket, preparedTicket = {}, fsTicket = null, client = null) {
+    if (!upsertedTicket?.id || upsertedTicket.requesterId) {
+      return upsertedTicket;
+    }
+
+    const requesterFreshserviceId = upsertedTicket.requesterFreshserviceId
+      || preparedTicket?.requesterId
+      || fsTicket?.requester_id
+      || null;
+    if (!requesterFreshserviceId) {
+      return upsertedTicket;
+    }
+
+    const requesterIdString = BigInt(requesterFreshserviceId).toString();
+    const embeddedName = fsTicket?.requester?.name
+      || preparedTicket?.requesterName
+      || this._embeddedRequesterNames.get(requesterIdString)
+      || null;
+
+    let requester = null;
+    try {
+      requester = await requesterRepository.findByFreshserviceId(requesterFreshserviceId);
+      if (!requester && client?.fetchRequester) {
+        const freshserviceRequester = await client.fetchRequester(Number(requesterIdString));
+        requester = await requesterRepository.upsert(freshserviceRequester, { embeddedName });
+      }
+      if (!requester) return upsertedTicket;
+
+      return await prisma.ticket.update({
+        where: { id: upsertedTicket.id },
+        data: { requesterId: requester.id },
+        include: {
+          assignedTech: true,
+          requester: true,
+        },
+      });
+    } catch (error) {
+      logger.warn('Could not link requester before notification workflow dispatch', {
+        ticketId: upsertedTicket.id,
+        freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString?.() || upsertedTicket.freshserviceTicketId,
+        requesterFreshserviceId: requesterIdString,
+        error: error.message,
+      });
+      return upsertedTicket;
+    }
+  }
+
   /**
    * Fetch and analyze ticket activities with configurable rate limiting
    *
@@ -1316,7 +1363,7 @@ class SyncService {
     const ingestRecordedAt = new Date();
     const isWebhookIngest = source === 'freshservice_webhook';
 
-    const upsertedTicket = await ticketRepository.upsert({
+    let upsertedTicket = await ticketRepository.upsert({
       ...ticket,
       workspaceId: ticketWorkspaceId,
       isNoise,
@@ -1332,6 +1379,15 @@ class SyncService {
       firstAssignedAt,
       rejectionCount,
     });
+
+    if (options.allowNotificationWorkflows === true) {
+      upsertedTicket = await this._ensureRequesterLinkedForNotification(
+        upsertedTicket,
+        ticket,
+        fsTicket,
+        client,
+      );
+    }
 
     await ticketPriorityEventService.recordFreshServicePriorityChange({
       existingTicket,
