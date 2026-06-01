@@ -2,7 +2,9 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin } from '../middleware/auth.js';
 import notificationWorkflowRepository from '../services/notificationWorkflowRepository.js';
-import notificationWorkflowEngine from '../services/notificationWorkflowEngine.js';
+import notificationWorkflowEngine, {
+  finalizeWorkflowSendEmail,
+} from '../services/notificationWorkflowEngine.js';
 import { processDelivery } from '../services/notificationDeliveryService.js';
 import settingsRepository from '../services/settingsRepository.js';
 import prisma from '../services/prisma.js';
@@ -363,9 +365,49 @@ function emailFromWorkflowStep(step) {
     || normalizeEmailPayload(output);
 }
 
-function emailFromAuditRun(run) {
-  const delivery = (run?.deliveries || []).find((item) => item.notificationType !== 'notification_workflow_test_email')
-    || run?.deliveries?.[0]
+function workflowScheduleMode(workflow = {}) {
+  return workflow?.publishedDefinition?.metadata?.scheduleMode
+    || workflow?.draftDefinition?.metadata?.scheduleMode
+    || null;
+}
+
+function sendNodeDataForStep(run, step) {
+  const definition = run?.workflow?.publishedDefinition || run?.workflow?.draftDefinition || {};
+  const node = (definition.nodes || []).find((candidate) => candidate.id === step?.nodeId)
+    || (definition.nodes || []).find((candidate) => candidate.type === 'send_email')
+    || null;
+  return node?.data || {};
+}
+
+function emailBeforeStep(run, step) {
+  const steps = run?.steps || [];
+  const stepIndex = steps.findIndex((candidate) => candidate.id === step?.id);
+  const priorSteps = stepIndex >= 0 ? steps.slice(0, stepIndex) : steps;
+  return [...priorSteps].reverse()
+    .map(emailFromWorkflowStep)
+    .find(Boolean)
+    || null;
+}
+
+async function finalEmailFromSendStep(run, step) {
+  const stepEmail = emailFromWorkflowStep(step);
+  if (stepEmail) return stepEmail;
+  const baseEmail = emailBeforeStep(run, step);
+  if (!baseEmail || !run?.workflow || !run?.eventContext) return null;
+  return normalizeEmailPayload(await finalizeWorkflowSendEmail({
+    workflow: run.workflow,
+    eventContext: run.eventContext,
+    email: baseEmail,
+    nodeData: sendNodeDataForStep(run, step),
+    actionLinkRenderMode: 'live',
+    workflowScheduleMode: workflowScheduleMode(run.workflow),
+    allowSignatureFailure: true,
+  }));
+}
+
+async function emailFromAuditRun(run) {
+  const delivery = (run?.deliveries || [])
+    .find((item) => item.notificationType !== 'notification_workflow_test_email')
     || null;
   const deliveryEmail = normalizeEmailPayload({
     subject: delivery?.subject,
@@ -373,6 +415,12 @@ function emailFromAuditRun(run) {
     textBody: delivery?.textBody,
   });
   if (deliveryEmail) return deliveryEmail;
+
+  const sendSteps = (run?.steps || []).filter((step) => step.nodeType === 'send_email').reverse();
+  for (const step of sendSteps) {
+    const email = await finalEmailFromSendStep(run, step);
+    if (email) return email;
+  }
 
   const stepPriority = ['template_render', 'llm_generate'];
   for (const nodeType of stepPriority) {
@@ -469,7 +517,7 @@ router.get(
 router.get(
   '/health',
   asyncHandler(async (req, res) => {
-    const [sendgridConfig, workflows, recentFailures, mockEnabledWorkflows, mockedDeliveries7d] = await Promise.all([
+    const [sendgridConfig, workflows, recentFailures, mockEnabledWorkflows, mockRuns7d, mockedDeliveries7d] = await Promise.all([
       settingsRepository.getSendGridConfig(),
       prisma.notificationWorkflow.groupBy({
         by: ['isEnabled'],
@@ -488,6 +536,13 @@ router.get(
         where: {
           workspaceId: req.workspaceId,
           mockModeEnabled: true,
+        },
+      }),
+      prisma.notificationWorkflowRun.count({
+        where: {
+          workspaceId: req.workspaceId,
+          executionMode: 'mock',
+          startedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
         },
       }),
       prisma.notificationDelivery.count({
@@ -509,6 +564,7 @@ router.get(
         enabledWorkflows: workflows.find((row) => row.isEnabled)?._count?._all || 0,
         disabledWorkflows: workflows.find((row) => !row.isEnabled)?._count?._all || 0,
         mockEnabledWorkflows,
+        mockRuns7d,
         mockedDeliveries7d,
         failedEmailDeliveries24h: recentFailures,
       },
@@ -828,10 +884,13 @@ router.post(
         workflow: {
           select: {
             id: true,
+            workspaceId: true,
             name: true,
             key: true,
             triggerType: true,
             publishedVersion: true,
+            publishedDefinition: true,
+            draftDefinition: true,
           },
         },
         ticket: {
@@ -852,7 +911,7 @@ router.post(
     if (!run) throw new NotFoundError('Workflow audit run not found in this workspace');
     if (!run.ticket) throw new ValidationError('Audit run is not linked to a ticket');
 
-    const email = emailFromAuditRun(run);
+    const email = await emailFromAuditRun(run);
     if (!email?.html && !email?.text) {
       throw new ValidationError('No rendered email content was captured for this audit run');
     }
@@ -941,7 +1000,20 @@ router.post(
       ? await prisma.notificationWorkflowRun.findFirst({
         where: { id: runId, workspaceId: req.workspaceId },
         include: {
-          steps: { where: { nodeType: 'send_email' }, orderBy: { startedAt: 'desc' }, take: 1 },
+          workflow: {
+            select: {
+              id: true,
+              workspaceId: true,
+              name: true,
+              key: true,
+              triggerType: true,
+              publishedVersion: true,
+              publishedDefinition: true,
+              draftDefinition: true,
+            },
+          },
+          steps: { orderBy: { startedAt: 'asc' } },
+          deliveries: { orderBy: { queuedAt: 'asc' } },
         },
       })
       : null;
@@ -959,12 +1031,13 @@ router.post(
     });
     if (!ticket) throw new NotFoundError('Preview ticket not found in this workspace');
 
+    const auditedEmail = run ? await emailFromAuditRun(run) : null;
     const { delivery, result, auditId } = await createTestEmailDelivery({
       req,
       ticket,
       run,
-      workflow,
-      email: {
+      workflow: run?.workflow || workflow,
+      email: auditedEmail || {
         subject,
         html,
         text,

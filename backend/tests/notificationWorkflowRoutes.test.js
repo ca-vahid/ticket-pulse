@@ -24,6 +24,7 @@ const buildNotificationLlmContextMock = jest.fn();
 const summarizeNotificationLlmContextMock = jest.fn();
 const getNotificationLlmToolPolicyMock = jest.fn();
 const processDeliveryMock = jest.fn();
+const finalizeWorkflowSendEmailMock = jest.fn();
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
   default: prismaMock,
@@ -39,6 +40,7 @@ jest.unstable_mockModule('../src/services/notificationWorkflowRepository.js', ()
 
 jest.unstable_mockModule('../src/services/notificationWorkflowEngine.js', () => ({
   default: {},
+  finalizeWorkflowSendEmail: finalizeWorkflowSendEmailMock,
 }));
 
 jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () => ({
@@ -155,6 +157,7 @@ describe('notification workflow routes', () => {
     prismaMock.notificationWorkflowRun.findFirst.mockResolvedValue(null);
     prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 900, ...data }));
     processDeliveryMock.mockResolvedValue({ success: true, providerMessageId: 'sg-test' });
+    finalizeWorkflowSendEmailMock.mockImplementation(async ({ email }) => email);
     repositoryMock.getWorkflow.mockResolvedValue({
       id: 7,
       workspaceId: 1,
@@ -258,17 +261,46 @@ describe('notification workflow routes', () => {
   });
 
   test('sends a test email from a mock audit run even when no delivery row was created', async () => {
+    finalizeWorkflowSendEmailMock.mockResolvedValueOnce({
+      subject: 'Ticket #225001 received',
+      html: '<p>We received it.</p><div>Helpful ticket links</div><div>Need immediate after-hours support?</div>',
+      text: 'We received it.\n\nHelpful ticket links\n\nNeed immediate after-hours support?',
+      actionLinks: {
+        publicStatus: { applied: true },
+        afterHoursSupport: { applied: true },
+      },
+    });
     prismaMock.notificationWorkflowRun.findFirst.mockResolvedValueOnce({
       id: 77,
       workspaceId: 1,
       workflowId: 7,
       eventType: 'ticket.created',
+      eventContext: {
+        event: { type: 'ticket.created' },
+        availability: { isBusinessHours: false, isAfterHours: true },
+        publicStatusUrl: 'https://ticketpulse.example/status',
+        afterHoursSupport: { immediateSupportUrl: 'https://ticketpulse.example/escalate' },
+      },
       workflow: {
         id: 7,
+        workspaceId: 1,
         name: 'Ticket arrived after-hours / holiday',
         key: 'ticket_created_after_hours',
         triggerType: 'ticket.created',
         publishedVersion: 1,
+        publishedDefinition: {
+          metadata: { scheduleMode: 'after_hours' },
+          nodes: [
+            {
+              id: 'send',
+              type: 'send_email',
+              data: {
+                appendPublicStatusLink: true,
+                appendAfterHoursSupportLink: true,
+              },
+            },
+          ],
+        },
       },
       ticket: {
         id: 501,
@@ -294,6 +326,7 @@ describe('notification workflow routes', () => {
         },
         {
           id: 703,
+          nodeId: 'send',
           nodeType: 'send_email',
           output: { skipped: true, reason: 'No recipient email address resolved' },
         },
@@ -308,6 +341,16 @@ describe('notification workflow routes', () => {
 
     expect(response.body.success).toBe(true);
     expect(response.body.data.sentTo).toBe('admin@example.com');
+    expect(finalizeWorkflowSendEmailMock).toHaveBeenCalledWith(expect.objectContaining({
+      eventContext: expect.objectContaining({
+        publicStatusUrl: 'https://ticketpulse.example/status',
+      }),
+      nodeData: expect.objectContaining({
+        appendPublicStatusLink: true,
+        appendAfterHoursSupportLink: true,
+      }),
+      workflowScheduleMode: 'after_hours',
+    }));
     expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         workflowRunId: 77,
@@ -317,7 +360,7 @@ describe('notification workflow routes', () => {
         toRecipients: ['admin@example.com'],
         notificationType: 'notification_workflow_test_email',
         subject: '[TEST] Ticket #225001 received',
-        htmlBody: expect.stringContaining('<p>We received it.</p>'),
+        htmlBody: expect.stringContaining('Helpful ticket links'),
         payload: expect.objectContaining({
           mockAuditReplay: true,
           auditId: 'TP-NWF-77',

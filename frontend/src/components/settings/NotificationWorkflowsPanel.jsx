@@ -854,8 +854,10 @@ function deliveryRecipientCount(delivery) {
 }
 
 function auditDeliveryForRun(run) {
-  return (run?.deliveries || []).find((delivery) => delivery.status === 'mocked')
-    || run?.deliveries?.[0]
+  const workflowDeliveries = (run?.deliveries || [])
+    .filter((delivery) => delivery.notificationType !== 'notification_workflow_test_email');
+  return workflowDeliveries.find((delivery) => delivery.status === 'mocked')
+    || workflowDeliveries[0]
     || null;
 }
 
@@ -4842,7 +4844,7 @@ export default function NotificationWorkflowsPanel() {
       description: 'Review suppressed live sends across workflows.',
       icon: FlaskConical,
       activeIconClass: 'border-sky-200 bg-sky-50 text-sky-700',
-      badge: `${health?.mockedDeliveries7d || 0} 7d`,
+      badge: `${health?.mockRuns7d ?? health?.mockedDeliveries7d ?? 0} 7d`,
       badgeClass: 'bg-sky-50 text-sky-700',
     },
   ];
@@ -6388,7 +6390,7 @@ export default function NotificationWorkflowsPanel() {
               </div>
               <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
                 <div className="text-gray-500">Mock</div>
-                <div className="font-semibold text-sky-700">{health.mockEnabledWorkflows || 0} on / {health.mockedDeliveries7d || 0} 7d</div>
+                <div className="font-semibold text-sky-700">{health.mockEnabledWorkflows || 0} on / {health.mockRuns7d ?? health.mockedDeliveries7d ?? 0} runs 7d</div>
               </div>
               <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
                 <div className="text-gray-500">Failures 24h</div>

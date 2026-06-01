@@ -603,6 +603,32 @@ function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {
   return next;
 }
 
+export async function finalizeWorkflowSendEmail({
+  workflow,
+  eventContext,
+  email = {},
+  nodeData = {},
+  actionLinkRenderMode = 'live',
+  workflowScheduleMode = null,
+  allowSignatureFailure = false,
+} = {}) {
+  const emailWithLinks = appendWorkflowActionLinksToEmail(email, eventContext, nodeData, {
+    actionLinkRenderMode,
+    workflowScheduleMode,
+  });
+  let signature = null;
+  try {
+    signature = await getWorkspaceSignature(workflow.workspaceId);
+  } catch (error) {
+    if (!allowSignatureFailure) throw error;
+    logger.debug('Skipping notification signature because it could not be loaded', {
+      workspaceId: workflow.workspaceId,
+      error: error.message,
+    });
+  }
+  return appendSignatureToEmail(emailWithLinks, signature);
+}
+
 function schemaTypeMatches(value, type) {
   if (value === null || value === undefined) return false;
   if (type === 'array') return Array.isArray(value);
@@ -1282,27 +1308,10 @@ async function executeNode({
   if (EMAIL_NODE_TYPES.has(node.type)) {
     const recipients = state.recipients || { to: [], cc: [], bcc: [] };
     const baseEmail = state.email || {};
-    let signature = null;
-    try {
-      signature = await getWorkspaceSignature(workflow.workspaceId);
-    } catch (error) {
-      if (executionMode !== EXECUTION_MODE_PREVIEW) throw error;
-      logger.debug('Skipping notification signature during preview because it could not be loaded', {
-        workspaceId: workflow.workspaceId,
-        error: error.message,
-      });
-    }
     const toRecipients = uniqueEmails(recipients.to || []);
     const ccRecipients = excludeExistingEmails(uniqueEmails(recipients.cc || []), toRecipients);
     const bccRecipients = excludeExistingEmails(uniqueEmails(recipients.bcc || []), [...toRecipients, ...ccRecipients]);
     const hasGeneratedBody = Boolean(String(baseEmail.html || baseEmail.text || '').trim());
-
-    if (toRecipients.length === 0) {
-      return {
-        skipped: true,
-        reason: 'No recipient email address resolved',
-      };
-    }
 
     if (!hasGeneratedBody) {
       return {
@@ -1311,8 +1320,15 @@ async function executeNode({
       };
     }
 
-    state.email = appendWorkflowActionLinksToEmail(baseEmail, eventContext, node.data || {}, actionLinkAppendOptions);
-    const email = appendSignatureToEmail(state.email || {}, signature);
+    const email = await finalizeWorkflowSendEmail({
+      workflow,
+      eventContext,
+      email: baseEmail,
+      nodeData: node.data || {},
+      actionLinkRenderMode: actionLinkAppendOptions.actionLinkRenderMode,
+      workflowScheduleMode: actionLinkAppendOptions.workflowScheduleMode,
+      allowSignatureFailure: executionMode === EXECUTION_MODE_PREVIEW,
+    });
     state.email = email;
     const subject = email.subject || node.data?.subject || 'Ticket Pulse notification';
     const htmlBody = email.html || null;
@@ -1336,6 +1352,14 @@ async function executeNode({
       notificationType: node.data?.notificationType || eventContext.event?.type || workflow.triggerType,
       actionLinks: email.actionLinks || {},
     };
+
+    if (toRecipients.length === 0) {
+      return {
+        ...output,
+        skipped: true,
+        reason: 'No recipient email address resolved',
+      };
+    }
 
     if (toRecipients.length + ccRecipients.length + bccRecipients.length > MAX_EMAIL_RECIPIENTS) {
       throw new Error(`Email recipient count exceeds the ${MAX_EMAIL_RECIPIENTS} recipient limit`);

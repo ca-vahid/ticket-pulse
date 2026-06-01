@@ -481,6 +481,41 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.html).toContain(immediateSupportUrl);
   });
 
+  test('send step captures final action-block email even when recipient resolution is empty', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.appendPublicStatusLink = true;
+    sendNode.data.appendAfterHoursSupportLink = true;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext: {
+        ...eventContext,
+        requester: null,
+        availability: { isBusinessHours: false, isAfterHours: true, isHoliday: false },
+      },
+      dryRun: true,
+      executionMode: 'mock',
+      triggerSource: 'freshservice_poll',
+    });
+
+    const sendStep = result.steps.find((step) => step.nodeType === 'send_email');
+    expect(sendStep.output).toEqual(expect.objectContaining({
+      skipped: true,
+      reason: 'No recipient email address resolved',
+      htmlBody: expect.stringContaining('Helpful ticket links'),
+      actionLinks: expect.objectContaining({
+        publicStatus: expect.objectContaining({ applied: true }),
+        afterHoursSupport: expect.objectContaining({ applied: true }),
+      }),
+    }));
+    expect(sendStep.output.htmlBody).toContain('Need immediate after-hours support?');
+    expect(result.state.email.html).toContain('Need immediate after-hours support?');
+    expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
+    expect(processDeliveryMock).not.toHaveBeenCalled();
+  });
+
   test('uses LLM text as HTML when the provider returns blank HTML', async () => {
     providerSendJsonMock.mockResolvedValue({
       provider: 'anthropic',
