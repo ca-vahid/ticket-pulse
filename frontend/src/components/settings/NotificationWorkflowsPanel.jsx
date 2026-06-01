@@ -26,6 +26,8 @@ import {
   Mail,
   Map as MapIcon,
   Maximize2,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRight,
   Play,
   Plus,
@@ -42,6 +44,8 @@ import {
   XCircle,
 } from 'lucide-react';
 import { notificationWorkflowAPI } from '../../services/api';
+
+const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v2';
 
 const EVENT_LABELS = {
   'ticket.created': 'Ticket arrived',
@@ -2081,15 +2085,52 @@ const PROSE_EDITOR_OPTIONS = {
   fontSize: 14,
   lineNumbers: 'on',
   scrollBeyondLastLine: false,
-  quickSuggestions: false,
+  quickSuggestions: { other: false, comments: false, strings: false },
   suggestOnTriggerCharacters: false,
+  acceptSuggestionOnCommitCharacter: false,
   acceptSuggestionOnEnter: 'off',
   tabCompletion: 'off',
   wordBasedSuggestions: 'off',
+  snippetSuggestions: 'none',
   parameterHints: { enabled: false },
+  suggest: {
+    preview: false,
+    showWords: false,
+    showSnippets: false,
+    showMethods: false,
+    showFunctions: false,
+    showConstructors: false,
+    showFields: false,
+    showVariables: false,
+    showClasses: false,
+    showStructs: false,
+    showInterfaces: false,
+    showModules: false,
+    showProperties: false,
+    showEvents: false,
+    showOperators: false,
+    showUnits: false,
+    showValues: false,
+    showConstants: false,
+    showEnums: false,
+    showEnumMembers: false,
+    showKeywords: false,
+    showColors: false,
+    showFiles: false,
+    showReferences: false,
+    showFolders: false,
+    showTypeParameters: false,
+    showIssues: false,
+    showUsers: false,
+  },
   hover: { enabled: false },
   links: false,
   inlineSuggest: { enabled: false },
+  formatOnType: false,
+  formatOnPaste: false,
+  autoClosingBrackets: 'never',
+  autoClosingQuotes: 'never',
+  autoSurround: 'never',
 };
 
 function FullContentEditorModal({
@@ -2149,8 +2190,11 @@ function FullContentEditorModal({
               height="100%"
               language={language}
               value={value || ''}
-              onMount={(editorInstance) => {
+              onMount={(editorInstance, monaco) => {
                 editorRef.current = editorInstance;
+                editorInstance.addCommand(monaco.KeyCode.Space, () => {
+                  editorInstance.trigger('keyboard', 'type', { text: ' ' });
+                });
               }}
               onChange={(next) => onChange(next || '')}
               options={PROSE_EDITOR_OPTIONS}
@@ -2685,7 +2729,7 @@ function MailSettingsTabButton({ tab, active, onClick }) {
       aria-selected={active}
       onClick={onClick}
       className={cls(
-        'group flex h-[70px] min-w-0 items-center gap-3 rounded-lg border-2 px-3 py-2 text-left transition',
+        'group flex h-[56px] min-w-0 items-center gap-2.5 rounded-lg border-2 px-2.5 py-2 text-left transition',
         active
           ? 'border-slate-900 bg-white text-slate-950 shadow-md ring-2 ring-slate-900/10'
           : 'border-slate-300 bg-white/65 text-slate-600 shadow-sm hover:border-slate-400 hover:bg-white hover:text-slate-900',
@@ -2693,7 +2737,7 @@ function MailSettingsTabButton({ tab, active, onClick }) {
     >
       <span
         className={cls(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-md border',
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border',
           active ? tab.activeIconClass : 'border-slate-200 bg-white text-slate-500 group-hover:text-slate-700',
         )}
       >
@@ -2708,7 +2752,7 @@ function MailSettingsTabButton({ tab, active, onClick }) {
             </span>
           )}
         </span>
-        <span className="mt-0.5 hidden truncate text-xs text-slate-500 xl:block">{tab.description}</span>
+        <span className="mt-0.5 hidden truncate text-xs text-slate-500 2xl:block">{tab.description}</span>
       </span>
     </button>
   );
@@ -3087,7 +3131,7 @@ function AfterHoursRoutingDrawer({
 
 function WorkflowList({ workflows, selectedId, onSelect }) {
   return (
-    <div className="divide-y divide-slate-100 border-t border-slate-100">
+    <div className="divide-y divide-slate-100">
       {workflows.map((workflow) => {
         const lastRun = workflow.runs?.[0];
         const isSelected = selectedId === workflow.id;
@@ -3099,10 +3143,14 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
             key={workflow.id}
             type="button"
             onClick={() => onSelect(workflow.id)}
+            aria-current={isSelected ? 'true' : undefined}
             className={cls(
-              'flex w-full flex-col gap-1.5 border-l-2 px-3 py-2.5 text-left transition hover:bg-slate-50',
-              isSelected && 'border-l-blue-500 bg-blue-50/80',
-              !isSelected && (isEnabled ? 'border-l-emerald-400 bg-white' : 'border-l-slate-200 bg-slate-50/70'),
+              'flex w-full flex-col gap-1.5 border-l-4 px-3 py-2.5 text-left transition-colors',
+              isSelected
+                ? 'border-l-blue-600 bg-blue-100/95 shadow-sm ring-1 ring-inset ring-blue-200 hover:bg-blue-100'
+                : isEnabled
+                  ? 'border-l-emerald-400 bg-white hover:bg-emerald-50/60'
+                  : 'border-l-slate-200 bg-slate-50/70 hover:bg-slate-100',
             )}
           >
             <div className="flex min-w-0 items-start justify-between gap-2">
@@ -4085,13 +4133,14 @@ function NodePalette({ onAddNode, onRemoveNode, showMiniMap, onToggleMiniMap }) 
 
 export default function NotificationWorkflowsPanel() {
   const editorLayout = useDefaultLayout({
-    id: 'ticket-pulse-notification-workflow-editor',
+    id: WORKFLOW_EDITOR_LAYOUT_ID,
     panelIds: ['workflow-canvas', 'workflow-inspector'],
   });
   const [workflows, setWorkflows] = useState([]);
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState('trigger');
+  const [workflowListCollapsed, setWorkflowListCollapsed] = useState(false);
   const [health, setHealth] = useState(null);
   const [preview, setPreview] = useState(null);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
@@ -4334,6 +4383,11 @@ export default function NotificationWorkflowsPanel() {
       const listResponse = await notificationWorkflowAPI.list();
       setWorkflows(listResponse.data || []);
     }
+  }
+
+  function handleWorkflowSelect(id) {
+    setWorkflowListCollapsed(true);
+    loadWorkflow(id);
   }
 
   function applyWorkflowUpdate(updatedWorkflow, { shouldUpdateDraft = true } = {}) {
@@ -6095,7 +6149,7 @@ export default function NotificationWorkflowsPanel() {
 
   return (
     <div className="tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-white/70 sm:m-4">
-      <div className="shrink-0 border-b border-white/70 px-6 py-4">
+      <div className="shrink-0 border-b border-white/70 px-5 py-3">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -6106,21 +6160,21 @@ export default function NotificationWorkflowsPanel() {
           </div>
           {health && (
             <div className="grid grid-cols-2 gap-2 text-xs xl:grid-cols-4">
-              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2 shadow-subtle">
+              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
                 <div className="text-gray-500">SendGrid</div>
                 <div className={cls('font-semibold', health.sendgridConfigured ? 'text-emerald-700' : 'text-red-700')}>
                   {health.sendgridConfigured ? `Configured${health.sendgridMode === 'smtp' ? ' (SMTP)' : ''}` : 'Missing'}
                 </div>
               </div>
-              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2 shadow-subtle">
+              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
                 <div className="text-gray-500">Enabled</div>
                 <div className="font-semibold text-gray-900">{health.enabledWorkflows || 0}</div>
               </div>
-              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2 shadow-subtle">
+              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
                 <div className="text-gray-500">Mock</div>
                 <div className="font-semibold text-sky-700">{health.mockEnabledWorkflows || 0} on / {health.mockedDeliveries7d || 0} 7d</div>
               </div>
-              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2 shadow-subtle">
+              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
                 <div className="text-gray-500">Failures 24h</div>
                 <div className={cls('font-semibold', health.failedEmailDeliveries24h ? 'text-red-700' : 'text-gray-900')}>
                   {health.failedEmailDeliveries24h || 0}
@@ -6130,11 +6184,11 @@ export default function NotificationWorkflowsPanel() {
           )}
         </div>
 
-        <div className="mt-4 space-y-3">
+        <div className="mt-3 space-y-2">
           <div
             role="tablist"
             aria-label="Mail settings sections"
-            className="grid grid-cols-1 gap-2 rounded-xl border-2 border-slate-300 bg-slate-100/90 p-2 shadow-inner sm:grid-cols-2 xl:grid-cols-4"
+            className="grid grid-cols-1 gap-1.5 rounded-xl border-2 border-slate-300 bg-slate-100/90 p-1.5 shadow-inner sm:grid-cols-2 xl:grid-cols-4"
           >
             {globalTabs.map((tab) => (
               <MailSettingsTabButton
@@ -6147,11 +6201,11 @@ export default function NotificationWorkflowsPanel() {
           </div>
 
           {workflowTabActive && (
-            <div className="flex min-h-[42px] flex-wrap items-center justify-end gap-2">
+            <div className="flex min-h-[36px] flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => loadWorkflows(selected?.id)}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 <RefreshCw className="h-4 w-4" />
               Refresh
@@ -6160,7 +6214,7 @@ export default function NotificationWorkflowsPanel() {
                 type="button"
                 onClick={saveDraft}
                 disabled={saving || !selected}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
               >
                 <Save className="h-4 w-4" />
               Save
@@ -6169,7 +6223,7 @@ export default function NotificationWorkflowsPanel() {
                 type="button"
                 onClick={openPreviewModal}
                 disabled={saving || previewRunning || !selected}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
               >
                 {previewRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                 {previewRunning ? 'Previewing' : 'Preview'}
@@ -6185,7 +6239,7 @@ export default function NotificationWorkflowsPanel() {
                       ? 'Publish the current draft update and keep this workflow enabled.'
                       : 'Publish the current draft without enabling live execution.'}
                 disabled={saving || !selected || !hasPublishableChanges || hasBlockingGraphErrors}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
               >
                 <Upload className="h-4 w-4" />
                 {hasPublishableChanges ? 'Publish' : 'Published'}
@@ -6196,7 +6250,7 @@ export default function NotificationWorkflowsPanel() {
                 disabled={saving || !selected || !canToggleMockMode}
                 title={mockModeButtonTitle}
                 className={cls(
-                  'inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
+                  'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold disabled:opacity-50',
                   selected?.mockModeEnabled ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
                 )}
               >
@@ -6209,7 +6263,7 @@ export default function NotificationWorkflowsPanel() {
                 disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
                 title={selected?.isEnabled ? 'Disable live workflow execution.' : selectedIsPublished ? 'Enable the latest published workflow version.' : 'Publish the workflow before enabling live execution.'}
                 className={cls(
-                  'inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
+                  'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold disabled:opacity-50',
                   selected?.isEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
                 )}
               >
@@ -6232,7 +6286,7 @@ export default function NotificationWorkflowsPanel() {
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="settings-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
         {activeGlobalTab === 'llm-context' && (
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <LlmContextToolsPanel
@@ -6310,7 +6364,7 @@ export default function NotificationWorkflowsPanel() {
         )}
 
         {activeGlobalTab === 'workflows' && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden">
             {selectedIsAfterHoursWorkflow && (
               <AfterHoursRoutingSummary
                 workflow={selected}
@@ -6321,20 +6375,57 @@ export default function NotificationWorkflowsPanel() {
               />
             )}
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)]">
-              <aside className="z-10 min-h-0 overflow-y-auto border-r border-gray-200 bg-slate-50/90">
-                <div className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">Workspace Workflows</div>
-                <WorkflowList workflows={workflows} selectedId={selected?.id} onSelect={loadWorkflow} />
+            <div
+              className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--workflow-list-width)_minmax(0,1fr)]"
+              style={{ '--workflow-list-width': workflowListCollapsed ? '3.5rem' : '220px' }}
+            >
+              <aside
+                className={cls(
+                  'z-10 flex min-h-0 flex-col overflow-hidden border-r border-gray-200 transition-colors duration-300',
+                  workflowListCollapsed ? 'bg-slate-100/90' : 'bg-slate-50/90',
+                )}
+              >
+                <div
+                  className={cls(
+                    'flex items-center gap-2 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500',
+                    workflowListCollapsed ? 'justify-center px-2' : 'justify-between',
+                  )}
+                >
+                  {!workflowListCollapsed && <span>Workspace Workflows</span>}
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowListCollapsed((current) => !current)}
+                    aria-label={workflowListCollapsed ? 'Expand workspace workflows' : 'Collapse workspace workflows'}
+                    title={workflowListCollapsed ? 'Expand workspace workflows' : 'Collapse workspace workflows'}
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                  >
+                    {workflowListCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                  </button>
+                </div>
+                {workflowListCollapsed ? (
+                  <div className="flex flex-1 flex-col items-center gap-3 border-t border-slate-200 px-2 py-3 text-slate-500">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700 ring-1 ring-blue-200">
+                      {workflows.length}
+                    </span>
+                    <span className="hidden rotate-180 text-[10px] font-bold uppercase tracking-wide [writing-mode:vertical-rl] lg:block">
+                      Workflows
+                    </span>
+                  </div>
+                ) : (
+                  <div className="settings-scrollbar min-h-0 flex-1 overflow-y-auto border-t border-slate-100">
+                    <WorkflowList workflows={workflows} selectedId={selected?.id} onSelect={handleWorkflowSelect} />
+                  </div>
+                )}
               </aside>
 
               <PanelGroup
-                id="ticket-pulse-notification-workflow-editor"
+                id={WORKFLOW_EDITOR_LAYOUT_ID}
                 orientation="horizontal"
                 defaultLayout={editorLayout.defaultLayout}
                 onLayoutChanged={editorLayout.onLayoutChanged}
                 className="min-h-0 min-w-0"
               >
-                <Panel id="workflow-canvas" minSize="50%" defaultSize="62%">
+                <Panel id="workflow-canvas" minSize="55%" defaultSize="75%">
                   <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200">
                     <NodePalette
                       onAddNode={addWorkflowNode}
@@ -6369,6 +6460,7 @@ export default function NotificationWorkflowsPanel() {
                           fitView
                           minZoom={0.25}
                           maxZoom={1.6}
+                          panActivationKeyCode={null}
                           isValidConnection={isValidWorkflowConnection}
                           onConnect={handleFlowConnect}
                           onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
@@ -6392,7 +6484,7 @@ export default function NotificationWorkflowsPanel() {
 
                 <PanelResizeHandle id="workflow-editor-resizer" className="w-1 bg-gray-100 transition hover:bg-blue-300" />
 
-                <Panel id="workflow-inspector" minSize="30%" maxSize="50%" defaultSize="38%">
+                <Panel id="workflow-inspector" minSize="22%" maxSize="45%" defaultSize="25%">
                   <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-white">
                     <div className="shrink-0 border-b border-gray-200 px-4 py-3">
                       <div className="flex items-center justify-between gap-3">
