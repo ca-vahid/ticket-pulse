@@ -262,6 +262,20 @@ describe('notification workflow routes', () => {
         count: 1,
       }),
     ]);
+    expect(prismaMock.notificationDelivery.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      by: ['ticketId', 'eventType', 'notificationType'],
+      where: expect.objectContaining({
+        workspaceId: 1,
+        channel: 'email',
+        status: 'mocked',
+        queuedAt: { gte: expect.any(Date) },
+      }),
+    }));
+    expect(prismaMock.notificationDelivery.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.not.objectContaining({
+        ticketId: expect.anything(),
+      }),
+    }));
   });
 
   test('context-preview accepts an internal Ticket Pulse ticket ID', async () => {

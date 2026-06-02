@@ -604,7 +604,6 @@ router.get(
           workspaceId: req.workspaceId,
           channel: 'email',
           status: 'mocked',
-          ticketId: { not: null },
           queuedAt: { gte: sevenDaysAgo },
         },
         _count: { _all: true },
