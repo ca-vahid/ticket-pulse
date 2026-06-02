@@ -42,8 +42,12 @@ import {
   Upload,
   UploadCloud,
   Wand2,
+  Wrench,
+  ShieldCheck,
+  Sparkles,
   XCircle,
 } from 'lucide-react';
+import { motion } from 'motion/react';
 import { notificationWorkflowAPI } from '../../services/api';
 
 const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v2';
@@ -834,6 +838,14 @@ function statusClass(status) {
   if (status === 'mocked') return 'bg-sky-50 text-sky-700 border-sky-200';
   if (status === 'running' || status === 'queued') return 'bg-amber-50 text-amber-700 border-amber-200';
   return 'bg-gray-50 text-gray-700 border-gray-200';
+}
+
+function statusDotClass(status) {
+  if (status === 'completed' || status === 'sent') return 'bg-emerald-500';
+  if (status === 'failed') return 'bg-red-500';
+  if (status === 'mocked') return 'bg-sky-500';
+  if (status === 'running' || status === 'queued') return 'bg-amber-500';
+  return 'bg-slate-400';
 }
 
 function formatDate(value) {
@@ -2004,9 +2016,9 @@ function PreviewMetric({ label, value, tone = 'gray' }) {
           ? 'border-blue-200 bg-blue-50 text-blue-800'
           : 'border-gray-200 bg-gray-50 text-gray-800';
   return (
-    <div className={cls('rounded-md border px-3 py-2', toneClass)}>
-      <div className="text-[11px] font-semibold uppercase tracking-wide opacity-70">{label}</div>
-      <div className="mt-0.5 truncate text-sm font-semibold">{value || 'None'}</div>
+    <div className={cls('rounded-lg border px-3 py-2.5 shadow-subtle', toneClass)}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider opacity-60">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold">{value || 'None'}</div>
     </div>
   );
 }
@@ -2961,32 +2973,31 @@ function MailSettingsTabButton({ tab, active, onClick }) {
       role="tab"
       aria-selected={active}
       onClick={onClick}
+      title={tab.description}
       className={cls(
-        'group flex h-[56px] min-w-0 items-center gap-2.5 rounded-lg border-2 px-2.5 py-2 text-left transition',
+        'group relative flex h-9 min-w-0 items-center gap-2 rounded-lg px-3 text-left transition-all duration-200',
         active
-          ? 'border-slate-900 bg-white text-slate-950 shadow-md ring-2 ring-slate-900/10'
-          : 'border-slate-300 bg-white/65 text-slate-600 shadow-sm hover:border-slate-400 hover:bg-white hover:text-slate-900',
+          ? 'bg-white text-slate-900 shadow-subtle ring-1 ring-slate-900/5'
+          : 'text-slate-500 hover:bg-white/70 hover:text-slate-800',
       )}
     >
-      <span
+      <Icon
         className={cls(
-          'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border',
-          active ? tab.activeIconClass : 'border-slate-200 bg-white text-slate-500 group-hover:text-slate-700',
+          'h-4 w-4 shrink-0 transition-colors',
+          active ? (tab.iconColor || 'text-slate-700') : 'text-slate-400 group-hover:text-slate-600',
         )}
-      >
-        <Icon className="h-4 w-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-semibold">{tab.label}</span>
-          {tab.badge && (
-            <span className={cls('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', tab.badgeClass)}>
-              {tab.badge}
-            </span>
+      />
+      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{tab.label}</span>
+      {tab.badge && (
+        <span
+          className={cls(
+            'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors',
+            active ? tab.badgeClass : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200/70 group-hover:text-slate-500',
           )}
+        >
+          {tab.badge}
         </span>
-        <span className="mt-0.5 hidden truncate text-xs text-slate-500 2xl:block">{tab.description}</span>
-      </span>
+      )}
     </button>
   );
 }
@@ -3932,7 +3943,20 @@ function MockAuditPanel({
   testResult = null,
   tabbed = false,
 }) {
-  const activeRun = selectedRun || runs?.[0] || null;
+  const searchTerm = (filters.search || '').trim().toLowerCase();
+  const visibleRuns = useMemo(() => {
+    if (!searchTerm) return runs || [];
+    return (runs || []).filter((run) => [
+      auditTicketLabel(run),
+      auditTicketSubject(run),
+      run?.ticket?.freshserviceTicketId,
+      run?.eventContext?.ticket?.freshserviceTicketId,
+      workflowDisplayName(run?.workflow),
+      workflowEventLabelForRun(run),
+      auditEmailForRun(run)?.subject,
+    ].filter((value) => value != null).join(' ').toLowerCase().includes(searchTerm));
+  }, [runs, searchTerm]);
+  const activeRun = selectedRun || visibleRuns?.[0] || null;
   const activeDelivery = auditDeliveryForRun(activeRun);
   const activeLlmDiagnostics = auditLlmsForRun(activeRun);
   const activeLlm = activeLlmDiagnostics[0]?.llm || null;
@@ -3968,8 +3992,8 @@ function MockAuditPanel({
   return (
     <section
       className={cls(
-        'bg-gradient-to-r from-sky-50 via-white to-slate-50 px-6 py-4',
-        tabbed ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'shrink-0 border-b border-sky-100',
+        'px-6 py-4',
+        tabbed ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'shrink-0 border-b border-slate-100',
       )}
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -3978,7 +4002,7 @@ function MockAuditPanel({
             <FlaskConical className="h-4 w-4 text-sky-700" />
             <h3 className="text-sm font-semibold text-slate-950">Workflow Audit</h3>
             <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-              {runs?.length || 0} runs
+              {visibleRuns.length} runs
             </span>
           </div>
           <p className="mt-1 text-xs text-slate-500">Saved live, mock, and preview workflow runs with rendered email, delivery outcome, and LLM/tool evidence.</p>
@@ -4022,7 +4046,7 @@ function MockAuditPanel({
           <select
             value={filters.executionMode}
             onChange={(event) => onFiltersChange({ ...filters, executionMode: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
           >
             {WORKFLOW_AUDIT_MODES.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -4034,7 +4058,7 @@ function MockAuditPanel({
           <select
             value={filters.workflowId}
             onChange={(event) => onFiltersChange({ ...filters, workflowId: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
           >
             <option value="selected">Selected workflow</option>
             <option value="all">All workflows</option>
@@ -4048,7 +4072,7 @@ function MockAuditPanel({
           <select
             value={filters.range}
             onChange={(event) => onFiltersChange({ ...filters, range: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
           >
             {MOCK_AUDIT_RANGES.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -4060,7 +4084,7 @@ function MockAuditPanel({
           <select
             value={filters.status}
             onChange={(event) => onFiltersChange({ ...filters, status: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
           >
             {MOCK_AUDIT_STATUSES.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -4074,7 +4098,7 @@ function MockAuditPanel({
             value={filters.search}
             onChange={(event) => onFiltersChange({ ...filters, search: event.target.value })}
             placeholder="Ticket, subject, workflow, or event"
-            className="w-full rounded-md border border-sky-100 bg-white py-2 pl-8 pr-3 text-xs font-medium text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs font-medium text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
           />
         </label>
       </div>
@@ -4104,21 +4128,20 @@ function MockAuditPanel({
           tabbed ? 'min-h-0 flex-1' : 'min-h-[300px] max-h-[430px]',
         )}
       >
-        <div className="min-h-0 overflow-auto rounded-md border border-sky-100 bg-white/80">
+        <div className="settings-scrollbar min-h-0 space-y-2 overflow-auto rounded-xl border border-slate-200 bg-slate-50/40 p-2 shadow-subtle">
           {loading && (
             <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-500">
               <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
               Loading workflow audit
             </div>
           )}
-          {!loading && (!runs || runs.length === 0) && (
+          {!loading && visibleRuns.length === 0 && (
             <div className="flex h-full min-h-[220px] items-center justify-center px-6 text-center text-sm text-slate-500">
               No workflow runs match the current filters.
             </div>
           )}
-          {!loading && runs?.map((run) => {
+          {!loading && visibleRuns.map((run, index) => {
             const delivery = auditDeliveryForRun(run);
-            const auditEmail = auditEmailForRun(run, delivery);
             const llmDiagnostics = auditLlmsForRun(run);
             const llm = llmDiagnostics[0]?.llm || null;
             const contextStep = (run.steps || []).find((step) => step.nodeType === 'llm_generate' && (step.output?.llm?.context || step.output?.context));
@@ -4126,73 +4149,160 @@ function MockAuditPanel({
             const claimGuard = llm?.guard?.accepted === true;
             const runWarnings = Array.isArray(run.warnings) ? run.warnings : [];
             const selected = activeRun?.id === run.id;
+            const recipientCount = deliveryRecipientCount(delivery);
+            const rowEmail = auditEmailForRun(run, delivery);
+            const llmText = llmDiagnostics.length > 1
+              ? `${llmDiagnostics.length} nodes`
+              : [llm?.provider, llm?.model].filter(Boolean).join(' / ') || 'Not recorded';
+            const st = String(run.status || '').toLowerCase();
+            const tone = (st === 'completed' || st === 'sent')
+              ? 'emerald'
+              : st === 'failed'
+                ? 'red'
+                : (st === 'running' || st === 'queued')
+                  ? 'amber'
+                  : run.executionMode === 'preview'
+                    ? 'violet'
+                    : run.executionMode === 'mock'
+                      ? 'sky'
+                      : 'slate';
+            const borderLeftClass = {
+              emerald: 'border-l-emerald-400', red: 'border-l-red-400', amber: 'border-l-amber-400',
+              violet: 'border-l-violet-400', sky: 'border-l-sky-400', slate: 'border-l-slate-300',
+            }[tone];
+            const dotClass = {
+              emerald: 'bg-emerald-500', red: 'bg-red-500', amber: 'bg-amber-500',
+              violet: 'bg-violet-500', sky: 'bg-sky-500', slate: 'bg-slate-400',
+            }[tone];
             return (
-              <button
+              <motion.button
                 key={run.id}
                 type="button"
                 onClick={() => onSelectRun(run)}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, delay: Math.min(index * 0.03, 0.24), ease: [0.22, 1, 0.36, 1] }}
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.994 }}
                 className={cls(
-                  'flex w-full flex-col gap-2 border-l-2 border-b border-slate-100 px-3 py-3 text-left transition hover:bg-sky-50/70',
-                  selected ? 'border-l-sky-500 bg-sky-50' : 'border-l-transparent bg-white/70',
+                  'group relative block w-full overflow-hidden rounded-lg border border-slate-200 border-l-[3px] bg-white p-3 text-left shadow-subtle transition-shadow duration-200 hover:shadow-soft',
+                  borderLeftClass,
                 )}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-slate-950">
-                      {auditTicketLabel(run)} {auditTicketSubject(run)}
-                    </div>
-                    <div className="mt-0.5 truncate text-xs text-slate-500">
-                      {workflowEventLabelForRun(run)} | {formatDate(run.startedAt)}
-                    </div>
-                  </div>
-                  <span className={cls('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold', statusClass(run.status))}>
-                    {run.status}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-1">
-                  <AuditModeBadge mode={run.executionMode} compact />
-                  {delivery?.status && (
-                    <span className={cls('rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', statusClass(delivery.status))}>
-                      {delivery.status}
+                {selected && (
+                  <motion.span
+                    layoutId="auditSelectedHighlight"
+                    className="pointer-events-none absolute inset-0 rounded-lg bg-blue-50/70 ring-2 ring-inset ring-blue-500/30"
+                    transition={{ type: 'spring', stiffness: 520, damping: 42 }}
+                  />
+                )}
+                <div className="relative space-y-2">
+                  <div className="flex items-start gap-2">
+                    <span className="mt-px shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600 transition-colors group-hover:bg-slate-200/70">
+                      {auditTicketLabel(run)}
                     </span>
+                    <span className="min-w-0 flex-1 text-sm font-semibold leading-snug text-slate-900">
+                      {auditTicketSubject(run)}
+                    </span>
+                    <span className={cls('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize', statusClass(run.status))}>
+                      <span className={cls('h-1.5 w-1.5 rounded-full', dotClass)} />
+                      {run.status}
+                    </span>
+                  </div>
+
+                  <div className="text-[11px] text-slate-400">
+                    {workflowEventLabelForRun(run)}
+                    <span className="px-1 text-slate-300">·</span>
+                    {formatDate(run.startedAt)}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <AuditModeBadge mode={run.executionMode} compact />
+                    {delivery?.status && (
+                      <span className={cls('rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', statusClass(delivery.status))}>
+                        {delivery.status}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="truncate text-[12px] leading-5 text-slate-500">
+                    <span className="text-slate-400">Subject:</span>{' '}
+                    <span className="font-medium text-slate-700">{rowEmail?.subject || 'No email rendered'}</span>
+                  </div>
+
+                  <div className="text-[11px] leading-4 text-slate-500">
+                    Recipients: <span className="font-medium text-slate-700">{recipientCount}</span>
+                    <span className="px-1 text-slate-300">·</span>
+                    LLM: <span className="font-medium text-slate-700">{llmText}</span>
+                  </div>
+
+                  {(contextStep || toolCount > 0 || runWarnings.length > 0 || claimGuard) && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {contextStep && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 ring-1 ring-inset ring-violet-200/70">
+                          <Bot className="h-3 w-3" />Context
+                        </span>
+                      )}
+                      {toolCount > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-inset ring-slate-200/70">
+                          <Wrench className="h-3 w-3" />Tools {toolCount}
+                        </span>
+                      )}
+                      {runWarnings.length > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-200/70">
+                          <AlertCircle className="h-3 w-3" />Warnings {runWarnings.length}
+                        </span>
+                      )}
+                      {claimGuard && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-200/70">
+                          <ShieldCheck className="h-3 w-3" />Claim guard
+                        </span>
+                      )}
+                      {(contextStep || toolCount > 0 || claimGuard) && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 ring-1 ring-inset ring-sky-200/70">
+                          <Sparkles className="h-3 w-3" />Evidence
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
-                <div className="grid gap-1 text-[11px] leading-4 text-slate-500">
-                  <span className="truncate">Subject: <span className="font-medium text-slate-700">{auditEmail?.subject || 'No email rendered'}</span></span>
-                  <span className="truncate">
-                    Recipients: {deliveryRecipientCount(delivery)} | LLM: {llmDiagnostics.length > 1
-                      ? `${llmDiagnostics.length} nodes`
-                      : [llm?.provider, llm?.model].filter(Boolean).join(' / ') || 'Not recorded'}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {contextStep && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Context</span>}
-                  {toolCount > 0 && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">Tools {toolCount}</span>}
-                  {claimGuard && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Claim guard</span>}
-                  {runWarnings.length > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Warnings {runWarnings.length}</span>}
-                  {(contextStep || toolCount > 0 || claimGuard) && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">Evidence</span>}
-                </div>
-              </button>
+              </motion.button>
             );
           })}
         </div>
 
-        <div className="min-h-0 overflow-auto rounded-md border border-sky-100 bg-white p-4">
+        <div className="settings-scrollbar min-h-0 overflow-auto rounded-xl border border-slate-200 bg-white p-4 shadow-subtle">
           {!activeRun ? (
-            <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-slate-500">Select a workflow run.</div>
+            <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 text-sm text-slate-400">
+              <FlaskConical className="h-6 w-6 text-slate-300" />
+              Select a workflow run.
+            </div>
           ) : (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+            <motion.div
+              key={activeRun.id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="space-y-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-sky-700">{activeEventLabel}</span>
-                    <span className={cls('rounded-full border px-2 py-0.5 text-[11px] font-semibold', statusClass(activeDelivery?.status || activeRun.status))}>
+                    <span className="inline-flex items-center rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-700 ring-1 ring-inset ring-sky-200/70">{activeEventLabel}</span>
+                    <span className={cls('inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize', statusClass(activeDelivery?.status || activeRun.status))}>
+                      <span className={cls('h-1.5 w-1.5 rounded-full', statusDotClass(activeDelivery?.status || activeRun.status))} />
                       {activeDelivery?.status || activeRun.status}
                     </span>
                   </div>
-                  <h4 className="mt-1 truncate text-base font-semibold text-slate-950">{auditTicketLabel(activeRun)} {auditTicketSubject(activeRun)}</h4>
-                  <div className="mt-0.5 text-xs text-slate-500">
-                    {activeRun.auditId || `TP-NWF-${activeRun.id}`} | {workflowDisplayName(activeRun.workflow || selectedWorkflow)} | {formatDate(activeRun.startedAt)}
+                  <h4 className="mt-1.5 text-base font-semibold leading-snug text-slate-900">
+                    <span className="font-mono text-sm text-slate-500">{auditTicketLabel(activeRun)}</span> {auditTicketSubject(activeRun)}
+                  </h4>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-slate-400">
+                    <span className="font-mono">{activeRun.auditId || `TP-NWF-${activeRun.id}`}</span>
+                    <span className="text-slate-300">·</span>
+                    <span>{workflowDisplayName(activeRun.workflow || selectedWorkflow)}</span>
+                    <span className="text-slate-300">·</span>
+                    <span>{formatDate(activeRun.startedAt)}</span>
                   </div>
                 </div>
                 <AuditModeBadge mode={activeRun.executionMode} />
@@ -4323,7 +4433,7 @@ function MockAuditPanel({
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-300">Redacted Event Context</div>
                 <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs leading-5 text-slate-100">{formatJson(activeRun.eventContext)}</pre>
               </section>
-            </div>
+            </motion.div>
           )}
         </div>
       </div>
@@ -4785,8 +4895,7 @@ export default function NotificationWorkflowsPanel() {
         workflowId: workflowId || undefined,
         from: rangeStartIso(filters.range) || undefined,
         status: filters.status !== 'all' ? filters.status : undefined,
-        search: filters.search || undefined,
-        limit: 50,
+        limit: 100,
       });
       const items = response.data || [];
       setMockAuditRuns(items);
@@ -4963,6 +5072,7 @@ export default function NotificationWorkflowsPanel() {
       description: 'Build, preview, publish, and enable live workflow diagrams.',
       icon: Send,
       activeIconClass: 'border-blue-200 bg-blue-50 text-blue-700',
+      iconColor: 'text-blue-600',
       badge: workflows.length ? String(workflows.length) : null,
       badgeClass: 'bg-blue-50 text-blue-700',
     },
@@ -4972,6 +5082,7 @@ export default function NotificationWorkflowsPanel() {
       description: 'Workspace evidence and read-only tools for generated mail.',
       icon: Bot,
       activeIconClass: 'border-violet-200 bg-violet-50 text-violet-700',
+      iconColor: 'text-violet-600',
       badge: llmModeLabel,
       badgeClass: llmToolPolicy?.mode === 'tools_enabled'
         ? 'bg-violet-50 text-violet-700'
@@ -4985,6 +5096,7 @@ export default function NotificationWorkflowsPanel() {
       description: 'Workspace footer appended to notification emails.',
       icon: Mail,
       activeIconClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      iconColor: 'text-emerald-600',
       badge: signatureDraft?.enabled ? 'On' : 'Off',
       badgeClass: signatureDraft?.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
     },
@@ -4994,6 +5106,7 @@ export default function NotificationWorkflowsPanel() {
       description: 'Review live, mock, and preview workflow runs.',
       icon: FlaskConical,
       activeIconClass: 'border-sky-200 bg-sky-50 text-sky-700',
+      iconColor: 'text-sky-600',
       badge: `${health?.workflowAuditRuns7d ?? health?.mockRuns7d ?? health?.mockedDeliveries7d ?? 0} 7d`,
       badgeClass: 'bg-sky-50 text-sky-700',
     },
@@ -5132,7 +5245,7 @@ export default function NotificationWorkflowsPanel() {
     }, 250);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mockAuditOpen, selected?.id, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status, mockAuditFilters.search]);
+  }, [mockAuditOpen, selected?.id, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status]);
 
   async function saveDraft() {
     if (!selected || !draft) return;
@@ -6613,7 +6726,7 @@ export default function NotificationWorkflowsPanel() {
           <div
             role="tablist"
             aria-label="Mail settings sections"
-            className="grid grid-cols-1 gap-1.5 rounded-xl border-2 border-slate-300 bg-slate-100/90 p-1.5 shadow-inner sm:grid-cols-2 xl:grid-cols-4"
+            className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200/80 bg-slate-100/70 p-1 shadow-subtle sm:grid-cols-4"
           >
             {globalTabs.map((tab) => (
               <MailSettingsTabButton
