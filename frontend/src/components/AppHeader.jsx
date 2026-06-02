@@ -9,10 +9,8 @@ import {
   BarChart3,
   LayoutDashboard,
   LogOut,
-  Map,
   RefreshCw,
   Settings,
-  Sparkles,
   Wifi,
   WifiOff,
   XCircle,
@@ -27,6 +25,56 @@ import {
 } from '../utils/demoMode';
 import { APP_VERSION } from '../data/changelog';
 import ChangelogModal from './ChangelogModal';
+
+function AssignmentNavIcon({ className = '' }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="6.6" r="3.1" strokeWidth="2" />
+      <path d="M5.1 16.5c.5-3.7 3.2-6.1 6.9-6.1s6.4 2.4 6.9 6.1" strokeWidth="2" />
+      <path
+        d="M6.9 14.2h10.2a1.1 1.1 0 0 1 1.1 1.1v1.1a1.8 1.8 0 0 0 0 3.2v1.1a1.1 1.1 0 0 1-1.1 1.1H6.9a1.1 1.1 0 0 1-1.1-1.1v-1.1a1.8 1.8 0 0 0 0-3.2v-1.1a1.1 1.1 0 0 1 1.1-1.1Z"
+        strokeWidth="2"
+      />
+      <path d="M12 15.8v.05M12 18.4v.05M12 21v.05" strokeWidth="2.4" />
+    </svg>
+  );
+}
+
+function AgentMapNavIcon({ className = '' }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="8.7" strokeWidth="2" />
+      <path
+        d="M5.1 9.3c1.7-.9 2.8-2.2 4-2.3 1-.1 1.7.8 2.6.8 1.2 0 1.4-1.6 2.8-1.5 1.2.1 2.4 1.4 3.6 3.4"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M6.7 14.7c1.7-.9 3.6-.6 4.6.7.7.9.5 2.4 1.4 3.1.7.5 1.8.3 3.2-.7"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M15 11.5c.8-.6 1.9-.7 2.8-.1.9.6 1.3 1.6 1.2 2.9"
+        strokeWidth="1.7"
+      />
+    </svg>
+  );
+}
 
 export default function AppHeader({
   activePage = 'dashboard',
@@ -117,7 +165,7 @@ export default function AppHeader({
       id: 'assignments',
       label: 'Assignment',
       path: '/assignments',
-      Icon: Sparkles,
+      Icon: AssignmentNavIcon,
       inactiveClass: 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300',
     }] : []),
   ];
@@ -474,9 +522,9 @@ export default function AppHeader({
               <button
                 onClick={() => navigate('/visuals')}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                title="Visuals"
+                title="Agent Map"
               >
-                <Map className="w-6 h-6" />
+                <AgentMapNavIcon className="w-6 h-6" />
               </button>
 
               <button
