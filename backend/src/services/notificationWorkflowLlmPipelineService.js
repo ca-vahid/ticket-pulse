@@ -145,7 +145,7 @@ export async function runNotificationWorkflowLlmPipeline({
       try {
         let result;
         if (block.name === SUBMIT_NOTIFICATION_EMAIL_TOOL.name) {
-          const payload = emailPayloadFromInput(block.input || {});
+          let payload = emailPayloadFromInput(block.input || {});
           assertFinalPayload(payload);
           const guard = guardNotificationEmailPayload(payload, {
             contextBundle,
@@ -153,7 +153,10 @@ export async function runNotificationWorkflowLlmPipeline({
             strictCitations: guardOptions.strictCitations !== false,
             allowEmoji: guardOptions.allowEmoji === true,
             allowPlayfulTone: guardOptions.allowPlayfulTone === true,
+            repairGuardrails: guardOptions.repairGuardrails || [],
+            disabledGuardrails: guardOptions.disabledGuardrails || [],
           });
+          payload = guard.payload || payload;
           finalSubmission = {
             ...payload,
             guard,

@@ -144,4 +144,38 @@ describe('notification workflow output guard', () => {
       allowPlayfulTone: true,
     })).toThrow(/response-time|resolution-time/);
   });
+
+  test('repairs enabled copy guardrails and tags the issue details', () => {
+    const result = guardNotificationEmailPayload({
+      subject: 'VPN update within 30 minutes',
+      html: '<p>We received your VPN request.</p><p>We should have this resolved within 30 minutes.</p>',
+      text: 'We received your VPN request. We should have this resolved within 30 minutes.',
+    }, {
+      repairGuardrails: ['unsupported_timing_claims'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.payload.subject).toBe('VPN update');
+    expect(result.payload.text).not.toMatch(/within 30 minutes/i);
+    expect(result.repairedIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'unsupported_timing_claims',
+        action: 'repaired',
+      }),
+    ]));
+  });
+
+  test('disabled guardrails are skipped and audited', () => {
+    const result = guardNotificationEmailPayload({
+      subject: 'VPN update within 30 minutes',
+      html: '<p>We should have this resolved within 30 minutes.</p>',
+      text: 'We should have this resolved within 30 minutes.',
+    }, {
+      disabledGuardrails: ['unsupported_timing_claims'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.payload.text).toMatch(/within 30 minutes/i);
+    expect(result.skippedChecks).toEqual(expect.arrayContaining(['unsupported_timing_claims']));
+  });
 });

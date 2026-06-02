@@ -186,6 +186,14 @@ const DEFAULT_LLM_OUTPUT_SCHEMA = {
   },
 };
 
+const DEFAULT_REQUESTER_GUARDRAILS = {
+  enabled: true,
+  internalReferences: true,
+  outageClaims: true,
+  timingClaims: true,
+  tone: true,
+};
+
 const TEMPLATE_CONTENT_SOURCES = [
   ['llm_with_template_fallback', 'LLM output with fallback', 'Use generated subject/body when available; otherwise use the template fields below.'],
   ['template_only', 'Template only', 'Ignore LLM output and render the template fields only.'],
@@ -1226,6 +1234,7 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
       outputSchema: DEFAULT_LLM_OUTPUT_SCHEMA,
       maxTokens: DEFAULT_LLM_MAX_TOKENS,
       temperature: 0.3,
+      requesterGuardrails: DEFAULT_REQUESTER_GUARDRAILS,
       outputMode: 'draft_email',
       promoteToEmail: true,
     };
@@ -1842,6 +1851,37 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
         const promptPolicy = llm.promptPolicy || {};
         const guardPolicy = llm.guardPolicy || {};
         const hasPromptAudit = Boolean(promptPolicy.source || guardPolicy.mode);
+        const timingGuardStatus = (guardPolicy.disabledChecks || []).includes('unsupported_timing_claims')
+          ? 'Disabled'
+          : (guardPolicy.repairChecks || []).includes('unsupported_timing_claims')
+            ? 'Repair + audit'
+            : (guardPolicy.hardBlocks || []).includes('unsupported_timing_claims')
+              ? 'Block'
+              : 'Not recorded';
+        const toneGuardStatus = (guardPolicy.disabledChecks || []).some((check) => ['emoji', 'playful_tone'].includes(check))
+          ? 'Disabled'
+          : guardPolicy.allowPlayfulTone || guardPolicy.allowEmoji
+            ? 'Relaxed'
+            : (guardPolicy.repairChecks || []).some((check) => ['emoji', 'playful_tone'].includes(check))
+              ? 'Repair + audit'
+              : 'Strict';
+        const llmFailed = llm.failed || diagnostic.status === 'failed';
+        const guardRepaired = (llm.guard?.repairedIssues || []).length > 0;
+        const guardStatusClass = llm.guard?.accepted === false
+          ? 'border-red-200 bg-red-50 text-red-700'
+          : guardRepaired
+            ? 'border-amber-200 bg-amber-50 text-amber-800'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+        const guardStatusLabel = llm.guard?.accepted === false
+          ? 'blocked output'
+          : guardRepaired
+            ? 'repaired output'
+            : 'passed';
+        const guardMessage = (llm.guard?.issues || []).length
+          ? (llm.guard.issues || []).join('; ')
+          : guardRepaired
+            ? (llm.guard.repairedIssues || []).map((issue) => issue.message || issue.id).join('; ')
+            : 'No requester-facing claim issues detected.';
         return (
           <div key={`${diagnostic.outputKey || diagnostic.nodeId || 'llm'}-${index}`} className="rounded-md border border-violet-100 bg-white p-3">
             <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
@@ -1853,12 +1893,12 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
               </div>
               <span className={cls(
                 'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
-                llm.failed || diagnostic.status === 'failed'
+                llmFailed
                   ? 'border-red-200 bg-red-50 text-red-700'
                   : 'border-emerald-200 bg-emerald-50 text-emerald-700',
               )}
               >
-                {llm.failed || diagnostic.status === 'failed' ? 'Failed' : diagnostic.status || 'Completed'}
+                {llmFailed ? 'Failed' : diagnostic.status || 'Completed'}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1874,10 +1914,10 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
                   Prompt source<br /><strong>{promptPolicy.source || 'not recorded'}</strong>
                 </div>
                 <div className="rounded-md bg-indigo-50 p-2 text-indigo-700">
-                  Tone guard<br /><strong>{guardPolicy.allowPlayfulTone || guardPolicy.allowEmoji ? 'Relaxed' : 'Strict'}</strong>
+                  Tone guard<br /><strong>{toneGuardStatus}</strong>
                 </div>
                 <div className="rounded-md bg-indigo-50 p-2 text-indigo-700">
-                  Timing claims<br /><strong>{(guardPolicy.hardBlocks || []).includes('unsupported_timing_claims') ? 'Evidence required' : 'Not recorded'}</strong>
+                  Timing claims<br /><strong>{timingGuardStatus}</strong>
                 </div>
               </div>
             )}
@@ -1918,17 +1958,11 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
             {llm.guard && (
               <div className={cls(
                 'mt-2 rounded-md border px-3 py-2 text-xs',
-                llm.guard.accepted === false
-                  ? 'border-red-200 bg-red-50 text-red-700'
-                  : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                guardStatusClass,
               )}
               >
-                <div className="font-semibold">Guardrail {llm.guard.accepted === false ? 'blocked output' : 'passed'}</div>
-                <div className="mt-0.5">
-                  {(llm.guard.issues || []).length
-                    ? (llm.guard.issues || []).join('; ')
-                    : 'No requester-facing claim issues detected.'}
-                </div>
+                <div className="font-semibold">Guardrail {guardStatusLabel}</div>
+                <div className="mt-0.5">{guardMessage}</div>
               </div>
             )}
             {(llm.repairedFields || []).length > 0 && (
@@ -5878,6 +5912,16 @@ export default function NotificationWorkflowsPanel() {
       const workspaceToolsAvailable = workspaceLlmMode === 'tools_enabled';
       const nodeContextEnabled = selectedNode.data?.contextEnrichmentEnabled !== false;
       const nodeToolModeEnabled = workspaceToolsAvailable && selectedNode.data?.useWorkspaceToolPolicy !== false;
+      const requesterGuardrails = {
+        ...DEFAULT_REQUESTER_GUARDRAILS,
+        ...(selectedNode.data?.requesterGuardrails || {}),
+      };
+      const updateRequesterGuardrail = (field, value) => updateNodeData({
+        requesterGuardrails: {
+          ...requesterGuardrails,
+          [field]: value,
+        },
+      });
       return (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-1 rounded-md bg-gray-100 p-1">
@@ -6101,6 +6145,53 @@ export default function NotificationWorkflowsPanel() {
                     <LlmHelpButton topic={helpTopic} onOpenHelp={setLlmHelpTopic} className="h-7 w-7 shadow-none" />
                   </div>
                 ))}
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Requester guardrails</div>
+                    <div className="mt-1 text-xs leading-4 text-slate-500">
+                      Copy issues are repaired and tagged in audit when possible. Sensitive internal references still block unless this workflow disables them.
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={requesterGuardrails.enabled !== false}
+                      onChange={(event) => updateRequesterGuardrail('enabled', event.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                    />
+                    Enabled
+                  </label>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {[
+                    ['internalReferences', 'Internal references', 'Blocks tool names, provider/model plumbing, audit IDs, and private/internal notes.'],
+                    ['outageClaims', 'Outage/similar wording', 'Repairs unsupported outage and multiple-similar-report wording unless evidence allows it.'],
+                    ['timingClaims', 'Timing claims', 'Repairs unsupported response or resolution-time promises unless SLA or business-window evidence supports them.'],
+                    ['tone', 'Tone cleanup', 'Repairs emoji and playful wording for strict default prompts; custom prompts can relax tone.'],
+                  ].map(([field, label, description]) => (
+                    <label
+                      key={field}
+                      className={cls(
+                        'flex min-w-0 items-start gap-2 rounded-md border px-3 py-2',
+                        requesterGuardrails.enabled === false ? 'border-slate-200 bg-white/60 text-slate-400' : 'border-slate-200 bg-white text-slate-700',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={requesterGuardrails[field] !== false}
+                        disabled={requesterGuardrails.enabled === false}
+                        onChange={(event) => updateRequesterGuardrail(field, event.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 disabled:opacity-50"
+                      />
+                      <span>
+                        <span className="block font-medium text-slate-900">{label}</span>
+                        <span className="mt-0.5 block text-xs leading-4 text-slate-500">{description}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

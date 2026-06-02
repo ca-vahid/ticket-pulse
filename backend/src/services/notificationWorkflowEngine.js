@@ -67,15 +67,25 @@ const DEFAULT_PROMPT_HARDENING_CONTROLS = [
   'no_emoji_or_playful_metaphors_by_default',
   'no_response_or_resolution_time_claims_without_evidence',
 ];
-const ALWAYS_ENFORCED_GUARD_CHECKS = [
+const HARD_BLOCK_GUARD_CHECKS = [
   'internal_tool_names',
-  'provider_model_audit_internals',
+  'provider_model_internals',
   'workflow_audit_identifiers',
   'private_internal_notes',
+];
+const REPAIRABLE_GUARD_CHECKS = [
   'unsupported_outage_claims',
   'unsupported_timing_claims',
   'similar_report_claim_without_evidence',
+  'emoji',
+  'playful_tone',
 ];
+const WORKFLOW_GUARDRAIL_GROUPS = {
+  internalReferences: HARD_BLOCK_GUARD_CHECKS,
+  outageClaims: ['unsupported_outage_claims', 'similar_report_claim_without_evidence'],
+  timingClaims: ['unsupported_timing_claims'],
+  tone: ['emoji', 'playful_tone'],
+};
 
 function safeJson(value) {
   return JSON.parse(JSON.stringify(value ?? null, (_key, item) => {
@@ -102,6 +112,41 @@ function isKnownDefaultLlmSystemPrompt(value) {
     || LEGACY_DEFAULT_LLM_SYSTEM_PROMPTS.has(normalized);
 }
 
+function requesterGuardrailSettings(node, { customPrompt = false, strictCitations = false } = {}) {
+  const settings = node.data?.requesterGuardrails && typeof node.data.requesterGuardrails === 'object'
+    ? node.data.requesterGuardrails
+    : {};
+  const guardrailsEnabled = settings.enabled !== false;
+  const disabledGuardrails = [];
+  const disabledGroups = [];
+  for (const [group, checks] of Object.entries(WORKFLOW_GUARDRAIL_GROUPS)) {
+    if (!guardrailsEnabled || settings[group] === false) {
+      disabledGroups.push(group);
+      disabledGuardrails.push(...checks);
+    }
+  }
+  const disabledSet = new Set(disabledGuardrails);
+  const repairGuardrails = guardrailsEnabled
+    ? REPAIRABLE_GUARD_CHECKS.filter((check) => !disabledSet.has(check))
+    : [];
+  const hardBlocks = guardrailsEnabled
+    ? HARD_BLOCK_GUARD_CHECKS.filter((check) => !disabledSet.has(check))
+    : [];
+  if (strictCitations && guardrailsEnabled) hardBlocks.push('unknown_cited_evidence_ids');
+  const toneDisabled = disabledSet.has('emoji') && disabledSet.has('playful_tone');
+  return {
+    guardrailsEnabled,
+    disabledGroups,
+    disabledGuardrails: [...disabledSet],
+    repairGuardrails: customPrompt
+      ? repairGuardrails.filter((check) => !['emoji', 'playful_tone'].includes(check))
+      : repairGuardrails,
+    hardBlocks,
+    allowEmoji: customPrompt || toneDisabled,
+    allowPlayfulTone: customPrompt || toneDisabled,
+  };
+}
+
 function llmPromptRuntimeProfile(node, { toolMode = false, strictCitations = false } = {}) {
   const suppliedSystemPrompt = String(node.data?.systemPrompt || '').trim();
   const usesDefaultPrompt = isKnownDefaultLlmSystemPrompt(suppliedSystemPrompt);
@@ -123,14 +168,19 @@ function llmPromptRuntimeProfile(node, { toolMode = false, strictCitations = fal
     appliedDefaultHardening: customPrompt ? [] : DEFAULT_PROMPT_HARDENING_CONTROLS,
     relaxedControls: customPrompt ? ['emoji', 'playful_tone'] : [],
   };
+  const guardrailSettings = requesterGuardrailSettings(node, { customPrompt, strictCitations });
   const guardPolicy = {
-    mode: customPrompt ? 'custom_prompt_relaxed_tone' : 'strict_default',
-    allowEmoji: customPrompt,
-    allowPlayfulTone: customPrompt,
+    mode: guardrailSettings.guardrailsEnabled
+      ? (customPrompt ? 'custom_prompt_repair_copy' : 'strict_default_repair_copy')
+      : 'disabled_for_workflow',
+    guardrailsEnabled: guardrailSettings.guardrailsEnabled,
+    allowEmoji: guardrailSettings.allowEmoji,
+    allowPlayfulTone: guardrailSettings.allowPlayfulTone,
     strictCitations: Boolean(strictCitations),
-    hardBlocks: strictCitations
-      ? [...ALWAYS_ENFORCED_GUARD_CHECKS, 'unknown_cited_evidence_ids']
-      : ALWAYS_ENFORCED_GUARD_CHECKS,
+    hardBlocks: guardrailSettings.hardBlocks,
+    repairChecks: guardrailSettings.repairGuardrails,
+    disabledGroups: guardrailSettings.disabledGroups,
+    disabledChecks: guardrailSettings.disabledGuardrails,
     relaxedChecks: customPrompt ? ['emoji', 'playful_tone'] : [],
   };
   return {
@@ -141,6 +191,8 @@ function llmPromptRuntimeProfile(node, { toolMode = false, strictCitations = fal
       allowEmoji: guardPolicy.allowEmoji,
       allowPlayfulTone: guardPolicy.allowPlayfulTone,
       strictCitations: guardPolicy.strictCitations,
+      repairGuardrails: guardPolicy.repairChecks,
+      disabledGuardrails: guardPolicy.disabledChecks,
     },
   };
 }
@@ -1404,14 +1456,17 @@ async function executeNode({
       tokenDiagnostics = llmTokenDiagnostics(response, maxTokens);
       parsed = response.parsed || {};
       const normalized = normalizeLlmPayload(parsed);
-      const payload = normalized.payload;
+      let payload = normalized.payload;
       const schema = validateLlmPayloadAgainstSchema(payload, outputSchema);
       const guard = guardNotificationEmailPayload(payload, {
         contextBundle: llmContext,
         strictCitations: directPromptRuntime.guardOptions.strictCitations,
         allowEmoji: directPromptRuntime.guardOptions.allowEmoji,
         allowPlayfulTone: directPromptRuntime.guardOptions.allowPlayfulTone,
+        repairGuardrails: directPromptRuntime.guardOptions.repairGuardrails,
+        disabledGuardrails: directPromptRuntime.guardOptions.disabledGuardrails,
       });
+      payload = guard.payload || payload;
       const html = sanitizeEmailHtml(payload.html || payload.bodyHtml)
         || sanitizeEmailHtml(textToEmailHtml(payload.text || payload.body));
       const text = String(payload.text || payload.body || stripHtml(html)).trim() || null;

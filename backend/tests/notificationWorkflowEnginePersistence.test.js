@@ -735,9 +735,11 @@ describe('notification workflow engine persistence', () => {
         customSystemPromptUsed: false,
       }),
       guardPolicy: expect.objectContaining({
-        mode: 'strict_default',
+        mode: 'strict_default_repair_copy',
         allowEmoji: false,
         allowPlayfulTone: false,
+        hardBlocks: expect.arrayContaining(['provider_model_internals']),
+        repairChecks: expect.arrayContaining(['unsupported_timing_claims']),
       }),
     }));
     const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
@@ -791,16 +793,120 @@ describe('notification workflow engine persistence', () => {
         relaxedControls: ['emoji', 'playful_tone'],
       }),
       guardPolicy: expect.objectContaining({
-        mode: 'custom_prompt_relaxed_tone',
+        mode: 'custom_prompt_repair_copy',
         allowEmoji: true,
         allowPlayfulTone: true,
-        hardBlocks: expect.arrayContaining(['unsupported_timing_claims']),
+        repairChecks: expect.arrayContaining(['unsupported_timing_claims']),
+        hardBlocks: expect.arrayContaining(['provider_model_internals']),
       }),
       guard: expect.objectContaining({ accepted: true }),
     }));
     const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
     expect(deliveryData.subject).toBe('Warmer VPN update');
     expect(deliveryData.textBody).toContain('rock solid ground');
+  });
+
+  test('unsupported timing claims are repaired and audited instead of falling back', async () => {
+    providerSendJsonMock.mockResolvedValueOnce(llmResponse({
+      subject: 'VPN update within 30 minutes',
+      html: '<p>We received your VPN request.</p><p>We should have this resolved within 30 minutes.</p>',
+      text: 'We received your VPN request. We should have this resolved within 30 minutes.',
+    }));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+
+    const llmStep = result.steps.find((step) => step.nodeType === 'llm_generate');
+    expect(result.status).toBe('completed');
+    expect(result.warnings || []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'guard_rejected' }),
+    ]));
+    expect(llmStep.output.llm.guard).toEqual(expect.objectContaining({
+      accepted: true,
+      repairedIssues: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'unsupported_timing_claims',
+          action: 'repaired',
+        }),
+      ]),
+    }));
+    expect(llmStep.output.llm.email.subject).not.toMatch(/within 30 minutes/i);
+    expect(llmStep.output.llm.email.text).not.toMatch(/within 30 minutes/i);
+    const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(deliveryData.subject).toBe('VPN update');
+    expect(deliveryData.textBody).toContain('We received your VPN request');
+    expect(deliveryData.textBody).not.toMatch(/within 30 minutes/i);
+  });
+
+  test('workflow can disable timing guardrail for an LLM node', async () => {
+    providerSendJsonMock.mockResolvedValueOnce(llmResponse({
+      subject: 'VPN update within 30 minutes',
+      html: '<p>We received your VPN request.</p><p>We should have this resolved within 30 minutes.</p>',
+      text: 'We received your VPN request. We should have this resolved within 30 minutes.',
+    }));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+        requesterGuardrails: {
+          timingClaims: false,
+        },
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+
+    const llmStep = result.steps.find((step) => step.nodeType === 'llm_generate');
+    expect(llmStep.output.llm.guardPolicy).toEqual(expect.objectContaining({
+      disabledGroups: expect.arrayContaining(['timingClaims']),
+      disabledChecks: expect.arrayContaining(['unsupported_timing_claims']),
+    }));
+    expect(llmStep.output.llm.guard.skippedChecks).toEqual(expect.arrayContaining(['unsupported_timing_claims']));
+    const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(deliveryData.subject).toMatch(/within 30 minutes/i);
   });
 
   test('tool-enabled LLM mode requires final email tool and persists tool audit rows', async () => {
