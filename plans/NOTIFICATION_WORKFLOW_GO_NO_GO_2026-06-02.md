@@ -23,6 +23,11 @@ Immediate post-deploy production audit:
 - Guard rejections/template fallbacks: `0`, but this is not a valid pass because there were no post-deploy LLM rows.
 - Payload rows with `data:image` or `activeContact`: `0`, but this is not a valid pass because there were no post-deploy delivery rows.
 
+Repeat audit on `2026-06-02T02:58:59Z`:
+
+- Command: `node backend/scripts/audit-notification-workflow-mock-window.mjs --since "2026-06-02 02:47:32" --out scratchpad/notification-workflow-postdeploy-audit-2026-06-02.json`
+- Result: all remaining launch gates are `missing_evidence` because the post-deploy window still has `0` workflow runs, `0` mocked deliveries, and `0` LLM steps.
+
 Decision:
 
 - Go/no-go: **NO-GO for live sends** until a real post-deploy mock window produces enough rows to validate the launch gates.
