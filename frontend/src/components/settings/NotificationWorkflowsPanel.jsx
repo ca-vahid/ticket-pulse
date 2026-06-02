@@ -1222,7 +1222,7 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
     return {
       label: 'Generate email text',
       prompt: 'Use the ticket context below to improve this notification email. Return JSON with subject, html, and text fields.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nRequester: {{ requester.name }} <{{ requester.email }}>\nRequester location: {{ requester.locationSummary }}\nRequester timezone: {{ requester.timeZoneIana }}\nAssigned agent: {{ assignedAgent.name }}',
-      systemPrompt: 'You write concise, professional IT helpdesk notification emails. Return JSON only.',
+      systemPrompt: 'You write concise, professional IT helpdesk notification emails. Return JSON only. Do not use emoji, jokes, playful metaphors, or field jargon unless the workflow explicitly opts into that tone and the ticket is low risk. Do not invent response-time or resolution-time estimates.',
       outputSchema: DEFAULT_LLM_OUTPUT_SCHEMA,
       maxTokens: DEFAULT_LLM_MAX_TOKENS,
       temperature: 0.3,
@@ -1485,6 +1485,16 @@ function summarizePreviewStep(step) {
 
 function previewAuditId(preview) {
   return preview?.auditId || (preview?.runId ? `TP-NWF-${preview.runId}` : null);
+}
+
+function signalLevelLabel(signalLevel) {
+  return {
+    possible_broader_issue: 'Possible broader issue',
+    watch: 'Watching related reports',
+    routine_cluster: 'Routine cluster',
+    related_activity: 'Related activity',
+    none: 'None',
+  }[signalLevel] || signalLevel || 'None';
 }
 
 function previewStepIssue(step) {
@@ -1771,9 +1781,10 @@ function ActionLinkDiagnostics({ diagnostics }) {
               <div className="mt-1 leading-5">
                 {diagnostic.reason || diagnostic.warning || diagnostic.liveWouldSkipReason || 'Ready'}
               </div>
-              {key === 'afterHoursSupport' && diagnostic.activeContact && (
+              {key === 'afterHoursSupport' && diagnostic.hasActiveContact && (
                 <div className="mt-1 text-[11px] opacity-80">
-                  Contact: {diagnostic.activeContact.name || 'none'}{diagnostic.activeContact.phone ? `, ${diagnostic.activeContact.phone}` : ''}
+                  Active contact configured{diagnostic.phoneVerified ? ' with verified phone' : ''}
+                  {diagnostic.rotationLabel ? ` (${diagnostic.rotationLabel})` : ''}
                 </div>
               )}
               {tone === 'red' && diagnostic.url && (
@@ -3783,7 +3794,7 @@ export function LlmContextToolsPanel({
             <div className="space-y-3">
               <div className="grid gap-2 sm:grid-cols-4">
                 <PreviewMetric label="Mode" value={summary?.mode || mode} tone="gray" />
-                <PreviewMetric label="Signal" value={summary?.signalLevel || 'none'} tone={summary?.signalLevel === 'possible_broader_issue' ? 'amber' : 'gray'} />
+                <PreviewMetric label="Signal" value={signalLevelLabel(summary?.signalLevel || 'none')} tone={summary?.signalLevel === 'possible_broader_issue' ? 'amber' : summary?.signalLevel === 'routine_cluster' ? 'blue' : 'gray'} />
                 <PreviewMetric label="Thread" value={String(summary?.threadEntryCount || 0)} tone="gray" />
                 <PreviewMetric label="Redactions" value={String(summary?.redactionCount || 0)} tone={summary?.redactionCount ? 'amber' : 'gray'} />
               </div>
@@ -4060,6 +4071,7 @@ function MockAuditPanel({
             const contextStep = (run.steps || []).find((step) => step.nodeType === 'llm_generate' && (step.output?.llm?.context || step.output?.context));
             const toolCount = auditToolRecordsForRun(run, llmDiagnostics).length;
             const claimGuard = llm?.guard?.accepted === true;
+            const runWarnings = Array.isArray(run.warnings) ? run.warnings : [];
             const selected = activeRun?.id === run.id;
             return (
               <button
@@ -4104,6 +4116,7 @@ function MockAuditPanel({
                   {contextStep && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Context</span>}
                   {toolCount > 0 && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">Tools {toolCount}</span>}
                   {claimGuard && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Claim guard</span>}
+                  {runWarnings.length > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Warnings {runWarnings.length}</span>}
                   {(contextStep || toolCount > 0 || claimGuard) && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">Evidence</span>}
                 </div>
               </button>
@@ -4152,6 +4165,20 @@ function MockAuditPanel({
                 <PreviewMetric label="Tool calls" value={String(activeToolRecords.length)} tone={activeToolRecords.length ? 'emerald' : 'gray'} />
               </div>
 
+              {Array.isArray(activeRun.warnings) && activeRun.warnings.length > 0 && (
+                <section className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  <div className="mb-1 font-semibold uppercase tracking-wide">Run warnings</div>
+                  <div className="space-y-1">
+                    {activeRun.warnings.map((warning, index) => (
+                      <div key={`${warning.type || 'warning'}-${index}`}>
+                        <span className="font-semibold">{warning.type || 'warning'}:</span> {warning.message || 'Review this run before enabling live sends.'}
+                        {warning.templateFallbackUsed && <span> Template fallback was used.</span>}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {(activeContext || activeToolRecords.length > 0) && (
                 <section className="rounded-md border border-violet-200 bg-violet-50 p-3">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -4164,7 +4191,7 @@ function MockAuditPanel({
                   </div>
                   <div className="grid gap-2 text-xs text-slate-700 sm:grid-cols-4">
                     <div>Mode: <span className="font-semibold">{activeContext?.mode || 'not recorded'}</span></div>
-                    <div>Signal: <span className="font-semibold">{activeContext?.signalLevel || 'none'}</span></div>
+                    <div>Signal: <span className="font-semibold">{signalLevelLabel(activeContext?.signalLevel || 'none')}</span></div>
                     <div>Thread: <span className="font-semibold">{activeContext?.threadEntryCount || 0}</span></div>
                     <div>Redactions: <span className="font-semibold">{activeContext?.redactionCount || 0}</span></div>
                   </div>

@@ -71,6 +71,8 @@ jest.unstable_mockModule('../src/services/publicTicketStatusService.js', () => (
       activeContact: {
         name: 'Alex Agent',
         phone: '+16045551234',
+        email: 'alex.agent@example.com',
+        photoUrl: 'data:image/png;base64,avatar',
         rotationLabel: 'Manual after-hours contact',
         source: 'manual',
       },
@@ -296,6 +298,43 @@ describe('notification workflow engine persistence', () => {
     }));
   });
 
+  test('workflow and delivery dedupe prefer canonical lifecycle fingerprints', async () => {
+    const assignedWorkflow = {
+      ...workflow,
+      triggerType: 'ticket.assigned',
+    };
+    const assignedContext = {
+      ...eventContext,
+      event: {
+        type: 'ticket.assigned',
+        source: 'assignment_pipeline',
+        occurredAt: '2026-06-01T16:00:02.000Z',
+        dedupeStamp: '2026-06-01T16:00:02.000Z',
+        notificationFingerprint: '1:ticket.assigned:501:17:2026-06-01T16:00:00.000Z',
+      },
+      assignedAgent: { id: 17, name: 'Agent', email: 'agent@example.com' },
+    };
+    const definition = buildDefaultWorkflowDefinition('ticket.assigned');
+    const recipientNode = definition.nodes.find((node) => node.type === 'recipient_resolver');
+    recipientNode.data.to = ['requester'];
+
+    await executeDefinition({
+      workflow: assignedWorkflow,
+      definition,
+      eventContext: assignedContext,
+      dryRun: true,
+      executionMode: 'mock',
+      triggerSource: 'freshservice_webhook',
+    });
+
+    const runData = prismaMock.notificationWorkflowRun.create.mock.calls[0][0].data;
+    expect(runData.dedupeKey).toContain('1:ticket.assigned:501:17:2026-06-01T16:00:00.000Z');
+    expect(runData.dedupeKey).not.toContain('2026-06-01T16:00:02.000Z');
+    const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(deliveryData.dedupeKey).toContain('notification-workflow-delivery:7:1:send:ticket.assigned:501:assignee:17');
+    expect(deliveryData.dedupeKey).toContain('1:ticket.assigned:501:17:2026-06-01T16:00:00.000Z');
+  });
+
   test('mock workflow execution runs the configured LLM but suppresses email send', async () => {
     providerSendJsonMock.mockResolvedValue({
       provider: 'openai',
@@ -366,6 +405,33 @@ describe('notification workflow engine persistence', () => {
       reason: 'Duplicate workflow event',
     }));
     expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
+  });
+
+  test('suppresses duplicate requester-facing deliveries through the delivery dedupe key', async () => {
+    prismaMock.notificationDelivery.create.mockRejectedValueOnce({ code: 'P2002' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition: buildDefaultWorkflowDefinition('ticket.created'),
+      eventContext: {
+        ...eventContext,
+        event: {
+          ...eventContext.event,
+          notificationFingerprint: '1:ticket.created:501:2026-05-29T18:30:00.000Z',
+        },
+      },
+      dryRun: false,
+      triggerSource: 'assignment_fast_sync',
+    });
+
+    expect(result.status).toBe('completed');
+    const sendStep = result.steps.find((step) => step.nodeType === 'send_email');
+    expect(sendStep.output).toEqual(expect.objectContaining({
+      skipped: true,
+      duplicateDelivery: true,
+      reason: 'Duplicate workflow delivery',
+    }));
+    expect(processDeliveryMock).not.toHaveBeenCalled();
   });
 
   test('appends the public status link before the workspace signature', async () => {
@@ -511,9 +577,53 @@ describe('notification workflow engine persistence', () => {
       }),
     }));
     expect(sendStep.output.htmlBody).toContain('Need immediate after-hours support?');
+    expect(sendStep.output.actionLinks.afterHoursSupport).toEqual(expect.objectContaining({
+      hasActiveContact: true,
+      phoneVerified: true,
+      rotationLabel: 'Manual after-hours contact',
+    }));
+    expect(sendStep.output.actionLinks.afterHoursSupport.activeContact).toBeUndefined();
     expect(result.state.email.html).toContain('Need immediate after-hours support?');
     expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
     expect(processDeliveryMock).not.toHaveBeenCalled();
+  });
+
+  test('mocked delivery payload stores compact action-link diagnostics without contact blobs', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.appendAfterHoursSupportLink = true;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext: {
+        ...eventContext,
+        availability: { isBusinessHours: false, isAfterHours: true, isHoliday: false },
+      },
+      dryRun: true,
+      executionMode: 'mock',
+      triggerSource: 'freshservice_poll',
+    });
+
+    const sendStep = result.steps.find((step) => step.nodeType === 'send_email');
+    const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    const stepDiagnostics = JSON.stringify(sendStep.output.actionLinks);
+    const payloadDiagnostics = JSON.stringify(deliveryData.payload.actionLinks);
+
+    expect(sendStep.output.actionLinks.afterHoursSupport).toEqual(expect.objectContaining({
+      requested: true,
+      applied: true,
+      hasActiveContact: true,
+      phoneVerified: true,
+      rotationLabel: 'Manual after-hours contact',
+    }));
+    expect(sendStep.output.actionLinks.afterHoursSupport.activeContact).toBeUndefined();
+    expect(stepDiagnostics).not.toContain('data:image');
+    expect(stepDiagnostics).not.toContain('alex.agent@example.com');
+    expect(stepDiagnostics).not.toContain('+16045551234');
+    expect(payloadDiagnostics).not.toContain('data:image');
+    expect(payloadDiagnostics).not.toContain('alex.agent@example.com');
+    expect(payloadDiagnostics).not.toContain('+16045551234');
   });
 
   test('uses LLM text as HTML when the provider returns blank HTML', async () => {
@@ -568,6 +678,62 @@ describe('notification workflow engine persistence', () => {
     expect(deliveryData.htmlBody).toContain('<p>It should be the visible email content.</p>');
     expect(deliveryData.htmlBody).not.toContain('We received your ticket');
     expect(deliveryData.textBody).toContain('LLM wrote this body.');
+  });
+
+  test('guard-rejected LLM output is visible while template fallback continues', async () => {
+    providerSendJsonMock.mockResolvedValueOnce(llmResponse({
+      subject: 'Provider leak',
+      html: '<p>The Claude model drafted this update.</p>',
+      text: 'The Claude model drafted this update.',
+    }));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+
+    const llmStep = result.steps.find((step) => step.nodeType === 'llm_generate');
+    expect(result.status).toBe('completed');
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'guard_rejected',
+        templateFallbackUsed: true,
+      }),
+    ]));
+    expect(llmStep.output).toEqual(expect.objectContaining({
+      failed: true,
+      failureType: 'guard_rejected',
+      guardRejected: true,
+      templateFallbackUsed: true,
+      raw: null,
+      guard: expect.objectContaining({ accepted: false }),
+    }));
+    const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(deliveryData.subject).not.toBe('Provider leak');
+    expect(deliveryData.htmlBody).not.toContain('Claude model');
+    expect(processDeliveryMock).toHaveBeenCalled();
   });
 
   test('tool-enabled LLM mode requires final email tool and persists tool audit rows', async () => {
@@ -971,8 +1137,8 @@ describe('notification workflow engine persistence', () => {
     expect(prismaMock.notificationDelivery.create).toHaveBeenCalledTimes(2);
     const dedupeKeys = prismaMock.notificationDelivery.create.mock.calls.map((call) => call[0].data.dedupeKey);
     expect(dedupeKeys).toEqual(expect.arrayContaining([
-      expect.stringContaining(':email:send'),
-      expect.stringContaining(':email:send-secondary'),
+      expect.stringContaining(':send:ticket.created'),
+      expect.stringContaining(':send-secondary:secondary_notice'),
     ]));
     expect(new Set(dedupeKeys).size).toBe(2);
     expect(processDeliveryMock).toHaveBeenCalledTimes(2);

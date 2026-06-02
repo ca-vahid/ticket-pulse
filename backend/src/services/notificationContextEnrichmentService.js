@@ -12,6 +12,8 @@ import {
 
 const BUNDLE_VERSION = 1;
 const OPEN_STATUSES = new Set(['open', 'pending']);
+const ROUTINE_CLUSTER_PATTERN = /\b(?:new[-\s]?hire|onboarding|offboarding|procurement|purchase|quote|invoice|payment|vendor|monitor report|drive health|disk health|backup report|license renewal|hardware request|laptop setup|workstation setup|equipment request)\b/i;
+const ROUTINE_OUTAGE_OVERRIDE_PATTERN = /\b(?:outage|down|unavailable|interruption|degradation|cannot connect|failed for everyone|multiple users cannot)\b/i;
 const STOPWORDS = new Set([
   'about',
   'access',
@@ -90,6 +92,10 @@ function redactText(value = '', enabled = true, state = { count: 0 }) {
 
 function emailList(value) {
   return Array.isArray(value) ? [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))] : [];
+}
+
+function shortHash(value) {
+  return createHash('sha256').update(String(value || '').trim().toLowerCase()).digest('hex').slice(0, 12);
 }
 
 function currentTicketId(eventContext = {}) {
@@ -302,7 +308,7 @@ async function loadSimilarTickets({ workspaceId, ticket, requester, anchor, sett
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: 100,
     include: {
-      requester: { select: { name: true, email: true, department: true } },
+      requester: { select: { id: true, name: true, email: true, department: true } },
       assignedTech: { select: { name: true, email: true } },
       internalCategory: { select: { id: true, name: true } },
       internalSubcategory: { select: { id: true, name: true } },
@@ -337,6 +343,11 @@ async function loadSimilarTickets({ workspaceId, ticket, requester, anchor, sett
         category: row.category || null,
         subCategory: row.subCategory || null,
         ticketCategory: row.ticketCategory || null,
+        requesterKey: row.requester?.id
+          ? `requester:${row.requester.id}`
+          : (row.requester?.email
+            ? `requester-email:${shortHash(row.requester.email)}`
+            : (row.requester?.name ? `requester-name:${shortHash(row.requester.name)}` : null)),
         requesterDepartment: row.requester?.department || row.department || null,
         assignedAgentName: row.assignedTech?.name || null,
         isOpen: OPEN_STATUSES.has(String(row.status || '').toLowerCase()),
@@ -358,20 +369,70 @@ async function loadSimilarTickets({ workspaceId, ticket, requester, anchor, sett
   };
 }
 
+function uniqueSimilarItems(similarTickets) {
+  const byId = new Map();
+  for (const item of (similarTickets.windows || []).flatMap((window) => window.items || [])) {
+    const key = item.id || item.freshserviceTicketId || item.evidenceId;
+    if (!key) continue;
+    if (!byId.has(key) || Number(item.score || 0) > Number(byId.get(key).score || 0)) {
+      byId.set(key, item);
+    }
+  }
+  return [...byId.values()];
+}
+
+function hasSpecificSimilarityAnchor(similarTickets = {}) {
+  const query = similarTickets.query || {};
+  return Boolean(
+    query.subCategory
+      || query.internalSubcategory
+      || query.internalCategory
+      || (query.category && !['it', 'other', 'general'].includes(String(query.category).trim().toLowerCase()))
+      || (query.keywords || []).length >= 2,
+  );
+}
+
+function routineClusterDetected(similarTickets = {}, items = []) {
+  const query = similarTickets.query || {};
+  const text = [
+    query.category,
+    query.subCategory,
+    query.internalCategory,
+    query.internalSubcategory,
+    ...(query.keywords || []),
+    ...items.map((item) => item.subject),
+  ].filter(Boolean).join(' ');
+  return ROUTINE_CLUSTER_PATTERN.test(text) && !ROUTINE_OUTAGE_OVERRIDE_PATTERN.test(text);
+}
+
 function outageSignals(similarTickets, settings) {
   if (settings.context.includeOutageSignals === false || similarTickets.enabled === false) {
     return { enabled: false, signalLevel: 'none', allowedPublicPhrases: [] };
   }
   const largestWindow = [...(similarTickets.windows || [])].sort((a, b) => b.hours - a.hours)[0] || { count: 0, items: [] };
-  const allItems = (similarTickets.windows || []).flatMap((window) => window.items || []);
+  const allItems = uniqueSimilarItems(similarTickets);
+  const strongItems = allItems.filter((item) => Number(item.score || 0) >= 5);
+  const openStrongItems = strongItems.filter((item) => item.isOpen);
   const distinctTicketIds = new Set(allItems.map((item) => item.id));
-  const distinctDepartments = new Set(allItems.map((item) => item.requesterDepartment).filter(Boolean));
+  const distinctDepartments = new Set(strongItems.map((item) => item.requesterDepartment).filter(Boolean));
+  const distinctRequesters = new Set(strongItems.map((item) => item.requesterKey).filter(Boolean));
   const openCount = allItems.filter((item) => item.isOpen).length;
   const count = largestWindow.count || distinctTicketIds.size;
-  const possible = count >= settings.outageSignals.possibleBroaderIssueThreshold
+  const routineCluster = routineClusterDetected(similarTickets, allItems);
+  const meaningfulOverlap = hasSpecificSimilarityAnchor(similarTickets)
+    && strongItems.length >= Math.min(settings.outageSignals.watchThreshold, count || strongItems.length);
+  const possible = !routineCluster
+    && meaningfulOverlap
+    && count >= settings.outageSignals.possibleBroaderIssueThreshold
+    && openStrongItems.length >= settings.outageSignals.watchThreshold
+    && distinctRequesters.size >= settings.outageSignals.distinctRequesterThreshold
     && distinctDepartments.size >= settings.outageSignals.distinctDepartmentThreshold;
-  const watch = count >= settings.outageSignals.watchThreshold;
-  const signalLevel = possible ? 'possible_broader_issue' : (watch ? 'watch' : 'none');
+  const watch = !routineCluster
+    && meaningfulOverlap
+    && count >= settings.outageSignals.watchThreshold;
+  const signalLevel = possible
+    ? 'possible_broader_issue'
+    : (routineCluster && count >= settings.outageSignals.watchThreshold ? 'routine_cluster' : (watch ? 'watch' : 'none'));
 
   return {
     enabled: true,
@@ -379,8 +440,11 @@ function outageSignals(similarTickets, settings) {
     counts: {
       similarTickets: count,
       distinctTickets: distinctTicketIds.size,
+      distinctRequesters: distinctRequesters.size,
       distinctDepartments: distinctDepartments.size,
       openSimilarTickets: openCount,
+      strongSimilarTickets: strongItems.length,
+      openStrongSimilarTickets: openStrongItems.length,
       largestWindowHours: largestWindow.hours || null,
     },
     thresholds: settings.outageSignals,

@@ -16,6 +16,22 @@ function dateIso(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function stableTicketId(ticket) {
+  return asNumber(ticket?.id)
+    || ticket?.freshserviceTicketId?.toString?.()
+    || ticket?.freshserviceTicketId
+    || 'ticket';
+}
+
+function stableAssignmentEvidence(upsertedTicket = {}, existingTicket = null) {
+  return dateIso(upsertedTicket.firstAssignedAt)
+    || dateIso(upsertedTicket.assignedAt)
+    || upsertedTicket.assignmentEpisodeId
+    || upsertedTicket.assignmentActivityId
+    || upsertedTicket.freshserviceAssignmentActivityId
+    || `${asNumber(existingTicket?.assignedTechId) || 'none'}-${asNumber(upsertedTicket.assignedTechId) || 'none'}`;
+}
+
 function isTerminalStatus(status) {
   const value = String(status || '').trim().toLowerCase();
   if (!value) return false;
@@ -50,12 +66,10 @@ function eventStamp(eventType, upsertedTicket, existingTicket = null) {
   if (eventType === 'ticket.assigned') {
     return dateIso(upsertedTicket.firstAssignedAt)
       || dateIso(upsertedTicket.assignedAt)
-      || dateIso(upsertedTicket.freshserviceUpdatedAt)
       || `${asNumber(existingTicket?.assignedTechId) || 'none'}-${asNumber(upsertedTicket.assignedTechId) || 'none'}`;
   }
   if (eventType === 'ticket.reassigned') {
     return dateIso(upsertedTicket.assignedAt)
-      || dateIso(upsertedTicket.freshserviceUpdatedAt)
       || dateIso(upsertedTicket.firstAssignedAt)
       || `${asNumber(existingTicket?.assignedTechId) || 'none'}-${asNumber(upsertedTicket.assignedTechId) || 'none'}`;
   }
@@ -68,6 +82,56 @@ function eventStamp(eventType, upsertedTicket, existingTicket = null) {
   return dateIso(upsertedTicket.freshserviceUpdatedAt) || new Date().toISOString();
 }
 
+export function lifecycleNotificationFingerprint(eventType, upsertedTicket, existingTicket = null) {
+  const workspaceId = asNumber(upsertedTicket?.workspaceId)
+    || asNumber(existingTicket?.workspaceId)
+    || 'workspace';
+  const ticketId = stableTicketId(upsertedTicket) || stableTicketId(existingTicket);
+  if (eventType === 'ticket.assigned') {
+    return [
+      workspaceId,
+      eventType,
+      ticketId,
+      asNumber(upsertedTicket?.assignedTechId) || 'none',
+      stableAssignmentEvidence(upsertedTicket, existingTicket),
+    ].join(':');
+  }
+  if (eventType === 'ticket.reassigned') {
+    return [
+      workspaceId,
+      eventType,
+      ticketId,
+      asNumber(existingTicket?.assignedTechId) || 'none',
+      asNumber(upsertedTicket?.assignedTechId) || 'none',
+      stableAssignmentEvidence(upsertedTicket, existingTicket),
+    ].join(':');
+  }
+  if (eventType === 'ticket.created') {
+    return [
+      workspaceId,
+      eventType,
+      ticketId,
+      dateIso(upsertedTicket?.createdAt) || eventStamp(eventType, upsertedTicket, existingTicket),
+    ].join(':');
+  }
+  if (eventType === 'ticket.resolved_closed') {
+    return [
+      workspaceId,
+      eventType,
+      ticketId,
+      dateIso(upsertedTicket?.resolvedAt)
+        || dateIso(upsertedTicket?.closedAt)
+        || String(upsertedTicket?.status || 'terminal'),
+    ].join(':');
+  }
+  return [
+    workspaceId,
+    eventType,
+    ticketId,
+    eventStamp(eventType, upsertedTicket, existingTicket),
+  ].join(':');
+}
+
 export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
   const events = [];
   if (!upsertedTicket) return events;
@@ -77,6 +141,7 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
       type: 'ticket.created',
       occurredAt: dateIso(upsertedTicket.createdAt) || dateIso(upsertedTicket.freshserviceUpdatedAt) || new Date().toISOString(),
       dedupeStamp: eventStamp('ticket.created', upsertedTicket, existingTicket),
+      notificationFingerprint: lifecycleNotificationFingerprint('ticket.created', upsertedTicket, existingTicket),
     });
     if (upsertedTicket.assignedTechId) {
       events.push({
@@ -86,6 +151,7 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
           || dateIso(upsertedTicket.freshserviceUpdatedAt)
           || new Date().toISOString(),
         dedupeStamp: eventStamp('ticket.assigned', upsertedTicket, existingTicket),
+        notificationFingerprint: lifecycleNotificationFingerprint('ticket.assigned', upsertedTicket, existingTicket),
       });
     }
     if (isTerminalStatus(upsertedTicket.status)) {
@@ -96,6 +162,7 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
           || dateIso(upsertedTicket.freshserviceUpdatedAt)
           || new Date().toISOString(),
         dedupeStamp: eventStamp('ticket.resolved_closed', upsertedTicket, existingTicket),
+        notificationFingerprint: lifecycleNotificationFingerprint('ticket.resolved_closed', upsertedTicket, existingTicket),
       });
     }
     return events;
@@ -112,6 +179,7 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
         || dateIso(upsertedTicket.freshserviceUpdatedAt)
         || new Date().toISOString(),
       dedupeStamp: eventStamp(type, upsertedTicket, existingTicket),
+      notificationFingerprint: lifecycleNotificationFingerprint(type, upsertedTicket, existingTicket),
     });
   }
 
@@ -123,6 +191,7 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
         || dateIso(upsertedTicket.freshserviceUpdatedAt)
         || new Date().toISOString(),
       dedupeStamp: eventStamp('ticket.resolved_closed', upsertedTicket, existingTicket),
+      notificationFingerprint: lifecycleNotificationFingerprint('ticket.resolved_closed', upsertedTicket, existingTicket),
     });
   }
 
@@ -161,6 +230,7 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       source,
       occurredAt: event.occurredAt,
       dedupeStamp: event.dedupeStamp,
+      notificationFingerprint: event.notificationFingerprint,
     },
     workspace: {
       id: ticket.workspaceId,
@@ -264,4 +334,5 @@ export async function emitTicketLifecycleNotifications({
 export default {
   deriveTicketLifecycleEvents,
   emitTicketLifecycleNotifications,
+  lifecycleNotificationFingerprint,
 };

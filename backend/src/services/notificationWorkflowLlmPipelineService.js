@@ -61,6 +61,8 @@ function systemPromptForTools(basePrompt, policy) {
     'Do not attempt to send email, update tickets, change workflow settings, or expose internal tool/provider/audit names.',
     'Only use outage-like public wording from outageSignals.allowedPublicPhrases. Never claim a global, company-wide, or confirmed outage unless an allowed phrase explicitly says that.',
     'Private/internal notes, if present, are internal evidence only and must not be quoted or mentioned in requester-facing fields.',
+    'Do not use emoji, jokes, playful metaphors, or field jargon unless the workflow explicitly opts into that tone and the ticket is low risk.',
+    'Do not invent response-time or resolution-time estimates; use neutral follow-up language unless deterministic SLA or historical timing evidence is supplied.',
     'When ready, call submit_notification_email exactly once with subject, html, text, and any citedSignals.',
     `Budgets: max turns ${policy.maxTurns}, max tool calls ${policy.maxToolCalls}, total timeout ${policy.totalTimeoutMs}ms.`,
   ].filter(Boolean).join('\n');

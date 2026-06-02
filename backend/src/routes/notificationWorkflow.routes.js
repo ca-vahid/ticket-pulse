@@ -318,10 +318,47 @@ function redactPayload(value) {
   return result;
 }
 
+function workflowRunWarnings(run = {}) {
+  const warnings = [];
+  for (const step of run.steps || []) {
+    const output = step.output || {};
+    if (output.duplicateDelivery === true) {
+      warnings.push({
+        type: 'duplicate_delivery',
+        nodeId: step.nodeId || null,
+        message: output.reason || 'A duplicate workflow delivery was suppressed.',
+      });
+    }
+    const llm = output.llm || (step.nodeType === 'llm_generate' ? output : null);
+    if (!llm || (!llm.failed && !llm.warning && llm.guardRejected !== true)) continue;
+    warnings.push({
+      type: llm.guardRejected ? 'guard_rejected' : 'llm_failed',
+      nodeId: step.nodeId || null,
+      outputKey: output.outputKey || llm.outputKey || null,
+      provider: llm.provider || null,
+      model: llm.model || null,
+      templateFallbackUsed: llm.templateFallbackUsed === true,
+      message: llm.warning || llm.error || 'LLM generation did not produce a usable requester-facing email.',
+    });
+  }
+  const duplicateDeliveries = (run.deliveries || []).filter((delivery) => (
+    delivery?.payload?.duplicateDelivery === true
+  ));
+  for (const delivery of duplicateDeliveries) {
+    warnings.push({
+      type: 'duplicate_delivery',
+      deliveryId: delivery.id,
+      message: 'A duplicate workflow delivery was suppressed.',
+    });
+  }
+  return warnings;
+}
+
 function redactRun(run) {
   return {
     ...run,
     auditId: formatAuditId(run.id),
+    warnings: workflowRunWarnings(run),
     eventContext: redactPayload(run.eventContext),
     steps: (run.steps || []).map((step) => ({
       ...step,
@@ -517,7 +554,8 @@ router.get(
 router.get(
   '/health',
   asyncHandler(async (req, res) => {
-    const [sendgridConfig, workflows, recentFailures, mockEnabledWorkflows, workflowAuditRuns7d, mockRuns7d, mockedDeliveries7d] = await Promise.all([
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [sendgridConfig, workflows, recentFailures, mockEnabledWorkflows, workflowAuditRuns7d, mockRuns7d, mockedDeliveries7d, mockDeliveryGroups7d] = await Promise.all([
       settingsRepository.getSendGridConfig(),
       prisma.notificationWorkflow.groupBy({
         by: ['isEnabled'],
@@ -542,14 +580,14 @@ router.get(
         where: {
           workspaceId: req.workspaceId,
           executionMode: { in: ['live', 'mock'] },
-          startedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+          startedAt: { gte: sevenDaysAgo },
         },
       }),
       prisma.notificationWorkflowRun.count({
         where: {
           workspaceId: req.workspaceId,
           executionMode: 'mock',
-          startedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+          startedAt: { gte: sevenDaysAgo },
         },
       }),
       prisma.notificationDelivery.count({
@@ -557,10 +595,37 @@ router.get(
           workspaceId: req.workspaceId,
           channel: 'email',
           status: 'mocked',
-          queuedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+          queuedAt: { gte: sevenDaysAgo },
         },
       }),
+      prisma.notificationDelivery.groupBy({
+        by: ['ticketId', 'eventType', 'notificationType'],
+        where: {
+          workspaceId: req.workspaceId,
+          channel: 'email',
+          status: 'mocked',
+          ticketId: { not: null },
+          queuedAt: { gte: sevenDaysAgo },
+        },
+        _count: { _all: true },
+      }),
     ]);
+    const duplicateMockDeliveryGroups7d = (mockDeliveryGroups7d || [])
+      .filter((row) => (row._count?._all || 0) > 1)
+      .map((row) => ({
+        ticketId: row.ticketId,
+        eventType: row.eventType,
+        notificationType: row.notificationType,
+        count: row._count?._all || 0,
+      }));
+    const warnings = [];
+    if (duplicateMockDeliveryGroups7d.length > 0) {
+      warnings.push({
+        type: 'duplicate_mock_delivery_groups',
+        message: 'Mock notification audit found duplicate ticket/event delivery groups.',
+        count: duplicateMockDeliveryGroups7d.length,
+      });
+    }
 
     res.json({
       success: true,
@@ -574,6 +639,8 @@ router.get(
         workflowAuditRuns7d,
         mockRuns7d,
         mockedDeliveries7d,
+        duplicateMockDeliveryGroups7d,
+        warnings,
         failedEmailDeliveries24h: recentFailures,
       },
     });

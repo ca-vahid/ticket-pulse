@@ -8,11 +8,18 @@ const prismaMock = {
     findMany: jest.fn(),
     findFirst: jest.fn(),
   },
+  notificationWorkflow: {
+    groupBy: jest.fn(),
+    count: jest.fn(),
+  },
   notificationWorkflowRun: {
     findFirst: jest.fn(),
+    count: jest.fn(),
   },
   notificationDelivery: {
     create: jest.fn(),
+    count: jest.fn(),
+    groupBy: jest.fn(),
   },
 };
 
@@ -25,6 +32,7 @@ const summarizeNotificationLlmContextMock = jest.fn();
 const getNotificationLlmToolPolicyMock = jest.fn();
 const processDeliveryMock = jest.fn();
 const finalizeWorkflowSendEmailMock = jest.fn();
+const getSendGridConfigMock = jest.fn();
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
   default: prismaMock,
@@ -48,7 +56,9 @@ jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () =>
 }));
 
 jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({
-  default: {},
+  default: {
+    getSendGridConfig: getSendGridConfigMock,
+  },
 }));
 
 jest.unstable_mockModule('../src/services/notificationWorkflowSignatureService.js', () => ({
@@ -154,8 +164,17 @@ describe('notification workflow routes', () => {
     prismaMock.ticket.count.mockResolvedValue(1);
     prismaMock.ticket.findMany.mockResolvedValue([sampleTicket]);
     prismaMock.ticket.findFirst.mockResolvedValue(sampleTicket);
+    prismaMock.notificationWorkflow.groupBy.mockResolvedValue([
+      { isEnabled: true, _count: { _all: 2 } },
+      { isEnabled: false, _count: { _all: 1 } },
+    ]);
+    prismaMock.notificationWorkflow.count.mockResolvedValue(1);
     prismaMock.notificationWorkflowRun.findFirst.mockResolvedValue(null);
+    prismaMock.notificationWorkflowRun.count.mockResolvedValue(4);
     prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 900, ...data }));
+    prismaMock.notificationDelivery.count.mockResolvedValue(3);
+    prismaMock.notificationDelivery.groupBy.mockResolvedValue([]);
+    getSendGridConfigMock.mockResolvedValue({ configured: true, mode: 'mock' });
     processDeliveryMock.mockResolvedValue({ success: true, providerMessageId: 'sg-test' });
     finalizeWorkflowSendEmailMock.mockImplementation(async ({ email }) => email);
     repositoryMock.getWorkflow.mockResolvedValue({
@@ -206,6 +225,43 @@ describe('notification workflow routes', () => {
         ]),
       }),
     }));
+  });
+
+  test('health exposes duplicate mock delivery groups as a warning', async () => {
+    prismaMock.notificationDelivery.groupBy.mockResolvedValueOnce([
+      {
+        ticketId: 501,
+        eventType: 'ticket.assigned',
+        notificationType: 'ticket.assigned',
+        _count: { _all: 2 },
+      },
+      {
+        ticketId: 502,
+        eventType: 'ticket.created',
+        notificationType: 'ticket.created',
+        _count: { _all: 1 },
+      },
+    ]);
+
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/health')
+      .expect(200);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.duplicateMockDeliveryGroups7d).toEqual([
+      {
+        ticketId: 501,
+        eventType: 'ticket.assigned',
+        notificationType: 'ticket.assigned',
+        count: 2,
+      },
+    ]);
+    expect(response.body.data.warnings).toEqual([
+      expect.objectContaining({
+        type: 'duplicate_mock_delivery_groups',
+        count: 1,
+      }),
+    ]);
   });
 
   test('context-preview accepts an internal Ticket Pulse ticket ID', async () => {

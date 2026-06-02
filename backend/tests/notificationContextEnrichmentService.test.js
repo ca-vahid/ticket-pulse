@@ -99,7 +99,7 @@ function ticketRow() {
   };
 }
 
-function similarTicket(id, department, minutesAgo = 20) {
+function similarTicket(id, department, minutesAgo = 20, overrides = {}) {
   return {
     id,
     workspaceId: 1,
@@ -116,10 +116,11 @@ function similarTicket(id, department, minutesAgo = 20) {
     createdAt: new Date(Date.parse('2026-05-31T16:00:00.000Z') - minutesAgo * 60 * 1000),
     resolvedAt: null,
     closedAt: null,
-    requester: { name: `Requester ${id}`, email: `r${id}@example.com`, department },
+    requester: { id, name: `Requester ${id}`, email: `r${id}@example.com`, department },
     assignedTech: { name: 'Agent', email: 'agent@example.com' },
     internalCategory: { id: 10, name: 'Network' },
     internalSubcategory: { id: 11, name: 'VPN' },
+    ...overrides,
   };
 }
 
@@ -181,6 +182,7 @@ describe('notification context enrichment service', () => {
     expect(bundle.threadSummary.omittedPrivateEntries).toBe(1);
     expect(bundle.recentSimilarTickets.windows.at(-1).count).toBe(5);
     expect(bundle.outageSignals.signalLevel).toBe('possible_broader_issue');
+    expect(bundle.outageSignals.counts.distinctRequesters).toBe(5);
     expect(bundle.outageSignals.allowedPublicPhrases).toContain('we are seeing multiple similar reports');
     expect(bundle.outageSignals.blockedPublicPhrases).toContain('global outage');
     expect(bundle.contextHash).toMatch(/^[a-f0-9]{64}$/);
@@ -236,5 +238,107 @@ describe('notification context enrichment service', () => {
       mode: 'off',
     }));
     expect(prismaMock.ticket.findFirst).not.toHaveBeenCalled();
+  });
+
+  test('classifies related tickets as watch when requester and department diversity is insufficient', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([
+      similarTicket(611, 'Accounting', 10, { requester: { id: 80, name: 'Requester One', email: 'one@example.com', department: 'Accounting' } }),
+      similarTicket(612, 'Accounting', 12, { requester: { id: 80, name: 'Requester One', email: 'one@example.com', department: 'Accounting' } }),
+      similarTicket(613, 'Accounting', 15, { requester: { id: 80, name: 'Requester One', email: 'one@example.com', department: 'Accounting' } }),
+      similarTicket(614, 'Accounting', 18, { requester: { id: 80, name: 'Requester One', email: 'one@example.com', department: 'Accounting' } }),
+      similarTicket(615, 'Accounting', 21, { requester: { id: 80, name: 'Requester One', email: 'one@example.com', department: 'Accounting' } }),
+    ]);
+
+    const bundle = await buildNotificationLlmContext({
+      workspaceId: 1,
+      eventContext,
+      state: eventContext.state,
+    });
+
+    expect(bundle.outageSignals.signalLevel).toBe('watch');
+    expect(bundle.outageSignals.counts.distinctRequesters).toBe(1);
+    expect(bundle.outageSignals.allowedPublicPhrases).toEqual(['we are reviewing similar reports']);
+  });
+
+  test('classifies routine onboarding and procurement clusters without outage-like wording', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      ...ticketRow(),
+      subject: 'New hire laptop setup',
+      descriptionText: 'Requesting laptop and dock for new hire onboarding.',
+      category: 'Hardware',
+      subCategory: 'Onboarding',
+      internalCategory: { id: 20, name: 'Hardware' },
+      internalSubcategory: { id: 21, name: 'Onboarding' },
+    });
+    prismaMock.ticket.findMany.mockResolvedValue([
+      similarTicket(621, 'Accounting', 10, {
+        subject: 'New hire laptop setup for accounting',
+        descriptionText: 'Laptop and dock procurement for new hire',
+        category: 'Hardware',
+        subCategory: 'Onboarding',
+        internalCategoryId: 20,
+        internalSubcategoryId: 21,
+        requester: { id: 91, name: 'Requester 91', email: 'r91@example.com', department: 'Accounting' },
+      }),
+      similarTicket(622, 'Finance', 12, {
+        subject: 'New hire workstation setup',
+        descriptionText: 'Equipment request for onboarding',
+        category: 'Hardware',
+        subCategory: 'Onboarding',
+        internalCategoryId: 20,
+        internalSubcategoryId: 21,
+        requester: { id: 92, name: 'Requester 92', email: 'r92@example.com', department: 'Finance' },
+      }),
+      similarTicket(623, 'Operations', 14, {
+        subject: 'New hire laptop procurement',
+        descriptionText: 'Laptop setup and purchase request',
+        category: 'Hardware',
+        subCategory: 'Onboarding',
+        internalCategoryId: 20,
+        internalSubcategoryId: 21,
+        requester: { id: 93, name: 'Requester 93', email: 'r93@example.com', department: 'Operations' },
+      }),
+    ]);
+
+    const bundle = await buildNotificationLlmContext({
+      workspaceId: 1,
+      eventContext: {
+        ...eventContext,
+        ticket: {
+          ...eventContext.ticket,
+          subject: 'New hire laptop setup',
+          descriptionText: 'Requesting laptop and dock for new hire onboarding.',
+          category: 'Hardware',
+          subCategory: 'Onboarding',
+        },
+      },
+      state: eventContext.state,
+    });
+
+    expect(bundle.outageSignals.signalLevel).toBe('routine_cluster');
+    expect(bundle.outageSignals.allowedPublicPhrases).toEqual([]);
+  });
+
+  test('returns none for isolated weak similarity', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([
+      similarTicket(631, 'Accounting', 10, {
+        subject: 'Shared mailbox question',
+        descriptionText: 'Question about mailbox access',
+        status: 'Resolved',
+        category: 'Access',
+        subCategory: 'Mailbox',
+        internalCategoryId: null,
+        internalSubcategoryId: null,
+      }),
+    ]);
+
+    const bundle = await buildNotificationLlmContext({
+      workspaceId: 1,
+      eventContext,
+      state: eventContext.state,
+    });
+
+    expect(bundle.outageSignals.signalLevel).toBe('none');
+    expect(bundle.outageSignals.allowedPublicPhrases).toEqual([]);
   });
 });
