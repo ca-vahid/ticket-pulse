@@ -729,11 +729,78 @@ describe('notification workflow engine persistence', () => {
       templateFallbackUsed: true,
       raw: null,
       guard: expect.objectContaining({ accepted: false }),
+      promptPolicy: expect.objectContaining({
+        strictness: 'strict_default',
+        strictDefaultApplied: true,
+        customSystemPromptUsed: false,
+      }),
+      guardPolicy: expect.objectContaining({
+        mode: 'strict_default',
+        allowEmoji: false,
+        allowPlayfulTone: false,
+      }),
     }));
     const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
     expect(deliveryData.subject).not.toBe('Provider leak');
     expect(deliveryData.htmlBody).not.toContain('Claude model');
     expect(processDeliveryMock).toHaveBeenCalled();
+  });
+
+  test('custom system prompt is audited and relaxes tone guard only', async () => {
+    providerSendJsonMock.mockResolvedValueOnce(llmResponse({
+      subject: 'Warmer VPN update',
+      html: '<p>We will get this back on rock solid ground. 🚀</p>',
+      text: 'We will get this back on rock solid ground. 🚀',
+    }));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+        systemPrompt: 'Use a warmer requester-facing voice and include emoji when it helps.',
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+
+    const llmStep = result.steps.find((step) => step.nodeType === 'llm_generate');
+    expect(result.status).toBe('completed');
+    expect(llmStep.output.llm).toEqual(expect.objectContaining({
+      promptPolicy: expect.objectContaining({
+        strictness: 'custom_relaxed_tone',
+        strictDefaultApplied: false,
+        customSystemPromptUsed: true,
+        relaxedControls: ['emoji', 'playful_tone'],
+      }),
+      guardPolicy: expect.objectContaining({
+        mode: 'custom_prompt_relaxed_tone',
+        allowEmoji: true,
+        allowPlayfulTone: true,
+        hardBlocks: expect.arrayContaining(['unsupported_timing_claims']),
+      }),
+      guard: expect.objectContaining({ accepted: true }),
+    }));
+    const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(deliveryData.subject).toBe('Warmer VPN update');
+    expect(deliveryData.textBody).toContain('rock solid ground');
   });
 
   test('tool-enabled LLM mode requires final email tool and persists tool audit rows', async () => {

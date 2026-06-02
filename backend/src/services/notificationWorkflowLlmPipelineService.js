@@ -81,6 +81,7 @@ export async function runNotificationWorkflowLlmPipeline({
   maxTokens,
   signal = null,
   recordToolEvent = null,
+  guardOptions = {},
 }) {
   const startedAt = Date.now();
   const totalTimeoutAt = startedAt + Math.max(policy.totalTimeoutMs || 20000, 1000);
@@ -149,7 +150,9 @@ export async function runNotificationWorkflowLlmPipeline({
           const guard = guardNotificationEmailPayload(payload, {
             contextBundle,
             extraEvidenceIds: [...evidenceIds],
-            strictCitations: true,
+            strictCitations: guardOptions.strictCitations !== false,
+            allowEmoji: guardOptions.allowEmoji === true,
+            allowPlayfulTone: guardOptions.allowPlayfulTone === true,
           });
           finalSubmission = {
             ...payload,

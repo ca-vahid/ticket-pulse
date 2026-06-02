@@ -114,4 +114,34 @@ describe('notification workflow output guard', () => {
       text: 'We will get this back on rock solid ground.',
     }, { contextBundle })).toThrow(/playful metaphors/);
   });
+
+  test('custom prompt relaxation can allow tone while timing claims still need evidence', () => {
+    const contextBundle = {
+      ticket: {
+        subject: 'Executive VPN access failure',
+        category: 'Identity and Access',
+        priorityLabel: 'Urgent',
+      },
+    };
+
+    expect(guardNotificationEmailPayload({
+      subject: 'VPN update',
+      html: '<p>We will get this back on rock solid ground. &#128640;</p>',
+      text: 'We will get this back on rock solid ground. \u{1F680}',
+    }, {
+      contextBundle,
+      allowEmoji: true,
+      allowPlayfulTone: true,
+    }).accepted).toBe(true);
+
+    expect(() => guardNotificationEmailPayload({
+      subject: 'VPN update',
+      html: '<p>We should have this resolved within 30 minutes. &#128640;</p>',
+      text: 'We should have this resolved within 30 minutes. \u{1F680}',
+    }, {
+      contextBundle,
+      allowEmoji: true,
+      allowPlayfulTone: true,
+    })).toThrow(/response-time|resolution-time/);
+  });
 });
