@@ -3893,7 +3893,7 @@ const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const RUN_HISTORY_TIME_OPTIONS = { timeZoneName: 'short' };
 const RUN_HISTORY_PAGE_SIZE = 8;
 const REVIEW_PAGE_TABS = [
-  { key: 'review', label: 'Review', icon: CalendarDays },
+  { key: 'review', label: 'Run History', icon: CalendarDays },
   { key: 'backlog', label: 'Backlog', icon: History },
   { key: 'consolidation', label: 'Consolidation', icon: Sparkles },
 ];
@@ -3960,7 +3960,7 @@ function DailyReviewHistoryPanel({
       <div className="flex flex-col gap-3 border-b border-indigo-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
           <History className="h-4 w-4 shrink-0 text-indigo-600" />
-          <span className="text-sm font-semibold text-slate-800">Review History</span>
+          <span className="text-sm font-semibold text-slate-800">Run History</span>
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">{total || 0}</span>
           <span className="text-xs text-slate-400">Collapsed list</span>
         </div>
@@ -4675,7 +4675,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
           onClick={() => { setView('trigger'); loadRuns(); }}
           className="mb-3 flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
         >
-          <ArrowLeft className="h-4 w-4" /> Back to Review
+          <ArrowLeft className="h-4 w-4" /> Back to Run History
         </button>
         <LiveDailyReviewView
           reviewDate={reviewDate}
@@ -4711,7 +4711,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             onClick={() => { setSelectedRun(null); setView('trigger'); setSelectedRunUrl(null); }}
             className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
           >
-            <ArrowLeft className="h-4 w-4" /> Back to Review
+            <ArrowLeft className="h-4 w-4" /> Back to Run History
           </button>
           <button
             onClick={() => navigate('/assignments/history')}
@@ -4774,10 +4774,10 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         <div>
           <h3 className="text-lg font-semibold text-slate-800 mb-1 flex items-center gap-2">
             <CalendarDays className="w-5 h-5 text-indigo-600" />
-          Review
+          Run History
           </h3>
           <p className="text-sm text-slate-500 mb-4">
-          Review assignment outcomes and generate prompt, tools/data, category, agent-skill, and dev/policy recommendations.
+          Run assignment outcome analysis and generate prompt, tools/data, category, agent-skill, and dev/policy recommendations.
           </p>
 
           {activeRun && (
@@ -4995,8 +4995,8 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
           <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
-              <div className="flex flex-1 flex-col gap-2 lg:flex-row lg:items-center">
-                <label className="relative min-w-0 flex-1">
+              <div className="flex flex-1 flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center">
+                <label className="relative min-w-0 flex-1 lg:min-w-[22rem] xl:flex-[1_1_30rem]">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type="search"
@@ -5006,7 +5006,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                     className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
                   />
                 </label>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex lg:items-center">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex lg:flex-wrap lg:items-center lg:shrink-0">
                   <label className="relative">
                     <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                     <select
@@ -5189,7 +5189,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="text-base font-bold text-slate-900">Pending Review Queue</h4>
+                          <h4 className="text-base font-bold text-slate-900">Pending Ticket Queue</h4>
                           <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">{visiblePendingBacklogItems.length}</span>
                         </div>
                         <p className="text-xs text-slate-500">Review each recommendation and stage the useful ones.</p>

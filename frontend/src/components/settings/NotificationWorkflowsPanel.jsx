@@ -25,7 +25,6 @@ import {
   FlaskConical,
   History,
   Mail,
-  Map as MapIcon,
   Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -4441,84 +4440,7 @@ function MockAuditPanel({
   );
 }
 
-function FlowMiniMap({ visible, nodes, selectedNodeId, onClose }) {
-  if (!visible) return null;
-
-  const mapWidth = 220;
-  const mapHeight = 132;
-  const padding = 14;
-  const nodeWidth = 180;
-  const nodeHeight = 62;
-  const drawableNodes = nodes || [];
-  const minX = Math.min(...drawableNodes.map((node) => node.position.x), 0);
-  const minY = Math.min(...drawableNodes.map((node) => node.position.y), 0);
-  const maxX = Math.max(...drawableNodes.map((node) => node.position.x + nodeWidth), nodeWidth);
-  const maxY = Math.max(...drawableNodes.map((node) => node.position.y + nodeHeight), nodeHeight);
-  const scale = Math.min(
-    (mapWidth - padding * 2) / Math.max(maxX - minX, nodeWidth),
-    (mapHeight - padding * 2) / Math.max(maxY - minY, nodeHeight),
-  );
-
-  const rectForNode = (node) => ({
-    x: padding + (node.position.x - minX) * scale,
-    y: padding + (node.position.y - minY) * scale,
-    width: Math.max(12, nodeWidth * scale),
-    height: Math.max(6, nodeHeight * scale),
-    color: NODE_COLORS[node.data?.nodeType] || '#64748b',
-  });
-
-  return (
-    <div className="absolute bottom-4 right-4 z-10 rounded-md border border-gray-200 bg-white p-2 shadow-lg">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Map</span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded px-1.5 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100"
-          title="Hide map"
-        >
-          Hide
-        </button>
-      </div>
-      <svg
-        width={mapWidth}
-        height={mapHeight}
-        viewBox={`0 0 ${mapWidth} ${mapHeight}`}
-        className="block rounded border border-gray-100 bg-slate-50"
-        aria-label="Workflow minimap"
-      >
-        <rect x="0" y="0" width={mapWidth} height={mapHeight} fill="#f8fafc" />
-        {drawableNodes.map((node) => {
-          const rect = rectForNode(node);
-          return (
-            <rect
-              key={node.id}
-              x={rect.x}
-              y={rect.y}
-              width={rect.width}
-              height={rect.height}
-              rx="3"
-              fill={rect.color}
-              opacity={node.id === selectedNodeId ? 0.95 : 0.65}
-              stroke={node.id === selectedNodeId ? '#111827' : rect.color}
-              strokeWidth={node.id === selectedNodeId ? 2 : 1}
-            />
-          );
-        })}
-      </svg>
-      <button
-        type="button"
-        onClick={onClose}
-        className="sr-only"
-        title="Hide minimap"
-      >
-        Hide map
-      </button>
-    </div>
-  );
-}
-
-function NodePalette({ onAddNode, onRemoveNode, showMiniMap, onToggleMiniMap }) {
+function NodePalette({ onAddNode, onRemoveNode }) {
   const [addOpen, setAddOpen] = useState(false);
   return (
     <div className="border-b border-gray-100 px-4 py-3">
@@ -4570,17 +4492,6 @@ function NodePalette({ onAddNode, onRemoveNode, showMiniMap, onToggleMiniMap }) 
           <XCircle className="h-3.5 w-3.5" />
           Remove selected
         </button>
-        <button
-          type="button"
-          onClick={onToggleMiniMap}
-          className={cls(
-            'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50',
-            showMiniMap ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-700',
-          )}
-        >
-          <MapIcon className="h-3.5 w-3.5" />
-          {showMiniMap ? 'Hide map' : 'Show map'}
-        </button>
       </div>
     </div>
   );
@@ -4616,7 +4527,6 @@ export default function NotificationWorkflowsPanel() {
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showMiniMap, setShowMiniMap] = useState(false);
   const [variableCatalog, setVariableCatalog] = useState([]);
   const [variableSearch, setVariableSearch] = useState('');
   const [activeInsertTarget, setActiveInsertTarget] = useState(null);
@@ -6974,8 +6884,6 @@ export default function NotificationWorkflowsPanel() {
                     <NodePalette
                       onAddNode={addWorkflowNode}
                       onRemoveNode={removeSelectedNode}
-                      showMiniMap={showMiniMap}
-                      onToggleMiniMap={() => setShowMiniMap((current) => !current)}
                     />
                     {hasBlockingGraphErrors && (
                       <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
@@ -7010,12 +6918,6 @@ export default function NotificationWorkflowsPanel() {
                           onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
                           onNodesChange={handleFlowNodesChange}
                         >
-                          <FlowMiniMap
-                            visible={showMiniMap}
-                            nodes={flowNodes}
-                            selectedNodeId={selectedNodeId}
-                            onClose={() => setShowMiniMap(false)}
-                          />
                           <Controls />
                           <Background gap={18} color="#e5e7eb" />
                         </ReactFlow>

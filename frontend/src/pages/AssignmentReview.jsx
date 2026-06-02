@@ -32,10 +32,10 @@ import {
 } from 'lucide-react';
 
 const ALL_TABS = [
-  { id: 'queue', label: 'Review Queue', icon: Inbox, minRole: 'reviewer' },
-  { id: 'history', label: 'History', icon: History, minRole: 'reviewer' },
+  { id: 'queue', label: 'Ticket Queue', icon: Inbox, minRole: 'reviewer' },
+  { id: 'history', label: 'Ticket History', icon: History, minRole: 'reviewer' },
   { id: 'audit', label: 'Audit', icon: ShieldCheck, minRole: 'reviewer' },
-  { id: 'daily-review', label: 'Review', icon: CalendarDays, minRole: 'admin' },
+  { id: 'daily-review', label: 'Improvements', icon: CalendarDays, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'competency-requests', label: 'Requests', icon: ShieldCheck, minRole: 'admin' },
   { id: 'prompts', label: 'Prompts', icon: FileText, minRole: 'admin' },
@@ -4773,7 +4773,7 @@ function ExcludedGroupsPicker({ autoAssign, excludedGroupIds, onChange }) {
   return (
     <div className="py-3 space-y-3">
       <p className="text-xs text-slate-500 leading-relaxed">
-        Tickets in any of the selected groups will <span className="font-semibold text-slate-700">always require manual approval</span> in the Review Queue, even when Auto-Assign is on. The LLM still produces a recommendation; an admin just has to click approve before it gets written back to FreshService.
+        Tickets in any of the selected groups will <span className="font-semibold text-slate-700">always require manual approval</span> in the Ticket Queue, even when Auto-Assign is on. The LLM still produces a recommendation; an admin just has to click approve before it gets written back to FreshService.
       </p>
 
       {!autoAssign && (
@@ -5565,7 +5565,7 @@ export default function AssignmentReview() {
             );
           })}
 
-          {/* Time-range filter — visible on Review Queue tab, integrated into the purple header */}
+          {/* Time-range filter — visible on Ticket Queue tab, integrated into the purple header */}
           {activeTab === 'queue' && (
             <>
               <div className="flex-1" />
