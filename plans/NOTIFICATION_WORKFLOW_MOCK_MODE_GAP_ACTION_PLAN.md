@@ -147,13 +147,13 @@ Done when:
   - `possible_broader_issue` rate: low and explainable.
   - New payloads: no base64 images or full contact objects.
   - Copy review: no unsupported timing promises or inappropriate playful tone.
-- [ ] Decide whether to enable `tools_enabled` canary before live sends.
+- [x] Decide whether to enable `tools_enabled` canary before live sends.
   - If yes, run a sampled canary and verify `llm_tool` step rows, tool budgets, and `submit_notification_email`.
   - If no, document why context-only is sufficient for the first live workflow.
-- [ ] Create a short go/no-go note linked to this plan and the new audit results.
+- [x] Create a short go/no-go note linked to this plan and the new audit results.
 
 Done when:
 
 - [ ] All launch gates pass.
-- [ ] The go/no-go note is written.
-- [ ] Live-send scope is explicitly chosen.
+- [x] The go/no-go note is written.
+- [x] Live-send scope is explicitly chosen.
