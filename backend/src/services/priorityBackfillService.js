@@ -26,6 +26,21 @@ class PriorityBackfillService {
       };
     }
 
+    const assignmentConfig = await prisma.assignmentConfig.findUnique({
+      where: { workspaceId },
+      select: { priorityAssessmentEnabled: true },
+    });
+    if (assignmentConfig?.priorityAssessmentEnabled === false) {
+      return {
+        skipped: true,
+        reason: 'priority_assessment_disabled',
+        workspaceId,
+        days,
+        limit,
+        candidates: [],
+      };
+    }
+
     const since = new Date(Date.now() - (days * DAY_MS));
     const tickets = await prisma.ticket.findMany({
       where: {

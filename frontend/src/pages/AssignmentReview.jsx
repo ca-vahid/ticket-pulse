@@ -5150,12 +5150,14 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
         excludedGroupIds: [],
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
-        dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false,
+        dailyReviewPreheatEnabled: false,
+        priorityAssessmentEnabled: true, priorityWritebackEnabled: true,
+        priorityAssessmentAfterHoursEnabled: false,
         ...cfg,
       });
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentAfterHoursEnabled: false });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, priorityAssessmentAfterHoursEnabled: false });
     } finally { setLoading(false); }
   }, []);
 
@@ -5196,6 +5198,28 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
           <p className="text-xs text-slate-500 mb-2">Number of technician recommendations the LLM should provide</p>
           <input type="number" min="1" max="10" value={config.maxRecommendations || 3} onChange={(e) => setConfig({ ...config, maxRecommendations: parseInt(e.target.value) || 3 })} className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         </div>
+      </ConfigSection>
+
+      <ConfigSection icon={AlertCircle} title="Priority Controls">
+        <ConfigToggle
+          label="Priority Assessment"
+          description="Persist Ticket Pulse assessed priority and allow priority-only runs. Turn off to stop workspace priority detection while assignment routing continues."
+          checked={config.priorityAssessmentEnabled !== false}
+          onChange={() => setConfig({ ...config, priorityAssessmentEnabled: !(config.priorityAssessmentEnabled !== false) })}
+          color="text-red-600"
+        />
+        <ConfigToggle
+          label="FreshService Priority Writeback"
+          description="Write assessed priority to FreshService native priority. Turn off to keep priority assessment local to Ticket Pulse."
+          checked={config.priorityWritebackEnabled !== false}
+          onChange={() => setConfig({ ...config, priorityWritebackEnabled: !(config.priorityWritebackEnabled !== false) })}
+          color="text-amber-600"
+        />
+        {config.priorityAssessmentEnabled === false && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            After-hours priority-only runs, priority backfills, local assessed-priority persistence, and FreshService priority writeback are disabled for this workspace.
+          </div>
+        )}
       </ConfigSection>
 
       {/* Section 2b: Excluded Groups — overrides auto-assign for specific FS groups. */}

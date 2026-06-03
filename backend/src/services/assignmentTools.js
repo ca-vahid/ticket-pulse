@@ -236,7 +236,7 @@ FORMAT: Plain text or simple Markdown. Use short paragraphs separated by a blank
         assessedPriority: {
           type: 'string',
           enum: ['Low', 'Medium', 'High', 'Urgent'],
-          description: 'Ticket Pulse priority assessment for this ticket. This is the source of truth that will be written back to FreshService native priority.',
+          description: 'Ticket Pulse priority assessment for this ticket. This is the source of truth for Ticket Pulse priority handling and is written back to FreshService native priority only when workspace writeback is enabled.',
         },
         priorityRationale: {
           type: 'string',

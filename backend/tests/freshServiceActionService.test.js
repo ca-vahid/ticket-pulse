@@ -249,6 +249,7 @@ describe('freshServiceActionService workspace-scoped category writeback', () => 
 describe('freshServiceActionService priority writeback', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ priorityWritebackEnabled: true });
     prismaMock.assignmentPipelineRun.update.mockResolvedValue({});
     prismaMock.ticket.update.mockResolvedValue({});
     settingsRepositoryMock.getFreshServiceConfigForWorkspace.mockResolvedValue({
@@ -299,6 +300,30 @@ describe('freshServiceActionService priority writeback', () => {
         priorityWritebackPayload: expect.objectContaining({
           dryRun: true,
           preview: 'Update ticket #222999 priority to Urgent',
+        }),
+      }),
+    });
+  });
+
+  test('marks priority writeback skipped when disabled for the workspace', async () => {
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ priorityWritebackEnabled: false });
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(priorityRun());
+
+    const result = await freshServiceActionService.executePriorityWriteback(3101, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({
+      success: true,
+      skipped: true,
+      error: 'priority_writeback_disabled',
+    }));
+    expect(freshserviceModule.createFreshServiceClient).not.toHaveBeenCalled();
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 3101 },
+      data: expect.objectContaining({
+        priorityWritebackStatus: 'skipped',
+        priorityWritebackError: 'priority_writeback_disabled',
+        priorityWritebackPayload: expect.objectContaining({
+          skippedReason: 'priority_writeback_disabled',
         }),
       }),
     });

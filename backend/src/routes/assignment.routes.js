@@ -109,6 +109,8 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
       dailyReviewRunMinute: 5,
       dailyReviewLookbackDays: 14,
       dailyReviewPreheatEnabled: false,
+      priorityAssessmentEnabled: true,
+      priorityWritebackEnabled: true,
       priorityAssessmentAfterHoursEnabled: false,
       afterHoursUrgentEscalationEnabled: false,
       afterHoursUrgentEscalationChannels: [],
@@ -129,7 +131,8 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
     autoCloseNoise, dryRunMode, excludedGroupIds,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
-    dailyReviewPreheatEnabled, priorityAssessmentAfterHoursEnabled,
+    dailyReviewPreheatEnabled, priorityAssessmentEnabled, priorityWritebackEnabled,
+    priorityAssessmentAfterHoursEnabled,
     afterHoursUrgentEscalationEnabled, afterHoursUrgentEscalationChannels,
     afterHoursUrgentEscalationEmails, afterHoursUrgentEscalationPhones,
   } = req.body;
@@ -155,6 +158,12 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (dailyReviewRunMinute !== undefined) data.dailyReviewRunMinute = Math.max(0, Math.min(59, parseInt(dailyReviewRunMinute, 10) || 0));
   if (dailyReviewLookbackDays !== undefined) data.dailyReviewLookbackDays = Math.max(1, Math.min(90, parseInt(dailyReviewLookbackDays, 10) || 14));
   if (dailyReviewPreheatEnabled !== undefined) data.dailyReviewPreheatEnabled = !!dailyReviewPreheatEnabled;
+  if (priorityAssessmentEnabled !== undefined) {
+    data.priorityAssessmentEnabled = !!priorityAssessmentEnabled;
+  }
+  if (priorityWritebackEnabled !== undefined) {
+    data.priorityWritebackEnabled = !!priorityWritebackEnabled;
+  }
   if (priorityAssessmentAfterHoursEnabled !== undefined) {
     data.priorityAssessmentAfterHoursEnabled = !!priorityAssessmentAfterHoursEnabled;
   }

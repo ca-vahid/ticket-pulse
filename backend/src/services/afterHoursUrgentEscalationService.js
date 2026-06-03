@@ -392,6 +392,8 @@ class AfterHoursUrgentEscalationService {
       prisma.assignmentConfig.findUnique({
         where: { workspaceId },
         select: {
+          priorityAssessmentEnabled: true,
+          priorityWritebackEnabled: true,
           priorityAssessmentAfterHoursEnabled: true,
         },
       }),
@@ -416,6 +418,8 @@ class AfterHoursUrgentEscalationService {
       ...policy,
       afterHoursActiveContact: activeContact,
       dependencies: {
+        priorityAssessmentEnabled: assignmentConfig?.priorityAssessmentEnabled !== false,
+        priorityWritebackEnabled: assignmentConfig?.priorityWritebackEnabled !== false,
         afterHoursPriorityAssessmentEnabled: assignmentConfig?.priorityAssessmentAfterHoursEnabled === true,
         afterHoursWorkflowRoutingEnabled: routingPolicy.afterHoursEnabled === true,
         holidaysIncluded: routingPolicy.holidaysEnabled === true,

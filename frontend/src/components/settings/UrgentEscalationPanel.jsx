@@ -403,11 +403,12 @@ export default function UrgentEscalationPanel() {
 
   const dependencies = policy?.dependencies || {};
   const priorityRunnerTone = draft?.automaticEnabled
-    ? dependencies.afterHoursPriorityAssessmentEnabled ? 'emerald' : 'blue'
+    ? dependencies.priorityAssessmentEnabled === false ? 'amber' : dependencies.afterHoursPriorityAssessmentEnabled ? 'emerald' : 'blue'
     : 'gray';
   const priorityRunnerStatus = draft?.automaticEnabled
-    ? dependencies.afterHoursPriorityAssessmentEnabled ? 'Enabled' : 'Will enable on save'
+    ? dependencies.priorityAssessmentEnabled === false ? 'Priority assessment off' : dependencies.afterHoursPriorityAssessmentEnabled ? 'Enabled' : 'Will enable on save'
     : 'Off';
+  const priorityWritebackStatus = dependencies.priorityWritebackEnabled === false ? 'FreshService writeback off' : 'FreshService writeback on';
   const workflowRoutingTone = draft?.selfServiceEnabled
     ? dependencies.afterHoursWorkflowRoutingEnabled ? 'emerald' : 'amber'
     : 'gray';
@@ -501,12 +502,18 @@ export default function UrgentEscalationPanel() {
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-3">
         <IntegratedStatusCard
           tone={priorityRunnerTone}
           label="After-hours priority assessment"
           status={priorityRunnerStatus}
-          detail="Controlled by Automatic urgent detection on this page. Saving this page turns the after-hours priority-only runner on or off."
+          detail="Controlled by Automatic urgent detection on this page. The global priority assessment control in Assignment Review must also be enabled."
+        />
+        <IntegratedStatusCard
+          tone={dependencies.priorityWritebackEnabled === false ? 'amber' : 'emerald'}
+          label="Priority writeback"
+          status={priorityWritebackStatus}
+          detail="Controlled in Assignment Review configuration. When off, urgent escalation can still notify recipients without changing FreshService native priority."
         />
         <IntegratedStatusCard
           tone={workflowRoutingTone}

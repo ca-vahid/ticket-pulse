@@ -61,6 +61,14 @@ function buildSyncPayload(actions, preview, dryRun, extras = {}) {
   return { actions, preview, dryRun, timestamp: new Date().toISOString(), ...extras };
 }
 
+async function isPriorityWritebackEnabled(workspaceId) {
+  const config = await prisma.assignmentConfig.findUnique({
+    where: { workspaceId: Number(workspaceId) },
+    select: { priorityWritebackEnabled: true },
+  });
+  return config?.priorityWritebackEnabled !== false;
+}
+
 function freshServiceErrorMessage(errorOrDetail) {
   const detail = errorOrDetail?.body || errorOrDetail?.freshserviceDetail || errorOrDetail?.response?.data || errorOrDetail;
   return detail?.description || detail?.message || errorOrDetail?.message || '';
@@ -297,6 +305,23 @@ class FreshServiceActionService {
       return { success: false, error: 'Run not found' };
     }
 
+    if (!(await isPriorityWritebackEnabled(workspaceId))) {
+      const preview = 'FreshService priority writeback is disabled for this workspace';
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          priorityWritebackStatus: 'skipped',
+          priorityWritebackError: 'priority_writeback_disabled',
+          priorityWritebackPayload: buildSyncPayload([], preview, dryRun, {
+            kind: 'priority_writeback',
+            skippedReason: 'priority_writeback_disabled',
+          }),
+        },
+      });
+      logger.info('FreshService priority sync skipped by workspace setting', { runId, workspaceId });
+      return { success: true, skipped: true, error: 'priority_writeback_disabled', preview, actions: [] };
+    }
+
     const actionPlan = await this.buildPriorityWritebackAction(run);
     const { actions, preview } = actionPlan;
     const payloadData = buildSyncPayload(actions, preview, dryRun, { kind: 'priority_writeback' });
@@ -413,6 +438,16 @@ class FreshServiceActionService {
     const fsTicketId = Number(ticket?.freshserviceTicketId);
     if (!ticket || !fsTicketId) {
       return { success: false, skipped: true, error: 'missing_fs_ticket_id' };
+    }
+
+    if (!(await isPriorityWritebackEnabled(workspaceId))) {
+      return {
+        success: true,
+        skipped: true,
+        error: 'priority_writeback_disabled',
+        preview: 'FreshService priority writeback is disabled for this workspace',
+        actions: [],
+      };
     }
 
     const parsedPriorityId = Number(priorityId);

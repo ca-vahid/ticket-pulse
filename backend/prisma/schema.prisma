@@ -843,6 +843,8 @@ model AssignmentConfig {
   // review can run with a near-warm cache. Off by default — workspaces
   // that don't use Daily Review shouldn't pay the FS API budget tax.
   dailyReviewPreheatEnabled Boolean @default(false) @map("daily_review_preheat_enabled")
+  priorityAssessmentEnabled Boolean @default(true) @map("priority_assessment_enabled")
+  priorityWritebackEnabled Boolean @default(true) @map("priority_writeback_enabled")
   priorityAssessmentAfterHoursEnabled Boolean @default(false) @map("priority_assessment_after_hours_enabled")
   afterHoursUrgentEscalationEnabled Boolean @default(false) @map("after_hours_urgent_escalation_enabled")
   afterHoursUrgentEscalationChannels String[] @default([]) @map("after_hours_urgent_escalation_channels")

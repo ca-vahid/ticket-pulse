@@ -1,6 +1,9 @@
 import { jest } from '@jest/globals';
 
 const prismaMock = {
+  assignmentConfig: {
+    findUnique: jest.fn(),
+  },
   ticket: {
     findMany: jest.fn(),
   },
@@ -35,6 +38,7 @@ const {
 describe('priorityBackfillService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ priorityAssessmentEnabled: true });
   });
 
   test('normalizes backfill windows and limits defensively', () => {
@@ -108,5 +112,20 @@ describe('priorityBackfillService', () => {
       started: [],
     }));
     expect(prismaMock.ticket.findMany).not.toHaveBeenCalled();
+  });
+
+  test('skips when workspace priority assessment is disabled', async () => {
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ priorityAssessmentEnabled: false });
+
+    const result = await priorityBackfillService.planOrStart(1, { run: true });
+
+    expect(result).toEqual(expect.objectContaining({
+      skipped: true,
+      reason: 'priority_assessment_disabled',
+      candidates: [],
+      started: [],
+    }));
+    expect(prismaMock.ticket.findMany).not.toHaveBeenCalled();
+    expect(assignmentPipelineServiceMock.runPipeline).not.toHaveBeenCalled();
   });
 });

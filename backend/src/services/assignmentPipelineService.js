@@ -29,6 +29,8 @@ import {
 import { normalizeSubmitRecommendationPayload } from './assignmentRecommendationValidation.js';
 
 const MAX_TURNS = 20;
+const PRIORITY_ASSESSMENT_DISABLED_REASON = 'priority_assessment_disabled';
+const PRIORITY_WRITEBACK_DISABLED_REASON = 'priority_writeback_disabled';
 
 function sanitizeJsonValue(value) {
   if (typeof value === 'bigint') return value.toString();
@@ -56,9 +58,16 @@ function truncateTaxonomySuggestion(value) {
   return normalized.slice(0, 120);
 }
 
-export function priorityWritebackSkipReasonForTrigger(triggerSource) {
+function isPriorityAssessmentEnabled(assignmentConfig) {
+  return assignmentConfig?.priorityAssessmentEnabled !== false;
+}
+
+export function priorityWritebackSkipReasonForTrigger(triggerSource, assignmentConfig = {}) {
   if (triggerSource === 'priority_changed') {
     return 'external_priority_change_reassessment_no_writeback';
+  }
+  if (assignmentConfig?.priorityWritebackEnabled === false) {
+    return PRIORITY_WRITEBACK_DISABLED_REASON;
   }
   return null;
 }
@@ -114,6 +123,13 @@ class AssignmentPipelineService {
       return { skipped: true, reason: 'assignment_not_enabled' };
     }
 
+    const priorityAssessmentEnabled = isPriorityAssessmentEnabled(assignmentConfig);
+    if (isPriorityAssessmentOnly && !priorityAssessmentEnabled) {
+      emit({ type: 'error', message: 'Priority assessment is disabled for this workspace' });
+      emit({ type: 'complete' });
+      return { skipped: true, reason: PRIORITY_ASSESSMENT_DISABLED_REASON };
+    }
+
     if (isPriorityAssessmentAfterHours && !assignmentConfig?.priorityAssessmentAfterHoursEnabled) {
       emit({ type: 'error', message: 'After-hours priority assessment is disabled for this workspace' });
       emit({ type: 'complete' });
@@ -149,7 +165,7 @@ class AssignmentPipelineService {
         const queuedReason = this._buildAfterHoursQueuedReason(bh.reason || 'Outside business hours', reboundFrom);
         let run;
 
-        if (assignmentConfig?.priorityAssessmentAfterHoursEnabled) {
+        if (priorityAssessmentEnabled && assignmentConfig?.priorityAssessmentAfterHoursEnabled) {
           run = await this._runAfterHoursPriorityAssessmentAndQueue({
             ticketId,
             workspaceId,
@@ -632,12 +648,18 @@ class AssignmentPipelineService {
     const assignmentConfig = await assignmentRepository.getConfig(workspaceId);
     const promptVersion = await promptRepository.getPublished(workspaceId);
     let systemPrompt = promptVersion.systemPrompt;
+    const priorityAssessmentEnabled = isPriorityAssessmentEnabled(assignmentConfig);
 
     if (assignmentConfig?.feedbackContext) {
       systemPrompt += `\n\n## Historical Admin Feedback\n${assignmentConfig.feedbackContext.slice(-4000)}`;
     }
 
     systemPrompt += '\n\n## Time Handling\nTreat the workspace current date/time supplied in the user message as the source of truth for what "today" means. Tool outputs expose ticket and decision timestamps in workspace-local time unless explicitly labeled as UTC. Agent availability includes each technician\'s own local date/time. Historical admin feedback may contain legacy UTC timestamps from older runs, so prefer current workspace-local timestamps when there is any ambiguity.';
+    if (!priorityAssessmentEnabled) {
+      systemPrompt += '\n\n## Workspace Priority Controls\nPriority assessment is disabled for this workspace. The submit_recommendation schema may still require priority fields for compatibility, but Ticket Pulse will not save those priority fields to the ticket or write them to FreshService. Do not spend extra tool calls or analysis turns only to refine priority.';
+    } else if (assignmentConfig?.priorityWritebackEnabled === false) {
+      systemPrompt += '\n\n## Workspace Priority Controls\nAssess priority for Ticket Pulse audit, but FreshService native priority writeback is disabled for this workspace. Ticket Pulse will save the assessed priority locally only.';
+    }
     if (triggerSource === 'classification_only') {
       systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category and subcategory. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory is saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields.';
     } else if (isPriorityAssessmentOnly) {
@@ -1033,7 +1055,15 @@ class AssignmentPipelineService {
 
       if (recommendation) {
         await this._persistInternalClassification(ticketId, workspaceId, recommendation);
-        await this._persistPriorityAssessment(ticketId, runId, recommendation);
+        if (priorityAssessmentEnabled) {
+          await this._persistPriorityAssessment(ticketId, runId, recommendation);
+        } else {
+          logger.info('Pipeline priority assessment persistence skipped by workspace setting', {
+            runId,
+            ticketId,
+            workspaceId,
+          });
+        }
         if (decision === 'noise_dismissed') {
           await prisma.ticket.update({
             where: { id: ticketId },
@@ -1082,7 +1112,9 @@ class AssignmentPipelineService {
       });
 
       if (recommendation && finalStatus === 'completed') {
-        const priorityWritebackSkipReason = priorityWritebackSkipReasonForTrigger(triggerSource);
+        const priorityWritebackSkipReason = priorityAssessmentEnabled
+          ? priorityWritebackSkipReasonForTrigger(triggerSource, assignmentConfig)
+          : PRIORITY_ASSESSMENT_DISABLED_REASON;
         if (priorityWritebackSkipReason) {
           await prisma.assignmentPipelineRun.update({
             where: { id: runId },
@@ -1098,7 +1130,7 @@ class AssignmentPipelineService {
           }).catch((err) => {
             logger.warn('Failed to mark priority writeback skipped', { runId, triggerSource, error: err.message });
           });
-          logger.info('FreshService priority writeback skipped for external priority-change reassessment', {
+          logger.info('FreshService priority writeback skipped', {
             runId,
             ticketId,
             triggerSource,

@@ -170,6 +170,26 @@ describe('assignmentPipelineService after-hours priority workflow', () => {
     ]));
   });
 
+  test('keeps queue-only behavior when global priority assessment is disabled', async () => {
+    assignmentRepositoryMock.getConfig.mockResolvedValue({
+      isEnabled: true,
+      priorityAssessmentEnabled: false,
+      priorityAssessmentAfterHoursEnabled: true,
+      llmModel: 'claude-sonnet-4-6-20260217',
+    });
+
+    const result = await assignmentPipelineService.runPipeline(501, 5, 'poll');
+
+    expect(result).toEqual(expect.objectContaining({ id: 8801, status: 'queued' }));
+    expect(assignmentRepositoryMock.createQueuedRun).toHaveBeenCalledWith({
+      ticketId: 501,
+      workspaceId: 5,
+      triggerSource: 'poll',
+      queuedReason: 'Outside business hours (09:00 - 17:00)',
+      reboundFrom: null,
+    });
+  });
+
   test('priority helper executes priority-only first and queues the original assignment trigger', async () => {
     const runPipelineSpy = jest.spyOn(assignmentPipelineService, 'runPipeline').mockResolvedValue({
       id: 7701,

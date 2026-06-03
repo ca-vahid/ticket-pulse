@@ -105,5 +105,7 @@ describe('assignmentPipelineService priority persistence', () => {
     expect(priorityWritebackSkipReasonForTrigger('poll')).toBeNull();
     expect(priorityWritebackSkipReasonForTrigger('priority_assessment_only')).toBeNull();
     expect(priorityWritebackSkipReasonForTrigger('priority_assessment_after_hours')).toBeNull();
+    expect(priorityWritebackSkipReasonForTrigger('poll', { priorityWritebackEnabled: false }))
+      .toBe('priority_writeback_disabled');
   });
 });
