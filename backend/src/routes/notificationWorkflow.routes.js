@@ -13,7 +13,12 @@ import {
   notificationVariableCatalog,
 } from '../services/notificationWorkflowDefinition.js';
 import {
+  createWorkspaceEmailBlock,
+  deleteWorkspaceEmailBlock,
   getWorkspaceSignature,
+  listWorkspaceEmailBlocks,
+  setDefaultWorkspaceEmailBlock,
+  updateWorkspaceEmailBlock,
   upsertWorkspaceSignature,
 } from '../services/notificationWorkflowSignatureService.js';
 import {
@@ -669,6 +674,50 @@ router.put(
       success: true,
       data: await getWorkspaceSignature(signature.workspaceId),
     });
+  }),
+);
+
+router.get(
+  '/email-blocks',
+  asyncHandler(async (req, res) => {
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.json({ success: true, data: blocks });
+  }),
+);
+
+router.post(
+  '/email-blocks',
+  asyncHandler(async (req, res) => {
+    const block = await createWorkspaceEmailBlock(req.workspaceId, req.body || {}, requestActor(req));
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.status(201).json({ success: true, data: { ...blocks, selectedId: block.id } });
+  }),
+);
+
+router.put(
+  '/email-blocks/:blockId',
+  asyncHandler(async (req, res) => {
+    const block = await updateWorkspaceEmailBlock(req.workspaceId, parseId(req.params.blockId, 'email block id'), req.body || {}, requestActor(req));
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.json({ success: true, data: { ...blocks, selectedId: block.id } });
+  }),
+);
+
+router.delete(
+  '/email-blocks/:blockId',
+  asyncHandler(async (req, res) => {
+    await deleteWorkspaceEmailBlock(req.workspaceId, parseId(req.params.blockId, 'email block id'));
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.json({ success: true, data: { ...blocks, selectedId: null } });
+  }),
+);
+
+router.post(
+  '/email-blocks/:blockId/default',
+  asyncHandler(async (req, res) => {
+    const block = await setDefaultWorkspaceEmailBlock(req.workspaceId, parseId(req.params.blockId, 'email block id'), requestActor(req));
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.json({ success: true, data: { ...blocks, selectedId: block.id } });
   }),
 );
 

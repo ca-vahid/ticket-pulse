@@ -15,8 +15,7 @@ import {
   validateLlmOutputSchema,
 } from './notificationWorkflowDefinition.js';
 import {
-  appendSignatureToEmail,
-  getWorkspaceSignature,
+  applyWorkspaceEmailBranding,
 } from './notificationWorkflowSignatureService.js';
 import { enrichEventContextWithPublicStatusUrl } from './publicTicketStatusService.js';
 import {
@@ -786,22 +785,18 @@ export async function finalizeWorkflowSendEmail({
   actionLinkRenderMode = 'live',
   workflowScheduleMode = null,
   allowSignatureFailure = false,
+  allowBrandingFailure = allowSignatureFailure,
 } = {}) {
   const emailWithLinks = appendWorkflowActionLinksToEmail(email, eventContext, nodeData, {
     actionLinkRenderMode,
     workflowScheduleMode,
   });
-  let signature = null;
-  try {
-    signature = await getWorkspaceSignature(workflow.workspaceId);
-  } catch (error) {
-    if (!allowSignatureFailure) throw error;
-    logger.debug('Skipping notification signature because it could not be loaded', {
-      workspaceId: workflow.workspaceId,
-      error: error.message,
-    });
-  }
-  return appendSignatureToEmail(emailWithLinks, signature);
+  return applyWorkspaceEmailBranding({
+    workspaceId: workflow?.workspaceId,
+    email: emailWithLinks,
+    nodeData,
+    allowFailure: allowBrandingFailure,
+  });
 }
 
 function schemaTypeMatches(value, type) {
@@ -1600,6 +1595,21 @@ async function executeNode({
     const htmlBody = email.html || null;
     const textBody = email.text || stripHtml(htmlBody);
     const actionLinks = compactActionLinkDiagnostics(email.actionLinks || {});
+    const branding = email.branding || {
+      header: {
+        requested: node.data?.includeHeader === true,
+        applied: email.headerApplied === true,
+        blockId: email.headerBlockId || null,
+        blockName: email.headerBlockName || null,
+      },
+      footer: {
+        requested: node.data?.includeFooter !== false,
+        applied: email.footerApplied === true,
+        blockId: email.footerBlockId || null,
+        blockName: email.footerBlockName || null,
+      },
+      warnings: email.brandingWarnings || [],
+    };
 
     if (!htmlBody && !textBody) {
       return {
@@ -1618,6 +1628,14 @@ async function executeNode({
       textBody,
       notificationType: node.data?.notificationType || eventContext.event?.type || workflow.triggerType,
       actionLinks,
+      branding,
+      brandingWarnings: email.brandingWarnings || branding.warnings || [],
+      headerApplied: email.headerApplied === true,
+      headerBlockId: email.headerBlockId || null,
+      headerBlockName: email.headerBlockName || null,
+      footerApplied: email.footerApplied === true,
+      footerBlockId: email.footerBlockId || null,
+      footerBlockName: email.footerBlockName || null,
     };
 
     if (toRecipients.length === 0) {
@@ -1678,6 +1696,8 @@ async function executeNode({
             nodeId: node.id,
             event: eventContext.event,
             actionLinks: output.actionLinks || {},
+            branding: output.branding || {},
+            brandingWarnings: output.brandingWarnings || [],
           }),
         },
       });

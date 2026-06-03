@@ -116,6 +116,18 @@ describe('notification workflow definitions', () => {
     }
   });
 
+  test('default send email nodes include footer branding and leave headers off', () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+
+    expect(sendNode.data).toEqual(expect.objectContaining({
+      includeHeader: false,
+      headerBlockId: null,
+      includeFooter: true,
+      footerBlockId: null,
+    }));
+  });
+
   test('validation rejects trigger mismatches', () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created');
     const result = validateWorkflowDefinition(definition, { triggerType: 'ticket.assigned' });

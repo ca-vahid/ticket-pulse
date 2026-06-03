@@ -78,12 +78,12 @@ export const DEFAULT_LLM_OUTPUT_SCHEMA = {
     html: {
       type: 'string',
       title: 'HTML body',
-      description: 'Final rich HTML email body without the workspace signature.',
+      description: 'Final rich HTML email body without workspace headers, footers, or signatures.',
     },
     text: {
       type: 'string',
       title: 'Plain text body',
-      description: 'Plain-text fallback body without the workspace signature.',
+      description: 'Plain-text fallback body without workspace headers, footers, or signatures.',
     },
     confidence: {
       type: 'string',
@@ -559,6 +559,10 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
           appendPublicStatusLink: true,
           appendRaiseUrgencyLink: scheduleMode === 'standard' && triggerType === 'ticket.created',
           appendAfterHoursSupportLink: scheduleMode === 'after_hours' && triggerType === 'ticket.created',
+          includeHeader: false,
+          headerBlockId: null,
+          includeFooter: true,
+          footerBlockId: null,
         },
       },
       {

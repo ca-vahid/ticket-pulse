@@ -71,6 +71,7 @@ model Workspace {
   notificationWorkflowRuns NotificationWorkflowRun[]
   notificationWorkflowStepRuns NotificationWorkflowStepRun[]
   notificationEmailSignature NotificationEmailSignature?
+  notificationEmailBlocks NotificationEmailBlock[]
   publicTicketStatusSettings PublicTicketStatusSettings?
   publicTicketStatusLinks PublicTicketStatusLink[]
   publicTicketStatusViews PublicTicketStatusView[]
@@ -1179,6 +1180,26 @@ model NotificationEmailSignature {
 
   @@map("notification_email_signatures")
   @@index([workspaceId])
+}
+
+model NotificationEmailBlock {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  type        String    @db.VarChar(20)
+  name        String    @db.VarChar(160)
+  enabled     Boolean   @default(true)
+  isDefault   Boolean   @default(false) @map("is_default")
+  html        String?   @db.Text
+  text        String?   @db.Text
+  updatedBy   String?   @db.VarChar(255) @map("updated_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("notification_email_blocks")
+  @@index([workspaceId])
+  @@index([workspaceId, type])
+  @@index([workspaceId, type, isDefault])
 }
 
 model PublicTicketStatusSettings {

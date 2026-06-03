@@ -33,6 +33,13 @@ const getNotificationLlmToolPolicyMock = jest.fn();
 const processDeliveryMock = jest.fn();
 const finalizeWorkflowSendEmailMock = jest.fn();
 const getSendGridConfigMock = jest.fn();
+const listWorkspaceEmailBlocksMock = jest.fn();
+const createWorkspaceEmailBlockMock = jest.fn();
+const updateWorkspaceEmailBlockMock = jest.fn();
+const deleteWorkspaceEmailBlockMock = jest.fn();
+const setDefaultWorkspaceEmailBlockMock = jest.fn();
+const getWorkspaceSignatureMock = jest.fn();
+const upsertWorkspaceSignatureMock = jest.fn();
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
   default: prismaMock,
@@ -62,8 +69,13 @@ jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({
 }));
 
 jest.unstable_mockModule('../src/services/notificationWorkflowSignatureService.js', () => ({
-  getWorkspaceSignature: jest.fn(),
-  upsertWorkspaceSignature: jest.fn(),
+  createWorkspaceEmailBlock: createWorkspaceEmailBlockMock,
+  deleteWorkspaceEmailBlock: deleteWorkspaceEmailBlockMock,
+  getWorkspaceSignature: getWorkspaceSignatureMock,
+  listWorkspaceEmailBlocks: listWorkspaceEmailBlocksMock,
+  setDefaultWorkspaceEmailBlock: setDefaultWorkspaceEmailBlockMock,
+  updateWorkspaceEmailBlock: updateWorkspaceEmailBlockMock,
+  upsertWorkspaceSignature: upsertWorkspaceSignatureMock,
 }));
 
 jest.unstable_mockModule('../src/services/notificationWorkflowPolicyService.js', () => ({
@@ -177,6 +189,21 @@ describe('notification workflow routes', () => {
     getSendGridConfigMock.mockResolvedValue({ configured: true, mode: 'mock' });
     processDeliveryMock.mockResolvedValue({ success: true, providerMessageId: 'sg-test' });
     finalizeWorkflowSendEmailMock.mockImplementation(async ({ email }) => email);
+    listWorkspaceEmailBlocksMock.mockResolvedValue({
+      items: [
+        { id: 11, workspaceId: 1, type: 'header', name: 'Default header', enabled: true, isDefault: true, html: '<p>Header</p>', text: 'Header' },
+        { id: 12, workspaceId: 1, type: 'footer', name: 'Default footer', enabled: true, isDefault: true, html: '<p>Footer</p>', text: 'Footer' },
+      ],
+      headers: [{ id: 11, workspaceId: 1, type: 'header', name: 'Default header', enabled: true, isDefault: true, html: '<p>Header</p>', text: 'Header' }],
+      footers: [{ id: 12, workspaceId: 1, type: 'footer', name: 'Default footer', enabled: true, isDefault: true, html: '<p>Footer</p>', text: 'Footer' }],
+      maxHtmlBytes: 524288,
+    });
+    createWorkspaceEmailBlockMock.mockResolvedValue({ id: 13, workspaceId: 1, type: 'footer', name: 'Alt footer' });
+    updateWorkspaceEmailBlockMock.mockResolvedValue({ id: 12, workspaceId: 1, type: 'footer', name: 'Updated footer' });
+    deleteWorkspaceEmailBlockMock.mockResolvedValue({ id: 12, workspaceId: 1, type: 'footer', name: 'Deleted footer' });
+    setDefaultWorkspaceEmailBlockMock.mockResolvedValue({ id: 12, workspaceId: 1, type: 'footer', name: 'Default footer' });
+    getWorkspaceSignatureMock.mockResolvedValue({ enabled: true, html: '<p>Footer</p>', text: 'Footer', maxHtmlBytes: 524288 });
+    upsertWorkspaceSignatureMock.mockResolvedValue({ workspaceId: 1 });
     repositoryMock.getWorkflow.mockResolvedValue({
       id: 7,
       workspaceId: 1,
@@ -199,6 +226,98 @@ describe('notification workflow routes', () => {
       enabled: true,
       mode: 'context_only',
     });
+  });
+
+  test('email block routes list workspace-scoped blocks', async () => {
+    const response = await request(buildApp(3))
+      .get('/api/notification-workflows/email-blocks')
+      .expect(200);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.headers).toHaveLength(1);
+    expect(listWorkspaceEmailBlocksMock).toHaveBeenCalledWith(3);
+  });
+
+  test('email block routes create update default and delete blocks', async () => {
+    await request(buildApp())
+      .post('/api/notification-workflows/email-blocks')
+      .send({ type: 'footer', name: 'Alt footer', html: '<p>Alt</p>' })
+      .expect(201);
+    expect(createWorkspaceEmailBlockMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ type: 'footer', name: 'Alt footer' }),
+      expect.objectContaining({ email: 'admin@example.com' }),
+    );
+
+    await request(buildApp())
+      .put('/api/notification-workflows/email-blocks/12')
+      .send({ name: 'Updated footer', enabled: false })
+      .expect(200);
+    expect(updateWorkspaceEmailBlockMock).toHaveBeenCalledWith(
+      1,
+      12,
+      expect.objectContaining({ name: 'Updated footer', enabled: false }),
+      expect.objectContaining({ email: 'admin@example.com' }),
+    );
+
+    await request(buildApp())
+      .post('/api/notification-workflows/email-blocks/12/default')
+      .expect(200);
+    expect(setDefaultWorkspaceEmailBlockMock).toHaveBeenCalledWith(
+      1,
+      12,
+      expect.objectContaining({ email: 'admin@example.com' }),
+    );
+
+    await request(buildApp())
+      .delete('/api/notification-workflows/email-blocks/12')
+      .expect(200);
+    expect(deleteWorkspaceEmailBlockMock).toHaveBeenCalledWith(1, 12);
+  });
+
+  test('email block routes return not found when a block is outside the workspace scope', async () => {
+    const error = new Error('Email branding block not found');
+    error.statusCode = 404;
+    updateWorkspaceEmailBlockMock.mockRejectedValueOnce(error);
+
+    const response = await request(buildApp(2))
+      .put('/api/notification-workflows/email-blocks/12')
+      .send({ name: 'Wrong workspace' })
+      .expect(404);
+
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toBe('Email branding block not found');
+    expect(updateWorkspaceEmailBlockMock).toHaveBeenCalledWith(
+      2,
+      12,
+      expect.objectContaining({ name: 'Wrong workspace' }),
+      expect.any(Object),
+    );
+  });
+
+  test('legacy signature routes still read and write the default footer shape', async () => {
+    const getResponse = await request(buildApp())
+      .get('/api/notification-workflows/signature')
+      .expect(200);
+
+    expect(getResponse.body.data).toEqual(expect.objectContaining({
+      enabled: true,
+      html: '<p>Footer</p>',
+      text: 'Footer',
+    }));
+    expect(getWorkspaceSignatureMock).toHaveBeenCalledWith(1);
+
+    const putResponse = await request(buildApp())
+      .put('/api/notification-workflows/signature')
+      .send({ enabled: true, html: '<p>Updated</p>' })
+      .expect(200);
+
+    expect(putResponse.body.data).toEqual(expect.objectContaining({ enabled: true }));
+    expect(upsertWorkspaceSignatureMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ enabled: true, html: '<p>Updated</p>' }),
+      expect.objectContaining({ email: 'admin@example.com' }),
+    );
   });
 
   test('preview-tickets searches numeric input as a FreshService ticket number', async () => {
@@ -441,5 +560,129 @@ describe('notification workflow routes', () => {
       id: 900,
       recipient: 'admin@example.com',
     }));
+  });
+
+  test('replays mock audit test email with finalized header and footer content', async () => {
+    finalizeWorkflowSendEmailMock.mockResolvedValueOnce({
+      subject: 'Ticket #225001 received',
+      html: '<div class="tp-header">Workspace header</div><p>We received it.</p><div class="tp-footer">Alternate footer</div>',
+      text: 'Workspace header\n\nWe received it.\n\nAlternate footer',
+      branding: {
+        header: {
+          requested: true,
+          applied: true,
+          blockId: 31,
+          blockName: 'Workspace header',
+        },
+        footer: {
+          requested: true,
+          applied: true,
+          blockId: 41,
+          blockName: 'Alternate footer',
+        },
+      },
+    });
+    prismaMock.notificationWorkflowRun.findFirst.mockResolvedValueOnce({
+      id: 78,
+      workspaceId: 1,
+      workflowId: 7,
+      eventType: 'ticket.created',
+      eventContext: {
+        event: { type: 'ticket.created' },
+        availability: { isBusinessHours: false, isAfterHours: true },
+      },
+      workflow: {
+        id: 7,
+        workspaceId: 1,
+        name: 'Ticket arrived after-hours / holiday',
+        key: 'ticket_created_after_hours',
+        triggerType: 'ticket.created',
+        publishedVersion: 1,
+        publishedDefinition: {
+          metadata: { scheduleMode: 'after_hours' },
+          nodes: [
+            {
+              id: 'send',
+              type: 'send_email',
+              data: {
+                includeHeader: true,
+                headerBlockId: 31,
+                includeFooter: true,
+                footerBlockId: 41,
+              },
+            },
+          ],
+        },
+      },
+      ticket: {
+        id: 501,
+        assessedPriority: 'High',
+        priority: 3,
+      },
+      steps: [
+        {
+          id: 801,
+          nodeType: 'recipient_resolver',
+          output: { recipients: { to: ['requester@example.com'], cc: [], bcc: [] } },
+        },
+        {
+          id: 802,
+          nodeType: 'template_render',
+          output: {
+            email: {
+              subject: 'Ticket #225001 received',
+              html: '<p>We received it.</p>',
+              text: 'We received it.',
+            },
+          },
+        },
+        {
+          id: 803,
+          nodeId: 'send',
+          nodeType: 'send_email',
+          output: { skipped: true, reason: 'Mock delivery' },
+        },
+      ],
+      deliveries: [],
+    });
+
+    const response = await request(buildApp())
+      .post('/api/notification-workflows/audits/TP-NWF-78/send-test-email')
+      .send({})
+      .expect(200);
+
+    expect(response.body.success).toBe(true);
+    expect(finalizeWorkflowSendEmailMock).toHaveBeenCalledWith(expect.objectContaining({
+      nodeData: expect.objectContaining({
+        includeHeader: true,
+        headerBlockId: 31,
+        includeFooter: true,
+        footerBlockId: 41,
+      }),
+      workflowScheduleMode: 'after_hours',
+    }));
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        workflowRunId: 78,
+        workflowStepRunId: 803,
+        ticketId: 501,
+        recipient: 'admin@example.com',
+        subject: '[TEST] Ticket #225001 received',
+        htmlBody: expect.stringContaining('Workspace header'),
+        textBody: expect.stringContaining('Alternate footer'),
+        payload: expect.objectContaining({
+          mockAuditReplay: true,
+          auditId: 'TP-NWF-78',
+          originalRecipients: expect.objectContaining({
+            to: ['requester@example.com'],
+          }),
+        }),
+      }),
+    }));
+    const createdDelivery = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(createdDelivery.htmlBody).toContain('We received it.');
+    expect(createdDelivery.htmlBody).toContain('Alternate footer');
+    expect(createdDelivery.htmlBody.indexOf('Workspace header')).toBeLessThan(createdDelivery.htmlBody.indexOf('We received it.'));
+    expect(createdDelivery.htmlBody.indexOf('We received it.')).toBeLessThan(createdDelivery.htmlBody.indexOf('Alternate footer'));
   });
 });

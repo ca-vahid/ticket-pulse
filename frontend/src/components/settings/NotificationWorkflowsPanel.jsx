@@ -161,12 +161,12 @@ const DEFAULT_LLM_OUTPUT_SCHEMA = {
     html: {
       type: 'string',
       title: 'HTML body',
-      description: 'Final rich HTML email body without the workspace signature.',
+      description: 'Final rich HTML email body without workspace headers, footers, or signatures.',
     },
     text: {
       type: 'string',
       title: 'Plain text body',
-      description: 'Plain-text fallback body without the workspace signature.',
+      description: 'Plain-text fallback body without workspace headers, footers, or signatures.',
     },
     confidence: {
       type: 'string',
@@ -1271,6 +1271,10 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
       appendPublicStatusLink: true,
       appendRaiseUrgencyLink: triggerType === 'ticket.created',
       appendAfterHoursSupportLink: false,
+      includeHeader: false,
+      headerBlockId: null,
+      includeFooter: true,
+      footerBlockId: null,
     };
   }
   if (type === 'stop') {
@@ -1767,6 +1771,23 @@ function collectPreviewIssues(preview, steps, email, recipients) {
       });
     }
   }
+  for (const [key, diagnostic] of Object.entries(email?.branding || {})) {
+    if (!['header', 'footer'].includes(key) || !diagnostic?.requested) continue;
+    const label = key === 'header' ? 'Header branding block' : 'Footer/sign-off branding block';
+    if (diagnostic.warning) {
+      issues.push({
+        tone: 'amber',
+        title: `${label} warning`,
+        detail: diagnostic.warning,
+      });
+    } else if (diagnostic.skipped && diagnostic.reason) {
+      issues.push({
+        tone: key === 'header' ? 'gray' : 'amber',
+        title: `${label} skipped`,
+        detail: diagnostic.reason,
+      });
+    }
+  }
   return issues;
 }
 
@@ -1810,6 +1831,44 @@ function ActionLinkDiagnostics({ diagnostics }) {
               {tone === 'red' && diagnostic.url && (
                 <div className="mt-1 truncate font-mono text-[10px] opacity-70">{diagnostic.url}</div>
               )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BrandingDiagnostics({ branding }) {
+  const items = [
+    ['header', 'Header'],
+    ['footer', 'Footer / sign-off'],
+  ]
+    .map(([key, label]) => ({ key, label, diagnostic: branding?.[key] }))
+    .filter((item) => item.diagnostic?.requested);
+  if (!items.length) return null;
+  return (
+    <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">Branding</div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {items.map(({ key, label, diagnostic }) => {
+          const color = diagnostic.applied
+            ? diagnostic.fallback
+              ? 'border-blue-200 bg-blue-50 text-blue-800'
+              : 'border-emerald-200 bg-white text-emerald-800'
+            : 'border-amber-200 bg-amber-50 text-amber-800';
+          return (
+            <div key={key} className={cls('rounded-md border px-3 py-2 text-xs', color)}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">{label}</span>
+                <span className="rounded-full bg-white/70 px-2 py-0.5 font-semibold">
+                  {diagnostic.applied ? (diagnostic.fallback ? 'Default used' : 'Applied') : 'Skipped'}
+                </span>
+              </div>
+              <div className="mt-1 leading-5">
+                {diagnostic.blockName || diagnostic.reason || 'Workspace default'}
+              </div>
+              {diagnostic.warning && <div className="mt-1 text-[11px] font-medium">{diagnostic.warning}</div>}
             </div>
           );
         })}
@@ -2737,6 +2796,10 @@ function PreviewModal({
                     {email.actionLinks && (
                       <ActionLinkDiagnostics diagnostics={email.actionLinks} />
                     )}
+                    {email.branding && (
+                      <BrandingDiagnostics branding={email.branding} />
+                    )}
+
                     <div className="rounded-md bg-gray-50 p-3 text-xs text-gray-600">
                       {auditId && <div><span className="font-semibold text-gray-800">Audit ID:</span> {auditId}</div>}
                       <div><span className="font-semibold text-gray-800">Original To:</span> {(recipients.to || []).join(', ') || 'none'}</div>
@@ -2777,18 +2840,104 @@ function PreviewModal({
   );
 }
 
-function SignaturePanel({
-  signature,
+const EMPTY_EMAIL_BLOCKS = {
+  items: [],
+  headers: [],
+  footers: [],
+  maxHtmlBytes: 524288,
+};
+
+function normalizeEmailBlocksCollection(value = {}) {
+  const items = Array.isArray(value.items) ? value.items : [];
+  const headers = Array.isArray(value.headers) ? value.headers : items.filter((item) => item.type === 'header');
+  const footers = Array.isArray(value.footers) ? value.footers : items.filter((item) => item.type === 'footer');
+  return {
+    items,
+    headers,
+    footers,
+    maxHtmlBytes: value.maxHtmlBytes || 524288,
+  };
+}
+
+function emailBlockDraftFromBlock(block = null, type = 'footer') {
+  return {
+    id: block?.id || null,
+    type: block?.type || type,
+    name: block?.name || (type === 'header' ? 'New header' : 'New footer'),
+    enabled: block?.enabled !== false,
+    isDefault: block?.isDefault === true,
+    html: block?.html || '',
+    text: block?.text || '',
+  };
+}
+
+function blockTypeLabel(type) {
+  return type === 'header' ? 'Header' : 'Footer / sign-off';
+}
+
+function EmailBlockListGroup({ title, emptyText, blocks, selectedId, onSelect }) {
+  return (
+    <div>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+      {blocks.length === 0 ? (
+        <div className="rounded-md border border-dashed border-slate-200 bg-white px-3 py-4 text-xs text-slate-500">{emptyText}</div>
+      ) : (
+        <div className="space-y-2">
+          {blocks.map((block) => (
+            <button
+              key={block.id}
+              type="button"
+              onClick={() => onSelect(block.id)}
+              className={cls(
+                'w-full rounded-md border px-3 py-2 text-left transition',
+                selectedId === block.id
+                  ? 'border-blue-300 bg-blue-50 text-blue-950 shadow-sm'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/50',
+              )}
+            >
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="truncate text-sm font-semibold">{block.name}</span>
+                <span className={cls(
+                  'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                  block.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
+                )}
+                >
+                  {block.enabled ? 'On' : 'Off'}
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-semibold uppercase tracking-wide">
+                {block.isDefault && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-700">Default</span>}
+                {!String(block.html || block.text || '').trim() && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">Empty</span>}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmailBrandingPanel({
+  blocks,
+  selectedBlockId,
   draft,
   saving,
   message,
+  onSelect,
   onChange,
   onSave,
+  onCreate,
+  onDuplicate,
+  onDelete,
+  onSetDefault,
   onImport,
 }) {
-  const htmlBytes = new Blob([draft.html || '']).size;
-  const maxBytes = signature?.maxHtmlBytes || 524288;
+  const collection = normalizeEmailBlocksCollection(blocks);
+  const htmlBytes = new Blob([draft?.html || '']).size;
+  const maxBytes = collection.maxHtmlBytes || 524288;
   const tooLarge = htmlBytes > maxBytes;
+  const selectedBlock = collection.items.find((item) => item.id === selectedBlockId) || null;
+  const disabledOrEmpty = !draft || tooLarge || !String(draft.name || '').trim();
 
   return (
     <section className="min-h-0 flex-1 overflow-auto bg-white px-6 py-4">
@@ -2796,78 +2945,65 @@ function SignaturePanel({
         <div>
           <div className="flex items-center gap-2">
             <Mail className="h-4 w-4 text-slate-700" />
-            <h3 className="text-sm font-semibold text-slate-950">Workspace signature</h3>
-            <span className={cls(
-              'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-              draft.enabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600',
-            )}
-            >
-              {draft.enabled ? 'On' : 'Off'}
+            <h3 className="text-sm font-semibold text-slate-950">Email Branding</h3>
+            <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700">
+              {collection.headers.length} headers / {collection.footers.length} footers
             </span>
           </div>
-          <p className="mt-1 text-xs text-slate-500">This signature is appended to workflow emails for the current workspace.</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Reusable workspace headers and footers are added after the LLM or template writes the main message body.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-            <UploadCloud className="h-4 w-4" />
-            Upload HTML
-            <input
-              type="file"
-              accept=".html,.htm,text/html"
-              onChange={(event) => onImport(event.target.files?.[0])}
-              className="hidden"
-            />
-          </label>
+          <button
+            type="button"
+            onClick={() => onCreate('header')}
+            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+          >
+            <Plus className="h-4 w-4" />
+            Header
+          </button>
+          <button
+            type="button"
+            onClick={() => onCreate('footer')}
+            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+          >
+            <Plus className="h-4 w-4" />
+            Footer
+          </button>
           <button
             type="button"
             onClick={onSave}
-            disabled={saving || tooLarge}
+            disabled={saving || disabledOrEmpty}
             className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
           >
             {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save signature
+            Save block
           </button>
         </div>
       </div>
 
-      <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(360px,0.95fr)_minmax(420px,1.05fr)]">
+      <div className="grid min-h-0 gap-4 xl:grid-cols-[280px_minmax(420px,0.95fr)_minmax(420px,1.05fr)]">
+        <aside className="min-h-0 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <div className="settings-scrollbar max-h-[680px] space-y-5 overflow-auto pr-1">
+            <EmailBlockListGroup
+              title="Headers"
+              emptyText="No headers configured. Headers are optional and appear above the generated body."
+              blocks={collection.headers}
+              selectedId={selectedBlockId}
+              onSelect={onSelect}
+            />
+            <EmailBlockListGroup
+              title="Footers / Sign-offs"
+              emptyText="No footers configured. Existing signatures are backfilled as the default footer."
+              blocks={collection.footers}
+              selectedId={selectedBlockId}
+              onSelect={onSelect}
+            />
+          </div>
+        </aside>
+
         <section className="min-h-0 rounded-md border border-slate-200 bg-slate-50 p-4">
-          <label className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-700">
-            <input
-              type="checkbox"
-              checked={draft.enabled}
-              onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600"
-            />
-              Enable workspace signature
-          </label>
-          <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
-            <span>HTML source</span>
-            <span className={tooLarge ? 'font-semibold text-red-600' : ''}>{Math.round(htmlBytes / 1024)} KB / {Math.round(maxBytes / 1024)} KB</span>
-          </div>
-          <div className="overflow-hidden rounded-md border border-gray-200">
-            <MonacoEditor
-              height="360px"
-              defaultLanguage="html"
-              value={draft.html || ''}
-              onChange={(value) => onChange({ ...draft, html: value || '', text: draft.text || stripHtmlClient(value || '') })}
-              options={{
-                minimap: { enabled: false },
-                wordWrap: 'on',
-                fontSize: 12,
-                lineNumbers: 'off',
-                scrollBeyondLastLine: false,
-              }}
-            />
-          </div>
-          <label className="mt-3 block text-xs font-medium uppercase text-gray-500">Plain text fallback</label>
-          <textarea
-            value={draft.text || ''}
-            onChange={(event) => onChange({ ...draft, text: event.target.value })}
-            className="mt-1 h-24 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-          />
-        </section>
-        <section className="min-h-0 rounded-md border border-slate-200 bg-white p-4">
           {message && (
             <div className={cls(
               'mb-3 rounded-md border px-3 py-2 text-sm',
@@ -2877,22 +3013,257 @@ function SignaturePanel({
               {message.text}
             </div>
           )}
+          {draft ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                <label className="block text-xs font-medium uppercase text-gray-500">
+                  Name
+                  <input
+                    value={draft.name || ''}
+                    onChange={(event) => onChange({ ...draft, name: event.target.value })}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+                <label className="block text-xs font-medium uppercase text-gray-500">
+                  Type
+                  <select
+                    value={draft.type || 'footer'}
+                    onChange={(event) => onChange({ ...draft, type: event.target.value })}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="header">Header</option>
+                    <option value="footer">Footer / sign-off</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={draft.enabled !== false}
+                    onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                  />
+                  Enabled
+                </label>
+                <button
+                  type="button"
+                  onClick={() => onSetDefault(draft)}
+                  disabled={!selectedBlock?.id || selectedBlock.isDefault}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {selectedBlock?.isDefault ? 'Default' : 'Set default'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDuplicate(draft)}
+                  disabled={!selectedBlock?.id}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <Clipboard className="h-4 w-4" />
+                  Duplicate
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(draft)}
+                  disabled={!selectedBlock?.id}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  <XCircle className="h-4 w-4" />
+                  Delete
+                </button>
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                  <UploadCloud className="h-4 w-4" />
+                  Upload HTML
+                  <input
+                    type="file"
+                    accept=".html,.htm,text/html"
+                    onChange={(event) => onImport(event.target.files?.[0])}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-900">
+                {blockTypeLabel(draft.type)} blocks are deterministic. The LLM and Liquid templates should generate only the main email body.
+              </div>
+
+              <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                <span>HTML source</span>
+                <span className={tooLarge ? 'font-semibold text-red-600' : ''}>{Math.round(htmlBytes / 1024)} KB / {Math.round(maxBytes / 1024)} KB</span>
+              </div>
+              <div className="mt-1 overflow-hidden rounded-md border border-gray-200">
+                <MonacoEditor
+                  height="320px"
+                  defaultLanguage="html"
+                  value={draft.html || ''}
+                  onChange={(value) => onChange({ ...draft, html: value || '', text: draft.text || stripHtmlClient(value || '') })}
+                  options={{
+                    minimap: { enabled: false },
+                    wordWrap: 'on',
+                    fontSize: 12,
+                    lineNumbers: 'off',
+                    scrollBeyondLastLine: false,
+                  }}
+                />
+              </div>
+              <label className="mt-3 block text-xs font-medium uppercase text-gray-500">Plain text fallback</label>
+              <textarea
+                value={draft.text || ''}
+                onChange={(event) => onChange({ ...draft, text: event.target.value })}
+                className="mt-1 h-24 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </>
+          ) : (
+            <div className="flex min-h-[420px] items-center justify-center rounded-md border border-dashed border-slate-200 bg-white text-sm text-slate-500">
+              Create a header or footer to begin.
+            </div>
+          )}
+        </section>
+
+        <section className="min-h-0 rounded-md border border-slate-200 bg-white p-4">
           {tooLarge && (
             <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                Signature HTML is too large. Reduce embedded image size before saving.
+              Branding HTML is too large. Reduce embedded image size before saving.
             </div>
           )}
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Preview</div>
-          <div className="min-h-[360px] rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-800">
-            {draft.html ? (
+          <div className="min-h-[420px] rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-800">
+            {draft?.html ? (
               <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(draft.html) }} />
             ) : (
-              <div className="flex h-64 items-center justify-center text-gray-500">Upload or paste signature HTML.</div>
+              <div className="flex h-64 items-center justify-center text-gray-500">Upload or paste HTML for this block.</div>
             )}
           </div>
         </section>
       </div>
     </section>
+  );
+}
+
+function selectedBlockWarning(blocks, selectedId, typeLabel) {
+  if (!selectedId) return null;
+  const block = blocks.find((item) => String(item.id) === String(selectedId));
+  if (!block) return `Selected ${typeLabel} is missing. The workflow will use the workspace default if available.`;
+  if (block.enabled === false) return `Selected ${typeLabel} "${block.name}" is disabled. The workflow will use the workspace default if available.`;
+  if (!String(block.html || block.text || '').trim()) return `Selected ${typeLabel} "${block.name}" is empty. The workflow will use the workspace default if available.`;
+  return null;
+}
+
+function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS, onChange }) {
+  const collection = normalizeEmailBlocksCollection(blocks);
+  const includeHeader = nodeData.includeHeader === true;
+  const includeFooter = nodeData.includeFooter !== false;
+  const headerBlockId = nodeData.headerBlockId || '';
+  const footerBlockId = nodeData.footerBlockId || '';
+  const headerWarning = includeHeader ? selectedBlockWarning(collection.headers, headerBlockId, 'header') : null;
+  const footerWarning = includeFooter ? selectedBlockWarning(collection.footers, footerBlockId, 'footer/sign-off') : null;
+
+  const renderSelect = ({ type, enabled, selectedId, items, defaultLabel, onSelect }) => (
+    <select
+      value={selectedId || ''}
+      onChange={(event) => onSelect(event.target.value ? Number.parseInt(event.target.value, 10) : null)}
+      disabled={!enabled}
+      className="mt-2 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50 disabled:text-gray-400"
+    >
+      <option value="">{defaultLabel}</option>
+      {items.map((block) => (
+        <option key={block.id} value={block.id}>
+          {block.name}{block.isDefault ? ' (default)' : ''}{block.enabled === false ? ' (disabled)' : ''}{!String(block.html || block.text || '').trim() ? ' (empty)' : ''}
+        </option>
+      ))}
+      {selectedId && !items.some((block) => String(block.id) === String(selectedId)) && (
+        <option value={selectedId}>{type} #{selectedId} (missing)</option>
+      )}
+    </select>
+  );
+
+  return (
+    <div className="rounded-lg border border-emerald-100 bg-emerald-50/40 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-emerald-950">Email branding</div>
+          <div className="text-xs leading-5 text-emerald-900">
+            Headers appear above the generated body. Footers/sign-offs appear after action links.
+          </div>
+        </div>
+        <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-100">
+          Post-processing
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        <div className="rounded-md border border-emerald-100 bg-white p-3">
+          <button
+            type="button"
+            aria-pressed={includeHeader}
+            onClick={() => onChange({
+              includeHeader: !includeHeader,
+              headerBlockId: includeHeader ? null : (nodeData.headerBlockId || null),
+            })}
+            className="flex w-full items-start gap-2 text-left"
+          >
+            {includeHeader ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-gray-400" />}
+            <span>
+              <span className="block text-sm font-semibold text-gray-900">Include header</span>
+              <span className="block text-xs leading-5 text-gray-500">Optional content above the generated email body.</span>
+            </span>
+          </button>
+          {renderSelect({
+            type: 'Header',
+            enabled: includeHeader,
+            selectedId: headerBlockId,
+            items: collection.headers,
+            defaultLabel: 'Workspace default header',
+            onSelect: (value) => onChange({ headerBlockId: value }),
+          })}
+          {includeHeader && collection.headers.length === 0 && (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              No headers are configured yet.
+            </div>
+          )}
+          {headerWarning && (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{headerWarning}</div>
+          )}
+        </div>
+
+        <div className="rounded-md border border-emerald-100 bg-white p-3">
+          <button
+            type="button"
+            aria-pressed={includeFooter}
+            onClick={() => onChange({
+              includeFooter: !includeFooter,
+              footerBlockId: includeFooter ? null : (nodeData.footerBlockId || null),
+            })}
+            className="flex w-full items-start gap-2 text-left"
+          >
+            {includeFooter ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-gray-400" />}
+            <span>
+              <span className="block text-sm font-semibold text-gray-900">Include footer/sign-off</span>
+              <span className="block text-xs leading-5 text-gray-500">On by default so existing workflows keep their workspace footer.</span>
+            </span>
+          </button>
+          {renderSelect({
+            type: 'Footer',
+            enabled: includeFooter,
+            selectedId: footerBlockId,
+            items: collection.footers,
+            defaultLabel: 'Workspace default footer/sign-off',
+            onSelect: (value) => onChange({ footerBlockId: value }),
+          })}
+          {includeFooter && collection.footers.length === 0 && (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              No footers are configured. Existing legacy signatures will still be used until migrated.
+            </div>
+          )}
+          {footerWarning && (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{footerWarning}</div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -4537,10 +4908,11 @@ export default function NotificationWorkflowsPanel() {
   const [llmSchemaError, setLlmSchemaError] = useState(null);
   const [activeGlobalTab, setActiveGlobalTab] = useState('workflows');
   const [afterHoursDrawerOpen, setAfterHoursDrawerOpen] = useState(false);
-  const [signature, setSignature] = useState({ enabled: false, html: '', text: '', maxHtmlBytes: 524288 });
-  const [signatureDraft, setSignatureDraft] = useState({ enabled: false, html: '', text: '' });
-  const [signatureSaving, setSignatureSaving] = useState(false);
-  const [signatureMessage, setSignatureMessage] = useState(null);
+  const [emailBlocks, setEmailBlocks] = useState(EMPTY_EMAIL_BLOCKS);
+  const [selectedEmailBlockId, setSelectedEmailBlockId] = useState(null);
+  const [emailBlockDraft, setEmailBlockDraft] = useState(emailBlockDraftFromBlock(null, 'footer'));
+  const [emailBlockSaving, setEmailBlockSaving] = useState(false);
+  const [emailBlockMessage, setEmailBlockMessage] = useState(null);
   const [afterHoursPolicy, setAfterHoursPolicy] = useState(DEFAULT_AFTER_HOURS_POLICY);
   const [afterHoursDraft, setAfterHoursDraft] = useState(DEFAULT_AFTER_HOURS_POLICY);
   const [afterHoursSaving, setAfterHoursSaving] = useState(false);
@@ -4701,11 +5073,11 @@ export default function NotificationWorkflowsPanel() {
     setLoading(true);
     setMessage(null);
     try {
-      const [response, healthResponse, variablesResponse, signatureResponse, afterHoursResponse, llmCatalogResponse, llmPolicyResponse] = await Promise.all([
+      const [response, healthResponse, variablesResponse, emailBlocksResponse, afterHoursResponse, llmCatalogResponse, llmPolicyResponse] = await Promise.all([
         notificationWorkflowAPI.list(),
         notificationWorkflowAPI.health(),
         notificationWorkflowAPI.variables(),
-        notificationWorkflowAPI.getSignature(),
+        notificationWorkflowAPI.getEmailBlocks(),
         notificationWorkflowAPI.getAfterHoursPolicy(),
         notificationWorkflowAPI.getLlmToolCatalog(),
         notificationWorkflowAPI.getLlmToolPolicy(),
@@ -4717,12 +5089,7 @@ export default function NotificationWorkflowsPanel() {
       setLlmToolCatalog(llmCatalogResponse.data || []);
       setLlmToolPolicy(llmPolicy);
       setLlmToolDraft(llmPolicy);
-      setSignature(signatureResponse.data || { enabled: false, html: '', text: '' });
-      setSignatureDraft({
-        enabled: signatureResponse.data?.enabled || false,
-        html: signatureResponse.data?.html || '',
-        text: signatureResponse.data?.text || '',
-      });
+      applyEmailBlocksResponse(emailBlocksResponse.data || EMPTY_EMAIL_BLOCKS);
       setAfterHoursPolicy(policy);
       setAfterHoursDraft(policy);
       setWorkflows(items);
@@ -5002,13 +5369,15 @@ export default function NotificationWorkflowsPanel() {
     },
     {
       id: 'signature',
-      label: 'Signature',
-      description: 'Workspace footer appended to notification emails.',
+      label: 'Email Branding',
+      description: 'Reusable headers and footers for notification emails.',
       icon: Mail,
       activeIconClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
       iconColor: 'text-emerald-600',
-      badge: signatureDraft?.enabled ? 'On' : 'Off',
-      badgeClass: signatureDraft?.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
+      badge: `${emailBlocks.headers.length + emailBlocks.footers.length} blocks`,
+      badgeClass: emailBlocks.footers.some((block) => block.isDefault)
+        ? 'bg-emerald-50 text-emerald-700'
+        : 'bg-amber-50 text-amber-700',
     },
     {
       id: 'mock-audit',
@@ -5586,19 +5955,123 @@ export default function NotificationWorkflowsPanel() {
     });
   }
 
-  async function saveSignature() {
-    setSignatureSaving(true);
-    setSignatureMessage(null);
+  function applyEmailBlocksResponse(data, preferredId = null) {
+    const nextBlocks = normalizeEmailBlocksCollection(data || EMPTY_EMAIL_BLOCKS);
+    const selectedHint = preferredId || data?.selectedId || null;
+    setEmailBlocks(nextBlocks);
+    const nextBlock = nextBlocks.items.find((block) => block.id === selectedHint)
+      || nextBlocks.items.find((block) => block.id === selectedEmailBlockId)
+      || nextBlocks.footers.find((block) => block.isDefault)
+      || nextBlocks.headers.find((block) => block.isDefault)
+      || nextBlocks.footers[0]
+      || nextBlocks.headers[0]
+      || null;
+    setSelectedEmailBlockId(nextBlock?.id || null);
+    setEmailBlockDraft(nextBlock ? emailBlockDraftFromBlock(nextBlock) : emailBlockDraftFromBlock(null, 'footer'));
+    return nextBlock;
+  }
+
+  function selectEmailBlock(blockId) {
+    const block = emailBlocks.items.find((item) => item.id === blockId) || null;
+    setSelectedEmailBlockId(block?.id || null);
+    setEmailBlockDraft(block ? emailBlockDraftFromBlock(block) : emailBlockDraftFromBlock(null, 'footer'));
+    setEmailBlockMessage(null);
+  }
+
+  async function createEmailBlock(type = 'footer') {
+    setEmailBlockSaving(true);
+    setEmailBlockMessage(null);
     try {
-      const response = await notificationWorkflowAPI.updateSignature(signatureDraft);
-      const saved = response.data || { enabled: false, html: '', text: '' };
-      setSignature(saved);
-      setSignatureDraft({ enabled: saved.enabled, html: saved.html || '', text: saved.text || '' });
-      setSignatureMessage({ type: 'success', text: 'Workspace signature saved' });
+      const response = await notificationWorkflowAPI.createEmailBlock({
+        ...emailBlockDraftFromBlock(null, type),
+        name: type === 'header' ? 'New header' : 'New footer',
+        isDefault: emailBlocks[type === 'header' ? 'headers' : 'footers'].length === 0,
+      });
+      const created = applyEmailBlocksResponse(response.data);
+      setEmailBlockMessage({ type: 'success', text: `${blockTypeLabel(type)} created${created?.name ? `: ${created.name}` : ''}` });
     } catch (error) {
-      setSignatureMessage({ type: 'error', text: error.message || 'Signature save failed' });
+      setEmailBlockMessage({ type: 'error', text: error.message || 'Email block create failed' });
     } finally {
-      setSignatureSaving(false);
+      setEmailBlockSaving(false);
+    }
+  }
+
+  async function saveEmailBlock() {
+    if (!emailBlockDraft) return;
+    setEmailBlockSaving(true);
+    setEmailBlockMessage(null);
+    try {
+      const payload = {
+        type: emailBlockDraft.type || 'footer',
+        name: emailBlockDraft.name || '',
+        enabled: emailBlockDraft.enabled !== false,
+        isDefault: emailBlockDraft.isDefault === true,
+        html: emailBlockDraft.html || '',
+        text: emailBlockDraft.text || '',
+      };
+      const response = emailBlockDraft.id
+        ? await notificationWorkflowAPI.updateEmailBlock(emailBlockDraft.id, payload)
+        : await notificationWorkflowAPI.createEmailBlock(payload);
+      const saved = applyEmailBlocksResponse(response.data, emailBlockDraft.id);
+      setEmailBlockMessage({ type: 'success', text: `Email block saved${saved?.name ? `: ${saved.name}` : ''}` });
+    } catch (error) {
+      setEmailBlockMessage({ type: 'error', text: error.message || 'Email block save failed' });
+    } finally {
+      setEmailBlockSaving(false);
+    }
+  }
+
+  async function duplicateEmailBlock(blockDraft = emailBlockDraft) {
+    if (!blockDraft?.id) return;
+    setEmailBlockSaving(true);
+    setEmailBlockMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.createEmailBlock({
+        type: blockDraft.type || 'footer',
+        name: `${blockDraft.name || 'Email block'} copy`,
+        enabled: blockDraft.enabled !== false,
+        isDefault: false,
+        html: blockDraft.html || '',
+        text: blockDraft.text || '',
+      });
+      const created = applyEmailBlocksResponse(response.data);
+      setEmailBlockMessage({ type: 'success', text: `Email block duplicated${created?.name ? `: ${created.name}` : ''}` });
+    } catch (error) {
+      setEmailBlockMessage({ type: 'error', text: error.message || 'Email block duplicate failed' });
+    } finally {
+      setEmailBlockSaving(false);
+    }
+  }
+
+  async function setDefaultEmailBlock(blockDraft = emailBlockDraft) {
+    if (!blockDraft?.id) return;
+    setEmailBlockSaving(true);
+    setEmailBlockMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.setDefaultEmailBlock(blockDraft.id);
+      const saved = applyEmailBlocksResponse(response.data, blockDraft.id);
+      setEmailBlockMessage({ type: 'success', text: `${saved?.name || 'Email block'} is now the default ${blockTypeLabel(saved?.type || blockDraft.type).toLowerCase()}` });
+    } catch (error) {
+      setEmailBlockMessage({ type: 'error', text: error.message || 'Default update failed' });
+    } finally {
+      setEmailBlockSaving(false);
+    }
+  }
+
+  async function deleteEmailBlock(blockDraft = emailBlockDraft) {
+    if (!blockDraft?.id) return;
+    const confirmed = window.confirm(`Delete "${blockDraft.name || 'this email block'}"? Workflows using it will fall back to the workspace default at send time.`);
+    if (!confirmed) return;
+    setEmailBlockSaving(true);
+    setEmailBlockMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.deleteEmailBlock(blockDraft.id);
+      applyEmailBlocksResponse(response.data, null);
+      setEmailBlockMessage({ type: 'success', text: 'Email block deleted' });
+    } catch (error) {
+      setEmailBlockMessage({ type: 'error', text: error.message || 'Email block delete failed' });
+    } finally {
+      setEmailBlockSaving(false);
     }
   }
 
@@ -5732,10 +6205,10 @@ export default function NotificationWorkflowsPanel() {
     }
   }
 
-  async function importSignatureFile(file) {
+  async function importEmailBlockFile(file) {
     if (!file) return;
     const html = await file.text();
-    setSignatureDraft((current) => ({ ...current, enabled: true, html, text: stripHtmlClient(html) }));
+    setEmailBlockDraft((current) => ({ ...current, enabled: true, html, text: stripHtmlClient(html) }));
   }
 
   function setRecipientList(field, value, checked) {
@@ -6477,7 +6950,7 @@ export default function NotificationWorkflowsPanel() {
       const linkOptions = [
         {
           key: 'appendPublicStatusLink',
-          title: 'Append public status link before signature',
+          title: 'Append public status link before footer',
           description: 'Adds a requester-facing link that shows latest Ticket Pulse status, current assignee, and estimate even if the ticket moves between people.',
           activePreview: 'Check the latest ticket status: View ticket status and estimate. The assigned person may change as the team works through the request; this link stays current.',
           liveRule: 'Live rule: renders whenever a public status URL exists.',
@@ -6557,6 +7030,12 @@ export default function NotificationWorkflowsPanel() {
               </button>
             );
           })}
+          <SendEmailBrandingControls
+            nodeData={selectedNode.data || {}}
+            blocks={emailBlocks}
+            onChange={updateNodeData}
+          />
+
           <div>
             <label className="text-xs font-medium uppercase text-gray-500">Provider</label>
             <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">SendGrid</div>
@@ -6604,7 +7083,7 @@ export default function NotificationWorkflowsPanel() {
               <h2 className="text-lg font-semibold text-gray-900">Mail Settings</h2>
               {selected?.mockModeEnabled && <MockModeBadge />}
             </div>
-            <p className="text-sm text-gray-500">Workspace-scoped notification workflows, LLM evidence, signature, and workflow audit.</p>
+            <p className="text-sm text-gray-500">Workspace-scoped notification workflows, LLM evidence, email branding, and workflow audit.</p>
           </div>
           {health && (
             <div className="grid grid-cols-2 gap-2 text-xs xl:grid-cols-4">
@@ -6782,16 +7261,21 @@ export default function NotificationWorkflowsPanel() {
             />
           </div>
         )}
-
         {activeGlobalTab === 'signature' && (
-          <SignaturePanel
-            signature={signature}
-            draft={signatureDraft}
-            saving={signatureSaving}
-            message={signatureMessage}
-            onChange={setSignatureDraft}
-            onSave={saveSignature}
-            onImport={importSignatureFile}
+          <EmailBrandingPanel
+            blocks={emailBlocks}
+            selectedBlockId={selectedEmailBlockId}
+            draft={emailBlockDraft}
+            saving={emailBlockSaving}
+            message={emailBlockMessage}
+            onSelect={selectEmailBlock}
+            onChange={setEmailBlockDraft}
+            onSave={saveEmailBlock}
+            onCreate={createEmailBlock}
+            onDuplicate={duplicateEmailBlock}
+            onDelete={deleteEmailBlock}
+            onSetDefault={setDefaultEmailBlock}
+            onImport={importEmailBlockFile}
           />
         )}
 

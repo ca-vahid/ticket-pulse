@@ -22,6 +22,10 @@ const prismaMock = {
   ticketThreadEntry: {
     findMany: jest.fn(),
   },
+  notificationEmailBlock: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+  },
   notificationEmailSignature: {
     findUnique: jest.fn(),
   },
@@ -194,6 +198,8 @@ describe('notification workflow engine persistence', () => {
     });
     prismaMock.ticket.findMany.mockResolvedValue([]);
     prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+    prismaMock.notificationEmailBlock.findFirst.mockResolvedValue(null);
+    prismaMock.notificationEmailBlock.findMany.mockResolvedValue([]);
     prismaMock.notificationEmailSignature.findUnique.mockResolvedValue(null);
     processDeliveryMock.mockResolvedValue({ success: true, result: { provider: 'sendgrid' } });
   });
@@ -463,6 +469,135 @@ describe('notification workflow engine persistence', () => {
     expect(deliveryData.textBody.indexOf('Check the latest ticket status')).toBeLessThan(
       deliveryData.textBody.indexOf('Workspace Signature'),
     );
+  });
+
+  test('send email can disable the default footer branding block', async () => {
+    prismaMock.notificationEmailSignature.findUnique.mockResolvedValueOnce({
+      enabled: true,
+      html: '<p>Workspace Signature</p>',
+      text: 'Workspace Signature',
+    });
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.includeFooter = false;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.html).not.toContain('Workspace Signature');
+    expect(result.state.email.footerApplied).toBe(false);
+    expect(result.state.email.branding.footer.requested).toBe(false);
+  });
+
+  test('send email uses a selected alternate footer block', async () => {
+    prismaMock.notificationEmailBlock.findFirst.mockImplementation(({ where }) => {
+      if (where.id === 44) {
+        return Promise.resolve({
+          id: 44,
+          workspaceId: 1,
+          type: 'footer',
+          name: 'Escalation footer',
+          enabled: true,
+          isDefault: false,
+          html: '<p>Escalation Footer</p>',
+          text: 'Escalation Footer',
+        });
+      }
+      return Promise.resolve(null);
+    });
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.footerBlockId = 44;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.html).toContain('Escalation Footer');
+    expect(result.state.email.footerBlockId).toBe(44);
+    expect(result.state.email.footerBlockName).toBe('Escalation footer');
+    expect(result.state.email.branding.footer.fallback).toBe(false);
+  });
+
+  test('send email applies selected header before the main body', async () => {
+    prismaMock.notificationEmailBlock.findFirst.mockImplementation(({ where }) => {
+      if (where.id === 33) {
+        return Promise.resolve({
+          id: 33,
+          workspaceId: 1,
+          type: 'header',
+          name: 'Maintenance header',
+          enabled: true,
+          isDefault: false,
+          html: '<p>Maintenance Header</p>',
+          text: 'Maintenance Header',
+        });
+      }
+      return Promise.resolve(null);
+    });
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.includeHeader = true;
+    sendNode.data.headerBlockId = 33;
+    sendNode.data.includeFooter = false;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.html.indexOf('Maintenance Header')).toBeLessThan(
+      result.state.email.html.indexOf('Ticket'),
+    );
+    expect(result.state.email.headerBlockId).toBe(33);
+    expect(result.state.email.branding.header.applied).toBe(true);
+  });
+
+  test('missing selected footer falls back to default and records branding warning', async () => {
+    prismaMock.notificationEmailBlock.findFirst.mockImplementation(({ where }) => {
+      if (where.id === 999) return Promise.resolve(null);
+      if (where.type === 'footer' && where.isDefault === true) {
+        return Promise.resolve({
+          id: 45,
+          workspaceId: 1,
+          type: 'footer',
+          name: 'Default footer',
+          enabled: true,
+          isDefault: true,
+          html: '<p>Default Footer</p>',
+          text: 'Default Footer',
+        });
+      }
+      return Promise.resolve(null);
+    });
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.footerBlockId = 999;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.html).toContain('Default Footer');
+    expect(result.state.email.footerBlockId).toBe(45);
+    expect(result.state.email.branding.footer.fallback).toBe(true);
+    expect(result.state.email.brandingWarnings[0]).toContain('not found');
   });
 
   test('live action blocks render only timing-appropriate links', async () => {
