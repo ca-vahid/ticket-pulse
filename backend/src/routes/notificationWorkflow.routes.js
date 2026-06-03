@@ -439,22 +439,35 @@ function emailBeforeStep(run, step) {
 }
 
 async function finalEmailFromSendStep(run, step) {
-  const stepEmail = emailFromWorkflowStep(step);
-  if (stepEmail) return stepEmail;
+  // Re-render the email body (captured before the send step) through the current engine so
+  // the appended action-link blocks use the CURRENT template, matching the Preview function.
+  // Fall back to the stored send-step email when a re-render isn't possible.
   const baseEmail = emailBeforeStep(run, step);
-  if (!baseEmail || !run?.workflow || !run?.eventContext) return null;
-  return normalizeEmailPayload(await finalizeWorkflowSendEmail({
-    workflow: run.workflow,
-    eventContext: run.eventContext,
-    email: baseEmail,
-    nodeData: sendNodeDataForStep(run, step),
-    actionLinkRenderMode: 'live',
-    workflowScheduleMode: workflowScheduleMode(run.workflow),
-    allowSignatureFailure: true,
-  }));
+  if (baseEmail && run?.workflow && run?.eventContext) {
+    const rerendered = normalizeEmailPayload(await finalizeWorkflowSendEmail({
+      workflow: run.workflow,
+      eventContext: run.eventContext,
+      email: baseEmail,
+      nodeData: sendNodeDataForStep(run, step),
+      actionLinkRenderMode: 'live',
+      workflowScheduleMode: workflowScheduleMode(run.workflow),
+      allowSignatureFailure: true,
+    }));
+    if (rerendered) return rerendered;
+  }
+  return emailFromWorkflowStep(step);
 }
 
 async function emailFromAuditRun(run) {
+  // Prefer re-rendering with the current engine so the audit "send test" / preview reflects
+  // the current action-link template (consistent with the Preview function). The stored
+  // delivery is the historical record and is used only as a fallback.
+  const sendSteps = (run?.steps || []).filter((step) => step.nodeType === 'send_email').reverse();
+  for (const step of sendSteps) {
+    const email = await finalEmailFromSendStep(run, step);
+    if (email) return email;
+  }
+
   const delivery = (run?.deliveries || [])
     .find((item) => item.notificationType !== 'notification_workflow_test_email')
     || null;
@@ -464,12 +477,6 @@ async function emailFromAuditRun(run) {
     textBody: delivery?.textBody,
   });
   if (deliveryEmail) return deliveryEmail;
-
-  const sendSteps = (run?.steps || []).filter((step) => step.nodeType === 'send_email').reverse();
-  for (const step of sendSteps) {
-    const email = await finalEmailFromSendStep(run, step);
-    if (email) return email;
-  }
 
   const stepPriority = ['template_render', 'llm_generate'];
   for (const nodeType of stepPriority) {
