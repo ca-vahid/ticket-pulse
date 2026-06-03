@@ -131,7 +131,7 @@ function requesterGuardrailSettings(node, { customPrompt = false, strictCitation
   const hardBlocks = guardrailsEnabled
     ? HARD_BLOCK_GUARD_CHECKS.filter((check) => !disabledSet.has(check))
     : [];
-  if (strictCitations && guardrailsEnabled) hardBlocks.push('unknown_cited_evidence_ids');
+  if (strictCitations && guardrailsEnabled) repairGuardrails.push('unknown_cited_evidence_ids');
   const toneDisabled = disabledSet.has('emoji') && disabledSet.has('playful_tone');
   return {
     guardrailsEnabled,

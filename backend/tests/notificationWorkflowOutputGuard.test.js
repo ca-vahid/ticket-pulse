@@ -165,6 +165,79 @@ describe('notification workflow output guard', () => {
     ]));
   });
 
+  test('repairs sentence claims without flattening unrelated html structure', () => {
+    const result = guardNotificationEmailPayload({
+      subject: 'VPN update',
+      html: '<div class="body"><p>We received your VPN request.</p><p>We should have this resolved within 30 minutes.</p><p><strong>Thanks,</strong><br>IT Support</p></div>',
+      text: 'We received your VPN request. We should have this resolved within 30 minutes. Thanks, IT Support',
+    }, {
+      repairGuardrails: ['unsupported_timing_claims'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.payload.html).toContain('<div class="body">');
+    expect(result.payload.html).toContain('<p>We received your VPN request.</p>');
+    expect(result.payload.html).toContain('<p><strong>Thanks,</strong><br>IT Support</p>');
+    expect(result.payload.html).not.toMatch(/within 30 minutes/i);
+  });
+
+  test('repairs subject-only claims without rewriting unchanged html', () => {
+    const html = '<div class="body"><p><strong>Hi,</strong></p><p>We received your request.</p></div>';
+    const result = guardNotificationEmailPayload({
+      subject: 'VPN update within 30 minutes',
+      html,
+      text: 'Hi,\n\nWe received your request.',
+    }, {
+      repairGuardrails: ['unsupported_timing_claims'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.payload.subject).toBe('VPN update');
+    expect(result.payload.html).toBe(html);
+  });
+
+  test('strips unknown cited signals from metadata without rewriting email formatting', () => {
+    const html = '<div class="body"><p><strong>Hi Dulaney,</strong></p><p>We are reviewing your phone request.</p></div>';
+    const text = 'Hi Dulaney,\n\nWe are reviewing your phone request.';
+    const result = guardNotificationEmailPayload({
+      subject: 'Ticket #225336 assigned',
+      html,
+      text,
+      citedSignals: [
+        'notification_context',
+        '2a725d1bce5e4eddadec9d8d898a82c6e9e7f2a3741661900444be7d38c535b6',
+        'similar-ticket:27913',
+      ],
+    }, {
+      strictCitations: true,
+      extraEvidenceIds: ['similar-ticket:27913'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.payload.html).toBe(html);
+    expect(result.payload.text).toBe(text);
+    expect(result.citedSignals).toEqual(['notification_context', 'similar-ticket:27913']);
+    expect(result.payload.citedSignals).toEqual(['notification_context', 'similar-ticket:27913']);
+    expect(result.repairedIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'unknown_cited_evidence_ids',
+        action: 'repaired',
+        removed: ['2a725d1bce5e4eddadec9d8d898a82c6e9e7f2a3741661900444be7d38c535b6'],
+      }),
+    ]));
+  });
+
+  test('blocks unknown cited signals when the id leaks into requester-facing copy', () => {
+    expect(() => guardNotificationEmailPayload({
+      subject: 'Ticket update',
+      html: '<p>Evidence 2a725d1bce5e4eddadec9d8d898a82c6e9e7f2a3741661900444be7d38c535b6 confirms this.</p>',
+      text: 'Evidence 2a725d1bce5e4eddadec9d8d898a82c6e9e7f2a3741661900444be7d38c535b6 confirms this.',
+      citedSignals: ['2a725d1bce5e4eddadec9d8d898a82c6e9e7f2a3741661900444be7d38c535b6'],
+    }, {
+      strictCitations: true,
+    })).toThrow(/unknown evidence id/i);
+  });
+
   test('disabled guardrails are skipped and audited', () => {
     const result = guardNotificationEmailPayload({
       subject: 'VPN update within 30 minutes',

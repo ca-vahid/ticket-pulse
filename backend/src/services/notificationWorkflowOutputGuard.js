@@ -241,6 +241,14 @@ function splitSentences(value = '') {
     .filter(Boolean);
 }
 
+function contentMentionsAny(value = '', candidates = []) {
+  const content = String(value || '');
+  return candidates.filter((candidate) => {
+    const text = String(candidate || '').trim();
+    return text && content.includes(text);
+  });
+}
+
 function removeMatchingSentences(value, pattern, replacement = null) {
   const sentences = splitSentences(value);
   const removed = [];
@@ -262,25 +270,67 @@ function removeMatchingSentences(value, pattern, replacement = null) {
   };
 }
 
+function replaceHtmlBlocks(value = '', pattern, replacement = null) {
+  const html = String(value || '');
+  if (!html.trim()) return { changed: false, removed: [], html };
+
+  let changed = false;
+  const removed = [];
+  let insertedReplacement = false;
+  const hasParagraphLikeBlocks = /<\/?(p|li)\b/i.test(html);
+  const blockPattern = hasParagraphLikeBlocks
+    ? /<(p|li)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi
+    : /<(p|li|div)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi;
+  const nextHtml = html.replace(blockPattern, (match, tag, attrs = '', inner) => {
+    const originalText = stripHtml(inner);
+    const repaired = removeMatchingSentences(originalText, pattern, null);
+    if (!repaired.changed) return match;
+    changed = true;
+    removed.push(...repaired.removed);
+    if (!repaired.text) return '';
+    return `<${tag}${attrs}>${escapeHtml(repaired.text)}</${tag}>`;
+  });
+
+  if (changed && replacement && !stripHtml(nextHtml).includes(replacement)) {
+    insertedReplacement = true;
+  }
+
+  return {
+    changed,
+    removed,
+    html: insertedReplacement
+      ? `${nextHtml}<p>${escapeHtml(replacement)}</p>`
+      : nextHtml,
+  };
+}
+
 function repairSentencePayload(payload, pattern, replacement = null) {
-  const sourceText = String(payload.text || payload.body || '').trim()
-    || stripHtml(payload.html || payload.bodyHtml || '');
-  const repairedText = removeMatchingSentences(sourceText, pattern, replacement);
+  const sourceText = String(payload.text || payload.body || '').trim();
+  const sourceHtml = String(payload.html || payload.bodyHtml || '').trim();
+  const fallbackText = sourceText || stripHtml(sourceHtml);
+  const repairedText = removeMatchingSentences(fallbackText, pattern, replacement);
+  const repairedHtml = sourceHtml
+    ? replaceHtmlBlocks(sourceHtml, pattern, replacement)
+    : { changed: false, removed: [], html: '' };
   const repairedSubject = removeMatchingSentences(payload.subject || '', pattern, null);
-  if (!repairedText.changed && !repairedSubject.changed) {
+  if (!repairedText.changed && !repairedHtml.changed && !repairedSubject.changed) {
     return { payload, removed: [] };
   }
-  const nextText = repairedText.text || sourceText;
+  const nextText = repairedText.text || fallbackText;
+  const sourceHtmlHasIssue = sourceHtml ? pattern.test(stripHtml(sourceHtml)) : false;
+  const nextHtml = repairedHtml.changed
+    ? repairedHtml.html
+    : (sourceHtml && !sourceHtmlHasIssue ? sourceHtml : textToHtml(nextText));
   return {
     payload: {
       ...payload,
       subject: repairedSubject.changed
         ? (repairedSubject.text || String(payload.subject || '').replace(pattern, '').trim() || 'Ticket update')
         : payload.subject,
-      html: textToHtml(nextText),
+      html: nextHtml,
       text: nextText,
     },
-    removed: [...repairedText.removed, ...repairedSubject.removed],
+    removed: [...new Set([...repairedText.removed, ...repairedHtml.removed, ...repairedSubject.removed])],
   };
 }
 
@@ -405,15 +455,32 @@ export function guardNotificationEmailPayload(payload, {
     for (const id of extraEvidenceIds || []) allowedIds.add(String(id));
     const unknown = citedSignals.filter((id) => !allowedIds.has(id));
     if (unknown.length > 0) {
-      const issue = guardIssue('unknown_cited_evidence_ids', `LLM cited unknown evidence id(s): ${unknown.join(', ')}`, 'block', { unknown });
-      issueDetails.push(issue);
-      throw guardError(issue.message, [issue.message], [issue]);
+      const publicMentions = contentMentionsAny(content, unknown);
+      if (publicMentions.length > 0) {
+        const issue = guardIssue('unknown_cited_evidence_ids', `LLM cited unknown evidence id(s) in requester-facing copy: ${publicMentions.join(', ')}`, 'block', { unknown, publicMentions });
+        issueDetails.push(issue);
+        throw guardError(issue.message, [issue.message], [issue]);
+      }
+      const repairedIssue = guardIssue('unknown_cited_evidence_ids', `Unknown cited evidence id(s) removed from citation metadata: ${unknown.join(', ')}`, 'repaired', {
+        unknown,
+        removed: unknown,
+        kept: citedSignals.filter((id) => allowedIds.has(id)),
+      });
+      nextPayload = {
+        ...nextPayload,
+        citedSignals: repairedIssue.kept,
+      };
+      issueDetails.push(repairedIssue);
+      repairedIssues.push(repairedIssue);
     }
   }
+  const acceptedCitedSignals = Array.isArray(nextPayload?.citedSignals)
+    ? nextPayload.citedSignals.map((item) => String(item || '').trim()).filter(Boolean)
+    : citedSignals;
 
   return {
     accepted: true,
-    citedSignals,
+    citedSignals: acceptedCitedSignals,
     allowedPublicPhrases,
     payload: nextPayload,
     issueDetails,

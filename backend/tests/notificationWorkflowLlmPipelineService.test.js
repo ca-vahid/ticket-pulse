@@ -113,6 +113,46 @@ describe('notification workflow LLM pipeline service', () => {
     );
   });
 
+  test('repairs unknown citedSignals metadata in final email tool output', async () => {
+    runToolTurnMock.mockResolvedValueOnce(toolTurn([
+      {
+        type: 'tool_use',
+        id: 'toolu_submit',
+        name: 'submit_notification_email',
+        input: {
+          subject: 'Ticket #225336 assigned',
+          html: '<div class="body"><p><strong>Hi Dulaney,</strong></p><p>We are reviewing your phone request.</p></div>',
+          text: 'Hi Dulaney,\n\nWe are reviewing your phone request.',
+          citedSignals: [
+            'notification_context',
+            '2a725d1bce5e4eddadec9d8d898a82c6e9e7f2a3741661900444be7d38c535b6',
+          ],
+        },
+      },
+    ]));
+
+    const result = await runNotificationWorkflowLlmPipeline({
+      workflow,
+      node,
+      eventContext: { event: { type: 'ticket.assigned' } },
+      state: {},
+      policy: basePolicy,
+      contextBundle,
+      systemPrompt: 'Write an email.',
+      userMessage: 'Generate.',
+      maxTokens: 1000,
+    });
+
+    expect(result.email.html).toBe('<div class="body"><p><strong>Hi Dulaney,</strong></p><p>We are reviewing your phone request.</p></div>');
+    expect(result.llm.email.extra.citedSignals).toEqual(['notification_context']);
+    expect(result.llm.guard.repairedIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'unknown_cited_evidence_ids',
+        action: 'repaired',
+      }),
+    ]));
+  });
+
   test('disabled tools are not executed even if the model asks for them', async () => {
     runToolTurnMock
       .mockResolvedValueOnce(toolTurn([
