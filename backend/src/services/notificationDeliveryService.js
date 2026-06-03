@@ -122,9 +122,39 @@ export async function processDelivery(delivery) {
   }
 }
 
-export async function processQueuedDeliveries({ limit = 25 } = {}) {
+function uniquePositiveIds(values) {
+  return [...new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0),
+  )];
+}
+
+function uniqueDedupeKeys(values) {
+  return [...new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+  )];
+}
+
+function queuedDeliveryWhere({ ids, dedupeKeys } = {}) {
+  const deliveryIds = uniquePositiveIds(ids);
+  const keys = uniqueDedupeKeys(dedupeKeys);
+  const scoped = [];
+  if (deliveryIds.length > 0) scoped.push({ id: { in: deliveryIds } });
+  if (keys.length > 0) scoped.push({ dedupeKey: { in: keys } });
+
+  if (scoped.length === 0) return { status: 'queued' };
+  return {
+    status: 'queued',
+    OR: scoped,
+  };
+}
+
+export async function processQueuedDeliveries({ limit = 25, ids = null, dedupeKeys = null } = {}) {
   const deliveries = await prisma.notificationDelivery.findMany({
-    where: { status: 'queued' },
+    where: queuedDeliveryWhere({ ids, dedupeKeys }),
     orderBy: { queuedAt: 'asc' },
     take: limit,
   });

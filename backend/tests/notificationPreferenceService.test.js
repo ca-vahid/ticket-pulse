@@ -419,7 +419,14 @@ describe('notificationPreferenceService', () => {
       ],
       skipDuplicates: true,
     });
-    expect(notificationDeliveryServiceMock.processQueuedDeliveries).toHaveBeenCalledWith({ limit: 3 });
+    expect(notificationDeliveryServiceMock.processQueuedDeliveries).toHaveBeenCalledWith({
+      limit: 3,
+      dedupeKeys: [
+        '3101:501:17:email',
+        '3101:501:17:sms',
+        '3101:501:17:whatsapp',
+      ],
+    });
   });
 
   test('hydrates assignment priority when the pipeline run has a partial ticket payload', async () => {
@@ -587,7 +594,13 @@ describe('notificationPreferenceService', () => {
       ],
       skipDuplicates: true,
     });
-    expect(notificationDeliveryServiceMock.processQueuedDeliveries).toHaveBeenCalledWith({ limit: 2 });
+    expect(notificationDeliveryServiceMock.processQueuedDeliveries).toHaveBeenCalledWith({
+      limit: 2,
+      dedupeKeys: [
+        'priority-change:44:501:17:email',
+        'priority-change:44:501:17:sms',
+      ],
+    });
   });
 
   test('queues notification delivery records when FreshService reassigns a High/Urgent ticket', async () => {

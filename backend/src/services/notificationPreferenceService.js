@@ -492,7 +492,10 @@ class NotificationPreferenceService {
     });
 
     if (result.count > 0) {
-      notificationDeliveryService.processQueuedDeliveries({ limit: result.count }).catch((error) => {
+      notificationDeliveryService.processQueuedDeliveries({
+        limit: result.count,
+        dedupeKeys: deliveries.map((delivery) => delivery.dedupeKey),
+      }).catch((error) => {
         logger.warn('Notification delivery processing failed', {
           runId: pipelineRunId,
           ticketId: ticket.id,
@@ -591,7 +594,10 @@ class NotificationPreferenceService {
     });
 
     if (result.count > 0) {
-      notificationDeliveryService.processQueuedDeliveries({ limit: result.count }).catch((error) => {
+      notificationDeliveryService.processQueuedDeliveries({
+        limit: result.count,
+        dedupeKeys: deliveries.map((delivery) => delivery.dedupeKey),
+      }).catch((error) => {
         logger.warn('Priority-change notification delivery processing failed', {
           priorityEventId: hydratedEvent.id,
           ticketId: ticket.id,

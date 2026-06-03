@@ -130,4 +130,29 @@ describe('notificationDeliveryService', () => {
     expect(result.sent).toBe(2);
     expect(sendEmailMock).toHaveBeenCalledTimes(2);
   });
+
+  test('scopes queued delivery processing to the provided dedupe keys', async () => {
+    prismaMock.notificationDelivery.findMany.mockResolvedValue([
+      { id: 5, channel: 'email', recipient: 'fresh@example.com', subject: 'Fresh', textBody: 'Fresh', payload: {} },
+    ]);
+    sendEmailMock.mockResolvedValue({ provider: 'sendgrid', providerMessageId: null });
+
+    const result = await processQueuedDeliveries({
+      limit: 2,
+      dedupeKeys: ['fresh-ticket:email', 'fresh-ticket:sms'],
+    });
+
+    expect(prismaMock.notificationDelivery.findMany).toHaveBeenCalledWith({
+      where: {
+        status: 'queued',
+        OR: [
+          { dedupeKey: { in: ['fresh-ticket:email', 'fresh-ticket:sms'] } },
+        ],
+      },
+      orderBy: { queuedAt: 'asc' },
+      take: 2,
+    });
+    expect(result.processed).toBe(1);
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+  });
 });

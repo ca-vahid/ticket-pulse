@@ -716,7 +716,10 @@ class AfterHoursUrgentEscalationService {
       });
       count = result.count;
       if (count > 0) {
-        notificationDeliveryService.processQueuedDeliveries({ limit: count }).catch((error) => {
+        notificationDeliveryService.processQueuedDeliveries({
+          limit: count,
+          dedupeKeys: deliveries.map((delivery) => delivery.dedupeKey),
+        }).catch((error) => {
           logger.warn('Urgent escalation delivery processing failed', {
             eventId: event.id,
             ticketId: ticket.id,

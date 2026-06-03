@@ -224,7 +224,13 @@ describe('afterHoursUrgentEscalationService', () => {
       ],
       skipDuplicates: true,
     });
-    expect(processQueuedDeliveriesMock).toHaveBeenCalledWith({ limit: 2 });
+    expect(processQueuedDeliveriesMock).toHaveBeenCalledWith({
+      limit: 2,
+      dedupeKeys: [
+        'urgent-escalation:44:501:17:email',
+        'urgent-escalation:44:501:17:sms',
+      ],
+    });
   });
 
   test('does not queue escalation for non-urgent priority runs', async () => {
