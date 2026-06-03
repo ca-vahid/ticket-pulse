@@ -1517,7 +1517,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         type="button"
         onClick={handleSmartRefresh}
         disabled={refreshing}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-300 p-0 text-xs font-semibold text-slate-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 lg:h-auto lg:w-auto lg:px-2.5 lg:py-1.5"
         title="Sync assignment queue with FreshService and refresh"
       >
         <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
