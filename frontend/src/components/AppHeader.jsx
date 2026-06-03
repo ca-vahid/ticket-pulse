@@ -239,6 +239,19 @@ export default function AppHeader({
       <div className={`inline-flex flex-none items-center ${compact ? 'gap-1' : 'gap-1.5'}`} aria-label="Primary navigation">
         {visibleItems.map(({ id, label, path, Icon, iconSrc, inactiveClass }) => {
           const isActive = activePage === id;
+          const hasImageIcon = Boolean(iconSrc);
+          const navButtonSize = compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl';
+          const navButtonClassName = hasImageIcon
+            ? `${navButtonSize} inline-flex flex-none items-center justify-center overflow-hidden border border-transparent bg-transparent p-0 transition ${
+              isActive
+                ? 'cursor-default'
+                : 'hover:scale-[1.03] hover:bg-slate-50'
+            }`
+            : `${navButtonSize} inline-flex flex-none items-center justify-center border transition-colors ${
+              isActive
+                ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400'
+                : `${inactiveClass} hover:shadow-sm`
+            }`;
           return (
             <button
               key={id}
@@ -248,18 +261,14 @@ export default function AppHeader({
               }}
               aria-current={isActive ? 'page' : undefined}
               aria-disabled={isActive ? 'true' : undefined}
-              className={`${compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-none items-center justify-center border transition-colors ${
-                isActive
-                  ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400'
-                  : `${inactiveClass} hover:shadow-sm`
-              }`}
+              className={navButtonClassName}
               title={isActive ? `${label} (current page)` : label}
             >
               {iconSrc ? (
                 <NavImageIcon
                   src={iconSrc}
                   alt=""
-                  className={`${compact ? 'h-6 w-6' : 'h-7 w-7'} rounded-md object-contain ${isActive ? 'opacity-50 grayscale' : ''}`}
+                  className="h-full w-full object-cover"
                 />
               ) : (
                 <Icon className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
@@ -490,10 +499,12 @@ export default function AppHeader({
 
               <button
                 onClick={() => navigate('/visuals')}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl transition hover:bg-slate-50"
                 title="Agent Map"
               >
-                <NavImageIcon src="/brand/nav-icons/Map.png" alt="" className="h-7 w-7 rounded-md object-contain" />
+                <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg">
+                  <NavImageIcon src="/brand/nav-icons/Map.png" alt="" className="h-14 w-14 max-w-none object-cover" />
+                </span>
               </button>
 
               <button
