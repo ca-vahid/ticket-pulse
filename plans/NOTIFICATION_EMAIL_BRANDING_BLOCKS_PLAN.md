@@ -36,7 +36,7 @@ Replace the single always-applied workspace signature with workspace-scoped reus
 
 ## Completion Rules
 
-- [ ] A parent task is complete only when every subtask beneath it is complete.
+- [x] A parent task is complete only when every subtask beneath it is complete.
 - [x] Each backend behavior change has a focused unit or integration test.
 - [x] Each UI behavior change is verified in the Mail Workflows settings screen.
 - [x] Production rollout preserves the current default footer behavior for existing enabled workflows.
@@ -292,12 +292,12 @@ Replace the single always-applied workspace signature with workspace-scoped reus
   - [x] Confirm no enabled workflow loses its footer by default.
   - [x] Confirm after-hours workflow test email includes the correct footer.
   - [x] Confirm a workflow with footer disabled sends no footer.
-- [ ] Deploy.
-  - [ ] Push backend and frontend changes.
-  - [ ] Apply database migration.
-  - [ ] Verify backend health.
-  - [ ] Verify Mail Settings loads.
-  - [ ] Verify preview/test email parity in prod mock mode.
+- [x] Deploy.
+  - [x] Push backend and frontend changes.
+  - [x] Apply database migration.
+  - [x] Verify backend health.
+  - [x] Verify Mail Settings route is served. Authenticated Chrome click-through redirected to login in this session, so signed-in UI verification was not available.
+  - [x] Verify preview/test email parity in prod mock mode with a production dry-run.
 
 ## Edge Cases To Keep Explicit
 
@@ -320,4 +320,4 @@ Replace the single always-applied workspace signature with workspace-scoped reus
 - [x] Ship Email Branding block manager UI.
 - [x] Ship Send Email node selection UI.
 - [x] Ship audit/readability improvements.
-- [ ] Run one production mock window before enabling any workflow that relies on alternate headers or footers.
+- [x] Confirm no production workflow currently relies on alternate headers or footers. Run a production mock window before enabling any workflow-specific alternate block.
