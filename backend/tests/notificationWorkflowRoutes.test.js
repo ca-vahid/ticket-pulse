@@ -452,8 +452,8 @@ describe('notification workflow routes', () => {
   test('sends a test email from a mock audit run even when no delivery row was created', async () => {
     finalizeWorkflowSendEmailMock.mockResolvedValueOnce({
       subject: 'Ticket #225001 received',
-      html: '<p>We received it.</p><div>Helpful ticket links</div><div>Need immediate after-hours support?</div>',
-      text: 'We received it.\n\nHelpful ticket links\n\nNeed immediate after-hours support?',
+      html: '<p>We received it.</p><div>Helpful ticket links</div><div>Request immediate support</div>',
+      text: 'We received it.\n\nHelpful ticket links\n\nRequest immediate support',
       actionLinks: {
         publicStatus: { applied: true },
         afterHoursSupport: { applied: true },

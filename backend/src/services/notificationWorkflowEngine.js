@@ -402,6 +402,19 @@ function regularActionRowHtml(action, index) {
     afterHoursSupport: { color: '#7f1d1d', accent: '#dc2626', button: '#dc2626', border: '#fecaca' },
   }[action.key] || { color: '#111827', accent: '#64748b', button: '#1d4ed8', border: '#e2e8f0' };
   const topBorder = index === 0 ? '1px solid #dbeafe' : '1px solid #e5e7eb';
+  const phoneHtml = action.key === 'afterHoursSupport'
+    ? [
+      '<div style="font-size:12px;line-height:17px;color:#7f1d1d;margin-top:6px;">',
+      'Active support phone: ',
+      action.phone
+        ? `<a href="tel:${escapeHtml(action.phoneHref)}" style="color:#7f1d1d;font-weight:700;text-decoration:none;">${escapeHtml(action.phone)}</a>`
+        : '<span style="font-weight:700;">not configured</span>',
+      '</div>',
+      action.rotationLabel
+        ? `<div style="font-size:12px;line-height:17px;color:#78716c;margin-top:2px;">${escapeHtml(action.rotationLabel)}</div>`
+        : '',
+    ].join('')
+    : '';
   return [
     '<tr>',
     `<td style="border-top:${topBorder};padding:12px 14px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">`,
@@ -411,6 +424,7 @@ function regularActionRowHtml(action, index) {
     '<td valign="top" style="padding:0 12px 0 0;">',
     `<div style="font-size:14px;line-height:18px;font-weight:700;color:${tone.color};">${escapeHtml(action.title)}</div>`,
     `<div style="font-size:13px;line-height:18px;color:#475569;margin-top:3px;">${escapeHtml(action.body)}</div>`,
+    phoneHtml,
     '</td>',
     '<td valign="middle" align="right" width="150" style="width:150px;">',
     emailActionButtonHtml({
@@ -449,102 +463,24 @@ function regularActionAppendixHtml(actions = []) {
   ].join(''));
 }
 
-function emergencyActionAppendixHtml(actions = []) {
-  const immediate = actions.find((action) => action.key === 'afterHoursSupport');
-  const secondary = actions.filter((action) => action.key !== 'afterHoursSupport');
-  if (!immediate) return regularActionAppendixHtml(actions);
-  const phoneHtml = immediate.phone
-    ? `<a href="tel:${escapeHtml(immediate.phoneHref)}" style="color:#7f1d1d;font-weight:700;text-decoration:none;">${escapeHtml(immediate.phone)}</a>`
-    : '<span style="color:#7f1d1d;font-weight:700;">not configured</span>';
-  const secondaryRows = secondary.map((action, index) => [
-    '<tr>',
-    `<td style="border-top:${index === 0 ? '1px solid #fed7aa' : '1px solid #f3e5d7'};padding:10px 12px;font-family:Arial,Helvetica,sans-serif;">`,
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
-    '<tr>',
-    '<td valign="top" style="padding-right:10px;">',
-    `<div style="font-size:13px;line-height:17px;font-weight:700;color:${action.key === 'raiseUrgency' ? '#7c2d12' : '#1e3a8a'};">${escapeHtml(action.title)}</div>`,
-    `<div style="font-size:12px;line-height:16px;color:#64748b;margin-top:2px;">${escapeHtml(action.body)}</div>`,
-    '</td>',
-    `<td valign="top" align="right" width="118" style="width:118px;font-size:12px;line-height:16px;"><a href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer" style="font-weight:700;color:${action.key === 'raiseUrgency' ? '#b45309' : '#1d4ed8'};text-decoration:underline;">${escapeHtml(action.buttonLabel)}</a></td>`,
-    '</tr>',
-    '</table>',
-    '</td>',
-    '</tr>',
-  ].join('')).join('');
-  return outlookCappedActionTable([
-    '<tr>',
-    '<td style="border:1px solid #f3c6ba;background:#fffaf7;padding:0;font-family:Arial,Helvetica,sans-serif;">',
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
-    '<tr>',
-    '<td style="padding:16px 16px 14px;">',
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
-    '<tr>',
-    '<td valign="top" style="padding-right:16px;">',
-    '<div style="font-size:16px;line-height:21px;font-weight:700;color:#7f1d1d;">Need immediate after-hours support?</div>',
-    `<div style="font-size:13px;line-height:19px;color:#57534e;margin-top:6px;">${escapeHtml(immediate.body)}</div>`,
-    `<div style="font-size:13px;line-height:18px;color:#57534e;margin-top:8px;">Active support phone: ${phoneHtml}</div>`,
-    '</td>',
-    '<td valign="middle" align="right" width="180" style="width:180px;">',
-    emailActionButtonHtml({
-      url: immediate.url,
-      label: immediate.buttonLabel,
-      background: '#dc2626',
-      border: '#b91c1c',
-    }),
-    '</td>',
-    '</tr>',
-    '</table>',
-    '</td>',
-    '</tr>',
-    secondaryRows ? [
-      '<tr>',
-      '<td style="border-top:1px solid #fed7aa;background:#ffffff;">',
-      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
-      secondaryRows,
-      '</table>',
-      '</td>',
-      '</tr>',
-    ].join('') : '',
-    immediate.rotationLabel ? `<tr><td style="border-top:1px solid #fed7aa;padding:9px 16px 12px;font-size:12px;line-height:17px;color:#78716c;font-family:Arial,Helvetica,sans-serif;">${escapeHtml(immediate.rotationLabel)}</td></tr>` : '',
-    '</table>',
-    '</td>',
-    '</tr>',
-  ].join(''));
-}
-
 function actionAppendixHtml(actions = []) {
-  const regularActions = actions.filter((action) => action.key !== 'afterHoursSupport');
-  const emergencyActions = actions.filter((action) => action.key === 'afterHoursSupport');
-  return [
-    regularActions.length > 0 ? regularActionAppendixHtml(regularActions) : null,
-    ...emergencyActions.map((action) => emergencyActionAppendixHtml([action])),
-  ].filter(Boolean).join('\n');
+  return actions.length > 0 ? regularActionAppendixHtml(actions) : '';
 }
 
 function actionAppendixText(actions = []) {
-  const regularActions = actions.filter((action) => action.key !== 'afterHoursSupport');
-  const emergencyActions = actions.filter((action) => action.key === 'afterHoursSupport');
-  const sections = [];
-  if (regularActions.length > 0) {
-    sections.push([
-      'Helpful ticket links',
-      'Use these Ticket Pulse links to follow this request or update its priority.',
-      '',
-      ...regularActions.map((action) => `${action.title}: ${action.url}`),
-      '',
-      'These links stay with the ticket even if the assigned person changes.',
-    ].filter(Boolean).join('\n'));
-  }
-  for (const immediate of emergencyActions) {
-    sections.push([
-      'Need immediate after-hours support?',
-      immediate.body,
-      immediate.phone ? `Active support phone: ${immediate.phone}` : 'Active support phone: not configured',
-      `${immediate.buttonLabel}: ${immediate.url}`,
-      immediate.rotationLabel ? `Contact selection: ${immediate.rotationLabel}` : null,
-    ].filter(Boolean).join('\n'));
-  }
-  return sections.join('\n\n');
+  if (!actions.length) return '';
+  return [
+    'Helpful ticket links',
+    'Use these Ticket Pulse links to follow this request or update its priority.',
+    '',
+    ...actions.flatMap((action) => [
+      `${action.title}: ${action.url}`,
+      action.key === 'afterHoursSupport' && action.phone ? `Active support phone: ${action.phone}` : null,
+      action.key === 'afterHoursSupport' && action.rotationLabel ? `Contact selection: ${action.rotationLabel}` : null,
+    ].filter(Boolean)),
+    '',
+    'These links stay with the ticket even if the assigned person changes.',
+  ].filter(Boolean).join('\n');
 }
 
 function actionLinkOptions(options = {}) {
@@ -556,24 +492,12 @@ function actionLinkOptions(options = {}) {
   };
 }
 
-function isAfterHoursWorkflowMode(options = {}) {
-  return options.workflowScheduleMode === 'after_hours';
-}
-
 function isBusinessHoursContext(context = {}) {
   const availability = context.availability || {};
   if (availability.isHoliday === true) return false;
   if (availability.isBusinessHours === true) return true;
   if (availability.isAfterHours === true) return false;
   return true;
-}
-
-function isAfterHoursContext(context = {}, options = {}) {
-  const availability = context.availability || {};
-  return isAfterHoursWorkflowMode(options)
-    || availability.isHoliday === true
-    || availability.isAfterHours === true
-    || availability.isBusinessHours === false;
 }
 
 function actionLinkDiagnostic(email = {}, key, diagnostic) {
@@ -722,12 +646,8 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
   const missingPhoneReason = contactPhone
     ? null
     : 'No active after-hours contact phone is available for requester emails.';
-  const liveAllowed = isAfterHoursContext(context, effectiveOptions);
-  const liveWouldSkipReason = liveAllowed
-    ? missingPhoneReason
-    : 'After-hours immediate support links are hidden during business hours unless the after-hours workflow is running.';
-  if (!effectiveOptions.forceActionLinks && liveWouldSkipReason) {
-    return skipActionLink(email, 'afterHoursSupport', 'afterHoursSupport', liveWouldSkipReason, {
+  if (!effectiveOptions.forceActionLinks && missingPhoneReason) {
+    return skipActionLink(email, 'afterHoursSupport', 'afterHoursSupport', missingPhoneReason, {
       url,
       activeContact,
       actionLinkRenderMode: effectiveOptions.actionLinkRenderMode,
@@ -743,8 +663,8 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
       activeContact,
       missingActiveContactPhone: Boolean(missingPhoneReason),
       warning: missingPhoneReason,
-      forced: effectiveOptions.forceActionLinks && Boolean(liveWouldSkipReason),
-      liveWouldSkipReason,
+      forced: effectiveOptions.forceActionLinks && Boolean(missingPhoneReason),
+      liveWouldSkipReason: missingPhoneReason,
       actionLinkRenderMode: effectiveOptions.actionLinkRenderMode,
     },
   );

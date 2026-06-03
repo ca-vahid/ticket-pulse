@@ -600,7 +600,7 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.brandingWarnings[0]).toContain('not found');
   });
 
-  test('live action blocks render only timing-appropriate links', async () => {
+  test('live action blocks bundle selected links including after-hours support during business hours', async () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created');
     const sendNode = definition.nodes.find((node) => node.type === 'send_email');
     sendNode.data.appendPublicStatusLink = true;
@@ -620,17 +620,20 @@ describe('notification workflow engine persistence', () => {
 
     expect(result.state.email.actionLinks.publicStatus.applied).toBe(true);
     expect(result.state.email.actionLinks.raiseUrgency.applied).toBe(true);
-    expect(result.state.email.actionLinks.afterHoursSupport.skipped).toBe(true);
-    expect(result.state.email.actionLinks.afterHoursSupport.reason).toContain('hidden during business hours');
+    expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
+    expect(result.state.email.actionLinks.afterHoursSupport.skipped).toBe(false);
     expect(result.state.email.html).toContain('Helpful ticket links');
     expect(result.state.email.html).toContain('Open status page');
     expect(result.state.email.html).toContain('Raise urgency');
+    expect(result.state.email.html).toContain('Request support');
     expect(result.state.email.html).toContain(publicStatusUrl);
     expect(result.state.email.html).toContain(raiseUrgencyUrl);
-    expect(result.state.email.html).not.toContain(immediateSupportUrl);
+    expect(result.state.email.html).toContain(immediateSupportUrl);
+    expect(result.state.email.html).toContain('+16045551234');
+    expect(result.state.email.html).not.toContain('Need immediate after-hours support?');
   });
 
-  test('forced preview renders checked timing-gated action blocks with diagnostics', async () => {
+  test('forced preview keeps selected action blocks in one helpful-links bundle', async () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created');
     const sendNode = definition.nodes.find((node) => node.type === 'send_email');
     sendNode.data.appendPublicStatusLink = true;
@@ -650,9 +653,10 @@ describe('notification workflow engine persistence', () => {
     });
 
     expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
-    expect(result.state.email.actionLinks.afterHoursSupport.forced).toBe(true);
+    expect(result.state.email.actionLinks.afterHoursSupport.forced).toBe(false);
+    expect(result.state.email.actionLinks.afterHoursSupport.actionLinkRenderMode).toBe('force_all_enabled');
     expect(result.state.email.html).toContain('Helpful ticket links');
-    expect(result.state.email.html).toContain('Need immediate after-hours support?');
+    expect(result.state.email.html).not.toContain('Need immediate after-hours support?');
     expect(result.state.email.html).toContain(immediateSupportUrl);
     expect(result.state.email.html).toContain('+16045551234');
   });
@@ -679,7 +683,9 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.actionLinks.raiseUrgency.skipped).toBe(true);
     expect(result.state.email.actionLinks.raiseUrgency.reason).toContain('outside business hours');
     expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
+    expect(result.state.email.html).toContain('Helpful ticket links');
     expect(result.state.email.html).toContain(immediateSupportUrl);
+    expect(result.state.email.html).not.toContain('Need immediate after-hours support?');
   });
 
   test('send step captures final action-block email even when recipient resolution is empty', async () => {
@@ -711,14 +717,16 @@ describe('notification workflow engine persistence', () => {
         afterHoursSupport: expect.objectContaining({ applied: true }),
       }),
     }));
-    expect(sendStep.output.htmlBody).toContain('Need immediate after-hours support?');
+    expect(sendStep.output.htmlBody).not.toContain('Need immediate after-hours support?');
+    expect(sendStep.output.htmlBody).toContain('Request immediate support');
     expect(sendStep.output.actionLinks.afterHoursSupport).toEqual(expect.objectContaining({
       hasActiveContact: true,
       phoneVerified: true,
       rotationLabel: 'Manual after-hours contact',
     }));
     expect(sendStep.output.actionLinks.afterHoursSupport.activeContact).toBeUndefined();
-    expect(result.state.email.html).toContain('Need immediate after-hours support?');
+    expect(result.state.email.html).not.toContain('Need immediate after-hours support?');
+    expect(result.state.email.html).toContain('Request immediate support');
     expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
     expect(processDeliveryMock).not.toHaveBeenCalled();
   });

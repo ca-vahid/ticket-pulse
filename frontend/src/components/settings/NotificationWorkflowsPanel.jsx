@@ -6968,8 +6968,8 @@ export default function NotificationWorkflowsPanel() {
           key: 'appendAfterHoursSupportLink',
           title: 'Append after-hours immediate support link',
           description: 'Adds the hosted after-hours page where the requester can review response windows and request immediate support. It only submits during off-hours or holidays.',
-          activePreview: 'Need immediate after-hours support? Request immediate support. Ticket Pulse will alert the configured after-hours escalation roster only after confirmation.',
-          liveRule: 'Live rule: renders for after-hours/holiday workflows and requires an active contact phone.',
+          activePreview: 'Request immediate support: Ticket Pulse will alert the configured after-hours escalation roster only after requester confirmation.',
+          liveRule: 'Live rule: renders when selected and an immediate-support URL plus active contact phone are available. The hosted page still only submits during off-hours or holidays.',
           color: 'red',
         },
       ];
@@ -7015,7 +7015,7 @@ export default function NotificationWorkflowsPanel() {
                       enabled ? 'bg-white/80 text-current ring-1 ring-current/20' : 'bg-gray-100 text-gray-500',
                     )}
                     >
-                      {enabled ? 'Included' : 'Off'}
+                      {enabled ? 'Selected' : 'Off'}
                     </span>
                   </span>
                   <span className="mt-1 block text-xs leading-5 text-gray-500">{option.description}</span>
