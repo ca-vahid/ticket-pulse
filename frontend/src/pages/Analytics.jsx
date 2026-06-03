@@ -3476,7 +3476,7 @@ export default function Analytics({ view = 'standard' }) {
         <button
           type="button"
           onClick={fetchAnalytics}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 sm:h-9 sm:w-9"
           title="Refresh analytics"
         >
           <RefreshCw className="h-4 w-4" />

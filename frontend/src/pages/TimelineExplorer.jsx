@@ -657,7 +657,7 @@ export default function TimelineExplorer() {
       <button
         onClick={fetchTimeline}
         disabled={isLoading}
-        className={`p-1.5 hover:bg-slate-100 rounded-md transition-colors flex-shrink-0 ${isLoading ? 'opacity-50' : ''}`}
+        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-slate-100 ${isLoading ? 'opacity-50' : ''}`}
         title={selectedTechIds.size > 0 ? `Refresh timeline for ${selectedTechIds.size} tech${selectedTechIds.size > 1 ? 's' : ''}` : 'Refresh Timeline Explorer'}
       >
         <RefreshCw className={`w-4 h-4 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
