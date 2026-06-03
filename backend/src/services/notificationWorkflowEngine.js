@@ -416,7 +416,7 @@ function regularActionRowHtml(action, index) {
     '<tr><td style="padding:0 20px;">',
     index === 0 ? '' : '<div style="border-top:1px solid #eef2f7;font-size:1px;line-height:1px;">&nbsp;</div>',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-    `<td width="40" valign="top" style="width:40px;padding:18px 0;"><div style="width:30px;height:30px;border-radius:9px;background:${tone.chipBg};color:${tone.icon};text-align:center;line-height:30px;">${glyph}</div></td>`,
+    `<td width="40" valign="top" style="width:40px;padding:18px 0;"><table role="presentation" width="30" cellpadding="0" cellspacing="0" border="0" style="width:30px;border-collapse:separate;"><tr><td align="center" valign="middle" height="30" style="width:30px;height:30px;border-radius:9px;background:${tone.chipBg};color:${tone.icon};text-align:center;line-height:1;">${glyph}</td></tr></table></td>`,
     '<td valign="middle" style="padding:18px 12px 18px 4px;font-family:Arial,Helvetica,sans-serif;">',
     `<div style="font-size:16px;line-height:21px;font-weight:700;color:${tone.title};">${escapeHtml(action.title)}</div>`,
     `<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:3px;">${escapeHtml(action.body)}</div>`,
