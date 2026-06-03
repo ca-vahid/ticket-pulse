@@ -330,14 +330,24 @@ function afterHoursSupportUrlFromContext(context) {
   ).trim();
 }
 
-function emailActionButtonHtml({ url, label, background = '#2563eb', arrow = true }) {
+function emailActionButtonHtml({ url, label, background = '#2563eb', color = '#ffffff', pill = false, arrow = true }) {
   const text = `${escapeHtml(label)}${arrow ? ' &rarr;' : ''}`;
-  const width = Math.max(170, String(label).length * 8 + 60);
+  const width = Math.max(150, String(label).length * 8 + 56);
+  const arcsize = pill ? '50%' : '22%';
+  const radius = pill ? '9999px' : '9px';
   return [
-    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(url)}" style="height:42px;v-text-anchor:middle;width:${width}px;" arcsize="22%" stroke="f" fillcolor="${background}"><w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">${text}</center></v:roundrect><![endif]-->`,
-    `<!--[if !mso]><!--><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="background:${background};border-radius:9px;color:#ffffff;display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;line-height:42px;padding:0 22px;text-align:center;text-decoration:none;-webkit-text-size-adjust:none;">${text}</a><!--<![endif]-->`,
+    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(url)}" style="height:40px;v-text-anchor:middle;width:${width}px;" arcsize="${arcsize}" stroke="f" fillcolor="${background}"><w:anchorlock/><center style="color:${color};font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">${text}</center></v:roundrect><![endif]-->`,
+    `<!--[if !mso]><!--><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="background:${background};border-radius:${radius};color:${color};display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;line-height:40px;padding:0 20px;text-align:center;text-decoration:none;-webkit-text-size-adjust:none;">${text}</a><!--<![endif]-->`,
   ].join('');
 }
+
+// Inline SVG row icons (clock / up-arrow / warning). Render in modern clients;
+// Outlook-desktop and Gmail strip inline SVG, degrading to the tinted chip square.
+const ACTION_ICON_SVGS = {
+  publicStatus: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>',
+  raiseUrgency: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M12 19V6"></path><path d="M6 12l6-6 6 6"></path></svg>',
+  afterHoursSupport: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>',
+};
 
 function outlookCappedActionTable(innerHtml) {
   return [
@@ -394,27 +404,26 @@ function afterHoursSupportAction(url, context = {}) {
 
 function regularActionRowHtml(action, index) {
   const tone = {
-    publicStatus: { accent: '#2563eb', title: '#1e3a8a', button: '#2563eb' },
-    raiseUrgency: { accent: '#d97706', title: '#92400e', button: '#b45309' },
-    afterHoursSupport: { accent: '#dc2626', title: '#7f1d1d', button: '#dc2626' },
-  }[action.key] || { accent: '#64748b', title: '#0f172a', button: '#2563eb' };
+    publicStatus: { chipBg: '#dbeafe', icon: '#2563eb', title: '#1e40af', btnBg: '#dbeafe', btnFg: '#1d4ed8' },
+    raiseUrgency: { chipBg: '#fef3c7', icon: '#b45309', title: '#92400e', btnBg: '#fde68a', btnFg: '#92400e' },
+    afterHoursSupport: { chipBg: '#fee2e2', icon: '#dc2626', title: '#b91c1c', btnBg: '#fee2e2', btnFg: '#b91c1c' },
+  }[action.key] || { chipBg: '#f1f5f9', icon: '#64748b', title: '#0f172a', btnBg: '#e2e8f0', btnFg: '#334155' };
+  const glyph = ACTION_ICON_SVGS[action.key] || ACTION_ICON_SVGS.publicStatus;
   const phoneHtml = action.key === 'afterHoursSupport' && action.phone
-    ? `<div style="font-size:12px;line-height:17px;color:#7f1d1d;margin-top:6px;"><strong>On-call:</strong> ${escapeHtml(action.phone)}</div>${action.rotationLabel ? `<div style="font-size:12px;line-height:17px;color:#a8a29e;margin-top:1px;">${escapeHtml(action.rotationLabel)}</div>` : ''}`
+    ? `<div style="font-size:13px;line-height:18px;margin-top:6px;color:#475569;"><strong style="color:${tone.title};">On-call:</strong> ${escapeHtml(action.phone)}</div>${action.rotationLabel ? `<div style="font-size:12px;line-height:17px;color:#94a3b8;margin-top:1px;">${escapeHtml(action.rotationLabel)}</div>` : ''}`
     : '';
   return [
-    '<tr><td style="padding:0 18px;">',
+    '<tr><td style="padding:0 20px;">',
     index === 0 ? '' : '<div style="border-top:1px solid #eef2f7;font-size:1px;line-height:1px;">&nbsp;</div>',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-    `<td width="4" valign="top" style="width:4px;background:${tone.accent};border-radius:4px;font-size:1px;line-height:1px;">&nbsp;</td>`,
-    '<td valign="middle" style="padding:16px 0 16px 14px;font-family:Arial,Helvetica,sans-serif;">',
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>',
-    '<td valign="middle" style="padding-right:12px;">',
-    `<div style="font-size:15px;line-height:20px;font-weight:700;color:${tone.title};">${escapeHtml(action.title)}</div>`,
+    `<td width="40" valign="top" style="width:40px;padding:18px 0;"><div style="width:30px;height:30px;border-radius:9px;background:${tone.chipBg};color:${tone.icon};text-align:center;line-height:30px;">${glyph}</div></td>`,
+    '<td valign="middle" style="padding:18px 12px 18px 4px;font-family:Arial,Helvetica,sans-serif;">',
+    `<div style="font-size:16px;line-height:21px;font-weight:700;color:${tone.title};">${escapeHtml(action.title)}</div>`,
     `<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:3px;">${escapeHtml(action.body)}</div>`,
     phoneHtml,
     '</td>',
-    `<td valign="middle" align="right" width="180" style="width:180px;">${emailActionButtonHtml({ url: action.url, label: action.buttonLabel, background: tone.button })}</td>`,
-    '</tr></table></td></tr></table></td></tr>',
+    `<td valign="middle" align="right" width="176" style="width:176px;">${emailActionButtonHtml({ url: action.url, label: action.buttonLabel, background: tone.btnBg, color: tone.btnFg, pill: true })}</td>`,
+    '</tr></table></td></tr>',
   ].join('');
 }
 
@@ -423,12 +432,12 @@ function regularActionAppendixHtml(actions = []) {
   return outlookCappedActionTable([
     '<tr><td style="border:1px solid #e2e8f0;border-radius:14px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
-    '<tr><td style="padding:18px 18px 6px;">',
-    '<div style="font-size:16px;line-height:22px;font-weight:700;color:#0f172a;letter-spacing:-0.2px;">Helpful ticket links</div>',
-    '<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:3px;">Follow this request or update its priority.</div>',
+    '<tr><td style="padding:22px 20px 8px;">',
+    '<div style="font-size:19px;line-height:25px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">Helpful ticket links</div>',
+    '<div style="font-size:14px;line-height:20px;color:#64748b;margin-top:4px;">Follow this request or update its priority.</div>',
     '</td></tr>',
     rows,
-    '<tr><td style="padding:12px 18px 16px;"><div style="border-top:1px solid #eef2f7;padding-top:10px;font-size:12px;line-height:17px;color:#94a3b8;">These links stay with the ticket even if the assigned person changes.</div></td></tr>',
+    '<tr><td style="padding:14px 20px 18px;"><div style="border-top:1px solid #eef2f7;padding-top:12px;font-size:13px;line-height:18px;color:#94a3b8;">These links stay with the ticket even if the assigned person changes.</div></td></tr>',
     '</table></td></tr>',
   ].join(''));
 }
@@ -467,7 +476,7 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
         '<tr><td style="padding:14px 18px 16px;"><div style="border-top:1px dashed #fecaca;padding-top:12px;">',
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>',
         '<td valign="middle" style="padding-right:10px;"><div style="font-size:13px;line-height:18px;color:#475569;"><strong style="color:#0f172a;">Meanwhile</strong> &mdash; track status, assignee &amp; ETA.</div></td>',
-        `<td valign="middle">${emailActionButtonHtml({ url: statusUrl, label: 'Check latest status', background: '#475569' })}</td>`,
+        `<td valign="middle">${emailActionButtonHtml({ url: statusUrl, label: 'Check latest status', background: '#e2e8f0', color: '#334155', pill: true })}</td>`,
         '</tr></table></div></td></tr>',
       ].join('')
       : '<tr><td style="padding:0 18px 16px;">&nbsp;</td></tr>',
