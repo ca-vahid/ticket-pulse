@@ -559,7 +559,7 @@ describe('notification workflow engine persistence', () => {
     });
 
     expect(result.state.email.html.indexOf('Maintenance Header')).toBeLessThan(
-      result.state.email.html.indexOf('Ticket'),
+      result.state.email.html.indexOf('received your ticket'),
     );
     expect(result.state.email.headerBlockId).toBe(33);
     expect(result.state.email.branding.header.applied).toBe(true);
@@ -683,9 +683,11 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.actionLinks.raiseUrgency.skipped).toBe(true);
     expect(result.state.email.actionLinks.raiseUrgency.reason).toContain('outside business hours');
     expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
-    expect(result.state.email.html).toContain('Helpful ticket links');
+    // After-hours context => distinct emergency panel that bundles the status link.
+    expect(result.state.email.html).toContain('Need immediate after-hours support?');
+    expect(result.state.email.html).not.toContain('Helpful ticket links');
     expect(result.state.email.html).toContain(immediateSupportUrl);
-    expect(result.state.email.html).not.toContain('Need immediate after-hours support?');
+    expect(result.state.email.html).toContain(publicStatusUrl);
   });
 
   test('send step captures final action-block email even when recipient resolution is empty', async () => {
@@ -711,13 +713,13 @@ describe('notification workflow engine persistence', () => {
     expect(sendStep.output).toEqual(expect.objectContaining({
       skipped: true,
       reason: 'No recipient email address resolved',
-      htmlBody: expect.stringContaining('Helpful ticket links'),
+      htmlBody: expect.stringContaining('Need immediate after-hours support?'),
       actionLinks: expect.objectContaining({
         publicStatus: expect.objectContaining({ applied: true }),
         afterHoursSupport: expect.objectContaining({ applied: true }),
       }),
     }));
-    expect(sendStep.output.htmlBody).not.toContain('Need immediate after-hours support?');
+    expect(sendStep.output.htmlBody).toContain('Check latest status');
     expect(sendStep.output.htmlBody).toContain('Request immediate support');
     expect(sendStep.output.actionLinks.afterHoursSupport).toEqual(expect.objectContaining({
       hasActiveContact: true,
@@ -725,7 +727,7 @@ describe('notification workflow engine persistence', () => {
       rotationLabel: 'Manual after-hours contact',
     }));
     expect(sendStep.output.actionLinks.afterHoursSupport.activeContact).toBeUndefined();
-    expect(result.state.email.html).not.toContain('Need immediate after-hours support?');
+    expect(result.state.email.html).toContain('Need immediate after-hours support?');
     expect(result.state.email.html).toContain('Request immediate support');
     expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
     expect(processDeliveryMock).not.toHaveBeenCalled();
