@@ -342,12 +342,12 @@ function emailActionButtonHtml({ url, label, background = '#2563eb', color = '#f
   ].join('');
 }
 
-// Inline SVG row icons (clock / up-arrow / warning). Render in modern clients;
-// Outlook-desktop and Gmail strip inline SVG, degrading to the tinted chip square.
-const ACTION_ICON_SVGS = {
-  publicStatus: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>',
-  raiseUrgency: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M12 19V6"></path><path d="M6 12l6-6 6 6"></path></svg>',
-  afterHoursSupport: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>',
+// Row chip icons as emoji — render across all email clients (colour in Gmail/Apple/Outlook-web,
+// monochrome in Outlook desktop). Inline SVG was stripped by Outlook and Gmail.
+const ACTION_ICON_EMOJI = {
+  publicStatus: '\u{1F552}',
+  raiseUrgency: '⬆️',
+  afterHoursSupport: '⚠️',
 };
 
 function outlookCappedActionTable(innerHtml) {
@@ -409,7 +409,7 @@ function regularActionRowHtml(action, index) {
     raiseUrgency: { chipBg: '#fff2da', icon: '#875814', title: '#875814', btnBg: '#fff2da', btnFg: '#875814', btnBorder: '#ebd7ba' },
     afterHoursSupport: { chipBg: '#ffece9', icon: '#a12626', title: '#a12626', btnBg: '#ffece9', btnFg: '#a12626', btnBorder: '#f0c4c4' },
   }[action.key] || { chipBg: '#f4f3f0', icon: '#60636a', title: '#22242a', btnBg: '#f4f3f0', btnFg: '#22242a', btnBorder: '#e3e4e7' };
-  const glyph = ACTION_ICON_SVGS[action.key] || ACTION_ICON_SVGS.publicStatus;
+  const glyph = ACTION_ICON_EMOJI[action.key] || '\u{1F517}';
   const phoneHtml = action.key === 'afterHoursSupport' && action.phone
     ? `<div style="font-size:13px;line-height:18px;margin-top:8px;color:#60636a;"><strong style="color:${tone.title};">On-call:</strong> <span style="color:#22242a;">${escapeHtml(action.phone)}</span></div>${action.rotationLabel ? `<div style="font-size:12px;line-height:17px;color:#909299;margin-top:1px;">${escapeHtml(action.rotationLabel)}</div>` : ''}`
     : '';
@@ -417,7 +417,7 @@ function regularActionRowHtml(action, index) {
     '<tr><td style="padding:0 20px;">',
     index === 0 ? '' : '<div style="border-top:1px solid #e3e4e7;font-size:1px;line-height:1px;">&nbsp;</div>',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-    `<td width="46" valign="top" style="width:46px;padding:20px 0;"><table role="presentation" width="36" cellpadding="0" cellspacing="0" border="0" style="width:36px;border-collapse:separate;"><tr><td align="center" valign="middle" height="36" style="width:36px;height:36px;border-radius:10px;background:${tone.chipBg};color:${tone.icon};text-align:center;line-height:1;">${glyph}</td></tr></table></td>`,
+    `<td width="46" valign="top" style="width:46px;padding:20px 0;"><table role="presentation" width="36" cellpadding="0" cellspacing="0" border="0" style="width:36px;border-collapse:separate;"><tr><td align="center" valign="middle" height="36" style="width:36px;height:36px;border-radius:10px;background:${tone.chipBg};color:${tone.icon};text-align:center;line-height:36px;font-size:18px;">${glyph}</td></tr></table></td>`,
     '<td valign="middle" style="padding:20px 12px 20px 4px;font-family:Arial,Helvetica,sans-serif;">',
     `<div style="font-size:17px;line-height:22px;font-weight:700;color:${tone.title};">${escapeHtml(action.title)}</div>`,
     `<div style="font-size:14px;line-height:20px;color:#60636a;margin-top:4px;">${escapeHtml(action.body)}</div>`,
