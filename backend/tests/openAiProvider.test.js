@@ -145,6 +145,75 @@ describe('OpenAiProvider streaming tool responses', () => {
     expect(onText).toHaveBeenCalledTimes(1);
     expect(onText).toHaveBeenCalledWith('Final only');
   });
+
+  test('does not replay parsed function-call fields in Responses continuation input', async () => {
+    streamMock
+      .mockReturnValueOnce(createResponseStream([], {
+        id: 'resp_tool',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_1',
+            call_id: 'call_1',
+            name: 'find_similar_tickets',
+            arguments: '{"ticketId":27883}',
+            parsed_arguments: { ticketId: 27883 },
+            status: 'completed',
+          },
+        ],
+        usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+      }))
+      .mockReturnValueOnce(createResponseStream([], {
+        id: 'resp_final',
+        output: [
+          {
+            type: 'message',
+            content: [{ type: 'output_text', text: 'Ready' }],
+          },
+        ],
+        usage: { input_tokens: 15, output_tokens: 3, total_tokens: 18 },
+      }));
+
+    const provider = new OpenAiProvider();
+    const first = await provider.toolResponse({
+      systemPrompt: 'Write notification copy.',
+      messages: [{ role: 'user', content: 'Ticket 27883' }],
+      tools: [{ name: 'find_similar_tickets', input_schema: { type: 'object', properties: {} } }],
+      model: 'gpt-5.5',
+    });
+
+    await provider.toolResponse({
+      systemPrompt: 'Write notification copy.',
+      messages: [
+        { role: 'user', content: 'Ticket 27883' },
+        { role: 'assistant', content: first.message.content },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call_1',
+              content: '{"recentSimilarTickets":[]}',
+            },
+          ],
+        },
+      ],
+      tools: [{ name: 'find_similar_tickets', input_schema: { type: 'object', properties: {} } }],
+      model: 'gpt-5.5',
+    });
+
+    const continuationInput = streamMock.mock.calls[1][0].input;
+    const functionCallInput = continuationInput.find((item) => item.type === 'function_call');
+    expect(functionCallInput).toMatchObject({
+      type: 'function_call',
+      id: 'fc_1',
+      call_id: 'call_1',
+      name: 'find_similar_tickets',
+      arguments: '{"ticketId":27883}',
+      status: 'completed',
+    });
+    expect(functionCallInput.parsed_arguments).toBeUndefined();
+  });
 });
 
 describe('OpenAiProvider JSON responses', () => {

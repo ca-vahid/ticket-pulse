@@ -115,6 +115,7 @@ describe('OpenAI Responses converters', () => {
         call_id: 'call_required',
         name: 'get_ticket_details',
         arguments: '{"ticketId":26901}',
+        parsed_arguments: { ticketId: 26901 },
         status: 'completed',
       },
     ]);
@@ -150,5 +151,66 @@ describe('OpenAI Responses converters', () => {
         call_id: 'call_required',
       }),
     ]);
+    expect(input.find((item) => item.type === 'function_call').parsed_arguments).toBeUndefined();
+  });
+
+  test('strips parsed function-call fields while preserving continuation fields', () => {
+    const blocks = buildAnthropicBlocksFromOpenAiResponse([
+      {
+        type: 'reasoning',
+        id: 'rs_required',
+        summary: [],
+        status: 'completed',
+        encrypted_content: 'encrypted-reasoning',
+        content: [{ type: 'reasoning_text', text: 'Internal chain' }],
+      },
+      {
+        type: 'function_call',
+        id: 'fc_required',
+        call_id: 'call_required',
+        name: 'detect_related_ticket_spike',
+        arguments: '{"ticketId":27883}',
+        parsed_arguments: { ticketId: 27883 },
+        status: 'completed',
+      },
+    ]);
+
+    const input = convertAnthropicMessagesToOpenAiInput([
+      { role: 'assistant', content: blocks },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call_required',
+            content: '{"outageSignals":{"status":"watch"}}',
+          },
+        ],
+      },
+    ]);
+
+    expect(input).toEqual([
+      expect.objectContaining({
+        type: 'reasoning',
+        id: 'rs_required',
+        summary: [],
+        encrypted_content: 'encrypted-reasoning',
+        status: 'completed',
+      }),
+      expect.objectContaining({
+        type: 'function_call',
+        id: 'fc_required',
+        call_id: 'call_required',
+        name: 'detect_related_ticket_spike',
+        arguments: '{"ticketId":27883}',
+        status: 'completed',
+      }),
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_required',
+      }),
+    ]);
+    expect(input[0].content).toBeUndefined();
+    expect(input[1].parsed_arguments).toBeUndefined();
   });
 });

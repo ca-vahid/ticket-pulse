@@ -24,11 +24,24 @@ function sanitizeToolSchema(schema = {}) {
 function cloneResponseItem(item) {
   if (!item || typeof item !== 'object') return null;
   const copy = JSON.parse(JSON.stringify(item));
-  if (copy.type === 'reasoning' && !Array.isArray(copy.summary)) {
-    copy.summary = [];
+  if (copy.type === 'function_call') {
+    return {
+      type: 'function_call',
+      ...(copy.id ? { id: copy.id } : {}),
+      call_id: copy.call_id,
+      name: copy.name,
+      arguments: typeof copy.arguments === 'string' ? copy.arguments : JSON.stringify(copy.arguments || {}),
+      status: copy.status || 'completed',
+    };
   }
-  if (copy.type === 'function_call' && !copy.status) {
-    copy.status = 'completed';
+  if (copy.type === 'reasoning') {
+    return {
+      type: 'reasoning',
+      ...(copy.id ? { id: copy.id } : {}),
+      summary: Array.isArray(copy.summary) ? copy.summary : [],
+      ...(copy.encrypted_content ? { encrypted_content: copy.encrypted_content } : {}),
+      ...(copy.status ? { status: copy.status } : {}),
+    };
   }
   return copy;
 }
