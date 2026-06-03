@@ -309,12 +309,19 @@ function truncateString(value, max = 2000) {
   return value.length > max ? `${value.slice(0, max)}... [truncated]` : value;
 }
 
+// Rendered email bodies carry the appended action-link blocks at the END, so an 800-char
+// cap silently drops them from the audit preview. Give email bodies a budget that fits a
+// full rendered email (body + branding + action links); ticket descriptions stay small.
+const AUDIT_EMAIL_MAX_CHARS = 20000;
+
 function redactPayload(value) {
   if (Array.isArray(value)) return value.map(redactPayload);
   if (!value || typeof value !== 'object') return truncateString(value);
   const result = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (['description', 'descriptionText', 'body', 'htmlBody', 'textBody'].includes(key)) {
+    if (['htmlBody', 'textBody'].includes(key)) {
+      result[key] = truncateString(entry, AUDIT_EMAIL_MAX_CHARS);
+    } else if (['description', 'descriptionText', 'body'].includes(key)) {
       result[key] = truncateString(entry, 800);
     } else {
       result[key] = redactPayload(entry);
@@ -373,8 +380,8 @@ function redactRun(run) {
     deliveries: (run.deliveries || []).map((delivery) => ({
       ...delivery,
       payload: redactPayload(delivery.payload),
-      htmlBody: truncateString(delivery.htmlBody, 5000),
-      textBody: truncateString(delivery.textBody, 5000),
+      htmlBody: truncateString(delivery.htmlBody, AUDIT_EMAIL_MAX_CHARS),
+      textBody: truncateString(delivery.textBody, AUDIT_EMAIL_MAX_CHARS),
     })),
   };
 }
