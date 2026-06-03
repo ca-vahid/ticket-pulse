@@ -26,53 +26,14 @@ import {
 import { APP_VERSION } from '../data/changelog';
 import ChangelogModal from './ChangelogModal';
 
-function AssignmentNavIcon({ className = '' }) {
+function NavImageIcon({ className = '', src, alt }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
+    <img
+      src={src}
+      alt={alt}
       className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="6.6" r="3.1" strokeWidth="2" />
-      <path d="M5.1 16.5c.5-3.7 3.2-6.1 6.9-6.1s6.4 2.4 6.9 6.1" strokeWidth="2" />
-      <path
-        d="M6.9 14.2h10.2a1.1 1.1 0 0 1 1.1 1.1v1.1a1.8 1.8 0 0 0 0 3.2v1.1a1.1 1.1 0 0 1-1.1 1.1H6.9a1.1 1.1 0 0 1-1.1-1.1v-1.1a1.8 1.8 0 0 0 0-3.2v-1.1a1.1 1.1 0 0 1 1.1-1.1Z"
-        strokeWidth="2"
-      />
-      <path d="M12 15.8v.05M12 18.4v.05M12 21v.05" strokeWidth="2.4" />
-    </svg>
-  );
-}
-
-function AgentMapNavIcon({ className = '' }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="8.7" strokeWidth="2" />
-      <path
-        d="M5.1 9.3c1.7-.9 2.8-2.2 4-2.3 1-.1 1.7.8 2.6.8 1.2 0 1.4-1.6 2.8-1.5 1.2.1 2.4 1.4 3.6 3.4"
-        strokeWidth="1.7"
-      />
-      <path
-        d="M6.7 14.7c1.7-.9 3.6-.6 4.6.7.7.9.5 2.4 1.4 3.1.7.5 1.8.3 3.2-.7"
-        strokeWidth="1.7"
-      />
-      <path
-        d="M15 11.5c.8-.6 1.9-.7 2.8-.1.9.6 1.3 1.6 1.2 2.9"
-        strokeWidth="1.7"
-      />
-    </svg>
+      draggable="false"
+    />
   );
 }
 
@@ -165,7 +126,7 @@ export default function AppHeader({
       id: 'assignments',
       label: 'Assignment',
       path: '/assignments',
-      Icon: AssignmentNavIcon,
+      iconSrc: '/brand/nav-icons/Assignment.png',
       inactiveClass: 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300',
     }] : []),
   ];
@@ -276,7 +237,7 @@ export default function AppHeader({
 
     return (
       <div className={`inline-flex flex-none items-center ${compact ? 'gap-1' : 'gap-1.5'}`} aria-label="Primary navigation">
-        {visibleItems.map(({ id, label, path, Icon, inactiveClass }) => {
+        {visibleItems.map(({ id, label, path, Icon, iconSrc, inactiveClass }) => {
           const isActive = activePage === id;
           return (
             <button
@@ -294,7 +255,15 @@ export default function AppHeader({
               }`}
               title={isActive ? `${label} (current page)` : label}
             >
-              <Icon className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
+              {iconSrc ? (
+                <NavImageIcon
+                  src={iconSrc}
+                  alt=""
+                  className={`${compact ? 'h-6 w-6' : 'h-7 w-7'} rounded-md object-contain ${isActive ? 'opacity-50 grayscale' : ''}`}
+                />
+              ) : (
+                <Icon className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
+              )}
             </button>
           );
         })}
@@ -524,7 +493,7 @@ export default function AppHeader({
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                 title="Agent Map"
               >
-                <AgentMapNavIcon className="w-6 h-6" />
+                <NavImageIcon src="/brand/nav-icons/Map.png" alt="" className="h-7 w-7 rounded-md object-contain" />
               </button>
 
               <button
