@@ -330,14 +330,15 @@ function afterHoursSupportUrlFromContext(context) {
   ).trim();
 }
 
-function emailActionButtonHtml({ url, label, background = '#2563eb', color = '#ffffff', pill = false, arrow = true }) {
+function emailActionButtonHtml({ url, label, background = '#2563eb', color = '#ffffff', border = null, pill = false, arrow = true }) {
   const text = `${escapeHtml(label)}${arrow ? ' &rarr;' : ''}`;
   const width = Math.max(150, String(label).length * 8 + 56);
   const arcsize = pill ? '50%' : '22%';
   const radius = pill ? '9999px' : '9px';
+  const vmlStroke = border ? `stroke="t" strokecolor="${border}" strokeweight="1pt"` : 'stroke="f"';
   return [
-    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(url)}" style="height:40px;v-text-anchor:middle;width:${width}px;" arcsize="${arcsize}" stroke="f" fillcolor="${background}"><w:anchorlock/><center style="color:${color};font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">${text}</center></v:roundrect><![endif]-->`,
-    `<!--[if !mso]><!--><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="background:${background};border-radius:${radius};color:${color};display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;line-height:40px;padding:0 20px;text-align:center;text-decoration:none;-webkit-text-size-adjust:none;">${text}</a><!--<![endif]-->`,
+    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(url)}" style="height:40px;v-text-anchor:middle;width:${width}px;" arcsize="${arcsize}" ${vmlStroke} fillcolor="${background}"><w:anchorlock/><center style="color:${color};font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">${text}</center></v:roundrect><![endif]-->`,
+    `<!--[if !mso]><!--><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="background:${background};border:1px solid ${border || background};border-radius:${radius};color:${color};display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;line-height:38px;padding:0 19px;text-align:center;text-decoration:none;-webkit-text-size-adjust:none;">${text}</a><!--<![endif]-->`,
   ].join('');
 }
 
@@ -404,25 +405,25 @@ function afterHoursSupportAction(url, context = {}) {
 
 function regularActionRowHtml(action, index) {
   const tone = {
-    publicStatus: { chipBg: '#dbeafe', icon: '#2563eb', title: '#1e40af', btnBg: '#dbeafe', btnFg: '#1d4ed8' },
-    raiseUrgency: { chipBg: '#fef3c7', icon: '#b45309', title: '#92400e', btnBg: '#fde68a', btnFg: '#92400e' },
-    afterHoursSupport: { chipBg: '#fee2e2', icon: '#dc2626', title: '#b91c1c', btnBg: '#fee2e2', btnFg: '#b91c1c' },
-  }[action.key] || { chipBg: '#f1f5f9', icon: '#64748b', title: '#0f172a', btnBg: '#e2e8f0', btnFg: '#334155' };
+    publicStatus: { chipBg: '#e9f5ff', icon: '#1b549b', title: '#1b549b', btnBg: '#e9f5ff', btnFg: '#1b549b', btnBorder: '#c0d4ee' },
+    raiseUrgency: { chipBg: '#fff2da', icon: '#875814', title: '#875814', btnBg: '#fff2da', btnFg: '#875814', btnBorder: '#ebd7ba' },
+    afterHoursSupport: { chipBg: '#ffece9', icon: '#a12626', title: '#a12626', btnBg: '#ffece9', btnFg: '#a12626', btnBorder: '#f0c4c4' },
+  }[action.key] || { chipBg: '#f4f3f0', icon: '#60636a', title: '#22242a', btnBg: '#f4f3f0', btnFg: '#22242a', btnBorder: '#e3e4e7' };
   const glyph = ACTION_ICON_SVGS[action.key] || ACTION_ICON_SVGS.publicStatus;
   const phoneHtml = action.key === 'afterHoursSupport' && action.phone
-    ? `<div style="font-size:13px;line-height:18px;margin-top:6px;color:#475569;"><strong style="color:${tone.title};">On-call:</strong> ${escapeHtml(action.phone)}</div>${action.rotationLabel ? `<div style="font-size:12px;line-height:17px;color:#94a3b8;margin-top:1px;">${escapeHtml(action.rotationLabel)}</div>` : ''}`
+    ? `<div style="font-size:13px;line-height:18px;margin-top:8px;color:#60636a;"><strong style="color:${tone.title};">On-call:</strong> <span style="color:#22242a;">${escapeHtml(action.phone)}</span></div>${action.rotationLabel ? `<div style="font-size:12px;line-height:17px;color:#909299;margin-top:1px;">${escapeHtml(action.rotationLabel)}</div>` : ''}`
     : '';
   return [
     '<tr><td style="padding:0 20px;">',
-    index === 0 ? '' : '<div style="border-top:1px solid #eef2f7;font-size:1px;line-height:1px;">&nbsp;</div>',
+    index === 0 ? '' : '<div style="border-top:1px solid #e3e4e7;font-size:1px;line-height:1px;">&nbsp;</div>',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-    `<td width="40" valign="top" style="width:40px;padding:18px 0;"><table role="presentation" width="30" cellpadding="0" cellspacing="0" border="0" style="width:30px;border-collapse:separate;"><tr><td align="center" valign="middle" height="30" style="width:30px;height:30px;border-radius:9px;background:${tone.chipBg};color:${tone.icon};text-align:center;line-height:1;">${glyph}</td></tr></table></td>`,
-    '<td valign="middle" style="padding:18px 12px 18px 4px;font-family:Arial,Helvetica,sans-serif;">',
-    `<div style="font-size:16px;line-height:21px;font-weight:700;color:${tone.title};">${escapeHtml(action.title)}</div>`,
-    `<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:3px;">${escapeHtml(action.body)}</div>`,
+    `<td width="46" valign="top" style="width:46px;padding:20px 0;"><table role="presentation" width="36" cellpadding="0" cellspacing="0" border="0" style="width:36px;border-collapse:separate;"><tr><td align="center" valign="middle" height="36" style="width:36px;height:36px;border-radius:10px;background:${tone.chipBg};color:${tone.icon};text-align:center;line-height:1;">${glyph}</td></tr></table></td>`,
+    '<td valign="middle" style="padding:20px 12px 20px 4px;font-family:Arial,Helvetica,sans-serif;">',
+    `<div style="font-size:17px;line-height:22px;font-weight:700;color:${tone.title};">${escapeHtml(action.title)}</div>`,
+    `<div style="font-size:14px;line-height:20px;color:#60636a;margin-top:4px;">${escapeHtml(action.body)}</div>`,
     phoneHtml,
     '</td>',
-    `<td valign="middle" align="right" width="176" style="width:176px;">${emailActionButtonHtml({ url: action.url, label: action.buttonLabel, background: tone.btnBg, color: tone.btnFg, pill: true })}</td>`,
+    `<td valign="middle" align="right" width="176" style="width:176px;">${emailActionButtonHtml({ url: action.url, label: action.buttonLabel, background: tone.btnBg, color: tone.btnFg, border: tone.btnBorder, pill: true })}</td>`,
     '</tr></table></td></tr>',
   ].join('');
 }
@@ -430,14 +431,14 @@ function regularActionRowHtml(action, index) {
 function regularActionAppendixHtml(actions = []) {
   const rows = actions.map((action, index) => regularActionRowHtml(action, index)).join('');
   return outlookCappedActionTable([
-    '<tr><td style="border:1px solid #e2e8f0;border-radius:14px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">',
+    '<tr><td style="border:1px solid #e3e4e7;border-radius:18px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
-    '<tr><td style="padding:22px 20px 8px;">',
-    '<div style="font-size:19px;line-height:25px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">Helpful ticket links</div>',
-    '<div style="font-size:14px;line-height:20px;color:#64748b;margin-top:4px;">Follow this request or update its priority.</div>',
+    '<tr><td style="padding:24px 22px 8px;">',
+    '<div style="font-size:21px;line-height:27px;font-weight:700;color:#22242a;letter-spacing:-0.3px;">Helpful ticket links</div>',
+    '<div style="font-size:15px;line-height:21px;color:#60636a;margin-top:5px;">Follow this request or update its priority.</div>',
     '</td></tr>',
     rows,
-    '<tr><td style="padding:14px 20px 18px;"><div style="border-top:1px solid #eef2f7;padding-top:12px;font-size:13px;line-height:18px;color:#94a3b8;">These links stay with the ticket even if the assigned person changes.</div></td></tr>',
+    '<tr><td style="padding:14px 22px 20px;"><div style="border-top:1px solid #e3e4e7;padding-top:14px;font-size:13px;line-height:18px;color:#909299;">These links stay with the ticket even if the assigned person changes.</div></td></tr>',
     '</table></td></tr>',
   ].join(''));
 }
@@ -465,18 +466,18 @@ function actionAppendixText(actions = []) {
 function afterHoursEmergencyHtml(action, publicAction = null) {
   const statusUrl = publicAction?.url || null;
   return outlookCappedActionTable([
-    '<tr><td style="border:1px solid #fca5a5;border-radius:14px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">',
+    '<tr><td style="border:1px solid #f0c4c4;border-radius:18px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
-    '<tr><td style="background:#b91c1c;border-radius:14px 14px 0 0;padding:13px 18px;"><div style="font-size:15px;line-height:20px;font-weight:700;color:#ffffff;letter-spacing:0.2px;">&#9888;&nbsp; Need immediate after-hours support?</div></td></tr>',
-    `<tr><td style="padding:16px 18px 6px;"><div style="font-size:14px;line-height:21px;color:#334155;">${escapeHtml(action.body)}</div></td></tr>`,
-    `<tr><td style="padding:14px 18px 4px;">${emailActionButtonHtml({ url: action.url, label: 'Request immediate support', background: '#dc2626' })}</td></tr>`,
-    `<tr><td style="padding:8px 18px 0;"><div style="font-size:12px;line-height:18px;color:#7f1d1d;"><strong>On-call tonight:</strong> ${action.phone ? escapeHtml(action.phone) : 'roster contact'}</div>${action.rotationLabel ? `<div style="font-size:12px;line-height:17px;color:#a8a29e;margin-top:1px;">${escapeHtml(action.rotationLabel)}</div>` : ''}</td></tr>`,
+    '<tr><td style="background:#a12626;border-radius:18px 18px 0 0;padding:14px 20px;"><div style="font-size:15px;line-height:20px;font-weight:700;color:#ffffff;letter-spacing:0.2px;">&#9888;&nbsp; Need immediate after-hours support?</div></td></tr>',
+    `<tr><td style="padding:16px 20px 6px;"><div style="font-size:14px;line-height:21px;color:#60636a;">${escapeHtml(action.body)}</div></td></tr>`,
+    `<tr><td style="padding:14px 20px 4px;">${emailActionButtonHtml({ url: action.url, label: 'Request immediate support', background: '#cc3d3a', color: '#ffffff', pill: true })}</td></tr>`,
+    `<tr><td style="padding:8px 20px 0;"><div style="font-size:13px;line-height:18px;color:#60636a;"><strong style="color:#a12626;">On-call tonight:</strong> <span style="color:#22242a;">${action.phone ? escapeHtml(action.phone) : 'roster contact'}</span></div>${action.rotationLabel ? `<div style="font-size:12px;line-height:17px;color:#909299;margin-top:1px;">${escapeHtml(action.rotationLabel)}</div>` : ''}</td></tr>`,
     statusUrl
       ? [
-        '<tr><td style="padding:14px 18px 16px;"><div style="border-top:1px dashed #fecaca;padding-top:12px;">',
+        '<tr><td style="padding:14px 20px 18px;"><div style="border-top:1px dashed #f0c4c4;padding-top:14px;">',
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>',
-        '<td valign="middle" style="padding-right:10px;"><div style="font-size:13px;line-height:18px;color:#475569;"><strong style="color:#0f172a;">Meanwhile</strong> &mdash; track status, assignee &amp; ETA.</div></td>',
-        `<td valign="middle">${emailActionButtonHtml({ url: statusUrl, label: 'Check latest status', background: '#e2e8f0', color: '#334155', pill: true })}</td>`,
+        '<td valign="middle" style="padding-right:10px;"><div style="font-size:13px;line-height:18px;color:#60636a;"><strong style="color:#22242a;">Meanwhile</strong> &mdash; track status, assignee &amp; ETA.</div></td>',
+        `<td valign="middle">${emailActionButtonHtml({ url: statusUrl, label: 'Check latest status', background: '#e9f5ff', color: '#1b549b', border: '#c0d4ee', pill: true })}</td>`,
         '</tr></table></div></td></tr>',
       ].join('')
       : '<tr><td style="padding:0 18px 16px;">&nbsp;</td></tr>',
