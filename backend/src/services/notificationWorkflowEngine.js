@@ -330,24 +330,21 @@ function afterHoursSupportUrlFromContext(context) {
   ).trim();
 }
 
-function emailActionButtonHtml({ url, label, background = '#1d4ed8', border = '#1d4ed8', color = '#ffffff' }) {
+function emailActionButtonHtml({ url, label, background = '#2563eb', arrow = true }) {
+  const text = `${escapeHtml(label)}${arrow ? ' &rarr;' : ''}`;
+  const width = Math.max(170, String(label).length * 8 + 60);
   return [
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;">',
-    '<tr>',
-    `<td bgcolor="${background}" style="background:${background};border:1px solid ${border};mso-padding-alt:9px 14px;">`,
-    `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;line-height:18px;color:${color};text-decoration:none;padding:9px 14px;">${escapeHtml(label)}</a>`,
-    '</td>',
-    '</tr>',
-    '</table>',
+    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(url)}" style="height:42px;v-text-anchor:middle;width:${width}px;" arcsize="22%" stroke="f" fillcolor="${background}"><w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">${text}</center></v:roundrect><![endif]-->`,
+    `<!--[if !mso]><!--><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="background:${background};border-radius:9px;color:#ffffff;display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;line-height:42px;padding:0 22px;text-align:center;text-decoration:none;-webkit-text-size-adjust:none;">${text}</a><!--<![endif]-->`,
   ].join('');
 }
 
 function outlookCappedActionTable(innerHtml) {
   return [
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:20px 0 14px;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:20px 0 8px;">',
     '<tr><td align="left" style="padding:0;">',
     '<!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td><![endif]-->',
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;max-width:640px;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;max-width:640px;">',
     innerHtml,
     '</table>',
     '<!--[if mso]></td></tr></table><![endif]-->',
@@ -397,69 +394,42 @@ function afterHoursSupportAction(url, context = {}) {
 
 function regularActionRowHtml(action, index) {
   const tone = {
-    publicStatus: { color: '#1e3a8a', accent: '#2563eb', button: '#1d4ed8', border: '#dbeafe' },
-    raiseUrgency: { color: '#7c2d12', accent: '#d97706', button: '#b45309', border: '#fed7aa' },
-    afterHoursSupport: { color: '#7f1d1d', accent: '#dc2626', button: '#dc2626', border: '#fecaca' },
-  }[action.key] || { color: '#111827', accent: '#64748b', button: '#1d4ed8', border: '#e2e8f0' };
-  const topBorder = index === 0 ? '1px solid #dbeafe' : '1px solid #e5e7eb';
-  const phoneHtml = action.key === 'afterHoursSupport'
-    ? [
-      '<div style="font-size:12px;line-height:17px;color:#7f1d1d;margin-top:6px;">',
-      'Active support phone: ',
-      action.phone
-        ? `<a href="tel:${escapeHtml(action.phoneHref)}" style="color:#7f1d1d;font-weight:700;text-decoration:none;">${escapeHtml(action.phone)}</a>`
-        : '<span style="font-weight:700;">not configured</span>',
-      '</div>',
-      action.rotationLabel
-        ? `<div style="font-size:12px;line-height:17px;color:#78716c;margin-top:2px;">${escapeHtml(action.rotationLabel)}</div>`
-        : '',
-    ].join('')
+    publicStatus: { accent: '#2563eb', title: '#1e3a8a', button: '#2563eb' },
+    raiseUrgency: { accent: '#d97706', title: '#92400e', button: '#b45309' },
+    afterHoursSupport: { accent: '#dc2626', title: '#7f1d1d', button: '#dc2626' },
+  }[action.key] || { accent: '#64748b', title: '#0f172a', button: '#2563eb' };
+  const phoneHtml = action.key === 'afterHoursSupport' && action.phone
+    ? `<div style="font-size:12px;line-height:17px;color:#7f1d1d;margin-top:6px;"><strong>On-call:</strong> ${escapeHtml(action.phone)}</div>${action.rotationLabel ? `<div style="font-size:12px;line-height:17px;color:#a8a29e;margin-top:1px;">${escapeHtml(action.rotationLabel)}</div>` : ''}`
     : '';
   return [
-    '<tr>',
-    `<td style="border-top:${topBorder};padding:12px 14px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">`,
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
-    '<tr>',
-    `<td width="8" valign="top" style="width:8px;border-left:3px solid ${tone.accent};font-size:1px;line-height:1px;">&nbsp;</td>`,
-    '<td valign="top" style="padding:0 12px 0 0;">',
-    `<div style="font-size:14px;line-height:18px;font-weight:700;color:${tone.color};">${escapeHtml(action.title)}</div>`,
-    `<div style="font-size:13px;line-height:18px;color:#475569;margin-top:3px;">${escapeHtml(action.body)}</div>`,
+    '<tr><td style="padding:0 18px;">',
+    index === 0 ? '' : '<div style="border-top:1px solid #eef2f7;font-size:1px;line-height:1px;">&nbsp;</div>',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
+    `<td width="4" valign="top" style="width:4px;background:${tone.accent};border-radius:4px;font-size:1px;line-height:1px;">&nbsp;</td>`,
+    '<td valign="middle" style="padding:16px 0 16px 14px;font-family:Arial,Helvetica,sans-serif;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>',
+    '<td valign="middle" style="padding-right:12px;">',
+    `<div style="font-size:15px;line-height:20px;font-weight:700;color:${tone.title};">${escapeHtml(action.title)}</div>`,
+    `<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:3px;">${escapeHtml(action.body)}</div>`,
     phoneHtml,
     '</td>',
-    '<td valign="middle" align="right" width="150" style="width:150px;">',
-    emailActionButtonHtml({
-      url: action.url,
-      label: action.buttonLabel,
-      background: tone.button,
-      border: tone.button,
-    }),
-    '</td>',
-    '</tr>',
-    '</table>',
-    '</td>',
-    '</tr>',
+    `<td valign="middle" align="right" width="180" style="width:180px;">${emailActionButtonHtml({ url: action.url, label: action.buttonLabel, background: tone.button })}</td>`,
+    '</tr></table></td></tr></table></td></tr>',
   ].join('');
 }
 
 function regularActionAppendixHtml(actions = []) {
   const rows = actions.map((action, index) => regularActionRowHtml(action, index)).join('');
   return outlookCappedActionTable([
-    '<tr>',
-    '<td style="border:1px solid #c7d8f5;background:#f8fbff;padding:0;font-family:Arial,Helvetica,sans-serif;">',
+    '<tr><td style="border:1px solid #e2e8f0;border-radius:14px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
-    '<tr>',
-    '<td style="padding:14px 16px 10px;">',
-    '<div style="font-size:15px;line-height:20px;font-weight:700;color:#172554;">Helpful ticket links</div>',
-    '<div style="font-size:13px;line-height:18px;color:#475569;margin-top:4px;">Use these Ticket Pulse links to follow this request or update its priority.</div>',
-    '</td>',
-    '</tr>',
+    '<tr><td style="padding:18px 18px 6px;">',
+    '<div style="font-size:16px;line-height:22px;font-weight:700;color:#0f172a;letter-spacing:-0.2px;">Helpful ticket links</div>',
+    '<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:3px;">Follow this request or update its priority.</div>',
+    '</td></tr>',
     rows,
-    '<tr>',
-    '<td style="border-top:1px solid #dbeafe;padding:9px 16px 12px;font-size:12px;line-height:17px;color:#64748b;font-family:Arial,Helvetica,sans-serif;">These links stay with the ticket even if the assigned person changes.</td>',
-    '</tr>',
-    '</table>',
-    '</td>',
-    '</tr>',
+    '<tr><td style="padding:12px 18px 16px;"><div style="border-top:1px solid #eef2f7;padding-top:10px;font-size:12px;line-height:17px;color:#94a3b8;">These links stay with the ticket even if the assigned person changes.</div></td></tr>',
+    '</table></td></tr>',
   ].join(''));
 }
 
@@ -481,6 +451,39 @@ function actionAppendixText(actions = []) {
     '',
     'These links stay with the ticket even if the assigned person changes.',
   ].filter(Boolean).join('\n');
+}
+
+function afterHoursEmergencyHtml(action, publicAction = null) {
+  const statusUrl = publicAction?.url || null;
+  return outlookCappedActionTable([
+    '<tr><td style="border:1px solid #fca5a5;border-radius:14px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+    '<tr><td style="background:#b91c1c;border-radius:14px 14px 0 0;padding:13px 18px;"><div style="font-size:15px;line-height:20px;font-weight:700;color:#ffffff;letter-spacing:0.2px;">&#9888;&nbsp; Need immediate after-hours support?</div></td></tr>',
+    `<tr><td style="padding:16px 18px 6px;"><div style="font-size:14px;line-height:21px;color:#334155;">${escapeHtml(action.body)}</div></td></tr>`,
+    `<tr><td style="padding:14px 18px 4px;">${emailActionButtonHtml({ url: action.url, label: 'Request immediate support', background: '#dc2626' })}</td></tr>`,
+    `<tr><td style="padding:8px 18px 0;"><div style="font-size:12px;line-height:18px;color:#7f1d1d;"><strong>On-call tonight:</strong> ${action.phone ? escapeHtml(action.phone) : 'roster contact'}</div>${action.rotationLabel ? `<div style="font-size:12px;line-height:17px;color:#a8a29e;margin-top:1px;">${escapeHtml(action.rotationLabel)}</div>` : ''}</td></tr>`,
+    statusUrl
+      ? [
+        '<tr><td style="padding:14px 18px 16px;"><div style="border-top:1px dashed #fecaca;padding-top:12px;">',
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>',
+        '<td valign="middle" style="padding-right:10px;"><div style="font-size:13px;line-height:18px;color:#475569;"><strong style="color:#0f172a;">Meanwhile</strong> &mdash; track status, assignee &amp; ETA.</div></td>',
+        `<td valign="middle">${emailActionButtonHtml({ url: statusUrl, label: 'Check latest status', background: '#475569' })}</td>`,
+        '</tr></table></div></td></tr>',
+      ].join('')
+      : '<tr><td style="padding:0 18px 16px;">&nbsp;</td></tr>',
+    '</table></td></tr>',
+  ].join(''));
+}
+
+function afterHoursEmergencyText(action, publicAction = null) {
+  return [
+    'Need immediate after-hours support?',
+    action.body,
+    `Request immediate support: ${action.url}`,
+    action.phone ? `On-call tonight: ${action.phone}` : null,
+    action.rotationLabel || null,
+    publicAction ? `Meanwhile, check latest status: ${publicAction.url}` : null,
+  ].filter((line) => line !== null && line !== undefined).join('\n');
 }
 
 function actionLinkOptions(options = {}) {
@@ -672,22 +675,35 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
 
 function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {}, options = {}) {
   const effectiveOptions = actionLinkOptions(options);
-  const actions = [];
   let next = appendPublicStatusLinkToEmail(email, context, nodeData?.appendPublicStatusLink === true, effectiveOptions);
-  if (next.publicStatusLinkApplied === true && email.publicStatusLinkApplied !== true) {
-    actions.push(publicStatusAction(next.publicStatusUrl));
-  }
+  const publicAction = (next.publicStatusLinkApplied === true && email.publicStatusLinkApplied !== true)
+    ? publicStatusAction(next.publicStatusUrl) : null;
   next = appendRaiseUrgencyLinkToEmail(next, context, nodeData?.appendRaiseUrgencyLink === true, effectiveOptions);
-  if (next.raiseUrgencyLinkApplied === true && email.raiseUrgencyLinkApplied !== true) {
-    actions.push(raiseUrgencyAction(next.raiseUrgencyUrl));
-  }
+  const urgencyAction = (next.raiseUrgencyLinkApplied === true && email.raiseUrgencyLinkApplied !== true)
+    ? raiseUrgencyAction(next.raiseUrgencyUrl) : null;
   next = appendAfterHoursSupportLinkToEmail(next, context, nodeData?.appendAfterHoursSupportLink === true, effectiveOptions);
-  if (next.afterHoursSupportLinkApplied === true && email.afterHoursSupportLinkApplied !== true) {
-    actions.push(afterHoursSupportAction(next.afterHoursSupportUrl, context));
+  const afterHoursAction = (next.afterHoursSupportLinkApplied === true && email.afterHoursSupportLinkApplied !== true)
+    ? afterHoursSupportAction(next.afterHoursSupportUrl, context) : null;
+
+  // In after-hours/holiday context the emergency block takes over and bundles the
+  // public status link inside itself. During business hours all selected links stay
+  // grouped in the regular "Helpful ticket links" card.
+  const availability = context?.availability || {};
+  const isAfterHoursContext = availability.isAfterHours === true || availability.isHoliday === true;
+
+  let appendixHtml = '';
+  let appendixText = '';
+  if (isAfterHoursContext && afterHoursAction) {
+    appendixHtml = afterHoursEmergencyHtml(afterHoursAction, publicAction);
+    appendixText = afterHoursEmergencyText(afterHoursAction, publicAction);
+  } else {
+    const actions = [publicAction, urgencyAction, afterHoursAction].filter(Boolean);
+    if (actions.length > 0) {
+      appendixHtml = actionAppendixHtml(actions);
+      appendixText = actionAppendixText(actions);
+    }
   }
-  if (actions.length > 0) {
-    const appendixHtml = actionAppendixHtml(actions);
-    const appendixText = actionAppendixText(actions);
+  if (appendixHtml) {
     next = {
       ...next,
       html: [next.html, appendixHtml].filter(Boolean).join('\n') || null,
