@@ -126,7 +126,7 @@ export default function AppHeader({
       id: 'assignments',
       label: 'Assignment',
       path: '/assignments',
-      iconSrc: '/brand/nav-icons/Assignment.png',
+      iconSrc: '/brand/nav-icons/Assignment-nav.png',
       inactiveClass: 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300',
     }] : []),
   ];
@@ -236,18 +236,18 @@ export default function AppHeader({
       : primaryNavItems;
 
     return (
-      <div className={`inline-flex flex-none items-center ${compact ? 'gap-1' : 'gap-1.5'}`} aria-label="Primary navigation">
+      <div className="inline-flex flex-none items-center gap-1.5" aria-label="Primary navigation">
         {visibleItems.map(({ id, label, path, Icon, iconSrc, inactiveClass }) => {
           const isActive = activePage === id;
           const hasImageIcon = Boolean(iconSrc);
           const navButtonSize = compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl';
           const navButtonClassName = hasImageIcon
-            ? `${navButtonSize} inline-flex flex-none items-center justify-center overflow-hidden border border-transparent bg-transparent p-0 transition ${
+            ? `${navButtonSize} inline-flex flex-none touch-manipulation items-center justify-center overflow-hidden border border-transparent bg-transparent p-0 transition ${
               isActive
                 ? 'cursor-default'
                 : 'hover:scale-[1.03] hover:bg-slate-50'
             }`
-            : `${navButtonSize} inline-flex flex-none items-center justify-center border transition-colors ${
+            : `${navButtonSize} inline-flex flex-none touch-manipulation items-center justify-center border transition-colors ${
               isActive
                 ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400'
                 : `${inactiveClass} hover:shadow-sm`
@@ -268,7 +268,7 @@ export default function AppHeader({
                 <NavImageIcon
                   src={iconSrc}
                   alt=""
-                  className="h-full w-full object-cover"
+                  className="h-full w-full object-contain"
                 />
               ) : (
                 <Icon className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
@@ -279,6 +279,32 @@ export default function AppHeader({
       </div>
     );
   };
+
+  const renderAgentMapButton = (compact = false) => (
+    <button
+      type="button"
+      onClick={() => navigate('/visuals')}
+      className={`${compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-shrink-0 touch-manipulation items-center justify-center overflow-hidden transition hover:bg-slate-50`}
+      title="Agent Map"
+    >
+      <NavImageIcon
+        src="/brand/nav-icons/Map-nav.png"
+        alt=""
+        className={`${compact ? 'h-8 w-8' : 'h-10 w-10'} object-contain`}
+      />
+    </button>
+  );
+
+  const renderSettingsButton = (compact = false) => (
+    <button
+      type="button"
+      onClick={() => navigate('/settings')}
+      className={`${compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-shrink-0 touch-manipulation items-center justify-center transition hover:bg-gray-100`}
+      title="Settings"
+    >
+      <Settings className={compact ? 'h-4 w-4' : 'h-6 w-6'} />
+    </button>
+  );
 
   const renderWorkspaceControl = (compact = false) => {
     if (!currentWorkspace) return null;
@@ -318,7 +344,7 @@ export default function AppHeader({
     <>
       <header className="sticky top-0 z-40 bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2">
-          <div className="space-y-2 md:hidden">
+          <div className="space-y-1.5 md:hidden">
             <div className="flex items-center justify-between gap-2">
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <div className="relative flex h-8 w-8 flex-shrink-0 items-center justify-center">
@@ -343,8 +369,8 @@ export default function AppHeader({
               {renderUserMenu(true)}
             </div>
 
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="-mx-1 flex min-w-0 items-center overflow-hidden">
+              <div className="flex min-w-0 flex-1 touch-pan-x items-center gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {extraActions}
                 {backgroundSyncRunning && (
                   <button
@@ -357,8 +383,9 @@ export default function AppHeader({
                   </button>
                 )}
                 {renderPrimaryNav(true, { hideActive: true })}
+                {renderAgentMapButton(true)}
+                {renderSettingsButton(true)}
               </div>
-              <button onClick={() => navigate('/settings')} className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg hover:bg-gray-100 touch-manipulation" title="Settings"><Settings className="w-4 h-4" /></button>
             </div>
           </div>
 
@@ -497,23 +524,9 @@ export default function AppHeader({
 
               {renderPrimaryNav(false)}
 
-              <button
-                onClick={() => navigate('/visuals')}
-                className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl transition hover:bg-slate-50"
-                title="Agent Map"
-              >
-                <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg">
-                  <NavImageIcon src="/brand/nav-icons/Map.png" alt="" className="h-14 w-14 max-w-none object-cover" />
-                </span>
-              </button>
+              {renderAgentMapButton(false)}
 
-              <button
-                onClick={() => navigate('/settings')}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                title="Settings"
-              >
-                <Settings className="w-6 h-6" />
-              </button>
+              {renderSettingsButton(false)}
 
               {renderUserMenu(false)}
             </div>
