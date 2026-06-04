@@ -1516,15 +1516,15 @@ async function executeNode({
       const schema = validateLlmPayloadAgainstSchema(payload, outputSchema);
       const guard = guardNotificationEmailPayload(payload, {
         contextBundle: llmContext,
-          strictCitations: directPromptRuntime.guardOptions.strictCitations,
-          allowEmoji: directPromptRuntime.guardOptions.allowEmoji,
-          allowPlayfulTone: directPromptRuntime.guardOptions.allowPlayfulTone,
-          repairGuardrails: directPromptRuntime.guardOptions.repairGuardrails,
-          auditOnlyGuardrails: directPromptRuntime.guardOptions.auditOnlyGuardrails,
-          disabledGuardrails: directPromptRuntime.guardOptions.disabledGuardrails,
-          toneMode: directPromptRuntime.guardOptions.toneMode,
-          toneStyleAction: directPromptRuntime.guardOptions.toneStyleAction,
-        });
+        strictCitations: directPromptRuntime.guardOptions.strictCitations,
+        allowEmoji: directPromptRuntime.guardOptions.allowEmoji,
+        allowPlayfulTone: directPromptRuntime.guardOptions.allowPlayfulTone,
+        repairGuardrails: directPromptRuntime.guardOptions.repairGuardrails,
+        auditOnlyGuardrails: directPromptRuntime.guardOptions.auditOnlyGuardrails,
+        disabledGuardrails: directPromptRuntime.guardOptions.disabledGuardrails,
+        toneMode: directPromptRuntime.guardOptions.toneMode,
+        toneStyleAction: directPromptRuntime.guardOptions.toneStyleAction,
+      });
       payload = guard.payload || payload;
       const html = sanitizeEmailHtml(payload.html || payload.bodyHtml)
         || sanitizeEmailHtml(textToEmailHtml(payload.text || payload.body));
