@@ -129,6 +129,13 @@ export default function AppHeader({
       iconSrc: '/brand/nav-icons/Assignment-nav.png',
       inactiveClass: 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300',
     }] : []),
+    ...(canManageWorkspace || activePage === 'workflows' ? [{
+      id: 'workflows',
+      label: 'Mail Workflows',
+      path: '/workflows',
+      iconSrc: '/brand/nav-icons/Workflow-nav.png',
+      inactiveClass: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300',
+    }] : []),
   ];
 
   const navigateFromMenu = (path) => {

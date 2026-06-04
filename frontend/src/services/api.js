@@ -770,6 +770,7 @@ export const notificationWorkflowAPI = {
   test: (data) => apiLongTimeout.post('/notification-workflows/test', data),
   sendTestEmail: (data) => api.post('/notification-workflows/test-email', data),
   sendAuditTestEmail: (auditId) => api.post(`/notification-workflows/audits/${encodeURIComponent(auditId)}/send-test-email`),
+  getAuditRunEmail: (auditId) => api.get(`/notification-workflows/audits/${encodeURIComponent(auditId)}/rendered-email`),
   getAudit: (auditId) => api.get(`/notification-workflows/audits/${encodeURIComponent(auditId)}`),
   getAuditRuns: (params = {}) => api.get('/notification-workflows/runs', { params }),
   getRuns: (id, params = {}) => api.get(`/notification-workflows/${id}/runs`, { params }),

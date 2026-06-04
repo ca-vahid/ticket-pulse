@@ -4342,8 +4342,24 @@ function MockAuditPanel({
     || null;
   const activeEventLabel = workflowEventLabelForRun(activeRun);
   const activeEmail = auditEmailForRun(activeRun, activeDelivery);
-  const bodyHtml = activeEmail?.html || null;
-  const bodyText = activeEmail?.text || null;
+  // Fetch the email re-rendered through the current engine so the preview matches the
+  // live/send-test output (current template) rather than the historically stored email.
+  const [renderedEmail, setRenderedEmail] = useState(null);
+  useEffect(() => {
+    if (!activeRun?.id) {
+      setRenderedEmail(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const auditId = activeRun.auditId || `TP-NWF-${activeRun.id}`;
+    notificationWorkflowAPI.getAuditRunEmail(auditId)
+      .then((res) => { if (!cancelled) setRenderedEmail(normalizeEmailFields(res?.data)); })
+      .catch(() => { if (!cancelled) setRenderedEmail(null); });
+    return () => { cancelled = true; };
+  }, [activeRun?.id, activeRun?.auditId]);
+  const displayEmail = renderedEmail || activeEmail;
+  const displayBodyHtml = displayEmail?.html || null;
+  const displayBodyText = displayEmail?.text || null;
   const recipientStep = activeSteps.find((step) => step.nodeType === 'recipient_resolver');
   const activeRecipients = activeDelivery
     ? {
@@ -4763,13 +4779,13 @@ function MockAuditPanel({
               <section className="rounded-md border border-slate-200 bg-white">
                 <div className="border-b border-slate-200 px-3 py-2">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Rendered Email</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-950">{activeEmail?.subject || 'No subject rendered'}</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-950">{displayEmail?.subject || 'No subject rendered'}</div>
                 </div>
                 <div className="max-h-64 overflow-auto p-3 text-sm leading-6 text-slate-800">
-                  {bodyHtml ? (
-                    <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(bodyHtml) }} />
-                  ) : bodyText ? (
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-6">{bodyText}</pre>
+                  {displayBodyHtml ? (
+                    <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(displayBodyHtml) }} />
+                  ) : displayBodyText ? (
+                    <pre className="whitespace-pre-wrap font-sans text-sm leading-6">{displayBodyText}</pre>
                   ) : (
                     <div className="text-sm text-slate-500">No email body captured for this run.</div>
                   )}
@@ -4868,7 +4884,12 @@ function NodePalette({ onAddNode, onRemoveNode }) {
   );
 }
 
-export default function NotificationWorkflowsPanel() {
+export default function NotificationWorkflowsPanel({
+  controlledTab = null,
+  onTabChange = null,
+  hideTabBar = false,
+  rootClassName = null,
+} = {}) {
   const editorLayout = useDefaultLayout({
     id: WORKFLOW_EDITOR_LAYOUT_ID,
     panelIds: ['workflow-canvas', 'workflow-inspector'],
@@ -4906,7 +4927,12 @@ export default function NotificationWorkflowsPanel() {
   const [templateTab, setTemplateTab] = useState('rich');
   const [llmSchemaText, setLlmSchemaText] = useState(formatJson(DEFAULT_LLM_OUTPUT_SCHEMA));
   const [llmSchemaError, setLlmSchemaError] = useState(null);
-  const [activeGlobalTab, setActiveGlobalTab] = useState('workflows');
+  const [internalGlobalTab, setInternalGlobalTab] = useState('workflows');
+  const activeGlobalTab = controlledTab ?? internalGlobalTab;
+  const setActiveGlobalTab = (nextTabId) => {
+    if (onTabChange) onTabChange(nextTabId);
+    if (controlledTab == null) setInternalGlobalTab(nextTabId);
+  };
   const [afterHoursDrawerOpen, setAfterHoursDrawerOpen] = useState(false);
   const [emailBlocks, setEmailBlocks] = useState(EMPTY_EMAIL_BLOCKS);
   const [selectedEmailBlockId, setSelectedEmailBlockId] = useState(null);
@@ -7075,7 +7101,7 @@ export default function NotificationWorkflowsPanel() {
   }
 
   return (
-    <div className="tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-white/70 sm:m-4">
+    <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-white/70 sm:m-4'}>
       <div className="shrink-0 border-b border-white/70 px-5 py-3">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -7112,20 +7138,22 @@ export default function NotificationWorkflowsPanel() {
         </div>
 
         <div className="mt-3 space-y-2">
-          <div
-            role="tablist"
-            aria-label="Mail settings sections"
-            className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200/80 bg-slate-100/70 p-1 shadow-subtle sm:grid-cols-4"
-          >
-            {globalTabs.map((tab) => (
-              <MailSettingsTabButton
-                key={tab.id}
-                tab={tab}
-                active={activeGlobalTab === tab.id}
-                onClick={() => setActiveGlobalTab(tab.id)}
-              />
-            ))}
-          </div>
+          {!hideTabBar && (
+            <div
+              role="tablist"
+              aria-label="Mail settings sections"
+              className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200/80 bg-slate-100/70 p-1 shadow-subtle sm:grid-cols-4"
+            >
+              {globalTabs.map((tab) => (
+                <MailSettingsTabButton
+                  key={tab.id}
+                  tab={tab}
+                  active={activeGlobalTab === tab.id}
+                  onClick={() => setActiveGlobalTab(tab.id)}
+                />
+              ))}
+            </div>
+          )}
 
           {workflowTabActive && (
             <div className="flex min-h-[36px] flex-wrap items-center justify-end gap-2">
