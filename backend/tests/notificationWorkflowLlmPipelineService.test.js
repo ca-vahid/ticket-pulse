@@ -113,6 +113,57 @@ describe('notification workflow LLM pipeline service', () => {
     );
   });
 
+  test.each([
+    ['find_similar_tickets', { query: 'vpn', lookbackHours: 24 }, 'similar-ticket:225001'],
+    ['detect_related_ticket_spike', { query: 'vpn', lookbackHours: 4 }, 'spike:vpns'],
+  ])('runs %s then accepts submit_notification_email', async (toolName, input, evidenceId) => {
+    const policy = {
+      ...basePolicy,
+      enabledTools: [toolName],
+    };
+    executeNotificationWorkflowToolMock.mockResolvedValueOnce({
+      evidenceId,
+      result: 'ok',
+    });
+    runToolTurnMock
+      .mockResolvedValueOnce(toolTurn([
+        { type: 'tool_use', id: `toolu_${toolName}`, name: toolName, input },
+      ]))
+      .mockResolvedValueOnce(toolTurn([
+        {
+          type: 'tool_use',
+          id: 'toolu_submit',
+          name: 'submit_notification_email',
+          input: {
+            subject: 'Ticket update',
+            html: '<p>We are reviewing your request.</p>',
+            text: 'We are reviewing your request.',
+            citedSignals: [evidenceId],
+          },
+        },
+      ]));
+
+    const result = await runNotificationWorkflowLlmPipeline({
+      workflow,
+      node,
+      eventContext: { event: { type: 'ticket.created' } },
+      state: {},
+      policy,
+      contextBundle,
+      systemPrompt: 'Write an email.',
+      userMessage: 'Generate.',
+      maxTokens: 1000,
+    });
+
+    expect(result.email.subject).toBe('Ticket update');
+    expect(result.llm.toolCalls).toBe(2);
+    expect(executeNotificationWorkflowToolMock).toHaveBeenCalledWith(
+      toolName,
+      input,
+      expect.objectContaining({ workspaceId: 1, policy }),
+    );
+  });
+
   test('repairs unknown citedSignals metadata in final email tool output', async () => {
     runToolTurnMock.mockResolvedValueOnce(toolTurn([
       {

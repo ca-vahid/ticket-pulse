@@ -11,6 +11,8 @@
     "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch",
     "lint": "eslint src/**/*.js",
     "format": "prettier --write \"src/**/*.js\"",
+    "audit:notification-workflows": "node scripts/audit-notification-workflow-mock-window.mjs",
+    "audit:notification-workflow-payloads": "node scripts/audit-notification-workflow-payload-sanitization.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",

@@ -16,9 +16,16 @@ const prismaMock = {
     findFirst: jest.fn(),
     count: jest.fn(),
   },
+  notificationWorkflowStepRun: {
+    findMany: jest.fn(),
+  },
   notificationDelivery: {
     create: jest.fn(),
     count: jest.fn(),
+    findMany: jest.fn(),
+    groupBy: jest.fn(),
+  },
+  aiProviderAttempt: {
     groupBy: jest.fn(),
   },
 };
@@ -68,6 +75,7 @@ jest.unstable_mockModule('../src/services/notificationWorkflowRepository.js', ()
 jest.unstable_mockModule('../src/services/notificationWorkflowEngine.js', () => ({
   default: {},
   finalizeWorkflowSendEmail: finalizeWorkflowSendEmailMock,
+  sanitizeWorkflowAuditPayload: (value) => value,
 }));
 
 jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () => ({
@@ -201,8 +209,11 @@ describe('notification workflow routes', () => {
     prismaMock.notificationWorkflow.count.mockResolvedValue(1);
     prismaMock.notificationWorkflowRun.findFirst.mockResolvedValue(null);
     prismaMock.notificationWorkflowRun.count.mockResolvedValue(4);
+    prismaMock.notificationWorkflowStepRun.findMany.mockResolvedValue([]);
+    prismaMock.aiProviderAttempt.groupBy.mockResolvedValue([]);
     prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 900, ...data }));
     prismaMock.notificationDelivery.count.mockResolvedValue(3);
+    prismaMock.notificationDelivery.findMany.mockResolvedValue([]);
     prismaMock.notificationDelivery.groupBy.mockResolvedValue([]);
     getSendGridConfigMock.mockResolvedValue({ configured: true, mode: 'mock' });
     processDeliveryMock.mockResolvedValue({ success: true, providerMessageId: 'sg-test' });
@@ -293,6 +304,8 @@ describe('notification workflow routes', () => {
       archivedBy: 'admin@example.com',
       isEnabled: false,
     });
+    repositoryMock.listAuditRuns.mockResolvedValue([]);
+    repositoryMock.listRuns.mockResolvedValue([]);
     getNotificationLlmToolPolicyMock.mockResolvedValue({
       mode: 'context_only',
       enabledTools: [],
@@ -610,6 +623,31 @@ describe('notification workflow routes', () => {
         _count: { _all: 1 },
       },
     ]);
+    prismaMock.notificationWorkflowStepRun.findMany.mockResolvedValueOnce([
+      {
+        nodeType: 'send_email',
+        output: { duplicateDelivery: true },
+        run: { eventType: 'ticket.assigned', triggerSource: 'freshservice_webhook' },
+      },
+      {
+        nodeType: 'send_email',
+        output: { duplicateDelivery: true },
+        run: { eventType: 'ticket.assigned', triggerSource: 'freshservice_webhook' },
+      },
+      {
+        nodeType: 'send_email',
+        output: { duplicateDelivery: false },
+        run: { eventType: 'ticket.created', triggerSource: 'freshservice_sync' },
+      },
+    ]);
+    prismaMock.aiProviderAttempt.groupBy.mockResolvedValueOnce([
+      {
+        provider: 'openai',
+        model: 'gpt-test',
+        errorClass: 'bad_request',
+        _count: { _all: 2 },
+      },
+    ]);
 
     const response = await request(buildApp())
       .get('/api/notification-workflows/health')
@@ -624,10 +662,30 @@ describe('notification workflow routes', () => {
         count: 2,
       },
     ]);
+    expect(response.body.data.suppressedDuplicateDeliveriesBySource7d).toEqual([
+      {
+        triggerSource: 'freshservice_webhook',
+        eventType: 'ticket.assigned',
+        count: 2,
+      },
+    ]);
+    expect(response.body.data.providerSchemaFailures7d).toBe(2);
+    expect(response.body.data.providerFailuresSummary7d).toEqual([
+      {
+        provider: 'openai',
+        model: 'gpt-test',
+        errorClass: 'bad_request',
+        count: 2,
+      },
+    ]);
     expect(response.body.data.warnings).toEqual([
       expect.objectContaining({
         type: 'duplicate_mock_delivery_groups',
         count: 1,
+      }),
+      expect.objectContaining({
+        type: 'provider_schema_failures',
+        count: 2,
       }),
     ]);
     expect(prismaMock.notificationDelivery.groupBy).toHaveBeenCalledWith(expect.objectContaining({
@@ -636,12 +694,172 @@ describe('notification workflow routes', () => {
         workspaceId: 1,
         channel: 'email',
         status: 'mocked',
+        notificationType: { not: 'notification_workflow_test_email' },
         queuedAt: { gte: expect.any(Date) },
       }),
     }));
     expect(prismaMock.notificationDelivery.groupBy).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.not.objectContaining({
         ticketId: expect.anything(),
+      }),
+    }));
+    expect(prismaMock.notificationWorkflowStepRun.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        workspaceId: 1,
+        nodeType: { in: ['send_email', 'llm_generate'] },
+        startedAt: { gte: expect.any(Date) },
+      }),
+      select: expect.objectContaining({
+        nodeType: true,
+        output: true,
+        run: expect.any(Object),
+      }),
+    }));
+  });
+
+  test('health exposes operational monitoring warnings for degraded workflow quality', async () => {
+    prismaMock.notificationWorkflowStepRun.findMany.mockResolvedValueOnce([
+      ...Array.from({ length: 10 }, () => ({
+        nodeType: 'send_email',
+        output: { duplicateDelivery: true },
+        run: { eventType: 'ticket.assigned', triggerSource: 'assignment_pipeline' },
+      })),
+      {
+        nodeType: 'llm_generate',
+        output: {
+          llm: {
+            templateFallbackUsed: true,
+            guard: { issues: [{ policyTier: 'hard_block', ruleId: 'internal_reference' }] },
+            context: { signalLevel: 'possible_broader_issue' },
+          },
+        },
+        run: { eventType: 'ticket.assigned', triggerSource: 'assignment_pipeline' },
+      },
+      {
+        nodeType: 'llm_generate',
+        output: { llm: { context: { signalLevel: 'watch' } } },
+        run: { eventType: 'ticket.created', triggerSource: 'freshservice_webhook' },
+      },
+    ]);
+    prismaMock.notificationDelivery.findMany.mockResolvedValueOnce([
+      {
+        id: 991,
+        payload: {
+          actionLinks: {
+            afterHoursSupport: {
+              activeContact: { phone: '+16045551234' },
+            },
+          },
+        },
+      },
+    ]);
+
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/health')
+      .expect(200);
+
+    expect(response.body.data.duplicateSuppressions7d).toBe(10);
+    expect(response.body.data.workflowQuality7d).toEqual(expect.objectContaining({
+      llmGenerateSteps: 2,
+      templateFallbacks: 1,
+      guardHardBlocks: 1,
+      possibleBroaderIssueCount: 1,
+      possibleBroaderIssueRatePct: 50,
+      payloadMinimizationFailures: 1,
+      payloadMinimizationFailureSampleIds: [991],
+    }));
+    expect(response.body.data.notificationWorkflowHealthThresholds).toEqual(expect.objectContaining({
+      duplicateSuppressionSpike7d: 10,
+      templateFallbacks7d: 0,
+      guardHardBlocks7d: 0,
+      payloadMinimizationFailures7d: 0,
+      possibleBroaderIssueRatePct: 25,
+    }));
+    expect(response.body.data.warnings.map((warning) => warning.type)).toEqual([
+      'duplicate_suppression_spike',
+      'template_fallback_rate',
+      'guard_hard_block_count',
+      'payload_minimization_failure',
+      'possible_broader_issue_rate',
+    ]);
+    expect(prismaMock.notificationDelivery.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        workspaceId: 1,
+        workflowRunId: { not: null },
+        notificationType: { not: 'notification_workflow_test_email' },
+        queuedAt: { gte: expect.any(Date) },
+      }),
+      select: expect.objectContaining({
+        id: true,
+        payload: true,
+      }),
+    }));
+  });
+
+  test('audit run list includes computed health and fallback cause', async () => {
+    repositoryMock.listAuditRuns.mockResolvedValueOnce([
+      {
+        id: 77,
+        workspaceId: 1,
+        workflowId: 7,
+        eventType: 'ticket.assigned',
+        status: 'completed',
+        executionMode: 'mock',
+        startedAt: new Date('2026-06-03T20:10:00.000Z'),
+        completedAt: new Date('2026-06-03T20:10:08.000Z'),
+        eventContext: {},
+        workflow: { id: 7, key: 'ticket_assigned', name: 'Ticket assigned' },
+        ticket: { id: 501, freshserviceTicketId: BigInt(225001), subject: 'VPN access problem' },
+        steps: [
+          {
+            id: 701,
+            nodeId: 'llm-1',
+            nodeType: 'llm_generate',
+            status: 'completed',
+            input: {},
+            output: {
+              failed: true,
+              failureType: 'provider_or_schema',
+              templateFallbackUsed: true,
+              error: "400 Unknown parameter: input[2].parsed_arguments",
+              provider: 'openai',
+              model: 'gpt-5.5',
+            },
+          },
+        ],
+        deliveries: [],
+        aiProviderAttempts: [
+          {
+            provider: 'openai',
+            model: 'gpt-5.5',
+            status: 'failed',
+            errorClass: 'bad_request',
+            errorMessage: "400 Unknown parameter: input[2].parsed_arguments",
+          },
+        ],
+      },
+    ]);
+
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/runs?health=completed_with_fallback&search=parsed_arguments')
+      .expect(200);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0]).toEqual(expect.objectContaining({
+      auditId: 'TP-NWF-77',
+      health: expect.objectContaining({
+        state: 'completed_with_fallback',
+        fallbackUsed: true,
+        fallbackSummary: expect.objectContaining({
+          type: 'provider_or_schema',
+          reason: "400 Unknown parameter: input[2].parsed_arguments",
+          provider: 'openai',
+          model: 'gpt-5.5',
+        }),
+      }),
+      fallbackSummary: expect.objectContaining({
+        type: 'provider_or_schema',
       }),
     }));
   });
