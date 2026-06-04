@@ -13,6 +13,7 @@ import Visuals from './pages/Visuals';
 import TimelineExplorer from './pages/TimelineExplorer';
 import AssignmentReview from './pages/AssignmentReview';
 import Analytics from './pages/Analytics';
+import WorkflowsPage from './pages/WorkflowsPage';
 import SummitTaxonomyWorkshop from './pages/SummitTaxonomyWorkshop';
 import SummitVote from './pages/SummitVote';
 import SummitReport from './pages/SummitReport';
@@ -270,6 +271,23 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <Analytics view="category-map" />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/workflows"
+                  element={
+                    <ProtectedRoute>
+                      <WorkflowsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/workflows/:tab"
+                  element={
+                    <ProtectedRoute>
+                      <WorkflowsPage />
                     </ProtectedRoute>
                   }
                 />

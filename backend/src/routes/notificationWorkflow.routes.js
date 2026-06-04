@@ -1006,6 +1006,38 @@ router.get(
   }),
 );
 
+// Returns the run's email re-rendered through the current engine (current template),
+// so the audit detail "Rendered Email" preview matches the live/preview/send-test output.
+router.get(
+  '/audits/:auditId/rendered-email',
+  asyncHandler(async (req, res) => {
+    const runId = parseAuditRunId(req.params.auditId);
+    const run = await prisma.notificationWorkflowRun.findFirst({
+      where: { id: runId, workspaceId: req.workspaceId },
+      include: {
+        workflow: {
+          select: {
+            id: true,
+            workspaceId: true,
+            name: true,
+            key: true,
+            triggerType: true,
+            publishedVersion: true,
+            publishedDefinition: true,
+            draftDefinition: true,
+          },
+        },
+        ticket: { select: { id: true, assessedPriority: true, priority: true } },
+        steps: { orderBy: { startedAt: 'asc' } },
+        deliveries: { orderBy: { queuedAt: 'asc' } },
+      },
+    });
+    if (!run) throw new NotFoundError('Workflow audit run not found in this workspace');
+    const email = await emailFromAuditRun(run);
+    res.json({ success: true, data: email || null });
+  }),
+);
+
 router.post(
   '/audits/:auditId/send-test-email',
   asyncHandler(async (req, res) => {
