@@ -864,6 +864,63 @@ describe('notification workflow routes', () => {
     }));
   });
 
+  test('audit run list marks audit-only LLM findings as warnings', async () => {
+    repositoryMock.listAuditRuns.mockResolvedValueOnce([
+      {
+        id: 88,
+        workspaceId: 1,
+        status: 'completed',
+        eventType: 'ticket.created',
+        triggerSource: 'preview',
+        executionMode: 'preview',
+        startedAt: new Date('2026-06-04T06:00:00.000Z'),
+        completedAt: new Date('2026-06-04T06:00:05.000Z'),
+        workflow: { id: 7, key: 'ticket_created', name: 'Ticket arrived' },
+        ticket: { id: 501, freshserviceTicketId: BigInt(225001), subject: 'VPN access problem' },
+        steps: [
+          {
+            id: 702,
+            nodeId: 'llm-1',
+            nodeType: 'llm_generate',
+            status: 'completed',
+            input: {},
+            output: {
+              llm: {
+                provider: 'anthropic',
+                model: 'claude-sonnet-4-6',
+                warning: 'Requester-facing LLM output has audit-only style findings.',
+                guard: {
+                  accepted: true,
+                  auditOnlyIssues: [{ id: 'playful_tone', policyTier: 'audit_only', actionTaken: 'warned' }],
+                },
+              },
+            },
+          },
+        ],
+        deliveries: [],
+        aiProviderAttempts: [],
+      },
+    ]);
+
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/runs')
+      .expect(200);
+
+    expect(response.body.data[0].health).toEqual(expect.objectContaining({
+      state: 'completed_with_warning',
+      degraded: true,
+    }));
+    expect(response.body.data[0].warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'llm_warning',
+        templateFallbackUsed: false,
+      }),
+    ]));
+    expect(response.body.data[0].warnings).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'llm_failed' }),
+    ]));
+  });
+
   test('context-preview accepts an internal Ticket Pulse ticket ID', async () => {
     const response = await request(buildApp())
       .post('/api/notification-workflows/llm-tools/context-preview')

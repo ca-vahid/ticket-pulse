@@ -1,0 +1,286 @@
+{
+  "generatedAt": "2026-06-04T06:14:41.055Z",
+  "executionMode": "preview",
+  "notes": [
+    "Provider forcing was done in-process by overriding providerGateway calls for this local canary only.",
+    "Workflow settings in production were not changed.",
+    "The tool-enabled cases use a preview-only prompt override to force similar-ticket and spike tool continuation.",
+    "No live emails are sent by executePreview.",
+    "Supplemental Claude timing-repair preview attempted to elicit an unsupported timing promise; the model avoided a privacy-safe repairable timing claim.",
+    "The first timing canary attempt TP-NWF-235 was rejected for direct_email_address, so the retry withheld requester/agent email from the preview context.",
+    "Timing-claim repair remains covered by focused automated tests; live Claude canary attempts did not produce a privacy-safe unsupported timing claim to repair.",
+    "Audit-only warning labels in this artifact are normalized to the post-patch llm_warning type when no fallback or failure occurred."
+  ],
+  "results": [
+    {
+      "requiredForCanary": true,
+      "label": "openai-assigned-tools-forced-preview",
+      "workflowId": 3,
+      "ticketId": 27968,
+      "ticketFreshserviceId": "225364",
+      "ticketSubject": "[redacted subject]",
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "expectedToolMode": true,
+      "status": "completed",
+      "runId": 232,
+      "auditId": "TP-NWF-232",
+      "schemaValid": true,
+      "passed": true,
+      "llm": {
+        "provider": "openai",
+        "model": "gpt-5.5",
+        "toolMode": true,
+        "turns": 2,
+        "toolCalls": 3,
+        "fallbackUsed": false,
+        "fallbackReason": null,
+        "failed": false,
+        "failureType": null,
+        "guardRejected": false,
+        "guardAccepted": true,
+        "auditWarningCount": 0,
+        "guardIssueCount": 0,
+        "citedSignalsCount": null
+      },
+      "tools": {
+        "required": [
+          "find_similar_tickets",
+          "detect_related_ticket_spike",
+          "submit_notification_email"
+        ],
+        "called": [
+          "find_similar_tickets",
+          "detect_related_ticket_spike",
+          "submit_notification_email"
+        ],
+        "completed": [
+          "find_similar_tickets",
+          "detect_related_ticket_spike",
+          "submit_notification_email"
+        ],
+        "requiredPresent": true
+      },
+      "providerAttempts": [
+        {
+          "provider": "openai",
+          "model": "gpt-5.5",
+          "status": "succeeded",
+          "errorClass": null,
+          "errorMessage": null,
+          "fallbackFromProvider": null,
+          "fallbackReason": null
+        },
+        {
+          "provider": "openai",
+          "model": "gpt-5.5",
+          "status": "succeeded",
+          "errorClass": null,
+          "errorMessage": null,
+          "fallbackFromProvider": null,
+          "fallbackReason": null
+        }
+      ],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "requiredForCanary": true,
+      "label": "claude-assigned-tools-forced-preview",
+      "workflowId": 3,
+      "ticketId": 27968,
+      "ticketFreshserviceId": "225364",
+      "ticketSubject": "[redacted subject]",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "expectedToolMode": true,
+      "status": "completed",
+      "runId": 233,
+      "auditId": "TP-NWF-233",
+      "schemaValid": true,
+      "passed": true,
+      "llm": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "toolMode": true,
+        "turns": 2,
+        "toolCalls": 3,
+        "fallbackUsed": false,
+        "fallbackReason": null,
+        "failed": false,
+        "failureType": null,
+        "guardRejected": false,
+        "guardAccepted": true,
+        "auditWarningCount": 0,
+        "guardIssueCount": 0,
+        "citedSignalsCount": null
+      },
+      "tools": {
+        "required": [
+          "find_similar_tickets",
+          "detect_related_ticket_spike",
+          "submit_notification_email"
+        ],
+        "called": [
+          "find_similar_tickets",
+          "detect_related_ticket_spike",
+          "submit_notification_email"
+        ],
+        "completed": [
+          "find_similar_tickets",
+          "detect_related_ticket_spike",
+          "submit_notification_email"
+        ],
+        "requiredPresent": true
+      },
+      "providerAttempts": [
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-4-6",
+          "status": "succeeded",
+          "errorClass": null,
+          "errorMessage": null,
+          "fallbackFromProvider": null,
+          "fallbackReason": null
+        },
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-4-6",
+          "status": "succeeded",
+          "errorClass": null,
+          "errorMessage": null,
+          "fallbackFromProvider": null,
+          "fallbackReason": null
+        }
+      ],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "requiredForCanary": true,
+      "label": "claude-subject-direct-preview",
+      "workflowId": 2,
+      "ticketId": 27984,
+      "ticketFreshserviceId": "225380",
+      "ticketSubject": "[redacted subject]",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "expectedToolMode": false,
+      "status": "completed",
+      "runId": 234,
+      "auditId": "TP-NWF-234",
+      "schemaValid": true,
+      "passed": true,
+      "llm": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "toolMode": false,
+        "turns": null,
+        "toolCalls": null,
+        "fallbackUsed": false,
+        "fallbackReason": null,
+        "failed": false,
+        "failureType": null,
+        "guardRejected": false,
+        "guardAccepted": true,
+        "auditWarningCount": 1,
+        "guardIssueCount": 1,
+        "citedSignalsCount": 9
+      },
+      "tools": {
+        "required": [],
+        "called": [],
+        "completed": [],
+        "requiredPresent": true
+      },
+      "providerAttempts": [
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-4-6",
+          "status": "succeeded",
+          "errorClass": null,
+          "errorMessage": null,
+          "fallbackFromProvider": null,
+          "fallbackReason": null
+        }
+      ],
+      "warnings": [
+        {
+          "type": "llm_warning",
+          "outputKey": "llm_generate",
+          "provider": "anthropic",
+          "model": "claude-sonnet-4-6",
+          "templateFallbackUsed": false,
+          "message": "Requester-facing LLM output has audit-only style findings.",
+          "normalizedAfterPatch": true
+        }
+      ],
+      "error": null
+    },
+    {
+      "label": "claude-timing-repair-direct-preview",
+      "workflowId": 2,
+      "ticketId": 27984,
+      "ticketFreshserviceId": "225380",
+      "ticketSubject": "[redacted subject]",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "expectedToolMode": false,
+      "expectedRepair": "unsupported_timing_claims",
+      "status": "completed",
+      "runId": 236,
+      "auditId": "TP-NWF-236",
+      "schemaValid": true,
+      "passed": null,
+      "llm": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "toolMode": false,
+        "fallbackUsed": false,
+        "fallbackReason": null,
+        "failed": false,
+        "guardRejected": false,
+        "guardAccepted": true,
+        "repairedIssueIds": [],
+        "auditWarningCount": 1,
+        "guardIssueCount": 1
+      },
+      "timingClaimPresentAfterRepair": false,
+      "providerAttempts": [
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-4-6",
+          "status": "succeeded",
+          "errorClass": null,
+          "errorMessage": null,
+          "fallbackFromProvider": null,
+          "fallbackReason": null
+        }
+      ],
+      "warnings": [
+        {
+          "type": "llm_warning",
+          "outputKey": "llm_generate",
+          "provider": "anthropic",
+          "model": "claude-sonnet-4-6",
+          "templateFallbackUsed": false,
+          "message": "Requester-facing LLM output has audit-only style findings."
+        }
+      ],
+      "error": null,
+      "requiredForCanary": false,
+      "outcome": "not_exercised_model_avoided_timing_claim",
+      "observation": "Non-blocking timing-repair canary attempt. TP-NWF-235 hard-blocked a generated direct email address; TP-NWF-236 avoided the unsupported timing claim, so timing repair was not exercised by the live-provider canary."
+    }
+  ],
+  "conclusion": {
+    "allRequiredPassed": true,
+    "toolContractPassed": true,
+    "claudeDirectContentPassed": true,
+    "claudeTimingRepairExercised": false,
+    "failedRequiredLabels": [],
+    "nonBlockingObservationLabels": [
+      "claude-timing-repair-direct-preview"
+    ]
+  }
+}
