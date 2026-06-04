@@ -7306,7 +7306,7 @@ export default function NotificationWorkflowsPanel({
                     </div>
                   </div>
                   <label className="relative min-w-[180px] flex-1 text-xs font-medium uppercase text-slate-500 sm:max-w-[260px]">
-                    <Search className="pointer-events-none absolute left-2 top-7 h-3.5 w-3.5 text-slate-400" />
+                    <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                     <input
                       value={routingLookupSearch}
                       onChange={(event) => setRoutingLookupSearch(event.target.value)}
@@ -8395,7 +8395,24 @@ export default function NotificationWorkflowsPanel({
                   </span>
                 ))}
                 {healthWarnings.length > 5 && (
-                  <span className="font-semibold text-amber-700">+{healthWarnings.length - 5} more</span>
+                  <details className="group relative">
+                    <summary className="cursor-pointer list-none rounded-full px-2 py-0.5 font-semibold text-amber-700 outline-none ring-amber-300 transition hover:bg-white/80 focus-visible:ring-2 [&::-webkit-details-marker]:hidden">
+                      +{healthWarnings.length - 5} more
+                    </summary>
+                    <div className="absolute right-0 z-30 mt-2 w-72 rounded-lg border border-amber-200 bg-white p-2 text-xs text-amber-900 shadow-lg">
+                      <div className="mb-1 px-1 font-semibold uppercase tracking-wide text-amber-700">Additional warnings</div>
+                      <div className="space-y-1">
+                        {healthWarnings.slice(5).map((warning, index) => (
+                          <div
+                            key={`${warning.type || 'warning'}-extra-${index}`}
+                            className="rounded-md border border-amber-100 bg-amber-50 px-2 py-1 font-medium"
+                          >
+                            {workflowHealthWarningLabel(warning)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </details>
                 )}
               </div>
             )}
