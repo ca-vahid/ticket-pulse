@@ -90,6 +90,10 @@ function ticketRow() {
     assignedAt: null,
     resolvedAt: null,
     closedAt: null,
+    dueBy: new Date('2026-06-03T23:00:00.000Z'),
+    frDueBy: new Date('2026-06-01T18:00:00.000Z'),
+    firstPublicAgentReplyAt: null,
+    resolutionTimeSeconds: null,
     freshserviceUpdatedAt: new Date('2026-05-31T15:58:00.000Z'),
     workspace: { id: 1, name: 'IT', defaultTimezone: 'America/Vancouver' },
     requester: { id: 40, name: 'Requester', email: 'requester@example.com', department: 'Accounting', jobTitle: 'Controller' },
@@ -182,17 +186,30 @@ describe('notification context enrichment service', () => {
     expect(bundle.threadSummary.omittedPrivateEntries).toBe(1);
     expect(bundle.recentSimilarTickets.windows.at(-1).count).toBe(5);
     expect(bundle.outageSignals.signalLevel).toBe('possible_broader_issue');
+    expect(bundle.outageSignals.confidence).toBe('high');
+    expect(bundle.outageSignals.criteria.distinctRequesterThresholdMet).toBe(true);
+    expect(bundle.outageSignals.passedCriteria).toContain('notRoutineCluster');
+    expect(bundle.outageSignals.rationale).toMatch(/Strong similar-ticket overlap/i);
     expect(bundle.outageSignals.counts.distinctRequesters).toBe(5);
     expect(bundle.outageSignals.allowedPublicPhrases).toContain('we are seeing multiple similar reports');
     expect(bundle.outageSignals.blockedPublicPhrases).toContain('global outage');
+    expect(bundle.ticket.dueBy).toBe('2026-06-03T23:00:00.000Z');
+    expect(bundle.timingEvidence).toEqual(expect.objectContaining({
+      deterministic: true,
+      source: 'freshservice_sla_due_dates',
+      dueBy: '2026-06-03T23:00:00.000Z',
+      firstResponseDueBy: '2026-06-01T18:00:00.000Z',
+    }));
     expect(bundle.contextHash).toMatch(/^[a-f0-9]{64}$/);
 
     const summary = summarizeNotificationLlmContext(bundle);
     expect(summary).toMatchObject({
       enabled: true,
       signalLevel: 'possible_broader_issue',
+      signalConfidence: 'high',
       threadEntryCount: 1,
       omittedPrivateEntries: 1,
+      timingEvidenceSource: 'freshservice_sla_due_dates',
     });
   });
 
@@ -207,6 +224,9 @@ describe('notification context enrichment service', () => {
 
     expect(prompt).toContain('Ticket Pulse Evidence Bundle');
     expect(prompt).toContain('Only use outage-like wording');
+    expect(prompt).toContain('Do not imply an outage');
+    expect(prompt).toContain('Only make response-time or resolution-time claims');
+    expect(prompt).toContain('"timingEvidence"');
     expect(prompt).toContain('"signalLevel": "possible_broader_issue"');
     expect(prompt).toContain('[REDACTED]');
   });
@@ -256,6 +276,9 @@ describe('notification context enrichment service', () => {
     });
 
     expect(bundle.outageSignals.signalLevel).toBe('watch');
+    expect(bundle.outageSignals.confidence).toBe('medium');
+    expect(bundle.outageSignals.rationale).toMatch(/not strong enough/i);
+    expect(bundle.outageSignals.criteria.distinctRequesterThresholdMet).toBe(false);
     expect(bundle.outageSignals.counts.distinctRequesters).toBe(1);
     expect(bundle.outageSignals.allowedPublicPhrases).toEqual(['we are reviewing similar reports']);
   });
@@ -316,6 +339,8 @@ describe('notification context enrichment service', () => {
     });
 
     expect(bundle.outageSignals.signalLevel).toBe('routine_cluster');
+    expect(bundle.outageSignals.confidence).toBe('low');
+    expect(bundle.outageSignals.rationale).toMatch(/routine operational patterns/i);
     expect(bundle.outageSignals.allowedPublicPhrases).toEqual([]);
   });
 
@@ -339,6 +364,7 @@ describe('notification context enrichment service', () => {
     });
 
     expect(bundle.outageSignals.signalLevel).toBe('none');
+    expect(bundle.outageSignals.confidence).toBe('low');
     expect(bundle.outageSignals.allowedPublicPhrases).toEqual([]);
   });
 });

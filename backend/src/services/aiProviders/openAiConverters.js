@@ -23,12 +23,17 @@ function sanitizeToolSchema(schema = {}) {
 
 function cloneResponseItem(item) {
   if (!item || typeof item !== 'object') return null;
+  return sanitizeOpenAiResponseInputItem(item);
+}
+
+export function sanitizeOpenAiResponseInputItem(item) {
+  if (!item || typeof item !== 'object') return null;
   const copy = JSON.parse(JSON.stringify(item));
   if (copy.type === 'function_call') {
     return {
       type: 'function_call',
       ...(copy.id ? { id: copy.id } : {}),
-      call_id: copy.call_id,
+      call_id: copy.call_id || copy.id,
       name: copy.name,
       arguments: typeof copy.arguments === 'string' ? copy.arguments : JSON.stringify(copy.arguments || {}),
       status: copy.status || 'completed',
@@ -40,10 +45,19 @@ function cloneResponseItem(item) {
       ...(copy.id ? { id: copy.id } : {}),
       summary: Array.isArray(copy.summary) ? copy.summary : [],
       ...(copy.encrypted_content ? { encrypted_content: copy.encrypted_content } : {}),
-      ...(copy.status ? { status: copy.status } : {}),
+      status: copy.status || 'completed',
     };
   }
-  return copy;
+  if (copy.type === 'message') {
+    return {
+      type: 'message',
+      ...(copy.id ? { id: copy.id } : {}),
+      role: copy.role || 'assistant',
+      status: copy.status || 'completed',
+      content: Array.isArray(copy.content) ? copy.content : [],
+    };
+  }
+  return null;
 }
 
 export function convertAnthropicToolsToOpenAiResponses(tools = []) {
@@ -124,7 +138,8 @@ export function convertAnthropicMessagesToOpenAiInput(messages = []) {
     for (const block of content) {
       if (!block || block.type === 'text') continue;
       if (block.type === 'tool_use') {
-        input.push(block.openai_response_item || {
+        const replayItem = sanitizeOpenAiResponseInputItem(block.openai_response_item);
+        input.push(replayItem || {
           type: 'function_call',
           id: block.openai_item_id || undefined,
           call_id: block.openai_call_id || block.id,
@@ -139,7 +154,8 @@ export function convertAnthropicMessagesToOpenAiInput(messages = []) {
           output: toText(block.content),
         });
       } else if (block.type === 'thinking') {
-        input.push(block.openai_response_item || {
+        const replayItem = sanitizeOpenAiResponseInputItem(block.openai_response_item);
+        input.push(replayItem || {
           type: 'reasoning',
           id: block.openai_item_id || `rs_local_${Math.random().toString(36).slice(2)}`,
           summary: [{ type: 'summary_text', text: block.thinking || block.text || '' }],

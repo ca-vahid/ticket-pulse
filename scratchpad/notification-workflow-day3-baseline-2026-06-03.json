@@ -1,0 +1,1740 @@
+{
+  "generatedAt": "2026-06-04T04:20:38.928Z",
+  "since": "2026-06-01T00:00:00Z",
+  "timezone": "America/Vancouver",
+  "clock": {
+    "db_now": "2026-06-04T04:20:37.770Z",
+    "timezone": "UTC"
+  },
+  "runs": {
+    "runs": 228,
+    "mock_runs": 207,
+    "preview_runs": 21,
+    "live_runs": 0,
+    "completed_runs": 228,
+    "failed_runs": 0,
+    "first_run": "2026-06-01 00:19:05.093",
+    "last_run": "2026-06-04 02:03:50.8"
+  },
+  "runsByLocalDay": [
+    {
+      "local_day": "2026-05-31",
+      "runs": 12,
+      "mock_runs": 6,
+      "preview_runs": 6,
+      "live_runs": 0,
+      "first_run": "2026-06-01 00:19:05.093",
+      "last_run": "2026-06-01 05:40:05.79"
+    },
+    {
+      "local_day": "2026-06-01",
+      "runs": 92,
+      "mock_runs": 88,
+      "preview_runs": 4,
+      "live_runs": 0,
+      "first_run": "2026-06-01 07:01:58.539",
+      "last_run": "2026-06-02 03:33:53.483"
+    },
+    {
+      "local_day": "2026-06-02",
+      "runs": 59,
+      "mock_runs": 55,
+      "preview_runs": 4,
+      "live_runs": 0,
+      "first_run": "2026-06-02 10:00:28.615",
+      "last_run": "2026-06-03 01:05:30.885"
+    },
+    {
+      "local_day": "2026-06-03",
+      "runs": 65,
+      "mock_runs": 58,
+      "preview_runs": 7,
+      "live_runs": 0,
+      "first_run": "2026-06-03 09:35:01.392",
+      "last_run": "2026-06-04 02:03:50.8"
+    }
+  ],
+  "runsByTrigger": [
+    {
+      "trigger_source": "assignment_pipeline",
+      "execution_mode": "mock",
+      "count": 126
+    },
+    {
+      "trigger_source": "freshservice_webhook",
+      "execution_mode": "mock",
+      "count": 41
+    },
+    {
+      "trigger_source": "assignment_fast_sync",
+      "execution_mode": "mock",
+      "count": 37
+    },
+    {
+      "trigger_source": "preview",
+      "execution_mode": "preview",
+      "count": 21
+    },
+    {
+      "trigger_source": "freshservice_sync",
+      "execution_mode": "mock",
+      "count": 3
+    }
+  ],
+  "runsByWorkflowEvent": [
+    {
+      "workflow_key": "ticket_assigned",
+      "workflow_name": "Ticket assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "count": 172
+    },
+    {
+      "workflow_key": "ticket_created_after_hours",
+      "workflow_name": "Ticket arrived after-hours / holiday",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "count": 35
+    },
+    {
+      "workflow_key": "ticket_assigned",
+      "workflow_name": "Ticket assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "count": 11
+    },
+    {
+      "workflow_key": "ticket_created_after_hours",
+      "workflow_name": "Ticket arrived after-hours / holiday",
+      "event_type": "ticket.created",
+      "execution_mode": "preview",
+      "count": 10
+    }
+  ],
+  "runHealth": [
+    {
+      "run_health": "completed_clean",
+      "count": 220
+    },
+    {
+      "run_health": "completed_with_fallback",
+      "count": 8
+    }
+  ],
+  "deliveries": {
+    "deliveries": 210,
+    "mocked": 179,
+    "sent": 31,
+    "failed": 0,
+    "real_mocked": 179,
+    "test_emails": 31,
+    "p50_payload_chars": 2104,
+    "p95_payload_chars": 10722,
+    "max_payload_chars": 10722
+  },
+  "realDuplicateGroups": [
+    {
+      "ticket_id": 27349,
+      "freshservice_ticket_id": "224745",
+      "event_type": "ticket.assigned",
+      "notification_type": "ticket.assigned",
+      "count": 3,
+      "trigger_sources": [
+        "assignment_pipeline"
+      ],
+      "run_ids": [
+        40,
+        42,
+        43
+      ],
+      "subject_previews": [
+        "Ticket #224745 assigned — Software install request",
+        "Ticket #224745 assigned: Software install request"
+      ]
+    },
+    {
+      "ticket_id": 26906,
+      "freshservice_ticket_id": "224300",
+      "event_type": "ticket.assigned",
+      "notification_type": "ticket.assigned",
+      "count": 2,
+      "trigger_sources": [
+        "assignment_pipeline"
+      ],
+      "run_ids": [
+        64,
+        66
+      ],
+      "subject_previews": [
+        "Ticket #224300 assigned — Dave Gauthier contractor transition",
+        "Ticket #224300 assigned: Dave Gauthier contractor transition"
+      ]
+    },
+    {
+      "ticket_id": 27452,
+      "freshservice_ticket_id": "224848",
+      "event_type": "ticket.assigned",
+      "notification_type": "ticket.assigned",
+      "count": 2,
+      "trigger_sources": [
+        "assignment_fast_sync",
+        "assignment_pipeline"
+      ],
+      "run_ids": [
+        57,
+        58
+      ],
+      "subject_previews": [
+        "Ticket #224848 assigned: LMS new hire visibility",
+        "Ticket #224848 assigned: LMS onboarding for Angela Custodio Garcia"
+      ]
+    },
+    {
+      "ticket_id": 27487,
+      "freshservice_ticket_id": "224883",
+      "event_type": "ticket.assigned",
+      "notification_type": "ticket.assigned",
+      "count": 2,
+      "trigger_sources": [
+        "assignment_pipeline"
+      ],
+      "run_ids": [
+        70,
+        71
+      ],
+      "subject_previews": [
+        "Ticket #224883 assigned — PDF error message"
+      ]
+    },
+    {
+      "ticket_id": 27520,
+      "freshservice_ticket_id": "224916",
+      "event_type": "ticket.assigned",
+      "notification_type": "ticket.assigned",
+      "count": 2,
+      "trigger_sources": [
+        "assignment_pipeline",
+        "freshservice_webhook"
+      ],
+      "run_ids": [
+        78,
+        79
+      ],
+      "subject_previews": [
+        "Ticket #224916 assigned — new hire account access",
+        "Ticket #224916 assigned: New hire account access"
+      ]
+    }
+  ],
+  "llm": {
+    "llm_steps": 201,
+    "completed": 201,
+    "failed": 0,
+    "guard_rejected": 2,
+    "template_fallback_used": 8,
+    "provider_or_schema": 6
+  },
+  "fallbackCauses": [
+    {
+      "failure_type": "provider_or_schema",
+      "error": "400 Unknown parameter: 'input[2].parsed_arguments'.",
+      "count": 6,
+      "first_run_id": 188,
+      "last_run_id": 198
+    },
+    {
+      "failure_type": "guard_rejected",
+      "error": "LLM cited unknown evidence id(s): 2a725d1bce5e4eddadec9d8d898a82c6e9e7f2a3741661900444be7d38c535b6",
+      "count": 1,
+      "first_run_id": 206,
+      "last_run_id": 206
+    },
+    {
+      "failure_type": "guard_rejected",
+      "error": "Requester-facing email cannot include response-time or resolution-time claims without deterministic timing evidence.",
+      "count": 1,
+      "first_run_id": 106,
+      "last_run_id": 106
+    }
+  ],
+  "repairedIssues": [],
+  "blockedIssues": [],
+  "signalLevels": [
+    {
+      "signal_level": "possible_broader_issue",
+      "count": 128
+    },
+    {
+      "signal_level": "watch",
+      "count": 28
+    },
+    {
+      "signal_level": "routine_cluster",
+      "count": 24
+    },
+    {
+      "signal_level": "none",
+      "count": 21
+    }
+  ],
+  "signalSamples": [
+    {
+      "run_id": 231,
+      "freshservice_ticket_id": "225384",
+      "subject_preview": "#83170 — Mail.Read Permissions Granted to Application involving one user",
+      "signal_level": "none",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 230,
+      "freshservice_ticket_id": "225384",
+      "subject_preview": "#83170 — Mail.Read Permissions Granted to Application involving one user",
+      "signal_level": "none",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 229,
+      "freshservice_ticket_id": "225381",
+      "subject_preview": "Random app pop up?",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 228,
+      "freshservice_ticket_id": "225380",
+      "subject_preview": "Claude Subscription",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 227,
+      "freshservice_ticket_id": "225378",
+      "subject_preview": "Dock fan failures?",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 226,
+      "freshservice_ticket_id": "225195",
+      "subject_preview": "[Rule Tuning] Azure Sentinel — false-positive cluster",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 225,
+      "freshservice_ticket_id": "225371",
+      "subject_preview": "International Calling Access in Teams",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 224,
+      "freshservice_ticket_id": "225364",
+      "subject_preview": "WinSitu install",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 223,
+      "freshservice_ticket_id": "225364",
+      "subject_preview": "WinSitu install",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 222,
+      "freshservice_ticket_id": "225364",
+      "subject_preview": "WinSitu install",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 221,
+      "freshservice_ticket_id": "225364",
+      "subject_preview": "WinSitu install",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 220,
+      "freshservice_ticket_id": "225363",
+      "subject_preview": "Teams Call Access",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 219,
+      "freshservice_ticket_id": "225363",
+      "subject_preview": "Teams Call Access",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 218,
+      "freshservice_ticket_id": "225360",
+      "subject_preview": "Folks being auto-added to Github teams",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 217,
+      "freshservice_ticket_id": "225360",
+      "subject_preview": "Folks being auto-added to Github teams",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 216,
+      "freshservice_ticket_id": "225354",
+      "subject_preview": "IPAD stolen from car",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 215,
+      "freshservice_ticket_id": "225354",
+      "subject_preview": "IPAD stolen from car",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 214,
+      "freshservice_ticket_id": "225349",
+      "subject_preview": "Admin Approval for Solocator Setup",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 213,
+      "freshservice_ticket_id": "225347",
+      "subject_preview": "NH Laptop - Calgary - CA - lclaypool - 2026-06-03",
+      "signal_level": "routine_cluster",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 212,
+      "freshservice_ticket_id": "225348",
+      "subject_preview": "NH Workstation - Calgary - CA - lclaypool - 2026-06-03",
+      "signal_level": "routine_cluster",
+      "signal_summary": {}
+    }
+  ],
+  "providerAttempts": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "status": "succeeded",
+      "error_class": "none",
+      "error_preview": "",
+      "count": 198,
+      "first_run_id": 2,
+      "last_run_id": 231
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "status": "failed",
+      "error_class": "bad_request",
+      "error_preview": "400 Unknown parameter: 'input[2].parsed_arguments'.",
+      "count": 6,
+      "first_run_id": 188,
+      "last_run_id": 198
+    }
+  ],
+  "stepTypes": [
+    {
+      "node_type": "condition",
+      "status": "completed",
+      "count": 228,
+      "p50_ms": 5,
+      "p95_ms": 11,
+      "max_ms": 109
+    },
+    {
+      "node_type": "trigger",
+      "status": "completed",
+      "count": 228,
+      "p50_ms": 8,
+      "p95_ms": 18,
+      "max_ms": 93
+    },
+    {
+      "node_type": "llm_generate",
+      "status": "completed",
+      "count": 201,
+      "p50_ms": 7988,
+      "p95_ms": 11854,
+      "max_ms": 16696
+    },
+    {
+      "node_type": "recipient_resolver",
+      "status": "completed",
+      "count": 201,
+      "p50_ms": 5,
+      "p95_ms": 13,
+      "max_ms": 40
+    },
+    {
+      "node_type": "send_email",
+      "status": "completed",
+      "count": 201,
+      "p50_ms": 44,
+      "p95_ms": 90,
+      "max_ms": 204
+    },
+    {
+      "node_type": "template_render",
+      "status": "completed",
+      "count": 201,
+      "p50_ms": 26,
+      "p95_ms": 53,
+      "max_ms": 108
+    },
+    {
+      "node_type": "llm_tool",
+      "status": "completed",
+      "count": 48,
+      "p50_ms": 10,
+      "p95_ms": 170,
+      "max_ms": 192
+    },
+    {
+      "node_type": "stop",
+      "status": "completed",
+      "count": 27,
+      "p50_ms": 5,
+      "p95_ms": 10,
+      "max_ms": 13
+    },
+    {
+      "node_type": "llm_tool",
+      "status": "failed",
+      "count": 1,
+      "p50_ms": 9,
+      "p95_ms": 9,
+      "max_ms": 9
+    }
+  ],
+  "payloadAudit": {
+    "deliveries": 210,
+    "active_contact_payloads": 71,
+    "base64_payloads": 71,
+    "avatar_or_photo_payloads": 71,
+    "email_like_payloads": 102,
+    "named_contact_payloads": 0,
+    "p50_payload_chars": 2104,
+    "p95_payload_chars": 10722,
+    "max_payload_chars": 10722
+  },
+  "payloadLargestShapes": [
+    {
+      "delivery_id": 66,
+      "workflow_run_id": 51,
+      "payload_chars": 10722,
+      "top_level_keys": [
+        "actionLinks",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "activeContact",
+        "applied",
+        "reason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "liveWouldSkipReason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "requested",
+        "skipped",
+        "url"
+      ]
+    },
+    {
+      "delivery_id": 71,
+      "workflow_run_id": 56,
+      "payload_chars": 10722,
+      "top_level_keys": [
+        "actionLinks",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "activeContact",
+        "applied",
+        "reason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "liveWouldSkipReason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "requested",
+        "skipped",
+        "url"
+      ]
+    },
+    {
+      "delivery_id": 51,
+      "workflow_run_id": 41,
+      "payload_chars": 10722,
+      "top_level_keys": [
+        "actionLinks",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "activeContact",
+        "applied",
+        "reason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "liveWouldSkipReason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "requested",
+        "skipped",
+        "url"
+      ]
+    },
+    {
+      "delivery_id": 55,
+      "workflow_run_id": 45,
+      "payload_chars": 10722,
+      "top_level_keys": [
+        "actionLinks",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "activeContact",
+        "applied",
+        "reason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "liveWouldSkipReason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "requested",
+        "skipped",
+        "url"
+      ]
+    },
+    {
+      "delivery_id": 73,
+      "workflow_run_id": 58,
+      "payload_chars": 10722,
+      "top_level_keys": [
+        "actionLinks",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "activeContact",
+        "applied",
+        "reason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "liveWouldSkipReason",
+        "requested",
+        "skipped",
+        "url"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "requested",
+        "skipped",
+        "url"
+      ]
+    }
+  ],
+  "workflowConfigs": [
+    {
+      "id": 3,
+      "workspaceId": 1,
+      "key": "ticket_assigned",
+      "name": "Ticket assigned",
+      "triggerType": "ticket.assigned",
+      "isEnabled": true,
+      "mockModeEnabled": true,
+      "publishedVersion": 4,
+      "publishedVersionId": 5,
+      "publishedAt": "2026-06-03 22:40:13.732",
+      "definition": {
+        "nodeCount": 7,
+        "llmNodes": [
+          {
+            "nodeId": "llm-generate",
+            "outputMode": "draft_email",
+            "toolMode": null,
+            "promptPresent": true,
+            "promptLength": 1504,
+            "tone": null,
+            "requesterGuardrails": {
+              "tone": false,
+              "enabled": true,
+              "outageClaims": true,
+              "timingClaims": false,
+              "internalReferences": true
+            },
+            "policy": null
+          }
+        ],
+        "sendNodes": [
+          {
+            "nodeId": "send",
+            "includeHeader": true,
+            "headerBlockId": null,
+            "footerBlockId": null
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "workspaceId": 1,
+      "key": "ticket_created_after_hours",
+      "name": "Ticket arrived after-hours / holiday",
+      "triggerType": "ticket.created",
+      "isEnabled": true,
+      "mockModeEnabled": true,
+      "publishedVersion": 3,
+      "publishedVersionId": 7,
+      "publishedAt": "2026-06-03 22:46:19.04",
+      "definition": {
+        "nodeCount": 7,
+        "llmNodes": [
+          {
+            "nodeId": "llm-generate",
+            "outputMode": null,
+            "toolMode": null,
+            "promptPresent": true,
+            "promptLength": 919,
+            "tone": null,
+            "requesterGuardrails": null,
+            "policy": null
+          }
+        ],
+        "sendNodes": [
+          {
+            "nodeId": "send",
+            "includeHeader": false,
+            "headerBlockId": null,
+            "footerBlockId": 1
+          }
+        ]
+      }
+    }
+  ],
+  "llmToolPolicy": [
+    {
+      "workspace_id": 1,
+      "mode": "tools_enabled",
+      "enabled_tools": [
+        "get_ticket_thread_summary",
+        "find_similar_tickets",
+        "detect_related_ticket_spike",
+        "get_notification_context"
+      ],
+      "tool_settings": {
+        "safety": {
+          "maxContextBytes": 40000,
+          "maxToolOutputBytes": 12000
+        },
+        "context": {
+          "lookbackHours": [
+            1,
+            4,
+            24
+          ],
+          "maxThreadEntries": 6,
+          "maxSimilarTickets": 5,
+          "includeOutageSignals": true,
+          "includeThreadHistory": true,
+          "includeSimilarTickets": true
+        },
+        "outageSignals": {
+          "watchThreshold": 3,
+          "distinctRequesterThreshold": 3,
+          "distinctDepartmentThreshold": 2,
+          "possibleBroaderIssueThreshold": 5
+        }
+      },
+      "max_turns": 4,
+      "max_tool_calls": 6,
+      "total_timeout_ms": 20000,
+      "per_tool_timeout_ms": 3000,
+      "include_private_notes": false,
+      "redaction_enabled": true,
+      "policy_version": 7,
+      "updated_at": "2026-06-03 16:35:27.1"
+    }
+  ],
+  "copyReview": {
+    "reviewed": 179,
+    "severityCounts": {
+      "auto_repair": 178,
+      "audit_only": 29
+    },
+    "ruleCounts": {
+      "unsupported_timing_claim": 178,
+      "emoji": 12,
+      "playful_copy": 17
+    },
+    "timingPhraseCounts": {
+      "by the next business day": 12,
+      "estimated resolution": 174,
+      "typically": 144,
+      "within 1 business day": 54,
+      "usually": 16,
+      "often resolved": 2,
+      "often completed": 8
+    },
+    "auditOnlyPhraseCounts": {
+      "launch pad": 6,
+      "bedrock": 14,
+      "core sample": 10,
+      "magic": 2,
+      "good ground": 2,
+      "loose colluvium": 2
+    },
+    "flaggedSamples": [
+      {
+        "deliveryId": 259,
+        "workflowRunId": 230,
+        "ticketId": 27988,
+        "eventType": "ticket.created",
+        "notificationType": "ticket.created",
+        "status": "mocked",
+        "priority": "Urgent",
+        "category": "Security Incident",
+        "subCategory": null,
+        "queuedAt": "2026-06-04 00:54:44.254",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225384 received after hours"
+      },
+      {
+        "deliveryId": 258,
+        "workflowRunId": 229,
+        "ticketId": 27985,
+        "eventType": "ticket.created",
+        "notificationType": "ticket.created",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Spam/Phishing",
+        "subCategory": null,
+        "queuedAt": "2026-06-04 00:13:28.912",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225381 received: Random app pop up?"
+      },
+      {
+        "deliveryId": 257,
+        "workflowRunId": 228,
+        "ticketId": 27984,
+        "eventType": "ticket.created",
+        "notificationType": "ticket.created",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Licensing",
+        "subCategory": null,
+        "queuedAt": "2026-06-04 00:09:13.306",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225380 received: Claude Subscription"
+      },
+      {
+        "deliveryId": 256,
+        "workflowRunId": 227,
+        "ticketId": 27982,
+        "eventType": "ticket.created",
+        "notificationType": "ticket.created",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Peripherals",
+        "subCategory": null,
+        "queuedAt": "2026-06-04 00:03:26.76",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225378 received: Dock fan failures?"
+      },
+      {
+        "deliveryId": 252,
+        "workflowRunId": 225,
+        "ticketId": 27975,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Licensing",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 22:45:17.097",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "Ticket #225371 assigned: International Calling Access in Teams"
+      },
+      {
+        "deliveryId": 247,
+        "workflowRunId": 222,
+        "ticketId": 27968,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Software Support",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 22:06:12.536",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "Ticket #225364 assigned: WinSitu install"
+      },
+      {
+        "deliveryId": 245,
+        "workflowRunId": 219,
+        "ticketId": 27967,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Mobile Roaming Plan",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 22:02:25.304",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "Ticket #225363 assigned: Teams call access"
+      },
+      {
+        "deliveryId": 244,
+        "workflowRunId": 218,
+        "ticketId": 27964,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Other",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 21:56:00.919",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "Ticket #225360 assigned: GitHub team auto-adds"
+      },
+      {
+        "deliveryId": 241,
+        "workflowRunId": 215,
+        "ticketId": 27958,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "High",
+        "category": null,
+        "subCategory": null,
+        "queuedAt": "2026-06-03 21:28:38.853",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "Ticket #225354 assigned: stolen iPad"
+      },
+      {
+        "deliveryId": 237,
+        "workflowRunId": 214,
+        "ticketId": 27953,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Permissions Update",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:51:00.266",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "Ticket #225349 assigned: Solocator admin approval"
+      },
+      {
+        "deliveryId": 236,
+        "workflowRunId": 213,
+        "ticketId": 27951,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Low",
+        "category": "Onboarding",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:45:31.989",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225347 assigned: NH laptop setup for Lilja Claypool"
+      },
+      {
+        "deliveryId": 235,
+        "workflowRunId": 212,
+        "ticketId": 27952,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Low",
+        "category": "Onboarding",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:45:23.998",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "playful_copy",
+            "severity": "audit_only",
+            "detail": "Playful or branded metaphor appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "Ticket #225348 assigned to Andrii Grynik"
+      },
+      {
+        "deliveryId": 234,
+        "workflowRunId": 211,
+        "ticketId": 27950,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Active Directory Tasks",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:43:42.635",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225346 assigned to Reza Zaim: Taylor & Francis SSO setup"
+      },
+      {
+        "deliveryId": 233,
+        "workflowRunId": 210,
+        "ticketId": 27948,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Software Support",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:41:06.771",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225344 assigned to Adrian Lo"
+      },
+      {
+        "deliveryId": 232,
+        "workflowRunId": 209,
+        "ticketId": 27945,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Onboarding",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:34:33.21",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225341 assigned: NH Laptop setup for Beckett Palmer-Stephen"
+      },
+      {
+        "deliveryId": 231,
+        "workflowRunId": 208,
+        "ticketId": 27946,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Low",
+        "category": "Onboarding",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:34:23.376",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225342 assigned to Andrii Grynik"
+      },
+      {
+        "deliveryId": 230,
+        "workflowRunId": 207,
+        "ticketId": 27944,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Low",
+        "category": null,
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:31:24.606",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225340 assigned: First BGC phone request"
+      },
+      {
+        "deliveryId": 228,
+        "workflowRunId": 206,
+        "ticketId": 27940,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Mobile Devices",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:10:47.846",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket assigned: #225336"
+      },
+      {
+        "deliveryId": 227,
+        "workflowRunId": 205,
+        "ticketId": 27939,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Licensing",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:08:43.738",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225335 assigned: Copilot license request"
+      },
+      {
+        "deliveryId": 226,
+        "workflowRunId": 204,
+        "ticketId": 27938,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Permissions Update",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:07:38.954",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "Ticket #225334 assigned: Porcupine Vehicle Inspection Reports"
+      }
+    ],
+    "note": "audit_only findings are style visibility only; they are not blockers when workflow tone permits relaxed copy."
+  },
+  "latestRuns": [
+    {
+      "id": 231,
+      "started_at": "2026-06-04 02:03:50.8",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_fast_sync",
+      "status": "completed",
+      "freshservice_ticket_id": "225384",
+      "ticket_subject_preview": "#83170 — Mail.Read Permissions Granted to Application involving one user",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 230,
+      "started_at": "2026-06-04 00:54:36.321",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "trigger_source": "freshservice_webhook",
+      "status": "completed",
+      "freshservice_ticket_id": "225384",
+      "ticket_subject_preview": "#83170 — Mail.Read Permissions Granted to Application involving one user",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 229,
+      "started_at": "2026-06-04 00:13:20.886",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "trigger_source": "freshservice_webhook",
+      "status": "completed",
+      "freshservice_ticket_id": "225381",
+      "ticket_subject_preview": "Random app pop up?",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 228,
+      "started_at": "2026-06-04 00:09:07.697",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "trigger_source": "freshservice_webhook",
+      "status": "completed",
+      "freshservice_ticket_id": "225380",
+      "ticket_subject_preview": "Claude Subscription",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 227,
+      "started_at": "2026-06-04 00:03:18.785",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "trigger_source": "freshservice_webhook",
+      "status": "completed",
+      "freshservice_ticket_id": "225378",
+      "ticket_subject_preview": "Dock fan failures?",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 226,
+      "started_at": "2026-06-03 22:51:02.168",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225195",
+      "ticket_subject_preview": "[Rule Tuning] Azure Sentinel — false-positive cluster",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 225,
+      "started_at": "2026-06-03 22:45:03.25",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225371",
+      "ticket_subject_preview": "International Calling Access in Teams",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 224,
+      "started_at": "2026-06-03 22:40:25.568",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225364",
+      "ticket_subject_preview": "WinSitu install",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 223,
+      "started_at": "2026-06-03 22:07:19.612",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225364",
+      "ticket_subject_preview": "WinSitu install",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 222,
+      "started_at": "2026-06-03 22:06:05.593",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225364",
+      "ticket_subject_preview": "WinSitu install",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 221,
+      "started_at": "2026-06-03 22:06:01.06",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225364",
+      "ticket_subject_preview": "WinSitu install",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 220,
+      "started_at": "2026-06-03 22:04:07.885",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225363",
+      "ticket_subject_preview": "Teams Call Access",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 219,
+      "started_at": "2026-06-03 22:02:15.762",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225363",
+      "ticket_subject_preview": "Teams Call Access",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 218,
+      "started_at": "2026-06-03 21:55:50.138",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225360",
+      "ticket_subject_preview": "Folks being auto-added to Github teams",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 217,
+      "started_at": "2026-06-03 21:55:30.934",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225360",
+      "ticket_subject_preview": "Folks being auto-added to Github teams",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 216,
+      "started_at": "2026-06-03 21:49:22.462",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225354",
+      "ticket_subject_preview": "IPAD stolen from car",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 215,
+      "started_at": "2026-06-03 21:28:31.184",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225354",
+      "ticket_subject_preview": "IPAD stolen from car",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 214,
+      "started_at": "2026-06-03 20:50:53.506",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225349",
+      "ticket_subject_preview": "Admin Approval for Solocator Setup",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 213,
+      "started_at": "2026-06-03 20:45:24.252",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_fast_sync",
+      "status": "completed",
+      "freshservice_ticket_id": "225347",
+      "ticket_subject_preview": "NH Laptop - Calgary - CA - lclaypool - 2026-06-03",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 212,
+      "started_at": "2026-06-03 20:45:14.097",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_fast_sync",
+      "status": "completed",
+      "freshservice_ticket_id": "225348",
+      "ticket_subject_preview": "NH Workstation - Calgary - CA - lclaypool - 2026-06-03",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    }
+  ],
+  "gates": {
+    "duplicateTicketEventGroups": {
+      "status": "fail",
+      "detail": "5 real mocked duplicate delivery group(s).",
+      "evidence": {
+        "realMockDeliveries": 179
+      }
+    },
+    "degradedRunVisibility": {
+      "status": "review",
+      "detail": "Run health is reported separately from workflow execution status.",
+      "evidence": {
+        "mockRuns": 207
+      }
+    },
+    "llmFallbackVisibility": {
+      "status": "pass",
+      "detail": "2 guard rejection(s), 8 template fallback marker(s), 6 provider/schema fallback marker(s).",
+      "evidence": {
+        "llm_steps": 201,
+        "completed": 201,
+        "failed": 0,
+        "guard_rejected": 2,
+        "template_fallback_used": 8,
+        "provider_or_schema": 6
+      }
+    },
+    "possibleBroaderIssueRate": {
+      "status": "review",
+      "detail": "63.7% possible_broader_issue rate.",
+      "evidence": {
+        "possibleCount": 128,
+        "llmSteps": 201
+      }
+    },
+    "compactPayloads": {
+      "status": "fail",
+      "detail": "71 base64, 71 activeContact, 71 avatar/photo, 102 email-like payload(s).",
+      "evidence": {
+        "deliveries": 210,
+        "active_contact_payloads": 71,
+        "base64_payloads": 71,
+        "avatar_or_photo_payloads": 71,
+        "email_like_payloads": 102,
+        "named_contact_payloads": 0,
+        "p50_payload_chars": 2104,
+        "p95_payload_chars": 10722,
+        "max_payload_chars": 10722
+      }
+    },
+    "copyPolicy": {
+      "status": "review",
+      "detail": "179 output(s) scanned, 0 hard-block and 178 auto-repair finding(s). Audit-only style findings are not blockers.",
+      "evidence": {
+        "auto_repair": 178,
+        "audit_only": 29
+      }
+    },
+    "oneBusinessDayMockAudit": {
+      "status": "review",
+      "detail": "Window has enough mock runs for audit volume, but business-day coverage must be confirmed against the selected timezone.",
+      "evidence": {
+        "mockRuns": 207
+      }
+    }
+  },
+  "summary": {
+    "runCount": 228,
+    "mockRunCount": 207,
+    "previewRunCount": 21,
+    "realDuplicateGroupCount": 5,
+    "llmFallbackMarkers": 8,
+    "providerOrSchemaMarkers": 6,
+    "possibleBroaderIssueRate": 63.7,
+    "hardBlockCopyFindings": 0,
+    "autoRepairCopyFindings": 178,
+    "auditOnlyCopyFindings": 29
+  }
+}
