@@ -715,6 +715,17 @@ describe('notification workflow routes', () => {
         run: expect.any(Object),
       }),
     }));
+    expect(prismaMock.aiProviderAttempt.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      by: ['provider', 'model', 'errorClass'],
+      where: expect.objectContaining({
+        workspaceId: 1,
+        operation: 'notification_workflow_generation',
+        status: 'failed',
+        startedAt: { gte: expect.any(Date) },
+      }),
+      _count: { _all: true },
+    }));
+    expect(prismaMock.aiProviderAttempt.groupBy.mock.calls[0][0].where).not.toHaveProperty('createdAt');
   });
 
   test('health exposes operational monitoring warnings for degraded workflow quality', async () => {
