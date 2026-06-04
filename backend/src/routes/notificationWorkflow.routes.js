@@ -1300,6 +1300,7 @@ router.get(
       status: req.query.status,
       search: req.query.search,
       limit: req.query.limit,
+      offset: req.query.offset,
     });
     res.json({ success: true, data: runs.map(redactRun) });
   }),

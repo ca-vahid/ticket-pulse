@@ -16,6 +16,9 @@ import {
   Bot,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   CircleHelp,
   Code,
@@ -32,6 +35,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Rows3,
   Save,
   Search,
   Send,
@@ -41,6 +45,7 @@ import {
   Upload,
   UploadCloud,
   Wand2,
+  Waypoints,
   Wrench,
   ShieldCheck,
   Sparkles,
@@ -4530,20 +4535,16 @@ function MockAuditPanel({
   testSending = false,
   testResult = null,
   tabbed = false,
+  page = 0,
+  pageSize = 50,
+  hasMore = false,
+  onPageChange,
+  onPageSizeChange,
+  compact = false,
+  onToggleCompact,
 }) {
-  const searchTerm = (filters.search || '').trim().toLowerCase();
-  const visibleRuns = useMemo(() => {
-    if (!searchTerm) return runs || [];
-    return (runs || []).filter((run) => [
-      auditTicketLabel(run),
-      auditTicketSubject(run),
-      run?.ticket?.freshserviceTicketId,
-      run?.eventContext?.ticket?.freshserviceTicketId,
-      workflowDisplayName(run?.workflow),
-      workflowEventLabelForRun(run),
-      auditEmailForRun(run)?.subject,
-    ].filter((value) => value != null).join(' ').toLowerCase().includes(searchTerm));
-  }, [runs, searchTerm]);
+  // Search is applied server-side (so it spans all runs, not just the current page).
+  const visibleRuns = runs || [];
   const activeRun = selectedRun || visibleRuns?.[0] || null;
   const activeDelivery = auditDeliveryForRun(activeRun);
   const activeLlmDiagnostics = auditLlmsForRun(activeRun);
@@ -4621,6 +4622,19 @@ function MockAuditPanel({
           >
             {testSending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
             Send test to me
+          </button>
+          <button
+            type="button"
+            onClick={onToggleCompact}
+            aria-pressed={compact}
+            title="Toggle compact run list"
+            className={cls(
+              'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold transition',
+              compact ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+            )}
+          >
+            <Rows3 className="h-3.5 w-3.5" />
+            Compact
           </button>
           <button
             type="button"
@@ -4732,147 +4746,193 @@ function MockAuditPanel({
           tabbed ? 'min-h-0 flex-1' : 'min-h-[300px] max-h-[430px]',
         )}
       >
-        <div className="settings-scrollbar min-h-0 space-y-2 overflow-auto rounded-xl border border-slate-200 bg-slate-50/40 p-2 shadow-subtle">
-          {loading && (
-            <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-500">
-              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+        <div className="flex min-h-0 flex-col gap-2">
+          <div className="settings-scrollbar min-h-0 flex-1 space-y-2 overflow-auto rounded-xl border border-slate-200 bg-slate-50/40 p-2 shadow-subtle">
+            {loading && (
+              <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-500">
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
               Loading workflow audit
-            </div>
-          )}
-          {!loading && visibleRuns.length === 0 && (
-            <div className="flex h-full min-h-[220px] items-center justify-center px-6 text-center text-sm text-slate-500">
+              </div>
+            )}
+            {!loading && visibleRuns.length === 0 && (
+              <div className="flex h-full min-h-[220px] items-center justify-center px-6 text-center text-sm text-slate-500">
               No workflow runs match the current filters.
-            </div>
-          )}
-          {!loading && visibleRuns.map((run, index) => {
-            const delivery = auditDeliveryForRun(run);
-            const llmDiagnostics = auditLlmsForRun(run);
-            const llm = llmDiagnostics[0]?.llm || null;
-            const contextStep = (run.steps || []).find((step) => step.nodeType === 'llm_generate' && (step.output?.llm?.context || step.output?.context));
-            const toolCount = auditToolRecordsForRun(run, llmDiagnostics).length;
-            const claimGuard = llm?.guard?.accepted === true;
-            const runWarnings = Array.isArray(run.warnings) ? run.warnings : [];
-            const selected = activeRun?.id === run.id;
-            const recipientCount = deliveryRecipientCount(delivery);
-            const rowEmail = auditEmailForRun(run, delivery);
-            const llmText = llmDiagnostics.length > 1
-              ? `${llmDiagnostics.length} nodes`
-              : [llm?.provider, llm?.model].filter(Boolean).join(' / ') || 'Not recorded';
-            const st = String(run.status || '').toLowerCase();
-            const tone = (st === 'completed' || st === 'sent')
-              ? 'emerald'
-              : st === 'failed'
-                ? 'red'
-                : (st === 'running' || st === 'queued')
-                  ? 'amber'
-                  : run.executionMode === 'preview'
-                    ? 'violet'
-                    : run.executionMode === 'mock'
-                      ? 'sky'
-                      : 'slate';
-            const borderLeftClass = {
-              emerald: 'border-l-emerald-400', red: 'border-l-red-400', amber: 'border-l-amber-400',
-              violet: 'border-l-violet-400', sky: 'border-l-sky-400', slate: 'border-l-slate-300',
-            }[tone];
-            const dotClass = {
-              emerald: 'bg-emerald-500', red: 'bg-red-500', amber: 'bg-amber-500',
-              violet: 'bg-violet-500', sky: 'bg-sky-500', slate: 'bg-slate-400',
-            }[tone];
-            return (
-              <motion.button
-                key={run.id}
-                type="button"
-                onClick={() => onSelectRun(run)}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, delay: Math.min(index * 0.03, 0.24), ease: [0.22, 1, 0.36, 1] }}
-                whileHover={{ y: -2 }}
-                whileTap={{ scale: 0.994 }}
-                className={cls(
-                  'group relative block w-full overflow-hidden rounded-lg border border-slate-200 border-l-[3px] bg-white p-3 text-left shadow-subtle transition-shadow duration-200 hover:shadow-soft',
-                  borderLeftClass,
-                )}
-              >
-                {selected && (
-                  <motion.span
-                    layoutId="auditSelectedHighlight"
-                    className="pointer-events-none absolute inset-0 rounded-lg bg-blue-50/70 ring-2 ring-inset ring-blue-500/30"
-                    transition={{ type: 'spring', stiffness: 520, damping: 42 }}
-                  />
-                )}
-                <div className="relative space-y-2">
-                  <div className="flex items-start gap-2">
-                    <span className="mt-px shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600 transition-colors group-hover:bg-slate-200/70">
-                      {auditTicketLabel(run)}
-                    </span>
-                    <span className="min-w-0 flex-1 text-sm font-semibold leading-snug text-slate-900">
-                      {auditTicketSubject(run)}
-                    </span>
-                    <span className={cls('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize', statusClass(run.status))}>
-                      <span className={cls('h-1.5 w-1.5 rounded-full', dotClass)} />
-                      {run.status}
-                    </span>
-                  </div>
-
-                  <div className="text-[11px] text-slate-400">
-                    {workflowEventLabelForRun(run)}
-                    <span className="px-1 text-slate-300">·</span>
-                    {formatDate(run.startedAt)}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <AuditModeBadge mode={run.executionMode} compact />
-                    {delivery?.status && (
-                      <span className={cls('rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', statusClass(delivery.status))}>
-                        {delivery.status}
+              </div>
+            )}
+            {!loading && visibleRuns.map((run, index) => {
+              const delivery = auditDeliveryForRun(run);
+              const llmDiagnostics = auditLlmsForRun(run);
+              const llm = llmDiagnostics[0]?.llm || null;
+              const contextStep = (run.steps || []).find((step) => step.nodeType === 'llm_generate' && (step.output?.llm?.context || step.output?.context));
+              const toolCount = auditToolRecordsForRun(run, llmDiagnostics).length;
+              const claimGuard = llm?.guard?.accepted === true;
+              const runWarnings = Array.isArray(run.warnings) ? run.warnings : [];
+              const selected = activeRun?.id === run.id;
+              const recipientCount = deliveryRecipientCount(delivery);
+              const rowEmail = auditEmailForRun(run, delivery);
+              const llmText = llmDiagnostics.length > 1
+                ? `${llmDiagnostics.length} nodes`
+                : [llm?.provider, llm?.model].filter(Boolean).join(' / ') || 'Not recorded';
+              const st = String(run.status || '').toLowerCase();
+              const tone = (st === 'completed' || st === 'sent')
+                ? 'emerald'
+                : st === 'failed'
+                  ? 'red'
+                  : (st === 'running' || st === 'queued')
+                    ? 'amber'
+                    : run.executionMode === 'preview'
+                      ? 'violet'
+                      : run.executionMode === 'mock'
+                        ? 'sky'
+                        : 'slate';
+              const borderLeftClass = {
+                emerald: 'border-l-emerald-400', red: 'border-l-red-400', amber: 'border-l-amber-400',
+                violet: 'border-l-violet-400', sky: 'border-l-sky-400', slate: 'border-l-slate-300',
+              }[tone];
+              const dotClass = {
+                emerald: 'bg-emerald-500', red: 'bg-red-500', amber: 'bg-amber-500',
+                violet: 'bg-violet-500', sky: 'bg-sky-500', slate: 'bg-slate-400',
+              }[tone];
+              return (
+                <motion.button
+                  key={run.id}
+                  type="button"
+                  onClick={() => onSelectRun(run)}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25, delay: Math.min(index * 0.03, 0.24), ease: [0.22, 1, 0.36, 1] }}
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.994 }}
+                  className={cls(
+                    'group relative block w-full overflow-hidden rounded-lg border border-slate-200 border-l-[3px] bg-white text-left shadow-subtle transition-shadow duration-200 hover:shadow-soft',
+                    compact ? 'p-2' : 'p-3',
+                    borderLeftClass,
+                  )}
+                >
+                  {selected && (
+                    <motion.span
+                      layoutId="auditSelectedHighlight"
+                      className="pointer-events-none absolute inset-0 rounded-lg bg-blue-50/70 ring-2 ring-inset ring-blue-500/30"
+                      transition={{ type: 'spring', stiffness: 520, damping: 42 }}
+                    />
+                  )}
+                  <div className={cls('relative', compact ? 'space-y-1' : 'space-y-2')}>
+                    <div className="flex items-start gap-2">
+                      <span className="mt-px shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600 transition-colors group-hover:bg-slate-200/70">
+                        {auditTicketLabel(run)}
                       </span>
-                    )}
-                  </div>
+                      <span className="min-w-0 flex-1 text-sm font-semibold leading-snug text-slate-900">
+                        {auditTicketSubject(run)}
+                      </span>
+                      <span className={cls('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize', statusClass(run.status))}>
+                        <span className={cls('h-1.5 w-1.5 rounded-full', dotClass)} />
+                        {run.status}
+                      </span>
+                    </div>
 
-                  <div className="truncate text-[12px] leading-5 text-slate-500">
-                    <span className="text-slate-400">Subject:</span>{' '}
-                    <span className="font-medium text-slate-700">{rowEmail?.subject || 'No email rendered'}</span>
-                  </div>
+                    <div className="text-[11px] text-slate-400">
+                      {workflowEventLabelForRun(run)}
+                      <span className="px-1 text-slate-300">·</span>
+                      {formatDate(run.startedAt)}
+                    </div>
 
-                  <div className="text-[11px] leading-4 text-slate-500">
-                    Recipients: <span className="font-medium text-slate-700">{recipientCount}</span>
-                    <span className="px-1 text-slate-300">·</span>
-                    LLM: <span className="font-medium text-slate-700">{llmText}</span>
-                  </div>
-
-                  {(contextStep || toolCount > 0 || runWarnings.length > 0 || claimGuard) && (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                      {contextStep && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 ring-1 ring-inset ring-violet-200/70">
-                          <Bot className="h-3 w-3" />Context
-                        </span>
-                      )}
-                      {toolCount > 0 && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-inset ring-slate-200/70">
-                          <Wrench className="h-3 w-3" />Tools {toolCount}
-                        </span>
-                      )}
-                      {runWarnings.length > 0 && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-200/70">
-                          <AlertCircle className="h-3 w-3" />Warnings {runWarnings.length}
-                        </span>
-                      )}
-                      {claimGuard && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-200/70">
-                          <ShieldCheck className="h-3 w-3" />Claim guard
-                        </span>
-                      )}
-                      {(contextStep || toolCount > 0 || claimGuard) && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 ring-1 ring-inset ring-sky-200/70">
-                          <Sparkles className="h-3 w-3" />Evidence
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <AuditModeBadge mode={run.executionMode} compact />
+                      {delivery?.status && (
+                        <span className={cls('rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', statusClass(delivery.status))}>
+                          {delivery.status}
                         </span>
                       )}
                     </div>
-                  )}
-                </div>
-              </motion.button>
-            );
-          })}
+
+                    {!compact && (
+                      <>
+                        <div className="truncate text-[12px] leading-5 text-slate-500">
+                          <span className="text-slate-400">Subject:</span>{' '}
+                          <span className="font-medium text-slate-700">{rowEmail?.subject || 'No email rendered'}</span>
+                        </div>
+
+                        <div className="text-[11px] leading-4 text-slate-500">
+                    Recipients: <span className="font-medium text-slate-700">{recipientCount}</span>
+                          <span className="px-1 text-slate-300">·</span>
+                    LLM: <span className="font-medium text-slate-700">{llmText}</span>
+                        </div>
+
+                        {(contextStep || toolCount > 0 || runWarnings.length > 0 || claimGuard) && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                            {contextStep && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 ring-1 ring-inset ring-violet-200/70">
+                                <Bot className="h-3 w-3" />Context
+                              </span>
+                            )}
+                            {toolCount > 0 && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-inset ring-slate-200/70">
+                                <Wrench className="h-3 w-3" />Tools {toolCount}
+                              </span>
+                            )}
+                            {runWarnings.length > 0 && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-200/70">
+                                <AlertCircle className="h-3 w-3" />Warnings {runWarnings.length}
+                              </span>
+                            )}
+                            {claimGuard && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-200/70">
+                                <ShieldCheck className="h-3 w-3" />Claim guard
+                              </span>
+                            )}
+                            {(contextStep || toolCount > 0 || claimGuard) && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 ring-1 ring-inset ring-sky-200/70">
+                                <Sparkles className="h-3 w-3" />Evidence
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </motion.button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-subtle">
+            <label className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+              <span>Rows</span>
+              <select
+                value={pageSize}
+                onChange={(event) => onPageSizeChange?.(Number(event.target.value))}
+                className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-semibold text-slate-700 focus:border-blue-400 focus:outline-none"
+              >
+                {[50, 100, 250].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-slate-500">
+              Page {page + 1}
+                <span className="px-1 text-slate-300">·</span>
+                {visibleRuns.length} shown
+              </span>
+              <button
+                type="button"
+                onClick={() => onPageChange?.(Math.max(0, page - 1))}
+                disabled={page === 0 || loading}
+                className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 shadow-subtle transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => onPageChange?.(page + 1)}
+                disabled={!hasMore || loading}
+                className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 shadow-subtle transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+              Next
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="settings-scrollbar min-h-0 overflow-auto rounded-xl border border-slate-200 bg-white p-4 shadow-subtle">
@@ -5118,6 +5178,8 @@ export default function NotificationWorkflowsPanel({
   const [draft, setDraft] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState('trigger');
   const [workflowListCollapsed, setWorkflowListCollapsed] = useState(false);
+  const [routingExpanded, setRoutingExpanded] = useState(false);
+  const [normalizationOpen, setNormalizationOpen] = useState(false);
   const [health, setHealth] = useState(null);
   useEffect(() => {
     if (onHealthChange) onHealthChange(health);
@@ -5197,6 +5259,10 @@ export default function NotificationWorkflowsPanel({
   const [contentEditor, setContentEditor] = useState(null);
   const [contentEditorValue, setContentEditorValue] = useState('');
   const [mockAuditRuns, setMockAuditRuns] = useState([]);
+  const [mockAuditPage, setMockAuditPage] = useState(0);
+  const [mockAuditPageSize, setMockAuditPageSize] = useState(50);
+  const [mockAuditHasMore, setMockAuditHasMore] = useState(false);
+  const [mockAuditCompact, setMockAuditCompact] = useState(false);
   const [mockAuditLoading, setMockAuditLoading] = useState(false);
   const [mockAuditError, setMockAuditError] = useState(null);
   const [selectedMockRun, setSelectedMockRun] = useState(null);
@@ -5480,7 +5546,7 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
-  async function loadMockAuditRuns(filters = mockAuditFilters) {
+  async function loadMockAuditRuns(filters = mockAuditFilters, page = mockAuditPage, pageSize = mockAuditPageSize) {
     setMockAuditLoading(true);
     setMockAuditError(null);
     try {
@@ -5494,10 +5560,13 @@ export default function NotificationWorkflowsPanel({
         workflowId: workflowId || undefined,
         from: rangeStartIso(filters.range) || undefined,
         status: filters.status !== 'all' ? filters.status : undefined,
-        limit: 100,
+        search: (filters.search || '').trim() || undefined,
+        limit: pageSize,
+        offset: page * pageSize,
       });
       const items = response.data || [];
       setMockAuditRuns(items);
+      setMockAuditHasMore(items.length >= pageSize);
       setSelectedMockRun((current) => (
         current && items.some((run) => run.id === current.id)
           ? items.find((run) => run.id === current.id)
@@ -5842,11 +5911,11 @@ export default function NotificationWorkflowsPanel({
   useEffect(() => {
     if (!mockAuditOpen) return undefined;
     const handle = window.setTimeout(() => {
-      loadMockAuditRuns(mockAuditFilters);
+      loadMockAuditRuns(mockAuditFilters, mockAuditPage, mockAuditPageSize);
     }, 250);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mockAuditOpen, selected?.id, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status]);
+  }, [mockAuditOpen, selected?.id, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status, mockAuditFilters.search, mockAuditPage, mockAuditPageSize]);
 
   async function saveDraft() {
     if (!selected || !draft) return;
@@ -8019,12 +8088,19 @@ export default function NotificationWorkflowsPanel({
             loading={mockAuditLoading}
             error={mockAuditError}
             filters={mockAuditFilters}
-            onFiltersChange={setMockAuditFilters}
-            onRefresh={() => loadMockAuditRuns(mockAuditFilters)}
+            onFiltersChange={(next) => { setMockAuditFilters(next); setMockAuditPage(0); }}
+            onRefresh={() => loadMockAuditRuns(mockAuditFilters, mockAuditPage, mockAuditPageSize)}
             onSelectRun={setSelectedMockRun}
             onSendTestToMe={sendMockAuditTestEmail}
             testSending={mockAuditTestSending}
             testResult={mockAuditTestResult}
+            page={mockAuditPage}
+            pageSize={mockAuditPageSize}
+            hasMore={mockAuditHasMore}
+            onPageChange={setMockAuditPage}
+            onPageSizeChange={(size) => { setMockAuditPageSize(size); setMockAuditPage(0); }}
+            compact={mockAuditCompact}
+            onToggleCompact={() => setMockAuditCompact((v) => !v)}
             tabbed
           />
         )}
@@ -8040,11 +8116,71 @@ export default function NotificationWorkflowsPanel({
                 onConfigure={() => setAfterHoursDrawerOpen(true)}
               />
             )}
-            {renderRoutingSettingsPanel()}
+            {selected && (
+              <div className="shrink-0">
+                <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-4 py-2">
+                  <Waypoints className="h-4 w-4 text-slate-400" />
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Routing</span>
+                  <span className={cls(
+                    'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                    selected.isDefaultVariant ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700',
+                  )}
+                  >
+                    {workflowVariantTypeLabel(selected)}
+                  </span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                    {selected.isDefaultVariant ? 'Default fallback' : `Match order ${routingPriority || 1}`}
+                  </span>
+                  <div className="relative ml-auto flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setNormalizationOpen((open) => !open)}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
+                      title="How routing values are normalized"
+                    >
+                      <CircleHelp className="h-3.5 w-3.5 text-blue-600" />
+                      Normalization
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRoutingExpanded((open) => !open)}
+                      aria-expanded={routingExpanded}
+                      className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
+                    >
+                      {routingExpanded ? 'Hide routing' : 'Edit routing'}
+                      <ChevronDown className={cls('h-3.5 w-3.5 transition-transform', routingExpanded && 'rotate-180')} />
+                    </button>
+                    {normalizationOpen && (
+                      <>
+                        <div className="fixed inset-0 z-30" onClick={() => setNormalizationOpen(false)} />
+                        <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600 shadow-xl">
+                          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                            <CircleHelp className="h-3.5 w-3.5 text-blue-600" />
+                            Normalization
+                          </div>
+                          <p>Routing values are normalized to stable route keys before they are matched.</p>
+                          {(routingMetadata.normalizationRules || []).length > 0 && (
+                            <ul className="mt-1.5 space-y-1 text-slate-500">
+                              {(routingMetadata.normalizationRules || []).slice(0, 6).map((rule) => (
+                                <li key={rule} className="flex gap-1.5">
+                                  <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-slate-400" />
+                                  <span>{rule}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {routingExpanded && renderRoutingSettingsPanel()}
+              </div>
+            )}
 
             <div
               className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--workflow-list-width)_minmax(0,1fr)]"
-              style={{ '--workflow-list-width': workflowListCollapsed ? '3.5rem' : '220px' }}
+              style={{ '--workflow-list-width': workflowListCollapsed ? '3.5rem' : '280px' }}
             >
               <aside
                 className={cls(
