@@ -439,6 +439,7 @@ export async function listAuditRuns(workspaceId, {
   status = null,
   search = null,
   limit = 50,
+  offset = 0,
 } = {}) {
   const where = { workspaceId };
   const mode = String(executionMode || '').trim().toLowerCase();
@@ -463,7 +464,8 @@ export async function listAuditRuns(workspaceId, {
   return prisma.notificationWorkflowRun.findMany({
     where,
     orderBy: { startedAt: 'desc' },
-    take: parseLimit(limit),
+    skip: Math.max(0, Number.parseInt(offset, 10) || 0),
+    take: parseLimit(limit, 50, 500),
     include: {
       workflow: {
         select: {
