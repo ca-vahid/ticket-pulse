@@ -2,6 +2,7 @@ import {
   buildAnthropicBlocksFromOpenAiResponse,
   convertAnthropicMessagesToOpenAiInput,
   convertAnthropicToolsToOpenAiResponses,
+  sanitizeOpenAiResponseInputItem,
 } from '../src/services/aiProviders/openAiConverters.js';
 
 describe('OpenAI Responses converters', () => {
@@ -150,5 +151,57 @@ describe('OpenAI Responses converters', () => {
         call_id: 'call_required',
       }),
     ]);
+  });
+
+  test('strips SDK-only fields from function-call replay items', () => {
+    const replayItem = sanitizeOpenAiResponseInputItem({
+      type: 'function_call',
+      id: 'fc_123',
+      call_id: 'call_123',
+      name: 'find_similar_tickets',
+      arguments: '{"ticketId":225001}',
+      parsed_arguments: { ticketId: 225001 },
+      parsedArguments: { ticketId: 225001 },
+      output: 'provider helper output',
+      status: 'completed',
+    });
+
+    expect(replayItem).toEqual({
+      type: 'function_call',
+      id: 'fc_123',
+      call_id: 'call_123',
+      name: 'find_similar_tickets',
+      arguments: '{"ticketId":225001}',
+      status: 'completed',
+    });
+
+    const input = convertAnthropicMessagesToOpenAiInput([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'call_123',
+            name: 'find_similar_tickets',
+            input: { ticketId: 225001 },
+            openai_response_item: {
+              type: 'function_call',
+              id: 'fc_123',
+              call_id: 'call_123',
+              name: 'find_similar_tickets',
+              arguments: '{"ticketId":225001}',
+              parsed_arguments: { ticketId: 225001 },
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(input[0]).not.toHaveProperty('parsed_arguments');
+    expect(input[0]).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_123',
+      name: 'find_similar_tickets',
+    });
   });
 });

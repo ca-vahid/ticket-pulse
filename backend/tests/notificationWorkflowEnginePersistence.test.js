@@ -11,6 +11,7 @@ const prismaMock = {
   },
   notificationDelivery: {
     create: jest.fn(),
+    findUnique: jest.fn(),
   },
   notificationLlmToolPolicy: {
     findUnique: jest.fn(),
@@ -20,6 +21,10 @@ const prismaMock = {
     findMany: jest.fn(),
   },
   ticketThreadEntry: {
+    findMany: jest.fn(),
+  },
+  notificationEmailBlock: {
+    findFirst: jest.fn(),
     findMany: jest.fn(),
   },
   notificationEmailSignature: {
@@ -161,6 +166,7 @@ describe('notification workflow engine persistence', () => {
       id: 1234,
       ...data,
     }));
+    prismaMock.notificationDelivery.findUnique.mockResolvedValue(null);
     prismaMock.notificationLlmToolPolicy.findUnique.mockResolvedValue(null);
     prismaMock.ticket.findFirst.mockResolvedValue({
       id: 501,
@@ -194,6 +200,8 @@ describe('notification workflow engine persistence', () => {
     });
     prismaMock.ticket.findMany.mockResolvedValue([]);
     prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+    prismaMock.notificationEmailBlock.findFirst.mockResolvedValue(null);
+    prismaMock.notificationEmailBlock.findMany.mockResolvedValue([]);
     prismaMock.notificationEmailSignature.findUnique.mockResolvedValue(null);
     processDeliveryMock.mockResolvedValue({ success: true, result: { provider: 'sendgrid' } });
   });
@@ -434,6 +442,41 @@ describe('notification workflow engine persistence', () => {
     expect(processDeliveryMock).not.toHaveBeenCalled();
   });
 
+  test('checks for an existing requester-facing delivery before queueing or sending', async () => {
+    prismaMock.notificationDelivery.findUnique.mockResolvedValueOnce({
+      id: 4321,
+      status: 'mocked',
+      workflowRunId: 321,
+    });
+
+    const result = await executeDefinition({
+      workflow,
+      definition: buildDefaultWorkflowDefinition('ticket.created'),
+      eventContext: {
+        ...eventContext,
+        event: {
+          ...eventContext.event,
+          notificationFingerprint: '1:ticket.created:501:2026-05-29T18:30:00.000Z',
+        },
+      },
+      dryRun: false,
+      triggerSource: 'freshservice_webhook',
+    });
+
+    expect(result.status).toBe('completed');
+    const sendStep = result.steps.find((step) => step.nodeType === 'send_email');
+    expect(sendStep.output).toEqual(expect.objectContaining({
+      skipped: true,
+      duplicateDelivery: true,
+      duplicateDeliveryId: 4321,
+      duplicateDeliveryStatus: 'mocked',
+      duplicateWorkflowRunId: 321,
+      reason: 'Duplicate workflow delivery',
+    }));
+    expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
+    expect(processDeliveryMock).not.toHaveBeenCalled();
+  });
+
   test('appends the public status link before the workspace signature', async () => {
     prismaMock.notificationEmailSignature.findUnique.mockResolvedValueOnce({
       enabled: true,
@@ -463,6 +506,135 @@ describe('notification workflow engine persistence', () => {
     expect(deliveryData.textBody.indexOf('Check the latest ticket status')).toBeLessThan(
       deliveryData.textBody.indexOf('Workspace Signature'),
     );
+  });
+
+  test('send email can disable the default footer branding block', async () => {
+    prismaMock.notificationEmailSignature.findUnique.mockResolvedValueOnce({
+      enabled: true,
+      html: '<p>Workspace Signature</p>',
+      text: 'Workspace Signature',
+    });
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.includeFooter = false;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.html).not.toContain('Workspace Signature');
+    expect(result.state.email.footerApplied).toBe(false);
+    expect(result.state.email.branding.footer.requested).toBe(false);
+  });
+
+  test('send email uses a selected alternate footer block', async () => {
+    prismaMock.notificationEmailBlock.findFirst.mockImplementation(({ where }) => {
+      if (where.id === 44) {
+        return Promise.resolve({
+          id: 44,
+          workspaceId: 1,
+          type: 'footer',
+          name: 'Escalation footer',
+          enabled: true,
+          isDefault: false,
+          html: '<p>Escalation Footer</p>',
+          text: 'Escalation Footer',
+        });
+      }
+      return Promise.resolve(null);
+    });
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.footerBlockId = 44;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.html).toContain('Escalation Footer');
+    expect(result.state.email.footerBlockId).toBe(44);
+    expect(result.state.email.footerBlockName).toBe('Escalation footer');
+    expect(result.state.email.branding.footer.fallback).toBe(false);
+  });
+
+  test('send email applies selected header before the main body', async () => {
+    prismaMock.notificationEmailBlock.findFirst.mockImplementation(({ where }) => {
+      if (where.id === 33) {
+        return Promise.resolve({
+          id: 33,
+          workspaceId: 1,
+          type: 'header',
+          name: 'Maintenance header',
+          enabled: true,
+          isDefault: false,
+          html: '<p>Maintenance Header</p>',
+          text: 'Maintenance Header',
+        });
+      }
+      return Promise.resolve(null);
+    });
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.includeHeader = true;
+    sendNode.data.headerBlockId = 33;
+    sendNode.data.includeFooter = false;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.html.indexOf('Maintenance Header')).toBeLessThan(
+      result.state.email.html.indexOf('Ticket'),
+    );
+    expect(result.state.email.headerBlockId).toBe(33);
+    expect(result.state.email.branding.header.applied).toBe(true);
+  });
+
+  test('missing selected footer falls back to default and records branding warning', async () => {
+    prismaMock.notificationEmailBlock.findFirst.mockImplementation(({ where }) => {
+      if (where.id === 999) return Promise.resolve(null);
+      if (where.type === 'footer' && where.isDefault === true) {
+        return Promise.resolve({
+          id: 45,
+          workspaceId: 1,
+          type: 'footer',
+          name: 'Default footer',
+          enabled: true,
+          isDefault: true,
+          html: '<p>Default Footer</p>',
+          text: 'Default Footer',
+        });
+      }
+      return Promise.resolve(null);
+    });
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.footerBlockId = 999;
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.html).toContain('Default Footer');
+    expect(result.state.email.footerBlockId).toBe(45);
+    expect(result.state.email.branding.footer.fallback).toBe(true);
+    expect(result.state.email.brandingWarnings[0]).toContain('not found');
   });
 
   test('live action blocks render only timing-appropriate links', async () => {
@@ -613,6 +785,7 @@ describe('notification workflow engine persistence', () => {
     expect(sendStep.output.actionLinks.afterHoursSupport).toEqual(expect.objectContaining({
       requested: true,
       applied: true,
+      hasUrl: true,
       hasActiveContact: true,
       phoneVerified: true,
       rotationLabel: 'Manual after-hours contact',
@@ -621,9 +794,49 @@ describe('notification workflow engine persistence', () => {
     expect(stepDiagnostics).not.toContain('data:image');
     expect(stepDiagnostics).not.toContain('alex.agent@example.com');
     expect(stepDiagnostics).not.toContain('+16045551234');
+    expect(stepDiagnostics).not.toContain('ticket-escalation');
     expect(payloadDiagnostics).not.toContain('data:image');
     expect(payloadDiagnostics).not.toContain('alex.agent@example.com');
     expect(payloadDiagnostics).not.toContain('+16045551234');
+    expect(payloadDiagnostics).not.toContain('ticket-escalation');
+  });
+
+  test('persists sanitized workflow run context and step audit data', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.appendAfterHoursSupportLink = true;
+
+    await executeDefinition({
+      workflow,
+      definition,
+      eventContext: {
+        ...eventContext,
+        availability: { isBusinessHours: false, isAfterHours: true, isHoliday: false },
+      },
+      dryRun: false,
+      executionMode: 'mock',
+      triggerSource: 'freshservice_webhook',
+    });
+
+    const persistedRunContext = prismaMock.notificationWorkflowRun.create.mock.calls[0][0].data.eventContext;
+    expect(persistedRunContext).toEqual(expect.objectContaining({
+      hasRequester: true,
+    }));
+    expect(persistedRunContext.event.occurredAt).toBe('2026-05-29T19:00:00.000Z');
+
+    const persistedAuditJson = JSON.stringify({
+      runContext: persistedRunContext,
+      stepInputs: prismaMock.notificationWorkflowStepRun.create.mock.calls.map((call) => call[0].data.input),
+      stepOutputs: prismaMock.notificationWorkflowStepRun.update.mock.calls.map((call) => call[0].data.output),
+      finalRunState: prismaMock.notificationWorkflowRun.update.mock.calls.map((call) => call[0].data.state),
+    });
+
+    expect(persistedAuditJson).not.toContain('activeContact');
+    expect(persistedAuditJson).not.toContain('requester@example.com');
+    expect(persistedAuditJson).not.toContain('alex.agent@example.com');
+    expect(persistedAuditJson).not.toContain('+16045551234');
+    expect(persistedAuditJson).not.toContain('data:image');
+    expect(persistedAuditJson).not.toContain('photoUrl');
   });
 
   test('uses LLM text as HTML when the provider returns blank HTML', async () => {
@@ -727,25 +940,98 @@ describe('notification workflow engine persistence', () => {
       failureType: 'guard_rejected',
       guardRejected: true,
       templateFallbackUsed: true,
+      templateFallbackReason: expect.any(String),
+      templateFallbackSource: 'guard',
+      fallbackTemplateId: null,
+      guardPolicyTier: 'hard_block',
+      guardPolicyRuleIds: expect.any(Array),
       raw: null,
       guard: expect.objectContaining({ accepted: false }),
       promptPolicy: expect.objectContaining({
-        strictness: 'strict_default',
-        strictDefaultApplied: true,
+        strictness: 'friendly_default',
+        defaultPolicyApplied: true,
         customSystemPromptUsed: false,
       }),
       guardPolicy: expect.objectContaining({
-        mode: 'strict_default_repair_copy',
-        allowEmoji: false,
-        allowPlayfulTone: false,
+        mode: 'friendly_tiered_policy',
+        toneMode: 'friendly',
+        allowEmoji: true,
+        allowPlayfulTone: true,
         hardBlocks: expect.arrayContaining(['provider_model_internals']),
         repairChecks: expect.arrayContaining(['unsupported_timing_claims']),
+        auditOnlyChecks: expect.arrayContaining(['emoji', 'playful_tone']),
       }),
     }));
     const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
     expect(deliveryData.subject).not.toBe('Provider leak');
     expect(deliveryData.htmlBody).not.toContain('Claude model');
     expect(processDeliveryMock).toHaveBeenCalled();
+  });
+
+  test('preview-only guardrail disable does not disable live hard blocks', async () => {
+    const llmLeak = {
+      subject: 'Provider leak',
+      html: '<p>The Claude model drafted this update.</p>',
+      text: 'The Claude model drafted this update.',
+    };
+    providerSendJsonMock
+      .mockResolvedValueOnce(llmResponse(llmLeak))
+      .mockResolvedValueOnce(llmResponse(llmLeak));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+        requesterGuardrails: {
+          enabled: false,
+        },
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const previewResult = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      executeLlm: true,
+      triggerSource: 'preview',
+    });
+    const previewLlmStep = previewResult.steps.find((step) => step.nodeType === 'llm_generate');
+    expect(previewLlmStep.output.llm.guardPolicy).toEqual(expect.objectContaining({
+      mode: 'disabled_for_preview_or_manual_test',
+      previewDisableApplied: true,
+    }));
+    expect(previewLlmStep.output.llm.guard).toEqual(expect.objectContaining({ accepted: true }));
+    expect(previewLlmStep.output.llm.email.text).toContain('Claude model');
+
+    const liveResult = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+    const liveLlmStep = liveResult.steps.find((step) => step.nodeType === 'llm_generate');
+    expect(liveResult.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'guard_rejected', templateFallbackUsed: true }),
+    ]));
+    expect(liveLlmStep.output).toEqual(expect.objectContaining({
+      guardRejected: true,
+      guardPolicyTier: 'hard_block',
+      guardPolicyRuleIds: expect.arrayContaining(['provider_model_internals']),
+    }));
   });
 
   test('custom system prompt is audited and relaxes tone guard only', async () => {
@@ -787,19 +1073,28 @@ describe('notification workflow engine persistence', () => {
     expect(result.status).toBe('completed');
     expect(llmStep.output.llm).toEqual(expect.objectContaining({
       promptPolicy: expect.objectContaining({
-        strictness: 'custom_relaxed_tone',
+        strictness: 'custom_tone',
         strictDefaultApplied: false,
+        defaultPolicyApplied: false,
         customSystemPromptUsed: true,
         relaxedControls: ['emoji', 'playful_tone'],
       }),
       guardPolicy: expect.objectContaining({
-        mode: 'custom_prompt_repair_copy',
+        mode: 'custom_tiered_policy',
+        toneMode: 'custom',
         allowEmoji: true,
         allowPlayfulTone: true,
         repairChecks: expect.arrayContaining(['unsupported_timing_claims']),
+        auditOnlyChecks: expect.arrayContaining(['emoji', 'playful_tone']),
         hardBlocks: expect.arrayContaining(['provider_model_internals']),
       }),
-      guard: expect.objectContaining({ accepted: true }),
+      guard: expect.objectContaining({
+        accepted: true,
+        auditOnlyIssues: expect.arrayContaining([
+          expect.objectContaining({ id: 'emoji', policyTier: 'audit_only' }),
+          expect.objectContaining({ id: 'playful_tone', policyTier: 'audit_only' }),
+        ]),
+      }),
     }));
     const deliveryData = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
     expect(deliveryData.subject).toBe('Warmer VPN update');

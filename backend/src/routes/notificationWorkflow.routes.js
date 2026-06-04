@@ -4,6 +4,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import notificationWorkflowRepository from '../services/notificationWorkflowRepository.js';
 import notificationWorkflowEngine, {
   finalizeWorkflowSendEmail,
+  sanitizeWorkflowAuditPayload,
 } from '../services/notificationWorkflowEngine.js';
 import { processDelivery } from '../services/notificationDeliveryService.js';
 import settingsRepository from '../services/settingsRepository.js';
@@ -13,7 +14,12 @@ import {
   notificationVariableCatalog,
 } from '../services/notificationWorkflowDefinition.js';
 import {
+  createWorkspaceEmailBlock,
+  deleteWorkspaceEmailBlock,
   getWorkspaceSignature,
+  listWorkspaceEmailBlocks,
+  setDefaultWorkspaceEmailBlock,
+  updateWorkspaceEmailBlock,
   upsertWorkspaceSignature,
 } from '../services/notificationWorkflowSignatureService.js';
 import {
@@ -38,6 +44,9 @@ import {
   enrichEventContextWithRequesterProfile,
   requesterContextFromSource,
 } from '../services/requesterProfileService.js';
+import {
+  classifyNotificationWorkflowRun,
+} from '../services/notificationWorkflowRunHealth.js';
 
 const router = express.Router();
 
@@ -305,17 +314,19 @@ function truncateString(value, max = 2000) {
 }
 
 function redactPayload(value) {
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(redactPayload);
   if (!value || typeof value !== 'object') return truncateString(value);
   const result = {};
   for (const [key, entry] of Object.entries(value)) {
     if (['description', 'descriptionText', 'body', 'htmlBody', 'textBody'].includes(key)) {
-      result[key] = truncateString(entry, 800);
+      result[key] = sanitizeWorkflowAuditPayload(truncateString(entry, 800));
     } else {
       result[key] = redactPayload(entry);
     }
   }
-  return result;
+  return sanitizeWorkflowAuditPayload(result);
 }
 
 function workflowRunWarnings(run = {}) {
@@ -354,11 +365,78 @@ function workflowRunWarnings(run = {}) {
   return warnings;
 }
 
+const WORKFLOW_HEALTH_THRESHOLDS = Object.freeze({
+  duplicateSuppressionSpike7d: 10,
+  providerSchemaFailures7d: 0,
+  templateFallbacks7d: 0,
+  guardHardBlocks7d: 0,
+  payloadMinimizationFailures7d: 0,
+  possibleBroaderIssueRatePct: 25,
+});
+
+function jsonText(value) {
+  try {
+    return JSON.stringify(value || {});
+  } catch (_error) {
+    return '';
+  }
+}
+
+function hasTemplateFallback(output = {}) {
+  return Boolean(
+    output?.templateFallbackUsed
+      || output?.fallbackUsed
+      || output?.llm?.templateFallbackUsed
+      || output?.llm?.fallbackUsed
+      || output?.llm?.fallback?.used,
+  );
+}
+
+function hasGuardHardBlock(output = {}) {
+  const text = jsonText(output);
+  return /"policyTier"\s*:\s*"hard_block"/i.test(text)
+    || /"severity"\s*:\s*"hard_block"/i.test(text)
+    || /"action"\s*:\s*"hard_block"/i.test(text)
+    || output?.guardRejected === true
+    || output?.llm?.guardRejected === true;
+}
+
+function collectSignalLevels(value, levels = []) {
+  if (!value || typeof value !== 'object') return levels;
+  if (Array.isArray(value)) {
+    for (const item of value) collectSignalLevels(item, levels);
+    return levels;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (['signalLevel', 'signal_level', 'broaderIssueSignal', 'level'].includes(key) && typeof entry === 'string') {
+      levels.push(entry);
+      continue;
+    }
+    collectSignalLevels(entry, levels);
+  }
+  return levels;
+}
+
+function payloadMinimizationFailures(payload = {}) {
+  const text = jsonText(payload);
+  return [
+    /"activeContact"\s*:/i.test(text),
+    /"(requester|assignedAgent|previousAgent|contact)"\s*:/i.test(text),
+    /data:image\/[a-z0-9.+-]+;base64,/i.test(text),
+    /"[^"]*(avatar|photo)(url|image|link)?[^"]*"\s*:/i.test(text),
+    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text),
+  ].filter(Boolean).length;
+}
+
 function redactRun(run) {
+  const health = classifyNotificationWorkflowRun(run);
   return {
     ...run,
     auditId: formatAuditId(run.id),
+    health,
+    fallbackSummary: health.fallbackSummary,
     warnings: workflowRunWarnings(run),
+    ticket: redactPayload(run.ticket),
     eventContext: redactPayload(run.eventContext),
     steps: (run.steps || []).map((step) => ({
       ...step,
@@ -372,6 +450,39 @@ function redactRun(run) {
       textBody: truncateString(delivery.textBody, 5000),
     })),
   };
+}
+
+function auditRunSearchText(run = {}) {
+  return [
+    run.auditId,
+    run.status,
+    run.executionMode,
+    run.eventType,
+    run.workflow?.name,
+    run.workflow?.key,
+    run.workflow?.triggerType,
+    run.ticket?.freshserviceTicketId,
+    run.ticket?.subject,
+    run.health?.state,
+    run.health?.label,
+    run.fallbackSummary?.type,
+    run.fallbackSummary?.reason,
+    ...(run.warnings || []).flatMap((warning) => [
+      warning.type,
+      warning.message,
+    ]),
+    ...(run.health?.reasons || []).flatMap((reason) => [
+      reason.type,
+      reason.message,
+      ...(reason.ruleIds || []),
+    ]),
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function auditRunMatchesSearch(run, search) {
+  const text = String(search || '').trim().toLowerCase();
+  if (!text) return true;
+  return auditRunSearchText(run).includes(text);
 }
 
 function testEmailBanner(auditId) {
@@ -530,13 +641,13 @@ async function createTestEmailDelivery({
         Date.now(),
         Math.random().toString(36).slice(2),
       ].join(':').slice(0, 255),
-      payload: {
+      payload: sanitizeWorkflowAuditPayload({
         preview: true,
         actorEmail,
         workflowId: workflow?.id || run?.workflowId || null,
         auditId,
         ...payload,
-      },
+      }),
     },
   });
   const result = await processDelivery(delivery);
@@ -555,7 +666,7 @@ router.get(
   '/health',
   asyncHandler(async (req, res) => {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [sendgridConfig, workflows, recentFailures, mockEnabledWorkflows, workflowAuditRuns7d, mockRuns7d, mockedDeliveries7d, mockDeliveryGroups7d] = await Promise.all([
+    const [sendgridConfig, workflows, recentFailures, mockEnabledWorkflows, workflowAuditRuns7d, mockRuns7d, mockedDeliveries7d, mockDeliveryGroups7d, workflowStepRows7d, workflowDeliveryPayloads7d, providerFailures7d] = await Promise.all([
       settingsRepository.getSendGridConfig(),
       prisma.notificationWorkflow.groupBy({
         by: ['isEnabled'],
@@ -604,11 +715,68 @@ router.get(
           workspaceId: req.workspaceId,
           channel: 'email',
           status: 'mocked',
+          notificationType: { not: 'notification_workflow_test_email' },
           queuedAt: { gte: sevenDaysAgo },
         },
         _count: { _all: true },
       }),
+      prisma.notificationWorkflowStepRun.findMany({
+        where: {
+          workspaceId: req.workspaceId,
+          nodeType: { in: ['send_email', 'llm_generate'] },
+          startedAt: { gte: sevenDaysAgo },
+        },
+        select: {
+          nodeType: true,
+          output: true,
+          run: {
+            select: {
+              eventType: true,
+              triggerSource: true,
+            },
+          },
+        },
+      }),
+      prisma.notificationDelivery.findMany({
+        where: {
+          workspaceId: req.workspaceId,
+          workflowRunId: { not: null },
+          notificationType: { not: 'notification_workflow_test_email' },
+          queuedAt: { gte: sevenDaysAgo },
+        },
+        select: {
+          id: true,
+          payload: true,
+        },
+      }),
+      prisma.aiProviderAttempt.groupBy({
+        by: ['provider', 'model', 'errorClass'],
+        where: {
+          workspaceId: req.workspaceId,
+          operation: 'notification_workflow_generation',
+          status: 'failed',
+          createdAt: { gte: sevenDaysAgo },
+        },
+        _count: { _all: true },
+      }),
     ]);
+    const suppressedDuplicateMap = new Map();
+    for (const row of workflowStepRows7d || []) {
+      if (row.nodeType !== 'send_email') continue;
+      if (row.output?.duplicateDelivery !== true) continue;
+      const triggerSource = row.run?.triggerSource || 'unknown';
+      const eventType = row.run?.eventType || 'unknown';
+      const key = `${triggerSource}:${eventType}`;
+      suppressedDuplicateMap.set(key, {
+        triggerSource,
+        eventType,
+        count: (suppressedDuplicateMap.get(key)?.count || 0) + 1,
+      });
+    }
+    const suppressedDuplicateDeliveriesBySource7d = Array.from(suppressedDuplicateMap.values())
+      .sort((a, b) => b.count - a.count || a.triggerSource.localeCompare(b.triggerSource) || a.eventType.localeCompare(b.eventType));
+    const duplicateSuppressions7d = suppressedDuplicateDeliveriesBySource7d
+      .reduce((sum, row) => sum + row.count, 0);
     const duplicateMockDeliveryGroups7d = (mockDeliveryGroups7d || [])
       .filter((row) => (row._count?._all || 0) > 1)
       .map((row) => ({
@@ -618,11 +786,79 @@ router.get(
         count: row._count?._all || 0,
       }));
     const warnings = [];
+    if (duplicateSuppressions7d >= WORKFLOW_HEALTH_THRESHOLDS.duplicateSuppressionSpike7d) {
+      warnings.push({
+        type: 'duplicate_suppression_spike',
+        message: 'Notification workflow duplicate suppression count is above the operational threshold.',
+        count: duplicateSuppressions7d,
+        threshold: WORKFLOW_HEALTH_THRESHOLDS.duplicateSuppressionSpike7d,
+      });
+    }
     if (duplicateMockDeliveryGroups7d.length > 0) {
       warnings.push({
         type: 'duplicate_mock_delivery_groups',
         message: 'Mock notification audit found duplicate ticket/event delivery groups.',
         count: duplicateMockDeliveryGroups7d.length,
+      });
+    }
+    const llmStepRows7d = (workflowStepRows7d || []).filter((row) => row.nodeType === 'llm_generate');
+    const templateFallbacks7d = llmStepRows7d.filter((row) => hasTemplateFallback(row.output)).length;
+    const guardHardBlocks7d = llmStepRows7d.filter((row) => hasGuardHardBlock(row.output)).length;
+    const possibleBroaderIssueCount7d = llmStepRows7d.filter((row) => (
+      collectSignalLevels(row.output).includes('possible_broader_issue')
+    )).length;
+    const possibleBroaderIssueRate7d = llmStepRows7d.length
+      ? Math.round((possibleBroaderIssueCount7d / llmStepRows7d.length) * 1000) / 10
+      : 0;
+    const payloadMinimizationFailureRows7d = (workflowDeliveryPayloads7d || [])
+      .filter((row) => payloadMinimizationFailures(row.payload) > 0);
+    if (templateFallbacks7d > WORKFLOW_HEALTH_THRESHOLDS.templateFallbacks7d) {
+      warnings.push({
+        type: 'template_fallback_rate',
+        message: 'Notification workflow LLM generation used template fallback in the last 7 days.',
+        count: templateFallbacks7d,
+        threshold: WORKFLOW_HEALTH_THRESHOLDS.templateFallbacks7d,
+      });
+    }
+    if (guardHardBlocks7d > WORKFLOW_HEALTH_THRESHOLDS.guardHardBlocks7d) {
+      warnings.push({
+        type: 'guard_hard_block_count',
+        message: 'Requester-facing guard hard-blocks were recorded in the last 7 days.',
+        count: guardHardBlocks7d,
+        threshold: WORKFLOW_HEALTH_THRESHOLDS.guardHardBlocks7d,
+      });
+    }
+    if (payloadMinimizationFailureRows7d.length > WORKFLOW_HEALTH_THRESHOLDS.payloadMinimizationFailures7d) {
+      warnings.push({
+        type: 'payload_minimization_failure',
+        message: 'Notification workflow delivery payloads contain data that should be sanitized.',
+        count: payloadMinimizationFailureRows7d.length,
+        threshold: WORKFLOW_HEALTH_THRESHOLDS.payloadMinimizationFailures7d,
+      });
+    }
+    if (possibleBroaderIssueRate7d > WORKFLOW_HEALTH_THRESHOLDS.possibleBroaderIssueRatePct) {
+      warnings.push({
+        type: 'possible_broader_issue_rate',
+        message: 'Possible broader-issue signals are above the operational review threshold.',
+        count: possibleBroaderIssueCount7d,
+        ratePct: possibleBroaderIssueRate7d,
+        thresholdPct: WORKFLOW_HEALTH_THRESHOLDS.possibleBroaderIssueRatePct,
+      });
+    }
+    const providerSchemaFailures7d = (providerFailures7d || [])
+      .filter((row) => ['schema_validation', 'bad_request', 'invalid_request'].includes(row.errorClass))
+      .reduce((sum, row) => sum + (row._count?._all || 0), 0);
+    const providerFailuresSummary7d = (providerFailures7d || []).map((row) => ({
+      provider: row.provider || null,
+      model: row.model || null,
+      errorClass: row.errorClass || 'unknown',
+      count: row._count?._all || 0,
+    })).sort((a, b) => b.count - a.count || String(a.provider).localeCompare(String(b.provider)));
+    if (providerSchemaFailures7d > 0) {
+      warnings.push({
+        type: 'provider_schema_failures',
+        message: 'Notification workflow generation has provider/schema failures in the last 7 days.',
+        count: providerSchemaFailures7d,
       });
     }
 
@@ -639,6 +875,20 @@ router.get(
         mockRuns7d,
         mockedDeliveries7d,
         duplicateMockDeliveryGroups7d,
+        suppressedDuplicateDeliveriesBySource7d,
+        duplicateSuppressions7d,
+        providerFailuresSummary7d,
+        providerSchemaFailures7d,
+        notificationWorkflowHealthThresholds: WORKFLOW_HEALTH_THRESHOLDS,
+        workflowQuality7d: {
+          llmGenerateSteps: llmStepRows7d.length,
+          templateFallbacks: templateFallbacks7d,
+          guardHardBlocks: guardHardBlocks7d,
+          possibleBroaderIssueCount: possibleBroaderIssueCount7d,
+          possibleBroaderIssueRatePct: possibleBroaderIssueRate7d,
+          payloadMinimizationFailures: payloadMinimizationFailureRows7d.length,
+          payloadMinimizationFailureSampleIds: payloadMinimizationFailureRows7d.slice(0, 10).map((row) => row.id),
+        },
         warnings,
         failedEmailDeliveries24h: recentFailures,
       },
@@ -669,6 +919,50 @@ router.put(
       success: true,
       data: await getWorkspaceSignature(signature.workspaceId),
     });
+  }),
+);
+
+router.get(
+  '/email-blocks',
+  asyncHandler(async (req, res) => {
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.json({ success: true, data: blocks });
+  }),
+);
+
+router.post(
+  '/email-blocks',
+  asyncHandler(async (req, res) => {
+    const block = await createWorkspaceEmailBlock(req.workspaceId, req.body || {}, requestActor(req));
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.status(201).json({ success: true, data: { ...blocks, selectedId: block.id } });
+  }),
+);
+
+router.put(
+  '/email-blocks/:blockId',
+  asyncHandler(async (req, res) => {
+    const block = await updateWorkspaceEmailBlock(req.workspaceId, parseId(req.params.blockId, 'email block id'), req.body || {}, requestActor(req));
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.json({ success: true, data: { ...blocks, selectedId: block.id } });
+  }),
+);
+
+router.delete(
+  '/email-blocks/:blockId',
+  asyncHandler(async (req, res) => {
+    await deleteWorkspaceEmailBlock(req.workspaceId, parseId(req.params.blockId, 'email block id'));
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.json({ success: true, data: { ...blocks, selectedId: null } });
+  }),
+);
+
+router.post(
+  '/email-blocks/:blockId/default',
+  asyncHandler(async (req, res) => {
+    const block = await setDefaultWorkspaceEmailBlock(req.workspaceId, parseId(req.params.blockId, 'email block id'), requestActor(req));
+    const blocks = await listWorkspaceEmailBlocks(req.workspaceId);
+    res.json({ success: true, data: { ...blocks, selectedId: block.id } });
   }),
 );
 
@@ -893,10 +1187,14 @@ router.get(
       from: req.query.from,
       to: req.query.to,
       status: req.query.status,
-      search: req.query.search,
       limit: req.query.limit,
     });
-    res.json({ success: true, data: runs.map(redactRun) });
+    const healthFilter = String(req.query.health || '').trim();
+    const data = runs
+      .map(redactRun)
+      .filter((run) => auditRunMatchesSearch(run, req.query.search))
+      .filter((run) => !healthFilter || healthFilter === 'all' || run.health?.state === healthFilter);
+    res.json({ success: true, data });
   }),
 );
 

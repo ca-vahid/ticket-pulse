@@ -113,6 +113,97 @@ describe('notification workflow LLM pipeline service', () => {
     );
   });
 
+  test.each([
+    ['find_similar_tickets', { query: 'vpn', lookbackHours: 24 }, 'similar-ticket:225001'],
+    ['detect_related_ticket_spike', { query: 'vpn', lookbackHours: 4 }, 'spike:vpns'],
+  ])('runs %s then accepts submit_notification_email', async (toolName, input, evidenceId) => {
+    const policy = {
+      ...basePolicy,
+      enabledTools: [toolName],
+    };
+    executeNotificationWorkflowToolMock.mockResolvedValueOnce({
+      evidenceId,
+      result: 'ok',
+    });
+    runToolTurnMock
+      .mockResolvedValueOnce(toolTurn([
+        { type: 'tool_use', id: `toolu_${toolName}`, name: toolName, input },
+      ]))
+      .mockResolvedValueOnce(toolTurn([
+        {
+          type: 'tool_use',
+          id: 'toolu_submit',
+          name: 'submit_notification_email',
+          input: {
+            subject: 'Ticket update',
+            html: '<p>We are reviewing your request.</p>',
+            text: 'We are reviewing your request.',
+            citedSignals: [evidenceId],
+          },
+        },
+      ]));
+
+    const result = await runNotificationWorkflowLlmPipeline({
+      workflow,
+      node,
+      eventContext: { event: { type: 'ticket.created' } },
+      state: {},
+      policy,
+      contextBundle,
+      systemPrompt: 'Write an email.',
+      userMessage: 'Generate.',
+      maxTokens: 1000,
+    });
+
+    expect(result.email.subject).toBe('Ticket update');
+    expect(result.llm.toolCalls).toBe(2);
+    expect(executeNotificationWorkflowToolMock).toHaveBeenCalledWith(
+      toolName,
+      input,
+      expect.objectContaining({ workspaceId: 1, policy }),
+    );
+  });
+
+  test('repairs unknown citedSignals metadata in final email tool output', async () => {
+    runToolTurnMock.mockResolvedValueOnce(toolTurn([
+      {
+        type: 'tool_use',
+        id: 'toolu_submit',
+        name: 'submit_notification_email',
+        input: {
+          subject: 'Ticket #225336 assigned',
+          html: '<div class="body"><p><strong>Hi Dulaney,</strong></p><p>We are reviewing your phone request.</p></div>',
+          text: 'Hi Dulaney,\n\nWe are reviewing your phone request.',
+          citedSignals: [
+            'notification_context',
+            '2a725d1bce5e4eddadec9d8d898a82c6e9e7f2a3741661900444be7d38c535b6',
+          ],
+        },
+      },
+    ]));
+
+    const result = await runNotificationWorkflowLlmPipeline({
+      workflow,
+      node,
+      eventContext: { event: { type: 'ticket.assigned' } },
+      state: {},
+      policy: basePolicy,
+      contextBundle,
+      systemPrompt: 'Write an email.',
+      userMessage: 'Generate.',
+      maxTokens: 1000,
+    });
+
+    expect(result.email.html).toBe('<div class="body"><p><strong>Hi Dulaney,</strong></p><p>We are reviewing your phone request.</p></div>');
+    expect(result.llm.email.extra.citedSignals).toEqual(['notification_context']);
+    expect(result.llm.guard.repairedIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'unknown_cited_evidence_ids',
+        action: 'repaired',
+      }),
+    ]));
+  });
+
   test('disabled tools are not executed even if the model asks for them', async () => {
     runToolTurnMock
       .mockResolvedValueOnce(toolTurn([
