@@ -16,6 +16,9 @@ const prismaMock = {
   notificationLlmToolPolicy: {
     findUnique: jest.fn(),
   },
+  aiProviderAttempt: {
+    updateMany: jest.fn(),
+  },
   ticket: {
     findFirst: jest.fn(),
     findMany: jest.fn(),
@@ -186,6 +189,7 @@ describe('notification workflow engine persistence', () => {
     }));
     prismaMock.notificationDelivery.findUnique.mockResolvedValue(null);
     prismaMock.notificationLlmToolPolicy.findUnique.mockResolvedValue(null);
+    prismaMock.aiProviderAttempt.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.ticket.findFirst.mockResolvedValue({
       id: 501,
       workspaceId: 1,
@@ -481,6 +485,68 @@ describe('notification workflow engine persistence', () => {
     expect(deliveryData.subject).toBe('Mock LLM ticket update');
     expect(deliveryData.htmlBody).toContain('Mock-generated body');
     expect(processDeliveryMock).not.toHaveBeenCalled();
+  });
+
+  test('fails the workflow run when execution exceeds the hard timeout', async () => {
+    providerSendJsonMock.mockImplementation(() => new Promise(() => {}));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: true,
+      executeLlm: true,
+      triggerSource: 'test',
+      workflowRunTimeoutMs: 5,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'failed',
+      error: expect.stringContaining('execution timeout'),
+    }));
+    expect(prismaMock.notificationWorkflowRun.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 900 },
+      data: expect.objectContaining({
+        status: 'failed',
+        error: expect.stringContaining('execution timeout'),
+      }),
+    }));
+    expect(prismaMock.aiProviderAttempt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        notificationWorkflowRunId: 900,
+        status: 'running',
+      },
+      data: expect.objectContaining({
+        status: 'failed',
+        errorClass: 'api_timeout',
+        errorMessage: expect.stringContaining('execution timeout'),
+      }),
+    }));
+    expect(prismaMock.notificationWorkflowStepRun.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'failed',
+        error: expect.stringContaining('execution timeout'),
+      }),
+    }));
+    expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
   });
 
   test('skips duplicate workflow events through the run dedupe key', async () => {

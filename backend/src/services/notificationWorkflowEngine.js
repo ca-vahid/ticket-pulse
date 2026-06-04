@@ -39,6 +39,11 @@ import {
   guardNotificationEmailPayload,
 } from './notificationWorkflowOutputGuard.js';
 import { enrichEventContextWithRequesterProfile } from './requesterProfileService.js';
+import {
+  NOTIFICATION_WORKFLOW_RUN_TIMEOUT_CODE,
+  NOTIFICATION_WORKFLOW_RUN_TIMEOUT_MS,
+  describeNotificationWorkflowTimeout,
+} from './notificationWorkflowRunTimeouts.js';
 
 const liquid = new Liquid({
   strictFilters: false,
@@ -93,6 +98,105 @@ function safeJson(value) {
 
 function safeAuditJson(value) {
   return sanitizeWorkflowAuditPayload(safeJson(value));
+}
+
+function normalizedWorkflowRunTimeoutMs(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return NOTIFICATION_WORKFLOW_RUN_TIMEOUT_MS;
+  return Math.max(1, Math.round(parsed));
+}
+
+function workflowRunTimeoutError(timeoutMs) {
+  const error = new Error(`Notification workflow exceeded ${describeNotificationWorkflowTimeout(timeoutMs)} execution timeout`);
+  error.code = NOTIFICATION_WORKFLOW_RUN_TIMEOUT_CODE;
+  error.timeoutMs = timeoutMs;
+  return error;
+}
+
+function workflowAbortError(signal, timeoutMs) {
+  if (signal?.reason instanceof Error) return signal.reason;
+  if (signal?.reason) {
+    const error = new Error(String(signal.reason));
+    error.code = NOTIFICATION_WORKFLOW_RUN_TIMEOUT_CODE;
+    error.timeoutMs = timeoutMs;
+    return error;
+  }
+  return workflowRunTimeoutError(timeoutMs);
+}
+
+function throwIfWorkflowAborted(signal, timeoutMs) {
+  if (signal?.aborted) throw workflowAbortError(signal, timeoutMs);
+}
+
+function createWorkflowAbortController({ timeoutMs, parentSignal = null } = {}) {
+  const normalizedTimeoutMs = normalizedWorkflowRunTimeoutMs(timeoutMs);
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => {
+    controller.abort(workflowRunTimeoutError(normalizedTimeoutMs));
+  }, normalizedTimeoutMs);
+  timeoutHandle.unref?.();
+
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason instanceof Error
+      ? parentSignal.reason
+      : new Error('Notification workflow execution cancelled'));
+  };
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else if (parentSignal?.addEventListener) {
+    parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    timeoutMs: normalizedTimeoutMs,
+    cleanup() {
+      clearTimeout(timeoutHandle);
+      if (parentSignal?.removeEventListener) {
+        parentSignal.removeEventListener('abort', abortFromParent);
+      }
+    },
+  };
+}
+
+function withWorkflowAbort(promise, signal, timeoutMs) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(workflowAbortError(signal, timeoutMs));
+
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(workflowAbortError(signal, timeoutMs));
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', abort);
+    });
+  });
+}
+
+function runFailureProviderAttemptClass(error) {
+  return error?.code === NOTIFICATION_WORKFLOW_RUN_TIMEOUT_CODE ? 'api_timeout' : 'workflow_failed';
+}
+
+async function failRunningProviderAttemptsForRun(run, error, completedAt) {
+  if (!run?.id) return;
+  try {
+    await prisma.aiProviderAttempt.updateMany({
+      where: {
+        notificationWorkflowRunId: run.id,
+        status: 'running',
+      },
+      data: {
+        status: 'failed',
+        completedAt,
+        errorClass: runFailureProviderAttemptClass(error),
+        errorMessage: error?.message || 'Notification workflow failed before provider attempt completed',
+      },
+    });
+  } catch (attemptError) {
+    logger.warn('Failed to close running notification workflow provider attempt(s)', {
+      runId: run.id,
+      error: attemptError.message,
+    });
+  }
 }
 
 function normalizePromptText(value) {
@@ -1296,7 +1400,11 @@ async function executeNode({
   executeLlm,
   actionLinkRenderMode = 'live',
   workflowScheduleMode = null,
+  signal = null,
+  workflowRunTimeoutMs = NOTIFICATION_WORKFLOW_RUN_TIMEOUT_MS,
 }) {
+  throwIfWorkflowAborted(signal, workflowRunTimeoutMs);
+
   const scope = { ...eventContext, state };
   const actionLinkAppendOptions = {
     actionLinkRenderMode,
@@ -1460,6 +1568,7 @@ async function executeNode({
           systemPrompt,
           userMessage,
           maxTokens,
+          signal,
           guardOptions: runtime.guardOptions,
           recordToolEvent: (event) => recordNotificationToolEvent({ workflow, run, event }),
         });
@@ -1500,6 +1609,7 @@ async function executeNode({
         userMessage,
         maxTokens,
         temperature: Number.isFinite(Number(node.data?.temperature)) ? Number(node.data.temperature) : 0.3,
+        signal,
         extra: {
           jsonSchema: outputSchema,
           reasoning: { effort: node.data?.reasoningEffort || 'none' },
@@ -1880,6 +1990,8 @@ export async function executeDefinition({
   actionLinkRenderMode = 'live',
   forceActionLinks = false,
   routingResult = null,
+  workflowRunTimeoutMs = NOTIFICATION_WORKFLOW_RUN_TIMEOUT_MS,
+  signal = null,
 }) {
   const normalizedExecutionMode = normalizeExecutionMode(executionMode, dryRun);
   const effectiveDryRun = dryRun || normalizedExecutionMode === EXECUTION_MODE_PREVIEW || normalizedExecutionMode === EXECUTION_MODE_MOCK;
@@ -1899,9 +2011,13 @@ export async function executeDefinition({
   const previews = [];
   const version = workflowVersion(workflow);
   let run = null;
+  const workflowAbort = createWorkflowAbortController({
+    timeoutMs: workflowRunTimeoutMs,
+    parentSignal: signal,
+  });
 
   try {
-    run = await createRun({
+    run = await withWorkflowAbort(createRun({
       workflow,
       version,
       eventContext: normalizedContext,
@@ -1909,8 +2025,9 @@ export async function executeDefinition({
       triggerSource,
       executionMode: normalizedExecutionMode,
       routingResult,
-    });
+    }), workflowAbort.signal, workflowAbort.timeoutMs);
   } catch (error) {
+    workflowAbort.cleanup();
     if (error?.code === 'P2002') {
       return {
         status: 'skipped',
@@ -1929,6 +2046,8 @@ export async function executeDefinition({
 
   try {
     while (queue.length > 0) {
+      throwIfWorkflowAborted(workflowAbort.signal, workflowAbort.timeoutMs);
+
       if (executed.length >= MAX_NODE_EXECUTIONS) {
         throw new Error('Workflow exceeded maximum node executions');
       }
@@ -1947,7 +2066,7 @@ export async function executeDefinition({
       });
 
       try {
-        const output = await executeNode({
+        const output = await withWorkflowAbort(executeNode({
           workflow,
           run,
           step,
@@ -1959,7 +2078,9 @@ export async function executeDefinition({
           executeLlm,
           actionLinkRenderMode: effectiveActionLinkRenderMode,
           workflowScheduleMode,
-        });
+          signal: workflowAbort.signal,
+          workflowRunTimeoutMs: workflowAbort.timeoutMs,
+        }), workflowAbort.signal, workflowAbort.timeoutMs);
         await finishStep(step, 'completed', output);
         executed.push({ nodeId: node.id, nodeType: node.type, output });
 
@@ -1996,11 +2117,13 @@ export async function executeDefinition({
     };
   } catch (error) {
     if (run) {
+      const completedAt = new Date();
+      await failRunningProviderAttemptsForRun(run, error, completedAt);
       await prisma.notificationWorkflowRun.update({
         where: { id: run.id },
         data: {
           status: 'failed',
-          completedAt: new Date(),
+          completedAt,
           durationMs: elapsedMs(startedAt),
           error: error.message,
         },
@@ -2019,6 +2142,8 @@ export async function executeDefinition({
       };
     }
     throw error;
+  } finally {
+    workflowAbort.cleanup();
   }
 }
 

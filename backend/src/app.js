@@ -17,6 +17,7 @@ import settingsRepository from './services/settingsRepository.js';
 import availabilityService from './services/availabilityService.js';
 import llmConfigService from './services/llmConfigService.js';
 import noiseRuleService from './services/noiseRuleService.js';
+import notificationWorkflowRunWatchdogService from './services/notificationWorkflowRunWatchdogService.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json');
@@ -234,6 +235,16 @@ async function initialize() {
       logger.warn('Backfill run reconciliation failed (non-fatal):', e.message);
     }
 
+    try {
+      const staleRuns = await notificationWorkflowRunWatchdogService.reconcileStaleRuns();
+      if (staleRuns.runCount > 0) {
+        logger.warn(`Marked ${staleRuns.runCount} stale notification workflow run(s) as failed on startup`);
+      }
+      notificationWorkflowRunWatchdogService.start();
+    } catch (e) {
+      logger.warn('Notification workflow stale-run reconciliation failed (non-fatal):', e.message);
+    }
+
     logger.info('Server initialization complete');
   } catch (error) {
     logger.error('Server initialization failed:', error);
@@ -269,6 +280,7 @@ process.on('SIGTERM', () => {
   logger.info('SIGTERM received, shutting down gracefully');
 
   scheduledSyncService.stop();
+  notificationWorkflowRunWatchdogService.stop();
   pgPool.end();
 
   process.exit(0);
@@ -278,6 +290,7 @@ process.on('SIGINT', () => {
   logger.info('SIGINT received, shutting down gracefully');
 
   scheduledSyncService.stop();
+  notificationWorkflowRunWatchdogService.stop();
   pgPool.end();
 
   process.exit(0);

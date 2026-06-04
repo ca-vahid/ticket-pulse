@@ -1649,6 +1649,7 @@ const WORKFLOW_AUDIT_PROVIDER_FILTERS = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
 ];
+const WORKFLOW_AUDIT_ACTIVE_REFRESH_MS = 5000;
 
 const WORKFLOW_AUDIT_FALLBACK_FILTERS = [
   { value: 'all', label: 'All fallback states' },
@@ -1665,6 +1666,14 @@ function contextSummaryForRun(run = {}) {
 
 function signalLevelForRun(run = {}) {
   return contextSummaryForRun(run)?.signalLevel || 'none';
+}
+
+function auditRunIsActive(run = {}) {
+  const activeStatuses = new Set(['running', 'queued']);
+  const runStatus = String(run.status || '').toLowerCase();
+  if (activeStatuses.has(runStatus)) return true;
+  return (run.deliveries || []).some((delivery) => activeStatuses.has(String(delivery.status || '').toLowerCase()))
+    || (run.steps || []).some((step) => activeStatuses.has(String(step.status || '').toLowerCase()));
 }
 
 function previewStepIssue(step) {
@@ -5640,6 +5649,10 @@ export default function NotificationWorkflowsPanel({
       : workflows.filter((workflow) => !workflow.archivedAt)),
     [showArchivedWorkflows, workflows],
   );
+  const mockAuditHasActiveRuns = useMemo(
+    () => mockAuditRuns.some((run) => auditRunIsActive(run)),
+    [mockAuditRuns],
+  );
 
   function updateDraft(mutator) {
     setDraft((current) => {
@@ -6289,6 +6302,15 @@ export default function NotificationWorkflowsPanel({
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mockAuditOpen, selected?.id, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status, mockAuditFilters.health, mockAuditFilters.signalLevel, mockAuditFilters.eventType, mockAuditFilters.triggerSource, mockAuditFilters.provider, mockAuditFilters.fallbackSource, mockAuditFilters.search, mockAuditPage, mockAuditPageSize]);
+
+  useEffect(() => {
+    if (!mockAuditOpen || !mockAuditHasActiveRuns || mockAuditLoading) return undefined;
+    const handle = window.setTimeout(() => {
+      loadMockAuditRuns(mockAuditFilters, mockAuditPage, mockAuditPageSize);
+    }, WORKFLOW_AUDIT_ACTIVE_REFRESH_MS);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mockAuditOpen, mockAuditHasActiveRuns, mockAuditLoading, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status, mockAuditFilters.health, mockAuditFilters.signalLevel, mockAuditFilters.eventType, mockAuditFilters.triggerSource, mockAuditFilters.provider, mockAuditFilters.fallbackSource, mockAuditFilters.search, mockAuditPage, mockAuditPageSize]);
 
   async function saveDraft() {
     if (!selected || !draft) return;
