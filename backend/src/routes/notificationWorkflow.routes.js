@@ -26,8 +26,12 @@ import {
   getNotificationWorkflowSchedulePreview,
   getNotificationWorkflowPolicy,
   isOffHoursWorkflow,
+  selectWorkflowsForNotificationTiming,
   updateNotificationWorkflowPolicy,
 } from '../services/notificationWorkflowPolicyService.js';
+import {
+  selectWorkflowVariants,
+} from '../services/notificationWorkflowRoutingService.js';
 import {
   buildNotificationLlmContext,
   summarizeNotificationLlmContext,
@@ -302,6 +306,49 @@ async function buildPreviewEventContext({ ticket, triggerType }) {
     previousAgent: null,
   });
   return enrichEventContextWithRequesterProfile(policyContext);
+}
+
+async function buildWorkflowRoutingPreview({ workspaceId, workflow, eventContext }) {
+  if (!workflow?.triggerType || !eventContext) return null;
+  const workflows = await notificationWorkflowRepository.listWorkflows(workspaceId);
+  const selectedId = workflow.id;
+  const candidates = workflows
+    .filter((candidate) => candidate.triggerType === workflow.triggerType && !candidate.archivedAt)
+    .map((candidate) => (
+      candidate.id === selectedId
+        ? {
+          ...candidate,
+          ...workflow,
+          draftDefinition: workflow.draftDefinition || candidate.draftDefinition,
+          publishedDefinition: workflow.publishedDefinition || workflow.draftDefinition || candidate.publishedDefinition || candidate.draftDefinition,
+        }
+        : {
+          ...candidate,
+          publishedDefinition: candidate.publishedDefinition || candidate.draftDefinition,
+        }
+    ));
+  if (!candidates.some((candidate) => candidate.id === selectedId)) {
+    candidates.push({
+      ...workflow,
+      publishedDefinition: workflow.publishedDefinition || workflow.draftDefinition,
+    });
+  }
+  const timing = selectWorkflowsForNotificationTiming(candidates, eventContext);
+  const variants = selectWorkflowVariants(timing.selected || [], eventContext, {
+    baseSuppressed: timing.suppressed || [],
+  });
+  return {
+    selectedWorkflowId: selectedId,
+    wouldRunSelectedWorkflow: (variants.selectedWorkflowIds || []).includes(selectedId),
+    timingMode: timing.mode || null,
+    timingReason: timing.reason || null,
+    selectedWorkflowIds: variants.selectedWorkflowIds || [],
+    considered: variants.considered || [],
+    matched: variants.matched || [],
+    suppressed: variants.suppressed || [],
+    fallbackWorkflowId: variants.fallbackWorkflowId || null,
+    reason: variants.reason || null,
+  };
 }
 
 function truncateString(value, max = 2000) {
@@ -1139,7 +1186,12 @@ router.post(
       executeLlm: req.body.executeLlm === true,
       forceActionLinks: req.body.forceActionLinks === true,
     });
-    res.json({ success: true, data: result });
+    const routingPreview = await buildWorkflowRoutingPreview({
+      workspaceId: req.workspaceId,
+      workflow,
+      eventContext,
+    });
+    res.json({ success: true, data: { ...result, routingPreview } });
   }),
 );
 
@@ -1250,6 +1302,57 @@ router.post(
     const updated = await prisma.notificationDelivery.findUnique({ where: { id } });
     const result = await processDelivery(updated);
     res.json({ success: true, data: result });
+  }),
+);
+
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
+    const workflow = await notificationWorkflowRepository.createWorkflowVariant(
+      req.workspaceId,
+      req.body || {},
+      requestActor(req),
+    );
+    res.status(201).json({ success: true, data: workflow });
+  }),
+);
+
+router.post(
+  '/:id/duplicate',
+  asyncHandler(async (req, res) => {
+    const workflow = await notificationWorkflowRepository.duplicateWorkflowVariant(
+      req.workspaceId,
+      req.params.id,
+      req.body || {},
+      requestActor(req),
+    );
+    res.status(201).json({ success: true, data: workflow });
+  }),
+);
+
+router.put(
+  '/:id/routing',
+  asyncHandler(async (req, res) => {
+    const workflow = await notificationWorkflowRepository.updateWorkflowRouting(
+      req.workspaceId,
+      req.params.id,
+      req.body || {},
+      requestActor(req),
+    );
+    res.json({ success: true, data: workflow });
+  }),
+);
+
+router.put(
+  '/:id/archive',
+  asyncHandler(async (req, res) => {
+    const workflow = await notificationWorkflowRepository.setWorkflowArchived(
+      req.workspaceId,
+      req.params.id,
+      req.body?.archived === true,
+      requestActor(req),
+    );
+    res.json({ success: true, data: workflow });
   }),
 );
 

@@ -1028,6 +1028,12 @@ model NotificationWorkflow {
   name                String    @db.VarChar(160)
   description         String?   @db.Text
   triggerType         String    @db.VarChar(60) @map("trigger_type")
+  routingMode         String    @default("exclusive") @db.VarChar(20) @map("routing_mode")
+  routingPriority     Int       @default(100) @map("routing_priority")
+  routingRule         Json?     @map("routing_rule")
+  isDefaultVariant    Boolean   @default(false) @map("is_default_variant")
+  archivedAt          DateTime? @map("archived_at")
+  archivedBy          String?   @db.VarChar(255) @map("archived_by")
   isEnabled           Boolean   @default(false) @map("is_enabled")
   enabledAt           DateTime? @map("enabled_at")
   mockModeEnabled     Boolean   @default(false) @map("mock_mode_enabled")
@@ -1046,7 +1052,9 @@ model NotificationWorkflow {
 
   @@map("notification_workflows")
   @@unique([workspaceId, key])
-  @@index([workspaceId, triggerType, isEnabled])
+  @@index([workspaceId, triggerType, isEnabled], map: "notification_workflows_workspace_id_trigger_type_is_enabled_idx")
+  @@index([workspaceId, triggerType, archivedAt], map: "notification_workflows_workspace_trigger_archived_idx")
+  @@index([workspaceId, triggerType, isEnabled, routingPriority], map: "notification_workflows_workspace_trigger_enabled_priority_idx")
 }
 
 model NotificationWorkflowPolicy {
@@ -1123,6 +1131,7 @@ model NotificationWorkflowRun {
   ticket            Ticket?   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   eventType         String    @db.VarChar(60) @map("event_type")
   eventContext      Json      @map("event_context")
+  routingResult     Json?     @map("routing_result")
   status            String    @default("running") @db.VarChar(30)
   triggerSource     String?   @db.VarChar(80) @map("trigger_source")
   startedAt         DateTime  @default(now()) @map("started_at")

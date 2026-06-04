@@ -1,12 +1,18 @@
 import prisma from './prisma.js';
 import {
   DEFAULT_WORKFLOW_SPECS,
+  NOTIFICATION_EVENT_TYPES,
   assertValidWorkflowDefinition,
   buildDefaultWorkflowDefinition,
   defaultWorkflowMetadataForSpec,
   sampleEventContext,
   validateWorkflowDefinition,
 } from './notificationWorkflowDefinition.js';
+import {
+  normalizeRoutingMode,
+  normalizeRoutingPriority,
+  normalizeRoutingRule,
+} from './notificationWorkflowRoutingService.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 
 function actorEmail(actor = null) {
@@ -31,6 +37,50 @@ function safeDate(value) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function assertKnownEventType(triggerType) {
+  const normalized = String(triggerType || '').trim();
+  if (!NOTIFICATION_EVENT_TYPES.includes(normalized)) {
+    throw new ValidationError('Unsupported workflow event type');
+  }
+  return normalized;
+}
+
+function slugPart(value) {
+  const text = String(value || '').trim();
+  return text
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 36) || 'custom';
+}
+
+async function uniqueWorkflowKey(workspaceId, triggerType, name) {
+  const base = `${triggerType.replace('ticket.', 'ticket_').replace(/\./g, '_')}_${slugPart(name)}`.slice(0, 72);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const key = attempt === 0 ? base : `${base.slice(0, 72 - String(attempt).length - 1)}_${attempt}`;
+    const existing = await prisma.notificationWorkflow.findFirst({
+      where: { workspaceId, key },
+      select: { id: true },
+    });
+    if (!existing) return key;
+  }
+  throw new ValidationError('Unable to create a unique workflow key');
+}
+
+function defaultRoutingPriorityForSpec(spec) {
+  return spec.scheduleMode === 'after_hours' ? 20 : 100;
+}
+
+function routingDataFromInput(data = {}, fallback = {}) {
+  return {
+    routingMode: normalizeRoutingMode(data.routingMode ?? fallback.routingMode),
+    routingPriority: normalizeRoutingPriority(data.routingPriority ?? fallback.routingPriority),
+    routingRule: normalizeRoutingRule(data.routingRule ?? fallback.routingRule ?? null),
+  };
 }
 
 function runSearchFilter(search) {
@@ -82,10 +132,22 @@ export async function ensureDefaultWorkflows(workspaceId, actor = null) {
         name: metadata.name,
         description: metadata.description,
         triggerType: metadata.triggerType,
+        routingMode: 'exclusive',
+        routingPriority: defaultRoutingPriorityForSpec(spec),
+        routingRule: null,
+        isDefaultVariant: true,
+        archivedAt: null,
+        archivedBy: null,
         draftDefinition,
         lastChangedBy: changedBy,
       },
-      update: {},
+      update: {
+        routingMode: 'exclusive',
+        routingPriority: defaultRoutingPriorityForSpec(spec),
+        isDefaultVariant: true,
+        archivedAt: null,
+        archivedBy: null,
+      },
     });
     results.push(workflow);
   }
@@ -97,7 +159,13 @@ export async function listWorkflows(workspaceId) {
   await ensureDefaultWorkflows(workspaceId);
   return prisma.notificationWorkflow.findMany({
     where: { workspaceId },
-    orderBy: [{ triggerType: 'asc' }, { name: 'asc' }],
+    orderBy: [
+      { triggerType: 'asc' },
+      { isDefaultVariant: 'desc' },
+      { archivedAt: 'asc' },
+      { routingPriority: 'asc' },
+      { name: 'asc' },
+    ],
     include: {
       runs: {
         orderBy: { startedAt: 'desc' },
@@ -139,6 +207,7 @@ export async function getWorkflow(workspaceId, id) {
 
 export async function saveDraft(workspaceId, id, data = {}, actor = null) {
   const workflow = await getWorkflowOrThrow(workspaceId, id);
+  if (workflow.archivedAt) throw new ValidationError('Restore the workflow variant before editing its draft');
   const draftDefinition = assertValidWorkflowDefinition(data.definition || data.draftDefinition, {
     triggerType: workflow.triggerType,
   });
@@ -156,6 +225,7 @@ export async function saveDraft(workspaceId, id, data = {}, actor = null) {
 
 export async function publishWorkflow(workspaceId, id, data = {}, actor = null) {
   const workflow = await getWorkflowOrThrow(workspaceId, id);
+  if (workflow.archivedAt) throw new ValidationError('Restore the workflow variant before publishing it');
   const definition = assertValidWorkflowDefinition(workflow.draftDefinition, {
     triggerType: workflow.triggerType,
   });
@@ -204,6 +274,7 @@ export async function publishWorkflow(workspaceId, id, data = {}, actor = null) 
 
 export async function setWorkflowEnabled(workspaceId, id, enabled, actor = null) {
   const workflow = await getWorkflowOrThrow(workspaceId, id);
+  if (workflow.archivedAt) throw new ValidationError('Restore the workflow variant before enabling it');
   const isEnabled = enabled === true || enabled === 'true';
   if (isEnabled && !workflow.publishedDefinition) {
     throw new ValidationError('Publish the workflow before enabling it');
@@ -221,6 +292,7 @@ export async function setWorkflowEnabled(workspaceId, id, enabled, actor = null)
 
 export async function setWorkflowMockMode(workspaceId, id, enabled, actor = null) {
   const workflow = await getWorkflowOrThrow(workspaceId, id);
+  if (workflow.archivedAt) throw new ValidationError('Restore the workflow variant before changing mock mode');
   const isEnabled = enabled === true || enabled === 'true';
   if (isEnabled && !workflow.publishedDefinition) {
     throw new ValidationError('Publish the workflow before enabling mock mode');
@@ -248,12 +320,108 @@ export async function listEnabledForEvent(workspaceId, eventType) {
       triggerType: eventType,
       isEnabled: true,
       publishedVersion: { gt: 0 },
+      archivedAt: null,
     },
+    orderBy: [{ routingPriority: 'asc' }, { id: 'asc' }],
     include: {
       versions: {
         orderBy: { version: 'desc' },
         take: 1,
       },
+    },
+  });
+}
+
+export async function createWorkflowVariant(workspaceId, data = {}, actor = null) {
+  const sourceId = data.sourceWorkflowId ? normalizeId(data.sourceWorkflowId, 'source workflow id') : null;
+  const source = sourceId ? await getWorkflowOrThrow(workspaceId, sourceId) : null;
+  const triggerType = assertKnownEventType(source?.triggerType || data.triggerType);
+  const sourceName = source ? `${source.name} variant` : `${triggerType.replace('ticket.', 'Ticket ')} variant`;
+  const name = String(data.name || sourceName).trim().slice(0, 160) || sourceName;
+  const description = data.description === undefined
+    ? (source ? `Draft variant copied from ${source.name}` : null)
+    : String(data.description || '').trim() || null;
+  const routing = routingDataFromInput(data, {
+    routingMode: source?.routingMode || 'exclusive',
+    routingPriority: source ? Math.min(999, normalizeRoutingPriority(source.routingPriority, 50) + 10) : 50,
+    routingRule: source?.routingRule || null,
+  });
+  const draftDefinition = assertValidWorkflowDefinition(
+    data.draftDefinition || data.definition || source?.draftDefinition || buildDefaultWorkflowDefinition(triggerType),
+    { triggerType },
+  );
+  const key = await uniqueWorkflowKey(workspaceId, triggerType, name);
+
+  return prisma.notificationWorkflow.create({
+    data: {
+      workspaceId,
+      key,
+      name,
+      description,
+      triggerType,
+      routingMode: routing.routingMode,
+      routingPriority: routing.routingPriority,
+      routingRule: routing.routingRule,
+      isDefaultVariant: false,
+      archivedAt: null,
+      archivedBy: null,
+      draftDefinition,
+      publishedDefinition: null,
+      publishedVersion: 0,
+      isEnabled: false,
+      mockModeEnabled: false,
+      lastChangedBy: actorEmail(actor),
+    },
+  });
+}
+
+export async function duplicateWorkflowVariant(workspaceId, id, data = {}, actor = null) {
+  return createWorkflowVariant(workspaceId, {
+    ...data,
+    sourceWorkflowId: id,
+    name: data.name || null,
+  }, actor);
+}
+
+export async function updateWorkflowRouting(workspaceId, id, data = {}, actor = null) {
+  const workflow = await getWorkflowOrThrow(workspaceId, id);
+  const routing = routingDataFromInput(data, workflow);
+  const updateData = {
+    routingMode: routing.routingMode,
+    routingPriority: routing.routingPriority,
+    routingRule: routing.routingRule,
+    lastChangedBy: actorEmail(actor),
+  };
+
+  if (Object.prototype.hasOwnProperty.call(data, 'isDefaultVariant')) {
+    if (workflow.isDefaultVariant && data.isDefaultVariant !== true) {
+      throw new ValidationError('Default workflow variants cannot be removed through routing settings');
+    }
+    updateData.isDefaultVariant = data.isDefaultVariant === true;
+  }
+
+  return prisma.notificationWorkflow.update({
+    where: { id: workflow.id },
+    data: updateData,
+  });
+}
+
+export async function setWorkflowArchived(workspaceId, id, archived, actor = null) {
+  const workflow = await getWorkflowOrThrow(workspaceId, id);
+  const nextArchived = archived === true || archived === 'true';
+  if (workflow.isDefaultVariant && nextArchived) {
+    throw new ValidationError('Default workflow variants cannot be archived');
+  }
+
+  return prisma.notificationWorkflow.update({
+    where: { id: workflow.id },
+    data: {
+      archivedAt: nextArchived ? new Date() : null,
+      archivedBy: nextArchived ? actorEmail(actor) : null,
+      isEnabled: nextArchived ? false : workflow.isEnabled,
+      mockModeEnabled: nextArchived ? false : workflow.mockModeEnabled,
+      mockModeEnabledAt: nextArchived ? null : workflow.mockModeEnabledAt,
+      lastChangedBy: actorEmail(actor),
     },
   });
 }
@@ -357,6 +525,10 @@ export default {
   setWorkflowEnabled,
   setWorkflowMockMode,
   listEnabledForEvent,
+  createWorkflowVariant,
+  duplicateWorkflowVariant,
+  updateWorkflowRouting,
+  setWorkflowArchived,
   listAuditRuns,
   listRuns,
   getSampleContext,

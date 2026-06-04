@@ -97,6 +97,18 @@ const CITY_TIMEZONE = new Map([
   ['victoria', 'America/Vancouver'],
 ]);
 
+function normalizeKeyPart(value) {
+  const text = cleanString(value);
+  if (!text) return null;
+  const normalized = text
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || null;
+}
+
 function cleanString(value) {
   if (value === null || value === undefined) return null;
   const text = String(value).trim();
@@ -150,6 +162,40 @@ function deriveTimeZoneIana({ city, state, country, countryCode, freshserviceTim
 
   const fsTimeZone = cleanString(freshserviceTimeZone);
   return fsTimeZone ? FRESHSERVICE_TIMEZONE_TO_IANA.get(fsTimeZone) || fsTimeZone : null;
+}
+
+function deriveRouteKeys({ officeLocation, city, state, country, countryCode, freshserviceDepartment }) {
+  const cityKey = normalizeKeyPart(city);
+  const officeKey = normalizeKeyPart(officeLocation);
+  const departmentKey = normalizeKeyPart(freshserviceDepartment);
+  const stateKey = normalizeKeyPart(state);
+  const normalizedCountryCode = normalizeCountryCode(country, countryCode);
+  const countryKey = normalizeKeyPart(normalizedCountryCode || country);
+  const locationCandidate = cityKey || officeKey || departmentKey;
+
+  if (
+    cityKey === 'BRISBANE'
+    || officeKey === 'BRISBANE'
+    || departmentKey === 'BRISBANE'
+    || departmentKey?.includes('BRISBANE')
+  ) {
+    return {
+      locationKey: 'AU-BRISBANE',
+      regionKey: 'AU-BRISBANE',
+    };
+  }
+
+  const locationKey = countryKey && locationCandidate
+    ? `${countryKey}-${locationCandidate}`
+    : locationCandidate;
+  const regionKey = stateKey && countryKey
+    ? `${countryKey}-${stateKey}`
+    : locationKey;
+
+  return {
+    locationKey: locationKey || null,
+    regionKey: regionKey || null,
+  };
 }
 
 function locationSummary({ officeLocation, city, stateName, country }) {
@@ -257,6 +303,14 @@ export function requesterContextFromSource(requester, ticket = null) {
     countryCode,
     freshserviceTimeZone: timeZone,
   });
+  const routeKeys = deriveRouteKeys({
+    officeLocation,
+    city,
+    state,
+    country,
+    countryCode,
+    freshserviceDepartment,
+  });
 
   const hasEntraLocation = Boolean(
     requester.entraOfficeLocation
@@ -285,6 +339,8 @@ export function requesterContextFromSource(requester, ticket = null) {
     stateName,
     country,
     countryCode,
+    locationKey: routeKeys.locationKey,
+    regionKey: routeKeys.regionKey,
     locationSummary: locationSummary({ officeLocation, city, stateName, country }),
     locationSource: hasEntraLocation ? 'entra' : (officeLocation ? 'freshservice_department' : null),
     timeZone,
@@ -298,6 +354,10 @@ export function requesterContextFromSource(requester, ticket = null) {
 export async function enrichEventContextWithRequesterProfile(eventContext) {
   const requester = eventContext?.requester;
   if (!requester) return eventContext;
+
+  if (requester.locationKey || requester.regionKey || requester.locationSource || requester.freshserviceDepartment) {
+    return eventContext;
+  }
 
   if (!requester.id || !prisma.requester?.findUnique) {
     return {

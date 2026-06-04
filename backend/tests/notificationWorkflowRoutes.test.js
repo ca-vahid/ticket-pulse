@@ -24,7 +24,19 @@ const prismaMock = {
 };
 
 const repositoryMock = {
+  listWorkflows: jest.fn(),
+  ensureDefaultWorkflows: jest.fn(),
   getWorkflow: jest.fn(),
+  createWorkflowVariant: jest.fn(),
+  duplicateWorkflowVariant: jest.fn(),
+  updateWorkflowRouting: jest.fn(),
+  setWorkflowArchived: jest.fn(),
+  listAuditRuns: jest.fn(),
+  listRuns: jest.fn(),
+  saveDraft: jest.fn(),
+  publishWorkflow: jest.fn(),
+  setWorkflowMockMode: jest.fn(),
+  setWorkflowEnabled: jest.fn(),
 };
 
 const buildNotificationLlmContextMock = jest.fn();
@@ -83,6 +95,12 @@ jest.unstable_mockModule('../src/services/notificationWorkflowPolicyService.js',
   getNotificationWorkflowSchedulePreview: jest.fn(),
   getNotificationWorkflowPolicy: jest.fn(),
   isOffHoursWorkflow: jest.fn(),
+  selectWorkflowsForNotificationTiming: jest.fn((workflows) => ({
+    selected: workflows,
+    suppressed: [],
+    mode: 'standard',
+    reason: null,
+  })),
   updateNotificationWorkflowPolicy: jest.fn(),
 }));
 
@@ -210,7 +228,70 @@ describe('notification workflow routes', () => {
       key: 'ticket_created',
       name: 'Ticket arrived',
       triggerType: 'ticket.created',
+      routingMode: 'exclusive',
+      routingPriority: 100,
+      routingRule: null,
+      isDefaultVariant: true,
+      archivedAt: null,
       publishedVersion: 1,
+    });
+    repositoryMock.listWorkflows.mockResolvedValue([
+      {
+        id: 7,
+        workspaceId: 1,
+        key: 'ticket_created',
+        name: 'Ticket arrived',
+        triggerType: 'ticket.created',
+        routingMode: 'exclusive',
+        routingPriority: 100,
+        routingRule: null,
+        isDefaultVariant: true,
+        archivedAt: null,
+        publishedVersion: 1,
+        draftDefinition: { metadata: { scheduleMode: 'standard' } },
+        publishedDefinition: { metadata: { scheduleMode: 'standard' } },
+      },
+    ]);
+    repositoryMock.ensureDefaultWorkflows.mockResolvedValue([]);
+    repositoryMock.createWorkflowVariant.mockResolvedValue({
+      id: 81,
+      workspaceId: 1,
+      key: 'ticket_created_brisbane',
+      name: 'Brisbane variant',
+      triggerType: 'ticket.created',
+      routingMode: 'exclusive',
+      routingPriority: 25,
+      routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+      isDefaultVariant: false,
+      archivedAt: null,
+      publishedVersion: 0,
+    });
+    repositoryMock.duplicateWorkflowVariant.mockResolvedValue({
+      id: 82,
+      workspaceId: 1,
+      key: 'ticket_created_copy',
+      name: 'Ticket arrived variant',
+      triggerType: 'ticket.created',
+      routingMode: 'exclusive',
+      routingPriority: 60,
+      routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+      isDefaultVariant: false,
+      archivedAt: null,
+      publishedVersion: 0,
+    });
+    repositoryMock.updateWorkflowRouting.mockResolvedValue({
+      id: 81,
+      workspaceId: 1,
+      routingMode: 'additive',
+      routingPriority: 30,
+      routingRule: { '==': [{ var: 'requester.locationKey' }, 'AU-BRISBANE'] },
+    });
+    repositoryMock.setWorkflowArchived.mockResolvedValue({
+      id: 81,
+      workspaceId: 1,
+      archivedAt: new Date('2026-06-04T00:00:00.000Z'),
+      archivedBy: 'admin@example.com',
+      isEnabled: false,
     });
     getNotificationLlmToolPolicyMock.mockResolvedValue({
       mode: 'context_only',
@@ -316,6 +397,69 @@ describe('notification workflow routes', () => {
     expect(upsertWorkspaceSignatureMock).toHaveBeenCalledWith(
       1,
       expect.objectContaining({ enabled: true, html: '<p>Updated</p>' }),
+      expect.objectContaining({ email: 'admin@example.com' }),
+    );
+  });
+
+  test('variant lifecycle routes create duplicate update routing and archive within workspace', async () => {
+    const routingRule = { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] };
+
+    const createResponse = await request(buildApp(3))
+      .post('/api/notification-workflows')
+      .send({
+        triggerType: 'ticket.created',
+        name: 'Brisbane variant',
+        routingMode: 'exclusive',
+        routingPriority: 25,
+        routingRule,
+      })
+      .expect(201);
+
+    expect(createResponse.body.data).toEqual(expect.objectContaining({
+      id: 81,
+      isDefaultVariant: false,
+      publishedVersion: 0,
+    }));
+    expect(repositoryMock.createWorkflowVariant).toHaveBeenCalledWith(
+      3,
+      expect.objectContaining({ triggerType: 'ticket.created', routingRule }),
+      expect.objectContaining({ email: 'admin@example.com' }),
+    );
+
+    await request(buildApp(3))
+      .post('/api/notification-workflows/81/duplicate')
+      .send({ name: 'Brisbane variant copy' })
+      .expect(201);
+    expect(repositoryMock.duplicateWorkflowVariant).toHaveBeenCalledWith(
+      3,
+      '81',
+      expect.objectContaining({ name: 'Brisbane variant copy' }),
+      expect.objectContaining({ email: 'admin@example.com' }),
+    );
+
+    await request(buildApp(3))
+      .put('/api/notification-workflows/81/routing')
+      .send({
+        routingMode: 'additive',
+        routingPriority: 30,
+        routingRule: { '==': [{ var: 'requester.locationKey' }, 'AU-BRISBANE'] },
+      })
+      .expect(200);
+    expect(repositoryMock.updateWorkflowRouting).toHaveBeenCalledWith(
+      3,
+      '81',
+      expect.objectContaining({ routingMode: 'additive', routingPriority: 30 }),
+      expect.objectContaining({ email: 'admin@example.com' }),
+    );
+
+    await request(buildApp(3))
+      .put('/api/notification-workflows/81/archive')
+      .send({ archived: true })
+      .expect(200);
+    expect(repositoryMock.setWorkflowArchived).toHaveBeenCalledWith(
+      3,
+      '81',
+      true,
       expect.objectContaining({ email: 'admin@example.com' }),
     );
   });

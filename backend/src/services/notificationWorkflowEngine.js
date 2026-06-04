@@ -23,6 +23,10 @@ import {
   selectWorkflowsForNotificationTiming,
 } from './notificationWorkflowPolicyService.js';
 import {
+  selectWorkflowVariants,
+  workflowRoutingSummary,
+} from './notificationWorkflowRoutingService.js';
+import {
   buildNotificationLlmContext,
   notificationLlmContextPrompt,
   summarizeNotificationLlmContext,
@@ -1064,7 +1068,7 @@ function buildDeliveryDedupeKey({ workflow, run, node, eventContext, output, toR
   ].filter(Boolean).join(':').slice(0, 255);
 }
 
-async function createRun({ workflow, version, eventContext, dryRun, triggerSource, executionMode }) {
+async function createRun({ workflow, version, eventContext, dryRun, triggerSource, executionMode, routingResult = null }) {
   return prisma.notificationWorkflowRun.create({
     data: {
       workspaceId: workflow.workspaceId,
@@ -1073,6 +1077,7 @@ async function createRun({ workflow, version, eventContext, dryRun, triggerSourc
       ticketId: eventContext.ticket?.id || null,
       eventType: eventContext.event?.type || workflow.triggerType,
       eventContext: safeJson(eventContext),
+      routingResult: routingResult ? safeJson(routingResult) : null,
       triggerSource: triggerSource || eventContext.event?.source || null,
       dedupeKey: dedupeKeyForExecutionMode(workflow, eventContext, executionMode),
       dryRun,
@@ -1712,6 +1717,7 @@ export async function executeDefinition({
   triggerSource = null,
   actionLinkRenderMode = 'live',
   forceActionLinks = false,
+  routingResult = null,
 }) {
   const normalizedExecutionMode = normalizeExecutionMode(executionMode, dryRun);
   const effectiveDryRun = dryRun || normalizedExecutionMode === EXECUTION_MODE_PREVIEW || normalizedExecutionMode === EXECUTION_MODE_MOCK;
@@ -1740,6 +1746,7 @@ export async function executeDefinition({
       dryRun: effectiveDryRun,
       triggerSource,
       executionMode: normalizedExecutionMode,
+      routingResult,
     });
   } catch (error) {
     if (error?.code === 'P2002') {
@@ -1876,27 +1883,71 @@ export async function executeWorkflow(workflow, eventContext, options = {}) {
   return executeDefinition({
     workflow,
     definition: workflow.publishedDefinition,
-    eventContext,
+    eventContext: options.eventContext || eventContext,
     dryRun: mockMode,
     executionMode: mockMode ? EXECUTION_MODE_MOCK : EXECUTION_MODE_LIVE,
     executeLlm: mockMode ? true : options.executeLlm === true,
     triggerSource: options.triggerSource,
+    routingResult: options.routingResult || null,
   });
 }
 
+function timingRoutingSummary(timing = {}) {
+  return {
+    mode: timing.mode || null,
+    reason: timing.reason || null,
+    selectedWorkflowIds: (timing.selected || []).map((workflow) => workflow.id),
+    suppressed: (timing.suppressed || []).map((workflow) => ({
+      ...workflowRoutingSummary(workflow),
+      reason: 'schedule_policy_suppressed',
+    })),
+  };
+}
+
+function routingResultForWorkflow({ workflow, timing, variantSelection }) {
+  return {
+    selectedWorkflowId: workflow.id,
+    timing: timingRoutingSummary(timing),
+    variants: {
+      mode: variantSelection.mode,
+      reason: variantSelection.reason,
+      selectedWorkflowIds: variantSelection.selectedWorkflowIds || [],
+      considered: variantSelection.considered || [],
+      matched: variantSelection.matched || [],
+      suppressed: variantSelection.suppressed || [],
+      fallbackWorkflowId: variantSelection.fallbackWorkflowId || null,
+    },
+  };
+}
+
 export async function executeForEvent(eventContext, options = {}) {
-  const routedContext = await enrichEventContextWithNotificationPolicy(eventContext);
+  let routedContext = await enrichEventContextWithNotificationPolicy(eventContext);
+  routedContext = await enrichEventContextWithRequesterProfile(routedContext);
   const workspaceId = routedContext?.workspace?.id;
   const eventType = routedContext?.event?.type;
   if (!workspaceId || !eventType) return { status: 'skipped', reason: 'Missing workspace or event type' };
 
   const workflows = await notificationWorkflowRepository.listEnabledForEvent(workspaceId, eventType);
   const timing = selectWorkflowsForNotificationTiming(workflows, routedContext);
-  const selectedWorkflows = timing.selected || [];
+  const variantSelection = selectWorkflowVariants(timing.selected || [], routedContext, {
+    baseSuppressed: timing.suppressed || [],
+  });
+  const selectedWorkflows = variantSelection.selected || [];
   const results = [];
   for (const workflow of selectedWorkflows) {
+    const routingResult = routingResultForWorkflow({ workflow, timing, variantSelection });
+    const workflowContext = {
+      ...routedContext,
+      event: {
+        ...(routedContext.event || {}),
+        routing: routingResult,
+      },
+      notificationRouting: routingResult,
+    };
     try {
       results.push(await executeWorkflow(workflow, routedContext, {
+        eventContext: workflowContext,
+        routingResult,
         triggerSource: options.triggerSource || routedContext.event?.source || null,
       }));
     } catch (error) {
@@ -1919,9 +1970,21 @@ export async function executeForEvent(eventContext, options = {}) {
     status: 'completed',
     workflowCount: selectedWorkflows.length,
     availableWorkflowCount: workflows.length,
-    suppressedWorkflowCount: timing.suppressed?.length || 0,
+    suppressedWorkflowCount: variantSelection.suppressed?.length || 0,
     timingMode: timing.mode,
     timingReason: timing.reason,
+    routingResult: {
+      timing: timingRoutingSummary(timing),
+      variants: {
+        mode: variantSelection.mode,
+        reason: variantSelection.reason,
+        selectedWorkflowIds: variantSelection.selectedWorkflowIds || [],
+        considered: variantSelection.considered || [],
+        matched: variantSelection.matched || [],
+        suppressed: variantSelection.suppressed || [],
+        fallbackWorkflowId: variantSelection.fallbackWorkflowId || null,
+      },
+    },
     availability: routedContext.availability || null,
     results,
   };

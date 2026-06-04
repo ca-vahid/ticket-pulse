@@ -34,6 +34,7 @@ const prismaMock = {
 const processDeliveryMock = jest.fn();
 const providerSendJsonMock = jest.fn();
 const providerRunToolTurnMock = jest.fn();
+const listEnabledForEventMock = jest.fn();
 const publicStatusUrl = 'https://ticketpulse.example/ticket-status/sample-token';
 const raiseUrgencyUrl = 'https://ticketpulse.example/ticket-urgency/sample-token';
 const immediateSupportUrl = 'https://ticketpulse.example/ticket-escalation/sample-token';
@@ -44,6 +45,22 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({
 
 jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () => ({
   processDelivery: processDeliveryMock,
+}));
+
+jest.unstable_mockModule('../src/services/notificationWorkflowRepository.js', () => ({
+  default: {
+    listEnabledForEvent: listEnabledForEventMock,
+  },
+}));
+
+jest.unstable_mockModule('../src/services/notificationWorkflowPolicyService.js', () => ({
+  enrichEventContextWithNotificationPolicy: jest.fn(async (context) => context),
+  selectWorkflowsForNotificationTiming: jest.fn((workflows) => ({
+    selected: workflows,
+    suppressed: [],
+    mode: 'standard',
+    reason: null,
+  })),
 }));
 
 jest.unstable_mockModule('../src/services/aiProviders/providerGateway.js', () => ({
@@ -93,7 +110,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
-const { executeDefinition, executeWorkflow } = await import('../src/services/notificationWorkflowEngine.js');
+const { executeDefinition, executeWorkflow, executeForEvent } = await import('../src/services/notificationWorkflowEngine.js');
 const { buildDefaultWorkflowDefinition } = await import('../src/services/notificationWorkflowDefinition.js');
 
 const workflow = {
@@ -151,6 +168,7 @@ describe('notification workflow engine persistence', () => {
     jest.clearAllMocks();
     providerSendJsonMock.mockReset();
     providerRunToolTurnMock.mockReset();
+    listEnabledForEventMock.mockReset();
     prismaMock.notificationWorkflowRun.create.mockImplementation(({ data }) => Promise.resolve({
       id: 900,
       ...data,
@@ -236,6 +254,72 @@ describe('notification workflow engine persistence', () => {
       }),
     }));
     expect(processDeliveryMock).toHaveBeenCalled();
+  });
+
+  test('executeForEvent selects Brisbane variant and persists routing audit result', async () => {
+    const defaultDefinition = buildDefaultWorkflowDefinition('ticket.created');
+    const brisbaneDefinition = buildDefaultWorkflowDefinition('ticket.created');
+    listEnabledForEventMock.mockResolvedValue([
+      {
+        id: 7,
+        workspaceId: 1,
+        key: 'ticket_created',
+        name: 'Ticket arrived',
+        triggerType: 'ticket.created',
+        routingMode: 'exclusive',
+        routingPriority: 100,
+        routingRule: null,
+        isDefaultVariant: true,
+        archivedAt: null,
+        publishedVersion: 1,
+        publishedDefinition: defaultDefinition,
+        versions: [{ id: 70, version: 1 }],
+      },
+      {
+        id: 8,
+        workspaceId: 1,
+        key: 'ticket_created_brisbane',
+        name: 'Ticket arrived - Brisbane',
+        triggerType: 'ticket.created',
+        routingMode: 'exclusive',
+        routingPriority: 25,
+        routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+        isDefaultVariant: false,
+        archivedAt: null,
+        publishedVersion: 1,
+        publishedDefinition: brisbaneDefinition,
+        versions: [{ id: 80, version: 1 }],
+      },
+    ]);
+
+    const result = await executeForEvent({
+      ...eventContext,
+      requester: {
+        name: 'Requester',
+        email: 'requester@example.com',
+        department: 'Brisbane',
+      },
+    }, { triggerSource: 'freshservice_poll' });
+
+    expect(result.status).toBe('completed');
+    expect(result.workflowCount).toBe(1);
+    expect(result.routingResult.variants.selectedWorkflowIds).toEqual([8]);
+    expect(prismaMock.notificationWorkflowRun.create).toHaveBeenCalledTimes(1);
+    const runData = prismaMock.notificationWorkflowRun.create.mock.calls[0][0].data;
+    expect(runData.workflowId).toBe(8);
+    expect(runData.routingResult).toEqual(expect.objectContaining({
+      selectedWorkflowId: 8,
+      variants: expect.objectContaining({
+        selectedWorkflowIds: [8],
+        matched: expect.arrayContaining([
+          expect.objectContaining({ id: 8, reason: 'exclusive_match' }),
+        ]),
+      }),
+    }));
+    expect(runData.eventContext.requester.regionKey).toBe('AU-BRISBANE');
+    expect(runData.eventContext.event.routing.variants.suppressed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 7, reason: 'default_variant_not_needed' }),
+    ]));
   });
 
   test('preview execution records preview run state without creating delivery rows', async () => {

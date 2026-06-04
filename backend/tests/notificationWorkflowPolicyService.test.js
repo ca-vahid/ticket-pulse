@@ -28,6 +28,9 @@ const {
   getNotificationWorkflowSchedulePreview,
   selectWorkflowsForNotificationTiming,
 } = await import('../src/services/notificationWorkflowPolicyService.js');
+const {
+  selectWorkflowVariants,
+} = await import('../src/services/notificationWorkflowRoutingService.js');
 
 const standardWorkflow = {
   id: 1,
@@ -135,6 +138,127 @@ describe('notification workflow policy routing', () => {
     expect(result.mode).toBe('standard');
     expect(result.selected.map((workflow) => workflow.id)).toEqual([1, 2]);
     expect(result.suppressed).toEqual([]);
+  });
+
+  test('variant routing selects Brisbane/Australia from normalized requester region', () => {
+    const brisbaneVariant = {
+      id: 3,
+      key: 'ticket_created_brisbane',
+      name: 'Brisbane arrival',
+      triggerType: 'ticket.created',
+      routingMode: 'exclusive',
+      routingPriority: 25,
+      routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+    };
+
+    const result = selectWorkflowVariants(
+      [{ ...standardWorkflow, isDefaultVariant: true, routingPriority: 100 }, brisbaneVariant],
+      { event: { type: 'ticket.created' }, requester: { regionKey: 'AU-BRISBANE' } },
+    );
+
+    expect(result.selectedWorkflowIds).toEqual([3]);
+    expect(result.fallbackWorkflowId).toBeNull();
+    expect(result.matched.map((workflow) => workflow.id)).toContain(3);
+  });
+
+  test('variant routing falls back to default when no custom variant matches', () => {
+    const result = selectWorkflowVariants(
+      [
+        { ...standardWorkflow, isDefaultVariant: true, routingPriority: 100 },
+        {
+          id: 3,
+          key: 'ticket_created_brisbane',
+          triggerType: 'ticket.created',
+          routingMode: 'exclusive',
+          routingPriority: 25,
+          routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+        },
+      ],
+      { event: { type: 'ticket.created' }, requester: { regionKey: 'CA-BC' } },
+    );
+
+    expect(result.selectedWorkflowIds).toEqual([1]);
+    expect(result.fallbackWorkflowId).toBe(1);
+    expect(result.suppressed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 3, reason: 'routing_rule_not_matched' }),
+    ]));
+  });
+
+  test('highest-priority exclusive match wins and lower-priority match is suppressed', () => {
+    const contextValue = { requester: { department: 'Brisbane' } };
+    const result = selectWorkflowVariants(
+      [
+        { ...standardWorkflow, isDefaultVariant: true, routingPriority: 100 },
+        {
+          id: 3,
+          key: 'ticket_created_brisbane_low',
+          triggerType: 'ticket.created',
+          routingMode: 'exclusive',
+          routingPriority: 40,
+          routingRule: { in: ['Brisbane', { var: 'requester.department' }] },
+        },
+        {
+          id: 4,
+          key: 'ticket_created_brisbane_high',
+          triggerType: 'ticket.created',
+          routingMode: 'exclusive',
+          routingPriority: 10,
+          routingRule: { in: ['Brisbane', { var: 'requester.department' }] },
+        },
+      ],
+      contextValue,
+    );
+
+    expect(result.selectedWorkflowIds).toEqual([4]);
+    expect(result.suppressed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 3, reason: 'lower_priority_exclusive_match_suppressed' }),
+    ]));
+  });
+
+  test('additive variants run only when explicitly configured', () => {
+    const result = selectWorkflowVariants(
+      [
+        { ...standardWorkflow, isDefaultVariant: true, routingPriority: 100 },
+        {
+          id: 3,
+          key: 'ticket_created_brisbane_exclusive',
+          triggerType: 'ticket.created',
+          routingMode: 'exclusive',
+          routingPriority: 20,
+          routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+        },
+        {
+          id: 4,
+          key: 'ticket_created_audit_copy',
+          triggerType: 'ticket.created',
+          routingMode: 'additive',
+          routingPriority: 30,
+          routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+        },
+      ],
+      { requester: { regionKey: 'AU-BRISBANE' } },
+    );
+
+    expect(result.selectedWorkflowIds).toEqual([3, 4]);
+  });
+
+  test('variant routing preserves after-hours replacement suppression result', () => {
+    const timing = selectWorkflowsForNotificationTiming(
+      [
+        { ...standardWorkflow, isDefaultVariant: true, routingPriority: 100 },
+        { ...afterHoursWorkflow, isDefaultVariant: true, routingPriority: 20 },
+      ],
+      context({ isBusinessHours: false, isAfterHours: true }),
+    );
+    const result = selectWorkflowVariants(timing.selected, context(), {
+      baseSuppressed: timing.suppressed,
+    });
+
+    expect(timing.mode).toBe('after_hours');
+    expect(result.selectedWorkflowIds).toEqual([2]);
+    expect(result.suppressed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 1, reason: 'schedule_policy_suppressed' }),
+    ]));
   });
 
   test('schedule preview shows the active after-hours window and the next one', async () => {

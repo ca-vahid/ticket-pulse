@@ -252,6 +252,8 @@ const CONDITION_FIELD_OPTIONS = [
   { value: 'requester.officeLocation', label: 'Requester office location', example: 'Vancouver' },
   { value: 'requester.city', label: 'Requester city', example: 'Vancouver' },
   { value: 'requester.country', label: 'Requester country', example: 'Canada' },
+  { value: 'requester.locationKey', label: 'Requester location key', example: 'AU-BRISBANE' },
+  { value: 'requester.regionKey', label: 'Requester region key', example: 'AU-BRISBANE' },
   { value: 'requester.timeZoneIana', label: 'Requester timezone', example: 'America/Vancouver' },
   { value: 'assignedAgent.email', label: 'Assigned agent exists', example: 'agent@example.com' },
   { value: 'ticket.isNoise', label: 'Noise ticket', example: 'true' },
@@ -2671,6 +2673,39 @@ function PreviewModal({
                 />
                 <PreviewMetric label="Recipients" value={(recipients.to || []).join(', ') || 'None'} tone={(recipients.to || []).length ? 'gray' : 'amber'} />
               </div>
+              {preview.routingPreview && (
+                <div className={cls(
+                  'mt-3 rounded-md border px-3 py-2 text-sm',
+                  preview.routingPreview.wouldRunSelectedWorkflow
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    : 'border-amber-200 bg-amber-50 text-amber-900',
+                )}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-bold uppercase tracking-wide opacity-80">Routing preview</div>
+                      <div className="mt-0.5 font-semibold">
+                        {preview.routingPreview.wouldRunSelectedWorkflow
+                          ? 'This ticket matches the selected workflow variant'
+                          : preview.routingPreview.fallbackWorkflowId
+                            ? 'This ticket falls back to the default workflow variant'
+                            : 'This ticket is routed to a different workflow variant'}
+                      </div>
+                      {preview.routingPreview.reason && (
+                        <div className="mt-0.5 text-xs opacity-90">{preview.routingPreview.reason}</div>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1 text-[11px] font-semibold">
+                      {(preview.routingPreview.selectedWorkflowIds || []).map((id) => (
+                        <span key={id} className="rounded-full bg-white/80 px-2 py-0.5 ring-1 ring-current/15">Selected #{id}</span>
+                      ))}
+                      {preview.routingPreview.fallbackWorkflowId && (
+                        <span className="rounded-full bg-white/80 px-2 py-0.5 ring-1 ring-current/15">Fallback #{preview.routingPreview.fallbackWorkflowId}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
               {issues.length > 0 && (
                 <div className="mt-3 grid gap-2 lg:grid-cols-2">
                   {issues.map((issue, index) => {
@@ -3743,63 +3778,108 @@ function AfterHoursRoutingDrawer({
   );
 }
 
+function workflowVariantTypeLabel(workflow) {
+  if (workflow.archivedAt) return 'Archived';
+  if (isAfterHoursWorkflow(workflow)) return workflow.isDefaultVariant ? 'After-hours default' : 'After-hours variant';
+  if (workflow.isDefaultVariant) return 'Default';
+  const ruleText = JSON.stringify(workflow.routingRule || '').toUpperCase();
+  if (ruleText.includes('AU-BRISBANE') || /brisbane|australia/i.test(workflow.name || '')) return 'Brisbane/Australia';
+  return 'Custom variant';
+}
+
+function workflowRoutingDescription(workflow) {
+  if (workflow.isDefaultVariant) return 'Fallback when no exclusive variant matches';
+  if (!workflow.routingRule) return 'Routing rule not set';
+  if (workflow.routingRule === true) return 'Always applies';
+  if (workflow.routingRule === false) return 'Never applies';
+  return describeCondition(conditionBuilderFromRule(workflow.routingRule));
+}
+
 function WorkflowList({ workflows, selectedId, onSelect }) {
+  const groups = workflows.reduce((acc, workflow) => {
+    const key = workflow.triggerType || 'other';
+    if (!acc.has(key)) acc.set(key, []);
+    acc.get(key).push(workflow);
+    return acc;
+  }, new Map());
+
   return (
-    <div className="divide-y divide-slate-100">
-      {workflows.map((workflow) => {
-        const lastRun = workflow.runs?.[0];
-        const isSelected = selectedId === workflow.id;
-        const isEnabled = !!workflow.isEnabled;
-        const runs = workflow._count?.runs || 0;
-        const lastText = lastRun ? `${lastRun.status} ${formatDate(lastRun.startedAt)}` : 'No runs yet';
-        const scheduleLabel = isAfterHoursWorkflow(workflow)
-          ? 'After-hours / holiday'
-          : workflow.triggerType === 'ticket.created'
-            ? 'Business-hours arrival'
-            : EVENT_LABELS[workflow.triggerType] || workflow.triggerType;
-        return (
-          <button
-            key={workflow.id}
-            type="button"
-            onClick={() => onSelect(workflow.id)}
-            aria-current={isSelected ? 'true' : undefined}
-            className={cls(
-              'flex w-full flex-col gap-1.5 border-l-4 px-3 py-2.5 text-left transition-colors',
-              isSelected
-                ? 'border-l-blue-600 bg-blue-100/95 shadow-sm ring-1 ring-inset ring-blue-200 hover:bg-blue-100'
-                : isEnabled
-                  ? 'border-l-emerald-400 bg-white hover:bg-emerald-50/60'
-                  : 'border-l-slate-200 bg-slate-50/70 hover:bg-slate-100',
-            )}
-          >
-            <div className="flex min-w-0 flex-col gap-1">
-              <div className="min-w-0">
-                <div
-                  className={cls('break-words text-sm font-semibold leading-5', isEnabled ? 'text-slate-950' : 'text-slate-700')}
-                  title={workflow.name}
+    <div className="divide-y divide-slate-200">
+      {[...groups.entries()].map(([triggerType, items]) => (
+        <section key={triggerType} className="bg-white">
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-100/95 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-600">
+            <span>{EVENT_LABELS[triggerType] || triggerType}</span>
+            <span className="rounded-full bg-white px-2 py-0.5 text-slate-500 ring-1 ring-slate-200">{items.length}</span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {items.map((workflow) => {
+              const lastRun = workflow.runs?.[0];
+              const isSelected = selectedId === workflow.id;
+              const isEnabled = !!workflow.isEnabled;
+              const isArchived = Boolean(workflow.archivedAt);
+              const runs = workflow._count?.runs || 0;
+              const lastText = lastRun ? `${lastRun.status} ${formatDate(lastRun.startedAt)}` : 'No runs yet';
+              const typeLabel = workflowVariantTypeLabel(workflow);
+              return (
+                <button
+                  key={workflow.id}
+                  type="button"
+                  onClick={() => onSelect(workflow.id)}
+                  aria-current={isSelected ? 'true' : undefined}
+                  className={cls(
+                    'flex w-full flex-col gap-1.5 border-l-4 px-3 py-2.5 text-left transition-colors',
+                    isSelected
+                      ? 'border-l-blue-600 bg-blue-100/95 shadow-sm ring-1 ring-inset ring-blue-200 hover:bg-blue-100'
+                      : isArchived
+                        ? 'border-l-slate-300 bg-slate-100/80 text-slate-500 hover:bg-slate-100'
+                        : isEnabled
+                          ? 'border-l-emerald-400 bg-white hover:bg-emerald-50/60'
+                          : 'border-l-slate-200 bg-slate-50/70 hover:bg-slate-100',
+                  )}
                 >
-                  {workflowDisplayName(workflow)}
-                </div>
-              </div>
-              <WorkflowStatus workflow={workflow} />
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-slate-500">
-              <span className="truncate">{scheduleLabel}</span>
-              {workflow.key === AFTER_HOURS_WORKFLOW_KEY && (
-                <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                  Separate after-hours copy
-                </span>
-              )}
-              <span className="rounded-full bg-white/80 px-1.5 py-0.5 font-medium text-slate-500 ring-1 ring-slate-200">v{workflow.publishedVersion || 0}</span>
-              <span>{runs} {runs === 1 ? 'run' : 'runs'}</span>
-            </div>
-            <div className="min-w-0 truncate text-[11px] leading-4 text-slate-500">
-              <span className="font-medium text-slate-600">Last:</span>{' '}
-              {lastText}
-            </div>
-          </button>
-        );
-      })}
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="min-w-0">
+                      <div
+                        className={cls('break-words text-sm font-semibold leading-5', isEnabled ? 'text-slate-950' : 'text-slate-700')}
+                        title={workflow.name}
+                      >
+                        {workflowDisplayName(workflow)}
+                      </div>
+                    </div>
+                    <WorkflowStatus workflow={workflow} />
+                  </div>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-slate-500">
+                    <span className={cls(
+                      'rounded-full border px-1.5 py-0.5 text-[10px] font-semibold',
+                      isArchived
+                        ? 'border-slate-200 bg-slate-100 text-slate-500'
+                        : workflow.isDefaultVariant
+                          ? 'border-blue-200 bg-blue-50 text-blue-700'
+                          : 'border-indigo-200 bg-indigo-50 text-indigo-700',
+                    )}
+                    >
+                      {typeLabel}
+                    </span>
+                    {workflow.routingMode === 'additive' && (
+                      <span className="rounded-full border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">Additive</span>
+                    )}
+                    <span className="rounded-full bg-white/80 px-1.5 py-0.5 font-medium text-slate-500 ring-1 ring-slate-200">P{workflow.routingPriority || 100}</span>
+                    <span className="rounded-full bg-white/80 px-1.5 py-0.5 font-medium text-slate-500 ring-1 ring-slate-200">v{workflow.publishedVersion || 0}</span>
+                    <span>{runs} {runs === 1 ? 'run' : 'runs'}</span>
+                  </div>
+                  <div className="min-w-0 truncate text-[11px] leading-4 text-slate-500">
+                    {workflowRoutingDescription(workflow)}
+                  </div>
+                  <div className="min-w-0 truncate text-[11px] leading-4 text-slate-500">
+                    <span className="font-medium text-slate-600">Last:</span>{' '}
+                    {lastText}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
@@ -4916,6 +4996,9 @@ export default function NotificationWorkflowsPanel({
   const [previewTestResult, setPreviewTestResult] = useState(null);
   const [conditionText, setConditionText] = useState('');
   const [conditionBuilder, setConditionBuilder] = useState({ field: 'ticket.status', operator: 'equals', value: 'Open' });
+  const [routingBuilder, setRoutingBuilder] = useState({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' });
+  const [routingMode, setRoutingMode] = useState('exclusive');
+  const [routingPriority, setRoutingPriority] = useState(50);
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -5078,6 +5161,15 @@ export default function NotificationWorkflowsPanel({
       setConditionText('');
     }
   }, [selectedNode]);
+
+  useEffect(() => {
+    if (!selected) return;
+    setRoutingMode(selected.routingMode || 'exclusive');
+    setRoutingPriority(Number(selected.routingPriority || (selected.isDefaultVariant ? 100 : 50)));
+    setRoutingBuilder(selected.routingRule
+      ? conditionBuilderFromRule(selected.routingRule)
+      : { field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' });
+  }, [selected]);
 
   useEffect(() => {
     if (selectedNode?.type === 'llm_generate') {
@@ -5566,6 +5658,86 @@ export default function NotificationWorkflowsPanel({
       setMessage({ type: 'success', text: 'Saved' });
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createVariant() {
+    const triggerType = selected?.triggerType || 'ticket.created';
+    const eventLabel = EVENT_LABELS[triggerType] || triggerType;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.createVariant({
+        triggerType,
+        name: `${eventLabel} custom variant`,
+        routingMode: 'exclusive',
+        routingPriority: 50,
+        routingRule: buildConditionRule({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' }),
+      });
+      await loadWorkflows(response.data?.id);
+      setWorkflowListCollapsed(false);
+      setMessage({ type: 'success', text: 'Variant draft created' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Variant creation failed' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function duplicateVariant() {
+    if (!selected) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.duplicateVariant(selected.id, {
+        name: `${workflowDisplayName(selected)} variant`,
+        routingMode: selected.routingMode || 'exclusive',
+        routingPriority: Math.min(999, Number(selected.routingPriority || 50) + 10),
+        routingRule: selected.routingRule || buildConditionRule({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' }),
+      });
+      await loadWorkflows(response.data?.id);
+      setWorkflowListCollapsed(false);
+      setMessage({ type: 'success', text: 'Variant duplicated as an unpublished draft' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Variant duplication failed' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveRoutingSettings() {
+    if (!selected) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.updateRouting(selected.id, {
+        routingMode,
+        routingPriority,
+        routingRule: selected.isDefaultVariant ? null : buildConditionRule(routingBuilder),
+      });
+      applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      setMessage({ type: 'success', text: 'Routing settings saved' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Routing save failed' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleArchived() {
+    if (!selected) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const nextArchived = !selected.archivedAt;
+      const response = await notificationWorkflowAPI.setArchived(selected.id, nextArchived);
+      applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      await refreshHealth();
+      setMessage({ type: 'success', text: nextArchived ? 'Variant archived' : 'Variant restored' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Archive update failed' });
     } finally {
       setSaving(false);
     }
@@ -6241,6 +6413,129 @@ export default function NotificationWorkflowsPanel({
     const current = Array.isArray(selectedNode?.data?.[field]) ? selectedNode.data[field] : [];
     const next = checked ? [...new Set([...current, value])] : current.filter((item) => item !== value);
     updateNodeData({ [field]: next });
+  }
+
+  function renderRoutingSettingsPanel() {
+    if (!selected) return null;
+    const fieldExample = conditionFieldOptions.find((option) => option.value === routingBuilder.field)?.example || '';
+    const valueDisabled = ['exists', 'is_true', 'is_false'].includes(routingBuilder.operator);
+    const routingPreview = preview?.routingPreview || null;
+    const previewStatus = routingPreview
+      ? routingPreview.wouldRunSelectedWorkflow
+        ? 'Preview ticket matches this workflow'
+        : routingPreview.fallbackWorkflowId
+          ? 'Preview ticket falls back to the default variant'
+          : 'Preview ticket is routed to another variant'
+      : null;
+    const previewTone = routingPreview?.wouldRunSelectedWorkflow
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : 'border-amber-200 bg-amber-50 text-amber-800';
+
+    return (
+      <div className="border-b border-slate-200 bg-white px-4 py-3">
+        <div className="grid gap-3 xl:grid-cols-[minmax(220px,0.85fr)_minmax(360px,1.4fr)_auto]">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Variant routing</span>
+              <span className={cls(
+                'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                selected.isDefaultVariant ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700',
+              )}
+              >
+                {workflowVariantTypeLabel(selected)}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                Fallback order {selected.routingPriority || routingPriority || 100}
+              </span>
+            </div>
+            <p className="mt-1 truncate text-xs leading-5 text-slate-500">
+              {selected.isDefaultVariant ? 'Runs when no exclusive variant matches after schedule routing.' : workflowRoutingDescription({ ...selected, routingRule: buildConditionRule(routingBuilder) })}
+            </p>
+            {routingPreview && (
+              <div className={cls('mt-2 rounded-md border px-2.5 py-1.5 text-xs font-medium', previewTone)}>
+                {previewStatus}
+                {routingPreview.reason ? <span className="font-normal">: {routingPreview.reason}</span> : null}
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-[minmax(150px,0.9fr)_minmax(120px,0.7fr)_minmax(150px,1fr)]">
+            <label className="text-xs font-medium uppercase text-slate-500">
+              Applies when
+              <select
+                value={routingBuilder.field}
+                onChange={(event) => setRoutingBuilder((current) => ({ ...current, field: event.target.value }))}
+                disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+              >
+                {conditionFieldOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-medium uppercase text-slate-500">
+              Operator
+              <select
+                value={routingBuilder.operator}
+                onChange={(event) => setRoutingBuilder((current) => ({ ...current, operator: event.target.value }))}
+                disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+              >
+                {CONDITION_OPERATOR_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-medium uppercase text-slate-500">
+              Value
+              <input
+                value={routingBuilder.value}
+                onChange={(event) => setRoutingBuilder((current) => ({ ...current, value: event.target.value }))}
+                disabled={selected.isDefaultVariant || Boolean(selected.archivedAt) || valueDisabled}
+                placeholder={fieldExample}
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+              />
+            </label>
+          </div>
+
+          <div className="grid min-w-[220px] gap-2 sm:grid-cols-[1fr_88px_auto] xl:grid-cols-[130px_80px_auto]">
+            <label className="text-xs font-medium uppercase text-slate-500">
+              Mode
+              <select
+                value={routingMode}
+                onChange={(event) => setRoutingMode(event.target.value)}
+                disabled={Boolean(selected.archivedAt)}
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+              >
+                <option value="exclusive">Exclusive</option>
+                <option value="additive">Additive</option>
+              </select>
+            </label>
+            <label className="text-xs font-medium uppercase text-slate-500">
+              Priority
+              <input
+                type="number"
+                min="1"
+                max="999"
+                value={routingPriority}
+                onChange={(event) => setRoutingPriority(Number.parseInt(event.target.value, 10) || 100)}
+                disabled={Boolean(selected.archivedAt)}
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={saveRoutingSettings}
+              disabled={saving || Boolean(selected.archivedAt)}
+              className="mt-5 inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              <Save className="h-3.5 w-3.5" />
+              Save routing
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   function renderInspector() {
@@ -7159,6 +7454,37 @@ export default function NotificationWorkflowsPanel({
             <div className="flex min-h-[36px] flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
+                onClick={createVariant}
+                disabled={saving}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+                New variant
+              </button>
+              <button
+                type="button"
+                onClick={duplicateVariant}
+                disabled={saving || !selected}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                <Clipboard className="h-4 w-4" />
+                Duplicate
+              </button>
+              <button
+                type="button"
+                onClick={toggleArchived}
+                disabled={saving || !selected || selected?.isDefaultVariant}
+                title={selected?.isDefaultVariant ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.'}
+                className={cls(
+                  'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium disabled:opacity-50',
+                  selected?.archivedAt ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                )}
+              >
+                {selected?.archivedAt ? <RefreshCw className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                {selected?.archivedAt ? 'Restore' : 'Archive'}
+              </button>
+              <button
+                type="button"
                 onClick={() => loadWorkflows(selected?.id)}
                 className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
@@ -7337,6 +7663,7 @@ export default function NotificationWorkflowsPanel({
                 onConfigure={() => setAfterHoursDrawerOpen(true)}
               />
             )}
+            {renderRoutingSettingsPanel()}
 
             <div
               className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--workflow-list-width)_minmax(0,1fr)]"
