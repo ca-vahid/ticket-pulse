@@ -4969,6 +4969,7 @@ export default function NotificationWorkflowsPanel({
   onTabChange = null,
   hideTabBar = false,
   rootClassName = null,
+  onHealthChange = null,
 } = {}) {
   const editorLayout = useDefaultLayout({
     id: WORKFLOW_EDITOR_LAYOUT_ID,
@@ -4980,6 +4981,9 @@ export default function NotificationWorkflowsPanel({
   const [selectedNodeId, setSelectedNodeId] = useState('trigger');
   const [workflowListCollapsed, setWorkflowListCollapsed] = useState(false);
   const [health, setHealth] = useState(null);
+  useEffect(() => {
+    if (onHealthChange) onHealthChange(health);
+  }, [health, onHealthChange]);
   const [preview, setPreview] = useState(null);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewRunning, setPreviewRunning] = useState(false);
@@ -5240,7 +5244,6 @@ export default function NotificationWorkflowsPanel({
   }
 
   function handleWorkflowSelect(id) {
-    setWorkflowListCollapsed(true);
     loadWorkflow(id);
   }
 
@@ -7395,177 +7398,183 @@ export default function NotificationWorkflowsPanel({
     );
   }
 
+  const showPanelHeader = !hideTabBar || workflowTabActive || Boolean(message);
+
   return (
     <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-white/70 sm:m-4'}>
-      <div className="shrink-0 border-b border-white/70 px-5 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-gray-900">Mail Settings</h2>
-              {selected?.mockModeEnabled && <MockModeBadge />}
-            </div>
-            <p className="text-sm text-gray-500">Workspace-scoped notification workflows, LLM evidence, email branding, and workflow audit.</p>
-          </div>
-          {health && (
-            <div className="grid grid-cols-2 gap-2 text-xs xl:grid-cols-4">
-              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                <div className="text-gray-500">SendGrid</div>
-                <div className={cls('font-semibold', health.sendgridConfigured ? 'text-emerald-700' : 'text-red-700')}>
-                  {health.sendgridConfigured ? `Configured${health.sendgridMode === 'smtp' ? ' (SMTP)' : ''}` : 'Missing'}
-                </div>
-              </div>
-              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                <div className="text-gray-500">Enabled</div>
-                <div className="font-semibold text-gray-900">{health.enabledWorkflows || 0}</div>
-              </div>
-              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                <div className="text-gray-500">Audit</div>
-                <div className="font-semibold text-sky-700">{health.workflowAuditRuns7d ?? health.mockRuns7d ?? health.mockedDeliveries7d ?? 0} runs / {health.mockEnabledWorkflows || 0} mock on</div>
-              </div>
-              <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                <div className="text-gray-500">Failures 24h</div>
-                <div className={cls('font-semibold', health.failedEmailDeliveries24h ? 'text-red-700' : 'text-gray-900')}>
-                  {health.failedEmailDeliveries24h || 0}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-3 space-y-2">
+      {showPanelHeader && (
+        <div className="shrink-0 border-b border-white/70 px-5 py-3">
           {!hideTabBar && (
-            <div
-              role="tablist"
-              aria-label="Mail settings sections"
-              className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200/80 bg-slate-100/70 p-1 shadow-subtle sm:grid-cols-4"
-            >
-              {globalTabs.map((tab) => (
-                <MailSettingsTabButton
-                  key={tab.id}
-                  tab={tab}
-                  active={activeGlobalTab === tab.id}
-                  onClick={() => setActiveGlobalTab(tab.id)}
-                />
-              ))}
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-semibold text-gray-900">Mail Settings</h2>
+                  {selected?.mockModeEnabled && <MockModeBadge />}
+                </div>
+                <p className="text-sm text-gray-500">Workspace-scoped notification workflows, LLM evidence, email branding, and workflow audit.</p>
+              </div>
+              {health && (
+                <div className="grid grid-cols-2 gap-2 text-xs xl:grid-cols-4">
+                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
+                    <div className="text-gray-500">SendGrid</div>
+                    <div className={cls('font-semibold', health.sendgridConfigured ? 'text-emerald-700' : 'text-red-700')}>
+                      {health.sendgridConfigured ? `Configured${health.sendgridMode === 'smtp' ? ' (SMTP)' : ''}` : 'Missing'}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
+                    <div className="text-gray-500">Enabled</div>
+                    <div className="font-semibold text-gray-900">{health.enabledWorkflows || 0}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
+                    <div className="text-gray-500">Audit</div>
+                    <div className="font-semibold text-sky-700">{health.workflowAuditRuns7d ?? health.mockRuns7d ?? health.mockedDeliveries7d ?? 0} runs / {health.mockEnabledWorkflows || 0} mock on</div>
+                  </div>
+                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
+                    <div className="text-gray-500">Failures 24h</div>
+                    <div className={cls('font-semibold', health.failedEmailDeliveries24h ? 'text-red-700' : 'text-gray-900')}>
+                      {health.failedEmailDeliveries24h || 0}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {workflowTabActive && (
-            <div className="flex min-h-[36px] flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={createVariant}
-                disabled={saving}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+          <div className={hideTabBar ? 'space-y-2' : 'mt-3 space-y-2'}>
+            {!hideTabBar && (
+              <div
+                role="tablist"
+                aria-label="Mail settings sections"
+                className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200/80 bg-slate-100/70 p-1 shadow-subtle sm:grid-cols-4"
               >
-                <Plus className="h-4 w-4" />
+                {globalTabs.map((tab) => (
+                  <MailSettingsTabButton
+                    key={tab.id}
+                    tab={tab}
+                    active={activeGlobalTab === tab.id}
+                    onClick={() => setActiveGlobalTab(tab.id)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {workflowTabActive && (
+              <div className="flex min-h-[36px] flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={createVariant}
+                  disabled={saving}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                >
+                  <Plus className="h-4 w-4" />
                 New variant
-              </button>
-              <button
-                type="button"
-                onClick={duplicateVariant}
-                disabled={saving || !selected}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                <Clipboard className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={duplicateVariant}
+                  disabled={saving || !selected}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <Clipboard className="h-4 w-4" />
                 Duplicate
-              </button>
-              <button
-                type="button"
-                onClick={toggleArchived}
-                disabled={saving || !selected || selected?.isDefaultVariant}
-                title={selected?.isDefaultVariant ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.'}
-                className={cls(
-                  'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium disabled:opacity-50',
-                  selected?.archivedAt ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
-                )}
-              >
-                {selected?.archivedAt ? <RefreshCw className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                {selected?.archivedAt ? 'Restore' : 'Archive'}
-              </button>
-              <button
-                type="button"
-                onClick={() => loadWorkflows(selected?.id)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <RefreshCw className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleArchived}
+                  disabled={saving || !selected || selected?.isDefaultVariant}
+                  title={selected?.isDefaultVariant ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.'}
+                  className={cls(
+                    'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium disabled:opacity-50',
+                    selected?.archivedAt ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                  )}
+                >
+                  {selected?.archivedAt ? <RefreshCw className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                  {selected?.archivedAt ? 'Restore' : 'Archive'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => loadWorkflows(selected?.id)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <RefreshCw className="h-4 w-4" />
               Refresh
-              </button>
-              <button
-                type="button"
-                onClick={saveDraft}
-                disabled={saving || !selected}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-              >
-                <Save className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={saveDraft}
+                  disabled={saving || !selected}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
               Save
-              </button>
-              <button
-                type="button"
-                onClick={openPreviewModal}
-                disabled={saving || previewRunning || !selected}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {previewRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {previewRunning ? 'Previewing' : 'Preview'}
-              </button>
-              <button
-                type="button"
-                onClick={publishWorkflow}
-                title={hasBlockingGraphErrors
-                  ? draftValidationIssues[0]
-                  : !hasPublishableChanges
-                    ? 'No draft changes to publish.'
-                    : selected?.isEnabled
-                      ? 'Publish the current draft update and keep this workflow enabled.'
-                      : 'Publish the current draft without enabling live execution.'}
-                disabled={saving || !selected || !hasPublishableChanges || hasBlockingGraphErrors}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
-              >
-                <Upload className="h-4 w-4" />
-                {hasPublishableChanges ? 'Publish' : 'Published'}
-              </button>
-              <button
-                type="button"
-                onClick={toggleMockMode}
-                disabled={saving || !selected || !canToggleMockMode}
-                title={mockModeButtonTitle}
-                className={cls(
-                  'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold disabled:opacity-50',
-                  selected?.mockModeEnabled ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-                )}
-              >
-                {selected?.mockModeEnabled ? <ToggleRight className="h-4 w-4" /> : <FlaskConical className="h-4 w-4" />}
-                <span>{selected?.mockModeEnabled ? 'Mock on' : 'Mock mode'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={toggleEnabled}
-                disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
-                title={selected?.isEnabled ? 'Disable live workflow execution.' : selectedIsPublished ? 'Enable the latest published workflow version.' : 'Publish the workflow before enabling live execution.'}
-                className={cls(
-                  'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold disabled:opacity-50',
-                  selected?.isEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-                )}
-              >
-                {selected?.isEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
-                {selected?.isEnabled ? 'Disable' : selectedIsPublished ? 'Enable' : 'Publish first'}
-              </button>
+                </button>
+                <button
+                  type="button"
+                  onClick={openPreviewModal}
+                  disabled={saving || previewRunning || !selected}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {previewRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  {previewRunning ? 'Previewing' : 'Preview'}
+                </button>
+                <button
+                  type="button"
+                  onClick={publishWorkflow}
+                  title={hasBlockingGraphErrors
+                    ? draftValidationIssues[0]
+                    : !hasPublishableChanges
+                      ? 'No draft changes to publish.'
+                      : selected?.isEnabled
+                        ? 'Publish the current draft update and keep this workflow enabled.'
+                        : 'Publish the current draft without enabling live execution.'}
+                  disabled={saving || !selected || !hasPublishableChanges || hasBlockingGraphErrors}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <Upload className="h-4 w-4" />
+                  {hasPublishableChanges ? 'Publish' : 'Published'}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleMockMode}
+                  disabled={saving || !selected || !canToggleMockMode}
+                  title={mockModeButtonTitle}
+                  className={cls(
+                    'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold disabled:opacity-50',
+                    selected?.mockModeEnabled ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+                  )}
+                >
+                  {selected?.mockModeEnabled ? <ToggleRight className="h-4 w-4" /> : <FlaskConical className="h-4 w-4" />}
+                  <span>{selected?.mockModeEnabled ? 'Mock on' : 'Mock mode'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleEnabled}
+                  disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
+                  title={selected?.isEnabled ? 'Disable live workflow execution.' : selectedIsPublished ? 'Enable the latest published workflow version.' : 'Publish the workflow before enabling live execution.'}
+                  className={cls(
+                    'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold disabled:opacity-50',
+                    selected?.isEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+                  )}
+                >
+                  {selected?.isEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
+                  {selected?.isEnabled ? 'Disable' : selectedIsPublished ? 'Enable' : 'Publish first'}
+                </button>
+              </div>
+            )}
+          </div>
+          {message && (
+            <div
+              className={cls(
+                'mt-3 flex items-center gap-2 rounded-md border px-3 py-2 text-sm',
+                message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+              )}
+            >
+              {message.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+              {message.text}
             </div>
           )}
         </div>
-        {message && (
-          <div
-            className={cls(
-              'mt-3 flex items-center gap-2 rounded-md border px-3 py-2 text-sm',
-              message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
-            )}
-          >
-            {message.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-            {message.text}
-          </div>
-        )}
-      </div>
+      )}
 
       <div className="settings-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
         {activeGlobalTab === 'llm-context' && (
