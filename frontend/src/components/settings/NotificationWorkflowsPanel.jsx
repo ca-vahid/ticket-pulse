@@ -252,13 +252,44 @@ const CONDITION_FIELD_OPTIONS = [
   { value: 'requester.officeLocation', label: 'Requester office location', example: 'Vancouver' },
   { value: 'requester.city', label: 'Requester city', example: 'Vancouver' },
   { value: 'requester.country', label: 'Requester country', example: 'Canada' },
-  { value: 'requester.locationKey', label: 'Requester location key', example: 'AU-BRISBANE' },
-  { value: 'requester.regionKey', label: 'Requester region key', example: 'AU-BRISBANE' },
+  { value: 'requester.locationKey', label: 'Requester location', example: 'AU-BRISBANE', description: 'Normalized site key from Entra first, FreshService fallback second.' },
+  { value: 'requester.regionKey', label: 'Requester region', example: 'AU-BRISBANE', description: 'Normalized regional key from Entra first, FreshService fallback second.' },
   { value: 'requester.timeZoneIana', label: 'Requester timezone', example: 'America/Vancouver' },
   { value: 'assignedAgent.email', label: 'Assigned agent exists', example: 'agent@example.com' },
   { value: 'ticket.isNoise', label: 'Noise ticket', example: 'true' },
   { value: 'availability.isAfterHours', label: 'After-hours state', example: 'true' },
 ];
+
+const ROUTING_BEHAVIOR_OPTIONS = [
+  {
+    value: 'exclusive',
+    label: 'Replace default',
+    shortLabel: 'Replaces default',
+    description: 'When this rule matches, send this workflow instead of the default workflow.',
+  },
+  {
+    value: 'additive',
+    label: 'Run in addition',
+    shortLabel: 'Runs in addition',
+    description: 'When this rule matches, also run this workflow alongside the selected/default workflow.',
+  },
+];
+
+const ROUTING_BEHAVIOR_LABELS = Object.fromEntries(
+  ROUTING_BEHAVIOR_OPTIONS.map((option) => [option.value, option.label]),
+);
+
+const DEFAULT_ROUTING_METADATA = {
+  fields: [],
+  field: 'requester.regionKey',
+  values: [],
+  normalizationRules: [
+    'Requester route keys prefer Entra office/city/state/country data.',
+    'FreshService department/location is used when Entra does not provide a usable location.',
+    'Known city and country values are converted to stable route keys such as AU-BRISBANE.',
+  ],
+  sampleSize: 0,
+};
 
 const CONDITION_OPERATOR_OPTIONS = [
   { value: 'equals', label: 'equals' },
@@ -1345,6 +1376,10 @@ export function describeCondition({ field, operator, value }) {
   if (operator === 'exists') return `${fieldLabel} exists`;
   if (operator === 'is_true' || operator === 'is_false') return `${fieldLabel} ${operatorLabel}`;
   return `${fieldLabel} ${operatorLabel} "${value}"`;
+}
+
+function routingBehaviorLabel(mode) {
+  return ROUTING_BEHAVIOR_LABELS[mode] || ROUTING_BEHAVIOR_LABELS.exclusive;
 }
 
 function isTerminalNode(node) {
@@ -3778,6 +3813,99 @@ function AfterHoursRoutingDrawer({
   );
 }
 
+function WorkflowArchiveConfirmModal({ workflow, archived, saving, onCancel, onConfirm }) {
+  if (!workflow) return null;
+
+  const workflowName = workflowDisplayName(workflow);
+  const isRestore = archived === false;
+
+  return (
+    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+      <button
+        type="button"
+        aria-label="Cancel archive action"
+        className="absolute inset-0 cursor-default"
+        onClick={saving ? undefined : onCancel}
+      />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="workflow-archive-confirm-title"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl"
+      >
+        <div className={cls(
+          'flex items-start gap-3 border-b px-5 py-4',
+          isRestore ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50',
+        )}
+        >
+          <div className={cls(
+            'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-white',
+            isRestore ? 'border-emerald-200 text-emerald-700' : 'border-amber-200 text-amber-700',
+          )}
+          >
+            {isRestore ? <RefreshCw className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+              {isRestore ? 'Restore workflow variant' : 'Archive workflow variant'}
+            </div>
+            <h3 id="workflow-archive-confirm-title" className="mt-1 break-words text-lg font-semibold text-slate-950">
+              {isRestore ? `Restore ${workflowName}?` : `Archive ${workflowName}?`}
+            </h3>
+            <p className="mt-1 text-sm leading-5 text-slate-600">
+              {isRestore
+                ? 'This variant will become available for routing again. Review its rule and match order before enabling or publishing changes.'
+                : 'This removes the variant from future routing and disables it, but keeps its draft, published versions, audit runs, and delivery history.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-white/70 disabled:opacity-50"
+            title="Cancel"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-3 px-5 py-4">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <div className="font-semibold text-slate-900">{EVENT_LABELS[workflow.triggerType] || workflow.triggerType}</div>
+            <div className="mt-0.5 text-xs leading-5 text-slate-500">{workflowRoutingDescription(workflow)}</div>
+          </div>
+          {!isRestore && (
+            <div className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs leading-5 text-amber-800">
+              If this is currently matching requesters, those tickets will fall back to the next matching replacement workflow or the default workflow.
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={saving}
+            className={cls(
+              'inline-flex h-9 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-semibold text-white disabled:opacity-50',
+              isRestore ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-slate-900 hover:bg-slate-800',
+            )}
+          >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : isRestore ? <RefreshCw className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+            {isRestore ? 'Restore variant' : 'Archive variant'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function workflowVariantTypeLabel(workflow) {
   if (workflow.archivedAt) return 'Archived';
   if (isAfterHoursWorkflow(workflow)) return workflow.isDefaultVariant ? 'After-hours default' : 'After-hours variant';
@@ -3788,7 +3916,7 @@ function workflowVariantTypeLabel(workflow) {
 }
 
 function workflowRoutingDescription(workflow) {
-  if (workflow.isDefaultVariant) return 'Fallback when no exclusive variant matches';
+  if (workflow.isDefaultVariant) return 'Default fallback when no replacement workflow matches';
   if (!workflow.routingRule) return 'Routing rule not set';
   if (workflow.routingRule === true) return 'Always applies';
   if (workflow.routingRule === false) return 'Never applies';
@@ -3860,10 +3988,20 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
                     >
                       {typeLabel}
                     </span>
-                    {workflow.routingMode === 'additive' && (
-                      <span className="rounded-full border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">Additive</span>
+                    {!workflow.isDefaultVariant && (
+                      <span className={cls(
+                        'rounded-full border px-1.5 py-0.5 text-[10px] font-semibold',
+                        workflow.routingMode === 'additive'
+                          ? 'border-teal-200 bg-teal-50 text-teal-700'
+                          : 'border-amber-200 bg-amber-50 text-amber-700',
+                      )}
+                      >
+                        {routingBehaviorLabel(workflow.routingMode)}
+                      </span>
                     )}
-                    <span className="rounded-full bg-white/80 px-1.5 py-0.5 font-medium text-slate-500 ring-1 ring-slate-200">P{workflow.routingPriority || 100}</span>
+                    <span className="rounded-full bg-white/80 px-1.5 py-0.5 font-medium text-slate-500 ring-1 ring-slate-200">
+                      {workflow.isDefaultVariant ? 'Default fallback' : `Match order ${workflow.routingPriority || 1}`}
+                    </span>
                     <span className="rounded-full bg-white/80 px-1.5 py-0.5 font-medium text-slate-500 ring-1 ring-slate-200">v{workflow.publishedVersion || 0}</span>
                     <span>{runs} {runs === 1 ? 'run' : 'runs'}</span>
                   </div>
@@ -5002,7 +5140,14 @@ export default function NotificationWorkflowsPanel({
   const [conditionBuilder, setConditionBuilder] = useState({ field: 'ticket.status', operator: 'equals', value: 'Open' });
   const [routingBuilder, setRoutingBuilder] = useState({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' });
   const [routingMode, setRoutingMode] = useState('exclusive');
-  const [routingPriority, setRoutingPriority] = useState(50);
+  const [routingPriority, setRoutingPriority] = useState(1);
+  const [routingMetadata, setRoutingMetadata] = useState(DEFAULT_ROUTING_METADATA);
+  const [routingMetadataLoading, setRoutingMetadataLoading] = useState(false);
+  const [routingLookupSearch, setRoutingLookupSearch] = useState('');
+  const [routingTestTicketSearch, setRoutingTestTicketSearch] = useState('');
+  const [routingTestResult, setRoutingTestResult] = useState(null);
+  const [routingTestLoading, setRoutingTestLoading] = useState(false);
+  const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -5169,11 +5314,21 @@ export default function NotificationWorkflowsPanel({
   useEffect(() => {
     if (!selected) return;
     setRoutingMode(selected.routingMode || 'exclusive');
-    setRoutingPriority(Number(selected.routingPriority || (selected.isDefaultVariant ? 100 : 50)));
+    setRoutingPriority(Number(selected.routingPriority || (selected.isDefaultVariant ? 100 : 1)));
     setRoutingBuilder(selected.routingRule
       ? conditionBuilderFromRule(selected.routingRule)
       : { field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' });
+    setRoutingTestResult(null);
   }, [selected]);
+
+  useEffect(() => {
+    if (!selected) return undefined;
+    const handle = window.setTimeout(() => {
+      loadRoutingMetadata(routingBuilder.field, routingLookupSearch);
+    }, 250);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, routingBuilder.field, routingLookupSearch]);
 
   useEffect(() => {
     if (selectedNode?.type === 'llm_generate') {
@@ -5240,6 +5395,52 @@ export default function NotificationWorkflowsPanel({
     if (refreshList) {
       const listResponse = await notificationWorkflowAPI.list();
       setWorkflows(listResponse.data || []);
+    }
+  }
+
+  async function loadRoutingMetadata(field = routingBuilder.field, search = routingLookupSearch) {
+    setRoutingMetadataLoading(true);
+    try {
+      const response = await notificationWorkflowAPI.getRoutingMetadata({ field, search });
+      setRoutingMetadata({ ...DEFAULT_ROUTING_METADATA, ...(response.data || {}) });
+    } catch (error) {
+      setRoutingMetadata({
+        ...DEFAULT_ROUTING_METADATA,
+        field,
+        values: [],
+        error: error.message || 'Routing lookup failed',
+      });
+    } finally {
+      setRoutingMetadataLoading(false);
+    }
+  }
+
+  async function runRoutingTest() {
+    if (!selected) return;
+    const freshserviceTicketId = String(routingTestTicketSearch || '').trim();
+    const ticketId = selectedPreviewTicket?.id || null;
+    if (!ticketId && !freshserviceTicketId) {
+      setRoutingTestResult({ error: 'Enter a FreshService ticket number or select a preview ticket first.' });
+      return;
+    }
+
+    setRoutingTestLoading(true);
+    setRoutingTestResult(null);
+    try {
+      const response = await notificationWorkflowAPI.previewRouting({
+        workflowId: selected.id,
+        ticketId,
+        freshserviceTicketId: ticketId ? null : freshserviceTicketId,
+        triggerType: selected.triggerType,
+        routingMode,
+        routingPriority,
+        routingRule: selected.isDefaultVariant ? null : buildConditionRule(routingBuilder),
+      });
+      setRoutingTestResult(response.data || null);
+    } catch (error) {
+      setRoutingTestResult({ error: error.message || 'Routing test failed' });
+    } finally {
+      setRoutingTestLoading(false);
     }
   }
 
@@ -5676,7 +5877,7 @@ export default function NotificationWorkflowsPanel({
         triggerType,
         name: `${eventLabel} custom variant`,
         routingMode: 'exclusive',
-        routingPriority: 50,
+        routingPriority: 1,
         routingRule: buildConditionRule({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' }),
       });
       await loadWorkflows(response.data?.id);
@@ -5697,7 +5898,7 @@ export default function NotificationWorkflowsPanel({
       const response = await notificationWorkflowAPI.duplicateVariant(selected.id, {
         name: `${workflowDisplayName(selected)} variant`,
         routingMode: selected.routingMode || 'exclusive',
-        routingPriority: Math.min(999, Number(selected.routingPriority || 50) + 10),
+        routingPriority: selected.isDefaultVariant ? 1 : Math.min(999, Number(selected.routingPriority || 1) + 1),
         routingRule: selected.routingRule || buildConditionRule({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' }),
       });
       await loadWorkflows(response.data?.id);
@@ -5729,16 +5930,16 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
-  async function toggleArchived() {
+  async function toggleArchived(nextArchived = !selected?.archivedAt) {
     if (!selected) return;
     setSaving(true);
     setMessage(null);
     try {
-      const nextArchived = !selected.archivedAt;
       const response = await notificationWorkflowAPI.setArchived(selected.id, nextArchived);
       applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
       await refreshHealth();
       setMessage({ type: 'success', text: nextArchived ? 'Variant archived' : 'Variant restored' });
+      setArchiveConfirm(null);
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Archive update failed' });
     } finally {
@@ -6420,8 +6621,20 @@ export default function NotificationWorkflowsPanel({
 
   function renderRoutingSettingsPanel() {
     if (!selected) return null;
-    const fieldExample = conditionFieldOptions.find((option) => option.value === routingBuilder.field)?.example || '';
+    const metadataFields = Array.isArray(routingMetadata.fields) && routingMetadata.fields.length > 0
+      ? routingMetadata.fields
+      : [];
+    const routingFieldOptionMap = new Map(conditionFieldOptions.map((option) => [option.value, option]));
+    for (const option of metadataFields) {
+      routingFieldOptionMap.set(option.value, { ...(routingFieldOptionMap.get(option.value) || {}), ...option });
+    }
+    const routingFieldOptions = [...routingFieldOptionMap.values()];
+    const selectedFieldMeta = routingFieldOptions.find((option) => option.value === routingBuilder.field) || {};
+    const fieldExample = selectedFieldMeta.example || '';
     const valueDisabled = ['exists', 'is_true', 'is_false'].includes(routingBuilder.operator);
+    const knownValues = routingMetadata.field === routingBuilder.field ? (routingMetadata.values || []) : [];
+    const currentValue = String(routingBuilder.value || '').trim();
+    const currentValueSeen = knownValues.some((item) => String(item.value || '').toLowerCase() === currentValue.toLowerCase());
     const routingPreview = preview?.routingPreview || null;
     const previewStatus = routingPreview
       ? routingPreview.wouldRunSelectedWorkflow
@@ -6433,13 +6646,24 @@ export default function NotificationWorkflowsPanel({
     const previewTone = routingPreview?.wouldRunSelectedWorkflow
       ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
       : 'border-amber-200 bg-amber-50 text-amber-800';
+    const behavior = ROUTING_BEHAVIOR_OPTIONS.find((option) => option.value === routingMode) || ROUTING_BEHAVIOR_OPTIONS[0];
+    const routeTest = routingTestResult?.routingPreview || null;
+    const routeTestSelected = routeTest?.selectedWorkflows || [];
+    const routeTestRequester = routingTestResult?.requester || null;
+    const routeTestTone = routingTestResult?.error
+      ? 'border-red-200 bg-red-50 text-red-800'
+      : routeTest?.wouldRunSelectedWorkflow
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+        : routeTest
+          ? 'border-amber-200 bg-amber-50 text-amber-800'
+          : 'border-slate-200 bg-slate-50 text-slate-600';
 
     return (
       <div className="border-b border-slate-200 bg-white px-4 py-3">
-        <div className="grid gap-3 xl:grid-cols-[minmax(220px,0.85fr)_minmax(360px,1.4fr)_auto]">
-          <div className="min-w-0">
+        <div className="grid gap-3 2xl:grid-cols-[minmax(260px,0.85fr)_minmax(520px,1.4fr)_minmax(300px,0.9fr)]">
+          <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Variant routing</span>
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Routing rule</span>
               <span className={cls(
                 'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
                 selected.isDefaultVariant ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700',
@@ -6448,12 +6672,21 @@ export default function NotificationWorkflowsPanel({
                 {workflowVariantTypeLabel(selected)}
               </span>
               <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
-                Fallback order {selected.routingPriority || routingPriority || 100}
+                {selected.isDefaultVariant ? 'Default fallback' : `Match order ${routingPriority || 1}`}
               </span>
             </div>
-            <p className="mt-1 truncate text-xs leading-5 text-slate-500">
-              {selected.isDefaultVariant ? 'Runs when no exclusive variant matches after schedule routing.' : workflowRoutingDescription({ ...selected, routingRule: buildConditionRule(routingBuilder) })}
+            <p className="text-xs leading-5 text-slate-500">
+              {selected.isDefaultVariant
+                ? 'Runs when no replacement workflow matches after schedule routing.'
+                : workflowRoutingDescription({ ...selected, routingRule: buildConditionRule(routingBuilder) })}
             </p>
+            {!selected.isDefaultVariant && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                <div className="font-semibold text-slate-900">{behavior.label}</div>
+                <div>{behavior.description}</div>
+                <div className="mt-1 text-slate-500">Lower match order numbers run first when more than one replacement workflow matches.</div>
+              </div>
+            )}
             {routingPreview && (
               <div className={cls('mt-2 rounded-md border px-2.5 py-1.5 text-xs font-medium', previewTone)}>
                 {previewStatus}
@@ -6462,79 +6695,214 @@ export default function NotificationWorkflowsPanel({
             )}
           </div>
 
-          <div className="grid gap-2 md:grid-cols-[minmax(150px,0.9fr)_minmax(120px,0.7fr)_minmax(150px,1fr)]">
-            <label className="text-xs font-medium uppercase text-slate-500">
-              Applies when
-              <select
-                value={routingBuilder.field}
-                onChange={(event) => setRoutingBuilder((current) => ({ ...current, field: event.target.value }))}
-                disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
-                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+          <div className="min-w-0 space-y-3">
+            <div className="grid gap-2 md:grid-cols-[minmax(160px,0.9fr)_minmax(120px,0.65fr)_minmax(180px,1fr)]">
+              <label className="text-xs font-medium uppercase text-slate-500">
+                Requester/ticket field
+                <select
+                  value={routingBuilder.field}
+                  onChange={(event) => {
+                    setRoutingBuilder((current) => ({ ...current, field: event.target.value, value: '' }));
+                    setRoutingLookupSearch('');
+                    setRoutingTestResult(null);
+                  }}
+                  disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                >
+                  {routingFieldOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-medium uppercase text-slate-500">
+                Operator
+                <select
+                  value={routingBuilder.operator}
+                  onChange={(event) => setRoutingBuilder((current) => ({ ...current, operator: event.target.value }))}
+                  disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                >
+                  {CONDITION_OPERATOR_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-medium uppercase text-slate-500">
+                Value
+                <input
+                  list={`routing-known-values-${selected.id}`}
+                  value={routingBuilder.value}
+                  onChange={(event) => {
+                    setRoutingBuilder((current) => ({ ...current, value: event.target.value }));
+                    setRoutingTestResult(null);
+                  }}
+                  disabled={selected.isDefaultVariant || Boolean(selected.archivedAt) || valueDisabled}
+                  placeholder={fieldExample}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                />
+                <datalist id={`routing-known-values-${selected.id}`}>
+                  {knownValues.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </datalist>
+              </label>
+            </div>
+
+            <div className="grid gap-2 md:grid-cols-[minmax(160px,1fr)_minmax(130px,0.55fr)_auto]">
+              <label className="text-xs font-medium uppercase text-slate-500">
+                Behavior
+                <select
+                  value={routingMode}
+                  onChange={(event) => setRoutingMode(event.target.value)}
+                  disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                >
+                  {ROUTING_BEHAVIOR_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-medium uppercase text-slate-500">
+                Match order
+                <input
+                  type="number"
+                  min="1"
+                  max="999"
+                  value={routingPriority}
+                  onChange={(event) => setRoutingPriority(Number.parseInt(event.target.value, 10) || 1)}
+                  disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={saveRoutingSettings}
+                disabled={saving || selected.isDefaultVariant || Boolean(selected.archivedAt)}
+                className="mt-5 inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
               >
-                {conditionFieldOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs font-medium uppercase text-slate-500">
-              Operator
-              <select
-                value={routingBuilder.operator}
-                onChange={(event) => setRoutingBuilder((current) => ({ ...current, operator: event.target.value }))}
-                disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
-                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
-              >
-                {CONDITION_OPERATOR_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs font-medium uppercase text-slate-500">
-              Value
-              <input
-                value={routingBuilder.value}
-                onChange={(event) => setRoutingBuilder((current) => ({ ...current, value: event.target.value }))}
-                disabled={selected.isDefaultVariant || Boolean(selected.archivedAt) || valueDisabled}
-                placeholder={fieldExample}
-                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
-              />
-            </label>
+                <Save className="h-3.5 w-3.5" />
+                Save routing
+              </button>
+            </div>
+
+            {!selected.isDefaultVariant && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Known values</div>
+                    <div className="text-xs text-slate-500">
+                      {routingMetadataLoading ? 'Looking up workspace values...' : `${knownValues.length} shown from ${routingMetadata.sampleSize || 0} recent tickets`}
+                    </div>
+                  </div>
+                  <label className="relative min-w-[180px] flex-1 text-xs font-medium uppercase text-slate-500 sm:max-w-[260px]">
+                    <Search className="pointer-events-none absolute left-2 top-7 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      value={routingLookupSearch}
+                      onChange={(event) => setRoutingLookupSearch(event.target.value)}
+                      placeholder="Search values"
+                      className="mt-1 w-full rounded-md border border-slate-200 bg-white py-1.5 pl-7 pr-2 text-sm normal-case text-slate-900"
+                    />
+                  </label>
+                </div>
+                {routingMetadata.error && (
+                  <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">{routingMetadata.error}</div>
+                )}
+                <div className="mt-2 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+                  {knownValues.slice(0, 12).map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => setRoutingBuilder((current) => ({ ...current, value: item.value }))}
+                      disabled={selected.isDefaultVariant || Boolean(selected.archivedAt) || valueDisabled}
+                      className="rounded-md border border-white bg-white px-2 py-1 text-left text-xs text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-50"
+                      title={`${item.value}${item.sources?.length ? ` - ${item.sources.join(', ')}` : ''}`}
+                    >
+                      <span className="font-semibold text-slate-900">{item.value}</span>
+                      <span className="ml-1 text-slate-500">{item.count} seen</span>
+                      {item.label && item.label !== item.value && <span className="ml-1 text-slate-500">- {item.label}</span>}
+                    </button>
+                  ))}
+                  {!routingMetadataLoading && knownValues.length === 0 && (
+                    <div className="rounded-md border border-dashed border-slate-300 bg-white px-2 py-1 text-xs text-slate-500">
+                      No known values found for this field in recent workspace tickets.
+                    </div>
+                  )}
+                </div>
+                {!routingLookupSearch && currentValue && !currentValueSeen && knownValues.length > 0 && !valueDisabled && (
+                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    This value is not in the current workspace lookup. It can still be saved, but test it against a real ticket before publishing.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="grid min-w-[220px] gap-2 sm:grid-cols-[1fr_88px_auto] xl:grid-cols-[130px_80px_auto]">
-            <label className="text-xs font-medium uppercase text-slate-500">
-              Mode
-              <select
-                value={routingMode}
-                onChange={(event) => setRoutingMode(event.target.value)}
-                disabled={Boolean(selected.archivedAt)}
-                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
-              >
-                <option value="exclusive">Exclusive</option>
-                <option value="additive">Additive</option>
-              </select>
-            </label>
-            <label className="text-xs font-medium uppercase text-slate-500">
-              Priority
-              <input
-                type="number"
-                min="1"
-                max="999"
-                value={routingPriority}
-                onChange={(event) => setRoutingPriority(Number.parseInt(event.target.value, 10) || 100)}
-                disabled={Boolean(selected.archivedAt)}
-                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={saveRoutingSettings}
-              disabled={saving || Boolean(selected.archivedAt)}
-              className="mt-5 inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-            >
-              <Save className="h-3.5 w-3.5" />
-              Save routing
-            </button>
+          <div className="min-w-0 space-y-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="flex items-start gap-2">
+              <CircleHelp className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+              <div className="min-w-0">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Normalization</div>
+                <p className="mt-0.5 text-xs leading-5 text-slate-600">
+                  {selectedFieldMeta.normalization || selectedFieldMeta.description || 'This field is compared against the value saved in the workflow context.'}
+                </p>
+              </div>
+            </div>
+            {(routingMetadata.normalizationRules || []).length > 0 && (
+              <ul className="space-y-1 text-xs leading-4 text-slate-500">
+                {(routingMetadata.normalizationRules || []).slice(0, 4).map((rule) => (
+                  <li key={rule} className="flex gap-1.5">
+                    <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-slate-400" />
+                    <span>{rule}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="border-t border-slate-200 pt-2">
+              <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Test routing</div>
+              <div className="mt-1 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <input
+                  value={routingTestTicketSearch}
+                  onChange={(event) => setRoutingTestTicketSearch(event.target.value)}
+                  placeholder="FreshService ticket #"
+                  className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900"
+                />
+                <button
+                  type="button"
+                  onClick={runRoutingTest}
+                  disabled={routingTestLoading || !selected}
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                >
+                  {routingTestLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+                  Test
+                </button>
+              </div>
+              <div className={cls('mt-2 rounded-md border px-2.5 py-2 text-xs leading-5', routeTestTone)}>
+                {routingTestResult?.error ? (
+                  routingTestResult.error
+                ) : routeTest ? (
+                  <>
+                    <div className="font-semibold">
+                      {routeTest.wouldRunSelectedWorkflow
+                        ? 'This workflow would run'
+                        : routeTest.fallbackWorkflowId
+                          ? 'This ticket would fall back'
+                          : 'This ticket would route elsewhere'}
+                    </div>
+                    {routeTestSelected.length > 0 && (
+                      <div>Runs: {routeTestSelected.map((item) => item.name || `Workflow #${item.id}`).join(', ')}</div>
+                    )}
+                    {routeTestRequester && (
+                      <div>
+                        Requester region: {routeTestRequester.regionKey || 'unknown'}; location: {routeTestRequester.locationKey || 'unknown'}
+                      </div>
+                    )}
+                    {routeTest.reason && <div>{routeTest.reason}</div>}
+                  </>
+                ) : (
+                  'Enter a FreshService ticket number to preview routing without sending email.'
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -7480,7 +7848,7 @@ export default function NotificationWorkflowsPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={toggleArchived}
+                  onClick={() => setArchiveConfirm({ workflow: selected, archived: !selected?.archivedAt })}
                   disabled={saving || !selected || selected?.isDefaultVariant}
                   title={selected?.isDefaultVariant ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.'}
                   className={cls(
@@ -7840,6 +8208,13 @@ export default function NotificationWorkflowsPanel({
       <LlmHelpModal
         topic={llmHelpTopic}
         onClose={() => setLlmHelpTopic(null)}
+      />
+      <WorkflowArchiveConfirmModal
+        workflow={archiveConfirm?.workflow || null}
+        archived={archiveConfirm?.archived}
+        saving={saving}
+        onCancel={() => setArchiveConfirm(null)}
+        onConfirm={() => toggleArchived(archiveConfirm?.archived === true)}
       />
       <PreviewModal
         open={previewModalOpen}

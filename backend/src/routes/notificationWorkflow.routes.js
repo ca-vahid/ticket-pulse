@@ -143,6 +143,212 @@ function emailList(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
+const ROUTING_FIELD_METADATA = Object.freeze([
+  {
+    value: 'requester.regionKey',
+    label: 'Requester region',
+    group: 'Requester routing',
+    example: 'AU-BRISBANE',
+    description: 'Normalized route key used for regional workflow variants.',
+    normalization: 'Built from Entra office/city/state/country first, then FreshService department/location when Entra has no usable location. Brisbane normalizes to AU-BRISBANE.',
+  },
+  {
+    value: 'requester.locationKey',
+    label: 'Requester location',
+    group: 'Requester routing',
+    example: 'AU-BRISBANE',
+    description: 'Normalized route key used for site-specific workflow variants.',
+    normalization: 'Uses city first, then office location, then FreshService department/location. Country codes are prefixed when available. Brisbane normalizes to AU-BRISBANE.',
+  },
+  {
+    value: 'requester.department',
+    label: 'FreshService department/location',
+    group: 'Requester profile',
+    example: 'Brisbane',
+    description: 'Requester department/location as stored in FreshService.',
+    normalization: 'This is the raw FreshService department/location value; routing keys may derive a city from the first department token.',
+  },
+  {
+    value: 'requester.officeLocation',
+    label: 'Requester office location',
+    group: 'Requester profile',
+    example: 'Brisbane',
+    description: 'Requester office location from Entra when available, otherwise derived from FreshService department/location.',
+    normalization: 'Entra is preferred. FreshService department/location is used only as a fallback.',
+  },
+  {
+    value: 'requester.city',
+    label: 'Requester city',
+    group: 'Requester profile',
+    example: 'Brisbane',
+    description: 'Requester city from Entra when available, otherwise derived from FreshService department/location.',
+    normalization: 'Entra is preferred. FreshService department/location is used only as a fallback.',
+  },
+  {
+    value: 'requester.country',
+    label: 'Requester country',
+    group: 'Requester profile',
+    example: 'Australia',
+    description: 'Requester country from Entra.',
+    normalization: 'Country names are converted to country codes when creating normalized route keys.',
+  },
+  {
+    value: 'requester.timeZoneIana',
+    label: 'Requester timezone',
+    group: 'Requester profile',
+    example: 'Australia/Brisbane',
+    description: 'IANA timezone derived from requester region, city, country, or FreshService timezone.',
+    normalization: 'Known regions and cities are mapped to IANA timezones; FreshService timezone is used as fallback.',
+  },
+  {
+    value: 'ticket.status',
+    label: 'Ticket status',
+    group: 'Ticket',
+    example: 'Open',
+    description: 'FreshService ticket status.',
+    normalization: 'Compared as the stored ticket status text.',
+  },
+  {
+    value: 'ticket.priorityLabel',
+    label: 'Ticket priority',
+    group: 'Ticket',
+    example: 'High',
+    description: 'FreshService priority label.',
+    normalization: 'FreshService priority number is shown as Low, Medium, High, or Urgent.',
+  },
+  {
+    value: 'ticket.assessedPriority',
+    label: 'Assessed priority',
+    group: 'Ticket',
+    example: 'Urgent',
+    description: 'Ticket Pulse assessed priority when available.',
+    normalization: 'Compared as the saved assessed priority text.',
+  },
+  {
+    value: 'ticket.ticketCategory',
+    label: 'Ticket category',
+    group: 'Ticket',
+    example: 'IT',
+    description: 'Ticket Pulse/FreshService ticket category.',
+    normalization: 'Compared as the stored category text.',
+  },
+]);
+
+const ROUTING_FIELD_LOOKUP = new Map(ROUTING_FIELD_METADATA.map((field) => [field.value, field]));
+
+function getPathValue(source, path) {
+  return String(path || '').split('.').reduce((value, key) => (
+    value && Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined
+  ), source);
+}
+
+function routingSourceLabel(field, requester = {}) {
+  if (!String(field || '').startsWith('requester.')) return 'Ticket data';
+  if (field === 'requester.department') return 'FreshService';
+  if (requester.locationSource === 'entra') return 'Entra';
+  if (requester.locationSource === 'freshservice_department') return 'FreshService fallback';
+  return 'Requester profile';
+}
+
+function routingValueLabel(field, value, context = {}) {
+  if (field === 'requester.regionKey' || field === 'requester.locationKey') {
+    return context.requester?.locationSummary || context.requester?.city || context.requester?.officeLocation || value;
+  }
+  return value;
+}
+
+function routingLookupContextFromTicket(ticket) {
+  const requester = ticket.requester ? requesterContextFromSource(ticket.requester, ticket) : null;
+  return {
+    ticket: {
+      id: ticket.id,
+      freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || String(ticket.freshserviceTicketId || ''),
+      subject: ticket.subject || '',
+      status: ticket.status,
+      priorityLabel: priorityLabel(ticket),
+      assessedPriority: ticket.assessedPriority || null,
+      category: ticket.category,
+      subCategory: ticket.subCategory,
+      ticketCategory: ticket.ticketCategory,
+      isNoise: ticket.isNoise === true,
+    },
+    requester,
+    assignedAgent: ticket.assignedTech ? {
+      name: ticket.assignedTech.name,
+      email: ticket.assignedTech.email,
+    } : null,
+  };
+}
+
+function normalizedLookupValue(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return String(value);
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text || null;
+}
+
+function summarizeRoutingFieldValues(tickets = [], field, search = '') {
+  const metadata = ROUTING_FIELD_LOOKUP.get(field);
+  if (!metadata) throw new ValidationError('Unsupported routing lookup field');
+  const query = String(search || '').trim().toLowerCase();
+  const byValue = new Map();
+
+  for (const ticket of tickets || []) {
+    const context = routingLookupContextFromTicket(ticket);
+    const value = normalizedLookupValue(getPathValue(context, field));
+    if (!value) continue;
+    const label = routingValueLabel(field, value, context);
+    const source = routingSourceLabel(field, context.requester || {});
+    if (query && !`${value} ${label} ${source}`.toLowerCase().includes(query)) continue;
+
+    const current = byValue.get(value) || {
+      value,
+      label,
+      count: 0,
+      sources: new Set(),
+      examples: [],
+    };
+    current.count += 1;
+    current.sources.add(source);
+    if (current.examples.length < 3) {
+      current.examples.push({
+        ticketId: ticket.id,
+        freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || String(ticket.freshserviceTicketId || ''),
+        requesterName: context.requester?.name || null,
+        requesterEmail: context.requester?.email || null,
+        locationSummary: context.requester?.locationSummary || null,
+      });
+    }
+    byValue.set(value, current);
+  }
+
+  return [...byValue.values()]
+    .map((entry) => ({
+      ...entry,
+      sources: [...entry.sources],
+    }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+    .slice(0, 50);
+}
+
+async function routingLookupTickets(workspaceId) {
+  return prisma.ticket.findMany({
+    where: { workspaceId },
+    orderBy: [
+      { createdAt: 'desc' },
+      { freshserviceTicketId: 'desc' },
+      { id: 'desc' },
+    ],
+    take: 500,
+    include: {
+      requester: { select: REQUESTER_PROFILE_SELECT },
+      assignedTech: { select: { name: true, email: true } },
+    },
+  });
+}
+
 function parsePriorityFilter(value) {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw || raw === 'all') return null;
@@ -337,16 +543,31 @@ async function buildWorkflowRoutingPreview({ workspaceId, workflow, eventContext
   const variants = selectWorkflowVariants(timing.selected || [], eventContext, {
     baseSuppressed: timing.suppressed || [],
   });
+  const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const workflowSummary = (id) => {
+    const candidate = candidateById.get(id);
+    return candidate ? {
+      id: candidate.id,
+      name: candidate.name,
+      key: candidate.key,
+      triggerType: candidate.triggerType,
+      routingMode: candidate.routingMode,
+      routingPriority: candidate.routingPriority,
+      isDefaultVariant: candidate.isDefaultVariant === true,
+    } : { id };
+  };
   return {
     selectedWorkflowId: selectedId,
     wouldRunSelectedWorkflow: (variants.selectedWorkflowIds || []).includes(selectedId),
     timingMode: timing.mode || null,
     timingReason: timing.reason || null,
     selectedWorkflowIds: variants.selectedWorkflowIds || [],
+    selectedWorkflows: (variants.selectedWorkflowIds || []).map(workflowSummary),
     considered: variants.considered || [],
     matched: variants.matched || [],
     suppressed: variants.suppressed || [],
     fallbackWorkflowId: variants.fallbackWorkflowId || null,
+    fallbackWorkflow: variants.fallbackWorkflowId ? workflowSummary(variants.fallbackWorkflowId) : null,
     reason: variants.reason || null,
   };
 }
@@ -716,6 +937,80 @@ router.get(
   '/variables',
   asyncHandler(async (_req, res) => {
     res.json({ success: true, data: notificationVariableCatalog() });
+  }),
+);
+
+router.get(
+  '/routing/metadata',
+  asyncHandler(async (req, res) => {
+    const field = String(req.query.field || 'requester.regionKey').trim();
+    const search = String(req.query.search || '').trim();
+    const activeField = ROUTING_FIELD_LOOKUP.has(field) ? field : 'requester.regionKey';
+    const tickets = await routingLookupTickets(req.workspaceId);
+    const values = summarizeRoutingFieldValues(tickets, activeField, search);
+
+    res.json({
+      success: true,
+      data: {
+        fields: ROUTING_FIELD_METADATA,
+        field: activeField,
+        values,
+        normalizationRules: [
+          'Requester route keys prefer Entra office/city/state/country data.',
+          'FreshService department/location is used when Entra does not provide a usable location.',
+          'Known city and country values are converted to stable route keys such as AU-BRISBANE.',
+          'Brisbane normalizes to AU-BRISBANE for both requester region and requester location.',
+        ],
+        sampleSize: tickets.length,
+      },
+    });
+  }),
+);
+
+router.post(
+  '/routing/preview',
+  asyncHandler(async (req, res) => {
+    const workflowId = parseId(req.body?.workflowId, 'workflow id');
+    const workflow = await notificationWorkflowRepository.getWorkflow(req.workspaceId, workflowId);
+    const ticket = await prisma.ticket.findFirst({
+      where: previewContextTicketWhere(req.workspaceId, req.body || {}),
+      include: {
+        requester: { select: REQUESTER_PROFILE_SELECT },
+        assignedTech: { select: { id: true, name: true, email: true } },
+        workspace: { select: { id: true, name: true, defaultTimezone: true } },
+        internalCategory: { select: { id: true, name: true } },
+        internalSubcategory: { select: { id: true, name: true } },
+      },
+    });
+    if (!ticket) throw new NotFoundError('Preview ticket not found in this workspace');
+
+    const eventContext = await buildPreviewEventContext({
+      ticket,
+      triggerType: req.body?.triggerType || workflow.triggerType,
+    });
+    const routingWorkflow = {
+      ...workflow,
+      routingMode: req.body?.routingMode ?? workflow.routingMode,
+      routingPriority: req.body?.routingPriority ?? workflow.routingPriority,
+      routingRule: Object.prototype.hasOwnProperty.call(req.body || {}, 'routingRule')
+        ? req.body.routingRule
+        : workflow.routingRule,
+      triggerType: req.body?.triggerType || workflow.triggerType,
+    };
+    const routingPreview = await buildWorkflowRoutingPreview({
+      workspaceId: req.workspaceId,
+      workflow: routingWorkflow,
+      eventContext,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        ticket: serializePreviewTicket(ticket),
+        requester: eventContext.requester || null,
+        routingPreview,
+      },
+    });
   }),
 );
 

@@ -490,6 +490,111 @@ describe('notification workflow routes', () => {
     }));
   });
 
+  test('routing metadata lists normalized requester values for the workspace', async () => {
+    prismaMock.ticket.findMany.mockResolvedValueOnce([{
+      ...sampleTicket,
+      requester: {
+        ...sampleTicket.requester,
+        department: 'Brisbane',
+        entraOfficeLocation: null,
+        entraCity: null,
+        entraCountry: null,
+        entraCountryCode: null,
+      },
+    }]);
+
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/routing/metadata')
+      .query({ field: 'requester.regionKey' })
+      .expect(200);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'requester.regionKey', label: 'Requester region' }),
+    ]));
+    expect(response.body.data.values).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        value: 'AU-BRISBANE',
+        count: 1,
+        sources: expect.arrayContaining(['FreshService fallback']),
+      }),
+    ]));
+  });
+
+  test('routing preview evaluates current routing settings against a real ticket without sending', async () => {
+    const brisbaneWorkflow = {
+      id: 81,
+      workspaceId: 1,
+      key: 'ticket_created_brisbane',
+      name: 'Brisbane variant',
+      triggerType: 'ticket.created',
+      routingMode: 'exclusive',
+      routingPriority: 1,
+      routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+      isDefaultVariant: false,
+      archivedAt: null,
+      publishedVersion: 1,
+      draftDefinition: { metadata: { scheduleMode: 'standard' } },
+      publishedDefinition: { metadata: { scheduleMode: 'standard' } },
+    };
+    const brisbaneTicket = {
+      ...sampleTicket,
+      requester: {
+        ...sampleTicket.requester,
+        department: 'Brisbane',
+        entraOfficeLocation: null,
+        entraCity: null,
+        entraCountry: 'Australia',
+        entraCountryCode: 'AU',
+      },
+    };
+    repositoryMock.getWorkflow.mockResolvedValueOnce(brisbaneWorkflow);
+    repositoryMock.listWorkflows.mockResolvedValueOnce([
+      {
+        id: 7,
+        workspaceId: 1,
+        key: 'ticket_created',
+        name: 'Ticket arrived',
+        triggerType: 'ticket.created',
+        routingMode: 'exclusive',
+        routingPriority: 100,
+        routingRule: null,
+        isDefaultVariant: true,
+        archivedAt: null,
+        draftDefinition: { metadata: { scheduleMode: 'standard' } },
+        publishedDefinition: { metadata: { scheduleMode: 'standard' } },
+      },
+      brisbaneWorkflow,
+    ]);
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(brisbaneTicket);
+
+    const response = await request(buildApp())
+      .post('/api/notification-workflows/routing/preview')
+      .send({
+        workflowId: 81,
+        freshserviceTicketId: '225001',
+        triggerType: 'ticket.created',
+        routingMode: 'exclusive',
+        routingPriority: 1,
+        routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+      })
+      .expect(200);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.requester).toEqual(expect.objectContaining({
+      regionKey: 'AU-BRISBANE',
+      locationKey: 'AU-BRISBANE',
+    }));
+    expect(response.body.data.routingPreview).toEqual(expect.objectContaining({
+      wouldRunSelectedWorkflow: true,
+      selectedWorkflowIds: [81],
+      fallbackWorkflowId: null,
+    }));
+    expect(response.body.data.routingPreview.selectedWorkflows).toEqual([
+      expect.objectContaining({ id: 81, name: 'Brisbane variant' }),
+    ]);
+  });
+
   test('health exposes duplicate mock delivery groups as a warning', async () => {
     prismaMock.notificationDelivery.groupBy.mockResolvedValueOnce([
       {

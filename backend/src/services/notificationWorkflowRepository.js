@@ -75,6 +75,11 @@ function defaultRoutingPriorityForSpec(spec) {
   return spec.scheduleMode === 'after_hours' ? 20 : 100;
 }
 
+function defaultRoutingPriorityForVariant(source = null) {
+  if (!source || source.isDefaultVariant) return 1;
+  return Math.min(999, normalizeRoutingPriority(source.routingPriority, 1) + 1);
+}
+
 function routingDataFromInput(data = {}, fallback = {}) {
   return {
     routingMode: normalizeRoutingMode(data.routingMode ?? fallback.routingMode),
@@ -343,7 +348,7 @@ export async function createWorkflowVariant(workspaceId, data = {}, actor = null
     : String(data.description || '').trim() || null;
   const routing = routingDataFromInput(data, {
     routingMode: source?.routingMode || 'exclusive',
-    routingPriority: source ? Math.min(999, normalizeRoutingPriority(source.routingPriority, 50) + 10) : 50,
+    routingPriority: defaultRoutingPriorityForVariant(source),
     routingRule: source?.routingRule || null,
   });
   const draftDefinition = assertValidWorkflowDefinition(
