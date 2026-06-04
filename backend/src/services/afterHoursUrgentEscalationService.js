@@ -279,6 +279,10 @@ function isUrgentTicket(ticket) {
     || String(ticket?.assessedPriority || '').toLowerCase() === 'urgent';
 }
 
+function isCompletedSelfServiceEscalation(event) {
+  return ['completed', 'completed_with_writeback_error'].includes(String(event?.status || '').toLowerCase());
+}
+
 function isPublicActionAfterHours(policyContext) {
   const availability = policyContext?.availability || {};
   if (availability.isAfterHours === true || availability.isHoliday === true) return true;
@@ -908,12 +912,12 @@ class AfterHoursUrgentEscalationService {
     const now = new Date();
     const cooldownUntil = lastEvent?.cooldownUntil ? new Date(lastEvent.cooldownUntil) : null;
     const cooldownActive = Boolean(cooldownUntil && cooldownUntil.getTime() > now.getTime());
-    const alreadyEscalated = isUrgentTicket(ticket) || lastEvent?.status === 'completed';
+    const alreadyUrgent = isUrgentTicket(ticket);
+    const alreadyEscalated = isCompletedSelfServiceEscalation(lastEvent);
     const terminal = isTerminalTicket(ticket);
     const reasons = [];
     if (!policy.selfServiceEnabled) reasons.push('self_service_disabled');
     if (!offHoursActive) reasons.push('not_after_hours');
-    if (terminal) reasons.push('ticket_closed_or_resolved');
     if (cooldownActive) reasons.push('cooldown_active');
     if (alreadyEscalated) reasons.push('already_escalated');
 
@@ -928,6 +932,7 @@ class AfterHoursUrgentEscalationService {
       offHoursActive,
       cooldownUntil,
       cooldownActive,
+      alreadyUrgent,
       alreadyEscalated,
       terminal,
       reasons,
@@ -942,6 +947,7 @@ class AfterHoursUrgentEscalationService {
       status: status || (state.available ? 'available' : 'unavailable'),
       available: state.available,
       reasons: state.reasons,
+      alreadyUrgent: state.alreadyUrgent,
       alreadyEscalated: state.alreadyEscalated,
       cooldownUntil: state.cooldownUntil?.toISOString?.() || null,
       afterHours: {
@@ -987,9 +993,6 @@ class AfterHoursUrgentEscalationService {
 
   async submitPublicSelfEscalation(token, requestMeta = {}) {
     const state = await this._selfEscalationState(token, requestMeta);
-    if (state.terminal) {
-      return this._publicSelfEscalationResponse(state, 'unavailable');
-    }
     if (state.alreadyEscalated) {
       return this._publicSelfEscalationResponse(state, 'already_escalated');
     }

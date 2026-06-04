@@ -356,6 +356,61 @@ describe('afterHoursUrgentEscalationService', () => {
     }));
   });
 
+  test('self-escalation still requests after-hours support when the ticket is already urgent', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue({
+      id: 22,
+      workspaceId: 5,
+      ticketId: 503,
+      token: 'token-3',
+      tokenHash: 'hash:token-3',
+      tokenPrefix: 'token-3',
+      enabled: true,
+      revokedAt: null,
+      expiresAt: null,
+      ticket: {
+        id: 503,
+        workspaceId: 5,
+        freshserviceTicketId: 225384n,
+        subject: 'Mail.Read Permissions Granted to Application involving one user',
+        status: 'Closed',
+        priority: 4,
+        assessedPriority: 'Urgent',
+        assessedPriorityId: 4,
+        workspace: { id: 5, name: 'IT', slug: 'it', defaultTimezone: 'America/Vancouver' },
+        requester: { name: 'Requester', email: 'requester@example.com' },
+        assignedTech: null,
+      },
+    });
+    prismaMock.publicTicketStatusSettings.findUnique.mockResolvedValue({
+      brandName: 'IT Helpdesk',
+      accentColor: '#2563eb',
+    });
+    prismaMock.urgentEscalationEvent.findFirst.mockResolvedValue(null);
+    prismaMock.ticket.update.mockResolvedValue({});
+    directPriorityWritebackMock.mockResolvedValue({ success: true });
+
+    const result = await afterHoursUrgentEscalationService.submitPublicSelfEscalation('token-3', {
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+    });
+
+    expect(result.status).toBe('submitted');
+    expect(result.alreadyUrgent).toBe(true);
+    expect(result.alreadyEscalated).toBe(false);
+    expect(result.reasons).not.toEqual(expect.arrayContaining([
+      'already_escalated',
+      'ticket_closed_or_resolved',
+    ]));
+    expect(prismaMock.urgentEscalationEvent.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        ticketId: 503,
+        source: 'self_service',
+        triggeredBy: 'requester_public_link',
+      }),
+    }));
+    expect(prismaMock.notificationDelivery.createMany).toHaveBeenCalled();
+  });
+
   test('business-hours public urgency updates priority and notifies only assigned-agent preferences by default', async () => {
     policyContextMock = {
       availability: { isAfterHours: false, isBusinessHours: true, isHoliday: false },
