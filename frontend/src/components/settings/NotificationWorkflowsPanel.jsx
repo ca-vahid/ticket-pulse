@@ -41,6 +41,7 @@ import {
   Send,
   ToggleLeft,
   ToggleRight,
+  Trash2,
   Type,
   Upload,
   UploadCloud,
@@ -917,22 +918,22 @@ function workflowHealthWarningLabel(warning = {}) {
   const count = Number.isFinite(Number(warning.count)) ? Number(warning.count) : null;
   const suffix = count === null ? '' : ` (${count})`;
   switch (warning.type) {
-    case 'duplicate_suppression_spike':
-      return `Duplicate suppressions${suffix}`;
-    case 'duplicate_mock_delivery_groups':
-      return `Duplicate groups${suffix}`;
-    case 'provider_schema_failures':
-      return `Provider/schema failures${suffix}`;
-    case 'template_fallback_rate':
-      return `Template fallbacks${suffix}`;
-    case 'guard_hard_block_count':
-      return `Guard hard blocks${suffix}`;
-    case 'payload_minimization_failure':
-      return `Payload minimization${suffix}`;
-    case 'possible_broader_issue_rate':
-      return `Broader-issue rate ${warning.ratePct ?? ''}%`.trim();
-    default:
-      return warning.message || warning.type || 'Workflow warning';
+  case 'duplicate_suppression_spike':
+    return `Duplicate suppressions${suffix}`;
+  case 'duplicate_mock_delivery_groups':
+    return `Duplicate groups${suffix}`;
+  case 'provider_schema_failures':
+    return `Provider/schema failures${suffix}`;
+  case 'template_fallback_rate':
+    return `Template fallbacks${suffix}`;
+  case 'guard_hard_block_count':
+    return `Guard hard blocks${suffix}`;
+  case 'payload_minimization_failure':
+    return `Payload minimization${suffix}`;
+  case 'possible_broader_issue_rate':
+    return `Broader-issue rate ${warning.ratePct ?? ''}%`.trim();
+  default:
+    return warning.message || warning.type || 'Workflow warning';
   }
 }
 
@@ -1666,23 +1667,6 @@ function signalLevelForRun(run = {}) {
   return contextSummaryForRun(run)?.signalLevel || 'none';
 }
 
-function firstLlmForRun(run = {}) {
-  const step = (run.steps || []).find((candidate) => candidate.nodeType === 'llm_generate');
-  return step?.output?.llm || step?.output || null;
-}
-
-function providerForRun(run = {}) {
-  return firstLlmForRun(run)?.provider || 'none';
-}
-
-function fallbackSourceForRun(run = {}) {
-  const source = run.health?.fallbackSummary?.source || firstLlmForRun(run)?.templateFallbackSource || null;
-  if (!source) return 'none';
-  if (source === 'provider_or_schema') return 'provider_or_schema';
-  if (source === 'provider' || source === 'workflow') return 'provider';
-  return source;
-}
-
 function previewStepIssue(step) {
   const output = step?.output || {};
   const expectedPreviewSend = step?.nodeType === 'send_email' && output.skipped && output.reason === 'Preview only';
@@ -2113,7 +2097,7 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
             ? 'repaired output'
             : guardAuditOnly
               ? 'audit warning'
-            : 'passed';
+              : 'passed';
         const guardMessage = (llm.guard?.issues || []).length
           ? (llm.guard.issues || []).join('; ')
           : guardRepaired
@@ -4037,6 +4021,85 @@ function WorkflowArchiveConfirmModal({ workflow, archived, saving, onCancel, onC
   );
 }
 
+function WorkflowDeleteConfirmModal({ workflow, saving, onCancel, onConfirm }) {
+  if (!workflow) return null;
+
+  const workflowName = workflowDisplayName(workflow);
+  const runs = workflow._count?.runs || 0;
+
+  return (
+    <div className="fixed inset-0 z-[97] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+      <button
+        type="button"
+        aria-label="Cancel delete action"
+        className="absolute inset-0 cursor-default"
+        onClick={saving ? undefined : onCancel}
+      />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="workflow-delete-confirm-title"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl"
+      >
+        <div className="flex items-start gap-3 border-b border-red-100 bg-red-50 px-5 py-4">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-200 bg-white text-red-700">
+            <Trash2 className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold uppercase tracking-wide text-red-600">Delete archived workflow variant</div>
+            <h3 id="workflow-delete-confirm-title" className="mt-1 break-words text-lg font-semibold text-slate-950">
+              Delete {workflowName}?
+            </h3>
+            <p className="mt-1 text-sm leading-5 text-slate-600">
+              This permanently removes the archived variant, its draft, published versions, workflow runs, step logs, deliveries, and provider-attempt audit rows.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-white/70 disabled:opacity-50"
+            title="Cancel"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-3 px-5 py-4">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <div className="font-semibold text-slate-900">{EVENT_LABELS[workflow.triggerType] || workflow.triggerType}</div>
+            <div className="mt-0.5 text-xs leading-5 text-slate-500">{workflowRoutingDescription(workflow)}</div>
+            <div className="mt-1 text-xs font-medium text-slate-600">
+              {runs} {runs === 1 ? 'run' : 'runs'} will be removed with this variant.
+            </div>
+          </div>
+          <div className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs leading-5 text-red-800">
+            Delete is only available after archive. Use Restore instead if you want to keep this variant and its audit history.
+          </div>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={saving}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-red-700 px-3 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-50"
+          >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Delete permanently
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function workflowVariantTypeLabel(workflow) {
   if (workflow.archivedAt) return 'Archived';
   if (isAfterHoursWorkflow(workflow)) return workflow.isDefaultVariant ? 'After-hours default' : 'After-hours variant';
@@ -4055,6 +4118,14 @@ function workflowRoutingDescription(workflow) {
 }
 
 function WorkflowList({ workflows, selectedId, onSelect }) {
+  if (!workflows.length) {
+    return (
+      <div className="px-3 py-6 text-center text-xs leading-5 text-slate-500">
+        No workflows match the current view.
+      </div>
+    );
+  }
+
   const groups = workflows.reduce((acc, workflow) => {
     const key = workflow.triggerType || 'other';
     if (!acc.has(key)) acc.set(key, []);
@@ -5478,6 +5549,8 @@ export default function NotificationWorkflowsPanel({
   const [routingTestResult, setRoutingTestResult] = useState(null);
   const [routingTestLoading, setRoutingTestLoading] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [showArchivedWorkflows, setShowArchivedWorkflows] = useState(false);
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -5559,6 +5632,13 @@ export default function NotificationWorkflowsPanel({
       ? formatJson(selectedNode.data?.outputSchema || DEFAULT_LLM_OUTPUT_SCHEMA)
       : '',
     [selectedNode?.type, selectedNode?.data?.outputSchema],
+  );
+  const archivedWorkflowCount = workflows.filter((workflow) => Boolean(workflow.archivedAt)).length;
+  const visibleWorkflows = useMemo(
+    () => (showArchivedWorkflows
+      ? workflows
+      : workflows.filter((workflow) => !workflow.archivedAt)),
+    [showArchivedWorkflows, workflows],
   );
 
   function updateDraft(mutator) {
@@ -5711,8 +5791,21 @@ export default function NotificationWorkflowsPanel({
       setAfterHoursDraft(policy);
       setWorkflows(items);
       setHealth(healthResponse.data || null);
-      const nextId = selectId || selected?.id || items[0]?.id;
-      if (nextId) await loadWorkflow(nextId, false);
+      const requestedWorkflow = selectId ? items.find((item) => String(item.id) === String(selectId)) : null;
+      const currentWorkflow = selected?.id ? items.find((item) => String(item.id) === String(selected.id)) : null;
+      const isVisibleWorkflow = (workflow) => workflow && (showArchivedWorkflows || !workflow.archivedAt);
+      const fallbackWorkflow = showArchivedWorkflows ? items[0] : items.find((item) => !item.archivedAt);
+      const nextWorkflow = (isVisibleWorkflow(requestedWorkflow) ? requestedWorkflow : null)
+        || (isVisibleWorkflow(currentWorkflow) ? currentWorkflow : null)
+        || fallbackWorkflow
+        || null;
+      if (nextWorkflow) {
+        await loadWorkflow(nextWorkflow.id, false);
+      } else {
+        setSelected(null);
+        setDraft(null);
+        setSelectedNodeId('trigger');
+      }
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
     } finally {
@@ -6289,8 +6382,55 @@ export default function NotificationWorkflowsPanel({
       await refreshHealth();
       setMessage({ type: 'success', text: nextArchived ? 'Variant archived' : 'Variant restored' });
       setArchiveConfirm(null);
+      if (nextArchived && !showArchivedWorkflows) {
+        const nextWorkflow = workflows.find((workflow) => workflow.id !== selected.id && !workflow.archivedAt);
+        if (nextWorkflow) await loadWorkflow(nextWorkflow.id, false);
+      }
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Archive update failed' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateShowArchivedWorkflows(checked) {
+    setShowArchivedWorkflows(checked);
+    if (!checked && selected?.archivedAt) {
+      const nextWorkflow = workflows.find((workflow) => !workflow.archivedAt);
+      if (nextWorkflow) {
+        await loadWorkflow(nextWorkflow.id, false);
+      } else {
+        setSelected(null);
+        setDraft(null);
+        setSelectedNodeId('trigger');
+      }
+    }
+  }
+
+  async function deleteArchivedWorkflow() {
+    const target = deleteConfirm?.workflow || selected;
+    if (!target) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      await notificationWorkflowAPI.deleteArchived(target.id);
+      const remaining = workflows.filter((workflow) => workflow.id !== target.id);
+      const nextWorkflow = showArchivedWorkflows
+        ? remaining[0] || null
+        : remaining.find((workflow) => !workflow.archivedAt) || null;
+      setWorkflows(remaining);
+      setDeleteConfirm(null);
+      await refreshHealth();
+      setMessage({ type: 'success', text: 'Archived variant deleted' });
+      if (nextWorkflow) {
+        await loadWorkflow(nextWorkflow.id, false);
+      } else {
+        setSelected(null);
+        setDraft(null);
+        setSelectedNodeId('trigger');
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Delete failed' });
     } finally {
       setSaving(false);
     }
@@ -8287,6 +8427,18 @@ export default function NotificationWorkflowsPanel({
                   {selected?.archivedAt ? <RefreshCw className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                   {selected?.archivedAt ? 'Restore' : 'Archive'}
                 </button>
+                {selected?.archivedAt && !selected?.isDefaultVariant && (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirm({ workflow: selected })}
+                    disabled={saving || !selected}
+                    title="Permanently delete this archived variant and its workflow audit history."
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => loadWorkflows(selected?.id)}
@@ -8553,7 +8705,22 @@ export default function NotificationWorkflowsPanel({
                     workflowListCollapsed ? 'justify-center px-2' : 'justify-between',
                   )}
                 >
-                  {!workflowListCollapsed && <span>Workspace Workflows</span>}
+                  {!workflowListCollapsed && (
+                    <div className="flex min-w-0 flex-col gap-1">
+                      <span>Workspace Workflows</span>
+                      {archivedWorkflowCount > 0 && (
+                        <label className="flex items-center gap-1.5 text-[11px] font-medium normal-case tracking-normal text-slate-500">
+                          <input
+                            type="checkbox"
+                            checked={showArchivedWorkflows}
+                            onChange={(event) => updateShowArchivedWorkflows(event.target.checked)}
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          Show archived ({archivedWorkflowCount})
+                        </label>
+                      )}
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => setWorkflowListCollapsed((current) => !current)}
@@ -8567,7 +8734,7 @@ export default function NotificationWorkflowsPanel({
                 {workflowListCollapsed ? (
                   <div className="flex flex-1 flex-col items-center gap-3 border-t border-slate-200 px-2 py-3 text-slate-500">
                     <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700 ring-1 ring-blue-200">
-                      {workflows.length}
+                      {visibleWorkflows.length}
                     </span>
                     <span
                       className="hidden min-h-0 rotate-180 break-words text-[10px] font-bold uppercase leading-4 tracking-wide text-slate-600 [writing-mode:vertical-rl] lg:block"
@@ -8578,7 +8745,7 @@ export default function NotificationWorkflowsPanel({
                   </div>
                 ) : (
                   <div className="settings-scrollbar min-h-0 flex-1 overflow-y-auto border-t border-slate-100">
-                    <WorkflowList workflows={workflows} selectedId={selected?.id} onSelect={handleWorkflowSelect} />
+                    <WorkflowList workflows={visibleWorkflows} selectedId={selected?.id} onSelect={handleWorkflowSelect} />
                   </div>
                 )}
               </aside>
@@ -8710,6 +8877,12 @@ export default function NotificationWorkflowsPanel({
         saving={saving}
         onCancel={() => setArchiveConfirm(null)}
         onConfirm={() => toggleArchived(archiveConfirm?.archived === true)}
+      />
+      <WorkflowDeleteConfirmModal
+        workflow={deleteConfirm?.workflow || null}
+        saving={saving}
+        onCancel={() => setDeleteConfirm(null)}
+        onConfirm={deleteArchivedWorkflow}
       />
       <PreviewModal
         open={previewModalOpen}

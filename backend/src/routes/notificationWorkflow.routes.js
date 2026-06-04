@@ -1964,6 +1964,17 @@ router.put(
   }),
 );
 
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const result = await notificationWorkflowRepository.deleteArchivedWorkflowVariant(
+      req.workspaceId,
+      req.params.id,
+    );
+    res.json({ success: true, data: result });
+  }),
+);
+
 router.get(
   '/:id',
   asyncHandler(async (req, res) => {

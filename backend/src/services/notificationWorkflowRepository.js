@@ -431,6 +431,51 @@ export async function setWorkflowArchived(workspaceId, id, archived, actor = nul
   });
 }
 
+export async function deleteArchivedWorkflowVariant(workspaceId, id) {
+  const workflow = await getWorkflowOrThrow(workspaceId, id);
+  if (workflow.isDefaultVariant) {
+    throw new ValidationError('Default workflow variants cannot be deleted');
+  }
+  if (!workflow.archivedAt) {
+    throw new ValidationError('Archive the workflow variant before deleting it');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const runs = await tx.notificationWorkflowRun.findMany({
+      where: { workspaceId, workflowId: workflow.id },
+      select: { id: true },
+    });
+    const runIds = runs.map((run) => run.id);
+    const steps = runIds.length
+      ? await tx.notificationWorkflowStepRun.findMany({
+        where: { workspaceId, runId: { in: runIds } },
+        select: { id: true },
+      })
+      : [];
+    const stepIds = steps.map((step) => step.id);
+
+    if (runIds.length || stepIds.length) {
+      await tx.notificationDelivery.deleteMany({
+        where: {
+          workspaceId,
+          OR: [
+            ...(runIds.length ? [{ workflowRunId: { in: runIds } }] : []),
+            ...(stepIds.length ? [{ workflowStepRunId: { in: stepIds } }] : []),
+          ],
+        },
+      });
+    }
+
+    await tx.notificationWorkflow.delete({ where: { id: workflow.id } });
+
+    return {
+      id: workflow.id,
+      deleted: true,
+      deletedRunCount: runIds.length,
+    };
+  });
+}
+
 export async function listAuditRuns(workspaceId, {
   executionMode = 'live_mock',
   workflowId = null,
@@ -536,6 +581,7 @@ export default {
   duplicateWorkflowVariant,
   updateWorkflowRouting,
   setWorkflowArchived,
+  deleteArchivedWorkflowVariant,
   listAuditRuns,
   listRuns,
   getSampleContext,

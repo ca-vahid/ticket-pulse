@@ -38,6 +38,7 @@ const repositoryMock = {
   duplicateWorkflowVariant: jest.fn(),
   updateWorkflowRouting: jest.fn(),
   setWorkflowArchived: jest.fn(),
+  deleteArchivedWorkflowVariant: jest.fn(),
   listAuditRuns: jest.fn(),
   listRuns: jest.fn(),
   saveDraft: jest.fn(),
@@ -414,7 +415,7 @@ describe('notification workflow routes', () => {
     );
   });
 
-  test('variant lifecycle routes create duplicate update routing and archive within workspace', async () => {
+  test('variant lifecycle routes create duplicate update routing archive and delete within workspace', async () => {
     const routingRule = { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] };
 
     const createResponse = await request(buildApp(3))
@@ -474,6 +475,25 @@ describe('notification workflow routes', () => {
       '81',
       true,
       expect.objectContaining({ email: 'admin@example.com' }),
+    );
+
+    repositoryMock.deleteArchivedWorkflowVariant.mockResolvedValueOnce({
+      id: 81,
+      deleted: true,
+      deletedRunCount: 2,
+    });
+
+    const deleteResponse = await request(buildApp(3))
+      .delete('/api/notification-workflows/81')
+      .expect(200);
+
+    expect(deleteResponse.body.data).toEqual(expect.objectContaining({
+      id: 81,
+      deleted: true,
+    }));
+    expect(repositoryMock.deleteArchivedWorkflowVariant).toHaveBeenCalledWith(
+      3,
+      '81',
     );
   });
 
