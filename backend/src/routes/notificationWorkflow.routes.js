@@ -1096,7 +1096,7 @@ router.get(
           workspaceId: req.workspaceId,
           operation: 'notification_workflow_generation',
           status: 'failed',
-          createdAt: { gte: sevenDaysAgo },
+          startedAt: { gte: sevenDaysAgo },
         },
         _count: { _all: true },
       }),
