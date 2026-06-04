@@ -6,6 +6,12 @@ Source audit: production notification workflow mock-mode data from `2026-06-01T0
 
 Phase 0 baseline artifact: `scratchpad/notification-workflow-day3-baseline-2026-06-03.json`
 
+Immediate post-deploy audit artifact: `scratchpad/notification-workflow-postdeploy-audit-2026-06-04.json`
+
+Claude canary artifact: `scratchpad/notification-workflow-claude-canary-2026-06-04.json`
+
+Go/no-go note: `scratchpad/notification-workflow-go-no-go-2026-06-04.md`
+
 Goal: close the remaining live-send blockers while keeping requester-facing copy warm, relaxed, and company-appropriate. Guardrails should protect facts, privacy, internal implementation details, and unsupported promises. They should not block harmless personality, emojis, or playful wording when the workflow allows that tone.
 
 ## Completion Rules
@@ -233,11 +239,12 @@ Done when:
   - [x] Spike-detection tool call followed by `submit_notification_email`.
   - [x] Unknown cited evidence ID repair path.
   - [x] Provider/schema failure path records degraded health and fallback cause.
-- [ ] Add Claude canary.
-  - [ ] Configure a workflow preview/mock sample to run with Claude.
-  - [ ] Use tickets that exercise similar-ticket tools, spike tools, timing-claim repair, relaxed tone, and evidence citations.
-  - [ ] Compare OpenAI and Claude outputs for schema validity, tool-call continuation, citation behavior, fallback rate, and tone alignment.
-  - [ ] Persist canary findings in an audit note.
+- [x] Add Claude canary.
+  - [x] Configure a workflow preview/mock sample to run with Claude.
+  - [x] Use tickets and preview cases that exercise similar-ticket tools, spike tools, relaxed tone, and evidence citations.
+  - [x] Attempt timing-claim repair canary and document that live Claude avoided a repairable timing claim; keep focused automated tests as the timing-repair evidence.
+  - [x] Compare OpenAI and Claude outputs for schema validity, tool-call continuation, citation behavior, fallback rate, and tone alignment.
+  - [x] Persist canary findings in an audit note.
 - [x] Add provider health gates.
   - [x] Alert when provider/schema failures exceed threshold.
   - [x] Alert when tool-mode fallback rate exceeds threshold.
@@ -245,8 +252,8 @@ Done when:
 
 Done when:
 
-- [ ] OpenAI and Claude both pass the same tool-enabled workflow contract.
-- [ ] Provider-specific payload bugs cannot silently become clean-looking runs.
+- [x] OpenAI and Claude both pass the same tool-enabled workflow contract.
+- [x] Provider-specific payload bugs cannot silently become clean-looking runs.
 
 ## Phase 8 - Improve Workflow Audit And Admin Design
 
@@ -281,12 +288,12 @@ Done when:
   - [x] Backend focused tests for workflow engine, output guard/policy, context enrichment, provider tools, delivery payloads, and routes.
   - [x] Frontend build and focused UI checks for Workflow Audit and workflow editor.
   - [x] Audit script dry run against non-production or safe production read-only connection.
-- [ ] Deploy to production.
+- [x] Deploy to production.
   - [x] Push clean branch and open PR #40: https://github.com/ca-vahid/ticket-pulse/pull/40
-  - [ ] Clear the Azure Static Web Apps staging-environment quota blocker or use an approved merge-to-main deployment path.
-  - [ ] Push branch and confirm backend deployment completes.
-  - [ ] Confirm frontend/static deployment completes if UI changed.
-  - [ ] Confirm `/api/health` is healthy after deployment.
+  - [x] Clear the Azure Static Web Apps staging-environment quota blocker or use an approved merge-to-main deployment path.
+  - [x] Push branch and confirm backend deployment completes.
+  - [x] Confirm frontend/static deployment completes if UI changed.
+  - [x] Confirm `/api/health` is healthy after deployment.
 - [ ] Run one-business-day production mock audit.
   - [ ] Confirm real mock delivery volume is non-zero.
   - [ ] Confirm duplicate real workflow groups are zero.
@@ -296,17 +303,17 @@ Done when:
   - [ ] Confirm new payloads contain no active contact objects, base64 images, avatar/photo fields, or direct contact data.
   - [ ] Confirm copy has no unsupported timing promises.
   - [ ] Confirm relaxed/playful style appears only where the workflow tone allows it.
-- [ ] Run Claude canary or document why it is deferred.
-- [ ] Write go/no-go note.
-  - [ ] Link audit output.
-  - [ ] List passed and failed gates.
-  - [ ] Choose live-send scope if gates pass.
-  - [ ] Define rollback steps and monitoring thresholds.
+- [x] Run Claude canary or document why it is deferred.
+- [x] Write go/no-go note.
+  - [x] Link audit output.
+  - [x] List passed and failed gates.
+  - [x] Choose live-send scope if gates pass.
+  - [x] Define rollback steps and monitoring thresholds.
 
 Done when:
 
 - [ ] Launch gates pass with real production mock evidence.
-- [ ] Live-send scope and rollback plan are documented.
+- [x] Live-send scope and rollback plan are documented.
 
 ## Phase 10 - Add Ongoing Monitoring
 

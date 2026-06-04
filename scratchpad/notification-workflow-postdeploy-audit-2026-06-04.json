@@ -1,0 +1,1714 @@
+{
+  "generatedAt": "2026-06-04T05:56:45.902Z",
+  "since": "2026-06-03T00:00:00Z",
+  "timezone": "America/Vancouver",
+  "clock": {
+    "db_now": "2026-06-04T05:56:46.231Z",
+    "timezone": "UTC"
+  },
+  "runs": {
+    "runs": 71,
+    "mock_runs": 60,
+    "preview_runs": 11,
+    "live_runs": 0,
+    "completed_runs": 71,
+    "failed_runs": 0,
+    "first_run": "2026-06-03 00:33:17.373",
+    "last_run": "2026-06-04 02:03:50.8"
+  },
+  "runsByLocalDay": [
+    {
+      "local_day": "2026-06-02",
+      "runs": 6,
+      "mock_runs": 2,
+      "preview_runs": 4,
+      "live_runs": 0,
+      "first_run": "2026-06-03 00:33:17.373",
+      "last_run": "2026-06-03 01:05:30.885"
+    },
+    {
+      "local_day": "2026-06-03",
+      "runs": 65,
+      "mock_runs": 58,
+      "preview_runs": 7,
+      "live_runs": 0,
+      "first_run": "2026-06-03 09:35:01.392",
+      "last_run": "2026-06-04 02:03:50.8"
+    }
+  ],
+  "runsByTrigger": [
+    {
+      "trigger_source": "assignment_pipeline",
+      "execution_mode": "mock",
+      "count": 33
+    },
+    {
+      "trigger_source": "assignment_fast_sync",
+      "execution_mode": "mock",
+      "count": 13
+    },
+    {
+      "trigger_source": "freshservice_webhook",
+      "execution_mode": "mock",
+      "count": 13
+    },
+    {
+      "trigger_source": "preview",
+      "execution_mode": "preview",
+      "count": 11
+    },
+    {
+      "trigger_source": "freshservice_sync",
+      "execution_mode": "mock",
+      "count": 1
+    }
+  ],
+  "runsByWorkflowEvent": [
+    {
+      "workflow_key": "ticket_assigned",
+      "workflow_name": "Ticket assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "count": 51
+    },
+    {
+      "workflow_key": "ticket_created_after_hours",
+      "workflow_name": "Ticket arrived after-hours / holiday",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "count": 9
+    },
+    {
+      "workflow_key": "ticket_assigned",
+      "workflow_name": "Ticket assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "count": 6
+    },
+    {
+      "workflow_key": "ticket_created_after_hours",
+      "workflow_name": "Ticket arrived after-hours / holiday",
+      "event_type": "ticket.created",
+      "execution_mode": "preview",
+      "count": 5
+    }
+  ],
+  "runHealth": [
+    {
+      "run_health": "completed_clean",
+      "count": 64
+    },
+    {
+      "run_health": "completed_with_fallback",
+      "count": 7
+    }
+  ],
+  "deliveries": {
+    "deliveries": 74,
+    "mocked": 56,
+    "sent": 18,
+    "failed": 0,
+    "real_mocked": 56,
+    "test_emails": 18,
+    "p50_payload_chars": 2086,
+    "p95_payload_chars": 2123,
+    "max_payload_chars": 2137
+  },
+  "realDuplicateGroups": [],
+  "llm": {
+    "llm_steps": 67,
+    "completed": 67,
+    "failed": 0,
+    "guard_rejected": 1,
+    "template_fallback_used": 7,
+    "provider_or_schema": 6
+  },
+  "fallbackCauses": [
+    {
+      "failure_type": "provider_or_schema",
+      "error": "400 Unknown parameter: 'input[2].parsed_arguments'.",
+      "count": 6,
+      "first_run_id": 188,
+      "last_run_id": 198
+    },
+    {
+      "failure_type": "guard_rejected",
+      "error": "LLM cited unknown evidence id(s): 2a725d1bce5e4eddadec9d8d898a82c6e9e7f2a3741661900444be7d38c535b6",
+      "count": 1,
+      "first_run_id": 206,
+      "last_run_id": 206
+    }
+  ],
+  "repairedIssues": [],
+  "blockedIssues": [],
+  "signalLevels": [
+    {
+      "signal_level": "possible_broader_issue",
+      "count": 28
+    },
+    {
+      "signal_level": "watch",
+      "count": 14
+    },
+    {
+      "signal_level": "none",
+      "count": 13
+    },
+    {
+      "signal_level": "routine_cluster",
+      "count": 12
+    }
+  ],
+  "signalSamples": [
+    {
+      "run_id": 231,
+      "freshservice_ticket_id": "225384",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "none",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 230,
+      "freshservice_ticket_id": "225384",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "none",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 229,
+      "freshservice_ticket_id": "225381",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 228,
+      "freshservice_ticket_id": "225380",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 227,
+      "freshservice_ticket_id": "225378",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 226,
+      "freshservice_ticket_id": "225195",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 225,
+      "freshservice_ticket_id": "225371",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 224,
+      "freshservice_ticket_id": "225364",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 223,
+      "freshservice_ticket_id": "225364",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 222,
+      "freshservice_ticket_id": "225364",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 221,
+      "freshservice_ticket_id": "225364",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 220,
+      "freshservice_ticket_id": "225363",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 219,
+      "freshservice_ticket_id": "225363",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 218,
+      "freshservice_ticket_id": "225360",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 217,
+      "freshservice_ticket_id": "225360",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 216,
+      "freshservice_ticket_id": "225354",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 215,
+      "freshservice_ticket_id": "225354",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "possible_broader_issue",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 214,
+      "freshservice_ticket_id": "225349",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "watch",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 213,
+      "freshservice_ticket_id": "225347",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "routine_cluster",
+      "signal_summary": {}
+    },
+    {
+      "run_id": 212,
+      "freshservice_ticket_id": "225348",
+      "subject_preview": "[redacted subject]",
+      "signal_level": "routine_cluster",
+      "signal_summary": {}
+    }
+  ],
+  "providerAttempts": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "status": "succeeded",
+      "error_class": "none",
+      "error_preview": "",
+      "count": 64,
+      "first_run_id": 165,
+      "last_run_id": 231
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "status": "failed",
+      "error_class": "bad_request",
+      "error_preview": "400 Unknown parameter: 'input[2].parsed_arguments'.",
+      "count": 6,
+      "first_run_id": 188,
+      "last_run_id": 198
+    }
+  ],
+  "stepTypes": [
+    {
+      "node_type": "condition",
+      "status": "completed",
+      "count": 71,
+      "p50_ms": 5,
+      "p95_ms": 20,
+      "max_ms": 24
+    },
+    {
+      "node_type": "trigger",
+      "status": "completed",
+      "count": 71,
+      "p50_ms": 8,
+      "p95_ms": 20,
+      "max_ms": 45
+    },
+    {
+      "node_type": "llm_generate",
+      "status": "completed",
+      "count": 67,
+      "p50_ms": 8219,
+      "p95_ms": 12867,
+      "max_ms": 13860
+    },
+    {
+      "node_type": "recipient_resolver",
+      "status": "completed",
+      "count": 67,
+      "p50_ms": 5,
+      "p95_ms": 18,
+      "max_ms": 24
+    },
+    {
+      "node_type": "send_email",
+      "status": "completed",
+      "count": 67,
+      "p50_ms": 48,
+      "p95_ms": 70,
+      "max_ms": 97
+    },
+    {
+      "node_type": "template_render",
+      "status": "completed",
+      "count": 67,
+      "p50_ms": 31,
+      "p95_ms": 63,
+      "max_ms": 77
+    },
+    {
+      "node_type": "llm_tool",
+      "status": "completed",
+      "count": 48,
+      "p50_ms": 10,
+      "p95_ms": 170,
+      "max_ms": 192
+    },
+    {
+      "node_type": "stop",
+      "status": "completed",
+      "count": 4,
+      "p50_ms": 8,
+      "p95_ms": 13,
+      "max_ms": 13
+    },
+    {
+      "node_type": "llm_tool",
+      "status": "failed",
+      "count": 1,
+      "p50_ms": 9,
+      "p95_ms": 9,
+      "max_ms": 9
+    }
+  ],
+  "payloadAudit": {
+    "deliveries": 56,
+    "test_email_payloads_excluded": 18,
+    "active_contact_payloads": 0,
+    "base64_payloads": 0,
+    "avatar_or_photo_payloads": 0,
+    "email_like_payloads": 0,
+    "named_contact_payloads": 0,
+    "p50_payload_chars": 2118,
+    "p95_payload_chars": 2123,
+    "max_payload_chars": 2137
+  },
+  "payloadLargestShapes": [
+    {
+      "delivery_id": 187,
+      "workflow_run_id": 170,
+      "payload_chars": 2137,
+      "top_level_keys": [
+        "actionLinks",
+        "branding",
+        "brandingWarnings",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ]
+    },
+    {
+      "delivery_id": 188,
+      "workflow_run_id": 171,
+      "payload_chars": 2136,
+      "top_level_keys": [
+        "actionLinks",
+        "branding",
+        "brandingWarnings",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ]
+    },
+    {
+      "delivery_id": 206,
+      "workflow_run_id": 186,
+      "payload_chars": 2123,
+      "top_level_keys": [
+        "actionLinks",
+        "branding",
+        "brandingWarnings",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ]
+    },
+    {
+      "delivery_id": 204,
+      "workflow_run_id": 184,
+      "payload_chars": 2123,
+      "top_level_keys": [
+        "actionLinks",
+        "branding",
+        "brandingWarnings",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ]
+    },
+    {
+      "delivery_id": 207,
+      "workflow_run_id": 187,
+      "payload_chars": 2123,
+      "top_level_keys": [
+        "actionLinks",
+        "branding",
+        "brandingWarnings",
+        "event",
+        "mockMode",
+        "nodeId",
+        "workflowId",
+        "workflowVersion",
+        "wouldSend"
+      ],
+      "action_link_keys": [
+        "afterHoursSupport",
+        "publicStatus",
+        "raiseUrgency"
+      ],
+      "after_hours_support_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "raise_urgency_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ],
+      "public_status_keys": [
+        "actionLinkRenderMode",
+        "applied",
+        "forced",
+        "hasActiveContact",
+        "liveWouldSkipReason",
+        "phoneVerified",
+        "reason",
+        "requested",
+        "rotationLabel",
+        "skipped",
+        "url",
+        "warning"
+      ]
+    }
+  ],
+  "workflowConfigs": [
+    {
+      "id": 3,
+      "workspaceId": 1,
+      "key": "ticket_assigned",
+      "name": "Ticket assigned",
+      "triggerType": "ticket.assigned",
+      "isEnabled": true,
+      "mockModeEnabled": true,
+      "publishedVersion": 4,
+      "publishedVersionId": 5,
+      "publishedAt": "2026-06-03 22:40:13.732",
+      "definition": {
+        "nodeCount": 7,
+        "llmNodes": [
+          {
+            "nodeId": "llm-generate",
+            "outputMode": "draft_email",
+            "toolMode": null,
+            "promptPresent": true,
+            "promptLength": 1504,
+            "tone": null,
+            "requesterGuardrails": {
+              "tone": false,
+              "enabled": true,
+              "outageClaims": true,
+              "timingClaims": false,
+              "internalReferences": true
+            },
+            "policy": null
+          }
+        ],
+        "sendNodes": [
+          {
+            "nodeId": "send",
+            "includeHeader": true,
+            "headerBlockId": null,
+            "footerBlockId": null
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "workspaceId": 1,
+      "key": "ticket_created_after_hours",
+      "name": "Ticket arrived after-hours / holiday",
+      "triggerType": "ticket.created",
+      "isEnabled": true,
+      "mockModeEnabled": true,
+      "publishedVersion": 3,
+      "publishedVersionId": 7,
+      "publishedAt": "2026-06-03 22:46:19.04",
+      "definition": {
+        "nodeCount": 7,
+        "llmNodes": [
+          {
+            "nodeId": "llm-generate",
+            "outputMode": null,
+            "toolMode": null,
+            "promptPresent": true,
+            "promptLength": 919,
+            "tone": null,
+            "requesterGuardrails": null,
+            "policy": null
+          }
+        ],
+        "sendNodes": [
+          {
+            "nodeId": "send",
+            "includeHeader": false,
+            "headerBlockId": null,
+            "footerBlockId": 1
+          }
+        ]
+      }
+    }
+  ],
+  "llmToolPolicy": [
+    {
+      "workspace_id": 1,
+      "mode": "tools_enabled",
+      "enabled_tools": [
+        "get_ticket_thread_summary",
+        "find_similar_tickets",
+        "detect_related_ticket_spike",
+        "get_notification_context"
+      ],
+      "tool_settings": {
+        "safety": {
+          "maxContextBytes": 40000,
+          "maxToolOutputBytes": 12000
+        },
+        "context": {
+          "lookbackHours": [
+            1,
+            4,
+            24
+          ],
+          "maxThreadEntries": 6,
+          "maxSimilarTickets": 5,
+          "includeOutageSignals": true,
+          "includeThreadHistory": true,
+          "includeSimilarTickets": true
+        },
+        "outageSignals": {
+          "watchThreshold": 3,
+          "distinctRequesterThreshold": 3,
+          "distinctDepartmentThreshold": 2,
+          "possibleBroaderIssueThreshold": 5
+        }
+      },
+      "max_turns": 4,
+      "max_tool_calls": 6,
+      "total_timeout_ms": 20000,
+      "per_tool_timeout_ms": 3000,
+      "include_private_notes": false,
+      "redaction_enabled": true,
+      "policy_version": 7,
+      "updated_at": "2026-06-03 16:35:27.1"
+    }
+  ],
+  "copyReview": {
+    "reviewed": 56,
+    "severityCounts": {
+      "auto_repair": 55,
+      "audit_only": 11
+    },
+    "ruleCounts": {
+      "unsupported_timing_claim": 55,
+      "emoji": 6,
+      "playful_copy": 5
+    },
+    "timingPhraseCounts": {
+      "by the next business day": 10,
+      "estimated resolution": 51,
+      "typically": 14,
+      "within 1 business day": 6,
+      "usually": 2
+    },
+    "auditOnlyPhraseCounts": {
+      "launch pad": 4,
+      "bedrock": 2,
+      "core sample": 4
+    },
+    "flaggedSamples": [
+      {
+        "deliveryId": 259,
+        "workflowRunId": 230,
+        "ticketId": 27988,
+        "eventType": "ticket.created",
+        "notificationType": "ticket.created",
+        "status": "mocked",
+        "priority": "Urgent",
+        "category": "Security Incident",
+        "subCategory": null,
+        "queuedAt": "2026-06-04 00:54:44.254",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 258,
+        "workflowRunId": 229,
+        "ticketId": 27985,
+        "eventType": "ticket.created",
+        "notificationType": "ticket.created",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Spam/Phishing",
+        "subCategory": null,
+        "queuedAt": "2026-06-04 00:13:28.912",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 257,
+        "workflowRunId": 228,
+        "ticketId": 27984,
+        "eventType": "ticket.created",
+        "notificationType": "ticket.created",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Licensing",
+        "subCategory": null,
+        "queuedAt": "2026-06-04 00:09:13.306",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 256,
+        "workflowRunId": 227,
+        "ticketId": 27982,
+        "eventType": "ticket.created",
+        "notificationType": "ticket.created",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Peripherals",
+        "subCategory": null,
+        "queuedAt": "2026-06-04 00:03:26.76",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 252,
+        "workflowRunId": 225,
+        "ticketId": 27975,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Licensing",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 22:45:17.097",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 247,
+        "workflowRunId": 222,
+        "ticketId": 27968,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Software Support",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 22:06:12.536",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 245,
+        "workflowRunId": 219,
+        "ticketId": 27967,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Mobile Roaming Plan",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 22:02:25.304",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 244,
+        "workflowRunId": 218,
+        "ticketId": 27964,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Other",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 21:56:00.919",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 241,
+        "workflowRunId": 215,
+        "ticketId": 27958,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "High",
+        "category": null,
+        "subCategory": null,
+        "queuedAt": "2026-06-03 21:28:38.853",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 237,
+        "workflowRunId": 214,
+        "ticketId": 27953,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Permissions Update",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:51:00.266",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "emoji",
+            "severity": "audit_only",
+            "detail": "Emoji or symbol style appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 236,
+        "workflowRunId": 213,
+        "ticketId": 27951,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Low",
+        "category": "Onboarding",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:45:31.989",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 235,
+        "workflowRunId": 212,
+        "ticketId": 27952,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Low",
+        "category": "Onboarding",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:45:23.998",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          },
+          {
+            "ruleId": "playful_copy",
+            "severity": "audit_only",
+            "detail": "Playful or branded metaphor appeared; allowed when workflow tone permits it."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 234,
+        "workflowRunId": 211,
+        "ticketId": 27950,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Active Directory Tasks",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:43:42.635",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 233,
+        "workflowRunId": 210,
+        "ticketId": 27948,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Software Support",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:41:06.771",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 232,
+        "workflowRunId": 209,
+        "ticketId": 27945,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Onboarding",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:34:33.21",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 231,
+        "workflowRunId": 208,
+        "ticketId": 27946,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Low",
+        "category": "Onboarding",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:34:23.376",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 230,
+        "workflowRunId": 207,
+        "ticketId": 27944,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Low",
+        "category": null,
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:31:24.606",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 228,
+        "workflowRunId": 206,
+        "ticketId": 27940,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Mobile Devices",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:10:47.846",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 227,
+        "workflowRunId": 205,
+        "ticketId": 27939,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Licensing",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:08:43.738",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      },
+      {
+        "deliveryId": 226,
+        "workflowRunId": 204,
+        "ticketId": 27938,
+        "eventType": "ticket.assigned",
+        "notificationType": "ticket.assigned",
+        "status": "mocked",
+        "priority": "Medium",
+        "category": "Permissions Update",
+        "subCategory": null,
+        "queuedAt": "2026-06-03 20:07:38.954",
+        "findings": [
+          {
+            "ruleId": "unsupported_timing_claim",
+            "severity": "auto_repair",
+            "detail": "Timing or resolution expectation needs deterministic evidence."
+          }
+        ],
+        "subjectPreview": "[redacted subject]"
+      }
+    ],
+    "note": "audit_only findings are style visibility only; they are not blockers when workflow tone permits relaxed copy."
+  },
+  "latestRuns": [
+    {
+      "id": 231,
+      "started_at": "2026-06-04 02:03:50.8",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_fast_sync",
+      "status": "completed",
+      "freshservice_ticket_id": "225384",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 230,
+      "started_at": "2026-06-04 00:54:36.321",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "trigger_source": "freshservice_webhook",
+      "status": "completed",
+      "freshservice_ticket_id": "225384",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 229,
+      "started_at": "2026-06-04 00:13:20.886",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "trigger_source": "freshservice_webhook",
+      "status": "completed",
+      "freshservice_ticket_id": "225381",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 228,
+      "started_at": "2026-06-04 00:09:07.697",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "trigger_source": "freshservice_webhook",
+      "status": "completed",
+      "freshservice_ticket_id": "225380",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 227,
+      "started_at": "2026-06-04 00:03:18.785",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "mock",
+      "trigger_source": "freshservice_webhook",
+      "status": "completed",
+      "freshservice_ticket_id": "225378",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 226,
+      "started_at": "2026-06-03 22:51:02.168",
+      "workflow_key": "ticket_created_after_hours",
+      "event_type": "ticket.created",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225195",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 225,
+      "started_at": "2026-06-03 22:45:03.25",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225371",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 224,
+      "started_at": "2026-06-03 22:40:25.568",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225364",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 223,
+      "started_at": "2026-06-03 22:07:19.612",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225364",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 222,
+      "started_at": "2026-06-03 22:06:05.593",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225364",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 221,
+      "started_at": "2026-06-03 22:06:01.06",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225364",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 220,
+      "started_at": "2026-06-03 22:04:07.885",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225363",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 219,
+      "started_at": "2026-06-03 22:02:15.762",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225363",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 218,
+      "started_at": "2026-06-03 21:55:50.138",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225360",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 217,
+      "started_at": "2026-06-03 21:55:30.934",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225360",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 216,
+      "started_at": "2026-06-03 21:49:22.462",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "preview",
+      "trigger_source": "preview",
+      "status": "completed",
+      "freshservice_ticket_id": "225354",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 215,
+      "started_at": "2026-06-03 21:28:31.184",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225354",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 214,
+      "started_at": "2026-06-03 20:50:53.506",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_pipeline",
+      "status": "completed",
+      "freshservice_ticket_id": "225349",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 213,
+      "started_at": "2026-06-03 20:45:24.252",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_fast_sync",
+      "status": "completed",
+      "freshservice_ticket_id": "225347",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    },
+    {
+      "id": 212,
+      "started_at": "2026-06-03 20:45:14.097",
+      "workflow_key": "ticket_assigned",
+      "event_type": "ticket.assigned",
+      "execution_mode": "mock",
+      "trigger_source": "assignment_fast_sync",
+      "status": "completed",
+      "freshservice_ticket_id": "225348",
+      "ticket_subject_preview": "[redacted subject]",
+      "llm_status": "completed",
+      "llm_failure_type": "none",
+      "template_fallback_used": "false",
+      "guard_rejected": "false",
+      "llm_error_preview": ""
+    }
+  ],
+  "gates": {
+    "duplicateTicketEventGroups": {
+      "status": "pass",
+      "detail": "0 real mocked duplicate delivery group(s).",
+      "evidence": {
+        "realMockDeliveries": 56
+      }
+    },
+    "degradedRunVisibility": {
+      "status": "review",
+      "detail": "Run health is reported separately from workflow execution status.",
+      "evidence": {
+        "mockRuns": 60
+      }
+    },
+    "llmFallbackVisibility": {
+      "status": "pass",
+      "detail": "1 guard rejection(s), 7 template fallback marker(s), 6 provider/schema fallback marker(s).",
+      "evidence": {
+        "llm_steps": 67,
+        "completed": 67,
+        "failed": 0,
+        "guard_rejected": 1,
+        "template_fallback_used": 7,
+        "provider_or_schema": 6
+      }
+    },
+    "possibleBroaderIssueRate": {
+      "status": "review",
+      "detail": "41.8% possible_broader_issue rate.",
+      "evidence": {
+        "possibleCount": 28,
+        "llmSteps": 67
+      }
+    },
+    "compactPayloads": {
+      "status": "pass",
+      "detail": "0 base64, 0 activeContact, 0 avatar/photo, 0 email-like payload(s).",
+      "evidence": {
+        "deliveries": 56,
+        "test_email_payloads_excluded": 18,
+        "active_contact_payloads": 0,
+        "base64_payloads": 0,
+        "avatar_or_photo_payloads": 0,
+        "email_like_payloads": 0,
+        "named_contact_payloads": 0,
+        "p50_payload_chars": 2118,
+        "p95_payload_chars": 2123,
+        "max_payload_chars": 2137
+      }
+    },
+    "copyPolicy": {
+      "status": "review",
+      "detail": "56 output(s) scanned, 0 hard-block and 55 auto-repair finding(s). Audit-only style findings are not blockers.",
+      "evidence": {
+        "auto_repair": 55,
+        "audit_only": 11
+      }
+    },
+    "oneBusinessDayMockAudit": {
+      "status": "review",
+      "detail": "Window has enough mock runs for audit volume, but business-day coverage must be confirmed against the selected timezone.",
+      "evidence": {
+        "mockRuns": 60
+      }
+    }
+  },
+  "summary": {
+    "runCount": 71,
+    "mockRunCount": 60,
+    "previewRunCount": 11,
+    "realDuplicateGroupCount": 0,
+    "llmFallbackMarkers": 7,
+    "providerOrSchemaMarkers": 6,
+    "possibleBroaderIssueRate": 41.8,
+    "hardBlockCopyFindings": 0,
+    "autoRepairCopyFindings": 55,
+    "auditOnlyCopyFindings": 11
+  }
+}

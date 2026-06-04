@@ -618,7 +618,7 @@ function workflowRunWarnings(run = {}) {
     const llm = output.llm || (step.nodeType === 'llm_generate' ? output : null);
     if (!llm || (!llm.failed && !llm.warning && llm.guardRejected !== true)) continue;
     warnings.push({
-      type: llm.guardRejected ? 'guard_rejected' : 'llm_failed',
+      type: llm.guardRejected ? 'guard_rejected' : (llm.failed ? 'llm_failed' : 'llm_warning'),
       nodeId: step.nodeId || null,
       outputKey: output.outputKey || llm.outputKey || null,
       provider: llm.provider || null,

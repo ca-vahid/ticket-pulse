@@ -1166,6 +1166,15 @@ describe('notification workflow engine persistence', () => {
 
     const llmStep = result.steps.find((step) => step.nodeType === 'llm_generate');
     expect(result.status).toBe('completed');
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'llm_warning',
+        templateFallbackUsed: false,
+      }),
+    ]));
+    expect(result.warnings).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'llm_failed' }),
+    ]));
     expect(llmStep.output.llm).toEqual(expect.objectContaining({
       promptPolicy: expect.objectContaining({
         strictness: 'custom_tone',

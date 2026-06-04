@@ -1858,7 +1858,7 @@ function workflowWarningsFromState(state = {}) {
   for (const [outputKey, llm] of llmRuns) {
     if (!llm?.failed && !llm?.warning) continue;
     warnings.push({
-      type: llm.guardRejected ? 'guard_rejected' : 'llm_failed',
+      type: llm.guardRejected ? 'guard_rejected' : (llm.failed ? 'llm_failed' : 'llm_warning'),
       outputKey,
       provider: llm.provider || null,
       model: llm.model || null,
