@@ -4,11 +4,12 @@ Decision: no-go for live-send expansion today. Keep enabled workflows in mock mo
 
 ## Evidence
 
-- Runtime deployed on main: `962f1d4b2774355a582c643bc8af7800d05bbd3f`.
-- Backend deployment: `Deploy Backend to Azure App Service` run `26933661394`, success.
-- Frontend deployment: `Azure Static Web Apps CI/CD` run `26933661336`, success.
+- Runtime deployed on main: `95ec499a6d7f263342c5164c07496c8f775de770`.
+- Backend deployment: `Deploy Backend to Azure App Service` run `26934657684`, success.
+- Frontend deployment: `Azure Static Web Apps CI/CD` run `26934657673`, success.
 - Production health: `https://ticket-pulse-app.azurewebsites.net/api/health` returned healthy after deployment.
 - Immediate post-deploy audit: `scratchpad/notification-workflow-postdeploy-audit-2026-06-04.json`.
+- Latest deployed-commit audit checkpoint: `scratchpad/notification-workflow-postdeploy-audit-95ec499a-2026-06-04.json`.
 - Claude canary: `scratchpad/notification-workflow-claude-canary-2026-06-04.json`.
 
 ## Passed Gates
@@ -26,6 +27,7 @@ Decision: no-go for live-send expansion today. Keep enabled workflows in mock mo
 ## Open Gates
 
 - One business day of post-deploy production mock evidence is not available yet.
+- The latest deployed-commit checkpoint after `95ec499a` had zero workflow runs, zero deliveries, and zero LLM/provider attempts, so it cannot prove launch readiness.
 - Immediate audit was generated shortly after deployment and mostly covers pre-deploy workflow runs; it should not be treated as launch evidence.
 - `possible_broader_issue` rate in the immediate audit window was still review-level and needs post-deploy confirmation.
 - Historical provider/schema fallbacks in the audit window were pre-fix rows; post-deploy provider/schema failure rate still needs a non-zero mock sample.
