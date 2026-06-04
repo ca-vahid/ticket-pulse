@@ -1,0 +1,271 @@
+{
+  "generatedAt": "2026-06-04T06:25:20.725Z",
+  "since": "2026-06-04T06:20:35.000Z",
+  "timezone": "America/Vancouver",
+  "clock": {
+    "db_now": "2026-06-04T06:25:21.756Z",
+    "timezone": "UTC"
+  },
+  "runs": {
+    "runs": 0,
+    "mock_runs": 0,
+    "preview_runs": 0,
+    "live_runs": 0,
+    "completed_runs": 0,
+    "failed_runs": 0,
+    "first_run": null,
+    "last_run": null
+  },
+  "runsByLocalDay": [],
+  "runsByTrigger": [],
+  "runsByWorkflowEvent": [],
+  "runHealth": [],
+  "deliveries": {
+    "deliveries": 0,
+    "mocked": 0,
+    "sent": 0,
+    "failed": 0,
+    "real_mocked": 0,
+    "test_emails": 0,
+    "p50_payload_chars": null,
+    "p95_payload_chars": null,
+    "max_payload_chars": null
+  },
+  "realDuplicateGroups": [],
+  "llm": {
+    "llm_steps": 0,
+    "completed": 0,
+    "failed": 0,
+    "guard_rejected": 0,
+    "template_fallback_used": 0,
+    "provider_or_schema": 0
+  },
+  "fallbackCauses": [],
+  "repairedIssues": [],
+  "blockedIssues": [],
+  "signalLevels": [],
+  "signalSamples": [],
+  "providerAttempts": [],
+  "stepTypes": [],
+  "payloadAudit": {
+    "deliveries": 0,
+    "test_email_payloads_excluded": 0,
+    "active_contact_payloads": 0,
+    "base64_payloads": 0,
+    "avatar_or_photo_payloads": 0,
+    "email_like_payloads": 0,
+    "named_contact_payloads": 0,
+    "p50_payload_chars": null,
+    "p95_payload_chars": null,
+    "max_payload_chars": null
+  },
+  "payloadLargestShapes": [],
+  "workflowConfigs": [
+    {
+      "id": 3,
+      "workspaceId": 1,
+      "key": "ticket_assigned",
+      "name": "Ticket assigned",
+      "triggerType": "ticket.assigned",
+      "isEnabled": true,
+      "mockModeEnabled": true,
+      "publishedVersion": 4,
+      "publishedVersionId": 5,
+      "publishedAt": "2026-06-03 22:40:13.732",
+      "definition": {
+        "nodeCount": 7,
+        "llmNodes": [
+          {
+            "nodeId": "llm-generate",
+            "outputMode": "draft_email",
+            "toolMode": null,
+            "promptPresent": true,
+            "promptLength": 1504,
+            "tone": null,
+            "requesterGuardrails": {
+              "tone": false,
+              "enabled": true,
+              "outageClaims": true,
+              "timingClaims": false,
+              "internalReferences": true
+            },
+            "policy": null
+          }
+        ],
+        "sendNodes": [
+          {
+            "nodeId": "send",
+            "includeHeader": true,
+            "headerBlockId": null,
+            "footerBlockId": null
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "workspaceId": 1,
+      "key": "ticket_created_after_hours",
+      "name": "Ticket arrived after-hours / holiday",
+      "triggerType": "ticket.created",
+      "isEnabled": true,
+      "mockModeEnabled": true,
+      "publishedVersion": 3,
+      "publishedVersionId": 7,
+      "publishedAt": "2026-06-03 22:46:19.04",
+      "definition": {
+        "nodeCount": 7,
+        "llmNodes": [
+          {
+            "nodeId": "llm-generate",
+            "outputMode": null,
+            "toolMode": null,
+            "promptPresent": true,
+            "promptLength": 919,
+            "tone": null,
+            "requesterGuardrails": null,
+            "policy": null
+          }
+        ],
+        "sendNodes": [
+          {
+            "nodeId": "send",
+            "includeHeader": false,
+            "headerBlockId": null,
+            "footerBlockId": 1
+          }
+        ]
+      }
+    }
+  ],
+  "llmToolPolicy": [
+    {
+      "workspace_id": 1,
+      "mode": "tools_enabled",
+      "enabled_tools": [
+        "get_ticket_thread_summary",
+        "find_similar_tickets",
+        "detect_related_ticket_spike",
+        "get_notification_context"
+      ],
+      "tool_settings": {
+        "safety": {
+          "maxContextBytes": 40000,
+          "maxToolOutputBytes": 12000
+        },
+        "context": {
+          "lookbackHours": [
+            1,
+            4,
+            24
+          ],
+          "maxThreadEntries": 6,
+          "maxSimilarTickets": 5,
+          "includeOutageSignals": true,
+          "includeThreadHistory": true,
+          "includeSimilarTickets": true
+        },
+        "outageSignals": {
+          "watchThreshold": 3,
+          "distinctRequesterThreshold": 3,
+          "distinctDepartmentThreshold": 2,
+          "possibleBroaderIssueThreshold": 5
+        }
+      },
+      "max_turns": 4,
+      "max_tool_calls": 6,
+      "total_timeout_ms": 20000,
+      "per_tool_timeout_ms": 3000,
+      "include_private_notes": false,
+      "redaction_enabled": true,
+      "policy_version": 7,
+      "updated_at": "2026-06-03 16:35:27.1"
+    }
+  ],
+  "copyReview": {
+    "reviewed": 0,
+    "severityCounts": {},
+    "ruleCounts": {},
+    "timingPhraseCounts": {},
+    "auditOnlyPhraseCounts": {},
+    "flaggedSamples": [],
+    "note": "audit_only findings are style visibility only; they are not blockers when workflow tone permits relaxed copy."
+  },
+  "latestRuns": [],
+  "gates": {
+    "duplicateTicketEventGroups": {
+      "status": "missing_evidence",
+      "detail": "No real mocked workflow deliveries exist in this window.",
+      "evidence": {
+        "realMockDeliveries": 0
+      }
+    },
+    "degradedRunVisibility": {
+      "status": "missing_evidence",
+      "detail": "No mock runs exist in this window.",
+      "evidence": {
+        "mockRuns": 0
+      }
+    },
+    "llmFallbackVisibility": {
+      "status": "missing_evidence",
+      "detail": "No LLM steps exist in this window.",
+      "evidence": {
+        "llm_steps": 0,
+        "completed": 0,
+        "failed": 0,
+        "guard_rejected": 0,
+        "template_fallback_used": 0,
+        "provider_or_schema": 0
+      }
+    },
+    "possibleBroaderIssueRate": {
+      "status": "missing_evidence",
+      "detail": "No LLM context rows exist in this window.",
+      "evidence": {
+        "possibleCount": 0,
+        "llmSteps": 0
+      }
+    },
+    "compactPayloads": {
+      "status": "missing_evidence",
+      "detail": "No workflow delivery payloads exist in this window.",
+      "evidence": {
+        "deliveries": 0,
+        "test_email_payloads_excluded": 0,
+        "active_contact_payloads": 0,
+        "base64_payloads": 0,
+        "avatar_or_photo_payloads": 0,
+        "email_like_payloads": 0,
+        "named_contact_payloads": 0,
+        "p50_payload_chars": null,
+        "p95_payload_chars": null,
+        "max_payload_chars": null
+      }
+    },
+    "copyPolicy": {
+      "status": "missing_evidence",
+      "detail": "Only 0 output(s) available; 20 required.",
+      "evidence": {}
+    },
+    "oneBusinessDayMockAudit": {
+      "status": "missing_evidence",
+      "detail": "Only 0 mock run(s) in this window; 20 required for the review sample.",
+      "evidence": {
+        "mockRuns": 0
+      }
+    }
+  },
+  "summary": {
+    "runCount": 0,
+    "mockRunCount": 0,
+    "previewRunCount": 0,
+    "realDuplicateGroupCount": 0,
+    "llmFallbackMarkers": 0,
+    "providerOrSchemaMarkers": 0,
+    "possibleBroaderIssueRate": null,
+    "hardBlockCopyFindings": 0,
+    "autoRepairCopyFindings": 0,
+    "auditOnlyCopyFindings": 0
+  }
+}

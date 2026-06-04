@@ -8,6 +8,8 @@ Phase 0 baseline artifact: `scratchpad/notification-workflow-day3-baseline-2026-
 
 Immediate post-deploy audit artifact: `scratchpad/notification-workflow-postdeploy-audit-2026-06-04.json`
 
+Latest deployed-commit audit checkpoint: `scratchpad/notification-workflow-postdeploy-audit-95ec499a-2026-06-04.json`
+
 Claude canary artifact: `scratchpad/notification-workflow-claude-canary-2026-06-04.json`
 
 Go/no-go note: `scratchpad/notification-workflow-go-no-go-2026-06-04.md`
@@ -294,7 +296,10 @@ Done when:
   - [x] Push branch and confirm backend deployment completes.
   - [x] Confirm frontend/static deployment completes if UI changed.
   - [x] Confirm `/api/health` is healthy after deployment.
+  - [x] Push follow-up PR #42 for audit-only warning labeling and evidence artifacts: https://github.com/ca-vahid/ticket-pulse/pull/42
+  - [x] Confirm backend and frontend deployments complete on `95ec499a`.
 - [ ] Run one-business-day production mock audit.
+  - [x] Run an immediate checkpoint audit after `95ec499a`; it found zero runs, so launch evidence is still missing.
   - [ ] Confirm real mock delivery volume is non-zero.
   - [ ] Confirm duplicate real workflow groups are zero.
   - [ ] Confirm provider/schema failures are zero after deployment.
