@@ -282,6 +282,8 @@ Done when:
   - [x] Frontend build and focused UI checks for Workflow Audit and workflow editor.
   - [x] Audit script dry run against non-production or safe production read-only connection.
 - [ ] Deploy to production.
+  - [x] Push clean branch and open PR #40: https://github.com/ca-vahid/ticket-pulse/pull/40
+  - [ ] Clear the Azure Static Web Apps staging-environment quota blocker or use an approved merge-to-main deployment path.
   - [ ] Push branch and confirm backend deployment completes.
   - [ ] Confirm frontend/static deployment completes if UI changed.
   - [ ] Confirm `/api/health` is healthy after deployment.
