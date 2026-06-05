@@ -904,13 +904,6 @@ function healthClass(state) {
   return 'bg-gray-50 text-gray-700 border-gray-200';
 }
 
-function healthTone(state) {
-  if (state === 'completed_clean') return 'emerald';
-  if (state === 'completed_with_repair' || state === 'completed_with_warning') return 'amber';
-  if (state === 'completed_with_fallback' || state === 'failed') return 'red';
-  return 'gray';
-}
-
 function workflowHealthWarningLabel(warning = {}) {
   const count = Number.isFinite(Number(warning.count)) ? Number(warning.count) : null;
   const suffix = count === null ? '' : ` (${count})`;
@@ -2006,6 +1999,32 @@ function collectPreviewIssues(preview, steps, email, recipients) {
   return issues;
 }
 
+// Neutral, reusable detail card — the mature replacement for the per-section colored boxes.
+function AuditSection({ title, icon: Icon, right, children, className }) {
+  return (
+    <section className={cls('overflow-hidden rounded-lg border border-slate-200 bg-white', className)}>
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          {Icon && <Icon className="h-3.5 w-3.5 text-slate-400" />}
+          {title}
+        </div>
+        {right}
+      </div>
+      <div className="p-3">{children}</div>
+    </section>
+  );
+}
+
+function AuditStat({ label, value, tone = 'default' }) {
+  const valueClass = tone === 'warn' ? 'text-amber-700' : tone === 'bad' ? 'text-red-700' : 'text-slate-800';
+  return (
+    <div className="flex items-baseline gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+      <span className={cls('text-xs font-semibold', valueClass)}>{value}</span>
+    </div>
+  );
+}
+
 function ActionLinkDiagnostics({ diagnostics }) {
   const items = [
     ['publicStatus', 'Public status', 'blue'],
@@ -2016,41 +2035,44 @@ function ActionLinkDiagnostics({ diagnostics }) {
     .filter((item) => item.diagnostic?.requested);
   if (!items.length) return null;
   return (
-    <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Action block diagnostics</div>
-      <div className="grid gap-2 md:grid-cols-3">
+    <AuditSection title="Action blocks">
+      <div className="divide-y divide-slate-100">
         {items.map(({ key, label, tone, diagnostic }) => {
           const applied = diagnostic.applied && !diagnostic.skipped;
-          const color = diagnostic.skipped
-            ? 'border-amber-200 bg-amber-50 text-amber-800'
+          const dot = diagnostic.skipped
+            ? 'bg-amber-400'
             : diagnostic.forced || diagnostic.warning
-              ? 'border-blue-200 bg-blue-50 text-blue-800'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-800';
+              ? 'bg-blue-400'
+              : applied
+                ? 'bg-emerald-500'
+                : 'bg-slate-300';
+          const stateLabel = diagnostic.skipped ? 'Skipped' : diagnostic.forced ? 'Forced test' : applied ? 'Rendered' : 'Checked';
           return (
-            <div key={key} className={cls('rounded-md border px-3 py-2 text-xs', color)}>
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold">{label}</span>
-                <span className="rounded-full bg-white/70 px-2 py-0.5 font-semibold">
-                  {diagnostic.skipped ? 'Skipped' : diagnostic.forced ? 'Forced test' : applied ? 'Rendered' : 'Checked'}
-                </span>
-              </div>
-              <div className="mt-1 leading-5">
-                {diagnostic.reason || diagnostic.warning || diagnostic.liveWouldSkipReason || 'Ready'}
-              </div>
-              {key === 'afterHoursSupport' && diagnostic.hasActiveContact && (
-                <div className="mt-1 text-[11px] opacity-80">
-                  Active contact configured{diagnostic.phoneVerified ? ' with verified phone' : ''}
-                  {diagnostic.rotationLabel ? ` (${diagnostic.rotationLabel})` : ''}
+            <div key={key} className="flex items-start gap-2.5 py-2 text-xs first:pt-0 last:pb-0">
+              <span className={cls('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', dot)} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-700">{label}</span>
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{stateLabel}</span>
                 </div>
-              )}
-              {tone === 'red' && diagnostic.hasUrl && (
-                <div className="mt-1 text-[11px] opacity-80">Action link URL captured in rendered email</div>
-              )}
+                <div className="mt-0.5 leading-5 text-slate-500">
+                  {diagnostic.reason || diagnostic.warning || diagnostic.liveWouldSkipReason || 'Ready'}
+                </div>
+                {key === 'afterHoursSupport' && diagnostic.hasActiveContact && (
+                  <div className="mt-0.5 text-[11px] text-slate-400">
+                    Active contact configured{diagnostic.phoneVerified ? ' with verified phone' : ''}
+                    {diagnostic.rotationLabel ? ` (${diagnostic.rotationLabel})` : ''}
+                  </div>
+                )}
+                {tone === 'red' && diagnostic.hasUrl && (
+                  <div className="mt-0.5 text-[11px] text-slate-400">Action link URL captured in rendered email</div>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
-    </div>
+    </AuditSection>
   );
 }
 
@@ -2063,32 +2085,33 @@ function BrandingDiagnostics({ branding }) {
     .filter((item) => item.diagnostic?.requested);
   if (!items.length) return null;
   return (
-    <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">Branding</div>
-      <div className="grid gap-2 md:grid-cols-2">
+    <AuditSection title="Branding">
+      <div className="divide-y divide-slate-100">
         {items.map(({ key, label, diagnostic }) => {
-          const color = diagnostic.applied
+          const dot = diagnostic.applied
             ? diagnostic.fallback
-              ? 'border-blue-200 bg-blue-50 text-blue-800'
-              : 'border-emerald-200 bg-white text-emerald-800'
-            : 'border-amber-200 bg-amber-50 text-amber-800';
+              ? 'bg-blue-400'
+              : 'bg-emerald-500'
+            : 'bg-amber-400';
+          const stateLabel = diagnostic.applied ? (diagnostic.fallback ? 'Default used' : 'Applied') : 'Skipped';
           return (
-            <div key={key} className={cls('rounded-md border px-3 py-2 text-xs', color)}>
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold">{label}</span>
-                <span className="rounded-full bg-white/70 px-2 py-0.5 font-semibold">
-                  {diagnostic.applied ? (diagnostic.fallback ? 'Default used' : 'Applied') : 'Skipped'}
-                </span>
+            <div key={key} className="flex items-start gap-2.5 py-2 text-xs first:pt-0 last:pb-0">
+              <span className={cls('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', dot)} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-700">{label}</span>
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{stateLabel}</span>
+                </div>
+                <div className="mt-0.5 leading-5 text-slate-500">
+                  {diagnostic.blockName || diagnostic.reason || 'Workspace default'}
+                </div>
+                {diagnostic.warning && <div className="mt-0.5 text-[11px] text-slate-400">{diagnostic.warning}</div>}
               </div>
-              <div className="mt-1 leading-5">
-                {diagnostic.blockName || diagnostic.reason || 'Workspace default'}
-              </div>
-              {diagnostic.warning && <div className="mt-1 text-[11px] font-medium">{diagnostic.warning}</div>}
             </div>
           );
         })}
       </div>
-    </div>
+    </AuditSection>
   );
 }
 
@@ -4863,6 +4886,8 @@ function MockAuditPanel({
   // live/send-test output (current template) rather than the historically stored email.
   const [renderedEmail, setRenderedEmail] = useState(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailDevice, setEmailDevice] = useState('desktop');
+  const [detailTab, setDetailTab] = useState('email');
   useEffect(() => {
     setEmailModalOpen(false);
     if (!activeRun?.id) {
@@ -5266,9 +5291,9 @@ function MockAuditPanel({
           </div>
         </div>
 
-        <div className="settings-scrollbar min-h-0 overflow-auto rounded-xl border border-slate-200 bg-white p-4 shadow-subtle">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-subtle">
           {!activeRun ? (
-            <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 text-sm text-slate-400">
+            <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 p-4 text-sm text-slate-400">
               <FlaskConical className="h-6 w-6 text-slate-300" />
               Select a workflow run.
             </div>
@@ -5278,12 +5303,24 @@ function MockAuditPanel({
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-              className="space-y-4"
+              className="flex min-h-0 flex-1 flex-col"
             >
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-700 ring-1 ring-inset ring-sky-200/70">{activeEventLabel}</span>
+              {/* Run summary header */}
+              <div className="shrink-0 px-4 pt-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h4 className="text-base font-semibold leading-snug text-slate-900">
+                      <span className="font-mono text-sm text-slate-400">{auditTicketLabel(activeRun)}</span> {auditTicketSubject(activeRun)}
+                    </h4>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-slate-400">
+                      <span className="font-mono">{activeRun.auditId || `TP-NWF-${activeRun.id}`}</span>
+                      <span className="text-slate-300">·</span>
+                      <span>{workflowDisplayName(activeRun.workflow || selectedWorkflow)}</span>
+                      <span className="text-slate-300">·</span>
+                      <span>{formatDate(activeRun.startedAt)}</span>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
                     <span className={cls('inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize', statusClass(activeDelivery?.status || activeRun.status))}>
                       <span className={cls('h-1.5 w-1.5 rounded-full', statusDotClass(activeDelivery?.status || activeRun.status))} />
                       {activeDelivery?.status || activeRun.status}
@@ -5293,185 +5330,220 @@ function MockAuditPanel({
                         {activeHealth.label || runHealthLabel(activeRun)}
                       </span>
                     )}
-                  </div>
-                  <h4 className="mt-1.5 text-base font-semibold leading-snug text-slate-900">
-                    <span className="font-mono text-sm text-slate-500">{auditTicketLabel(activeRun)}</span> {auditTicketSubject(activeRun)}
-                  </h4>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-slate-400">
-                    <span className="font-mono">{activeRun.auditId || `TP-NWF-${activeRun.id}`}</span>
-                    <span className="text-slate-300">·</span>
-                    <span>{workflowDisplayName(activeRun.workflow || selectedWorkflow)}</span>
-                    <span className="text-slate-300">·</span>
-                    <span>{formatDate(activeRun.startedAt)}</span>
+                    <AuditModeBadge mode={activeRun.executionMode} />
                   </div>
                 </div>
-                <AuditModeBadge mode={activeRun.executionMode} />
+                <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5 border-t border-slate-100 pt-2.5">
+                  <AuditStat label="Event" value={activeEventLabel} />
+                  <AuditStat label="Email" value={activeEmail ? (activeDelivery?.status || 'Captured') : 'None'} tone={activeEmail ? 'default' : 'warn'} />
+                  <AuditStat label="Recipients" value={activeRecipientCount} tone={activeRecipientCount ? 'default' : 'warn'} />
+                  <AuditStat
+                    label="LLM"
+                    value={activeLlmDiagnostics.length > 1
+                      ? `${activeLlmDiagnostics.length} nodes`
+                      : [activeLlm?.provider, activeLlm?.model].filter(Boolean).join(' / ') || 'None'}
+                    tone={activeLlmDiagnostics.some((diagnostic) => diagnostic.llm?.failed || diagnostic.llm?.status === 'failed') ? 'bad' : 'default'}
+                  />
+                  <AuditStat label="Context" value={activeContext ? (activeContext.mode || 'used') : 'None'} />
+                  <AuditStat label="Tools" value={activeToolRecords.length} />
+                </div>
               </div>
 
-              <div className="grid gap-2 md:grid-cols-4">
-                <PreviewMetric
-                  label="Email"
-                  value={activeEmail ? (activeDelivery ? (activeDelivery.status || 'Delivery captured') : 'Email captured') : 'No email captured'}
-                  tone={activeEmail ? 'blue' : 'amber'}
-                />
-                <PreviewMetric label="Recipients" value={String(activeRecipientCount)} tone={activeRecipientCount ? 'gray' : 'amber'} />
-                <PreviewMetric
-                  label="Run health"
-                  value={activeHealth?.label || 'Not classified'}
-                  tone={healthTone(activeHealth?.state)}
-                />
-                <PreviewMetric
-                  label="LLM"
-                  value={activeLlmDiagnostics.length > 1
-                    ? `${activeLlmDiagnostics.length} LLM nodes`
-                    : [activeLlm?.provider, activeLlm?.model].filter(Boolean).join(' / ') || 'Not recorded'}
-                  tone={activeLlmDiagnostics.some((diagnostic) => diagnostic.llm?.failed || diagnostic.llm?.status === 'failed') ? 'red' : 'gray'}
-                />
-              </div>
-              <div className="grid gap-2 md:grid-cols-2">
-                <PreviewMetric label="Context" value={activeContext ? (activeContext.mode || 'context used') : 'Not recorded'} tone={activeContext ? 'emerald' : 'gray'} />
-                <PreviewMetric label="Tool calls" value={String(activeToolRecords.length)} tone={activeToolRecords.length ? 'emerald' : 'gray'} />
+              {/* Tabs */}
+              <div className="mt-3 flex shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {[
+                  { id: 'email', label: 'Email' },
+                  { id: 'llm', label: 'LLM & Tools' },
+                  { id: 'steps', label: 'Steps', count: activeSteps.length || null },
+                  { id: 'diagnostics', label: 'Diagnostics', count: (Array.isArray(activeRun.warnings) ? activeRun.warnings.length : 0) || null },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setDetailTab(t.id)}
+                    className={cls(
+                      '-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-semibold transition-colors',
+                      detailTab === t.id ? 'border-blue-500 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800',
+                    )}
+                  >
+                    {t.label}
+                    {t.count != null && <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">{t.count}</span>}
+                  </button>
+                ))}
               </div>
 
-              {Array.isArray(activeRun.warnings) && activeRun.warnings.length > 0 && (
-                <section className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  <div className="mb-1 font-semibold uppercase tracking-wide">Run warnings</div>
-                  <div className="space-y-1">
-                    {activeRun.warnings.map((warning, index) => (
-                      <div key={`${warning.type || 'warning'}-${index}`}>
-                        <span className="font-semibold">{warning.type || 'warning'}:</span> {warning.message || 'Review this run before enabling live sends.'}
-                        {warning.templateFallbackUsed && <span> Template fallback was used.</span>}
+              {/* Tab content */}
+              <div className="settings-scrollbar min-h-0 flex-1 space-y-3 overflow-auto p-4">
+                {detailTab === 'email' && (
+                  <>
+                    <AuditSection title="Recipients" icon={Mail}>
+                      <div className="space-y-1 text-xs leading-5 text-slate-700">
+                        <div>{recipientLine('To', activeRecipients.to)}</div>
+                        <div>{recipientLine('Cc', activeRecipients.cc)}</div>
+                        <div>{recipientLine('Bcc', activeRecipients.bcc)}</div>
                       </div>
-                    ))}
-                  </div>
-                </section>
-              )}
+                    </AuditSection>
 
-              {activeHealth?.degraded && (
-                <section className={cls(
-                  'rounded-md border p-3 text-xs',
-                  healthClass(activeHealth.state),
+                    <AuditSection
+                      title="Rendered email"
+                      right={(displayBodyHtml || displayBodyText) ? (
+                        <button
+                          type="button"
+                          onClick={() => setEmailModalOpen(true)}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                        >
+                          <Maximize2 className="h-3.5 w-3.5" />
+                          Open
+                        </button>
+                      ) : null}
+                    >
+                      <div className="mb-2 truncate text-sm font-semibold text-slate-900">{displayEmail?.subject || 'No subject rendered'}</div>
+                      {(displayBodyHtml || displayBodyText) ? (
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setEmailModalOpen(true)}
+                          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setEmailModalOpen(true); }}
+                          title="Open the full rendered email"
+                          className="block max-h-40 cursor-pointer overflow-hidden rounded-md border border-slate-100 bg-slate-50/50 p-3 text-sm leading-6 text-slate-800 [mask-image:linear-gradient(to_bottom,black_55%,transparent)]"
+                        >
+                          {displayBodyHtml ? (
+                            <div className="pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(displayBodyHtml) }} />
+                          ) : (
+                            <pre className="pointer-events-none whitespace-pre-wrap font-sans text-sm leading-6">{displayBodyText}</pre>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-slate-500">No email body captured for this run.</div>
+                      )}
+                    </AuditSection>
+
+                    <ActionLinkDiagnostics diagnostics={actionDiagnostics} />
+                    <BrandingDiagnostics branding={brandingDiagnostics} />
+                  </>
                 )}
-                >
-                  <div className="mb-1 font-semibold uppercase tracking-wide">
-                    {activeHealth.label || 'Run health'} run
-                  </div>
-                  {activeHealth.fallbackSummary && (
-                    <div className="mb-2 leading-5">
-                      <span className="font-semibold">Fallback:</span> {activeHealth.fallbackSummary.reason || activeHealth.fallbackSummary.type}
-                    </div>
-                  )}
-                  {(activeHealth.reasons || []).length > 0 && (
-                    <div className="space-y-1">
-                      {activeHealth.reasons.map((reason, index) => (
-                        <div key={`${reason.type || 'reason'}-${index}`}>
-                          <span className="font-semibold">{reason.type || 'reason'}:</span> {reason.message || 'Review this run before live sends.'}
-                          {reason.ruleIds?.length > 0 && <span> Rules: {reason.ruleIds.join(', ')}.</span>}
+
+                {detailTab === 'llm' && (
+                  <>
+                    {(activeContext || activeToolRecords.length > 0) && (
+                      <AuditSection
+                        title="LLM evidence & tools"
+                        icon={Bot}
+                        right={activeContext?.contextHash ? (
+                          <span className="max-w-[180px] truncate rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-500">{activeContext.contextHash}</span>
+                        ) : null}
+                      >
+                        <div className="grid gap-2 text-xs text-slate-600 sm:grid-cols-4">
+                          <div>Mode: <span className="font-semibold text-slate-800">{activeContext?.mode || 'not recorded'}</span></div>
+                          <div>Signal: <span className="font-semibold text-slate-800">{signalLevelLabel(activeContext?.signalLevel || 'none')}</span></div>
+                          <div>Thread: <span className="font-semibold text-slate-800">{activeContext?.threadEntryCount || 0}</span></div>
+                          <div>Redactions: <span className="font-semibold text-slate-800">{activeContext?.redactionCount || 0}</span></div>
+                        </div>
+                        {activeContext?.signalRationale && (
+                          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                            <div className="font-semibold text-slate-800">
+                              Signal confidence: {activeContext.signalConfidence || 'unknown'}
+                              {Number.isFinite(Number(activeContext.signalConfidenceScore)) ? ` (${activeContext.signalConfidenceScore})` : ''}
+                            </div>
+                            <div>{activeContext.signalRationale}</div>
+                            {activeContext.signalCounts && (
+                              <div className="mt-1 text-slate-500">
+                                Similar {activeContext.signalCounts.similarTickets || 0} | Open strong {activeContext.signalCounts.openStrongSimilarTickets || 0} | Requesters {activeContext.signalCounts.distinctRequesters || 0} | Departments {activeContext.signalCounts.distinctDepartments || 0}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {(activeContext?.allowedPublicPhrases || []).length > 0 && (
+                          <div className="mt-2 text-xs leading-5 text-slate-600">
+                            Allowed wording: {activeContext.allowedPublicPhrases.join('; ')}
+                          </div>
+                        )}
+                        {activeToolRecords.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Tool calls</div>
+                            <div className="space-y-2">
+                              {activeToolRecords.map((tool, index) => (
+                                <details key={`${tool.name}-${index}`} className="rounded-md border border-slate-200 bg-white">
+                                  <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700">
+                                    {tool.name} <span className="ml-1 text-slate-400">{tool.status || 'completed'}{Number.isFinite(tool.durationMs) ? `, ${tool.durationMs} ms` : ''}</span>
+                                  </summary>
+                                  <pre className="max-h-40 overflow-auto border-t border-slate-100 bg-slate-950 p-2 text-[11px] leading-5 text-slate-100">{formatJson(tool.output || tool.input)}</pre>
+                                </details>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </AuditSection>
+                    )}
+
+                    <AuditSection title="LLM diagnostics" icon={Bot}>
+                      <LlmDiagnosticsList
+                        diagnostics={activeLlmDiagnostics}
+                        emptyText="No LLM diagnostics were captured for this workflow run."
+                      />
+                    </AuditSection>
+                  </>
+                )}
+
+                {detailTab === 'steps' && (
+                  activeSteps.length > 0 ? (
+                    <div className="relative space-y-3 pl-5">
+                      <span className="absolute bottom-2 left-1 top-2 w-px bg-slate-200" aria-hidden />
+                      {activeSteps.map((step) => (
+                        <div key={step.id || `${step.nodeId}-${step.startedAt}`} className="relative">
+                          <span className={cls('absolute -left-[18px] top-3 h-2.5 w-2.5 rounded-full ring-2 ring-white', statusDotClass(step.status))} />
+                          <PreviewStepCard step={step} />
                         </div>
                       ))}
                     </div>
-                  )}
-                </section>
-              )}
-
-              {(activeContext || activeToolRecords.length > 0) && (
-                <section className="rounded-md border border-violet-200 bg-violet-50 p-3">
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">LLM evidence and tools</div>
-                    {activeContext?.contextHash && (
-                      <span className="max-w-[220px] truncate rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-200">
-                        {activeContext.contextHash}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid gap-2 text-xs text-slate-700 sm:grid-cols-4">
-                    <div>Mode: <span className="font-semibold">{activeContext?.mode || 'not recorded'}</span></div>
-                    <div>Signal: <span className="font-semibold">{signalLevelLabel(activeContext?.signalLevel || 'none')}</span></div>
-                    <div>Thread: <span className="font-semibold">{activeContext?.threadEntryCount || 0}</span></div>
-                    <div>Redactions: <span className="font-semibold">{activeContext?.redactionCount || 0}</span></div>
-                  </div>
-                  {activeContext?.signalRationale && (
-                    <div className="mt-2 rounded-md border border-violet-100 bg-white px-3 py-2 text-xs leading-5 text-violet-900">
-                      <div className="font-semibold">
-                        Signal confidence: {activeContext.signalConfidence || 'unknown'}
-                        {Number.isFinite(Number(activeContext.signalConfidenceScore)) ? ` (${activeContext.signalConfidenceScore})` : ''}
-                      </div>
-                      <div>{activeContext.signalRationale}</div>
-                      {activeContext.signalCounts && (
-                        <div className="mt-1 text-violet-700">
-                          Similar {activeContext.signalCounts.similarTickets || 0} | Open strong {activeContext.signalCounts.openStrongSimilarTickets || 0} | Requesters {activeContext.signalCounts.distinctRequesters || 0} | Departments {activeContext.signalCounts.distinctDepartments || 0}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {(activeContext?.allowedPublicPhrases || []).length > 0 && (
-                    <div className="mt-2 text-xs leading-5 text-violet-900">
-                      Allowed wording: {activeContext.allowedPublicPhrases.join('; ')}
-                    </div>
-                  )}
-                  {activeToolRecords.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-700">Tool calls</div>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {activeToolRecords.map((tool, index) => (
-                          <details key={`${tool.name}-${index}`} className="rounded-md border border-violet-100 bg-white">
-                            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700">
-                              {tool.name} <span className="ml-1 text-slate-400">{tool.status || 'completed'}{Number.isFinite(tool.durationMs) ? `, ${tool.durationMs} ms` : ''}</span>
-                            </summary>
-                            <pre className="max-h-40 overflow-auto border-t border-violet-50 bg-slate-950 p-2 text-[11px] leading-5 text-slate-100">{formatJson(tool.output || tool.input)}</pre>
-                          </details>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </section>
-              )}
-
-              <section className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Recipients</div>
-                <div className="space-y-1 text-xs leading-5 text-slate-700">
-                  <div>{recipientLine('To', activeRecipients.to)}</div>
-                  <div>{recipientLine('Cc', activeRecipients.cc)}</div>
-                  <div>{recipientLine('Bcc', activeRecipients.bcc)}</div>
-                </div>
-              </section>
-
-              <section className="rounded-md border border-slate-200 bg-white">
-                <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-3 py-2">
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Rendered Email</div>
-                    <div className="mt-1 truncate text-sm font-semibold text-slate-950">{displayEmail?.subject || 'No subject rendered'}</div>
-                  </div>
-                  {(displayBodyHtml || displayBodyText) && (
-                    <button
-                      type="button"
-                      onClick={() => setEmailModalOpen(true)}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
-                    >
-                      <Maximize2 className="h-3.5 w-3.5" />
-                      Open
-                    </button>
-                  )}
-                </div>
-                {(displayBodyHtml || displayBodyText) ? (
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setEmailModalOpen(true)}
-                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setEmailModalOpen(true); }}
-                    title="Open the full rendered email"
-                    className="block max-h-44 cursor-pointer overflow-hidden p-3 text-sm leading-6 text-slate-800 [mask-image:linear-gradient(to_bottom,black_55%,transparent)]"
-                  >
-                    {displayBodyHtml ? (
-                      <div className="pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(displayBodyHtml) }} />
-                    ) : (
-                      <pre className="pointer-events-none whitespace-pre-wrap font-sans text-sm leading-6">{displayBodyText}</pre>
-                    )}
-                  </div>
-                ) : (
-                  <div className="p-3 text-sm text-slate-500">No email body captured for this run.</div>
+                  ) : (
+                    <div className="py-10 text-center text-sm text-slate-400">No steps recorded for this run.</div>
+                  )
                 )}
-              </section>
+
+                {detailTab === 'diagnostics' && (
+                  <>
+                    {Array.isArray(activeRun.warnings) && activeRun.warnings.length > 0 && (
+                      <AuditSection title="Run warnings" icon={AlertCircle}>
+                        <div className="space-y-1.5 text-xs leading-5 text-slate-600">
+                          {activeRun.warnings.map((warning, index) => (
+                            <div key={`${warning.type || 'warning'}-${index}`} className="flex gap-2">
+                              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                              <span>
+                                <span className="font-semibold text-slate-700">{warning.type || 'warning'}:</span> {warning.message || 'Review this run before enabling live sends.'}
+                                {warning.templateFallbackUsed && <span> Template fallback was used.</span>}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </AuditSection>
+                    )}
+
+                    {activeHealth?.degraded && (
+                      <AuditSection title={`${activeHealth.label || 'Run health'} run`} icon={AlertCircle}>
+                        <div className="space-y-1.5 text-xs leading-5 text-slate-600">
+                          {activeHealth.fallbackSummary && (
+                            <div><span className="font-semibold text-slate-700">Fallback:</span> {activeHealth.fallbackSummary.reason || activeHealth.fallbackSummary.type}</div>
+                          )}
+                          {(activeHealth.reasons || []).map((reason, index) => (
+                            <div key={`${reason.type || 'reason'}-${index}`} className="flex gap-2">
+                              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                              <span>
+                                <span className="font-semibold text-slate-700">{reason.type || 'reason'}:</span> {reason.message || 'Review this run before live sends.'}
+                                {reason.ruleIds?.length > 0 && <span> Rules: {reason.ruleIds.join(', ')}.</span>}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </AuditSection>
+                    )}
+
+                    <AuditSection title="Redacted event context" icon={Code}>
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">{formatJson(activeRun.eventContext)}</pre>
+                    </AuditSection>
+                  </>
+                )}
+              </div>
 
               {emailModalOpen && (displayBodyHtml || displayBodyText) && (
                 <div
@@ -5479,62 +5551,46 @@ function MockAuditPanel({
                   onClick={() => setEmailModalOpen(false)}
                 >
                   <div
-                    className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+                    className="flex h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
                     onClick={(event) => event.stopPropagation()}
                   >
-                    <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-3">
+                    <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
                       <div className="min-w-0">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Rendered Email</div>
-                        <div className="truncate text-sm font-semibold text-slate-950">{displayEmail?.subject || 'No subject rendered'}</div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Rendered email</div>
+                        <div className="truncate text-sm font-semibold text-slate-900">{displayEmail?.subject || 'No subject rendered'}</div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setEmailModalOpen(false)}
-                        className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                        aria-label="Close"
-                      >
-                        <XCircle className="h-5 w-5" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {displayBodyHtml && (
+                          <div className="flex items-center rounded-md border border-slate-200 p-0.5">
+                            <button type="button" onClick={() => setEmailDevice('desktop')} className={cls('rounded px-2 py-1 text-xs font-semibold transition-colors', emailDevice === 'desktop' ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:text-slate-700')}>Desktop</button>
+                            <button type="button" onClick={() => setEmailDevice('mobile')} className={cls('rounded px-2 py-1 text-xs font-semibold transition-colors', emailDevice === 'mobile' ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:text-slate-700')}>Mobile</button>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setEmailModalOpen(false)}
+                          className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                          aria-label="Close"
+                        >
+                          <XCircle className="h-5 w-5" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="overflow-auto bg-slate-50 p-5 text-sm leading-6 text-slate-800">
+                    <div className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
                       {displayBodyHtml ? (
-                        <div className="mx-auto max-w-2xl rounded-lg bg-white p-4 shadow-sm" dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(displayBodyHtml) }} />
+                        <iframe
+                          title="Rendered email"
+                          sandbox=""
+                          srcDoc={sanitizePreviewHtmlClient(displayBodyHtml)}
+                          className={cls('mx-auto block h-full rounded-lg border border-slate-200 bg-white', emailDevice === 'mobile' ? 'w-[390px]' : 'w-full max-w-2xl')}
+                        />
                       ) : (
-                        <pre className="whitespace-pre-wrap font-sans text-sm leading-6">{displayBodyText}</pre>
+                        <pre className="mx-auto max-w-2xl whitespace-pre-wrap rounded-lg bg-white p-4 font-sans text-sm leading-6 text-slate-800 shadow-sm">{displayBodyText}</pre>
                       )}
                     </div>
                   </div>
                 </div>
               )}
-
-              <ActionLinkDiagnostics diagnostics={actionDiagnostics} />
-              <BrandingDiagnostics branding={brandingDiagnostics} />
-
-              <section className="rounded-md border border-violet-100 bg-violet-50/50 p-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-violet-600" />
-                  <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">LLM Diagnostics</div>
-                </div>
-                <LlmDiagnosticsList
-                  diagnostics={activeLlmDiagnostics}
-                  emptyText="No LLM diagnostics were captured for this workflow run."
-                />
-              </section>
-
-              <section>
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <History className="h-3.5 w-3.5" />
-                  Step Timeline
-                </div>
-                <div className="grid gap-2 lg:grid-cols-2">
-                  {activeSteps.map((step) => <PreviewStepCard key={step.id || `${step.nodeId}-${step.startedAt}`} step={step} />)}
-                </div>
-              </section>
-
-              <section className="rounded-md border border-slate-200 bg-slate-950 p-3">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-300">Redacted Event Context</div>
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs leading-5 text-slate-100">{formatJson(activeRun.eventContext)}</pre>
-              </section>
             </motion.div>
           )}
         </div>
