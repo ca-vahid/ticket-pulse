@@ -60,7 +60,7 @@ export default function WorkflowsPage() {
     <AppShell
       activePage="workflows"
       fillViewport
-      contentClassName="mx-auto flex w-full max-w-[100rem] flex-col px-2 py-3 sm:px-4"
+      contentClassName="flex w-full flex-col px-2 py-3 sm:px-4"
     >
       {/* Gradient ribbon = page header: tabs on the left, workspace status on the right */}
       <div className="flex-shrink-0 pb-3">
