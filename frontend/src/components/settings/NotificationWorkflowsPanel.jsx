@@ -4198,7 +4198,77 @@ function workflowRoutingDescription(workflow) {
   return describeCondition(conditionBuilderFromRule(workflow.routingRule));
 }
 
+function buildWorkflowGroups(workflows) {
+  const groups = new Map(); // triggerType -> { default, customs: [] }
+  for (const workflow of workflows) {
+    const key = workflow.triggerType || 'other';
+    if (!groups.has(key)) groups.set(key, { default: null, customs: [] });
+    const bucket = groups.get(key);
+    if (workflow.isDefaultVariant && !bucket.default) bucket.default = workflow;
+    else bucket.customs.push(workflow);
+  }
+  for (const bucket of groups.values()) {
+    bucket.customs.sort((a, b) => (
+      Number(Boolean(a.archivedAt)) - Number(Boolean(b.archivedAt))
+      || (a.routingPriority || 1) - (b.routingPriority || 1)
+      || String(a.name || '').localeCompare(String(b.name || ''))
+    ));
+  }
+  return groups;
+}
+
+// Decluttered list row: name + status are always visible; the secondary meta
+// (variant type, routing, version, runs, last run) shows only when selected or hovered.
+function WorkflowRow({ workflow, selectedId, onSelect, nested = false }) {
+  const isSelected = selectedId === workflow.id;
+  const isEnabled = !!workflow.isEnabled;
+  const isArchived = Boolean(workflow.archivedAt);
+  const runs = workflow._count?.runs || 0;
+  const lastRun = workflow.runs?.[0];
+  const meta = [
+    workflowVariantTypeLabel(workflow),
+    workflow.isDefaultVariant
+      ? 'Default fallback'
+      : `Match ${workflow.routingPriority || 1} · ${routingBehaviorLabel(workflow.routingMode)}`,
+    `v${workflow.publishedVersion || 0}`,
+    `${runs} ${runs === 1 ? 'run' : 'runs'}`,
+    lastRun ? `Last ${lastRun.status} ${formatDate(lastRun.startedAt)}` : 'No runs yet',
+  ].join('  ·  ');
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(workflow.id)}
+      aria-current={isSelected ? 'true' : undefined}
+      className={cls(
+        'group flex w-full flex-col gap-0.5 border-l-4 px-3 py-2 text-left transition-colors',
+        nested && 'pl-5',
+        isSelected
+          ? 'border-l-blue-600 bg-blue-100/95 ring-1 ring-inset ring-blue-200 hover:bg-blue-100'
+          : isArchived
+            ? 'border-l-slate-300 bg-slate-100/70 text-slate-500 hover:bg-slate-100'
+            : isEnabled
+              ? 'border-l-emerald-400 bg-white hover:bg-slate-50'
+              : 'border-l-slate-200 bg-slate-50/60 hover:bg-slate-100',
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className={cls('min-w-0 flex-1 truncate text-[15px] font-semibold leading-5', isEnabled ? 'text-slate-950' : 'text-slate-700')}
+          title={workflow.name}
+        >
+          {workflowDisplayName(workflow)}
+        </span>
+        <WorkflowStatus workflow={workflow} />
+      </div>
+      <div className={cls('min-w-0 truncate text-[11px] leading-4 text-slate-500', isSelected ? 'block' : 'hidden group-hover:block')}>
+        {meta}
+      </div>
+    </button>
+  );
+}
+
 function WorkflowList({ workflows, selectedId, onSelect }) {
+  const [expandedTriggers, setExpandedTriggers] = useState(() => new Set());
   if (!workflows.length) {
     return (
       <div className="px-3 py-6 text-center text-xs leading-5 text-slate-500">
@@ -4207,100 +4277,57 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
     );
   }
 
-  const groups = workflows.reduce((acc, workflow) => {
-    const key = workflow.triggerType || 'other';
-    if (!acc.has(key)) acc.set(key, []);
-    acc.get(key).push(workflow);
-    return acc;
-  }, new Map());
+  const groups = buildWorkflowGroups(workflows);
+  const selectedTrigger = workflows.find((workflow) => workflow.id === selectedId)?.triggerType || null;
+  const toggleTrigger = (key) => setExpandedTriggers((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  });
 
   return (
     <div className="divide-y divide-slate-200">
-      {[...groups.entries()].map(([triggerType, items]) => (
-        <section key={triggerType} className="bg-white">
-          <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-100/95 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-600">
-            <span>{EVENT_LABELS[triggerType] || triggerType}</span>
-            <span className="rounded-full bg-white px-2 py-0.5 text-slate-500 ring-1 ring-slate-200">{items.length}</span>
-          </div>
-          <div className="divide-y divide-slate-100">
-            {items.map((workflow) => {
-              const lastRun = workflow.runs?.[0];
-              const isSelected = selectedId === workflow.id;
-              const isEnabled = !!workflow.isEnabled;
-              const isArchived = Boolean(workflow.archivedAt);
-              const runs = workflow._count?.runs || 0;
-              const lastText = lastRun ? `${lastRun.status} ${formatDate(lastRun.startedAt)}` : 'No runs yet';
-              const typeLabel = workflowVariantTypeLabel(workflow);
-              return (
-                <button
-                  key={workflow.id}
-                  type="button"
-                  onClick={() => onSelect(workflow.id)}
-                  aria-current={isSelected ? 'true' : undefined}
-                  className={cls(
-                    'flex w-full flex-col gap-1.5 border-l-4 px-3 py-2.5 text-left transition-colors',
-                    isSelected
-                      ? 'border-l-blue-600 bg-blue-100/95 shadow-sm ring-1 ring-inset ring-blue-200 hover:bg-blue-100'
-                      : isArchived
-                        ? 'border-l-slate-300 bg-slate-100/80 text-slate-500 hover:bg-slate-100'
-                        : isEnabled
-                          ? 'border-l-emerald-400 bg-white hover:bg-emerald-50/60'
-                          : 'border-l-slate-200 bg-slate-50/70 hover:bg-slate-100',
-                  )}
-                >
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <div className="min-w-0">
-                      <div
-                        className={cls('break-words text-sm font-semibold leading-5', isEnabled ? 'text-slate-950' : 'text-slate-700')}
-                        title={workflow.name}
-                      >
-                        {workflowDisplayName(workflow)}
-                      </div>
-                    </div>
-                    <WorkflowStatus workflow={workflow} />
+      {[...groups.entries()].map(([triggerType, bucket]) => {
+        const hasCustoms = bucket.customs.length > 0;
+        const total = (bucket.default ? 1 : 0) + bucket.customs.length;
+        // The group holding the selected workflow stays open so the selection is never hidden.
+        const isExpanded = expandedTriggers.has(triggerType) || selectedTrigger === triggerType;
+        return (
+          <section key={triggerType} className="bg-white">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-100/95 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-600">
+              <span>{EVENT_LABELS[triggerType] || triggerType}</span>
+              <span className="rounded-full bg-white px-2 py-0.5 text-slate-500 ring-1 ring-slate-200">{total}</span>
+            </div>
+            {bucket.default ? (
+              <>
+                <WorkflowRow workflow={bucket.default} selectedId={selectedId} onSelect={onSelect} />
+                {hasCustoms && (
+                  <button
+                    type="button"
+                    onClick={() => toggleTrigger(triggerType)}
+                    className="flex w-full items-center gap-1.5 px-3 py-1.5 pl-5 text-left text-[11px] font-semibold text-slate-500 transition-colors hover:bg-slate-50"
+                  >
+                    {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    {isExpanded ? 'Hide variants' : `${bucket.customs.length} variant${bucket.customs.length === 1 ? '' : 's'}`}
+                  </button>
+                )}
+                {hasCustoms && isExpanded && (
+                  <div className="border-l-2 border-slate-100">
+                    {bucket.customs.map((workflow) => (
+                      <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} nested />
+                    ))}
                   </div>
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-slate-500">
-                    <span className={cls(
-                      'rounded-full border px-1.5 py-0.5 text-[10px] font-semibold',
-                      isArchived
-                        ? 'border-slate-200 bg-slate-100 text-slate-500'
-                        : workflow.isDefaultVariant
-                          ? 'border-blue-200 bg-blue-50 text-blue-700'
-                          : 'border-indigo-200 bg-indigo-50 text-indigo-700',
-                    )}
-                    >
-                      {typeLabel}
-                    </span>
-                    {!workflow.isDefaultVariant && (
-                      <span className={cls(
-                        'rounded-full border px-1.5 py-0.5 text-[10px] font-semibold',
-                        workflow.routingMode === 'additive'
-                          ? 'border-teal-200 bg-teal-50 text-teal-700'
-                          : 'border-amber-200 bg-amber-50 text-amber-700',
-                      )}
-                      >
-                        {routingBehaviorLabel(workflow.routingMode)}
-                      </span>
-                    )}
-                    <span className="rounded-full bg-white/80 px-1.5 py-0.5 font-medium text-slate-500 ring-1 ring-slate-200">
-                      {workflow.isDefaultVariant ? 'Default fallback' : `Match order ${workflow.routingPriority || 1}`}
-                    </span>
-                    <span className="rounded-full bg-white/80 px-1.5 py-0.5 font-medium text-slate-500 ring-1 ring-slate-200">v{workflow.publishedVersion || 0}</span>
-                    <span>{runs} {runs === 1 ? 'run' : 'runs'}</span>
-                  </div>
-                  <div className="min-w-0 truncate text-[11px] leading-4 text-slate-500">
-                    {workflowRoutingDescription(workflow)}
-                  </div>
-                  <div className="min-w-0 truncate text-[11px] leading-4 text-slate-500">
-                    <span className="font-medium text-slate-600">Last:</span>{' '}
-                    {lastText}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ))}
+                )}
+              </>
+            ) : (
+              bucket.customs.map((workflow) => (
+                <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} />
+              ))
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }
