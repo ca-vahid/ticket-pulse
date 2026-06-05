@@ -55,7 +55,7 @@ import {
 import { motion } from 'motion/react';
 import { notificationWorkflowAPI } from '../../services/api';
 
-const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v2';
+const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v3';
 
 const EVENT_LABELS = {
   'ticket.created': 'Ticket arrived',
@@ -1137,7 +1137,7 @@ function WorkflowGraphNode({ id, data }) {
       {!isTrigger && (
         <Handle
           type="target"
-          position={Position.Left}
+          position={Position.Top}
           className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-700"
         />
       )}
@@ -1151,16 +1151,16 @@ function WorkflowGraphNode({ id, data }) {
           <Handle
             id="true"
             type="source"
-            position={Position.Right}
+            position={Position.Bottom}
             className="!h-2.5 !w-2.5 !border-2 !border-white !bg-emerald-600"
-            style={{ top: 22 }}
+            style={{ left: '30%' }}
           />
           <Handle
             id="false"
             type="source"
-            position={Position.Right}
+            position={Position.Bottom}
             className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500"
-            style={{ top: 48 }}
+            style={{ left: '70%' }}
           />
         </>
       )}
@@ -1168,7 +1168,7 @@ function WorkflowGraphNode({ id, data }) {
         <Handle
           id="default"
           type="source"
-          position={Position.Right}
+          position={Position.Bottom}
           className="!h-2.5 !w-2.5 !border-2 !border-white !bg-blue-600"
         />
       )}
@@ -1179,10 +1179,13 @@ function WorkflowGraphNode({ id, data }) {
 const FLOW_NODE_TYPES = { workflowNode: WorkflowGraphNode };
 
 function flowNodesFromDefinition(definition, selectedNodeId) {
+  const layout = computeVerticalLayout(definition);
   return (definition?.nodes || []).map((node, index) => ({
     id: node.id,
     type: 'workflowNode',
-    position: displayPositionForNode(node, definition, index),
+    position: layout.get(node.id) || { x: 0, y: index * 116 },
+    sourcePosition: Position.Bottom,
+    targetPosition: Position.Top,
     data: {
       nodeType: node.type,
       label: node.data?.label || node.data?.notificationType || node.id,
@@ -1460,6 +1463,75 @@ function graphMaps(definition) {
     if (incoming.has(edge.target)) incoming.get(edge.target).push(edge);
   }
   return { nodes, outgoing, incoming };
+}
+
+function workflowEdgeHandleRank(edge) {
+  if (edge.sourceHandle === 'true') return 0;
+  if (edge.sourceHandle === 'false') return 2;
+  return 1;
+}
+
+// Lays the workflow graph out TOP-TO-BOTTOM: y = longest-path depth from the
+// trigger, x = column (the main chain keeps its parent's column; extra branches
+// such as the stop path get a fresh column to the right).
+function computeVerticalLayout(definition) {
+  const { nodes, outgoing, incoming } = graphMaps(definition);
+  const layout = new Map();
+  if (nodes.size === 0) return layout;
+
+  const V_GAP = 116;
+  const H_GAP = 240;
+
+  // y: longest-path rank (cycle-safe relaxation, capped by node count).
+  const rank = new Map([...nodes.keys()].map((id) => [id, 0]));
+  for (let iter = 0; iter <= nodes.size; iter += 1) {
+    let changed = false;
+    for (const id of nodes.keys()) {
+      let best = 0;
+      for (const edge of incoming.get(id) || []) {
+        const candidate = (rank.get(edge.source) || 0) + 1;
+        if (candidate > best) best = candidate;
+      }
+      if (best !== rank.get(id)) {
+        rank.set(id, best);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  // x: column. Start from the trigger (or any root); a node's first child
+  // (true/default handle) inherits its column, extra children get fresh columns.
+  const start = nodes.has('trigger')
+    ? 'trigger'
+    : [...nodes.keys()].find((id) => (incoming.get(id) || []).length === 0) || [...nodes.keys()][0];
+  const col = new Map([[start, 0]]);
+  let nextCol = 1;
+  const seen = new Set();
+  const stack = [start];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const edges = [...(outgoing.get(id) || [])].sort((a, b) => workflowEdgeHandleRank(a) - workflowEdgeHandleRank(b));
+    const myCol = col.get(id) ?? 0;
+    edges.forEach((edge, index) => {
+      if (!col.has(edge.target)) col.set(edge.target, index === 0 ? myCol : nextCol++);
+    });
+    for (let i = edges.length - 1; i >= 0; i -= 1) stack.push(edges[i].target);
+  }
+
+  // Orphans (no path from the start node): stack them in a spare column.
+  let orphanRow = 0;
+  for (const id of nodes.keys()) {
+    if (!col.has(id)) {
+      col.set(id, nextCol);
+      rank.set(id, orphanRow);
+      orphanRow += 1;
+    }
+    layout.set(id, { x: (col.get(id) || 0) * H_GAP, y: (rank.get(id) || 0) * V_GAP });
+  }
+  return layout;
 }
 
 function reachableIds(trigger, outgoing) {
@@ -8796,7 +8868,7 @@ export default function NotificationWorkflowsPanel({
                 onLayoutChanged={editorLayout.onLayoutChanged}
                 className="min-h-0 min-w-0"
               >
-                <Panel id="workflow-canvas" minSize="55%" defaultSize="75%">
+                <Panel id="workflow-canvas" minSize="38%" defaultSize="56%">
                   <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200">
                     <NodePalette
                       onAddNode={addWorkflowNode}
@@ -8827,6 +8899,8 @@ export default function NotificationWorkflowsPanel({
                           edges={flowEdges}
                           nodeTypes={FLOW_NODE_TYPES}
                           fitView
+                          fitViewOptions={{ padding: 0.2 }}
+                          nodesDraggable={false}
                           minZoom={0.25}
                           maxZoom={1.6}
                           panActivationKeyCode={null}
@@ -8847,7 +8921,7 @@ export default function NotificationWorkflowsPanel({
 
                 <PanelResizeHandle id="workflow-editor-resizer" className="w-1 bg-gray-100 transition hover:bg-blue-300" />
 
-                <Panel id="workflow-inspector" minSize="22%" maxSize="45%" defaultSize="25%">
+                <Panel id="workflow-inspector" minSize="25%" maxSize="62%" defaultSize="44%">
                   <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-white">
                     <div className="shrink-0 border-b border-gray-200 px-4 py-3">
                       <div className="flex items-center justify-between gap-3">
