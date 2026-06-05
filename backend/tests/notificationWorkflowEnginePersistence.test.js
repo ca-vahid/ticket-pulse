@@ -555,6 +555,64 @@ describe('notification workflow engine persistence', () => {
     expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
   });
 
+  test('uses template fallback when LLM generation exceeds its node timeout before the hard timeout', async () => {
+    providerSendJsonMock.mockImplementation(({ signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    }));
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+        llmTimeoutMs: 10,
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executionMode: 'mock',
+      executeLlm: true,
+      triggerSource: 'test',
+      workflowRunTimeoutMs: 1000,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(providerSendJsonMock).toHaveBeenCalledWith(expect.objectContaining({
+      attemptTimeoutMs: 10,
+      signal: expect.any(AbortSignal),
+    }));
+    const llmStep = result.steps.find((step) => step.nodeType === 'llm_generate');
+    expect(llmStep).toEqual(expect.objectContaining({
+      status: 'completed',
+      output: expect.objectContaining({
+        templateFallbackUsed: true,
+        templateFallbackSource: 'provider_or_schema',
+        templateFallbackReason: expect.stringContaining('Notification LLM generation exceeded'),
+      }),
+    }));
+    expect(prismaMock.notificationWorkflowRun.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 900 },
+      data: expect.objectContaining({
+        status: 'completed',
+      }),
+    }));
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalled();
+  });
+
   test('skips duplicate workflow events through the run dedupe key', async () => {
     prismaMock.notificationWorkflowRun.create.mockRejectedValueOnce({ code: 'P2002' });
     const result = await executeDefinition({

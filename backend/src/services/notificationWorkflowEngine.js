@@ -40,6 +40,9 @@ import {
 } from './notificationWorkflowOutputGuard.js';
 import { enrichEventContextWithRequesterProfile } from './requesterProfileService.js';
 import {
+  NOTIFICATION_WORKFLOW_LLM_TIMEOUT_CODE,
+  NOTIFICATION_WORKFLOW_LLM_TIMEOUT_MS,
+  NOTIFICATION_WORKFLOW_PROVIDER_ATTEMPT_TIMEOUT_MS,
   NOTIFICATION_WORKFLOW_RUN_TIMEOUT_CODE,
   NOTIFICATION_WORKFLOW_RUN_TIMEOUT_MS,
   describeNotificationWorkflowTimeout,
@@ -106,9 +109,23 @@ function normalizedWorkflowRunTimeoutMs(value) {
   return Math.max(1, Math.round(parsed));
 }
 
+function normalizedPositiveTimeoutMs(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return Math.max(1, Math.round(fallback));
+  return Math.max(1, Math.round(parsed));
+}
+
 function workflowRunTimeoutError(timeoutMs) {
   const error = new Error(`Notification workflow exceeded ${describeNotificationWorkflowTimeout(timeoutMs)} execution timeout`);
   error.code = NOTIFICATION_WORKFLOW_RUN_TIMEOUT_CODE;
+  error.timeoutMs = timeoutMs;
+  return error;
+}
+
+function llmGenerationTimeoutError(timeoutMs) {
+  const error = new Error(`Notification LLM generation exceeded ${describeNotificationWorkflowTimeout(timeoutMs)} timeout`);
+  error.name = 'TimeoutError';
+  error.code = NOTIFICATION_WORKFLOW_LLM_TIMEOUT_CODE;
   error.timeoutMs = timeoutMs;
   return error;
 }
@@ -126,6 +143,37 @@ function workflowAbortError(signal, timeoutMs) {
 
 function throwIfWorkflowAborted(signal, timeoutMs) {
   if (signal?.aborted) throw workflowAbortError(signal, timeoutMs);
+}
+
+function createLlmAbortController({ timeoutMs, parentSignal = null } = {}) {
+  const normalizedTimeoutMs = normalizedPositiveTimeoutMs(timeoutMs, NOTIFICATION_WORKFLOW_LLM_TIMEOUT_MS);
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => {
+    controller.abort(llmGenerationTimeoutError(normalizedTimeoutMs));
+  }, normalizedTimeoutMs);
+  timeoutHandle.unref?.();
+
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason instanceof Error
+      ? parentSignal.reason
+      : new Error('Notification workflow execution cancelled'));
+  };
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else if (parentSignal?.addEventListener) {
+    parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    timeoutMs: normalizedTimeoutMs,
+    cleanup() {
+      clearTimeout(timeoutHandle);
+      if (parentSignal?.removeEventListener) {
+        parentSignal.removeEventListener('abort', abortFromParent);
+      }
+    },
+  };
 }
 
 function createWorkflowAbortController({ timeoutMs, parentSignal = null } = {}) {
@@ -1566,11 +1614,21 @@ async function executeNode({
     let response = null;
     let parsed = null;
     let tokenDiagnostics = null;
+    let llmAbort = null;
+    const llmTimeoutMs = normalizedPositiveTimeoutMs(node.data?.llmTimeoutMs, NOTIFICATION_WORKFLOW_LLM_TIMEOUT_MS);
+    const providerAttemptTimeoutMs = normalizedPositiveTimeoutMs(
+      node.data?.providerAttemptTimeoutMs,
+      Math.min(NOTIFICATION_WORKFLOW_PROVIDER_ATTEMPT_TIMEOUT_MS, llmTimeoutMs),
+    );
     try {
       const outputSchema = normalizeLlmOutputSchema(node.data?.outputSchema || DEFAULT_LLM_OUTPUT_SCHEMA);
       const maxTokens = llmMaxTokens(node.data?.maxTokens);
       const runtime = toolPromptRuntime || directPromptRuntime;
       const { systemPrompt } = runtime;
+      llmAbort = createLlmAbortController({
+        timeoutMs: llmTimeoutMs,
+        parentSignal: signal,
+      });
       if (useToolMode) {
         const pipelineResult = await runNotificationWorkflowLlmPipeline({
           workflow,
@@ -1583,7 +1641,8 @@ async function executeNode({
           systemPrompt,
           userMessage,
           maxTokens,
-          signal,
+          signal: llmAbort.signal,
+          providerAttemptTimeoutMs,
           guardOptions: runtime.guardOptions,
           recordToolEvent: (event) => recordNotificationToolEvent({ workflow, run, event }),
         });
@@ -1604,6 +1663,8 @@ async function executeNode({
           context: contextSummary,
           promptPolicy: runtime.promptPolicy,
           guardPolicy: runtime.guardPolicy,
+          llmTimeoutMs,
+          providerAttemptTimeoutMs,
           email: generatedEmail,
           outputMode: node.data?.outputMode || 'draft_email',
           promotedToEmail: shouldPromoteLlmEmail(node),
@@ -1624,7 +1685,8 @@ async function executeNode({
         userMessage,
         maxTokens,
         temperature: Number.isFinite(Number(node.data?.temperature)) ? Number(node.data.temperature) : 0.3,
-        signal,
+        signal: llmAbort.signal,
+        attemptTimeoutMs: providerAttemptTimeoutMs,
         extra: {
           jsonSchema: outputSchema,
           reasoning: { effort: node.data?.reasoningEffort || 'none' },
@@ -1682,6 +1744,8 @@ async function executeNode({
         context: contextSummary,
         promptPolicy: directPromptRuntime.promptPolicy,
         guardPolicy: directPromptRuntime.guardPolicy,
+        llmTimeoutMs,
+        providerAttemptTimeoutMs,
         guard,
         auditWarnings: guardAuditWarnings,
         warning: guardAuditWarnings.length
@@ -1755,6 +1819,8 @@ async function executeNode({
         context: contextSummary,
         promptPolicy: (toolPromptRuntime || directPromptRuntime).promptPolicy,
         guardPolicy: (toolPromptRuntime || directPromptRuntime).guardPolicy,
+        llmTimeoutMs,
+        providerAttemptTimeoutMs,
         outputMode: node.data?.outputMode || 'draft_email',
         promotedToEmail: false,
         email: null,
@@ -1781,6 +1847,8 @@ async function executeNode({
         guardPolicy: state.llm.guardPolicy,
         outputKey,
       };
+    } finally {
+      llmAbort?.cleanup();
     }
   }
 

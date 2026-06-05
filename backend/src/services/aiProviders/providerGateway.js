@@ -5,6 +5,10 @@ import providerHealthService from './providerHealthService.js';
 import providerModelResolver from './providerModelResolver.js';
 import anthropicProvider from './anthropicProvider.js';
 import openAiProvider from './openAiProvider.js';
+import {
+  AI_PROVIDER_ATTEMPT_TIMEOUT_CODE,
+  describeNotificationWorkflowTimeout,
+} from '../notificationWorkflowRunTimeouts.js';
 
 const PROVIDERS = {
   anthropic: anthropicProvider,
@@ -31,6 +35,67 @@ function attemptUpdateData({ status, usage = null, error = null, durationMs = nu
   };
 }
 
+function normalizedTimeoutMs(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.max(1, Math.round(parsed));
+}
+
+function providerAttemptTimeoutError({ provider, model, timeoutMs }) {
+  const error = new Error(`AI provider attempt for ${provider}/${model} exceeded ${describeNotificationWorkflowTimeout(timeoutMs)} timeout`);
+  error.name = 'TimeoutError';
+  error.code = AI_PROVIDER_ATTEMPT_TIMEOUT_CODE;
+  error.timeoutMs = timeoutMs;
+  error.provider = provider;
+  error.model = model;
+  return error;
+}
+
+function createProviderAttemptAbortController({ parentSignal = null, timeoutMs = null, provider, model } = {}) {
+  const normalized = normalizedTimeoutMs(timeoutMs);
+  if (!parentSignal && !normalized) {
+    return {
+      signal: null,
+      cleanup() {},
+    };
+  }
+
+  const controller = new AbortController();
+  let timeoutHandle = null;
+
+  const abort = (reason) => {
+    if (!controller.signal.aborted) controller.abort(reason);
+  };
+  const abortFromParent = () => {
+    abort(parentSignal?.reason instanceof Error
+      ? parentSignal.reason
+      : new Error('AI provider attempt cancelled'));
+  };
+
+  if (normalized) {
+    timeoutHandle = setTimeout(() => {
+      abort(providerAttemptTimeoutError({ provider, model, timeoutMs: normalized }));
+    }, normalized);
+    timeoutHandle.unref?.();
+  }
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else if (parentSignal?.addEventListener) {
+    parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup() {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (parentSignal?.removeEventListener) {
+        parentSignal.removeEventListener('abort', abortFromParent);
+      }
+    },
+  };
+}
+
 class ProviderGateway {
   async runToolTurn(options) {
     return this._runWithFailover({
@@ -52,6 +117,7 @@ class ProviderGateway {
     legacyModel = null,
     runLinks = {},
     emit = null,
+    attemptTimeoutMs = null,
     call,
     ...callOptions
   }) {
@@ -92,11 +158,19 @@ class ProviderGateway {
         },
       });
 
+      const attemptAbort = createProviderAttemptAbortController({
+        parentSignal: callOptions.signal,
+        timeoutMs: attemptTimeoutMs,
+        provider: attempt.provider,
+        model: attempt.model,
+      });
+
       try {
         const result = await call(attempt.provider, {
           ...callOptions,
           model: attempt.model,
           provider: attempt.provider,
+          ...(attemptAbort.signal ? { signal: attemptAbort.signal } : {}),
         });
         const durationMs = Date.now() - startedAt;
         await prisma.aiProviderAttempt.update({
@@ -173,6 +247,8 @@ class ProviderGateway {
         });
 
         if (!classified.retryable) break;
+      } finally {
+        attemptAbort.cleanup();
       }
     }
 

@@ -51,6 +51,58 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
+function timeoutError(message, timeoutMs = null) {
+  const error = new Error(message);
+  error.name = 'TimeoutError';
+  if (timeoutMs) error.timeoutMs = timeoutMs;
+  return error;
+}
+
+function createTimeoutSignal({ parentSignal = null, timeoutMs = null, message } = {}) {
+  const parsed = Number(timeoutMs);
+  const normalized = Number.isFinite(parsed) && parsed > 0 ? Math.max(1, Math.round(parsed)) : null;
+  if (!parentSignal && !normalized) {
+    return {
+      signal: null,
+      cleanup() {},
+    };
+  }
+
+  const controller = new AbortController();
+  let timeoutHandle = null;
+  const abort = (reason) => {
+    if (!controller.signal.aborted) controller.abort(reason);
+  };
+  const abortFromParent = () => {
+    abort(parentSignal?.reason instanceof Error
+      ? parentSignal.reason
+      : new Error('Notification LLM pipeline cancelled'));
+  };
+
+  if (normalized) {
+    timeoutHandle = setTimeout(() => {
+      abort(timeoutError(message, normalized));
+    }, normalized);
+    timeoutHandle.unref?.();
+  }
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else if (parentSignal?.addEventListener) {
+    parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup() {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (parentSignal?.removeEventListener) {
+        parentSignal.removeEventListener('abort', abortFromParent);
+      }
+    },
+  };
+}
+
 function systemPromptForTools(basePrompt, policy) {
   return [
     basePrompt,
@@ -80,6 +132,7 @@ export async function runNotificationWorkflowLlmPipeline({
   userMessage,
   maxTokens,
   signal = null,
+  providerAttemptTimeoutMs = null,
   recordToolEvent = null,
   guardOptions = {},
 }) {
@@ -101,19 +154,34 @@ export async function runNotificationWorkflowLlmPipeline({
     if (Date.now() > totalTimeoutAt) throw new Error('Notification LLM pipeline exceeded total timeout');
     turns += 1;
 
-    const turnResult = await providerGateway.runToolTurn({
-      operation: 'notification_workflow_generation',
-      workspaceId: workflow.workspaceId,
-      runLinks: run?.id ? { notificationWorkflowRunId: run.id } : {},
-      systemPrompt: systemPromptForTools(systemPrompt, policy),
-      messages,
-      tools,
-      maxTokens,
-      signal,
-      onText: (text) => {
-        transcript += text || '';
-      },
+    const remainingMs = Math.max(totalTimeoutAt - Date.now(), 1);
+    const turnTimeout = createTimeoutSignal({
+      parentSignal: signal,
+      timeoutMs: remainingMs,
+      message: 'Notification LLM pipeline exceeded total timeout',
     });
+    let turnResult;
+    try {
+      const providerAttemptBudget = Number(providerAttemptTimeoutMs);
+      turnResult = await providerGateway.runToolTurn({
+        operation: 'notification_workflow_generation',
+        workspaceId: workflow.workspaceId,
+        runLinks: run?.id ? { notificationWorkflowRunId: run.id } : {},
+        systemPrompt: systemPromptForTools(systemPrompt, policy),
+        messages,
+        tools,
+        maxTokens,
+        signal: turnTimeout.signal || signal,
+        attemptTimeoutMs: Number.isFinite(providerAttemptBudget) && providerAttemptBudget > 0
+          ? Math.min(Math.round(providerAttemptBudget), remainingMs)
+          : remainingMs,
+        onText: (text) => {
+          transcript += text || '';
+        },
+      });
+    } finally {
+      turnTimeout.cleanup();
+    }
     providerResult = turnResult;
     const finalMessage = turnResult.message || {};
     const content = Array.isArray(finalMessage.content) ? finalMessage.content : [];

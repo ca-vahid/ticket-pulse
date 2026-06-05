@@ -259,6 +259,31 @@ describe('notification workflow LLM pipeline service', () => {
     })).rejects.toThrow('exceeded max tool calls');
   });
 
+  test('aborts a stalled provider turn when the pipeline timeout expires', async () => {
+    runToolTurnMock.mockImplementation(({ signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    }));
+
+    await expect(runNotificationWorkflowLlmPipeline({
+      workflow,
+      node,
+      eventContext: { event: { type: 'ticket.created' } },
+      state: {},
+      policy: { ...basePolicy, totalTimeoutMs: 10 },
+      contextBundle,
+      systemPrompt: 'Write an email.',
+      userMessage: 'Generate.',
+      maxTokens: 1000,
+      providerAttemptTimeoutMs: 2000,
+    })).rejects.toThrow('Notification LLM pipeline exceeded total timeout');
+
+    expect(runToolTurnMock).toHaveBeenCalledWith(expect.objectContaining({
+      attemptTimeoutMs: expect.any(Number),
+      signal: expect.any(AbortSignal),
+    }));
+    expect(runToolTurnMock.mock.calls[0][0].attemptTimeoutMs).toBeLessThanOrEqual(1000);
+  });
+
   test('rejects unsupported outage claims in final email tool output', async () => {
     runToolTurnMock.mockResolvedValueOnce(toolTurn([
       {
