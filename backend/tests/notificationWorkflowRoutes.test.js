@@ -1004,6 +1004,95 @@ describe('notification workflow routes', () => {
     }));
   });
 
+  test('test-email sends the displayed preview body when an audit id is present', async () => {
+    prismaMock.notificationWorkflowRun.findFirst.mockResolvedValueOnce({
+      id: 295,
+      workspaceId: 1,
+      workflowId: 7,
+      eventType: 'ticket.created',
+      ticketId: 501,
+      eventContext: {
+        event: { type: 'ticket.created' },
+        availability: { isBusinessHours: false, isAfterHours: true },
+      },
+      workflow: {
+        id: 7,
+        workspaceId: 1,
+        name: 'Ticket arrived after-hours / holiday',
+        key: 'ticket_created_after_hours',
+        triggerType: 'ticket.created',
+        publishedVersion: 1,
+        publishedDefinition: {
+          metadata: { scheduleMode: 'after_hours' },
+          nodes: [
+            {
+              id: 'send',
+              type: 'send_email',
+              data: {
+                appendPublicStatusLink: true,
+                appendAfterHoursSupportLink: true,
+              },
+            },
+          ],
+        },
+      },
+      steps: [
+        {
+          id: 951,
+          nodeId: 'template',
+          nodeType: 'template_render',
+          output: {
+            email: {
+              subject: 'Ticket #225574 received',
+              html: '<p>We received it.</p><div>Helpful ticket links</div>',
+              text: 'We received it.\n\nHelpful ticket links',
+            },
+          },
+        },
+        {
+          id: 952,
+          nodeId: 'send',
+          nodeType: 'send_email',
+          output: { skipped: true, reason: 'Mock delivery' },
+        },
+      ],
+      deliveries: [],
+    });
+
+    const response = await request(buildApp())
+      .post('/api/notification-workflows/test-email')
+      .send({
+        workflowId: 7,
+        ticketId: 501,
+        previewRunId: 'TP-NWF-295',
+        auditId: 'TP-NWF-295',
+        subject: 'Ticket #225574 received',
+        html: '<p>We received it.</p><div>Need immediate after-hours support?</div>',
+        text: 'We received it.\n\nNeed immediate after-hours support?',
+      })
+      .expect(200);
+
+    expect(response.body.success).toBe(true);
+    expect(finalizeWorkflowSendEmailMock).not.toHaveBeenCalled();
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        workflowRunId: 295,
+        workflowStepRunId: 952,
+        ticketId: 501,
+        recipient: 'admin@example.com',
+        subject: '[TEST] Ticket #225574 received',
+        htmlBody: expect.stringContaining('Need immediate after-hours support?'),
+        textBody: expect.stringContaining('Need immediate after-hours support?'),
+        payload: expect.objectContaining({
+          previewRunTest: true,
+          auditId: 'TP-NWF-295',
+        }),
+      }),
+    }));
+    const createdDelivery = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(createdDelivery.htmlBody).not.toContain('Helpful ticket links');
+  });
+
   test('sends a test email from a mock audit run even when no delivery row was created', async () => {
     finalizeWorkflowSendEmailMock.mockResolvedValueOnce({
       subject: 'Ticket #225001 received',

@@ -1860,13 +1860,14 @@ router.post(
     });
     if (!ticket) throw new NotFoundError('Preview ticket not found in this workspace');
 
-    const auditedEmail = run ? await emailFromAuditRun(run) : null;
     const { delivery, result, auditId } = await createTestEmailDelivery({
       req,
       ticket,
       run,
       workflow: run?.workflow || workflow,
-      email: auditedEmail || {
+      // The preview modal sends the exact body the admin is looking at. Preserve it
+      // even when an audit id is present; audit replay has a separate endpoint.
+      email: {
         subject,
         html,
         text,
