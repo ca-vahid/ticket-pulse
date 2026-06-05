@@ -1180,7 +1180,7 @@ router.get(
     if (possibleBroaderIssueRate7d > WORKFLOW_HEALTH_THRESHOLDS.possibleBroaderIssueRatePct) {
       warnings.push({
         type: 'possible_broader_issue_rate',
-        message: 'Possible broader-issue signals are above the operational review threshold.',
+        message: 'Strict incident signals are above the operational review threshold.',
         count: possibleBroaderIssueCount7d,
         ratePct: possibleBroaderIssueRate7d,
         thresholdPct: WORKFLOW_HEALTH_THRESHOLDS.possibleBroaderIssueRatePct,

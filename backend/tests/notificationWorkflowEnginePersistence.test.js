@@ -1545,9 +1545,6 @@ describe('notification workflow engine persistence', () => {
         },
         outageSignals: {
           watchThreshold: 3,
-          possibleBroaderIssueThreshold: 5,
-          distinctRequesterThreshold: 3,
-          distinctDepartmentThreshold: 2,
         },
         safety: {
           maxContextBytes: 40000,
@@ -1664,9 +1661,6 @@ describe('notification workflow engine persistence', () => {
         },
         outageSignals: {
           watchThreshold: 3,
-          possibleBroaderIssueThreshold: 5,
-          distinctRequesterThreshold: 3,
-          distinctDepartmentThreshold: 2,
         },
         safety: {
           maxContextBytes: 40000,

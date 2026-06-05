@@ -31,8 +31,8 @@ export const NOTIFICATION_LLM_TOOL_CATALOG = [
   },
   {
     name: 'detect_related_ticket_spike',
-    label: 'Related ticket spike',
-    description: 'Counts recent similar tickets and returns conservative public wording allowed by deterministic thresholds.',
+    label: 'Incident signal check',
+    description: 'Checks recent similar tickets for strict shared incident language before any public similar-report wording is allowed.',
     riskLevel: 'read_only',
     defaultEnabled: true,
     phase: 2,
@@ -62,9 +62,6 @@ export const DEFAULT_NOTIFICATION_LLM_TOOL_SETTINGS = {
   },
   outageSignals: {
     watchThreshold: 3,
-    possibleBroaderIssueThreshold: 5,
-    distinctRequesterThreshold: 3,
-    distinctDepartmentThreshold: 2,
   },
   safety: {
     maxContextBytes: 40000,
@@ -158,24 +155,6 @@ function normalizeToolSettings(value = {}) {
         outageSignals.watchThreshold,
         DEFAULT_NOTIFICATION_LLM_TOOL_SETTINGS.outageSignals.watchThreshold,
         2,
-        100,
-      ),
-      possibleBroaderIssueThreshold: clampInteger(
-        outageSignals.possibleBroaderIssueThreshold,
-        DEFAULT_NOTIFICATION_LLM_TOOL_SETTINGS.outageSignals.possibleBroaderIssueThreshold,
-        2,
-        200,
-      ),
-      distinctRequesterThreshold: clampInteger(
-        outageSignals.distinctRequesterThreshold,
-        DEFAULT_NOTIFICATION_LLM_TOOL_SETTINGS.outageSignals.distinctRequesterThreshold,
-        1,
-        100,
-      ),
-      distinctDepartmentThreshold: clampInteger(
-        outageSignals.distinctDepartmentThreshold,
-        DEFAULT_NOTIFICATION_LLM_TOOL_SETTINGS.outageSignals.distinctDepartmentThreshold,
-        1,
         100,
       ),
     },

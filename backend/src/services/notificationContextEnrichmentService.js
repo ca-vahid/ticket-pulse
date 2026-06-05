@@ -12,8 +12,78 @@ import {
 
 const BUNDLE_VERSION = 1;
 const OPEN_STATUSES = new Set(['open', 'pending']);
-const ROUTINE_CLUSTER_PATTERN = /\b(?:new[-\s]?hire|onboarding|offboarding|procurement|purchase|quote|invoice|payment|vendor|monitor report|drive health|disk health|backup report|license renewal|hardware request|laptop setup|workstation setup|equipment request)\b/i;
-const ROUTINE_OUTAGE_OVERRIDE_PATTERN = /\b(?:outage|down|unavailable|interruption|degradation|cannot connect|failed for everyone|multiple users cannot)\b/i;
+const ROUTINE_CLUSTER_TERMS = [
+  'new[-\\s]?hire',
+  'onboarding',
+  'offboarding',
+  'procurement',
+  'purchase',
+  'quote',
+  'invoice',
+  'payment',
+  'vendor',
+  'monitor report',
+  'drive health',
+  'disk health',
+  'backup report',
+  'license renewal',
+  'licen[cs](?:e|ing)',
+  'software install(?:ation)?',
+  'software support',
+  'access request',
+  'permissions?',
+  'account access',
+  'github',
+  'cursor',
+  'claude',
+  'hardware request',
+  'laptop setup',
+  'workstation setup',
+  'equipment request',
+  'peripherals?',
+  'accessories',
+  'docking station',
+  'dock',
+  'printer',
+  'scanner',
+  'webcam',
+  'keyboard',
+  'mouse',
+  'monitor',
+  'display',
+];
+const ROUTINE_CLUSTER_PATTERN = new RegExp(`\\b(?:${ROUTINE_CLUSTER_TERMS.join('|')})\\b`, 'i');
+const BROADER_ISSUE_OPEN_INCIDENT_MATCH_THRESHOLD = 3;
+const BROADER_ISSUE_DISTINCT_REQUESTER_THRESHOLD = 3;
+const BROADER_ISSUE_DISTINCT_DEPARTMENT_THRESHOLD = 2;
+const INCIDENT_SIGNAL_DEFINITIONS = [
+  {
+    id: 'explicit_outage',
+    patterns: [/\boutages?\b/i],
+  },
+  {
+    id: 'service_down',
+    patterns: [
+      /\b(?:service|system|application|app|portal|server|network|internet|vpn|wi-?fi|wifi)\b.{0,50}\b(?:down|offline|unavailable|degraded|degradation|interruption|not working)\b/i,
+      /\b(?:down|offline|unavailable|degraded|degradation|interruption|not working)\b.{0,50}\b(?:service|system|application|app|portal|server|network|internet|vpn|wi-?fi|wifi)\b/i,
+    ],
+  },
+  {
+    id: 'connection_failure',
+    patterns: [
+      /\b(?:cannot|can't|unable to|not able to)\s+(?:connect|reach)\b/i,
+      /\bconnection\s+(?:failed|failure|unavailable|down)\b/i,
+    ],
+  },
+  {
+    id: 'multi_user_impact',
+    patterns: [
+      /\b(?:multiple|several|many|all)\s+(?:users|people|staff|employees|team members)\b/i,
+      /\b(?:everyone|office-wide|site-wide|company-wide|whole office)\b/i,
+      /\bfailed for everyone\b/i,
+    ],
+  },
+];
 const STOPWORDS = new Set([
   'about',
   'access',
@@ -381,6 +451,7 @@ async function loadSimilarTickets({ workspaceId, ticket, requester, anchor, sett
   return {
     enabled: true,
     query: {
+      subject: ticket.subject || null,
       keywords,
       category: ticket.category || null,
       subCategory: ticket.subCategory || null,
@@ -418,6 +489,7 @@ function hasSpecificSimilarityAnchor(similarTickets = {}) {
 function routineClusterDetected(similarTickets = {}, items = []) {
   const query = similarTickets.query || {};
   const text = [
+    query.subject,
     query.category,
     query.subCategory,
     query.internalCategory,
@@ -425,7 +497,43 @@ function routineClusterDetected(similarTickets = {}, items = []) {
     ...(query.keywords || []),
     ...items.map((item) => item.subject),
   ].filter(Boolean).join(' ');
-  return ROUTINE_CLUSTER_PATTERN.test(text) && !ROUTINE_OUTAGE_OVERRIDE_PATTERN.test(text);
+  return ROUTINE_CLUSTER_PATTERN.test(text);
+}
+
+function incidentSignalsFromText(value = '') {
+  const text = String(value || '').trim();
+  if (!text) return [];
+  return INCIDENT_SIGNAL_DEFINITIONS
+    .filter((signal) => signal.patterns.some((pattern) => pattern.test(text)))
+    .map((signal) => signal.id);
+}
+
+function incidentSignalsForQuery(similarTickets = {}) {
+  const query = similarTickets.query || {};
+  return new Set(incidentSignalsFromText([
+    query.subject,
+    ...(query.keywords || []),
+    query.category,
+    query.subCategory,
+    query.internalCategory,
+    query.internalSubcategory,
+  ].filter(Boolean).join(' ')));
+}
+
+function incidentSignalsForItem(item = {}) {
+  return new Set(incidentSignalsFromText([
+    item.subject,
+    item.category,
+    item.subCategory,
+    item.ticketCategory,
+  ].filter(Boolean).join(' ')));
+}
+
+function hasSharedSignal(currentSignals, itemSignals) {
+  for (const signal of itemSignals) {
+    if (currentSignals.has(signal)) return true;
+  }
+  return false;
 }
 
 function outageSignals(similarTickets, settings) {
@@ -441,46 +549,54 @@ function outageSignals(similarTickets, settings) {
   const distinctRequesters = new Set(strongItems.map((item) => item.requesterKey).filter(Boolean));
   const openCount = allItems.filter((item) => item.isOpen).length;
   const count = largestWindow.count || distinctTicketIds.size;
+  const currentIncidentSignals = incidentSignalsForQuery(similarTickets);
+  const incidentStrongItems = strongItems.filter((item) => hasSharedSignal(currentIncidentSignals, incidentSignalsForItem(item)));
+  const openIncidentStrongItems = openStrongItems.filter((item) => hasSharedSignal(currentIncidentSignals, incidentSignalsForItem(item)));
+  const incidentRequesters = new Set(openIncidentStrongItems.map((item) => item.requesterKey).filter(Boolean));
+  const incidentDepartments = new Set(openIncidentStrongItems.map((item) => item.requesterDepartment).filter(Boolean));
   const routineCluster = routineClusterDetected(similarTickets, allItems);
+  const hasCurrentIncidentLanguage = currentIncidentSignals.size > 0;
+  const hasSharedIncidentEvidence = incidentStrongItems.length > 0;
   const meaningfulOverlap = hasSpecificSimilarityAnchor(similarTickets)
-    && strongItems.length >= Math.min(settings.outageSignals.watchThreshold, count || strongItems.length);
-  const possible = !routineCluster
+    && hasCurrentIncidentLanguage
+    && hasSharedIncidentEvidence;
+  const possible = meaningfulOverlap
+    && openIncidentStrongItems.length >= BROADER_ISSUE_OPEN_INCIDENT_MATCH_THRESHOLD
+    && incidentRequesters.size >= BROADER_ISSUE_DISTINCT_REQUESTER_THRESHOLD
+    && incidentDepartments.size >= BROADER_ISSUE_DISTINCT_DEPARTMENT_THRESHOLD;
+  const watch = !possible
     && meaningfulOverlap
-    && count >= settings.outageSignals.possibleBroaderIssueThreshold
-    && openStrongItems.length >= settings.outageSignals.watchThreshold
-    && distinctRequesters.size >= settings.outageSignals.distinctRequesterThreshold
-    && distinctDepartments.size >= settings.outageSignals.distinctDepartmentThreshold;
-  const watch = !routineCluster
-    && meaningfulOverlap
-    && count >= settings.outageSignals.watchThreshold;
+    && incidentStrongItems.length >= Math.max(1, Math.min(settings.outageSignals.watchThreshold, BROADER_ISSUE_OPEN_INCIDENT_MATCH_THRESHOLD));
+  const routine = !possible && (routineCluster || (!hasCurrentIncidentLanguage && count >= settings.outageSignals.watchThreshold));
   const signalLevel = possible
     ? 'possible_broader_issue'
-    : (routineCluster && count >= settings.outageSignals.watchThreshold ? 'routine_cluster' : (watch ? 'watch' : 'none'));
+    : (routine ? 'routine_cluster' : (watch ? 'watch' : 'none'));
   const criteria = {
     specificSimilarityAnchor: hasSpecificSimilarityAnchor(similarTickets),
     meaningfulOverlap,
-    notRoutineCluster: !routineCluster,
-    similarTicketThresholdMet: count >= settings.outageSignals.watchThreshold,
-    possibleBroaderIssueThresholdMet: count >= settings.outageSignals.possibleBroaderIssueThreshold,
-    openStrongTicketThresholdMet: openStrongItems.length >= settings.outageSignals.watchThreshold,
-    distinctRequesterThresholdMet: distinctRequesters.size >= settings.outageSignals.distinctRequesterThreshold,
-    distinctDepartmentThresholdMet: distinctDepartments.size >= settings.outageSignals.distinctDepartmentThreshold,
+    currentIncidentLanguage: hasCurrentIncidentLanguage,
+    sharedIncidentSignal: hasSharedIncidentEvidence,
+    notRoutineCluster: !routine,
+    incidentTicketThresholdMet: incidentStrongItems.length >= BROADER_ISSUE_OPEN_INCIDENT_MATCH_THRESHOLD,
+    openIncidentTicketThresholdMet: openIncidentStrongItems.length >= BROADER_ISSUE_OPEN_INCIDENT_MATCH_THRESHOLD,
+    distinctIncidentRequesterThresholdMet: incidentRequesters.size >= BROADER_ISSUE_DISTINCT_REQUESTER_THRESHOLD,
+    distinctIncidentDepartmentThresholdMet: incidentDepartments.size >= BROADER_ISSUE_DISTINCT_DEPARTMENT_THRESHOLD,
   };
   const passedCriteria = Object.entries(criteria).filter(([, passed]) => passed === true).map(([key]) => key);
   const failedCriteria = Object.entries(criteria).filter(([, passed]) => passed !== true).map(([key]) => key);
   const confidenceScore = possible
-    ? Math.min(100, 70 + Math.min(15, openStrongItems.length * 3) + Math.min(10, distinctRequesters.size * 2) + Math.min(5, distinctDepartments.size * 2))
+    ? 90
     : watch
-      ? Math.min(69, 35 + Math.min(20, strongItems.length * 4) + Math.min(10, distinctRequesters.size * 2))
-      : (routineCluster ? 20 : Math.min(30, strongItems.length * 5));
+      ? 45
+      : (routine ? 20 : 0);
   const confidence = confidenceScore >= 70 ? 'high' : confidenceScore >= 35 ? 'medium' : 'low';
   const rationale = possible
-    ? 'Strong similar-ticket overlap with open related tickets and requester/department diversity.'
-    : routineCluster
-      ? 'Similar activity matches routine operational patterns, so public broader-issue wording is not allowed.'
+    ? 'Shared incident language appears across open related tickets with requester and department diversity.'
+    : routine
+      ? 'Similar activity matches routine operational patterns, so public similar-report wording is not allowed.'
       : watch
-        ? 'Related activity is visible, but diversity or open-ticket evidence is not strong enough for broader-issue wording.'
-        : 'No strong related-ticket signal was found.';
+        ? 'Incident-like language appears in related tickets, but evidence is not strong enough for requester-facing similar-report wording.'
+        : 'No deterministic broader-issue signal was found.';
 
   return {
     enabled: true,
@@ -499,12 +615,22 @@ function outageSignals(similarTickets, settings) {
       openSimilarTickets: openCount,
       strongSimilarTickets: strongItems.length,
       openStrongSimilarTickets: openStrongItems.length,
+      incidentStrongTickets: incidentStrongItems.length,
+      openIncidentStrongTickets: openIncidentStrongItems.length,
+      distinctIncidentRequesters: incidentRequesters.size,
+      distinctIncidentDepartments: incidentDepartments.size,
       largestWindowHours: largestWindow.hours || null,
     },
-    thresholds: settings.outageSignals,
+    incidentSignals: [...currentIncidentSignals],
+    thresholds: {
+      routineClusterThreshold: settings.outageSignals.watchThreshold,
+      strictOpenIncidentMatchThreshold: BROADER_ISSUE_OPEN_INCIDENT_MATCH_THRESHOLD,
+      strictDistinctRequesterThreshold: BROADER_ISSUE_DISTINCT_REQUESTER_THRESHOLD,
+      strictDistinctDepartmentThreshold: BROADER_ISSUE_DISTINCT_DEPARTMENT_THRESHOLD,
+    },
     allowedPublicPhrases: signalLevel === 'possible_broader_issue'
-      ? ['we are seeing multiple similar reports', 'this may be part of a broader issue']
-      : (signalLevel === 'watch' ? ['we are reviewing similar reports'] : []),
+      ? ['we are seeing multiple similar reports']
+      : [],
     blockedPublicPhrases: ['global outage', 'company-wide outage', 'confirmed outage'],
   };
 }

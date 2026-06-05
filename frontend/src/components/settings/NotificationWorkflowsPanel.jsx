@@ -322,9 +322,6 @@ const DEFAULT_LLM_TOOL_POLICY = {
     },
     outageSignals: {
       watchThreshold: 3,
-      possibleBroaderIssueThreshold: 5,
-      distinctRequesterThreshold: 3,
-      distinctDepartmentThreshold: 2,
     },
     safety: {
       maxContextBytes: 40000,
@@ -450,20 +447,21 @@ const LLM_HELP_TOPICS = {
         heading: 'What it helps with',
         items: [
           'Gives the LLM context that a request may resemble other recent cases.',
-          'Feeds conservative signal checks for broader-issue wording.',
+          'Feeds strict incident checks before similar-report wording can be used.',
           'It is not semantic/vector search yet; it uses deterministic matching and scoring.',
         ],
       },
     ],
   },
   outageSignals: {
-    title: 'Broader-issue wording signals',
-    summary: 'Counts similar tickets and decides which public wording is allowed.',
+    title: 'Incident signal checks',
+    summary: 'Requires explicit incident language shared across open related tickets before public similar-report wording is allowed.',
     sections: [
       {
-        heading: 'What it allows',
+        heading: 'What it checks',
         items: [
-          'With enough related evidence, the email may use softer language such as reviewing similar reports.',
+          'Routine clusters such as hardware requests, access requests, procurement, and software installs do not unlock public similar-report wording.',
+          'Public similar-report wording requires shared incident language, open related tickets, and requester plus department diversity.',
           'It does not allow unsupported claims like global outage, company-wide outage, or confirmed outage.',
           'Allowed phrases are generated deterministically, then enforced by the output guard.',
         ],
@@ -485,14 +483,14 @@ const LLM_HELP_TOPICS = {
     ],
   },
   watchThreshold: {
-    title: 'Watch threshold',
-    summary: 'Minimum related-ticket count before softer similar-report wording can be used.',
+    title: 'Routine cluster threshold',
+    summary: 'Minimum related-ticket count before non-incident similar activity is labeled as a routine cluster.',
     sections: [
       {
         heading: 'Requester-facing impact',
         items: [
-          'Below the threshold, the email should talk only about the current ticket.',
-          'At or above the threshold, the app can allow cautious wording about similar reports.',
+          'This no longer unlocks requester-facing similar-report wording.',
+          'It helps audit distinguish normal repeated operational work from true incident signals.',
         ],
       },
     ],
@@ -602,10 +600,10 @@ const LLM_HELP_TOPICS = {
     ],
   },
   detect_related_ticket_spike: {
-    title: 'Tool: Related ticket spike',
-    summary: 'Counts recent similar tickets and returns exact public phrases allowed by the thresholds.',
+    title: 'Tool: Incident signal check',
+    summary: 'Checks recent similar tickets for shared incident language before returning any allowed public phrase.',
     sections: [
-      { heading: 'Use case', items: ['Best when the model wants to know whether it can mention similar reports or a possible broader issue.'] },
+      { heading: 'Use case', items: ['Best when the model needs to verify whether similar-report wording is supported by strict incident evidence.'] },
     ],
   },
   search_recent_tickets: {
@@ -921,7 +919,7 @@ function workflowHealthWarningLabel(warning = {}) {
   case 'payload_minimization_failure':
     return `Payload minimization${suffix}`;
   case 'possible_broader_issue_rate':
-    return `Broader-issue rate ${warning.ratePct ?? ''}%`.trim();
+    return `Strict incident rate ${warning.ratePct ?? ''}%`.trim();
   default:
     return warning.message || warning.type || 'Workflow warning';
   }
@@ -1674,7 +1672,7 @@ function previewAuditId(preview) {
 function signalLevelLabel(signalLevel) {
   return {
     all: 'All signals',
-    possible_broader_issue: 'Possible broader issue',
+    possible_broader_issue: 'Strict incident signal',
     watch: 'Watching related reports',
     routine_cluster: 'Routine cluster',
     related_activity: 'Related activity',
@@ -4402,8 +4400,8 @@ export function LlmContextToolsPanel({
     },
     {
       key: 'includeOutageSignals',
-      label: 'Broader-issue wording',
-      description: 'Deterministic ticket-volume signals and allowed public phrasing.',
+      label: 'Incident signal checks',
+      description: 'Strict incident-language checks and allowed public phrasing.',
       helpTopic: 'outageSignals',
       enabled: context.includeOutageSignals !== false,
     },
@@ -4520,7 +4518,7 @@ export function LlmContextToolsPanel({
               />
             </label>
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <LabelWithHelp topic="watchThreshold" onOpenHelp={onOpenHelp}>Watch threshold</LabelWithHelp>
+              <LabelWithHelp topic="watchThreshold" onOpenHelp={onOpenHelp}>Routine cluster threshold</LabelWithHelp>
               <input
                 type="number"
                 min="2"
@@ -5047,7 +5045,7 @@ function MockAuditPanel({
           </select>
         </label>
         <label>
-          <span className="sr-only">Filter workflow audit by broader-issue signal</span>
+          <span className="sr-only">Filter workflow audit by incident signal</span>
           <select
             value={filters.signalLevel || 'all'}
             onChange={(event) => onFiltersChange({ ...filters, signalLevel: event.target.value })}
@@ -7975,7 +7973,7 @@ export default function NotificationWorkflowsPanel({
                 {[
                   ['includeThreadHistory', 'Thread history', 'threadHistory'],
                   ['includeSimilarTickets', 'Similar tickets', 'similarTickets'],
-                  ['includeOutageSignals', 'Broader-issue wording', 'outageSignals'],
+                  ['includeOutageSignals', 'Incident signal checks', 'outageSignals'],
                 ].map(([field, label, helpTopic]) => (
                   <div key={field} className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
                     <label className="flex min-w-0 items-center gap-2">

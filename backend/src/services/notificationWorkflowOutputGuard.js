@@ -68,6 +68,12 @@ const UNSAFE_HTML_PATTERN = /<script\b|javascript:/i;
 const EMOJI_PATTERN = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
 const PLAYFUL_COPY_PATTERN = /\b(?:bedrock|rock solid|launchpad|launch pad|blast off|mission control|magic|sparkle|sprinkle|wizard|core sample|loose colluvium|good ground)\b/i;
 const SENSITIVE_CONTEXT_PATTERN = /\b(?:security|identity|access|password|mfa|sso|vpn|urgent|high|onboarding|new hire|hardware|laptop|desktop|workstation|failure|failed|executive|vip)\b/i;
+const SIMILAR_REPORT_CLAIM_PATTERN = /\b(?:multiple similar reports|similar reports|broader issue|wider issue|widespread issue)\b/i;
+const EXACT_ALLOWED_SIMILAR_REPORT_PHRASE = /\bwe are seeing multiple similar reports\b/i;
+const EXACT_ALLOWED_SIMILAR_REPORT_PHRASE_GLOBAL = /\bwe are seeing multiple similar reports\b/ig;
+const BROADER_ISSUE_CLAIM_PATTERN = /\b(?:broader issue|wider issue|widespread issue)\b/i;
+const GENERIC_SIMILAR_REPORT_PATTERN = /\bsimilar reports\b/i;
+const MULTIPLE_SIMILAR_REPORT_PATTERN = /\bmultiple similar reports\b/i;
 const COPY_REPAIR_GUARDRAILS = new Set([
   'unsupported_outage_claims',
   'unsupported_timing_claims',
@@ -92,6 +98,20 @@ function defaultActionForTier(policyTier) {
   if (policyTier === NOTIFICATION_GUARD_POLICY_TIERS.AUTO_REPAIR) return 'repair';
   if (policyTier === NOTIFICATION_GUARD_POLICY_TIERS.AUDIT_ONLY) return 'warn';
   return 'block';
+}
+
+function hasUnsupportedSimilarReportClaim(content, allowedPublicPhrases) {
+  if (!SIMILAR_REPORT_CLAIM_PATTERN.test(content)) return false;
+  if (BROADER_ISSUE_CLAIM_PATTERN.test(content)) return true;
+
+  const exactAllowed = allowedPublicPhrases.includes('we are seeing multiple similar reports')
+    && EXACT_ALLOWED_SIMILAR_REPORT_PHRASE.test(content);
+  const uncheckedContent = exactAllowed
+    ? content.replace(EXACT_ALLOWED_SIMILAR_REPORT_PHRASE_GLOBAL, ' ')
+    : content;
+
+  return MULTIPLE_SIMILAR_REPORT_PATTERN.test(uncheckedContent)
+    || GENERIC_SIMILAR_REPORT_PATTERN.test(uncheckedContent);
 }
 
 function normalizeActionTaken(action) {
@@ -437,7 +457,7 @@ function repairGuardrailPayload(payload, issue, contextBundle) {
     return repairSentencePayload(payload, /\b(global|company-wide|confirmed)\s+outage\b/i, null);
   }
   if (issue.id === 'similar_report_claim_without_evidence') {
-    return repairSentencePayload(payload, /\bmultiple similar reports\b/i, null);
+    return repairSentencePayload(payload, SIMILAR_REPORT_CLAIM_PATTERN, null);
   }
   return { payload, removed: [] };
 }
@@ -445,7 +465,7 @@ function repairGuardrailPayload(payload, issue, contextBundle) {
 function repairFailed(issue, content) {
   if (issue.id === 'unsupported_timing_claims') return UNSUPPORTED_TIMING_PATTERN.test(content);
   if (issue.id === 'unsupported_outage_claims') return /\b(global|company-wide|confirmed)\s+outage\b/i.test(content);
-  if (issue.id === 'similar_report_claim_without_evidence') return /\bmultiple similar reports\b/i.test(content);
+  if (issue.id === 'similar_report_claim_without_evidence') return SIMILAR_REPORT_CLAIM_PATTERN.test(content);
   if (issue.id === 'emoji') return EMOJI_PATTERN.test(content);
   if (issue.id === 'playful_tone') return PLAYFUL_COPY_PATTERN.test(content);
   return false;
@@ -454,7 +474,7 @@ function repairFailed(issue, content) {
 function repairSummary(issue, removed = []) {
   if (issue.id === 'unsupported_timing_claims') return 'Removed unsupported response or resolution-time wording; preserved the remaining generated copy.';
   if (issue.id === 'unsupported_outage_claims') return 'Removed unsupported outage wording; preserved the remaining generated copy.';
-  if (issue.id === 'similar_report_claim_without_evidence') return 'Removed unsupported multiple-similar-report wording; preserved the remaining generated copy.';
+  if (issue.id === 'similar_report_claim_without_evidence') return 'Removed unsupported similar-report or broader-issue wording; preserved the remaining generated copy.';
   if (issue.id === 'emoji') return 'Removed emoji because this workflow uses a stricter tone mode.';
   if (issue.id === 'playful_tone') return 'Replaced playful wording because this workflow uses a stricter tone mode.';
   if (removed.length > 0) return `Removed ${removed.length} unsupported item${removed.length === 1 ? '' : 's'}; preserved the remaining generated copy.`;
@@ -604,9 +624,8 @@ export function guardNotificationEmailPayload(payload, {
     handleIssue(guardIssue('unsupported_timing_claims', 'Requester-facing email cannot include response-time or resolution-time claims without deterministic timing evidence.'));
   }
 
-  if (/\bmultiple similar reports\b/i.test(content)
-    && !allowedPublicPhrases.includes('we are seeing multiple similar reports')) {
-    handleIssue(guardIssue('similar_report_claim_without_evidence', '"Multiple similar reports" wording requires deterministic related-ticket evidence.'));
+  if (hasUnsupportedSimilarReportClaim(content, allowedPublicPhrases)) {
+    handleIssue(guardIssue('similar_report_claim_without_evidence', 'Similar-report or broader-issue wording requires strict deterministic incident evidence.'));
   }
 
   const citedSignals = Array.isArray(payload?.citedSignals)

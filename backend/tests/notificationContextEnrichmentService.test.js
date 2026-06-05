@@ -187,9 +187,9 @@ describe('notification context enrichment service', () => {
     expect(bundle.recentSimilarTickets.windows.at(-1).count).toBe(5);
     expect(bundle.outageSignals.signalLevel).toBe('possible_broader_issue');
     expect(bundle.outageSignals.confidence).toBe('high');
-    expect(bundle.outageSignals.criteria.distinctRequesterThresholdMet).toBe(true);
+    expect(bundle.outageSignals.criteria.distinctIncidentRequesterThresholdMet).toBe(true);
     expect(bundle.outageSignals.passedCriteria).toContain('notRoutineCluster');
-    expect(bundle.outageSignals.rationale).toMatch(/Strong similar-ticket overlap/i);
+    expect(bundle.outageSignals.rationale).toMatch(/Shared incident language/i);
     expect(bundle.outageSignals.counts.distinctRequesters).toBe(5);
     expect(bundle.outageSignals.allowedPublicPhrases).toContain('we are seeing multiple similar reports');
     expect(bundle.outageSignals.blockedPublicPhrases).toContain('global outage');
@@ -278,9 +278,9 @@ describe('notification context enrichment service', () => {
     expect(bundle.outageSignals.signalLevel).toBe('watch');
     expect(bundle.outageSignals.confidence).toBe('medium');
     expect(bundle.outageSignals.rationale).toMatch(/not strong enough/i);
-    expect(bundle.outageSignals.criteria.distinctRequesterThresholdMet).toBe(false);
+    expect(bundle.outageSignals.criteria.distinctIncidentRequesterThresholdMet).toBe(false);
     expect(bundle.outageSignals.counts.distinctRequesters).toBe(1);
-    expect(bundle.outageSignals.allowedPublicPhrases).toEqual(['we are reviewing similar reports']);
+    expect(bundle.outageSignals.allowedPublicPhrases).toEqual([]);
   });
 
   test('classifies routine onboarding and procurement clusters without outage-like wording', async () => {
@@ -342,6 +342,87 @@ describe('notification context enrichment service', () => {
     expect(bundle.outageSignals.confidence).toBe('low');
     expect(bundle.outageSignals.rationale).toMatch(/routine operational patterns/i);
     expect(bundle.outageSignals.allowedPublicPhrases).toEqual([]);
+  });
+
+  test('classifies high-volume peripheral and docking station matches as a routine cluster', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      ...ticketRow(),
+      subject: 'Docking Station has no power',
+      descriptionText: 'My docking station does not seem to have power, though the power bar works.',
+      category: null,
+      subCategory: null,
+      ticketCategory: 'Peripherals',
+      internalCategory: { id: 66, name: 'Devices & Hardware' },
+      internalSubcategory: { id: 70, name: 'Docking Stations & Display Connectivity' },
+    });
+    prismaMock.ticket.findMany.mockResolvedValue([
+      similarTicket(641, 'Vancouver', 10, {
+        subject: 'Inspect and troubleshoot office printer',
+        descriptionText: 'Printer peripheral troubleshooting',
+        category: null,
+        subCategory: null,
+        ticketCategory: 'Printers',
+        internalCategoryId: 66,
+        internalSubcategoryId: 71,
+        internalCategory: { id: 66, name: 'Devices & Hardware' },
+        internalSubcategory: { id: 71, name: 'Printers & Scanners' },
+      }),
+      similarTicket(642, 'Calgary', 12, {
+        subject: 'Install ordered PDU at office workstation',
+        descriptionText: 'Workstation hardware setup',
+        category: null,
+        subCategory: null,
+        ticketCategory: 'Workstation Setup',
+        internalCategoryId: 66,
+        internalSubcategoryId: 72,
+        internalCategory: { id: 66, name: 'Devices & Hardware' },
+        internalSubcategory: { id: 72, name: 'Workstation Setup' },
+      }),
+      similarTicket(643, 'Halifax', 14, {
+        subject: 'Request for webcam',
+        descriptionText: 'Peripheral accessory request',
+        category: null,
+        subCategory: null,
+        ticketCategory: 'Peripherals',
+        internalCategoryId: 66,
+        internalSubcategoryId: 73,
+        internalCategory: { id: 66, name: 'Devices & Hardware' },
+        internalSubcategory: { id: 73, name: 'Peripherals / Accessories Procurement' },
+      }),
+      similarTicket(644, 'Surrey', 16, {
+        subject: 'Docking station display connectivity',
+        descriptionText: 'Dock display cable check',
+        category: null,
+        subCategory: null,
+        ticketCategory: 'Peripherals',
+        internalCategoryId: 66,
+        internalSubcategoryId: 70,
+        internalCategory: { id: 66, name: 'Devices & Hardware' },
+        internalSubcategory: { id: 70, name: 'Docking Stations & Display Connectivity' },
+      }),
+    ]);
+
+    const bundle = await buildNotificationLlmContext({
+      workspaceId: 1,
+      eventContext: {
+        ...eventContext,
+        ticket: {
+          ...eventContext.ticket,
+          subject: 'Docking Station has no power',
+          descriptionText: 'My docking station does not seem to have power, though the power bar works.',
+          category: null,
+          subCategory: null,
+          ticketCategory: 'Peripherals',
+        },
+      },
+      state: eventContext.state,
+    });
+
+    expect(bundle.outageSignals.signalLevel).toBe('routine_cluster');
+    expect(bundle.outageSignals.criteria.currentIncidentLanguage).toBe(false);
+    expect(bundle.outageSignals.counts.openIncidentStrongTickets).toBe(0);
+    expect(bundle.outageSignals.allowedPublicPhrases).toEqual([]);
+    expect(bundle.outageSignals.rationale).toMatch(/routine operational patterns/i);
   });
 
   test('returns none for isolated weak similarity', async () => {

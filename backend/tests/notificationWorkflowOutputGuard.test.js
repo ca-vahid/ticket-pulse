@@ -121,6 +121,62 @@ describe('notification workflow output guard', () => {
     })).toThrow(/response-time|resolution-time/);
   });
 
+  test('repairs unsupported broader-issue wording without dropping unrelated copy', () => {
+    const result = guardNotificationEmailPayload({
+      subject: 'Ticket update',
+      html: '<p>We received your docking station request.</p><p>This may be part of a broader issue.</p><p>We are looking into it.</p>',
+      text: 'We received your docking station request. This may be part of a broader issue. We are looking into it.',
+    }, {
+      contextBundle: {
+        ticket: {
+          subject: 'Docking Station has no power',
+          category: 'Peripherals',
+        },
+        outageSignals: {
+          allowedPublicPhrases: [],
+        },
+      },
+      repairGuardrails: ['similar_report_claim_without_evidence'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.payload.text).toContain('We received your docking station request');
+    expect(result.payload.text).toContain('We are looking into it');
+    expect(result.payload.text).not.toMatch(/broader issue/i);
+    expect(result.repairedIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'similar_report_claim_without_evidence',
+        action: 'repaired',
+      }),
+    ]));
+  });
+
+  test('allows only the exact deterministic similar-report phrase when evidence permits it', () => {
+    expect(guardNotificationEmailPayload({
+      subject: 'Ticket update',
+      html: '<p>We are seeing multiple similar reports.</p>',
+      text: 'We are seeing multiple similar reports.',
+    }, {
+      contextBundle: {
+        outageSignals: {
+          allowedPublicPhrases: ['we are seeing multiple similar reports'],
+        },
+      },
+    }).accepted).toBe(true);
+
+    expect(() => guardNotificationEmailPayload({
+      subject: 'Ticket update',
+      html: '<p>We are seeing multiple similar reports, so this may be part of a broader issue.</p>',
+      text: 'We are seeing multiple similar reports, so this may be part of a broader issue.',
+    }, {
+      contextBundle: {
+        outageSignals: {
+          allowedPublicPhrases: ['we are seeing multiple similar reports'],
+        },
+      },
+    })).toThrow(/similar-report|broader-issue/i);
+  });
+
   test('records emoji and playful metaphors as audit-only findings by default', () => {
     const contextBundle = {
       ticket: {
