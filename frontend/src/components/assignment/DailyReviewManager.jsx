@@ -4994,8 +4994,8 @@ export default function DailyReviewManager({ workspaceTimezone }) {
           </div>
 
           <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
-              <div className="flex flex-1 flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
                 <label className="relative min-w-0 flex-1 lg:min-w-[22rem] xl:flex-[1_1_30rem]">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
@@ -5006,98 +5006,99 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                     className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
                   />
                 </label>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex lg:flex-wrap lg:items-center lg:shrink-0">
-                  <label className="relative">
-                    <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                    <select
-                      value={backlogSeverity}
-                      onChange={(e) => setBacklogSeverity(e.target.value)}
-                      className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
+
+                {backlogStatus === 'pending' && (
+                  <div className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2 sm:flex-row sm:flex-wrap sm:items-center 2xl:flex-nowrap">
+                    <label className="inline-flex h-10 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={allVisiblePendingSelected}
+                        onChange={toggleAllVisiblePending}
+                        disabled={visiblePendingBacklogItems.length === 0}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                      />
+                      Select all ({visiblePendingBacklogItems.length})
+                    </label>
+                    <span className="hidden h-6 w-px bg-slate-200 sm:block" />
+                    <span className="px-2 text-sm font-semibold text-slate-600">{selectedPendingItems.length} selected</span>
+                    <button
+                      type="button"
+                      onClick={() => runBulkBacklogAction('approved')}
+                      disabled={selectedPendingItems.length === 0 || Boolean(bulkBacklogAction)}
+                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <option value="all">All priority</option>
-                      <option value="high">High</option>
-                      <option value="medium">Medium</option>
-                      <option value="low">Low</option>
-                    </select>
-                  </label>
-                  <label className="relative">
-                    <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                    <select
-                      value={backlogSort}
-                      onChange={(e) => setBacklogSort(e.target.value)}
-                      className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
+                      {bulkBacklogAction === 'approved' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                      Approve selected
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => runBulkBacklogAction('rejected')}
+                      disabled={selectedPendingItems.length === 0 || Boolean(bulkBacklogAction)}
+                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <option value="newest">Newest</option>
-                      <option value="oldest">Oldest</option>
-                      <option value="severity">Priority</option>
-                      <option value="title">Title</option>
-                    </select>
-                  </label>
-                  <select
-                    value={backlogStatus}
-                    onChange={(e) => setBacklogStatus(e.target.value)}
-                    className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
-                  >
-                    <option value="pending">Review queue</option>
-                    <option value="rejected">Rejected</option>
-                    <option value="applied">Applied</option>
-                    <option value="all">All</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={loadBacklog}
-                    disabled={loadingBacklog || refreshingBacklog}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    title="Refresh review queue"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${refreshingBacklog ? 'animate-spin' : ''}`} />
-                    <span className="hidden sm:inline">{refreshingBacklog ? 'Refreshing' : 'Refresh'}</span>
-                  </button>
-                </div>
+                      {bulkBacklogAction === 'rejected' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                      Reject selected
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowBacklogAdvancedFilters((prev) => !prev)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50"
+                      title="More filters"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
               </div>
 
-              {backlogStatus === 'pending' && (
-                <div className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2 sm:flex-row sm:items-center">
-                  <label className="inline-flex h-10 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={allVisiblePendingSelected}
-                      onChange={toggleAllVisiblePending}
-                      disabled={visiblePendingBacklogItems.length === 0}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-                    />
-                    Select all ({visiblePendingBacklogItems.length})
-                  </label>
-                  <span className="hidden h-6 w-px bg-slate-200 sm:block" />
-                  <span className="px-2 text-sm font-semibold text-slate-600">{selectedPendingItems.length} selected</span>
-                  <button
-                    type="button"
-                    onClick={() => runBulkBacklogAction('approved')}
-                    disabled={selectedPendingItems.length === 0 || Boolean(bulkBacklogAction)}
-                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex lg:flex-wrap lg:items-center lg:shrink-0">
+                <label className="relative">
+                  <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <select
+                    value={backlogSeverity}
+                    onChange={(e) => setBacklogSeverity(e.target.value)}
+                    className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
                   >
-                    {bulkBacklogAction === 'approved' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                    Approve selected
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => runBulkBacklogAction('rejected')}
-                    disabled={selectedPendingItems.length === 0 || Boolean(bulkBacklogAction)}
-                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    <option value="all">All priority</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                <label className="relative">
+                  <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <select
+                    value={backlogSort}
+                    onChange={(e) => setBacklogSort(e.target.value)}
+                    className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
                   >
-                    {bulkBacklogAction === 'rejected' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
-                    Reject selected
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowBacklogAdvancedFilters((prev) => !prev)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50"
-                    title="More filters"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                    <option value="severity">Priority</option>
+                    <option value="title">Title</option>
+                  </select>
+                </label>
+                <select
+                  value={backlogStatus}
+                  onChange={(e) => setBacklogStatus(e.target.value)}
+                  className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
+                >
+                  <option value="pending">Review queue</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="applied">Applied</option>
+                  <option value="all">All</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={loadBacklog}
+                  disabled={loadingBacklog || refreshingBacklog}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  title="Refresh review queue"
+                >
+                  <RefreshCw className={`h-4 w-4 ${refreshingBacklog ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">{refreshingBacklog ? 'Refreshing' : 'Refresh'}</span>
+                </button>
+              </div>
             </div>
 
             <SmoothCollapse open={showBacklogAdvancedFilters || backlogStatus !== 'pending' || Boolean(backlogRunFilter || backlogStartDate || backlogEndDate)}>

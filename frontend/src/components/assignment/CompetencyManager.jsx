@@ -10,7 +10,7 @@ import {
   Search, Clock, Save, Upload, FileText, X, MapPin, History,
   Sparkles, ArrowUpDown, ArrowUpRight, ArrowDownRight, SlidersHorizontal, CalendarDays,
   Folder, GitMerge, CheckSquare, Square, HelpCircle, Database,
-  ShieldCheck, Gauge, Zap,
+  ShieldCheck, Gauge, Zap, Lock, Unlock,
 } from 'lucide-react';
 import {
   CopyBadge, ToolCallCard, StreamContent,
@@ -1714,6 +1714,7 @@ function MatrixTab({ onAnalyze }) {
   const [categorySearch, setCategorySearch] = useState('');
   const [mappedOnly, setMappedOnly] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
+  const [matrixEditMode, setMatrixEditMode] = useState(false);
   const [matrixScrollLeft, setMatrixScrollLeft] = useState(0);
   const [matrixMaxScrollLeft, setMatrixMaxScrollLeft] = useState(0);
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState(() => new Set());
@@ -1857,6 +1858,19 @@ function MatrixTab({ onAnalyze }) {
               Showing <span className="font-semibold text-slate-700">{displayCategories.length}</span> rows across <span className="font-semibold text-slate-700">{tree.length}</span> top categories and <span className="font-semibold text-slate-700">{categories.length - tree.length}</span> subcategories.
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMatrixEditMode((enabled) => !enabled)}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold shadow-sm transition-all ${
+                  matrixEditMode
+                    ? 'border-amber-300 bg-amber-100 text-amber-900 ring-2 ring-amber-200'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+                title={matrixEditMode ? 'Disable matrix edits' : 'Enable matrix score editing'}
+              >
+                {matrixEditMode ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                {matrixEditMode ? 'Editing on' : 'Enable edits'}
+              </button>
               {focusedTech && (
                 <>
                   <button type="button" onClick={() => setSelectedTechId(focusedTech.id)} className="rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1.5 text-xs font-semibold text-purple-700 transition-colors hover:bg-purple-100">Edit</button>
@@ -1925,10 +1939,17 @@ function MatrixTab({ onAnalyze }) {
         </div>
       )}
 
+      {matrixEditMode && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 shadow-sm">
+          <Unlock className="h-4 w-4" />
+          Matrix edit mode is on. Score clicks auto-save immediately.
+        </div>
+      )}
+
       {/* Swapped-axis matrix: categories as rows, technicians as columns */}
       {technicians.length > 0 && (
         <div className="space-y-2">
-          <div className="sticky top-[57px] z-50 overflow-hidden rounded-xl border border-slate-200 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
+          <div className="sticky top-[57px] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
             <div className="flex">
               <div
                 className="flex shrink-0 items-center justify-between gap-3 border-r border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700"
@@ -2009,7 +2030,7 @@ function MatrixTab({ onAnalyze }) {
               <thead className="sr-only">
                 <tr>
                   <th
-                    className="sticky left-0 z-30 bg-slate-50 px-3 py-3 text-left font-medium text-slate-600"
+                    className="sticky left-0 z-20 bg-slate-50 px-3 py-3 text-left font-medium text-slate-600"
                     style={{ width: MATRIX_CATEGORY_COL_WIDTH, minWidth: MATRIX_CATEGORY_COL_WIDTH }}
                   >
                   Category / Subcategory
@@ -2068,7 +2089,7 @@ function MatrixTab({ onAnalyze }) {
                   return (
                     <tr key={cat.id} className={`border-t transition-colors duration-200 hover:bg-slate-50 ${rowTone}`}>
                       <td
-                        className={`sticky left-0 z-40 px-3 shadow-[1px_0_0_rgba(226,232,240,0.8)] ${labelCellTone}`}
+                        className={`sticky left-0 z-20 px-3 shadow-[1px_0_0_rgba(226,232,240,0.8)] ${labelCellTone}`}
                         style={{ width: MATRIX_CATEGORY_COL_WIDTH, minWidth: MATRIX_CATEGORY_COL_WIDTH }}
                         title={cat.description || ''}
                       >
@@ -2106,6 +2127,8 @@ function MatrixTab({ onAnalyze }) {
                         const CYCLE = ['', 'basic', 'intermediate', 'advanced', 'expert'];
                         const handleCycle = (e) => {
                           e.stopPropagation();
+                          if (!matrixEditMode) return;
+
                           const currentIdx = CYCLE.indexOf(level);
                           const nextLevel = CYCLE[(currentIdx + 1) % CYCLE.length];
 
@@ -2136,15 +2159,19 @@ function MatrixTab({ onAnalyze }) {
                           >
                             {isFocused && <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-purple-300/70" />}
                             <button
+                              type="button"
                               onClick={handleCycle}
-                              className={`relative z-10 h-7 w-7 rounded-lg text-center text-[10px] font-bold leading-7 transition-all hover:scale-110 hover:shadow-sm ${
+                              disabled={!matrixEditMode}
+                              className={`relative z-10 h-7 w-7 rounded-lg text-center text-[10px] font-bold leading-7 transition-all ${
+                                matrixEditMode ? 'cursor-pointer hover:scale-110 hover:shadow-sm' : 'cursor-default'
+                              } ${
                                 levelInfo
                                   ? `${levelInfo.color} ${isActiveColumn ? 'ring-2 ring-white shadow-md' : ''}`
                                   : isActiveColumn
                                     ? 'bg-white/75 text-slate-300 ring-1 ring-purple-200'
-                                    : 'text-slate-200 hover:bg-slate-100'
+                                    : `${matrixEditMode ? 'text-slate-200 hover:bg-slate-100' : 'text-slate-200'}`
                               }`}
-                              title={`${cat.depth === 1 ? `${cat.parentName} > ` : ''}${cat.name} × ${tech.name}: ${level || 'not set'} (click to cycle)`}
+                              title={`${cat.depth === 1 ? `${cat.parentName} > ` : ''}${cat.name} × ${tech.name}: ${level || 'not set'} (${matrixEditMode ? 'click to cycle and auto-save' : 'enable edits to change'})`}
                             >
                               {levelInfo ? levelInfo.num : '·'}
                             </button>
@@ -2175,7 +2202,7 @@ function MatrixTab({ onAnalyze }) {
           <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">2 = Comfortable</span>
           <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">3 = Advanced</span>
           <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800">4 = Expert / SME</span>
-          <span className="ml-2 text-slate-400">Click cell to cycle · Click agent header to spotlight column · Double-click header to edit</span>
+          <span className="ml-2 text-slate-400">{matrixEditMode ? 'Click cell to cycle and auto-save' : 'Enable edits before changing scores'} · Click agent header to spotlight column · Double-click header to edit</span>
         </div>
       )}
 
