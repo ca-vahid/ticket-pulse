@@ -64,30 +64,32 @@ export default function WorkflowsPage() {
     >
       {/* Gradient ribbon = page header: tabs on the left, workspace status on the right */}
       <div className="flex-shrink-0 pb-3">
-        <div className="flex items-center gap-1.5 overflow-x-auto rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 p-1.5 shadow-md [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {WORKFLOW_TABS.map((t) => {
-            const Icon = t.Icon;
-            const isActive = activeTab === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => handleTabChange(t.id)}
-                aria-current={isActive ? 'page' : undefined}
-                className={`group flex touch-manipulation items-center gap-2 whitespace-nowrap rounded-lg border-b-[3px] px-3.5 py-1.5 text-sm font-semibold transition-all sm:px-4 ${
-                  isActive
-                    ? `bg-white text-slate-900 shadow-sm ${t.accentBorder}`
-                    : 'border-transparent bg-white/10 text-white/80 hover:bg-white/20 hover:text-white'
-                }`}
-              >
-                <Icon className={`h-4 w-4 ${isActive ? t.accentText : 'text-white/70 group-hover:text-white'}`} />
-                <span>{t.label}</span>
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-3 overflow-x-auto rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 p-1.5 shadow-md [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex flex-1 items-center gap-2">
+            {WORKFLOW_TABS.map((t) => {
+              const Icon = t.Icon;
+              const isActive = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => handleTabChange(t.id)}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`group flex flex-1 touch-manipulation items-center justify-center gap-2 whitespace-nowrap rounded-lg border-b-[3px] px-4 py-2.5 text-sm font-semibold transition-all ${
+                    isActive
+                      ? `bg-white text-slate-900 shadow-sm ${t.accentBorder}`
+                      : 'border-transparent bg-white/10 text-white/80 hover:bg-white/20 hover:text-white'
+                  }`}
+                >
+                  <Icon className={`h-4 w-4 shrink-0 ${isActive ? t.accentText : 'text-white/70 group-hover:text-white'}`} />
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
 
           {health && (
-            <div className="ml-auto hidden items-center gap-1.5 pl-2 pr-0.5 lg:flex">
+            <div className="hidden shrink-0 items-center gap-1.5 pr-0.5 lg:flex">
               <RibbonStat
                 label="SendGrid"
                 value={health.sendgridConfigured ? (health.sendgridMode === 'smtp' ? 'SMTP' : 'OK') : 'Missing'}
