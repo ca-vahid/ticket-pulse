@@ -114,7 +114,13 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
-const { executeDefinition, executeWorkflow, executeForEvent } = await import('../src/services/notificationWorkflowEngine.js');
+const {
+  executeDefinition,
+  executeWorkflow,
+  executeForEvent,
+  finalizeWorkflowSendEmail,
+  sanitizeWorkflowAuditPayload,
+} = await import('../src/services/notificationWorkflowEngine.js');
 const { buildDefaultWorkflowDefinition } = await import('../src/services/notificationWorkflowDefinition.js');
 
 const workflow = {
@@ -904,6 +910,68 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.html).toContain(publicStatusUrl);
     expect(result.state.email.html).toContain(immediateSupportUrl);
     expect(result.state.email.html).not.toContain('Helpful ticket links');
+  });
+
+  test('audit replay renders emergency support from a redacted after-hours contact snapshot', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created', { scheduleMode: 'after_hours' });
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.appendPublicStatusLink = true;
+    sendNode.data.appendAfterHoursSupportLink = true;
+
+    const email = await finalizeWorkflowSendEmail({
+      workflow: {
+        ...workflow,
+        publishedDefinition: definition,
+      },
+      eventContext: {
+        event: { type: 'ticket.created' },
+        availability: { isBusinessHours: false, isAfterHours: true, isHoliday: false },
+        publicStatusUrl,
+        afterHoursEscalationUrl: immediateSupportUrl,
+        afterHoursSupport: {
+          immediateSupportUrl,
+          hasActiveContact: true,
+          phoneVerified: true,
+          rotationLabel: 'First roster member with a verified phone',
+        },
+        ticket: {
+          publicStatusUrl,
+          afterHoursEscalationUrl: immediateSupportUrl,
+        },
+      },
+      email: {
+        subject: 'Ticket received',
+        html: '<p>We received it.</p>',
+        text: 'We received it.',
+      },
+      nodeData: sendNode.data,
+      actionLinkRenderMode: 'live',
+      workflowScheduleMode: 'after_hours',
+      allowSignatureFailure: true,
+    });
+
+    expect(email.actionLinks.afterHoursSupport).toEqual(expect.objectContaining({
+      applied: true,
+      hasActiveContact: true,
+      phoneVerified: true,
+      rotationLabel: 'First roster member with a verified phone',
+    }));
+    expect(email.html).toContain('Need immediate after-hours support?');
+    expect(email.html).toContain('Request immediate support');
+    expect(email.html).toContain('roster contact');
+    expect(email.html).toContain('First roster member with a verified phone');
+    expect(email.html).not.toContain('Helpful ticket links');
+  });
+
+  test('audit HTML sanitization redacts embedded image data without dropping the email body', () => {
+    const sanitized = sanitizeWorkflowAuditPayload({
+      htmlBody: '<p>We received it.</p><img src="data:image/png;base64,abcdef123456"><p>Need immediate after-hours support?</p>',
+    });
+
+    expect(sanitized.htmlBody).toContain('<p>We received it.</p>');
+    expect(sanitized.htmlBody).toContain('[redacted-image-data]');
+    expect(sanitized.htmlBody).toContain('Need immediate after-hours support?');
+    expect(sanitized.htmlBody).not.toBe('[redacted-image-data]');
   });
 
   test('send step captures final action-block email even when recipient resolution is empty', async () => {

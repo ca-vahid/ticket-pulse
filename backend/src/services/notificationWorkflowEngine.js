@@ -535,7 +535,8 @@ function raiseUrgencyAction(url) {
 }
 
 function afterHoursSupportAction(url, context = {}) {
-  const activeContact = context?.afterHoursSupport?.activeContact || {};
+  const support = context?.afterHoursSupport || {};
+  const activeContact = support.activeContact || {};
   const phone = String(activeContact.phone || '').trim();
   return {
     key: 'afterHoursSupport',
@@ -547,7 +548,7 @@ function afterHoursSupportAction(url, context = {}) {
     activeContact,
     phone,
     phoneHref: phone ? phone.replace(/[^\d+]/g, '') : null,
-    rotationLabel: activeContact.rotationLabel || null,
+    rotationLabel: activeContact.rotationLabel || support.rotationLabel || null,
   };
 }
 
@@ -705,8 +706,8 @@ function compactActionLinkDiagnostic(diagnostic = {}) {
     warning: diagnostic.warning || null,
     actionLinkRenderMode: diagnostic.actionLinkRenderMode || null,
     hasUrl: Boolean(diagnostic.applied === true && diagnostic.url),
-    hasActiveContact: Boolean(activeContact),
-    phoneVerified: Boolean(String(activeContact?.phone || '').trim()),
+    hasActiveContact: Boolean(activeContact) || diagnostic.hasActiveContact === true,
+    phoneVerified: Boolean(String(activeContact?.phone || '').trim()) || diagnostic.phoneVerified === true,
     rotationLabel: activeContact?.rotationLabel || diagnostic.rotationLabel || null,
   };
 }
@@ -726,7 +727,7 @@ function compactEmailForAudit(email = {}) {
 
 const AUDIT_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const AUDIT_PHONE_PATTERN = /(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)/g;
-const AUDIT_IMAGE_PATTERN = /data:image\/[a-z0-9.+-]+;base64,/i;
+const AUDIT_IMAGE_PATTERN = /data:image\/[a-z0-9.+-]+;base64,[^\s"'<>)]*/gi;
 const AUDIT_SENSITIVE_KEY_PATTERN = /^(activeContact|contact|requester|assignedAgent|previousAgent)$/i;
 const AUDIT_DIRECT_CONTACT_KEY_PATTERN = /(email|phone|mobile|cell|avatar|photo|image|thumbnail|profile)/i;
 
@@ -764,8 +765,8 @@ export function sanitizeWorkflowAuditPayload(value, depth = 0) {
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'string') {
-    if (AUDIT_IMAGE_PATTERN.test(value)) return '[redacted-image-data]';
     return value
+      .replace(AUDIT_IMAGE_PATTERN, '[redacted-image-data]')
       .replace(AUDIT_EMAIL_PATTERN, '[redacted-email]')
       .replace(AUDIT_PHONE_PATTERN, '[redacted-phone]');
   }
@@ -877,9 +878,11 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
       { actionLinkRenderMode: effectiveOptions.actionLinkRenderMode },
     );
   }
-  const activeContact = context?.afterHoursSupport?.activeContact || null;
+  const support = context?.afterHoursSupport || {};
+  const activeContact = support.activeContact || null;
   const contactPhone = String(activeContact?.phone || '').trim();
-  const missingPhoneReason = contactPhone
+  const hasVerifiedContact = Boolean(contactPhone || support.phoneVerified === true || support.hasActiveContact === true);
+  const missingPhoneReason = hasVerifiedContact
     ? null
     : 'No active after-hours contact phone is available for requester emails.';
   if (!effectiveOptions.forceActionLinks && missingPhoneReason) {
@@ -889,6 +892,9 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
       actionLinkRenderMode: effectiveOptions.actionLinkRenderMode,
     });
   }
+  const redactedContactWarning = !contactPhone && hasVerifiedContact
+    ? 'After-hours contact details are redacted in audit context; rendering immediate-support CTA without a displayed phone.'
+    : null;
 
   return recordAppliedActionLink(
     email,
@@ -897,8 +903,11 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
     url,
     {
       activeContact,
-      missingActiveContactPhone: Boolean(missingPhoneReason),
-      warning: missingPhoneReason,
+      hasActiveContact: hasVerifiedContact,
+      phoneVerified: Boolean(contactPhone) || support.phoneVerified === true,
+      rotationLabel: activeContact?.rotationLabel || support.rotationLabel || null,
+      missingActiveContactPhone: !contactPhone,
+      warning: redactedContactWarning,
       forced: effectiveOptions.forceActionLinks && Boolean(missingPhoneReason),
       liveWouldSkipReason: missingPhoneReason,
       actionLinkRenderMode: effectiveOptions.actionLinkRenderMode,
