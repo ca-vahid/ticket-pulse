@@ -878,6 +878,34 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.html).toContain(publicStatusUrl);
   });
 
+  test('after-hours workflow schedule renders emergency support when availability is missing', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created', { scheduleMode: 'after_hours' });
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.appendPublicStatusLink = true;
+    sendNode.data.appendAfterHoursSupportLink = true;
+
+    const eventContextWithoutAvailability = { ...eventContext };
+    delete eventContextWithoutAvailability.availability;
+    const result = await executeDefinition({
+      workflow: {
+        ...workflow,
+        publishedDefinition: definition,
+      },
+      definition,
+      eventContext: eventContextWithoutAvailability,
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.actionLinks.publicStatus.applied).toBe(true);
+    expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
+    expect(result.state.email.html).toContain('Need immediate after-hours support?');
+    expect(result.state.email.html).toContain('Request immediate support');
+    expect(result.state.email.html).toContain(publicStatusUrl);
+    expect(result.state.email.html).toContain(immediateSupportUrl);
+    expect(result.state.email.html).not.toContain('Helpful ticket links');
+  });
+
   test('send step captures final action-block email even when recipient resolution is empty', async () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created');
     const sendNode = definition.nodes.find((node) => node.type === 'send_email');

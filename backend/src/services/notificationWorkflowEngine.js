@@ -661,6 +661,13 @@ function isBusinessHoursContext(context = {}) {
   return true;
 }
 
+function isAfterHoursActionContext(context = {}, options = {}) {
+  const availability = context.availability || {};
+  if (availability.isAfterHours === true || availability.isHoliday === true) return true;
+  if (availability.isBusinessHours === true) return false;
+  return actionLinkOptions(options).workflowScheduleMode === 'after_hours';
+}
+
 function actionLinkDiagnostic(email = {}, key, diagnostic) {
   return {
     ...email,
@@ -914,8 +921,7 @@ function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {
   // In after-hours/holiday context the emergency block takes over and bundles the
   // public status link inside itself. During business hours all selected links stay
   // grouped in the regular "Helpful ticket links" card.
-  const availability = context?.availability || {};
-  const isAfterHoursContext = availability.isAfterHours === true || availability.isHoliday === true;
+  const isAfterHoursContext = isAfterHoursActionContext(context, effectiveOptions);
 
   let appendixHtml = '';
   let appendixText = '';
