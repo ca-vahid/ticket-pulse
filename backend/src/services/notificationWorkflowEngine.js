@@ -536,14 +536,14 @@ function afterHoursSupportUrlFromContext(context) {
 // A large, full-width gradient action button: bold label + one-line description + inline PNG icon.
 // VML <v:roundrect> with a gradient fill renders it in Outlook desktop; a padded <a> with a CSS
 // gradient + drop shadow renders it everywhere else.
-function gradientActionButtonHtml({ url, icon, label, subtitle, fill, gradTop, gradBottom, shadow, subColor, radius = '999px', arcsize = '50%', fullWidth = false, vmlWidth = 428, vmlHeight = 62, labelSize = 15 }) {
+function gradientActionButtonHtml({ url, icon, label, subtitle, fill, gradTop, gradBottom, shadow, subColor, radius = '999px', arcsize = '50%', fullWidth = false, vmlWidth = 428, vmlHeight = 54, labelSize = 15, padY = 9 }) {
   const subVml = subtitle ? `<span style="font-size:11px;color:${subColor};"><br>${escapeHtml(subtitle)}</span>` : '';
   const subHtml = subtitle ? `<span style="display:block;font-size:11.5px;font-weight:400;line-height:15px;color:${subColor};margin-top:1px;">${escapeHtml(subtitle)}</span>` : '';
   const widthStyle = fullWidth ? '' : 'width:90%;margin:0 auto;';
-  const iconImg = icon ? `<img src="${icon}" width="16" height="16" alt="" style="vertical-align:middle;margin-right:7px;border:0;">` : '';
+  const iconImg = icon ? `<img src="${icon}" width="16" height="16" alt="" style="vertical-align:middle;margin-top:-2px;margin-right:7px;border:0;">` : '';
   return [
     `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(url)}" style="height:${vmlHeight}px;v-text-anchor:middle;width:${vmlWidth}px;" arcsize="${arcsize}" stroke="f" fillcolor="${fill}"><v:fill type="gradient" color="${gradTop}" color2="${gradBottom}" angle="180"/><w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;"><span style="font-size:${labelSize}px;font-weight:bold;">${escapeHtml(label)}</span>${subVml}</center></v:roundrect><![endif]-->`,
-    `<!--[if !mso]><!--><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="background:${fill};background-image:linear-gradient(${gradTop},${gradBottom});border-radius:${radius};box-shadow:${shadow};color:#ffffff;display:block;${widthStyle}font-family:Arial,Helvetica,sans-serif;text-decoration:none;padding:12px 18px;-webkit-text-size-adjust:none;"><span style="display:block;font-size:${labelSize}px;font-weight:700;line-height:20px;">${iconImg}${escapeHtml(label)}</span>${subHtml}</a><!--<![endif]-->`,
+    `<!--[if !mso]><!--><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="background:${fill};background-image:linear-gradient(${gradTop},${gradBottom});border-radius:${radius};box-shadow:${shadow};color:#ffffff;display:block;${widthStyle}font-family:Arial,Helvetica,sans-serif;text-decoration:none;padding:${padY}px 18px;-webkit-text-size-adjust:none;"><span style="display:block;font-size:${labelSize}px;font-weight:700;line-height:20px;">${iconImg}${escapeHtml(label)}</span>${subHtml}</a><!--<![endif]-->`,
   ].join('');
 }
 
@@ -551,7 +551,7 @@ function gradientActionButtonHtml({ url, icon, label, subtitle, fill, gradTop, g
 function outlinedStatusButtonHtml(url) {
   return [
     `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#ffffff;border:1px solid #c3d0e8;border-radius:999px;box-shadow:0 2px 0 #d6dff0;color:#143f9c;font-family:Arial,Helvetica,sans-serif;font-size:12.5px;font-weight:700;line-height:16px;padding:7px 14px;text-decoration:none;">`,
-    `<!--[if !mso]><!--><img src="${EMAIL_ICON_CLOCK_LIGHT}" width="16" height="16" alt="" style="vertical-align:middle;margin-right:5px;border:0;"><!--<![endif]-->`,
+    `<!--[if !mso]><!--><img src="${EMAIL_ICON_CLOCK_LIGHT}" width="16" height="16" alt="" style="vertical-align:middle;margin-top:-2px;margin-right:5px;border:0;"><!--<![endif]-->`,
     'Check status</a>',
   ].join('');
 }
@@ -571,8 +571,8 @@ const ACTION_BUTTON = {
     icon: EMAIL_ICON_UP_ARROW,
     label: 'Raise urgency',
     subtitle: 'Bumps priority and notifies the team lead',
-    fill: '#d12b21', gradTop: '#e64a3e', gradBottom: '#d12b21',
-    shadow: '0 3px 0 #9e2018,0 8px 15px rgba(158,32,24,.3)', subColor: '#f7cfca',
+    fill: '#df4537', gradTop: '#ef6457', gradBottom: '#df4537',
+    shadow: '0 3px 0 #b5342a,0 8px 15px rgba(181,52,42,.28)', subColor: '#fbd9d4',
   },
   afterHoursSupport: {
     icon: EMAIL_ICON_BOLT,
@@ -686,7 +686,7 @@ function regularActionAppendixHtml(actions = []) {
     .map((action) => {
       const cfg = ACTION_BUTTON[action.key];
       if (!cfg) return null;
-      return gradientActionButtonHtml({ url: action.url, ...cfg, vmlWidth: 428, vmlHeight: 62 });
+      return gradientActionButtonHtml({ url: action.url, ...cfg, vmlWidth: 428, vmlHeight: 54 });
     })
     .filter(Boolean);
   if (!buttons.length) return '';
@@ -716,7 +716,7 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
     subtitle: 'Pages the on-call engineer right now',
     fill: '#c0392f', gradTop: '#d8564b', gradBottom: '#c0392f',
     shadow: '0 3px 0 #93271f,0 8px 15px rgba(146,40,33,.3)', subColor: '#f3c8c3',
-    radius: '12px', arcsize: '20%', fullWidth: true, vmlWidth: 472, vmlHeight: 62,
+    radius: '12px', arcsize: '20%', fullWidth: true, vmlWidth: 472, vmlHeight: 54,
   });
 
   // Below the primary: an on-call call-card (number + Check status). With no resolved phone we
@@ -743,7 +743,7 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
 
   const heading = [
     '<div style="font-size:14px;line-height:18px;font-weight:700;color:#8a2730;margin:0 0 14px;">',
-    `<!--[if !mso]><!--><img src="${EMAIL_ICON_WARNING}" width="16" height="16" alt="" style="vertical-align:middle;margin-right:7px;border:0;"><!--<![endif]-->`,
+    `<!--[if !mso]><!--><img src="${EMAIL_ICON_WARNING}" width="16" height="16" alt="" style="vertical-align:middle;margin-top:-2px;margin-right:7px;border:0;"><!--<![endif]-->`,
     '<!--[if mso]><span style="font-family:Arial,sans-serif;">&#9888;</span>&nbsp; <![endif]-->',
     "Can't wait until morning?",
     '</div>',
