@@ -548,7 +548,7 @@ const ACTION_ICON_EMOJI = {
 
 function outlookCappedActionTable(innerHtml) {
   return [
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:20px 0 8px;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 8px;">',
     '<tr><td align="left" style="padding:0;">',
     '<!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td><![endif]-->',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;max-width:640px;">',
@@ -559,6 +559,27 @@ function outlookCappedActionTable(innerHtml) {
     '</table>',
   ].join('');
 }
+
+// Caps arbitrary message-body HTML to the same 640px left-aligned column as the action band, so
+// the LLM body lines up with the header, footer, and appended links instead of running the full
+// width of the email client.
+function cappedEmailBodyHtml(contentHtml) {
+  return [
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+    '<tr><td align="left" style="padding:0;">',
+    '<!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td><![endif]-->',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;max-width:640px;">',
+    `<tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:22px;color:#1f2937;">${contentHtml}</td></tr>`,
+    '</table>',
+    '<!--[if mso]></td></tr></table><![endif]-->',
+    '</td></tr>',
+    '</table>',
+  ].join('');
+}
+
+// Reliable vertical gap between the message body and the appended action block. Table margins are
+// dropped by some clients (e.g. Outlook on the web), so an explicit spacer row is used instead.
+const EMAIL_BODY_APPENDIX_SPACER = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td height="20" style="height:20px;line-height:20px;font-size:1px;">&nbsp;</td></tr></table>';
 
 function publicStatusAction(url) {
   return {
@@ -990,7 +1011,7 @@ function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {
 
   // In after-hours/holiday context the emergency block takes over and bundles the
   // public status link inside itself. During business hours all selected links stay
-  // grouped in the regular "Helpful ticket links" card.
+  // grouped in the regular action band.
   const isAfterHoursContext = isAfterHoursActionContext(context, effectiveOptions);
 
   let appendixHtml = '';
@@ -1005,10 +1026,16 @@ function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {
       appendixText = actionAppendixText(actions);
     }
   }
+  // Contain the message body in the same 640px column as the header/footer/appended links. This
+  // runs the first time the email is touched (template_render); finalize calls this again, where
+  // the flag makes it a no-op so the body is never wrapped twice.
+  if (next.bodyContainerApplied !== true && String(next.html || '').trim()) {
+    next = { ...next, html: cappedEmailBodyHtml(next.html), bodyContainerApplied: true };
+  }
   if (appendixHtml) {
     next = {
       ...next,
-      html: [next.html, appendixHtml].filter(Boolean).join('\n') || null,
+      html: [next.html, EMAIL_BODY_APPENDIX_SPACER, appendixHtml].filter(Boolean).join('\n') || null,
       text: [next.text || stripHtml(next.html), appendixText].filter(Boolean).join('\n\n') || null,
     };
   }
