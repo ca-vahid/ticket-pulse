@@ -874,8 +874,8 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.actionLinks.raiseUrgency.applied).toBe(true);
     expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
     expect(result.state.email.actionLinks.afterHoursSupport.skipped).toBe(false);
-    expect(result.state.email.html).toContain('Helpful ticket links');
-    expect(result.state.email.html).toContain('Open status page');
+    expect(result.state.email.html).toContain('What would you like to do?');
+    expect(result.state.email.html).toContain('Check status');
     expect(result.state.email.html).toContain('Raise urgency');
     expect(result.state.email.html).toContain('Request support');
     expect(result.state.email.html).toContain(publicStatusUrl);
@@ -907,7 +907,7 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
     expect(result.state.email.actionLinks.afterHoursSupport.forced).toBe(false);
     expect(result.state.email.actionLinks.afterHoursSupport.actionLinkRenderMode).toBe('force_all_enabled');
-    expect(result.state.email.html).toContain('Helpful ticket links');
+    expect(result.state.email.html).toContain('What would you like to do?');
     expect(result.state.email.html).not.toContain('Need immediate after-hours support?');
     expect(result.state.email.html).toContain(immediateSupportUrl);
     expect(result.state.email.html).toContain('+16045551234');
@@ -937,7 +937,7 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
     // After-hours context => distinct emergency panel that bundles the status link.
     expect(result.state.email.html).toContain('Need immediate after-hours support?');
-    expect(result.state.email.html).not.toContain('Helpful ticket links');
+    expect(result.state.email.html).not.toContain('What would you like to do?');
     expect(result.state.email.html).toContain(immediateSupportUrl);
     expect(result.state.email.html).toContain(publicStatusUrl);
   });
@@ -967,7 +967,7 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.html).toContain('Request immediate support');
     expect(result.state.email.html).toContain(publicStatusUrl);
     expect(result.state.email.html).toContain(immediateSupportUrl);
-    expect(result.state.email.html).not.toContain('Helpful ticket links');
+    expect(result.state.email.html).not.toContain('What would you like to do?');
   });
 
   test('audit replay renders emergency support from a redacted after-hours contact snapshot', async () => {
@@ -1018,7 +1018,7 @@ describe('notification workflow engine persistence', () => {
     expect(email.html).toContain('Request immediate support');
     expect(email.html).toContain('roster contact');
     expect(email.html).toContain('First roster member with a verified phone');
-    expect(email.html).not.toContain('Helpful ticket links');
+    expect(email.html).not.toContain('What would you like to do?');
   });
 
   test('audit HTML sanitization redacts embedded image data without dropping the email body', () => {
@@ -1061,7 +1061,7 @@ describe('notification workflow engine persistence', () => {
         afterHoursSupport: expect.objectContaining({ applied: true }),
       }),
     }));
-    expect(sendStep.output.htmlBody).toContain('Check latest status');
+    expect(sendStep.output.htmlBody).toContain('Check status');
     expect(sendStep.output.htmlBody).toContain('Request immediate support');
     expect(sendStep.output.actionLinks.afterHoursSupport).toEqual(expect.objectContaining({
       hasActiveContact: true,
