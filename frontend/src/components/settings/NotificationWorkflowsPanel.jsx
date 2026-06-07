@@ -27,6 +27,7 @@ import {
   FileJson,
   FlaskConical,
   History,
+  Inbox,
   Mail,
   Maximize2,
   PanelLeftClose,
@@ -35,6 +36,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Repeat,
   Rows3,
   Save,
   Search,
@@ -45,6 +47,7 @@ import {
   Type,
   Upload,
   UploadCloud,
+  UserCheck,
   Wand2,
   Waypoints,
   XCircle,
@@ -60,6 +63,27 @@ const EVENT_LABELS = {
   'ticket.reassigned': 'Ticket reassigned',
   'ticket.resolved_closed': 'Resolved or closed',
 };
+
+// Per-event color + icon, so the four trigger groups read as distinct zones in the
+// workflow list (and the selected-workflow header) instead of identical gray bars.
+const TRIGGER_VISUALS = {
+  'ticket.created': { icon: Inbox, icon_: 'text-emerald-600', chip: 'bg-emerald-50 text-emerald-700 ring-emerald-200', rail: 'bg-emerald-400' },
+  'ticket.assigned': { icon: UserCheck, icon_: 'text-blue-600', chip: 'bg-blue-50 text-blue-700 ring-blue-200', rail: 'bg-blue-400' },
+  'ticket.reassigned': { icon: Repeat, icon_: 'text-amber-600', chip: 'bg-amber-50 text-amber-700 ring-amber-200', rail: 'bg-amber-400' },
+  'ticket.resolved_closed': { icon: CheckCircle2, icon_: 'text-slate-500', chip: 'bg-slate-100 text-slate-600 ring-slate-200', rail: 'bg-slate-400' },
+};
+
+function triggerVisuals(triggerType) {
+  return TRIGGER_VISUALS[triggerType] || { icon: Waypoints, icon_: 'text-slate-500', chip: 'bg-slate-100 text-slate-600 ring-slate-200', rail: 'bg-slate-400' };
+}
+
+// Tone for the "last run" chip, derived loosely from the run status string.
+function lastRunChipClass(status) {
+  const s = String(status || '').toLowerCase();
+  if (/(complete|success|sent|deliver|ok)/.test(s)) return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+  if (/(fail|error|bounce|reject|block)/.test(s)) return 'bg-red-50 text-red-700 ring-red-200';
+  return 'bg-slate-100 text-slate-600 ring-slate-200';
+}
 
 const WORKFLOW_NODE_REGISTRY = {
   trigger: {
@@ -4226,51 +4250,66 @@ function buildWorkflowGroups(workflows) {
   return groups;
 }
 
-// Decluttered list row: name + status are always visible; the secondary meta
-// (variant type, routing, version, runs, last run) shows only when selected or hovered.
+// Always-on rich card: name + status on top, a role/version line, and a chip row
+// (runs, last run) — everything is visible without hovering so the list is scannable.
 function WorkflowRow({ workflow, selectedId, onSelect, nested = false }) {
   const isSelected = selectedId === workflow.id;
   const isEnabled = !!workflow.isEnabled;
   const isArchived = Boolean(workflow.archivedAt);
   const runs = workflow._count?.runs || 0;
   const lastRun = workflow.runs?.[0];
-  const meta = [
-    workflowVariantTypeLabel(workflow),
-    workflow.isDefaultVariant
-      ? 'Default fallback'
-      : `Match ${workflow.routingPriority || 1} · ${routingBehaviorLabel(workflow.routingMode)}`,
-    `v${workflow.publishedVersion || 0}`,
-    `${runs} ${runs === 1 ? 'run' : 'runs'}`,
-    lastRun ? `Last ${lastRun.status} ${formatDate(lastRun.startedAt)}` : 'No runs yet',
-  ].join('  ·  ');
+  const version = workflow.publishedVersion || 0;
+  const roleLine = workflow.isDefaultVariant
+    ? `Default · v${version}`
+    : `${workflowVariantTypeLabel(workflow)} · Match ${workflow.routingPriority || 1} · ${routingBehaviorLabel(workflow.routingMode)} · v${version}`;
   return (
     <button
       type="button"
       onClick={() => onSelect(workflow.id)}
       aria-current={isSelected ? 'true' : undefined}
       className={cls(
-        'group flex w-full flex-col gap-0.5 border-l-4 px-3 py-2 text-left transition-colors',
+        'group flex w-full flex-col gap-1.5 border-l-4 px-3 py-2.5 text-left transition-colors',
         nested && 'pl-5',
         isSelected
-          ? 'border-l-blue-600 bg-blue-100/95 ring-1 ring-inset ring-blue-200 hover:bg-blue-100'
+          ? 'border-l-blue-600 bg-blue-100 ring-1 ring-inset ring-blue-200 hover:bg-blue-100'
           : isArchived
-            ? 'border-l-slate-300 bg-slate-100/70 text-slate-500 hover:bg-slate-100'
+            ? 'border-l-slate-300 bg-slate-100 hover:bg-slate-200/70'
             : isEnabled
               ? 'border-l-emerald-400 bg-white hover:bg-slate-50'
-              : 'border-l-slate-200 bg-slate-50/60 hover:bg-slate-100',
+              : 'border-l-slate-300 bg-slate-50 hover:bg-slate-100',
       )}
     >
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 items-start gap-2">
         <span
-          className={cls('min-w-0 flex-1 truncate text-[15px] font-semibold leading-5', isEnabled ? 'text-slate-950' : 'text-slate-700')}
+          className={cls(
+            'min-w-0 flex-1 text-[15px] font-semibold leading-5 line-clamp-2',
+            isArchived ? 'text-slate-500' : isEnabled ? 'text-slate-900' : 'text-slate-600',
+          )}
           title={workflow.name}
         >
           {workflowDisplayName(workflow)}
         </span>
         <WorkflowStatus workflow={workflow} />
       </div>
-      <div className={cls('min-w-0 truncate text-[11px] leading-4 text-slate-500', isSelected ? 'block' : 'hidden group-hover:block')}>
-        {meta}
+      <div className="min-w-0 truncate text-[11px] font-medium leading-4 text-slate-500" title={roleLine}>
+        {roleLine}
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
+          {runs} {runs === 1 ? 'run' : 'runs'}
+        </span>
+        {lastRun ? (
+          <span
+            className={cls('inline-flex max-w-[12rem] items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold ring-1', lastRunChipClass(lastRun.status))}
+            title={`Last run: ${lastRun.status} · ${formatDate(lastRun.startedAt)}`}
+          >
+            <span className="truncate">{lastRun.status} · {formatDate(lastRun.startedAt)}</span>
+          </span>
+        ) : (
+          <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
+            No runs yet
+          </span>
+        )}
       </div>
     </button>
   );
@@ -4302,11 +4341,18 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
         const total = (bucket.default ? 1 : 0) + bucket.customs.length;
         // The group holding the selected workflow stays open so the selection is never hidden.
         const isExpanded = expandedTriggers.has(triggerType) || selectedTrigger === triggerType;
+        const visuals = triggerVisuals(triggerType);
+        const GroupIcon = visuals.icon;
         return (
           <section key={triggerType} className="bg-white">
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-100/95 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-600">
-              <span>{EVENT_LABELS[triggerType] || triggerType}</span>
-              <span className="rounded-full bg-white px-2 py-0.5 text-slate-500 ring-1 ring-slate-200">{total}</span>
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-700">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className={cls('flex h-6 w-6 shrink-0 items-center justify-center rounded-md ring-1', visuals.chip)}>
+                  <GroupIcon className={cls('h-3.5 w-3.5', visuals.icon_)} />
+                </span>
+                <span className="truncate text-xs font-bold uppercase tracking-wide">{EVENT_LABELS[triggerType] || triggerType}</span>
+              </span>
+              <span className={cls('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ring-1', visuals.chip)}>{total}</span>
             </div>
             {bucket.default ? (
               <>
@@ -5597,10 +5643,34 @@ function MockAuditPanel({
   );
 }
 
-function NodePalette({ onAddNode, onRemoveNode }) {
+function NodePalette({ onAddNode, onRemoveNode, workflow }) {
   const [addOpen, setAddOpen] = useState(false);
+  const visuals = triggerVisuals(workflow?.triggerType);
+  const HeaderIcon = visuals.icon;
+  const version = workflow?.publishedVersion || 0;
+  const roleLine = workflow
+    ? (workflow.isDefaultVariant
+      ? `${EVENT_LABELS[workflow.triggerType] || workflow.triggerType || 'Trigger'} · Default · v${version}`
+      : `${EVENT_LABELS[workflow.triggerType] || workflow.triggerType || 'Trigger'} · ${workflowVariantTypeLabel(workflow)} · v${version}`)
+    : null;
   return (
     <div className="border-b border-gray-100 px-4 py-3">
+      {/* Prominent identity of the workflow currently being edited. */}
+      <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span className={cls('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1', visuals.chip)}>
+            <HeaderIcon className={cls('h-4 w-4', visuals.icon_)} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Editing workflow</div>
+            <div className="truncate text-base font-bold leading-6 text-slate-900" title={workflow?.name}>
+              {workflow ? workflowDisplayName(workflow) : 'No workflow selected'}
+            </div>
+            {roleLine && <div className="truncate text-xs font-medium text-slate-500">{roleLine}</div>}
+          </div>
+        </div>
+        {workflow && <WorkflowStatus workflow={workflow} />}
+      </div>
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Workflow Steps</div>
       <div className="flex flex-wrap gap-2">
         <div className="relative">
@@ -8874,12 +8944,12 @@ export default function NotificationWorkflowsPanel({
 
             <div
               className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--workflow-list-width)_minmax(0,1fr)]"
-              style={{ '--workflow-list-width': workflowListCollapsed ? '3.5rem' : '280px' }}
+              style={{ '--workflow-list-width': workflowListCollapsed ? '3.5rem' : '340px' }}
             >
               <aside
                 className={cls(
                   'z-10 flex min-h-0 flex-col overflow-hidden border-r border-gray-200 transition-colors duration-300',
-                  workflowListCollapsed ? 'bg-slate-100/90' : 'bg-slate-50/90',
+                  workflowListCollapsed ? 'bg-slate-100' : 'bg-slate-50',
                 )}
               >
                 <div
@@ -8945,6 +9015,7 @@ export default function NotificationWorkflowsPanel({
                     <NodePalette
                       onAddNode={addWorkflowNode}
                       onRemoveNode={removeSelectedNode}
+                      workflow={selected}
                     />
                     {hasBlockingGraphErrors && (
                       <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
