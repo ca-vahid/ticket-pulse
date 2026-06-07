@@ -1,6 +1,19 @@
-export const APP_VERSION = '2.66';
+export const APP_VERSION = '2.75';
 
 export const changelog = [
+  {
+    version: '2.75',
+    date: 'June 7, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Mail Workflow list redesign</strong> shows every workflow as an always-on card with run health, groups them by event with colour-coded icons, widens the list pane, and adds a prominent "now editing" header so the selected workflow is always clear.' },
+      { type: 'improved', html: '<strong>Simpler workflow editing</strong> merges Save and Publish into one <strong>Save &amp; publish</strong> action, turns Enable and Mock into stable on/off switches, lets you rename a workflow inline, and always lists variants beneath their default.' },
+      { type: 'improved', html: '<strong>Independent mock mode</strong> can now be armed on a disabled but published workflow, so it is already in safe test mode before you turn it live.' },
+      { type: 'improved', html: '<strong>Toast notifications</strong> replace the inline status banners across every Mail Settings tab with modern, auto-dismissing toasts that no longer push the layout around.' },
+      { type: 'improved', html: '<strong>Consolidated workflow health</strong> moves the warning bar and stat grid into a single status button with a popover, freeing editor space and keeping the full details one click away.' },
+      { type: 'improved', html: '<strong>After-hours routing</strong> folds into the routing row instead of a separate banner, and after-hours workflows now carry a clear moon badge in the list for quick identification.' },
+      { type: 'improved', html: '<strong>Email action buttons</strong> are refined into compact status, raise-urgency, and after-hours support links with a calmer palette and a navy emergency call-to-action.' },
+    ],
+  },
   {
     version: '2.66',
     date: 'June 1, 2026',
