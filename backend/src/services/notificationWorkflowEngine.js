@@ -48,10 +48,11 @@ import {
   describeNotificationWorkflowTimeout,
 } from './notificationWorkflowRunTimeouts.js';
 import {
-  EMAIL_ICON_UP_ARROW,
-  EMAIL_ICON_CLOCK_DARK,
-  EMAIL_ICON_WARNING,
-  EMAIL_ICON_BOLT,
+  EMAIL_BADGE_STATUS,
+  EMAIL_BADGE_URGENCY,
+  EMAIL_BADGE_REQUEST,
+  EMAIL_BADGE_PHONE,
+  EMAIL_GLYPH_CLOCK_WHITE,
 } from './notificationEmailIcons.js';
 
 const liquid = new Liquid({
@@ -532,57 +533,37 @@ function afterHoursSupportUrlFromContext(context) {
   ).trim();
 }
 
-// A large, full-width gradient action button: bold label + one-line description + inline PNG icon.
-// VML <v:roundrect> with a gradient fill renders it in Outlook desktop; a padded <a> with a CSS
-// gradient + drop shadow renders it everywhere else.
-function gradientActionButtonHtml({ url, cls = '', icon, label, subtitle, fill, gradTop, gradBottom, shadow, subColor, radius = '999px', arcsize = '50%', fullWidth = false, vmlWidth = 388, vmlHeight = 48, labelSize = 14, padY = 7 }) {
-  const subVml = subtitle ? `<span style="font-size:11px;color:${subColor};"><br>${escapeHtml(subtitle)}</span>` : '';
-  const subHtml = subtitle ? `<span style="display:block;font-size:11px;font-weight:400;line-height:14px;color:${subColor};margin-top:1px;">${escapeHtml(subtitle)}</span>` : '';
-  const widthStyle = fullWidth ? '' : 'width:90%;margin:0 auto;';
-  const iconImg = icon ? `<img src="${icon}" width="16" height="16" alt="" style="vertical-align:middle;margin-top:-2px;margin-right:7px;border:0;">` : '';
+// One minimalist action row: a circular badge icon, a title + one-line description, and a trailing
+// arrow. The whole row is a link. Used for both the business-hours and after-hours cards.
+function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null, mb = false }) {
+  const borderStyle = border ? `border:1px solid ${border};` : '';
   return [
-    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(url)}" style="height:${vmlHeight}px;v-text-anchor:middle;width:${vmlWidth}px;" arcsize="${arcsize}" stroke="f" fillcolor="${fill}"><v:fill type="gradient" color="${gradTop}" color2="${gradBottom}" angle="180"/><w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;"><span style="font-size:${labelSize}px;font-weight:bold;">${escapeHtml(label)}</span>${subVml}</center></v:roundrect><![endif]-->`,
-    `<!--[if !mso]><!--><a class="tp-btn ${cls}" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="background:${fill};background-image:linear-gradient(${gradTop},${gradBottom});border-radius:${radius};box-shadow:${shadow};color:#ffffff;display:block;${widthStyle}font-family:Arial,Helvetica,sans-serif;text-decoration:none;padding:${padY}px 18px;-webkit-text-size-adjust:none;"><span style="display:block;font-size:${labelSize}px;font-weight:700;line-height:19px;">${iconImg}${escapeHtml(label)}</span>${subHtml}</a><!--<![endif]-->`,
+    `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;${mb ? 'margin-bottom:10px;' : ''}">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:${tint};${borderStyle}border-radius:12px;"><tr>`,
+    `<td width="58" valign="middle" style="padding:11px 0 11px 14px;"><img src="${badge}" width="44" height="44" alt="" style="display:block;border:0;"></td>`,
+    `<td valign="middle" style="padding:11px 0 11px 14px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:15px;line-height:20px;font-weight:700;color:${color};">${escapeHtml(title)}</div><div style="font-size:12.5px;line-height:17px;color:#64748b;margin-top:1px;">${escapeHtml(subtitle)}</div></td>`,
+    `<td width="42" align="right" valign="middle" style="padding-right:16px;"><span style="font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:700;color:${color};">&rarr;</span></td>`,
+    '</tr></table></a>',
   ].join('');
 }
 
-// Compact navy "Check status" button used beside the on-call number in the after-hours card.
-function navyStatusButtonHtml(url) {
+// The navy "Check status" button (a table-cell button so the padding/background survive Outlook).
+// The white clock glyph is hidden in Outlook (mso); there it shows the label + arrow only.
+function navyCheckStatusButtonHtml(url) {
   return [
-    `<a class="tp-btn-navy" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#0c1975;border-radius:999px;box-shadow:0 2px 0 #081157;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:12.5px;font-weight:700;line-height:16px;padding:8px 15px;text-decoration:none;">`,
-    `<!--[if !mso]><!--><img src="${EMAIL_ICON_CLOCK_DARK}" width="16" height="16" alt="" style="vertical-align:middle;margin-top:-2px;margin-right:6px;border:0;"><!--<![endif]-->`,
-    'Check status</a>',
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;margin:0 auto;"><tr>',
+    '<td class="tp-navy-btn" bgcolor="#143f9c" style="background:#143f9c;border-radius:10px;padding:9px 16px;text-align:center;box-shadow:0 2px 0 #0e2f74;">',
+    `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;line-height:16px;text-decoration:none;white-space:nowrap;">`,
+    `<!--[if !mso]><!--><img src="${EMAIL_GLYPH_CLOCK_WHITE}" width="15" height="15" alt="" style="vertical-align:middle;margin-top:-2px;margin-right:6px;border:0;"><!--<![endif]-->`,
+    'Check status &rarr;</a></td></tr></table>',
   ].join('');
 }
 
-// Row chip icons as emoji — render across all email clients (colour in Gmail/Apple/Outlook-web,
-// monochrome in Outlook desktop). Inline SVG was stripped by Outlook and Gmail.
-// Per-action styling for the business-hours action card. After-hours support uses its own layout.
-const ACTION_BUTTON = {
-  publicStatus: {
-    cls: 'tp-btn-blue',
-    icon: EMAIL_ICON_CLOCK_DARK,
-    label: 'Check status',
-    subtitle: 'Live SLA timer, assignee & latest note',
-    fill: '#143f9c', gradTop: '#2f63c2', gradBottom: '#143f9c',
-    shadow: '0 3px 0 #0e2f74,0 6px 12px rgba(15,32,90,.26)', subColor: '#c2cef0',
-  },
-  raiseUrgency: {
-    cls: 'tp-btn-red',
-    icon: EMAIL_ICON_UP_ARROW,
-    label: 'Raise urgency',
-    subtitle: 'Bumps priority and notifies the team lead',
-    fill: '#df4537', gradTop: '#ef6457', gradBottom: '#df4537',
-    shadow: '0 3px 0 #b5342a,0 6px 12px rgba(181,52,42,.24)', subColor: '#fbd9d4',
-  },
-  afterHoursSupport: {
-    cls: 'tp-btn-em',
-    icon: EMAIL_ICON_BOLT,
-    label: 'Request support',
-    subtitle: 'Pages the on-call engineer right now',
-    fill: '#c0392f', gradTop: '#d8564b', gradBottom: '#c0392f',
-    shadow: '0 3px 0 #93271f,0 6px 12px rgba(146,40,33,.26)', subColor: '#f3c8c3',
-  },
+// Per-action styling for the minimalist business-hours rows (badge + colour + copy).
+const ROW_STYLE = {
+  publicStatus: { badge: EMAIL_BADGE_STATUS, title: 'Check status', subtitle: 'Live SLA timer, assignee & latest note', color: '#143f9c', tint: '#f4f7fe' },
+  raiseUrgency: { badge: EMAIL_BADGE_URGENCY, title: 'Raise urgency', subtitle: 'Bumps priority and notifies the team lead', color: '#d8392c', tint: '#fdf4f3' },
+  afterHoursSupport: { badge: EMAIL_BADGE_REQUEST, title: 'Request support', subtitle: 'Pages the on-call engineer right now', color: '#c0392f', tint: '#fdf0ef' },
 };
 
 function outlookCappedActionTable(innerHtml) {
@@ -663,14 +644,9 @@ function afterHoursSupportAction(url, context = {}) {
   };
 }
 
-// A fixed vertical gap used between stacked buttons inside a card (margins are unreliable in email).
-function buttonGapHtml(px) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td height="${px}" style="height:${px}px;line-height:${px}px;font-size:1px;">&nbsp;</td></tr></table>`;
-}
-
-// Hover-darken for the action buttons. Honoured by Outlook on the web, Gmail, Apple Mail and most
-// mobile clients; Outlook desktop strips :hover and simply shows the static button (no breakage).
-const ACTION_HOVER_STYLE = '<style>.tp-btn,.tp-btn-navy{transition:all .12s ease}.tp-btn-blue:hover{background:#0e2f74 !important;background-image:linear-gradient(#26539f,#0e2f74) !important}.tp-btn-red:hover{background:#cf3a2d !important;background-image:linear-gradient(#e6564a,#cf3a2d) !important}.tp-btn-em:hover{background:#a32f26 !important;background-image:linear-gradient(#c8493d,#a32f26) !important}.tp-btn-navy:hover{background:#0a1560 !important}</style>';
+// Hover-darken for the navy "Check status" button. Honoured by Outlook on the web, Gmail, Apple
+// Mail and mobile; Outlook desktop strips :hover and shows the static button (no breakage).
+const ACTION_HOVER_STYLE = '<style>.tp-navy-btn{transition:background .12s ease}.tp-navy-btn:hover{background:#0e2f74 !important}</style>';
 
 // Extra breathing room between the action card and the footer/signature that follows it.
 const ACTION_FOOTER_GAP = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td height="22" style="height:22px;line-height:22px;font-size:1px;">&nbsp;</td></tr></table>';
@@ -683,13 +659,14 @@ function formatPhoneForDisplay(raw) {
   return String(raw || '').trim();
 }
 
-// A centred ~468px action card that sits within the body's 640px column (so it lines up beneath
-// the message rather than floating to the full client width).
+// A centred ~496px action card that sits within the body's 640px column (so it lines up beneath
+// the message rather than floating to the full client width). bg may be 'transparent'.
 function actionCardHtml(bg, border, radius, padding, innerHtml) {
+  const bgStyle = bg === 'transparent' ? 'background:transparent;' : `background:${bg};`;
   return outlookCappedActionTable([
     '<tr><td align="center" style="padding:0;">',
-    '<!--[if mso]><table role="presentation" width="468" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td><![endif]-->',
-    `<table role="presentation" align="center" width="468" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;border-collapse:separate;max-width:468px;background:${bg};border:1px solid ${border};border-radius:${radius};">`,
+    '<!--[if mso]><table role="presentation" width="496" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td><![endif]-->',
+    `<table role="presentation" align="center" width="496" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;border-collapse:separate;max-width:496px;${bgStyle}border:1px solid ${border};border-radius:${radius};">`,
     `<tr><td style="padding:${padding};font-family:Arial,Helvetica,sans-serif;text-align:center;">${innerHtml}</td></tr>`,
     '</table>',
     '<!--[if mso]></td></tr></table><![endif]-->',
@@ -699,17 +676,15 @@ function actionCardHtml(bg, border, radius, padding, innerHtml) {
 
 function regularActionAppendixHtml(actions = []) {
   if (!actions.length) return '';
-  const buttons = actions
-    .map((action) => {
-      const cfg = ACTION_BUTTON[action.key];
+  const rows = actions
+    .map((action, index) => {
+      const cfg = ROW_STYLE[action.key];
       if (!cfg) return null;
-      return gradientActionButtonHtml({ url: action.url, ...cfg, vmlWidth: 388 });
+      return actionRowHtml({ url: action.url, ...cfg, mb: index < actions.length - 1 });
     })
     .filter(Boolean);
-  if (!buttons.length) return '';
-  return ACTION_HOVER_STYLE
-    + actionCardHtml('#f4f7fc', '#e0e6f0', '18px', '20px 20px 20px', buttons.join(buttonGapHtml(10)))
-    + ACTION_FOOTER_GAP;
+  if (!rows.length) return '';
+  return actionCardHtml('#ffffff', '#eef1f6', '16px', '14px', rows.join('')) + ACTION_FOOTER_GAP;
 }
 
 function actionAppendixHtml(actions = []) {
@@ -727,50 +702,33 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
   const phoneHref = action.phoneHref || (phone ? phone.replace(/[^\d+]/g, '') : '');
   const phoneDisplay = phone ? formatPhoneForDisplay(phone) : '';
 
-  // Primary: a large red "Request immediate support" button (pages on-call).
-  const requestBtn = gradientActionButtonHtml({
-    url: action.url,
-    cls: 'tp-btn-em',
-    icon: EMAIL_ICON_BOLT,
-    label: 'Request immediate support',
-    subtitle: 'Pages the on-call engineer right now',
-    fill: '#c0392f', gradTop: '#d8564b', gradBottom: '#c0392f',
-    shadow: '0 3px 0 #93271f,0 6px 12px rgba(146,40,33,.26)', subColor: '#f3c8c3',
-    radius: '12px', arcsize: '20%', fullWidth: true, vmlWidth: 428,
+  const heading = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:20px;font-weight:700;color:#8a2730;text-align:center;margin:2px 0 13px;">&#9888;&nbsp; Can\'t wait until morning?</div>';
+
+  // Primary: "Request immediate support" as a bordered red row (pages on-call).
+  const requestRow = actionRowHtml({
+    url: action.url, badge: EMAIL_BADGE_REQUEST, title: 'Request immediate support',
+    subtitle: 'Pages the on-call engineer right now', color: '#c0392f', tint: '#fff6f5', border: '#f0c7c2', mb: true,
   });
 
-  // Below the primary: an on-call card (the emergency number + a navy Check status). With no
-  // resolved phone we drop the card and show just the Check status button.
-  let support = '';
+  // Combined row: the emergency number (prominent, ~75%) + a navy "Check status" button (~25%).
+  // With no resolved phone we drop the number and show just the Check status button.
+  const navyBtn = statusUrl ? navyCheckStatusButtonHtml(statusUrl) : '';
+  let combined = '';
   if (phone) {
-    const statusCell = statusUrl
-      ? `<td align="right" valign="middle" style="white-space:nowrap;">${navyStatusButtonHtml(statusUrl)}</td>`
-      : '';
-    support = [
-      buttonGapHtml(10),
-      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td style="background:#ffffff;border:1px solid #ecd0d2;border-radius:11px;padding:11px 14px;">',
-      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-      '<td align="left" valign="middle" style="font-family:Arial,Helvetica,sans-serif;">',
-      '<div style="font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b06a6a;margin-bottom:1px;">Emergency number</div>',
-      `<a href="tel:${escapeHtml(phoneHref)}" style="color:#8a2730;font-size:18px;font-weight:800;text-decoration:none;letter-spacing:.01em;">${escapeHtml(phoneDisplay)}</a>`,
-      '</td>',
-      statusCell,
-      '</tr></table></td></tr></table>',
+    const numberCell = [
+      `<a href="tel:${escapeHtml(phoneHref)}" style="display:block;text-decoration:none;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>`,
+      `<td width="58" valign="middle" style="padding:12px 0 12px 14px;"><img src="${EMAIL_BADGE_PHONE}" width="44" height="44" alt="" style="display:block;border:0;"></td>`,
+      `<td valign="middle" style="padding:12px 0 12px 12px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;">${escapeHtml(phoneDisplay)}</div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
+      '</tr></table></a>',
     ].join('');
-  } else if (statusUrl) {
-    support = `${buttonGapHtml(10)}<div style="text-align:center;">${navyStatusButtonHtml(statusUrl)}</div>`;
+    const btnCell = navyBtn ? `<td width="150" valign="middle" align="center" style="padding:10px 10px;">${navyBtn}</td>` : '';
+    combined = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr><td valign="middle" style="padding:0;">${numberCell}</td>${btnCell}</tr></table>`;
+  } else if (navyBtn) {
+    combined = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr><td align="center" valign="middle" style="padding:12px;">${navyBtn}</td></tr></table>`;
   }
 
-  const heading = [
-    '<div style="font-size:14px;line-height:18px;font-weight:700;color:#8a2730;margin:0 0 12px;">',
-    `<!--[if !mso]><!--><img src="${EMAIL_ICON_WARNING}" width="16" height="16" alt="" style="vertical-align:middle;margin-top:-2px;margin-right:7px;border:0;"><!--<![endif]-->`,
-    '<!--[if mso]><span style="font-family:Arial,sans-serif;">&#9888;</span>&nbsp; <![endif]-->',
-    "Can't wait until morning?",
-    '</div>',
-  ].join('');
-
   return ACTION_HOVER_STYLE
-    + actionCardHtml('#fbeef0', '#f0d2d5', '14px', '18px 20px 20px', heading + requestBtn + support)
+    + actionCardHtml('transparent', '#f1cfca', '16px', '16px', heading + requestRow + combined)
     + ACTION_FOOTER_GAP;
 }
 
