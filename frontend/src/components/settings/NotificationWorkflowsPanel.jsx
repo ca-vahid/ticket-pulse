@@ -15,6 +15,7 @@ import {
   AlertCircle,
   Bot,
   CalendarClock,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -33,6 +34,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRight,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -1003,9 +1005,19 @@ function isAfterHoursWorkflow(workflow) {
 
 function workflowDisplayName(workflow) {
   if (!workflow) return 'Workflow';
-  if (isAfterHoursWorkflow(workflow)) return 'Ticket arrived after-hours / holiday';
-  if (workflow.triggerType === 'ticket.created') return 'Ticket arrived during business hours';
-  return workflow.name || EVENT_LABELS[workflow.triggerType] || workflow.triggerType || 'Workflow';
+  const customName = String(workflow.name || '').trim();
+  // Default workflows ship with friendly labels; a user-set rename takes precedence.
+  if (isAfterHoursWorkflow(workflow)) {
+    return customName && customName !== 'Ticket arrived after-hours / holiday'
+      ? customName
+      : 'Ticket arrived after-hours / holiday';
+  }
+  if (workflow.triggerType === 'ticket.created') {
+    return customName && customName !== 'Ticket arrived'
+      ? customName
+      : 'Ticket arrived during business hours';
+  }
+  return customName || EVENT_LABELS[workflow.triggerType] || workflow.triggerType || 'Workflow';
 }
 
 function workflowEventLabelForRun(run) {
@@ -3634,6 +3646,33 @@ function WorkflowStatus({ workflow }) {
   );
 }
 
+// Stable on/off switch: the label never changes (so you always read it the same
+// way), and the track position + color shows the current state — not the action.
+function WorkflowToggle({ label, checked, onClick, disabled = false, title, tone = 'emerald' }) {
+  const onTrack = tone === 'sky' ? 'bg-sky-500' : 'bg-emerald-500';
+  const onShell = tone === 'sky' ? 'border-sky-300 bg-sky-50 text-sky-800' : 'border-emerald-300 bg-emerald-50 text-emerald-800';
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={`${label} ${checked ? 'on' : 'off'}`}
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={cls(
+        'inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+        checked ? onShell : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+      )}
+    >
+      <span>{label}</span>
+      <span className={cls('relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors', checked ? onTrack : 'bg-slate-300')}>
+        <span className={cls('inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform', checked ? 'translate-x-3.5' : 'translate-x-0.5')} />
+      </span>
+    </button>
+  );
+}
+
 function MailSettingsTabButton({ tab, active, onClick }) {
   const Icon = tab.icon;
   return (
@@ -4316,7 +4355,6 @@ function WorkflowRow({ workflow, selectedId, onSelect, nested = false }) {
 }
 
 function WorkflowList({ workflows, selectedId, onSelect }) {
-  const [expandedTriggers, setExpandedTriggers] = useState(() => new Set());
   if (!workflows.length) {
     return (
       <div className="px-3 py-6 text-center text-xs leading-5 text-slate-500">
@@ -4326,21 +4364,12 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
   }
 
   const groups = buildWorkflowGroups(workflows);
-  const selectedTrigger = workflows.find((workflow) => workflow.id === selectedId)?.triggerType || null;
-  const toggleTrigger = (key) => setExpandedTriggers((prev) => {
-    const next = new Set(prev);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    return next;
-  });
 
   return (
     <div className="divide-y divide-slate-200">
       {[...groups.entries()].map(([triggerType, bucket]) => {
         const hasCustoms = bucket.customs.length > 0;
         const total = (bucket.default ? 1 : 0) + bucket.customs.length;
-        // The group holding the selected workflow stays open so the selection is never hidden.
-        const isExpanded = expandedTriggers.has(triggerType) || selectedTrigger === triggerType;
         const visuals = triggerVisuals(triggerType);
         const GroupIcon = visuals.icon;
         return (
@@ -4354,31 +4383,20 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
               </span>
               <span className={cls('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ring-1', visuals.chip)}>{total}</span>
             </div>
-            {bucket.default ? (
-              <>
-                <WorkflowRow workflow={bucket.default} selectedId={selectedId} onSelect={onSelect} />
-                {hasCustoms && (
-                  <button
-                    type="button"
-                    onClick={() => toggleTrigger(triggerType)}
-                    className="flex w-full items-center gap-1.5 px-3 py-1.5 pl-5 text-left text-[11px] font-semibold text-slate-500 transition-colors hover:bg-slate-50"
-                  >
-                    {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                    {isExpanded ? 'Hide variants' : `${bucket.customs.length} variant${bucket.customs.length === 1 ? '' : 's'}`}
-                  </button>
-                )}
-                {hasCustoms && isExpanded && (
-                  <div className="border-l-2 border-slate-100">
-                    {bucket.customs.map((workflow) => (
-                      <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} nested />
-                    ))}
+            {bucket.default && (
+              <WorkflowRow workflow={bucket.default} selectedId={selectedId} onSelect={onSelect} />
+            )}
+            {hasCustoms && (
+              <div className="border-l-2 border-slate-100">
+                {bucket.default && (
+                  <div className="px-3 py-1 pl-5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    {bucket.customs.length} variant{bucket.customs.length === 1 ? '' : 's'}
                   </div>
                 )}
-              </>
-            ) : (
-              bucket.customs.map((workflow) => (
-                <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} />
-              ))
+                {bucket.customs.map((workflow) => (
+                  <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} nested={Boolean(bucket.default)} />
+                ))}
+              </div>
             )}
           </section>
         );
@@ -5643,8 +5661,10 @@ function MockAuditPanel({
   );
 }
 
-function NodePalette({ onAddNode, onRemoveNode, workflow }) {
+function NodePalette({ onAddNode, onRemoveNode, workflow, onRename }) {
   const [addOpen, setAddOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
   const visuals = triggerVisuals(workflow?.triggerType);
   const HeaderIcon = visuals.icon;
   const version = workflow?.publishedVersion || 0;
@@ -5653,6 +5673,12 @@ function NodePalette({ onAddNode, onRemoveNode, workflow }) {
       ? `${EVENT_LABELS[workflow.triggerType] || workflow.triggerType || 'Trigger'} · Default · v${version}`
       : `${EVENT_LABELS[workflow.triggerType] || workflow.triggerType || 'Trigger'} · ${workflowVariantTypeLabel(workflow)} · v${version}`)
     : null;
+  // Drop any in-progress rename when the selection changes.
+  useEffect(() => { setRenaming(false); }, [workflow?.id]);
+  const submitRename = async () => {
+    const ok = await onRename?.(nameDraft);
+    if (ok) setRenaming(false);
+  };
   return (
     <div className="border-b border-gray-100 px-4 py-3">
       {/* Prominent identity of the workflow currently being edited. */}
@@ -5661,11 +5687,45 @@ function NodePalette({ onAddNode, onRemoveNode, workflow }) {
           <span className={cls('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1', visuals.chip)}>
             <HeaderIcon className={cls('h-4 w-4', visuals.icon_)} />
           </span>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Editing workflow</div>
-            <div className="truncate text-base font-bold leading-6 text-slate-900" title={workflow?.name}>
-              {workflow ? workflowDisplayName(workflow) : 'No workflow selected'}
-            </div>
+            {renaming ? (
+              <form
+                onSubmit={(event) => { event.preventDefault(); submitRename(); }}
+                className="mt-0.5 flex items-center gap-1"
+              >
+                <input
+                  autoFocus
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Escape') setRenaming(false); }}
+                  placeholder="Workflow name"
+                  className="min-w-0 flex-1 rounded-md border border-blue-300 px-2 py-1 text-base font-bold leading-6 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+                <button type="submit" title="Save name" className="shrink-0 rounded-md p-1 text-emerald-600 transition hover:bg-emerald-50">
+                  <Check className="h-4 w-4" />
+                </button>
+                <button type="button" title="Cancel" onClick={() => setRenaming(false)} className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+                  <XCircle className="h-4 w-4" />
+                </button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-base font-bold leading-6 text-slate-900" title={workflow?.name}>
+                  {workflow ? workflowDisplayName(workflow) : 'No workflow selected'}
+                </span>
+                {workflow && onRename && (
+                  <button
+                    type="button"
+                    onClick={() => { setNameDraft(workflow.name || workflowDisplayName(workflow)); setRenaming(true); }}
+                    title="Rename workflow"
+                    className="shrink-0 rounded-md p-1 text-slate-300 transition hover:bg-slate-100 hover:text-blue-600"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
             {roleLine && <div className="truncate text-xs font-medium text-slate-500">{roleLine}</div>}
           </div>
         </div>
@@ -6205,10 +6265,6 @@ export default function NotificationWorkflowsPanel({
       setMessage({ type: 'error', text: 'Publish the workflow before enabling mock mode' });
       return;
     }
-    if (nextEnabled && !selected?.isEnabled) {
-      setMessage({ type: 'error', text: 'Enable the workflow before enabling mock mode' });
-      return;
-    }
     setSaving(true);
     setMessage(null);
     try {
@@ -6381,15 +6437,15 @@ export default function NotificationWorkflowsPanel({
       badgeClass: 'bg-sky-50 text-sky-700',
     },
   ];
-  const canEnableMockMode = selectedIsPublished && selected?.isEnabled === true;
+  // Mock mode is independent of live-enable: it can be armed on a disabled
+  // (but published) workflow so it is already in safe test mode before going live.
+  const canEnableMockMode = selectedIsPublished;
   const canToggleMockMode = Boolean(selected?.mockModeEnabled || canEnableMockMode);
   const mockModeButtonTitle = selected?.mockModeEnabled
     ? 'Turn mock mode off.'
     : !selectedIsPublished
-      ? 'Publish the workflow, then enable it before turning on mock mode.'
-      : selected?.isEnabled !== true
-        ? 'Enable the published workflow before turning on mock mode.'
-        : 'Run real workflow and LLM, but do not send email.';
+      ? 'Publish the workflow before turning on mock mode.'
+      : 'Run the real workflow and LLM, but redirect email to mock recipients instead of sending live.';
   const afterHoursScheduleDraft = useMemo(() => ({
     afterHoursEnabled: selectedIsAfterHoursWorkflow ? true : afterHoursDraft.afterHoursEnabled,
     holidaysEnabled: afterHoursDraft.holidaysEnabled,
@@ -6526,20 +6582,30 @@ export default function NotificationWorkflowsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mockAuditOpen, mockAuditHasActiveRuns, mockAuditLoading, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status, mockAuditFilters.health, mockAuditFilters.signalLevel, mockAuditFilters.eventType, mockAuditFilters.triggerSource, mockAuditFilters.provider, mockAuditFilters.fallbackSource, mockAuditFilters.search, mockAuditPage, mockAuditPageSize]);
 
-  async function saveDraft() {
-    if (!selected || !draft) return;
+  // Rename persists the new name via the draft endpoint (no publish, not live).
+  async function renameWorkflow(rawName) {
+    if (!selected) return false;
+    const name = String(rawName || '').trim();
+    if (!name || name === selected.name) return false;
+    const definition = draft || selected.draftDefinition || selected.publishedDefinition;
+    if (!definition) {
+      setMessage({ type: 'error', text: 'Open the workflow before renaming it' });
+      return false;
+    }
     setSaving(true);
     setMessage(null);
     try {
       const response = await notificationWorkflowAPI.saveDraft(selected.id, {
-        name: selected.name,
+        name,
         description: selected.description,
-        definition: draft,
+        definition,
       });
       applyWorkflowUpdate(response.data);
-      setMessage({ type: 'success', text: 'Saved' });
+      setMessage({ type: 'success', text: 'Workflow renamed' });
+      return true;
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
+      return false;
     } finally {
       setSaving(false);
     }
@@ -8702,15 +8768,6 @@ export default function NotificationWorkflowsPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={saveDraft}
-                  disabled={saving || !selected}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-                >
-                  <Save className="h-4 w-4" />
-              Save
-                </button>
-                <button
-                  type="button"
                   onClick={openPreviewModal}
                   disabled={saving || previewRunning || !selected}
                   className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
@@ -8724,42 +8781,37 @@ export default function NotificationWorkflowsPanel({
                   title={hasBlockingGraphErrors
                     ? draftValidationIssues[0]
                     : !hasPublishableChanges
-                      ? 'No draft changes to publish.'
+                      ? 'Everything is saved and published.'
                       : selected?.isEnabled
-                        ? 'Publish the current draft update and keep this workflow enabled.'
-                        : 'Publish the current draft without enabling live execution.'}
+                        ? 'Save the draft and publish it live (this workflow is enabled).'
+                        : 'Save the draft and publish a new version.'}
                   disabled={saving || !selected || !hasPublishableChanges || hasBlockingGraphErrors}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
                 >
-                  <Upload className="h-4 w-4" />
-                  {hasPublishableChanges ? 'Publish' : 'Published'}
+                  {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {hasPublishableChanges ? 'Save & publish' : 'Saved'}
                 </button>
-                <button
-                  type="button"
+                <span className="mx-0.5 h-6 w-px bg-slate-200" aria-hidden="true" />
+                <WorkflowToggle
+                  label="Live"
+                  tone="emerald"
+                  checked={selected?.isEnabled === true}
+                  onClick={toggleEnabled}
+                  disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
+                  title={selected?.isEnabled
+                    ? 'Live: real notifications send on matching events. Click to turn off.'
+                    : selectedIsPublished
+                      ? 'Off: this workflow does not run. Click to go live.'
+                      : 'Publish the workflow before it can go live.'}
+                />
+                <WorkflowToggle
+                  label="Mock mode"
+                  tone="sky"
+                  checked={selected?.mockModeEnabled === true}
                   onClick={toggleMockMode}
                   disabled={saving || !selected || !canToggleMockMode}
                   title={mockModeButtonTitle}
-                  className={cls(
-                    'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold disabled:opacity-50',
-                    selected?.mockModeEnabled ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-                  )}
-                >
-                  {selected?.mockModeEnabled ? <ToggleRight className="h-4 w-4" /> : <FlaskConical className="h-4 w-4" />}
-                  <span>{selected?.mockModeEnabled ? 'Mock on' : 'Mock mode'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleEnabled}
-                  disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
-                  title={selected?.isEnabled ? 'Disable live workflow execution.' : selectedIsPublished ? 'Enable the latest published workflow version.' : 'Publish the workflow before enabling live execution.'}
-                  className={cls(
-                    'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold disabled:opacity-50',
-                    selected?.isEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-                  )}
-                >
-                  {selected?.isEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
-                  {selected?.isEnabled ? 'Disable' : selectedIsPublished ? 'Enable' : 'Publish first'}
-                </button>
+                />
               </div>
             )}
           </div>
@@ -9016,6 +9068,7 @@ export default function NotificationWorkflowsPanel({
                       onAddNode={addWorkflowNode}
                       onRemoveNode={removeSelectedNode}
                       workflow={selected}
+                      onRename={renameWorkflow}
                     />
                     {hasBlockingGraphErrors && (
                       <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">

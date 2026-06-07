@@ -302,9 +302,8 @@ export async function setWorkflowMockMode(workspaceId, id, enabled, actor = null
   if (isEnabled && !workflow.publishedDefinition) {
     throw new ValidationError('Publish the workflow before enabling mock mode');
   }
-  if (isEnabled && workflow.isEnabled !== true) {
-    throw new ValidationError('Enable the workflow before enabling mock mode');
-  }
+  // Mock mode is independent of live-enable: you may arm mock on a disabled
+  // (but published) workflow so it is already in safe test mode before going live.
 
   return prisma.notificationWorkflow.update({
     where: { id: workflow.id },
