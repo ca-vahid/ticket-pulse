@@ -12,6 +12,7 @@ import {
   useDefaultLayout,
 } from 'react-resizable-panels';
 import {
+  Activity,
   AlertCircle,
   Bot,
   CalendarClock,
@@ -31,6 +32,7 @@ import {
   Inbox,
   Mail,
   Maximize2,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRight,
@@ -54,7 +56,7 @@ import {
   Waypoints,
   XCircle,
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI } from '../../services/api';
 
 const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v3';
@@ -3233,7 +3235,6 @@ function EmailBrandingPanel({
   selectedBlockId,
   draft,
   saving,
-  message,
   onSelect,
   onChange,
   onSave,
@@ -3315,15 +3316,6 @@ function EmailBrandingPanel({
         </aside>
 
         <section className="min-h-0 rounded-md border border-slate-200 bg-slate-50 p-4">
-          {message && (
-            <div className={cls(
-              'mb-3 rounded-md border px-3 py-2 text-sm',
-              message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
-            )}
-            >
-              {message.text}
-            </div>
-          )}
           {draft ? (
             <>
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
@@ -3673,6 +3665,119 @@ function WorkflowToggle({ label, checked, onClick, disabled = false, title, tone
   );
 }
 
+// Modern auto-dismissing toast, driven by the panel's `message` state.
+function NotificationToast({ message, onDismiss }) {
+  useEffect(() => {
+    if (!message) return undefined;
+    const timer = setTimeout(onDismiss, 4200);
+    return () => clearTimeout(timer);
+  }, [message, onDismiss]);
+  const isError = message?.type === 'error';
+  return (
+    <AnimatePresence>
+      {message && (
+        <motion.div
+          key={message.text}
+          initial={{ opacity: 0, y: 24, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 12, scale: 0.96 }}
+          transition={{ duration: 0.26, ease: 'easeOut' }}
+          role="status"
+          aria-live="polite"
+          className={cls(
+            'fixed bottom-5 right-5 z-[70] flex max-w-sm items-start gap-3 rounded-xl border px-4 py-3 shadow-soft backdrop-blur',
+            isError ? 'border-red-200 bg-red-50/95 text-red-800' : 'border-emerald-200 bg-emerald-50/95 text-emerald-800',
+          )}
+        >
+          <span className={cls('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full', isError ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600')}>
+            {isError ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          </span>
+          <span className="min-w-0 flex-1 text-sm font-medium leading-5">{message.text}</span>
+          <button type="button" onClick={onDismiss} aria-label="Dismiss" className="shrink-0 rounded-md p-0.5 text-slate-400 transition hover:bg-black/5 hover:text-slate-600">
+            <XCircle className="h-4 w-4" />
+          </button>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// All workflow health in one place: a status-colored button that opens a popover
+// with the workspace stat grid plus the deterministic workflow warnings list.
+function WorkflowHealthMenu({ health, warnings = [] }) {
+  const [open, setOpen] = useState(false);
+  if (!health) return null;
+  const quality = health.workflowQuality7d || {};
+  const templateFallbacks = quality.templateFallbacks || 0;
+  const guardHardBlocks = quality.guardHardBlocks || 0;
+  const payloadFailures = quality.payloadMinimizationFailures || 0;
+  const broaderPct = quality.possibleBroaderIssueRatePct || 0;
+  const warnCount = warnings.length;
+  const stats = [
+    { label: 'SendGrid', value: health.sendgridConfigured ? `Configured${health.sendgridMode === 'smtp' ? ' (SMTP)' : ''}` : 'Missing', tone: health.sendgridConfigured ? 'text-emerald-700' : 'text-red-700' },
+    { label: 'Enabled', value: String(health.enabledWorkflows || 0), tone: 'text-slate-900' },
+    { label: 'Audit 7d', value: `${health.workflowAuditRuns7d ?? health.mockRuns7d ?? health.mockedDeliveries7d ?? 0} runs · ${health.mockEnabledWorkflows || 0} mock`, tone: 'text-sky-700' },
+    { label: 'Quality 7d', value: `${templateFallbacks} fallback · ${guardHardBlocks} block`, tone: (templateFallbacks || guardHardBlocks) ? 'text-red-700' : 'text-emerald-700' },
+    { label: 'Payloads', value: `${payloadFailures} flagged`, tone: payloadFailures ? 'text-red-700' : 'text-emerald-700' },
+    { label: 'Broader signal', value: `${broaderPct}%`, tone: broaderPct > 25 ? 'text-amber-700' : 'text-slate-900' },
+  ];
+  return (
+    <div className="relative mr-auto">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        title="Workflow health"
+        aria-expanded={open}
+        className={cls(
+          'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm font-semibold transition',
+          warnCount > 0 ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100',
+        )}
+      >
+        <Activity className="h-4 w-4" />
+        <span>Health</span>
+        {warnCount > 0 && <span className="rounded-full bg-amber-200 px-1.5 text-[10px] font-bold text-amber-900">{warnCount}</span>}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 z-40 mt-2 w-[22rem] rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <Activity className="h-3.5 w-3.5 text-blue-600" />
+              Workflow health
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {stats.map((stat) => (
+                <div key={stat.label} className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                  <div className="text-[11px] text-slate-500">{stat.label}</div>
+                  <div className={cls('text-xs font-semibold', stat.tone)}>{stat.value}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3">
+              <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                {warnCount > 0 ? `${warnCount} warning${warnCount === 1 ? '' : 's'}` : 'Warnings'}
+              </div>
+              {warnCount === 0 ? (
+                <div className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> All checks clean
+                </div>
+              ) : (
+                <div className="settings-scrollbar max-h-56 space-y-1 overflow-y-auto">
+                  {warnings.map((warning, index) => (
+                    <div key={`${warning.type || 'warning'}-${index}`} className="rounded-md border border-amber-100 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-900">
+                      {workflowHealthWarningLabel(warning)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function MailSettingsTabButton({ tab, active, onClick }) {
   const Icon = tab.icon;
   return (
@@ -3789,73 +3894,6 @@ function AfterHoursSchedulePreview({ schedule, loading }) {
   );
 }
 
-function AfterHoursRoutingSummary({
-  workflow,
-  afterHoursDraft,
-  afterHoursSchedule,
-  afterHoursScheduleLoading,
-  onConfigure,
-}) {
-  const workflowEnabled = workflow?.isEnabled === true;
-  const workflowPublished = Number(workflow?.publishedVersion || 0) > 0;
-  const current = afterHoursSchedule?.current || null;
-  const activeWindow = afterHoursSchedule?.activeNow === true;
-  const statusText = !workflowPublished
-    ? 'Publish first'
-    : workflowEnabled
-      ? 'Live routing on'
-      : 'Workflow disabled';
-  const statusClass = workflowEnabled
-    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-    : workflowPublished
-      ? 'border-slate-200 bg-slate-50 text-slate-600'
-      : 'border-amber-200 bg-amber-50 text-amber-700';
-
-  return (
-    <section className="shrink-0 border-b border-amber-100 bg-amber-50/35 px-4 py-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-amber-200 bg-white text-amber-700">
-            <CalendarClock className="h-4 w-4" />
-          </span>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-950">After-hours routing</h3>
-              <span className={cls('rounded-full border px-2 py-0.5 text-[11px] font-semibold', statusClass)}>
-                {statusText}
-              </span>
-              <span className={cls(
-                'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
-                activeWindow ? 'border-amber-200 bg-white text-amber-700' : 'border-slate-200 bg-white text-slate-600',
-              )}
-              >
-                {afterHoursScheduleLoading ? 'Checking window' : activeWindow ? 'Window active now' : current?.label || 'Window preview'}
-              </span>
-              <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                {afterHoursDraft.holidaysEnabled ? 'Holidays included' : 'Holidays excluded'}
-              </span>
-              <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                {afterHoursDraft.suppressStandardTicketCreated ? 'Replaces normal received email' : 'Also sends normal received email'}
-              </span>
-            </div>
-            <p className="mt-0.5 truncate text-xs text-slate-500">
-              Uses this workflow Enable state as the live on/off switch. Options only control holidays, replacement behavior, and requester copy.
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onConfigure}
-          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-amber-200 bg-white px-3 text-sm font-semibold text-amber-800 shadow-sm hover:bg-amber-50"
-        >
-          <PanelRight className="h-4 w-4" />
-          Configure
-        </button>
-      </div>
-    </section>
-  );
-}
-
 function AfterHoursRoutingPanel({
   workflow,
   afterHoursDraft,
@@ -3865,7 +3903,6 @@ function AfterHoursRoutingPanel({
   onSave,
   onToggleWorkflow,
   saving,
-  message,
 }) {
   const workflowEnabled = workflow?.isEnabled === true;
   const workflowPublished = Number(workflow?.publishedVersion || 0) > 0;
@@ -4009,17 +4046,6 @@ function AfterHoursRoutingPanel({
         </div>
       </div>
 
-      {message && (
-        <div
-          className={cls(
-            'mt-3 flex items-center gap-2 rounded-md border px-3 py-2 text-sm',
-            message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
-          )}
-        >
-          {message.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-          {message.text}
-        </div>
-      )}
     </div>
   );
 }
@@ -4035,7 +4061,6 @@ function AfterHoursRoutingDrawer({
   onSave,
   onToggleWorkflow,
   saving,
-  message,
 }) {
   if (!open) return null;
 
@@ -4073,7 +4098,6 @@ function AfterHoursRoutingDrawer({
             onSave={onSave}
             onToggleWorkflow={onToggleWorkflow}
             saving={saving}
-            message={message}
           />
         </div>
       </aside>
@@ -4298,6 +4322,7 @@ function WorkflowRow({ workflow, selectedId, onSelect, nested = false }) {
   const runs = workflow._count?.runs || 0;
   const lastRun = workflow.runs?.[0];
   const version = workflow.publishedVersion || 0;
+  const afterHours = isAfterHoursWorkflow(workflow);
   const roleLine = workflow.isDefaultVariant
     ? `Default · v${version}`
     : `${workflowVariantTypeLabel(workflow)} · Match ${workflow.routingPriority || 1} · ${routingBehaviorLabel(workflow.routingMode)} · v${version}`;
@@ -4334,6 +4359,11 @@ function WorkflowRow({ workflow, selectedId, onSelect, nested = false }) {
         {roleLine}
       </div>
       <div className="flex flex-wrap items-center gap-1">
+        {afterHours && (
+          <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200">
+            <Moon className="h-2.5 w-2.5" /> After-hours
+          </span>
+        )}
         <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
           {runs} {runs === 1 ? 'run' : 'runs'}
         </span>
@@ -4410,7 +4440,6 @@ export function LlmContextToolsPanel({
   draft,
   catalog,
   saving,
-  message,
   tickets,
   ticketsLoading,
   ticketSearch,
@@ -4747,16 +4776,6 @@ export function LlmContextToolsPanel({
             </div>
           )}
 
-          {message && (
-            <div className={cls(
-              'flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold',
-              message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
-            )}
-            >
-              {message.type === 'error' ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-              {message.text}
-            </div>
-          )}
         </div>
 
         <div className="min-w-0 rounded-md border border-violet-100 bg-slate-50 p-3">
@@ -5856,18 +5875,15 @@ export default function NotificationWorkflowsPanel({
   const [selectedEmailBlockId, setSelectedEmailBlockId] = useState(null);
   const [emailBlockDraft, setEmailBlockDraft] = useState(emailBlockDraftFromBlock(null, 'footer'));
   const [emailBlockSaving, setEmailBlockSaving] = useState(false);
-  const [emailBlockMessage, setEmailBlockMessage] = useState(null);
   const [afterHoursPolicy, setAfterHoursPolicy] = useState(DEFAULT_AFTER_HOURS_POLICY);
   const [afterHoursDraft, setAfterHoursDraft] = useState(DEFAULT_AFTER_HOURS_POLICY);
   const [afterHoursSaving, setAfterHoursSaving] = useState(false);
-  const [afterHoursMessage, setAfterHoursMessage] = useState(null);
   const [afterHoursSchedule, setAfterHoursSchedule] = useState(null);
   const [afterHoursScheduleLoading, setAfterHoursScheduleLoading] = useState(false);
   const [llmToolCatalog, setLlmToolCatalog] = useState([]);
   const [llmToolPolicy, setLlmToolPolicy] = useState(DEFAULT_LLM_TOOL_POLICY);
   const [llmToolDraft, setLlmToolDraft] = useState(DEFAULT_LLM_TOOL_POLICY);
   const [llmToolSaving, setLlmToolSaving] = useState(false);
-  const [llmToolMessage, setLlmToolMessage] = useState(null);
   const [llmContextTickets, setLlmContextTickets] = useState({ items: [], page: 1, pageSize: 10, total: 0, totalPages: 1 });
   const [llmContextTicketsLoading, setLlmContextTicketsLoading] = useState(false);
   const [llmContextTicketSearch, setLlmContextTicketSearch] = useState('');
@@ -6290,6 +6306,7 @@ export default function NotificationWorkflowsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const dismissMessage = useCallback(() => setMessage(null), []);
   const flowNodes = useMemo(() => flowNodesFromDefinition(draft, selectedNodeId), [draft, selectedNodeId]);
   const flowEdges = useMemo(() => flowEdgesFromDefinition(draft), [draft]);
   const availableVariables = useMemo(() => {
@@ -6530,7 +6547,7 @@ export default function NotificationWorkflowsPanel({
       });
       setLlmContextTickets(response.data || { items: [], page, pageSize: 9, total: 0, totalPages: 1 });
     } catch (error) {
-      setLlmToolMessage({ type: 'error', text: error.message || 'Ticket search failed' });
+      setMessage({ type: 'error', text: error.message || 'Ticket search failed' });
     } finally {
       setLlmContextTicketsLoading(false);
     }
@@ -7168,12 +7185,12 @@ export default function NotificationWorkflowsPanel({
     const block = emailBlocks.items.find((item) => item.id === blockId) || null;
     setSelectedEmailBlockId(block?.id || null);
     setEmailBlockDraft(block ? emailBlockDraftFromBlock(block) : emailBlockDraftFromBlock(null, 'footer'));
-    setEmailBlockMessage(null);
+    setMessage(null);
   }
 
   async function createEmailBlock(type = 'footer') {
     setEmailBlockSaving(true);
-    setEmailBlockMessage(null);
+    setMessage(null);
     try {
       const response = await notificationWorkflowAPI.createEmailBlock({
         ...emailBlockDraftFromBlock(null, type),
@@ -7181,9 +7198,9 @@ export default function NotificationWorkflowsPanel({
         isDefault: emailBlocks[type === 'header' ? 'headers' : 'footers'].length === 0,
       });
       const created = applyEmailBlocksResponse(response.data);
-      setEmailBlockMessage({ type: 'success', text: `${blockTypeLabel(type)} created${created?.name ? `: ${created.name}` : ''}` });
+      setMessage({ type: 'success', text: `${blockTypeLabel(type)} created${created?.name ? `: ${created.name}` : ''}` });
     } catch (error) {
-      setEmailBlockMessage({ type: 'error', text: error.message || 'Email block create failed' });
+      setMessage({ type: 'error', text: error.message || 'Email block create failed' });
     } finally {
       setEmailBlockSaving(false);
     }
@@ -7192,7 +7209,7 @@ export default function NotificationWorkflowsPanel({
   async function saveEmailBlock() {
     if (!emailBlockDraft) return;
     setEmailBlockSaving(true);
-    setEmailBlockMessage(null);
+    setMessage(null);
     try {
       const payload = {
         type: emailBlockDraft.type || 'footer',
@@ -7206,9 +7223,9 @@ export default function NotificationWorkflowsPanel({
         ? await notificationWorkflowAPI.updateEmailBlock(emailBlockDraft.id, payload)
         : await notificationWorkflowAPI.createEmailBlock(payload);
       const saved = applyEmailBlocksResponse(response.data, emailBlockDraft.id);
-      setEmailBlockMessage({ type: 'success', text: `Email block saved${saved?.name ? `: ${saved.name}` : ''}` });
+      setMessage({ type: 'success', text: `Email block saved${saved?.name ? `: ${saved.name}` : ''}` });
     } catch (error) {
-      setEmailBlockMessage({ type: 'error', text: error.message || 'Email block save failed' });
+      setMessage({ type: 'error', text: error.message || 'Email block save failed' });
     } finally {
       setEmailBlockSaving(false);
     }
@@ -7217,7 +7234,7 @@ export default function NotificationWorkflowsPanel({
   async function duplicateEmailBlock(blockDraft = emailBlockDraft) {
     if (!blockDraft?.id) return;
     setEmailBlockSaving(true);
-    setEmailBlockMessage(null);
+    setMessage(null);
     try {
       const response = await notificationWorkflowAPI.createEmailBlock({
         type: blockDraft.type || 'footer',
@@ -7228,9 +7245,9 @@ export default function NotificationWorkflowsPanel({
         text: blockDraft.text || '',
       });
       const created = applyEmailBlocksResponse(response.data);
-      setEmailBlockMessage({ type: 'success', text: `Email block duplicated${created?.name ? `: ${created.name}` : ''}` });
+      setMessage({ type: 'success', text: `Email block duplicated${created?.name ? `: ${created.name}` : ''}` });
     } catch (error) {
-      setEmailBlockMessage({ type: 'error', text: error.message || 'Email block duplicate failed' });
+      setMessage({ type: 'error', text: error.message || 'Email block duplicate failed' });
     } finally {
       setEmailBlockSaving(false);
     }
@@ -7239,13 +7256,13 @@ export default function NotificationWorkflowsPanel({
   async function setDefaultEmailBlock(blockDraft = emailBlockDraft) {
     if (!blockDraft?.id) return;
     setEmailBlockSaving(true);
-    setEmailBlockMessage(null);
+    setMessage(null);
     try {
       const response = await notificationWorkflowAPI.setDefaultEmailBlock(blockDraft.id);
       const saved = applyEmailBlocksResponse(response.data, blockDraft.id);
-      setEmailBlockMessage({ type: 'success', text: `${saved?.name || 'Email block'} is now the default ${blockTypeLabel(saved?.type || blockDraft.type).toLowerCase()}` });
+      setMessage({ type: 'success', text: `${saved?.name || 'Email block'} is now the default ${blockTypeLabel(saved?.type || blockDraft.type).toLowerCase()}` });
     } catch (error) {
-      setEmailBlockMessage({ type: 'error', text: error.message || 'Default update failed' });
+      setMessage({ type: 'error', text: error.message || 'Default update failed' });
     } finally {
       setEmailBlockSaving(false);
     }
@@ -7256,13 +7273,13 @@ export default function NotificationWorkflowsPanel({
     const confirmed = window.confirm(`Delete "${blockDraft.name || 'this email block'}"? Workflows using it will fall back to the workspace default at send time.`);
     if (!confirmed) return;
     setEmailBlockSaving(true);
-    setEmailBlockMessage(null);
+    setMessage(null);
     try {
       const response = await notificationWorkflowAPI.deleteEmailBlock(blockDraft.id);
       applyEmailBlocksResponse(response.data, null);
-      setEmailBlockMessage({ type: 'success', text: 'Email block deleted' });
+      setMessage({ type: 'success', text: 'Email block deleted' });
     } catch (error) {
-      setEmailBlockMessage({ type: 'error', text: error.message || 'Email block delete failed' });
+      setMessage({ type: 'error', text: error.message || 'Email block delete failed' });
     } finally {
       setEmailBlockSaving(false);
     }
@@ -7270,7 +7287,7 @@ export default function NotificationWorkflowsPanel({
 
   async function saveAfterHoursPolicy() {
     setAfterHoursSaving(true);
-    setAfterHoursMessage(null);
+    setMessage(null);
     try {
       const payload = {
         ...afterHoursDraft,
@@ -7280,12 +7297,12 @@ export default function NotificationWorkflowsPanel({
       const saved = { ...DEFAULT_AFTER_HOURS_POLICY, ...(response.data || {}) };
       setAfterHoursPolicy(saved);
       setAfterHoursDraft(saved);
-      setAfterHoursMessage({ type: 'success', text: 'After-hours workflow routing saved' });
+      setMessage({ type: 'success', text: 'After-hours workflow routing saved' });
       await refreshAfterHoursSchedule({ ...saved, afterHoursEnabled: selectedIsAfterHoursWorkflow ? true : saved.afterHoursEnabled });
       const listResponse = await notificationWorkflowAPI.list();
       setWorkflows(listResponse.data || []);
     } catch (error) {
-      setAfterHoursMessage({ type: 'error', text: error.message || 'After-hours routing save failed' });
+      setMessage({ type: 'error', text: error.message || 'After-hours routing save failed' });
     } finally {
       setAfterHoursSaving(false);
     }
@@ -7334,15 +7351,15 @@ export default function NotificationWorkflowsPanel({
 
   async function saveLlmToolPolicy() {
     setLlmToolSaving(true);
-    setLlmToolMessage(null);
+    setMessage(null);
     try {
       const response = await notificationWorkflowAPI.updateLlmToolPolicy(llmToolDraft);
       const saved = { ...DEFAULT_LLM_TOOL_POLICY, ...(response.data || {}) };
       setLlmToolPolicy(saved);
       setLlmToolDraft(saved);
-      setLlmToolMessage({ type: 'success', text: 'LLM context policy saved' });
+      setMessage({ type: 'success', text: 'LLM context policy saved' });
     } catch (error) {
-      setLlmToolMessage({ type: 'error', text: error.message || 'LLM context policy save failed' });
+      setMessage({ type: 'error', text: error.message || 'LLM context policy save failed' });
     } finally {
       setLlmToolSaving(false);
     }
@@ -7359,16 +7376,16 @@ export default function NotificationWorkflowsPanel({
     } else if (/^\d+$/.test(manualFreshserviceTicketId)) {
       payload.freshserviceTicketId = manualFreshserviceTicketId;
     } else {
-      setLlmToolMessage({ type: 'error', text: 'Search by FreshService ticket number or select a ticket for context preview' });
+      setMessage({ type: 'error', text: 'Search by FreshService ticket number or select a ticket for context preview' });
       return;
     }
     setLlmContextPreviewLoading(true);
-    setLlmToolMessage(null);
+    setMessage(null);
     try {
       const response = await notificationWorkflowAPI.previewLlmContext(payload);
       setLlmContextPreview(response.data || null);
     } catch (error) {
-      setLlmToolMessage({ type: 'error', text: error.message || 'Context preview failed' });
+      setMessage({ type: 'error', text: error.message || 'Context preview failed' });
     } finally {
       setLlmContextPreviewLoading(false);
     }
@@ -7377,11 +7394,11 @@ export default function NotificationWorkflowsPanel({
   async function runLlmToolTest() {
     const ticketId = Number.parseInt(selectedLlmContextTicket?.id, 10);
     if (!selected?.id || !Number.isFinite(ticketId) || ticketId <= 0) {
-      setLlmToolMessage({ type: 'error', text: 'Select a workflow and ticket before running the tool test' });
+      setMessage({ type: 'error', text: 'Select a workflow and ticket before running the tool test' });
       return;
     }
     setLlmToolTestLoading(true);
-    setLlmToolMessage(null);
+    setMessage(null);
     try {
       const response = await notificationWorkflowAPI.testLlmTools({
         workflowId: selected.id,
@@ -7390,9 +7407,9 @@ export default function NotificationWorkflowsPanel({
         forceActionLinks: true,
       });
       setLlmToolTestRun(response.data || response);
-      setLlmToolMessage({ type: 'success', text: 'LLM tool test completed' });
+      setMessage({ type: 'success', text: 'LLM tool test completed' });
     } catch (error) {
-      setLlmToolMessage({ type: 'error', text: error.message || 'LLM tool test failed' });
+      setMessage({ type: 'error', text: error.message || 'LLM tool test failed' });
     } finally {
       setLlmToolTestLoading(false);
     }
@@ -8592,11 +8609,6 @@ export default function NotificationWorkflowsPanel({
   }
 
   const healthWarnings = Array.isArray(health?.warnings) ? health.warnings : [];
-  const workflowQuality = health?.workflowQuality7d || {};
-  const templateFallbacks7d = workflowQuality.templateFallbacks || 0;
-  const guardHardBlocks7d = workflowQuality.guardHardBlocks || 0;
-  const payloadFailures7d = workflowQuality.payloadMinimizationFailures || 0;
-  const possibleBroaderIssueRatePct = workflowQuality.possibleBroaderIssueRatePct || 0;
 
   if (loading) {
     return (
@@ -8607,10 +8619,11 @@ export default function NotificationWorkflowsPanel({
     );
   }
 
-  const showPanelHeader = !hideTabBar || workflowTabActive || Boolean(message);
+  const showPanelHeader = !hideTabBar || workflowTabActive;
 
   return (
     <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-white/70 sm:m-4'}>
+      <NotificationToast message={message} onDismiss={dismissMessage} />
       {showPanelHeader && (
         <div className="shrink-0 border-b border-white/70 px-5 py-3">
           {!hideTabBar && (
@@ -8622,80 +8635,10 @@ export default function NotificationWorkflowsPanel({
                 </div>
                 <p className="text-sm text-gray-500">Workspace-scoped notification workflows, LLM evidence, email branding, and workflow audit.</p>
               </div>
-              {health && (
-                <div className="grid grid-cols-2 gap-2 text-xs xl:grid-cols-6">
-                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                    <div className="text-gray-500">SendGrid</div>
-                    <div className={cls('font-semibold', health.sendgridConfigured ? 'text-emerald-700' : 'text-red-700')}>
-                      {health.sendgridConfigured ? `Configured${health.sendgridMode === 'smtp' ? ' (SMTP)' : ''}` : 'Missing'}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                    <div className="text-gray-500">Enabled</div>
-                    <div className="font-semibold text-gray-900">{health.enabledWorkflows || 0}</div>
-                  </div>
-                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                    <div className="text-gray-500">Audit</div>
-                    <div className="font-semibold text-sky-700">{health.workflowAuditRuns7d ?? health.mockRuns7d ?? health.mockedDeliveries7d ?? 0} runs / {health.mockEnabledWorkflows || 0} mock on</div>
-                  </div>
-                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                    <div className="text-gray-500">Quality 7d</div>
-                    <div className={cls('font-semibold', templateFallbacks7d || guardHardBlocks7d ? 'text-red-700' : 'text-emerald-700')}>
-                      {templateFallbacks7d} fallback / {guardHardBlocks7d} block
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                    <div className="text-gray-500">Payloads</div>
-                    <div className={cls('font-semibold', payloadFailures7d ? 'text-red-700' : 'text-emerald-700')}>
-                      {payloadFailures7d} flagged
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-1.5 shadow-subtle">
-                    <div className="text-gray-500">Broader signal</div>
-                    <div className={cls('font-semibold', possibleBroaderIssueRatePct > 25 ? 'text-amber-700' : 'text-gray-900')}>
-                      {possibleBroaderIssueRatePct}%
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
           <div className={hideTabBar ? 'space-y-2' : 'mt-3 space-y-2'}>
-            {healthWarnings.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
-                <span className="font-semibold uppercase tracking-wide">Workflow health</span>
-                {healthWarnings.slice(0, 5).map((warning, index) => (
-                  <span
-                    key={`${warning.type || 'warning'}-${index}`}
-                    className="rounded-full border border-amber-200 bg-white/80 px-2 py-0.5 font-semibold"
-                  >
-                    {workflowHealthWarningLabel(warning)}
-                  </span>
-                ))}
-                {healthWarnings.length > 5 && (
-                  <details className="group relative">
-                    <summary className="cursor-pointer list-none rounded-full px-2 py-0.5 font-semibold text-amber-700 outline-none ring-amber-300 transition hover:bg-white/80 focus-visible:ring-2 [&::-webkit-details-marker]:hidden">
-                      +{healthWarnings.length - 5} more
-                    </summary>
-                    <div className="absolute right-0 z-30 mt-2 w-72 rounded-lg border border-amber-200 bg-white p-2 text-xs text-amber-900 shadow-lg">
-                      <div className="mb-1 px-1 font-semibold uppercase tracking-wide text-amber-700">Additional warnings</div>
-                      <div className="space-y-1">
-                        {healthWarnings.slice(5).map((warning, index) => (
-                          <div
-                            key={`${warning.type || 'warning'}-extra-${index}`}
-                            className="rounded-md border border-amber-100 bg-amber-50 px-2 py-1 font-medium"
-                          >
-                            {workflowHealthWarningLabel(warning)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </details>
-                )}
-              </div>
-            )}
             {!hideTabBar && (
               <div
                 role="tablist"
@@ -8715,6 +8658,7 @@ export default function NotificationWorkflowsPanel({
 
             {workflowTabActive && (
               <div className="flex min-h-[36px] flex-wrap items-center justify-end gap-2">
+                <WorkflowHealthMenu health={health} warnings={healthWarnings} />
                 <button
                   type="button"
                   onClick={createVariant}
@@ -8815,17 +8759,6 @@ export default function NotificationWorkflowsPanel({
               </div>
             )}
           </div>
-          {message && (
-            <div
-              className={cls(
-                'mt-3 flex items-center gap-2 rounded-md border px-3 py-2 text-sm',
-                message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
-              )}
-            >
-              {message.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-              {message.text}
-            </div>
-          )}
         </div>
       )}
 
@@ -8837,7 +8770,6 @@ export default function NotificationWorkflowsPanel({
               draft={llmToolDraft}
               catalog={llmToolCatalog}
               saving={llmToolSaving}
-              message={llmToolMessage}
               tickets={llmContextTickets}
               ticketsLoading={llmContextTicketsLoading}
               ticketSearch={llmContextTicketSearch}
@@ -8883,7 +8815,6 @@ export default function NotificationWorkflowsPanel({
             selectedBlockId={selectedEmailBlockId}
             draft={emailBlockDraft}
             saving={emailBlockSaving}
-            message={emailBlockMessage}
             onSelect={selectEmailBlock}
             onChange={setEmailBlockDraft}
             onSave={saveEmailBlock}
@@ -8923,15 +8854,6 @@ export default function NotificationWorkflowsPanel({
 
         {activeGlobalTab === 'workflows' && (
           <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden">
-            {selectedIsAfterHoursWorkflow && (
-              <AfterHoursRoutingSummary
-                workflow={selected}
-                afterHoursDraft={afterHoursDraft}
-                afterHoursSchedule={afterHoursSchedule}
-                afterHoursScheduleLoading={afterHoursScheduleLoading}
-                onConfigure={() => setAfterHoursDrawerOpen(true)}
-              />
-            )}
             {selected && (
               <div className="shrink-0">
                 <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-4 py-2">
@@ -8947,7 +8869,24 @@ export default function NotificationWorkflowsPanel({
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
                     {selected.isDefaultVariant ? 'Default fallback' : `Match order ${routingPriority || 1}`}
                   </span>
+                  {selectedIsAfterHoursWorkflow && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                      <Moon className="h-3 w-3" />
+                      After-hours
+                    </span>
+                  )}
                   <div className="relative ml-auto flex items-center gap-1.5">
+                    {selectedIsAfterHoursWorkflow && (
+                      <button
+                        type="button"
+                        onClick={() => setAfterHoursDrawerOpen(true)}
+                        title="Configure after-hours routing — holidays, replacement behavior, and requester copy"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 transition hover:bg-amber-100"
+                      >
+                        <CalendarClock className="h-3.5 w-3.5" />
+                        Configure
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setNormalizationOpen((open) => !open)}
@@ -9160,7 +9099,6 @@ export default function NotificationWorkflowsPanel({
         onSave={saveAfterHoursPolicy}
         onToggleWorkflow={toggleEnabled}
         saving={saving || afterHoursSaving}
-        message={afterHoursMessage}
       />
       <FullContentEditorModal
         open={Boolean(contentEditor)}
