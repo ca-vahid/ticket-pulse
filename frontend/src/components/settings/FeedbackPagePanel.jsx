@@ -218,6 +218,9 @@ export default function FeedbackPagePanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
+  const [submissions, setSubmissions] = useState([]);
+  const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
   const workspaceRequestConfig = useMemo(() => (
     workspaceId ? { headers: { 'X-Workspace-Id': String(workspaceId) } } : {}
@@ -241,11 +244,38 @@ export default function FeedbackPagePanel() {
     }
   }, [workspaceId, workspaceRequestConfig]);
 
+  const loadSubmissions = useCallback(async () => {
+    if (!workspaceId) return;
+    setSubmissionsLoading(true);
+    try {
+      const response = await settingsAPI.listFeedbackSubmissions(workspaceRequestConfig);
+      setSubmissions(response.data || []);
+    } catch { /* non-fatal */ } finally {
+      setSubmissionsLoading(false);
+    }
+  }, [workspaceId, workspaceRequestConfig]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadSubmissions();
+  }, [load, loadSubmissions]);
 
   const update = (patch) => setSettings((current) => ({ ...current, ...patch }));
+
+  const deleteSubmission = async (row) => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Delete the feedback on ticket #${row.ticketNumber || row.id}? This permanently removes the rating and comment.`)) return;
+    setDeletingId(row.id);
+    try {
+      await settingsAPI.deleteFeedbackSubmission(row.id, workspaceRequestConfig);
+      setSubmissions((cur) => cur.filter((s) => s.id !== row.id));
+      setStatus({ type: 'success', message: `Deleted feedback for ticket #${row.ticketNumber || row.id}` });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message || 'Failed to delete feedback' });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   // Open the real /feedback page in preview mode, seeded with the current (unsaved)
   // settings via localStorage, so admins can click through the full experience.
@@ -408,6 +438,48 @@ export default function FeedbackPagePanel() {
               </div>
             </div>
             <Field label="Footer / trademark text" value={settings.trademarkText} maxLength={300} onChange={(v) => update({ trademarkText: v })} placeholder="© Your Company. All rights reserved." />
+          </div>
+
+          <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-slate-900">Recent submissions</div>
+              <button type="button" onClick={loadSubmissions} className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700">
+                <RefreshCw className="h-3.5 w-3.5" /> Refresh
+              </button>
+            </div>
+            <p className="text-xs text-slate-500">Review or remove feedback — e.g. clear test ratings. Deleting is permanent.</p>
+            {submissionsLoading ? (
+              <div className="py-4 text-center text-xs text-slate-400">Loading…</div>
+            ) : submissions.length === 0 ? (
+              <div className="py-4 text-center text-xs text-slate-400">No feedback submitted yet.</div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {submissions.map((s) => (
+                  <li key={s.id} className="flex items-start gap-3 py-2.5">
+                    <span className="mt-0.5 text-lg" title={`${s.score}/5`}>{['😞', '😕', '😐', '🙂', '😄'][Math.min(Math.max((s.score || 3) - 1, 0), 4)]}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="font-semibold text-slate-700">#{s.ticketNumber || '—'}</span>
+                        <span className="font-bold" style={{ color: FACE_COLORS[Math.min(Math.max((s.score || 1) - 1, 0), 4)] }}>{s.score}/5</span>
+                        <span className="text-slate-400">{s.submittedAt ? new Date(s.submittedAt).toLocaleDateString() : ''}</span>
+                        {s.techName && <span className="truncate text-slate-400">· {s.techName}</span>}
+                      </div>
+                      {s.subject && <div className="truncate text-xs text-slate-500" title={s.subject}>{s.subject}</div>}
+                      {s.comment && <div className="truncate text-xs italic text-slate-400" title={s.comment}>“{s.comment}”</div>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => deleteSubmission(s)}
+                      disabled={deletingId === s.id}
+                      className="shrink-0 rounded-lg border border-slate-200 p-1.5 text-red-500 transition hover:bg-red-50 disabled:opacity-50"
+                      title="Delete this feedback"
+                    >
+                      {deletingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="flex items-center gap-3">

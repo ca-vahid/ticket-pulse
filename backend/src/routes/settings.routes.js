@@ -23,6 +23,8 @@ import {
 import {
   getFeedbackSettings,
   updateFeedbackSettings,
+  listFeedbackSubmissions,
+  deleteFeedbackSubmission,
 } from '../services/publicFeedbackService.js';
 import urgentEscalationService from '../services/afterHoursUrgentEscalationService.js';
 import logger from '../utils/logger.js';
@@ -308,6 +310,36 @@ router.put(
       requestActor(req),
     );
     res.json({ success: true, data: settings });
+  }),
+);
+
+/**
+ * GET /api/settings/feedback-submissions
+ * List recent first-party feedback submissions (admin; review / test cleanup).
+ */
+router.get(
+  '/feedback-submissions',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const data = await listFeedbackSubmissions(req.workspaceId, { limit: req.query.limit });
+    res.json({ success: true, data });
+  }),
+);
+
+/**
+ * DELETE /api/settings/feedback-submissions/:id
+ * Permanently delete one feedback submission (admin).
+ */
+router.delete(
+  '/feedback-submissions/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const data = await deleteFeedbackSubmission(req.workspaceId, req.params.id);
+    res.json({ success: true, data });
   }),
 );
 

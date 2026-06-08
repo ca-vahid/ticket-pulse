@@ -1,6 +1,13 @@
-export const APP_VERSION = '2.9';
+export const APP_VERSION = '2.91';
 
 export const changelog = [
+  {
+    version: '2.91',
+    date: 'June 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Manage feedback submissions</strong> — Settings &rarr; Feedback now lists recent ratings with their ticket, score, and comment, and lets admins permanently delete any entry (handy for clearing test feedback).' },
+    ],
+  },
   {
     version: '2.9',
     date: 'June 8, 2026',
