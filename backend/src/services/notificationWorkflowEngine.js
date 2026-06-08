@@ -644,9 +644,11 @@ function afterHoursSupportAction(url, context = {}) {
   };
 }
 
-// Hover-darken for the navy "Check status" button. Honoured by Outlook on the web, Gmail, Apple
-// Mail and mobile; Outlook desktop strips :hover and shows the static button (no breakage).
-const ACTION_HOVER_STYLE = '<style>.tp-navy-btn{transition:background .12s ease}.tp-navy-btn:hover{background:#0e2f74 !important}</style>';
+// Hover-darken for the navy "Check status" button, plus a mobile stack rule for the after-hours
+// number/Check-status row. :hover and @media are honoured by Outlook on the web, Gmail, Apple Mail
+// and mobile clients; Outlook desktop ignores both and shows the static side-by-side layout (it has
+// the width). On phones the number stacks above a full-width Check status button.
+const ACTION_STYLE = '<style>.tp-navy-btn{transition:background .12s ease}.tp-navy-btn:hover{background:#0e2f74 !important}@media only screen and (max-width:480px){.tp-comb-main{display:block !important;width:100% !important}.tp-comb-side{display:block !important;width:100% !important;padding:10px 12px 2px !important;text-align:center !important}}</style>';
 
 // Extra breathing room between the action card and the footer/signature that follows it.
 const ACTION_FOOTER_GAP = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td height="22" style="height:22px;line-height:22px;font-size:1px;">&nbsp;</td></tr></table>';
@@ -666,7 +668,7 @@ function actionCardHtml(bg, border, radius, padding, innerHtml) {
   return outlookCappedActionTable([
     '<tr><td align="center" style="padding:0;">',
     '<!--[if mso]><table role="presentation" width="496" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td><![endif]-->',
-    `<table role="presentation" align="center" width="496" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;border-collapse:separate;max-width:496px;${bgStyle}border:1px solid ${border};border-radius:${radius};">`,
+    `<table role="presentation" align="center" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;border-collapse:separate;max-width:496px;${bgStyle}border:1px solid ${border};border-radius:${radius};">`,
     `<tr><td style="padding:${padding};font-family:Arial,Helvetica,sans-serif;text-align:center;">${innerHtml}</td></tr>`,
     '</table>',
     '<!--[if mso]></td></tr></table><![endif]-->',
@@ -721,13 +723,15 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
       `<td valign="middle" style="padding:12px 0 12px 12px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;">${escapeHtml(phoneDisplay)}</div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
       '</tr></table></a>',
     ].join('');
-    const btnCell = navyBtn ? `<td width="150" valign="middle" align="center" style="padding:10px 10px;">${navyBtn}</td>` : '';
-    combined = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr><td valign="middle" style="padding:0;">${numberCell}</td>${btnCell}</tr></table>`;
+    // Percent widths + classes so the row is fluid and stacks on phones (via the @media rule).
+    const mainCell = `<td class="${navyBtn ? 'tp-comb-main' : ''}" width="${navyBtn ? '68%' : '100%'}" valign="middle" style="padding:0;">${numberCell}</td>`;
+    const btnCell = navyBtn ? `<td class="tp-comb-side" width="32%" valign="middle" align="center" style="padding:10px 10px;">${navyBtn}</td>` : '';
+    combined = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;table-layout:fixed;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr>${mainCell}${btnCell}</tr></table>`;
   } else if (navyBtn) {
     combined = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr><td align="center" valign="middle" style="padding:12px;">${navyBtn}</td></tr></table>`;
   }
 
-  return ACTION_HOVER_STYLE
+  return ACTION_STYLE
     + actionCardHtml('transparent', '#f1cfca', '16px', '16px', heading + requestRow + combined)
     + ACTION_FOOTER_GAP;
 }
