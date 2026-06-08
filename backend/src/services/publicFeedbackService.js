@@ -16,9 +16,16 @@ const MAX_LOGO_DATA_URL_LENGTH = 700_000;
 const MAX_COMMENT_LENGTH = 2000;
 const ALLOWED_LOGO_DATA_URL = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=\s]+$/i;
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+const ALLOWED_THEMES = new Set(['classic', 'earth', 'clay', 'geo', 'it', 'acct', 'hse']);
+
+function cleanTheme(value) {
+  const t = String(value || '').trim().toLowerCase();
+  return ALLOWED_THEMES.has(t) ? t : 'earth';
+}
 
 export const DEFAULT_PUBLIC_FEEDBACK_SETTINGS = {
   enabled: true,
+  theme: 'earth',
   headline: 'How did we do?',
   subtext: 'Your feedback helps our team keep improving. It only takes a moment.',
   thankYouMessage: 'Thanks for letting us know — we really appreciate it.',
@@ -97,6 +104,7 @@ export function normalizePublicFeedbackSettings(row = {}) {
   const d = DEFAULT_PUBLIC_FEEDBACK_SETTINGS;
   return {
     enabled: bool(row.enabled, d.enabled),
+    theme: cleanTheme(row.theme),
     headline: cleanText(row.headline, 160, d.headline),
     subtext: cleanText(row.subtext, 400, d.subtext),
     thankYouMessage: cleanText(row.thankYouMessage, 400, d.thankYouMessage),
@@ -127,6 +135,7 @@ function normalizeSettingsInput(input = {}) {
   const merged = normalizePublicFeedbackSettings({ ...DEFAULT_PUBLIC_FEEDBACK_SETTINGS, ...input });
   return {
     enabled: merged.enabled,
+    theme: merged.theme,
     headline: merged.headline,
     subtext: merged.subtext,
     thankYouMessage: merged.thankYouMessage,
@@ -218,6 +227,7 @@ function resolveBranding(feedbackSettings, statusSettings, workspaceName) {
 
 function publicPagePayload(settings, branding, ticket, existing) {
   return {
+    theme: settings.theme || 'earth',
     ticket: {
       number: ticket.freshserviceTicketId ? String(ticket.freshserviceTicketId) : null,
       subject: ticket.subject || null,

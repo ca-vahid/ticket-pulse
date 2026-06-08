@@ -1304,6 +1304,7 @@ model PublicFeedbackSettings {
   workspaceId     Int       @unique @map("workspace_id")
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   enabled         Boolean   @default(true)
+  theme           String?   @default("earth") @db.VarChar(24)
   headline        String?   @db.VarChar(160)
   subtext         String?   @db.VarChar(400)
   thankYouMessage String?   @db.VarChar(400) @map("thank_you_message")

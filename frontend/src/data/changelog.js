@@ -1,6 +1,14 @@
-export const APP_VERSION = '2.8';
+export const APP_VERSION = '2.85';
 
 export const changelog = [
+  {
+    version: '2.85',
+    date: 'June 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Feedback page themes</strong> add six selectable looks for the satisfaction page — <strong>Earth Sciences</strong> (the new default), Clay 3D, Geometric, IT, Accounting, and Health &amp; Safety — each with custom rating artwork and a matching background, plus the original animated face as a Classic option.' },
+      { type: 'improved', html: '<strong>Theme picker</strong> in Settings &rarr; Feedback lets each workspace choose its style with a live preview, and reserves a “Bring your own” slot for uploading your own background, logo, and rating images later.' },
+    ],
+  },
   {
     version: '2.8',
     date: 'June 7, 2026',
