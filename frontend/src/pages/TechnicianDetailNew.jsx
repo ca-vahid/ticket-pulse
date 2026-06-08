@@ -9,6 +9,7 @@ import OverviewTab from '../components/tech-detail/OverviewTab';
 import TicketBoardTab from '../components/tech-detail/TicketBoardTab';
 import CoverageTab from '../components/tech-detail/CoverageTab';
 import CSATTab from '../components/tech-detail/CSATTab';
+import FeedbackSection from '../components/tech-detail/FeedbackSection';
 import BouncedTab from '../components/tech-detail/BouncedTab';
 import { formatDateLocal } from '../components/tech-detail/utils';
 
@@ -19,6 +20,7 @@ const PRIMARY_TABS = [
   { id: 'tickets',  label: 'Tickets' },
   { id: 'coverage', label: 'Coverage' },
   { id: 'csat',     label: 'CSAT' },
+  { id: 'feedback', label: 'Feedback' },
   { id: 'bounced',  label: 'Bounced' },
 ];
 
@@ -53,6 +55,11 @@ export default function TechnicianDetailNew() {
   const [csatLoading, setCSATLoading] = useState(false);
   const [csatCount, setCSATCount] = useState(0);
   const [csatAverage, setCSATAverage] = useState(null);
+
+  // First-party feedback
+  const [feedbackTickets, setFeedbackTickets] = useState([]);
+  const [feedbackStats, setFeedbackStats] = useState({});
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
 
   // Search – persisted in sessionStorage
   const [searchTerm, setSearchTerm] = useState(() => {
@@ -160,6 +167,20 @@ export default function TechnicianDetailNew() {
       .catch((e) => console.error('Failed to fetch CSAT data:', e))
       .finally(() => setCSATLoading(false));
   }, [id, getTechnicianCSAT]);
+
+  // Fetch first-party feedback
+  useEffect(() => {
+    if (!id) return;
+    setFeedbackLoading(true);
+    dashboardAPI.getTechnicianFeedback(parseInt(id, 10))
+      .then((response) => {
+        const payload = response?.data || {};
+        setFeedbackTickets(payload.feedbackTickets || []);
+        setFeedbackStats(payload);
+      })
+      .catch((e) => console.error('Failed to fetch feedback data:', e))
+      .finally(() => setFeedbackLoading(false));
+  }, [id]);
 
   // Fetch technician data
   useEffect(() => {
@@ -515,6 +536,8 @@ export default function TechnicianDetailNew() {
                   }).length;
                 }
                 if (csatCount !== badge && csatCount > 0) badgeHint = `${csatCount} all-time`;
+              } else if (tab.id === 'feedback') {
+                badge = feedbackTickets?.length || 0;
               } else if (tab.id === 'bounced') {
                 // Period-specific rejection count: rejections whose endedAt
                 // falls in the selected day/week/month.
@@ -638,6 +661,14 @@ export default function TechnicianDetailNew() {
                 selectedDate={selectedDate}
                 selectedWeek={selectedWeek}
                 selectedMonth={selectedMonth}
+              />
+            )}
+
+            {activeTab === 'feedback' && (
+              <FeedbackSection
+                feedbackTickets={feedbackTickets}
+                stats={feedbackStats}
+                isLoading={feedbackLoading}
               />
             )}
 

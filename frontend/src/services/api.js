@@ -308,6 +308,10 @@ export const dashboardAPI = {
     return await api.get(`/dashboard/technician/${id}/csat`);
   },
 
+  getTechnicianFeedback: async (id) => {
+    return await api.get(`/dashboard/technician/${id}/feedback`);
+  },
+
   getMonthlyDashboard: async (monthStart = null, timezone = 'America/Los_Angeles') => {
     const params = { timezone };
     if (monthStart) {
