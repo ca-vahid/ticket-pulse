@@ -359,6 +359,8 @@ export const settingsAPI = {
   setTechnicianActive: (id, isActive) => api.put(`/settings/technicians/${id}/active`, { isActive }),
   getPublicTicketStatusSettings: (config = {}) => api.get('/settings/public-ticket-status', config),
   updatePublicTicketStatusSettings: (data, config = {}) => api.put('/settings/public-ticket-status', data, config),
+  getFeedbackSettings: (config = {}) => api.get('/settings/feedback-settings', config),
+  updateFeedbackSettings: (data, config = {}) => api.put('/settings/feedback-settings', data, config),
   getPublicTicketStatusTickets: (params = {}, config = {}) => api.get('/settings/public-ticket-status/tickets', { ...config, params }),
   previewPublicTicketStatus: (ticketId, config = {}) => api.get(`/settings/public-ticket-status/tickets/${ticketId}/preview`, config),
   ensurePublicTicketStatusLink: (ticketId, config = {}) => api.post(`/settings/public-ticket-status/tickets/${ticketId}/ensure-link`, undefined, config),
@@ -865,6 +867,11 @@ export const publicTicketEscalationAPI = {
 export const publicTicketUrgencyAPI = {
   get: (token) => api.get(`/ticket-status/public/${encodeURIComponent(token)}/urgency`),
   submit: (token) => api.post(`/ticket-status/public/${encodeURIComponent(token)}/urgency`),
+};
+
+export const publicTicketFeedbackAPI = {
+  get: (token) => api.get(`/ticket-status/public/${encodeURIComponent(token)}/feedback`),
+  submit: (token, body) => api.post(`/ticket-status/public/${encodeURIComponent(token)}/feedback`, body),
 };
 
 /**

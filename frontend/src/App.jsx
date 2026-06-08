@@ -20,6 +20,7 @@ import SummitReport from './pages/SummitReport';
 import PublicTicketStatus from './pages/PublicTicketStatus';
 import PublicTicketEscalation from './pages/PublicTicketEscalation';
 import PublicTicketUrgency from './pages/PublicTicketUrgency';
+import PublicTicketFeedback from './pages/PublicTicketFeedback';
 import MyCompetencies from './pages/MyCompetencies';
 import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
@@ -200,6 +201,11 @@ function App() {
                 <Route
                   path="/ticket-urgency/:token"
                   element={<PublicTicketUrgency />}
+                />
+
+                <Route
+                  path="/feedback/:token"
+                  element={<PublicTicketFeedback />}
                 />
 
                 <Route

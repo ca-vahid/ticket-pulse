@@ -4,6 +4,10 @@ import {
   getPublicTicketStatusByToken,
 } from '../services/publicTicketStatusService.js';
 import urgentEscalationService from '../services/afterHoursUrgentEscalationService.js';
+import {
+  getTicketFeedbackByToken,
+  submitTicketFeedback,
+} from '../services/publicFeedbackService.js';
 
 export const publicTicketStatusPublicRouter = express.Router();
 
@@ -44,6 +48,27 @@ publicTicketStatusPublicRouter.post(
   '/:token/urgency',
   asyncHandler(async (req, res) => {
     const data = await urgentEscalationService.submitPublicBusinessUrgency(req.params.token, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+publicTicketStatusPublicRouter.get(
+  '/:token/feedback',
+  asyncHandler(async (req, res) => {
+    const data = await getTicketFeedbackByToken(req.params.token);
+    res.json({ success: true, data });
+  }),
+);
+
+publicTicketStatusPublicRouter.post(
+  '/:token/feedback',
+  asyncHandler(async (req, res) => {
+    const data = await submitTicketFeedback(req.params.token, {
+      score: req.body?.score,
+      comment: req.body?.comment,
       ip: req.ip,
       userAgent: req.headers['user-agent'],
     });

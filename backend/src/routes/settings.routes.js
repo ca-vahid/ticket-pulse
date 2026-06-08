@@ -20,6 +20,10 @@ import {
   revokePublicTicketStatusLink,
   updatePublicTicketStatusSettings,
 } from '../services/publicTicketStatusService.js';
+import {
+  getFeedbackSettings,
+  updateFeedbackSettings,
+} from '../services/publicFeedbackService.js';
 import urgentEscalationService from '../services/afterHoursUrgentEscalationService.js';
 import logger from '../utils/logger.js';
 
@@ -265,6 +269,40 @@ router.put(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const settings = await updatePublicTicketStatusSettings(
+      req.workspaceId,
+      req.body || {},
+      requestActor(req),
+    );
+    res.json({ success: true, data: settings });
+  }),
+);
+
+/**
+ * GET /api/settings/feedback-settings
+ * Get workspace-scoped public feedback page settings.
+ */
+router.get(
+  '/feedback-settings',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const settings = await getFeedbackSettings(req.workspaceId);
+    res.json({ success: true, data: settings });
+  }),
+);
+
+/**
+ * PUT /api/settings/feedback-settings
+ * Update workspace-scoped public feedback page settings.
+ */
+router.put(
+  '/feedback-settings',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const settings = await updateFeedbackSettings(
       req.workspaceId,
       req.body || {},
       requestActor(req),
