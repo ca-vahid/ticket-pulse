@@ -98,11 +98,17 @@ function runSearchFilter(search) {
     { eventType: { contains: trimmed, mode: 'insensitive' } },
   ];
   if (/^\d+$/.test(trimmed)) {
+    or.push({ id: Number.parseInt(trimmed, 10) });
     try {
       or.push({ ticket: { is: { freshserviceTicketId: BigInt(trimmed) } } });
     } catch {
       // Ignore invalid bigint values even if they are numeric-looking.
     }
+  }
+  // Audit IDs are shown as "TP-NWF-<runId>" (or "NWF-<runId>"); match on the run id.
+  const auditIdMatch = trimmed.match(/^(?:TP-)?NWF-(\d+)$/i);
+  if (auditIdMatch) {
+    or.push({ id: Number.parseInt(auditIdMatch[1], 10) });
   }
   return { OR: or };
 }

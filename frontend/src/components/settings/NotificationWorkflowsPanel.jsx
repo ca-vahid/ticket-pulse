@@ -4505,7 +4505,7 @@ export function LlmContextToolsPanel({
   return (
     <section className="min-h-0 flex-1 bg-white px-6 py-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.9fr)_minmax(420px,1.1fr)]">
-        <div className="min-w-0 space-y-3">
+        <div className="min-w-0 space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
@@ -4556,9 +4556,9 @@ export function LlmContextToolsPanel({
             })}
           </div>
 
-          <div>
-            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Evidence sources
+          <div className="space-y-2 border-t border-slate-200 pt-4">
+            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
+              Evidence
               <LlmHelpButton topic="evidenceSources" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
             </div>
             <div className="grid gap-2 md:grid-cols-3">
@@ -4703,6 +4703,11 @@ export function LlmContextToolsPanel({
             </div>
           </div>
 
+          <div className="flex items-center gap-1.5 border-t border-slate-200 pt-4 text-xs font-bold uppercase tracking-wide text-slate-600">
+            Privacy &amp; redaction
+            <LlmHelpButton topic="redaction" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+          </div>
+
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
             <div className="flex items-center gap-1.5 font-semibold uppercase tracking-wide">
               Requester-facing claim controls
@@ -4743,9 +4748,9 @@ export function LlmContextToolsPanel({
           </div>
 
           {mode === 'tools_enabled' && (
-            <div>
-              <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Read-only tool availability
+            <div className="border-t border-slate-200 pt-4">
+              <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
+                Read-only tools
                 <LlmHelpButton topic="toolCatalog" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
               </div>
               <div className="grid gap-2 md:grid-cols-2">
@@ -5088,9 +5093,13 @@ function MockAuditPanel({
           >
             <option value="selected">Selected workflow</option>
             <option value="all">All workflows</option>
-            {workflows.map((workflow) => (
-              <option key={workflow.id} value={workflow.id}>{workflowDisplayName(workflow)}</option>
-            ))}
+            {workflows
+              .filter((workflow) => !workflow.archivedAt || String(workflow.id) === String(filters.workflowId))
+              .map((workflow) => (
+                <option key={workflow.id} value={workflow.id}>
+                  {workflowDisplayName(workflow)}{workflow.archivedAt ? ' (archived)' : ''}
+                </option>
+              ))}
           </select>
         </label>
         <label>
@@ -5147,7 +5156,7 @@ function MockAuditPanel({
           <input
             value={filters.search}
             onChange={(event) => onFiltersChange({ ...filters, search: event.target.value })}
-            placeholder="Ticket, subject, workflow, or event"
+            placeholder="Ticket, subject, workflow, event, or TP-NWF id"
             className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs font-medium text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
           />
         </label>

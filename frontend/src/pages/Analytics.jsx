@@ -3166,12 +3166,12 @@ export default function Analytics({ view = 'standard' }) {
 
       <Panel
         title="Satisfaction"
-        subtitle="Blends first-party feedback (1–5) and FreshService CSAT (1–4) on a 0–100% scale; first-party wins when a ticket has both. Response counts (N) are always shown."
+        subtitle="Two views, both 0–100%. Satisfied (top-2-box) is the share of ratings that are Good/Great (CSAT 3–4) — the satisfaction rate. Average score is the mean normalized score, which only reaches 100% when every rating is the maximum. First-party feedback wins when a ticket has both. Counts (N) always shown."
       >
         <div className="grid gap-3 sm:grid-cols-3">
           <StatCard title="Satisfied (top-2-box)" value={quality?.satisfaction?.topTwoBoxPct != null ? `${quality.satisfaction.topTwoBoxPct}%` : '—'} subtitle={`${formatNumber(quality?.satisfaction?.responses)} rated tickets`} icon={CheckCircle2} tone="green" />
           <StatCard title="First-party feedback" value={quality?.feedback?.averageScore != null ? `${quality.feedback.averageScore} / 5` : '—'} subtitle={`${formatNumber(quality?.feedback?.responses)} responses`} icon={Sparkles} tone="blue" />
-          <StatCard title="Unified satisfaction" value={quality?.satisfaction?.average != null ? `${quality.satisfaction.average}%` : '—'} subtitle={`${formatNumber(quality?.satisfaction?.bySource?.feedback)} first-party · ${formatNumber(quality?.satisfaction?.bySource?.csat)} CSAT`} icon={Gauge} tone="purple" />
+          <StatCard title="Average score" value={quality?.satisfaction?.average != null ? `${quality.satisfaction.average}%` : '—'} subtitle={`mean · ${formatNumber(quality?.satisfaction?.bySource?.feedback)} first-party · ${formatNumber(quality?.satisfaction?.bySource?.csat)} CSAT`} icon={Gauge} tone="purple" />
         </div>
       </Panel>
 
