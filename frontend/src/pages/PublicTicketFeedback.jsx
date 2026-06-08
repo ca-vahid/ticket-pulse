@@ -19,6 +19,35 @@ function errMessage(err, fallback) {
   return err?.response?.data?.message || err?.message || fallback;
 }
 
+export const FEEDBACK_PREVIEW_KEY = 'tp_feedback_preview';
+
+// Build a sample public payload from the admin's (possibly unsaved) settings so the
+// /feedback/preview route renders the full interactive experience without a real token.
+function previewPayloadFromSettings(s) {
+  const v = s || {};
+  const labels = [v.label1, v.label2, v.label3, v.label4, v.label5];
+  return {
+    theme: v.theme || 'earth',
+    ticket: { number: '12345', subject: 'VPN access problem', status: 'Resolved' },
+    branding: {
+      brandName: v.brandName || 'Ticket Pulse',
+      logoDataUrl: v.logoDataUrl || null,
+      logoAltText: v.logoAltText || v.brandName || null,
+      trademarkText: v.trademarkText || null,
+      accentColor: v.accentColor || DEFAULT_ACCENT,
+    },
+    page: {
+      headline: v.headline || 'How did we do?',
+      subtext: v.subtext || 'Your feedback helps our team keep improving. It only takes a moment.',
+      thankYouMessage: v.thankYouMessage || 'Thanks for letting us know — we really appreciate it.',
+      commentEnabled: v.commentEnabled !== false,
+      commentPrompt: v.commentPrompt || "Anything you'd like to add? (optional)",
+      labels: labels.every(Boolean) ? labels : DEFAULT_LABELS,
+    },
+    existing: null,
+  };
+}
+
 function lerp(a, b, v) {
   return a + (b - a) * v;
 }
@@ -131,7 +160,7 @@ function ScoreButton({ index, label, active, accent, imgSrc, onPick, onHover, on
   );
 }
 
-function Shell({ accent, bgImage, children }) {
+function Shell({ accent, bgImage, preview, children }) {
   const style = bgImage
     ? {
       backgroundImage: `linear-gradient(180deg, rgba(255,255,255,.34), rgba(255,255,255,.56)), url('${bgImage}')`,
@@ -143,6 +172,12 @@ function Shell({ accent, bgImage, children }) {
     };
   return (
     <div className="flex min-h-screen items-center justify-center p-4 sm:p-6" style={style}>
+      {preview && (
+        <div className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 bg-slate-900/95 px-4 py-1.5 text-center text-xs font-semibold text-white">
+          <span>Preview — this is exactly what requesters see. Submissions are not recorded.</span>
+          <button type="button" onClick={() => window.close()} className="rounded bg-white/15 px-2 py-0.5 font-bold hover:bg-white/25">Close</button>
+        </div>
+      )}
       {children}
     </div>
   );
@@ -158,6 +193,7 @@ function CenteredCard({ children }) {
 
 export default function PublicTicketFeedback() {
   const { token } = useParams();
+  const isPreview = token === 'preview';
   const reduced = useReducedMotion();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -174,6 +210,13 @@ export default function PublicTicketFeedback() {
   const load = useCallback(async () => {
     setLoading(true);
     setFatal(null);
+    if (isPreview) {
+      let stored = null;
+      try { stored = JSON.parse(localStorage.getItem(FEEDBACK_PREVIEW_KEY) || 'null'); } catch { /* ignore */ }
+      setData(previewPayloadFromSettings(stored));
+      setLoading(false);
+      return;
+    }
     try {
       const payload = unwrap(await publicTicketFeedbackAPI.get(token));
       setData(payload);
@@ -186,7 +229,7 @@ export default function PublicTicketFeedback() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, isPreview]);
 
   useEffect(() => {
     load();
@@ -217,6 +260,10 @@ export default function PublicTicketFeedback() {
 
   const submit = async () => {
     if (!selected || submitting) return;
+    if (isPreview) {
+      setDone({ score: selected, thankYouMessage: page.thankYouMessage });
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -231,7 +278,7 @@ export default function PublicTicketFeedback() {
 
   if (loading) {
     return (
-      <Shell accent={DEFAULT_ACCENT}>
+      <Shell accent={DEFAULT_ACCENT} preview={isPreview}>
         <CenteredCard>
           <Loader2 className="mx-auto h-8 w-8 animate-spin text-slate-400" />
           <p className="mt-3 text-sm text-slate-500">Loading…</p>
@@ -242,7 +289,7 @@ export default function PublicTicketFeedback() {
 
   if (fatal) {
     return (
-      <Shell accent={DEFAULT_ACCENT}>
+      <Shell accent={DEFAULT_ACCENT} preview={isPreview}>
         <CenteredCard>
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100">
             <MessageSquareHeart className="h-7 w-7 text-slate-400" />
@@ -257,7 +304,7 @@ export default function PublicTicketFeedback() {
   if (done) {
     const score = done.score || selected || 5;
     return (
-      <Shell accent={accent} bgImage={isImage ? theme.bg : null}>
+      <Shell accent={accent} bgImage={isImage ? theme.bg : null} preview={isPreview}>
         <CenteredCard>
           <motion.div
             initial={reduced ? false : { scale: 0.7, opacity: 0 }}
@@ -285,7 +332,7 @@ export default function PublicTicketFeedback() {
   }
 
   return (
-    <Shell accent={accent} bgImage={isImage ? theme.bg : null}>
+    <Shell accent={accent} bgImage={isImage ? theme.bg : null} preview={isPreview}>
       <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white/95 p-6 shadow-xl backdrop-blur sm:p-8">
         <div className="flex flex-col items-center text-center">
           {data?.branding?.logoDataUrl ? (
