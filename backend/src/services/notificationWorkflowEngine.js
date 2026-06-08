@@ -759,10 +759,14 @@ function isBusinessHoursContext(context = {}) {
 }
 
 function isAfterHoursActionContext(context = {}, options = {}) {
+  // An after-hours-scheduled workflow only ever sends after-hours emails, so it always uses the
+  // emergency layout — even when it runs (or is tested) during business hours. Schedule mode wins
+  // over the current business-hours state.
+  if (actionLinkOptions(options).workflowScheduleMode === 'after_hours') return true;
   const availability = context.availability || {};
   if (availability.isAfterHours === true || availability.isHoliday === true) return true;
   if (availability.isBusinessHours === true) return false;
-  return actionLinkOptions(options).workflowScheduleMode === 'after_hours';
+  return false;
 }
 
 function actionLinkDiagnostic(email = {}, key, diagnostic) {

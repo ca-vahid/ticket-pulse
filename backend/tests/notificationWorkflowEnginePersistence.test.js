@@ -970,6 +970,33 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.html).not.toContain('Raise urgency');
   });
 
+  test('after-hours workflow uses the emergency layout even when run during business hours', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created', { scheduleMode: 'after_hours' });
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.appendPublicStatusLink = true;
+    sendNode.data.appendAfterHoursSupportLink = true;
+
+    const result = await executeDefinition({
+      workflow: {
+        ...workflow,
+        publishedDefinition: definition,
+      },
+      definition,
+      eventContext: {
+        ...eventContext,
+        // Tested/run during business hours — schedule mode must still win for an after-hours workflow.
+        availability: { isBusinessHours: true, isAfterHours: false, isHoliday: false },
+      },
+      dryRun: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
+    expect(result.state.email.html).toContain("Can't wait until morning?");
+    expect(result.state.email.html).toContain('Request immediate support');
+    expect(result.state.email.html).toContain(immediateSupportUrl);
+  });
+
   test('audit replay renders emergency support from a redacted after-hours contact snapshot', async () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created', { scheduleMode: 'after_hours' });
     const sendNode = definition.nodes.find((node) => node.type === 'send_email');
