@@ -3,9 +3,11 @@ import {
   CheckCircle2,
   Image as ImageIcon,
   Loader2,
+  Plus,
   RefreshCw,
   Save,
   SendHorizonal,
+  Smile,
   Trash2,
   Upload,
   XCircle,
@@ -14,12 +16,14 @@ import { settingsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { Button } from '../ui';
 import { SettingsHero } from './SettingsLayoutPrimitives';
+import { FEEDBACK_THEME_LIST, getFeedbackTheme } from '../../data/feedbackThemes';
 
 const FACE_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981'];
 const MAX_LOGO_BYTES = 512 * 1024;
 
 const DEFAULTS = {
   enabled: true,
+  theme: 'earth',
   headline: 'How did we do?',
   subtext: 'Your feedback helps our team keep improving. It only takes a moment.',
   thankYouMessage: 'Thanks for letting us know — we really appreciate it.',
@@ -110,16 +114,61 @@ function Status({ status }) {
   );
 }
 
+const CHIP_BG = 'radial-gradient(circle at 50% 36%, #ffffff, #eef2f7)';
+
+/** Theme selector grid — image themes show their "Great" tile; classic shows a smiley. */
+function ThemePicker({ value, onChange }) {
+  return (
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="text-sm font-semibold text-slate-900">Theme</div>
+      <p className="text-xs text-slate-500">Pick the look requesters see. Earth Sciences is the default.</p>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+        {FEEDBACK_THEME_LIST.map((t) => {
+          const sel = value === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => onChange(t.key)}
+              className={`flex flex-col items-center gap-1.5 rounded-xl border p-2 text-center transition ${
+                sel ? 'border-blue-400 bg-blue-50/60 ring-1 ring-blue-300' : 'border-slate-200 bg-white hover:bg-slate-50'
+              }`}
+            >
+              <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full" style={{ background: CHIP_BG }}>
+                {t.kind === 'image'
+                  ? <img src={t.tiles[4]} alt="" className="h-full w-full object-contain p-1" />
+                  : <Smile className="h-6 w-6 text-emerald-500" />}
+              </span>
+              <span className="text-[11px] font-semibold leading-tight text-slate-700">{t.label}</span>
+            </button>
+          );
+        })}
+        <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-2 text-center opacity-80">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100"><Plus className="h-5 w-5 text-slate-400" /></span>
+          <span className="text-[11px] font-semibold leading-tight text-slate-400">Bring your own</span>
+          <span className="rounded-full bg-amber-100 px-1.5 text-[8px] font-bold uppercase tracking-wide text-amber-700">Soon</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** A faithful-but-static preview of the live /feedback page so admins see their edits. */
 function FeedbackPreview({ settings }) {
-  const accent = settings.accentColor || '#2563eb';
+  const theme = getFeedbackTheme(settings.theme);
+  const isImage = theme.kind === 'image';
+  const accent = isImage ? theme.accent : (settings.accentColor || '#2563eb');
   const labels = [settings.label1, settings.label2, settings.label3, settings.label4, settings.label5];
+  const bgStyle = isImage
+    ? {
+      backgroundImage: `linear-gradient(180deg, rgba(255,255,255,.42), rgba(255,255,255,.62)), url('${theme.bg}')`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+    }
+    : { background: `radial-gradient(600px 280px at 50% -20%, ${accent}22, transparent 60%), #ffffff` };
   return (
-    <div
-      className="rounded-2xl border border-slate-200 p-5 shadow-sm"
-      style={{ background: `radial-gradient(600px 280px at 50% -20%, ${accent}22, transparent 60%), #ffffff` }}
-    >
-      <div className="mx-auto max-w-xs rounded-2xl border border-slate-200 bg-white/90 p-5 text-center shadow">
+    <div className="rounded-2xl border border-slate-200 p-5 shadow-sm" style={bgStyle}>
+      <div className="mx-auto max-w-xs rounded-2xl border border-slate-200 bg-white/95 p-5 text-center shadow">
         {settings.logoDataUrl ? (
           <img src={settings.logoDataUrl} alt="" className="mx-auto mb-2 h-9 max-w-[140px] object-contain" />
         ) : (
@@ -130,13 +179,19 @@ function FeedbackPreview({ settings }) {
         <div className="text-[11px] font-medium text-slate-400">Ticket #12345 · VPN access problem</div>
         <h3 className="mt-1 text-lg font-bold text-slate-900">{settings.headline || 'How did we do?'}</h3>
         {settings.subtext && <p className="mt-1 text-xs leading-5 text-slate-500">{settings.subtext}</p>}
-        <div className="mx-auto mt-3 flex h-16 w-16 items-center justify-center rounded-full" style={{ background: FACE_COLORS[4] }}>
-          <span className="text-2xl">🙂</span>
+        <div className="mx-auto mt-3 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full" style={{ background: isImage ? CHIP_BG : FACE_COLORS[4] }}>
+          {isImage ? <img src={theme.tiles[4]} alt="" className="h-full w-full object-contain p-1.5" /> : <span className="text-2xl">🙂</span>}
         </div>
         <div className="mt-3 flex items-start justify-between gap-1">
           {labels.map((label, i) => (
             <div key={i} className="flex flex-1 flex-col items-center gap-1">
-              <span className="h-7 w-7 rounded-full border-2" style={{ borderColor: FACE_COLORS[i], background: i === 4 ? FACE_COLORS[i] : '#fff' }} />
+              {isImage ? (
+                <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border-2" style={{ borderColor: i === 4 ? accent : '#e2e8f0', background: CHIP_BG }}>
+                  <img src={theme.tiles[i]} alt="" className="h-full w-full object-contain p-0.5" />
+                </span>
+              ) : (
+                <span className="h-7 w-7 rounded-full border-2" style={{ borderColor: FACE_COLORS[i], background: i === 4 ? FACE_COLORS[i] : '#fff' }} />
+              )}
               <span className="text-[9px] font-semibold leading-tight text-slate-500">{label}</span>
             </div>
           ))}
@@ -258,6 +313,8 @@ export default function FeedbackPagePanel() {
 
       <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
         <div className="space-y-4">
+          <ThemePicker value={settings.theme} onChange={(k) => update({ theme: k })} />
+
           <Toggle
             label="Collect feedback"
             description="When off, the feedback page shows a friendly closed message and submissions are rejected."
