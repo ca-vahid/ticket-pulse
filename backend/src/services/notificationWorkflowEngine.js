@@ -52,6 +52,7 @@ import {
   EMAIL_BADGE_URGENCY,
   EMAIL_BADGE_REQUEST,
   EMAIL_BADGE_PHONE,
+  EMAIL_BADGE_FEEDBACK,
   EMAIL_GLYPH_CLOCK_WHITE,
 } from './notificationEmailIcons.js';
 
@@ -533,6 +534,10 @@ function afterHoursSupportUrlFromContext(context) {
   ).trim();
 }
 
+function feedbackUrlFromContext(context) {
+  return String(context?.ticket?.feedbackUrl || context?.feedbackUrl || '').trim();
+}
+
 // One minimalist action row: a circular badge icon, a title + one-line description, and a trailing
 // arrow. The whole row is a link. Used for both the business-hours and after-hours cards.
 function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null, mb = false }) {
@@ -564,6 +569,7 @@ const ROW_STYLE = {
   publicStatus: { badge: EMAIL_BADGE_STATUS, title: 'Check status', subtitle: 'Live SLA timer, assignee & latest note', color: '#143f9c', tint: '#f4f7fe' },
   raiseUrgency: { badge: EMAIL_BADGE_URGENCY, title: 'Raise urgency', subtitle: 'Bumps priority and notifies the team lead', color: '#d8392c', tint: '#fdf4f3' },
   afterHoursSupport: { badge: EMAIL_BADGE_REQUEST, title: 'Request support', subtitle: 'Pages the on-call engineer right now', color: '#c0392f', tint: '#fdf0ef' },
+  feedback: { badge: EMAIL_BADGE_FEEDBACK, title: 'Rate your support', subtitle: 'Takes ten seconds — it helps the team', color: '#0f766e', tint: '#f0fdfa' },
 };
 
 function outlookCappedActionTable(innerHtml) {
@@ -621,6 +627,18 @@ function raiseUrgencyAction(url) {
     body: 'Mark this ticket Urgent during business hours. This does not page after-hours support.',
     buttonLabel: 'Raise urgency',
     pillLabel: 'Raise urgency',
+    url,
+  };
+}
+
+function feedbackAction(url) {
+  return {
+    key: 'feedback',
+    tone: 'teal',
+    title: 'Rate your support',
+    body: 'Tell us how we did — it only takes a moment and helps the team improve.',
+    buttonLabel: 'Give feedback',
+    pillLabel: 'Give feedback',
     url,
   };
 }
@@ -1019,6 +1037,28 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
   );
 }
 
+function appendFeedbackLinkToEmail(email = {}, context = {}, enabled = false, options = {}) {
+  if (!enabled || email.feedbackLinkApplied) return email;
+  const url = feedbackUrlFromContext(context);
+  if (!url) {
+    return skipActionLink(
+      email,
+      'feedback',
+      'feedback',
+      'No feedback URL is available for this ticket. Check that the workspace feedback page is enabled.',
+      { actionLinkRenderMode: actionLinkOptions(options).actionLinkRenderMode },
+    );
+  }
+
+  return recordAppliedActionLink(
+    email,
+    'feedback',
+    { feedbackLinkApplied: true, feedbackUrl: url },
+    url,
+    { actionLinkRenderMode: actionLinkOptions(options).actionLinkRenderMode },
+  );
+}
+
 function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {}, options = {}) {
   const effectiveOptions = actionLinkOptions(options);
   let next = appendPublicStatusLinkToEmail(email, context, nodeData?.appendPublicStatusLink === true, effectiveOptions);
@@ -1030,6 +1070,9 @@ function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {
   next = appendAfterHoursSupportLinkToEmail(next, context, nodeData?.appendAfterHoursSupportLink === true, effectiveOptions);
   const afterHoursAction = (next.afterHoursSupportLinkApplied === true && email.afterHoursSupportLinkApplied !== true)
     ? afterHoursSupportAction(next.afterHoursSupportUrl, context) : null;
+  next = appendFeedbackLinkToEmail(next, context, nodeData?.appendFeedbackLink === true, effectiveOptions);
+  const feedbackActionItem = (next.feedbackLinkApplied === true && email.feedbackLinkApplied !== true)
+    ? feedbackAction(next.feedbackUrl) : null;
 
   // In after-hours/holiday context the emergency block takes over and bundles the
   // public status link inside itself. During business hours all selected links stay
@@ -1042,7 +1085,7 @@ function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {
     appendixHtml = afterHoursEmergencyHtml(afterHoursAction, publicAction);
     appendixText = afterHoursEmergencyText(afterHoursAction, publicAction);
   } else {
-    const actions = [publicAction, urgencyAction, afterHoursAction].filter(Boolean);
+    const actions = [publicAction, urgencyAction, afterHoursAction, feedbackActionItem].filter(Boolean);
     if (actions.length > 0) {
       appendixHtml = actionAppendixHtml(actions);
       appendixText = actionAppendixText(actions);
@@ -1598,6 +1641,10 @@ async function executeNode({
       afterHoursSupportUrl: state.email.afterHoursSupportUrl || null,
       afterHoursSupportLinkSkipped: state.email.afterHoursSupportLinkSkipped === true,
       afterHoursSupportLinkSkipReason: state.email.afterHoursSupportLinkSkipReason || null,
+      feedbackLinkApplied: state.email.feedbackLinkApplied === true,
+      feedbackUrl: state.email.feedbackUrl || null,
+      feedbackLinkSkipped: state.email.feedbackLinkSkipped === true,
+      feedbackLinkSkipReason: state.email.feedbackLinkSkipReason || null,
     };
   }
 

@@ -547,6 +547,7 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
           appendPublicStatusLink: false,
           appendRaiseUrgencyLink: false,
           appendAfterHoursSupportLink: false,
+          appendFeedbackLink: false,
         },
       },
       {
@@ -559,6 +560,7 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
           appendPublicStatusLink: true,
           appendRaiseUrgencyLink: scheduleMode === 'standard' && triggerType === 'ticket.created',
           appendAfterHoursSupportLink: scheduleMode === 'after_hours' && triggerType === 'ticket.created',
+          appendFeedbackLink: false,
           includeHeader: false,
           headerBlockId: null,
           includeFooter: true,
@@ -626,6 +628,7 @@ export function sampleEventContext(triggerType = 'ticket.created') {
       raiseUrgencyUrl: 'https://ticketpulse.example/ticket-urgency/sample-token',
       selfEscalationUrl: 'https://ticketpulse.example/ticket-escalation/sample-token',
       afterHoursEscalationUrl: 'https://ticketpulse.example/ticket-escalation/sample-token',
+      feedbackUrl: 'https://ticketpulse.example/feedback/sample-token',
       publicStatusExpiresAt: '2026-07-28T18:42:00.000Z',
     },
     requester: {
@@ -688,6 +691,7 @@ export function sampleEventContext(triggerType = 'ticket.created') {
     raiseUrgencyUrl: 'https://ticketpulse.example/ticket-urgency/sample-token',
     selfEscalationUrl: 'https://ticketpulse.example/ticket-escalation/sample-token',
     afterHoursEscalationUrl: 'https://ticketpulse.example/ticket-escalation/sample-token',
+    feedbackUrl: 'https://ticketpulse.example/feedback/sample-token',
     state: {
       recipients: {
         to: ['requester@example.com'],
@@ -763,10 +767,12 @@ export function notificationVariableCatalog(extraOutputFields = []) {
     variable('ticket.selfEscalationUrl', 'Immediate support URL', 'Ticket', 'Backward-compatible requester-facing after-hours immediate support link for this ticket.', 'https://ticketpulse.example/ticket-escalation/sample-token'),
     variable('ticket.afterHoursEscalationUrl', 'After-hours immediate support URL', 'Ticket', 'Requester-facing after-hours immediate support link for this ticket.', 'https://ticketpulse.example/ticket-escalation/sample-token'),
     variable('ticket.publicStatusExpiresAt', 'Public status expiry', 'Ticket', 'Expiration timestamp for the public status link, or blank if it never expires.', '2026-07-28T18:42:00.000Z'),
+    variable('ticket.feedbackUrl', 'Feedback URL', 'Ticket', 'Requester-facing satisfaction feedback link for this ticket.', 'https://ticketpulse.example/feedback/sample-token'),
     variable('publicStatusUrl', 'Public status URL', 'Ticket', 'Shortcut to the requester-facing public ticket status link.', 'https://ticketpulse.example/ticket-status/sample-token'),
     variable('raiseUrgencyUrl', 'Raise urgency URL', 'Ticket', 'Shortcut to the business-hours raise urgency link.', 'https://ticketpulse.example/ticket-urgency/sample-token'),
     variable('selfEscalationUrl', 'Immediate support URL', 'Ticket', 'Backward-compatible shortcut to the after-hours immediate support link.', 'https://ticketpulse.example/ticket-escalation/sample-token'),
     variable('afterHoursEscalationUrl', 'After-hours immediate support URL', 'Ticket', 'Shortcut to the after-hours immediate support link.', 'https://ticketpulse.example/ticket-escalation/sample-token'),
+    variable('feedbackUrl', 'Feedback URL', 'Ticket', 'Shortcut to the requester-facing satisfaction feedback link.', 'https://ticketpulse.example/feedback/sample-token'),
     variable('requester.name', 'Requester name', 'Requester', 'Requester display name.', 'Requester Name'),
     variable('requester.email', 'Requester email', 'Requester', 'Requester email address.', 'requester@example.com'),
     variable('requester.department', 'Requester FreshService department/location', 'Requester', 'FreshService requester department_names value. In this workspace it is often an office/location label.', 'Vancouver'),

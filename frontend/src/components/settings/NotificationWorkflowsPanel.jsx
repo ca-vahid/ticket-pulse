@@ -1384,6 +1384,7 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
       appendPublicStatusLink: false,
       appendRaiseUrgencyLink: false,
       appendAfterHoursSupportLink: false,
+      appendFeedbackLink: false,
     };
   }
   if (type === 'send_email') {
@@ -1394,6 +1395,7 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
       appendPublicStatusLink: true,
       appendRaiseUrgencyLink: triggerType === 'ticket.created',
       appendAfterHoursSupportLink: false,
+      appendFeedbackLink: false,
       includeHeader: false,
       headerBlockId: null,
       includeFooter: true,
@@ -8515,6 +8517,14 @@ export default function NotificationWorkflowsPanel({
           liveRule: 'Live rule: renders when selected and an immediate-support URL plus active contact phone are available. The hosted page still only submits during off-hours or holidays.',
           color: 'red',
         },
+        {
+          key: 'appendFeedbackLink',
+          title: 'Append satisfaction feedback link',
+          description: 'Adds a requester-facing link to the branded feedback page where they rate their support (1–5) and leave an optional comment. Best on resolved or closed notifications.',
+          activePreview: 'Rate your support: a quick 1–5 rating plus an optional comment that helps the team improve.',
+          liveRule: 'Live rule: renders whenever a feedback URL exists (the workspace Feedback page is enabled).',
+          color: 'teal',
+        },
       ];
       return (
         <div className="space-y-3">
@@ -8524,17 +8534,23 @@ export default function NotificationWorkflowsPanel({
               ? 'border-red-300 bg-red-50 text-red-950'
               : option.color === 'amber'
                 ? 'border-amber-300 bg-amber-50 text-amber-950'
-                : 'border-blue-300 bg-blue-50 text-blue-950';
+                : option.color === 'teal'
+                  ? 'border-teal-300 bg-teal-50 text-teal-950'
+                  : 'border-blue-300 bg-blue-50 text-blue-950';
             const iconClass = option.color === 'red'
               ? 'text-red-600'
               : option.color === 'amber'
                 ? 'text-amber-600'
-                : 'text-blue-600';
+                : option.color === 'teal'
+                  ? 'text-teal-600'
+                  : 'text-blue-600';
             const previewClass = option.color === 'red'
               ? 'border-red-200 text-red-900'
               : option.color === 'amber'
                 ? 'border-amber-200 text-amber-900'
-                : 'border-blue-200 text-blue-900';
+                : option.color === 'teal'
+                  ? 'border-teal-200 text-teal-900'
+                  : 'border-blue-200 text-blue-900';
             return (
               <button
                 key={option.key}

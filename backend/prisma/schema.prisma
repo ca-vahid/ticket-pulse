@@ -75,6 +75,8 @@ model Workspace {
   publicTicketStatusSettings PublicTicketStatusSettings?
   publicTicketStatusLinks PublicTicketStatusLink[]
   publicTicketStatusViews PublicTicketStatusView[]
+  publicFeedbackSettings PublicFeedbackSettings?
+  ticketFeedback         TicketFeedback[]
   urgentEscalationPolicy UrgentEscalationPolicy?
   urgentEscalationRecipients UrgentEscalationRecipient[]
   urgentEscalationEvents UrgentEscalationEvent[]
@@ -316,6 +318,7 @@ model Ticket {
   notificationWorkflowRuns NotificationWorkflowRun[]
   publicStatusLinks    PublicTicketStatusLink[]
   publicStatusViews    PublicTicketStatusView[]
+  feedback             TicketFeedback?
   urgentEscalationEvents UrgentEscalationEvent[]
   priorityEvents       TicketPriorityEvent[]
 
@@ -1264,6 +1267,7 @@ model PublicTicketStatusLink {
 
   views         PublicTicketStatusView[]
   urgentEscalationEvents UrgentEscalationEvent[]
+  feedback      TicketFeedback?
 
   @@unique([workspaceId, ticketId])
   @@map("public_ticket_status_links")
@@ -1291,6 +1295,63 @@ model PublicTicketStatusView {
   @@index([workspaceId, viewedAt])
   @@index([ticketId, viewedAt])
   @@index([linkId, viewedAt])
+}
+
+// First-party satisfaction feedback (custom CSAT replacement).
+// Per-workspace branding/config for the public /feedback/:token page.
+model PublicFeedbackSettings {
+  id              Int       @id @default(autoincrement())
+  workspaceId     Int       @unique @map("workspace_id")
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  enabled         Boolean   @default(true)
+  headline        String?   @db.VarChar(160)
+  subtext         String?   @db.VarChar(400)
+  thankYouMessage String?   @db.VarChar(400) @map("thank_you_message")
+  commentEnabled  Boolean   @default(true) @map("comment_enabled")
+  commentPrompt   String?   @db.VarChar(200) @map("comment_prompt")
+  label1          String?   @db.VarChar(40)
+  label2          String?   @db.VarChar(40)
+  label3          String?   @db.VarChar(40)
+  label4          String?   @db.VarChar(40)
+  label5          String?   @db.VarChar(40)
+  image1          String?   @db.Text
+  image2          String?   @db.Text
+  image3          String?   @db.Text
+  image4          String?   @db.Text
+  image5          String?   @db.Text
+  brandName       String?   @db.VarChar(120) @map("brand_name")
+  logoDataUrl     String?   @db.Text @map("logo_data_url")
+  logoAltText     String?   @db.VarChar(160) @map("logo_alt_text")
+  trademarkText   String?   @db.VarChar(300) @map("trademark_text")
+  accentColor     String?   @db.VarChar(24) @map("accent_color")
+  updatedBy       String?   @db.VarChar(255) @map("updated_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("public_feedback_settings")
+  @@index([workspaceId])
+}
+
+// One satisfaction submission per ticket link (unique linkId => upsert overwrites
+// so a requester can change their rating; last-write-wins).
+model TicketFeedback {
+  id              Int       @id @default(autoincrement())
+  workspaceId     Int       @map("workspace_id")
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ticketId        Int       @unique @map("ticket_id")
+  ticket          Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  linkId          Int       @unique @map("link_id")
+  link            PublicTicketStatusLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  score           Int       // 1..5
+  normalizedScore Int       @map("normalized_score") // 0..100
+  comment         String?   @db.Text
+  ipHash          String?   @db.VarChar(64) @map("ip_hash")
+  userAgent       String?   @db.VarChar(500) @map("user_agent")
+  submittedAt     DateTime  @default(now()) @map("submitted_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("ticket_feedback")
+  @@index([workspaceId, submittedAt])
 }
 
 model UrgentEscalationPolicy {

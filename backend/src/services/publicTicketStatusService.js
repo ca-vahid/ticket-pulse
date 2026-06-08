@@ -181,6 +181,10 @@ export function buildTicketUrgencyUrl(token, baseUrl = null) {
   return `${publicBaseUrl(baseUrl)}/ticket-urgency/${encodeURIComponent(token)}`;
 }
 
+export function buildTicketFeedbackUrl(token, baseUrl = null) {
+  return `${publicBaseUrl(baseUrl)}/feedback/${encodeURIComponent(token)}`;
+}
+
 function stripHtml(value) {
   return String(value || '')
     .replace(/<br\s*\/?>/gi, '\n')
@@ -625,6 +629,22 @@ async function getTicketForLink(workspaceId, ticketId) {
   return ticket;
 }
 
+// The per-ticket public token powers several requester-facing surfaces (status,
+// escalation/urgency, and feedback). Read the feedback toggle directly via prisma
+// to avoid a circular import with publicFeedbackService; a missing row means the
+// feature is on by default (matching the default-enabled settings row).
+async function isFeedbackEnabledForWorkspace(workspaceId) {
+  try {
+    const row = await prisma.publicFeedbackSettings.findUnique({
+      where: { workspaceId },
+      select: { enabled: true },
+    });
+    return row ? row.enabled !== false : true;
+  } catch {
+    return false;
+  }
+}
+
 export async function ensurePublicTicketStatusLink({
   workspaceId,
   ticketId,
@@ -633,10 +653,17 @@ export async function ensurePublicTicketStatusLink({
 } = {}) {
   if (!workspaceId || !ticketId) throw new ValidationError('Workspace id and ticket id are required');
   const settings = await getPublicTicketStatusSettings(workspaceId);
-  if (!settings.enabled) {
+  const statusEnabled = settings.enabled;
+  const feedbackEnabled = await isFeedbackEnabledForWorkspace(workspaceId);
+  // Mint a token when ANY requester-facing surface is enabled — not status alone —
+  // so a feedback-only workspace still gets a working /feedback link.
+  if (!statusEnabled && !feedbackEnabled) {
     return {
       enabled: false,
+      statusEnabled: false,
+      feedbackEnabled: false,
       url: null,
+      token: null,
       expiresAt: null,
       reason: 'Public ticket status is disabled for this workspace',
     };
@@ -649,8 +676,11 @@ export async function ensurePublicTicketStatusLink({
 
   if (existing && existing.enabled && !existing.revokedAt) {
     return {
-      enabled: true,
-      url: buildPublicTicketStatusUrl(existing.token, baseUrl),
+      enabled: statusEnabled,
+      statusEnabled,
+      feedbackEnabled,
+      url: statusEnabled ? buildPublicTicketStatusUrl(existing.token, baseUrl) : null,
+      token: existing.token,
       expiresAt: existing.expiresAt ? existing.expiresAt.toISOString() : null,
       existing: true,
     };
@@ -681,8 +711,10 @@ export async function ensurePublicTicketStatusLink({
   });
 
   return {
-    enabled: true,
-    url: buildPublicTicketStatusUrl(token, baseUrl),
+    enabled: statusEnabled,
+    statusEnabled,
+    feedbackEnabled,
+    url: statusEnabled ? buildPublicTicketStatusUrl(token, baseUrl) : null,
     token,
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     existing: false,
@@ -1103,6 +1135,9 @@ export async function enrichEventContextWithPublicStatusUrl(eventContext, option
     const raiseUrgencyUrl = escalationPolicy?.businessUrgencyEnabled !== false && publicToken
       ? buildTicketUrgencyUrl(publicToken, options.baseUrl || null)
       : null;
+    const feedbackUrl = link.feedbackEnabled && publicToken
+      ? buildTicketFeedbackUrl(publicToken, options.baseUrl || null)
+      : null;
     context.publicStatusUrl = link.url || null;
     context.ticket.publicStatusUrl = link.url || null;
     context.ticket.publicStatusExpiresAt = link.expiresAt || null;
@@ -1113,6 +1148,8 @@ export async function enrichEventContextWithPublicStatusUrl(eventContext, option
     context.afterHoursEscalationUrl = selfEscalationUrl;
     context.ticket.selfEscalationUrl = selfEscalationUrl;
     context.ticket.afterHoursEscalationUrl = selfEscalationUrl;
+    context.feedbackUrl = feedbackUrl;
+    context.ticket.feedbackUrl = feedbackUrl;
     context.afterHoursSupport = {
       ...(context.afterHoursSupport && typeof context.afterHoursSupport === 'object'
         ? context.afterHoursSupport
@@ -1132,12 +1169,14 @@ export async function enrichEventContextWithPublicStatusUrl(eventContext, option
     context.selfEscalationUrl = null;
     context.raiseUrgencyUrl = null;
     context.afterHoursEscalationUrl = null;
+    context.feedbackUrl = null;
     if (context.ticket) {
       context.ticket.publicStatusUrl = null;
       context.ticket.selfEscalationUrl = null;
       context.ticket.raiseUrgencyUrl = null;
       context.ticket.urgencyRaiseUrl = null;
       context.ticket.afterHoursEscalationUrl = null;
+      context.ticket.feedbackUrl = null;
       context.ticket.publicStatusError = error.message;
     }
     context.afterHoursSupport = {
@@ -1165,4 +1204,5 @@ export default {
   buildPublicTicketStatusUrl,
   buildTicketEscalationUrl,
   buildTicketUrgencyUrl,
+  buildTicketFeedbackUrl,
 };

@@ -1,6 +1,16 @@
-export const APP_VERSION = '2.75';
+export const APP_VERSION = '2.8';
 
 export const changelog = [
+  {
+    version: '2.8',
+    date: 'June 7, 2026',
+    entries: [
+      { type: 'new', html: '<mark>Major</mark> <strong>First-party feedback page</strong> adds a branded, mobile-friendly satisfaction page where requesters rate their support on a playful 1–5 face that morphs from unhappy to happy and leave an optional comment — our own alternative to FreshService CSAT.' },
+      { type: 'new', html: '<strong>Feedback page customization</strong> adds a Settings &rarr; Feedback tab to tailor the headline, intro, thank-you message, rating labels, comment prompt, logo, brand name, and accent colour per workspace, with a live preview.' },
+      { type: 'improved', html: '<strong>“Give feedback” email link</strong> can be appended to any workflow email — ideal on resolved or closed notifications — and a new <code>{{ ticket.feedbackUrl }}</code> variable is available in templates.' },
+      { type: 'database', html: '<strong>Database updates</strong> add per-workspace feedback page settings and a ticket feedback table capturing each 1–5 rating, a normalised 0–100 score, and an optional comment.' },
+    ],
+  },
   {
     version: '2.75',
     date: 'June 7, 2026',

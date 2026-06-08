@@ -21,6 +21,7 @@ import FreshServiceWebhookCard from '../components/settings/FreshServiceWebhookC
 import NotificationWorkflowsPanel from '../components/settings/NotificationWorkflowsPanel';
 import AiProviderSettingsPanel from '../components/settings/AiProviderSettingsPanel';
 import PublicTicketStatusPanel from '../components/settings/PublicTicketStatusPanel';
+import FeedbackPagePanel from '../components/settings/FeedbackPagePanel';
 import UrgentEscalationPanel from '../components/settings/UrgentEscalationPanel';
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui';
 import { cn } from '../lib/utils';
@@ -72,7 +73,7 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'webhooks', 'notification-providers', 'notification-workflows', 'public-ticket-status', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
+  const validSections = ['freshservice', 'webhooks', 'notification-providers', 'notification-workflows', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -135,6 +136,7 @@ export default function Settings() {
     { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global' },
     { id: 'notification-workflows', label: 'Mail Workflows', Icon: Send, minRole: 'admin' },
     { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin' },
+    { id: 'feedback-page', label: 'Feedback', Icon: MessageSquare, minRole: 'admin' },
     { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin' },
     { id: 'ai-providers', label: 'AI Providers', Icon: Bot, minRole: 'admin' },
     { id: 'sync', label: 'Sync Settings', Icon: RefreshCw, minRole: 'admin' },
@@ -1316,6 +1318,10 @@ export default function Settings() {
 
               {activeSection === 'public-ticket-status' && (
                 <PublicTicketStatusPanel />
+              )}
+
+              {activeSection === 'feedback-page' && (
+                <FeedbackPagePanel />
               )}
 
               {activeSection === 'urgent-escalation' && (
