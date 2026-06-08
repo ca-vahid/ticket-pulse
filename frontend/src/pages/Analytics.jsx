@@ -3164,6 +3164,17 @@ export default function Analytics({ view = 'standard' }) {
         <StatCard title="CSAT Average" value={quality?.csat?.average ?? '—'} subtitle={`${formatNumber(quality?.csat?.responses)} responses`} icon={CheckCircle2} tone="purple" />
       </div>
 
+      <Panel
+        title="Satisfaction"
+        subtitle="Blends first-party feedback (1–5) and FreshService CSAT (1–4) on a 0–100% scale; first-party wins when a ticket has both. Response counts (N) are always shown."
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <StatCard title="Satisfied (top-2-box)" value={quality?.satisfaction?.topTwoBoxPct != null ? `${quality.satisfaction.topTwoBoxPct}%` : '—'} subtitle={`${formatNumber(quality?.satisfaction?.responses)} rated tickets`} icon={CheckCircle2} tone="green" />
+          <StatCard title="First-party feedback" value={quality?.feedback?.averageScore != null ? `${quality.feedback.averageScore} / 5` : '—'} subtitle={`${formatNumber(quality?.feedback?.responses)} responses`} icon={Sparkles} tone="blue" />
+          <StatCard title="Unified satisfaction" value={quality?.satisfaction?.average != null ? `${quality.satisfaction.average}%` : '—'} subtitle={`${formatNumber(quality?.satisfaction?.bySource?.feedback)} first-party · ${formatNumber(quality?.satisfaction?.bySource?.csat)} CSAT`} icon={Gauge} tone="purple" />
+        </div>
+      </Panel>
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
         <Panel
           title="Resolution Distribution"
@@ -3252,6 +3263,31 @@ export default function Analytics({ view = 'standard' }) {
             ]}
           />
         </div>
+      </Panel>
+
+      <Panel
+        title="First-Party Feedback"
+        subtitle={
+          (quality?.feedback?.responses || 0) > 0
+            ? 'Recent first-party satisfaction responses (lowest scores first). Coaching signal — frame as team balance, not a leaderboard.'
+            : 'No first-party feedback in this range yet. Enable the “Give feedback” link on your resolved-ticket workflow to start collecting it.'
+        }
+      >
+        {(quality?.feedback?.responses || 0) > 0 ? (
+          <SimpleTable
+            rows={(quality?.feedback?.lowScoreTickets?.length ? quality.feedback.lowScoreTickets : quality?.feedback?.recentResponses) || []}
+            columns={[
+              { key: 'freshserviceTicketId', label: 'Ticket' },
+              { key: 'feedbackScore', label: 'Score', render: (row) => (row.feedbackScore != null ? `${row.feedbackScore}/5` : '—') },
+              { key: 'feedbackComment', label: 'Comment', render: (row) => row.feedbackComment || '—' },
+              { key: 'subject', label: 'Subject' },
+              { key: 'assignedTechName', label: 'Tech', render: (row) => row.assignedTechName || 'Unassigned' },
+              { key: 'feedbackSubmittedAt', label: 'Submitted', render: (row) => formatDateTime(row.feedbackSubmittedAt) },
+            ]}
+          />
+        ) : (
+          <EmptyState text="No first-party feedback yet." />
+        )}
       </Panel>
     </div>
   );

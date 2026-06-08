@@ -1,6 +1,15 @@
-export const APP_VERSION = '2.86';
+export const APP_VERSION = '2.9';
 
 export const changelog = [
+  {
+    version: '2.9',
+    date: 'June 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Satisfaction analytics</strong> blend the new first-party feedback (1–5) with FreshService CSAT (1–4) on a unified 0–100% scale in Analytics &rarr; Quality — a top-2-box “satisfied” rate, first-party average, and a recent-feedback drilldown, always with response counts (N).' },
+      { type: 'new', html: '<strong>Per-technician feedback</strong> adds a Feedback tab on the technician page showing first-party scores, top-2-box rate, and comments as a coaching / team-balance signal (never a leaderboard), always with N.' },
+      { type: 'improved', html: '<strong>Resolved-ticket workflows</strong> now request feedback by default — newly created “Ticket resolved or closed” workflows include the “Give feedback” link automatically.' },
+    ],
+  },
   {
     version: '2.86',
     date: 'June 8, 2026',

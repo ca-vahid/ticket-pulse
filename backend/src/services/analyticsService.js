@@ -999,6 +999,19 @@ function compactCsatTicket(ticket, workspaceId) {
   };
 }
 
+// First-party feedback record -> compact ticket row (1-5 score + 0-100 normalized + comment).
+function compactFeedbackTicket(record, workspaceId) {
+  const compact = compactTicket(record.ticket, workspaceId);
+  if (!compact) return null;
+  return {
+    ...compact,
+    feedbackScore: record.score,
+    feedbackNormalized: record.normalizedScore,
+    feedbackComment: record.comment || null,
+    feedbackSubmittedAt: record.submittedAt,
+  };
+}
+
 async function getServiceAccountNames() {
   const rows = await prisma.appSettings.findMany({
     where: {
@@ -1597,7 +1610,7 @@ export async function getQuality(workspaceId, query = {}) {
     const rangeInfo = parseAnalyticsRange(query);
     const excludeNoise = query.excludeNoise === 'true';
     const categoryFilter = categoryFilterForQuery(workspaceId, query);
-    const [tickets, csatTickets, openTickets] = await Promise.all([
+    const [tickets, csatTickets, openTickets, feedbackRecords] = await Promise.all([
       fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
       prisma.ticket.findMany({
         where: withCategoryWhere({
@@ -1633,6 +1646,42 @@ export async function getQuality(workspaceId, query = {}) {
         },
       }),
       fetchOpenTickets(workspaceId, excludeNoise, categoryFilter.where),
+      prisma.ticketFeedback.findMany({
+        where: {
+          workspaceId,
+          submittedAt: { gte: rangeInfo.start, lte: rangeInfo.end },
+          ticket: ticketRelationWhere(excludeNoise, categoryFilter.where),
+        },
+        orderBy: { submittedAt: 'desc' },
+        select: {
+          ticketId: true,
+          score: true,
+          normalizedScore: true,
+          comment: true,
+          submittedAt: true,
+          ticket: {
+            select: {
+              id: true,
+              freshserviceTicketId: true,
+              subject: true,
+              status: true,
+              priority: true,
+              ticketCategory: true,
+              tpSkill: true,
+              tpSubskill: true,
+              internalCategoryId: true,
+              internalCategory: { select: { id: true, name: true } },
+              internalSubcategoryId: true,
+              internalSubcategory: { select: { id: true, name: true, parentId: true } },
+              internalCategoryFit: true,
+              internalSubcategoryFit: true,
+              taxonomyReviewNeeded: true,
+              requester: { select: { name: true, email: true } },
+              assignedTech: { select: { name: true } },
+            },
+          },
+        },
+      }),
     ]);
 
     const resolution = summarizeNumeric(tickets.map((t) => t.resolutionTimeSeconds).filter((v) => v !== null));
@@ -1657,6 +1706,32 @@ export async function getQuality(workspaceId, query = {}) {
       csatTrendMap.set(key, row);
     }
     const lowCsat = csatTickets.filter((t) => t.csatScore !== null && t.csatScore <= 2);
+
+    const feedbackTrendMap = new Map();
+    for (const f of feedbackRecords) {
+      const key = groupKey(f.submittedAt, rangeInfo);
+      const row = feedbackTrendMap.get(key) || { date: key, responses: 0, total: 0, average: null };
+      row.responses += 1;
+      row.total += f.normalizedScore || 0;
+      row.average = Number((row.total / row.responses).toFixed(1));
+      feedbackTrendMap.set(key, row);
+    }
+    const lowFeedback = feedbackRecords.filter((f) => f.score !== null && f.score <= 2);
+
+    // Unified satisfaction across both sources, deduped per ticket (first-party wins).
+    // Top-2-box "satisfied": first-party score >= 4, or FreshService CSAT >= 3.
+    const ratingByTicket = new Map();
+    for (const t of csatTickets) {
+      if (t.csatScore === null || t.csatScore === undefined) continue;
+      ratingByTicket.set(t.id, { source: 'csat', satisfied: t.csatScore >= 3, normalized: ((t.csatScore - 1) / 3) * 100 });
+    }
+    for (const f of feedbackRecords) {
+      ratingByTicket.set(f.ticketId, { source: 'feedback', satisfied: f.score >= 4, normalized: f.normalizedScore });
+    }
+    const unifiedRatings = Array.from(ratingByTicket.values());
+    const satisfiedCount = unifiedRatings.filter((u) => u.satisfied).length;
+    const csatOnlyCount = unifiedRatings.filter((u) => u.source === 'csat').length;
+
     const now = new Date();
     const agingBuckets = { under1d: 0, d1to3: 0, d3to7: 0, over7d: 0 };
     for (const ticket of openTickets) {
@@ -1688,6 +1763,28 @@ export async function getQuality(workspaceId, query = {}) {
         lowScoreCount: lowCsat.length,
         lowScoreTickets: lowCsat.slice(0, 25).map((ticket) => compactCsatTicket(ticket, workspaceId)),
         recentResponses: csatTickets.slice(0, 25).map((ticket) => compactCsatTicket(ticket, workspaceId)),
+      },
+      feedback: {
+        responses: feedbackRecords.length,
+        average: feedbackRecords.length
+          ? Number((feedbackRecords.reduce((sum, f) => sum + (f.normalizedScore || 0), 0) / feedbackRecords.length).toFixed(1))
+          : null,
+        averageScore: feedbackRecords.length
+          ? Number((feedbackRecords.reduce((sum, f) => sum + (f.score || 0), 0) / feedbackRecords.length).toFixed(2))
+          : null,
+        trend: Array.from(feedbackTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
+        lowScoreCount: lowFeedback.length,
+        lowScoreTickets: lowFeedback.slice(0, 25).map((f) => compactFeedbackTicket(f, workspaceId)).filter(Boolean),
+        recentResponses: feedbackRecords.slice(0, 25).map((f) => compactFeedbackTicket(f, workspaceId)).filter(Boolean),
+      },
+      satisfaction: {
+        responses: unifiedRatings.length,
+        satisfiedCount,
+        topTwoBoxPct: unifiedRatings.length ? Number(((satisfiedCount / unifiedRatings.length) * 100).toFixed(1)) : null,
+        average: unifiedRatings.length
+          ? Number((unifiedRatings.reduce((sum, u) => sum + u.normalized, 0) / unifiedRatings.length).toFixed(1))
+          : null,
+        bySource: { feedback: feedbackRecords.length, csat: csatOnlyCount, total: unifiedRatings.length },
       },
     };
   });

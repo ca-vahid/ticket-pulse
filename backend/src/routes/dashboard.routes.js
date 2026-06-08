@@ -1137,6 +1137,45 @@ router.get(
 );
 
 /**
+ * GET /api/dashboard/technician/:id/feedback
+ * First-party satisfaction feedback (1-5 + comments) for a technician.
+ */
+router.get(
+  '/technician/:id/feedback',
+  readCache(15_000),
+  asyncHandler(async (req, res) => {
+    const techId = parseInt(req.params.id, 10);
+    if (isNaN(techId)) {
+      return res.status(400).json({ success: false, message: 'Invalid technician ID' });
+    }
+    const technician = await technicianRepository.getById(techId);
+    if (!technician || technician.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+
+    const records = await ticketRepository.getTicketsWithFeedbackByTechnician(techId, req.workspaceId);
+    const total = records.length;
+    const satisfied = records.filter((t) => (t.feedback?.score || 0) >= 4).length;
+
+    res.json({
+      success: true,
+      data: {
+        id: technician.id,
+        name: technician.name,
+        email: technician.email,
+        categoryMode: getCategoryMode(req.workspaceId),
+        feedbackTickets: records.map((ticket) => ({ ...transformTicket(ticket, req.workspaceId), feedback: ticket.feedback })),
+        totalFeedback: total,
+        averageScore: total ? Number((records.reduce((s, t) => s + (t.feedback?.score || 0), 0) / total).toFixed(2)) : null,
+        averageNormalized: total ? Math.round(records.reduce((s, t) => s + (t.feedback?.normalizedScore || 0), 0) / total) : null,
+        topTwoBoxCount: satisfied,
+        topTwoBoxPct: total ? Number(((satisfied / total) * 100).toFixed(1)) : null,
+      },
+    });
+  }),
+);
+
+/**
  * GET /api/dashboard/technician/:id/bounced
  * Return tickets this technician picked up and then rejected back to the queue.
  * Query params:

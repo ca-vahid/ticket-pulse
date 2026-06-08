@@ -560,7 +560,7 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
           appendPublicStatusLink: true,
           appendRaiseUrgencyLink: scheduleMode === 'standard' && triggerType === 'ticket.created',
           appendAfterHoursSupportLink: scheduleMode === 'after_hours' && triggerType === 'ticket.created',
-          appendFeedbackLink: false,
+          appendFeedbackLink: triggerType === 'ticket.resolved_closed',
           includeHeader: false,
           headerBlockId: null,
           includeFooter: true,

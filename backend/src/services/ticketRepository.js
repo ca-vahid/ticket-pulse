@@ -555,6 +555,34 @@ class TicketRepository {
   }
 
   /**
+   * Get tickets with first-party feedback for a technician. Returns ticket objects
+   * (with requester) each carrying a `feedback` sub-object { score, normalizedScore,
+   * comment, submittedAt }.
+   * @returns {Promise<Array>}
+   */
+  async getTicketsWithFeedbackByTechnician(technicianId, workspaceId) {
+    try {
+      const records = await prisma.ticketFeedback.findMany({
+        where: { workspaceId, ticket: { assignedTechId: technicianId } },
+        orderBy: [{ score: 'asc' }, { submittedAt: 'desc' }],
+        include: { ticket: { include: { requester: true } } },
+      });
+      return records.map((r) => ({
+        ...r.ticket,
+        feedback: {
+          score: r.score,
+          normalizedScore: r.normalizedScore,
+          comment: r.comment,
+          submittedAt: r.submittedAt,
+        },
+      }));
+    } catch (error) {
+      logger.error(`Error fetching feedback tickets for technician ${technicianId}:`, error);
+      throw new DatabaseError(`Failed to fetch feedback tickets for technician ${technicianId}`, error);
+    }
+  }
+
+  /**
    * Get CSAT statistics for a technician within a date range
    * @param {number} technicianId - Internal technician ID
    * @param {Date} startDate - Start of date range
