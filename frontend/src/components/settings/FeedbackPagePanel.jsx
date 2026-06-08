@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
+  ExternalLink,
   Image as ImageIcon,
   Loader2,
   Plus,
@@ -246,6 +247,13 @@ export default function FeedbackPagePanel() {
 
   const update = (patch) => setSettings((current) => ({ ...current, ...patch }));
 
+  // Open the real /feedback page in preview mode, seeded with the current (unsaved)
+  // settings via localStorage, so admins can click through the full experience.
+  const openFullPreview = () => {
+    try { localStorage.setItem('tp_feedback_preview', JSON.stringify(settings)); } catch { /* ignore */ }
+    window.open('/feedback/preview', '_blank', 'noopener');
+  };
+
   const save = async () => {
     setSaving(true);
     setStatus(null);
@@ -415,8 +423,18 @@ export default function FeedbackPagePanel() {
         </div>
 
         <div className="lg:sticky lg:top-4 lg:self-start">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Live preview</div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Live preview</span>
+            <button
+              type="button"
+              onClick={openFullPreview}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-600 transition hover:bg-blue-50"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> Open full preview
+            </button>
+          </div>
           <FeedbackPreview settings={settings} />
+          <p className="mt-2 text-center text-[11px] text-slate-400">Opens the real page with your current edits — click the faces and submit. Nothing is recorded.</p>
         </div>
       </div>
     </div>

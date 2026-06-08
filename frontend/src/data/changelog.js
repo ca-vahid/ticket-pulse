@@ -1,6 +1,13 @@
-export const APP_VERSION = '2.85';
+export const APP_VERSION = '2.86';
 
 export const changelog = [
+  {
+    version: '2.86',
+    date: 'June 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Full feedback preview</strong> adds an “Open full preview” link in Settings &rarr; Feedback that opens the real page with your current (even unsaved) edits and theme — click the faces, type a comment, and submit to experience exactly what requesters see. Nothing is recorded.' },
+    ],
+  },
   {
     version: '2.85',
     date: 'June 8, 2026',
