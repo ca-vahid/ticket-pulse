@@ -16,6 +16,10 @@ export const HARD_BLOCK_GUARD_CHECKS = Object.freeze([
   'unsafe_html_or_script',
 ]);
 
+export const REPAIR_FIRST_HARD_BLOCK_GUARD_CHECKS = Object.freeze([
+  'direct_email_address',
+]);
+
 export const AUTO_REPAIR_GUARD_CHECKS = Object.freeze([
   'unsupported_outage_claims',
   'unsupported_timing_claims',
@@ -75,6 +79,7 @@ const BROADER_ISSUE_CLAIM_PATTERN = /\b(?:broader issue|wider issue|widespread i
 const GENERIC_SIMILAR_REPORT_PATTERN = /\bsimilar reports\b/i;
 const MULTIPLE_SIMILAR_REPORT_PATTERN = /\bmultiple similar reports\b/i;
 const COPY_REPAIR_GUARDRAILS = new Set([
+  'direct_email_address',
   'unsupported_outage_claims',
   'unsupported_timing_claims',
   'similar_report_claim_without_evidence',
@@ -450,6 +455,9 @@ function repairGuardrailPayload(payload, issue, contextBundle) {
   if (!COPY_REPAIR_GUARDRAILS.has(issue.id)) return { payload, removed: [] };
   if (issue.id === 'emoji') return repairEmojiPayload(payload);
   if (issue.id === 'playful_tone') return repairPlayfulPayload(payload);
+  if (issue.id === 'direct_email_address') {
+    return repairSentencePayload(payload, EMAIL_ADDRESS_PATTERN, null);
+  }
   if (issue.id === 'unsupported_timing_claims') {
     return repairSentencePayload(payload, UNSUPPORTED_TIMING_PATTERN, deterministicTimingSentence(contextBundle));
   }
@@ -463,6 +471,7 @@ function repairGuardrailPayload(payload, issue, contextBundle) {
 }
 
 function repairFailed(issue, content) {
+  if (issue.id === 'direct_email_address') return EMAIL_ADDRESS_PATTERN.test(content);
   if (issue.id === 'unsupported_timing_claims') return UNSUPPORTED_TIMING_PATTERN.test(content);
   if (issue.id === 'unsupported_outage_claims') return /\b(global|company-wide|confirmed)\s+outage\b/i.test(content);
   if (issue.id === 'similar_report_claim_without_evidence') return SIMILAR_REPORT_CLAIM_PATTERN.test(content);
@@ -472,6 +481,7 @@ function repairFailed(issue, content) {
 }
 
 function repairSummary(issue, removed = []) {
+  if (issue.id === 'direct_email_address') return 'Removed generated direct email-address wording; preserved the remaining generated copy.';
   if (issue.id === 'unsupported_timing_claims') return 'Removed unsupported response or resolution-time wording; preserved the remaining generated copy.';
   if (issue.id === 'unsupported_outage_claims') return 'Removed unsupported outage wording; preserved the remaining generated copy.';
   if (issue.id === 'similar_report_claim_without_evidence') return 'Removed unsupported similar-report or broader-issue wording; preserved the remaining generated copy.';
@@ -670,6 +680,7 @@ export function guardNotificationEmailPayload(payload, {
     auditOnlyIssues,
     policyTiers: {
       hardBlock: [...HARD_BLOCK_GUARD_CHECKS],
+      repairFirstHardBlock: [...REPAIR_FIRST_HARD_BLOCK_GUARD_CHECKS],
       autoRepair: [...AUTO_REPAIR_GUARD_CHECKS],
       auditOnly: [...AUDIT_ONLY_GUARD_CHECKS],
     },

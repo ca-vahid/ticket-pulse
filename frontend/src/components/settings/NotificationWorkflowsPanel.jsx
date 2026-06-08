@@ -8188,8 +8188,8 @@ export default function NotificationWorkflowsPanel({
                 </div>
                 <div className="mb-2 grid gap-2 md:grid-cols-3">
                   {[
-                    ['hardBlocks', 'Hard block', 'Privacy, contact, internal, provider, audit, and unsafe HTML leaks.'],
-                    ['autoRepair', 'Auto repair', 'Unsupported timing, outage, similar-report, and citation issues.'],
+                    ['hardBlocks', 'Hard block', 'Privacy, phone, internal, provider, audit, and unsafe HTML leaks.'],
+                    ['autoRepair', 'Auto repair', 'Generated email-address leaks plus unsupported timing, outage, similar-report, and citation issues.'],
                     ['auditOnly', 'Audit only', 'Emoji, playful metaphors, and harmless personality markers.'],
                   ].map(([field, label, description]) => (
                     <label key={field} className="flex min-w-0 items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-700">

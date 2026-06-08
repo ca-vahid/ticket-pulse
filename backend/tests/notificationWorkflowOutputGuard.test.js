@@ -287,6 +287,29 @@ describe('notification workflow output guard', () => {
     }
   });
 
+  test('repairs generated direct email addresses when repair is enabled', () => {
+    const result = guardNotificationEmailPayload({
+      subject: 'Ticket update',
+      html: '<p>We received your ticket.</p><p>Email alex.agent@example.com for updates.</p><p>The team will follow up through the ticket.</p>',
+      text: 'We received your ticket. Email alex.agent@example.com for updates. The team will follow up through the ticket.',
+    }, {
+      repairGuardrails: ['direct_email_address'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.payload.text).toContain('We received your ticket');
+    expect(result.payload.text).toContain('The team will follow up through the ticket');
+    expect(result.payload.text).not.toMatch(/alex\.agent@example\.com/i);
+    expect(result.payload.html).not.toMatch(/alex\.agent@example\.com/i);
+    expect(result.repairedIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'direct_email_address',
+        policyTier: 'hard_block',
+        actionTaken: 'repaired',
+      }),
+    ]));
+  });
+
   test('repairs enabled copy guardrails and tags the issue details', () => {
     const result = guardNotificationEmailPayload({
       subject: 'VPN update within 30 minutes',

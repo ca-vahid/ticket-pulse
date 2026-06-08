@@ -36,6 +36,7 @@ import {
   AUDIT_ONLY_GUARD_CHECKS,
   AUTO_REPAIR_GUARD_CHECKS,
   HARD_BLOCK_GUARD_CHECKS,
+  REPAIR_FIRST_HARD_BLOCK_GUARD_CHECKS,
   guardNotificationEmailPayload,
 } from './notificationWorkflowOutputGuard.js';
 import { enrichEventContextWithRequesterProfile } from './requesterProfileService.js';
@@ -70,7 +71,7 @@ const EXECUTION_MODE_LIVE = 'live';
 const EXECUTION_MODE_PREVIEW = 'preview';
 const EXECUTION_MODE_MOCK = 'mock';
 const ASSIGNMENT_EVENT_TYPES = new Set(['ticket.assigned', 'ticket.reassigned']);
-const DEFAULT_LLM_SYSTEM_PROMPT_VERSION = 'notification-email-policy-tiers-v3';
+const DEFAULT_LLM_SYSTEM_PROMPT_VERSION = 'notification-email-policy-tiers-v4';
 const DEFAULT_LLM_SYSTEM_PROMPT_PARTS = [
   'You write concise, friendly IT helpdesk notification emails.',
   'Return JSON matching the requested schema.',
@@ -78,6 +79,7 @@ const DEFAULT_LLM_SYSTEM_PROMPT_PARTS = [
   'Do not claim a global, company-wide, or confirmed outage unless the evidence bundle explicitly allows that wording.',
   'Warm, relaxed wording is allowed when it fits the workflow tone and ticket risk; never let style override factual, privacy, or security requirements.',
   'Do not invent response-time or resolution-time estimates; use neutral follow-up language unless deterministic SLA or historical timing evidence is supplied.',
+  'Do not place raw email addresses, phone numbers, or direct contact details in requester-facing subject, html, or text; use role names or approved action links instead.',
 ];
 const DEFAULT_LLM_SYSTEM_PROMPT = DEFAULT_LLM_SYSTEM_PROMPT_PARTS.join(' ');
 const LEGACY_DEFAULT_LLM_SYSTEM_PROMPTS = new Set([
@@ -90,6 +92,7 @@ const DEFAULT_PROMPT_HARDENING_CONTROLS = [
   'outage_claim_requires_allowed_evidence',
   'friendly_tone_allowed_with_audit_visibility',
   'no_response_or_resolution_time_claims_without_evidence',
+  'no_raw_contact_details_in_generated_copy',
 ];
 const WORKFLOW_GUARDRAIL_GROUPS = {
   internalReferences: [...HARD_BLOCK_GUARD_CHECKS],
@@ -299,6 +302,9 @@ function requesterGuardrailSettings(node, { customPrompt = false, strictCitation
   const repairGuardrails = autoRepairEnabled
     ? AUTO_REPAIR_GUARD_CHECKS.filter((check) => !disabledSet.has(check))
     : [];
+  if (autoRepairEnabled) {
+    repairGuardrails.push(...REPAIR_FIRST_HARD_BLOCK_GUARD_CHECKS.filter((check) => !disabledSet.has(check)));
+  }
   if (strictCitations && autoRepairEnabled && !disabledSet.has('unknown_cited_evidence_ids')) {
     repairGuardrails.push('unknown_cited_evidence_ids');
   }
@@ -379,6 +385,7 @@ function llmPromptRuntimeProfile(node, { toolMode = false, strictCitations = fal
     relaxedChecks: ['friendly', 'playful', 'custom'].includes(guardrailSettings.toneMode) ? ['emoji', 'playful_tone'] : [],
     policyTiers: {
       hardBlock: [...HARD_BLOCK_GUARD_CHECKS],
+      repairFirstHardBlock: [...REPAIR_FIRST_HARD_BLOCK_GUARD_CHECKS],
       autoRepair: [...AUTO_REPAIR_GUARD_CHECKS],
       auditOnly: [...AUDIT_ONLY_GUARD_CHECKS],
     },

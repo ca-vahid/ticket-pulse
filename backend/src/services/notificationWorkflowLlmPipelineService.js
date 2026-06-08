@@ -115,6 +115,7 @@ function systemPromptForTools(basePrompt, policy) {
     'Private/internal notes, if present, are internal evidence only and must not be quoted or mentioned in requester-facing fields.',
     'Warm, relaxed wording is allowed when it fits the workflow tone and ticket risk; never let style override factual, privacy, or security requirements.',
     'Do not invent response-time or resolution-time estimates; use neutral follow-up language unless deterministic SLA or historical timing evidence is supplied.',
+    'Do not place raw email addresses, phone numbers, or direct contact details in requester-facing subject, html, or text; use role names or approved action links instead.',
     'When ready, call submit_notification_email exactly once with subject, html, text, and any citedSignals.',
     `Budgets: max turns ${policy.maxTurns}, max tool calls ${policy.maxToolCalls}, total timeout ${policy.totalTimeoutMs}ms.`,
   ].filter(Boolean).join('\n');
