@@ -231,6 +231,15 @@ async function withCache(workspaceId, endpoint, query, producer) {
   return pendingValue;
 }
 
+// Drop all cached analytics for a workspace (e.g. after feedback is submitted/deleted)
+// so the next read recomputes instead of waiting out the short TTL.
+export function invalidateAnalyticsCache(workspaceId) {
+  const prefix = `${workspaceId}:`;
+  for (const key of [...cache.keys()]) {
+    if (key.startsWith(prefix)) cache.delete(key);
+  }
+}
+
 function metadata(rangeInfo, extra = {}) {
   return {
     range: {

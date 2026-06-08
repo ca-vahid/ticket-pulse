@@ -6,6 +6,7 @@ import {
   hashPublicStatusToken,
   getPublicTicketStatusSettings,
 } from './publicTicketStatusService.js';
+import { invalidateAnalyticsCache } from './analyticsService.js';
 
 // First-party satisfaction feedback (custom CSAT replacement). Per-workspace
 // branding/config for the public /feedback/:token page plus the public read/submit
@@ -309,6 +310,7 @@ export async function submitTicketFeedback(token, { score, comment, ip, userAgen
   });
 
   logger.info('Ticket feedback submitted', { workspaceId, ticketId: link.ticket.id, score: parsedScore });
+  invalidateAnalyticsCache(workspaceId);
 
   return {
     status: 'submitted',
@@ -360,6 +362,7 @@ export async function deleteFeedbackSubmission(workspaceId, id) {
   const existing = await prisma.ticketFeedback.findFirst({ where: { id: fid, workspaceId }, select: { id: true } });
   if (!existing) throw new NotFoundError('Feedback submission not found');
   await prisma.ticketFeedback.delete({ where: { id: fid } });
+  invalidateAnalyticsCache(workspaceId);
   return { deleted: true, id: fid };
 }
 

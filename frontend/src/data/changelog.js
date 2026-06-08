@@ -1,6 +1,16 @@
-export const APP_VERSION = '2.91';
+export const APP_VERSION = '2.92';
 
 export const changelog = [
+  {
+    version: '2.92',
+    date: 'June 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Audit search by TP-NWF id</strong> now works — searching a run/audit id like <code>TP-NWF-1234</code> (or the bare number) finds the matching workflow run.' },
+      { type: 'fixed', html: '<strong>Archived workflows</strong> no longer clutter the workflow filter dropdown in the audit bar (a currently-selected archived workflow stays visible, labelled “archived”).' },
+      { type: 'improved', html: '<strong>LLM Context page</strong> left panel is reorganized into clearly separated sections — Policy, Evidence, Privacy &amp; redaction, and Read-only tools — instead of one dense stack.' },
+      { type: 'improved', html: '<strong>Satisfaction metrics</strong> are clearer: “Satisfied (top-2-box)” is the happy-rating rate, while “Average score” is the mean (rarely 100%). Analytics now refresh immediately after feedback is added or removed.' },
+    ],
+  },
   {
     version: '2.91',
     date: 'June 8, 2026',
