@@ -319,6 +319,50 @@ export async function submitTicketFeedback(token, { score, comment, ip, userAgen
   };
 }
 
+// Admin: list recent feedback submissions for a workspace (for review / test cleanup).
+export async function listFeedbackSubmissions(workspaceId, { limit = 50 } = {}) {
+  const take = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 200);
+  const rows = await prisma.ticketFeedback.findMany({
+    where: { workspaceId },
+    orderBy: { submittedAt: 'desc' },
+    take,
+    select: {
+      id: true,
+      score: true,
+      normalizedScore: true,
+      comment: true,
+      submittedAt: true,
+      ticket: {
+        select: {
+          freshserviceTicketId: true,
+          subject: true,
+          assignedTech: { select: { name: true } },
+        },
+      },
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    score: r.score,
+    normalizedScore: r.normalizedScore,
+    comment: r.comment || null,
+    submittedAt: r.submittedAt ? new Date(r.submittedAt).toISOString() : null,
+    ticketNumber: r.ticket?.freshserviceTicketId ? String(r.ticket.freshserviceTicketId) : null,
+    subject: r.ticket?.subject || null,
+    techName: r.ticket?.assignedTech?.name || null,
+  }));
+}
+
+// Admin: permanently delete a single feedback submission (scoped to the workspace).
+export async function deleteFeedbackSubmission(workspaceId, id) {
+  const fid = Number.parseInt(id, 10);
+  if (!Number.isFinite(fid)) throw new ValidationError('Invalid feedback id');
+  const existing = await prisma.ticketFeedback.findFirst({ where: { id: fid, workspaceId }, select: { id: true } });
+  if (!existing) throw new NotFoundError('Feedback submission not found');
+  await prisma.ticketFeedback.delete({ where: { id: fid } });
+  return { deleted: true, id: fid };
+}
+
 export default {
   DEFAULT_PUBLIC_FEEDBACK_SETTINGS,
   normalizePublicFeedbackSettings,
@@ -326,4 +370,6 @@ export default {
   updateFeedbackSettings,
   getTicketFeedbackByToken,
   submitTicketFeedback,
+  listFeedbackSubmissions,
+  deleteFeedbackSubmission,
 };
