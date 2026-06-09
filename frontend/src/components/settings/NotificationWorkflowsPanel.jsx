@@ -4472,6 +4472,13 @@ export function LlmContextToolsPanel({
   const enabledTools = Array.isArray(draft?.enabledTools) ? draft.enabledTools : [];
   const hasChanges = JSON.stringify(policy || {}) !== JSON.stringify(draft || {});
   const mode = draft?.mode || 'context_only';
+  const [llmSection, setLlmSection] = useState('policy');
+  const sections = [
+    { id: 'policy', label: 'Policy' },
+    { id: 'evidence', label: 'Evidence' },
+    { id: 'privacy', label: 'Privacy & redaction' },
+    { id: 'tools', label: 'Tools' },
+  ];
   const summary = preview?.summary || null;
   const bundle = preview?.bundle || null;
   const manualFreshserviceTicketNumber = /^\d+$/.test(String(ticketSearch || '').trim());
@@ -4531,255 +4538,279 @@ export function LlmContextToolsPanel({
             </button>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-3">
-            {LLM_TOOL_POLICY_MODES.map((option) => {
-              const active = mode === option.value;
-              return (
-                <div
-                  key={option.value}
-                  className={cls(
-                    'relative min-h-[86px] rounded-md border transition',
-                    active ? 'border-violet-300 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => onChange({ mode: option.value })}
-                    className="h-full w-full px-3 py-2 pr-10 text-left"
-                  >
-                    <span className="block text-sm font-semibold">{option.label}</span>
-                    <span className="mt-1 block text-xs leading-4 text-slate-500">{option.description}</span>
-                  </button>
-                  <LlmHelpButton topic={option.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
-                </div>
-              );
-            })}
+          <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1">
+            {sections.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setLlmSection(s.id)}
+                className={cls(
+                  'flex-1 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition',
+                  llmSection === s.id ? 'bg-white text-violet-700 shadow-subtle' : 'text-slate-500 hover:bg-white/60 hover:text-slate-700',
+                )}
+              >
+                {s.label}
+              </button>
+            ))}
           </div>
 
-          <div className="space-y-2 border-t border-slate-200 pt-4">
-            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
-              Evidence
-              <LlmHelpButton topic="evidenceSources" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
-            </div>
+          {llmSection === 'policy' && (
             <div className="grid gap-2 md:grid-cols-3">
-              {sourceRows.map((row) => (
-                <div
-                  key={row.key}
-                  className={cls(
-                    'relative rounded-md border transition',
-                    mode === 'off' ? 'opacity-50' : '',
-                    row.enabled && mode !== 'off' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-200 bg-slate-50 text-slate-600',
-                  )}
-                >
+              {LLM_TOOL_POLICY_MODES.map((option) => {
+                const active = mode === option.value;
+                return (
+                  <div
+                    key={option.value}
+                    className={cls(
+                      'relative min-h-[86px] rounded-md border transition',
+                      active ? 'border-violet-300 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onChange({ mode: option.value })}
+                      className="h-full w-full px-3 py-2 pr-10 text-left"
+                    >
+                      <span className="block text-sm font-semibold">{option.label}</span>
+                      <span className="mt-1 block text-xs leading-4 text-slate-500">{option.description}</span>
+                    </button>
+                    <LlmHelpButton topic={option.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {llmSection === 'evidence' && (
+            <div className="space-y-3">
+              <div className="grid gap-2 md:grid-cols-3">
+                {sourceRows.map((row) => (
+                  <div
+                    key={row.key}
+                    className={cls(
+                      'relative rounded-md border transition',
+                      mode === 'off' ? 'opacity-50' : '',
+                      row.enabled && mode !== 'off' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-200 bg-slate-50 text-slate-600',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSettingChange('context', { [row.key]: !row.enabled })}
+                      disabled={mode === 'off'}
+                      className="w-full px-3 py-2 pr-10 text-left disabled:cursor-not-allowed"
+                    >
+                      <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
+                        {row.label}
+                        {row.enabled && mode !== 'off' ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                      </span>
+                      <span className="mt-1 block text-xs leading-4 text-slate-500">{row.description}</span>
+                    </button>
+                    <LlmHelpButton topic={row.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-2 md:grid-cols-4">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <LabelWithHelp topic="threadEntries" onOpenHelp={onOpenHelp}>Thread entries</LabelWithHelp>
+                  <input
+                    type="number"
+                    min="0"
+                    max="20"
+                    value={context.maxThreadEntries ?? 6}
+                    onChange={(event) => onSettingChange('context', { maxThreadEntries: Number(event.target.value) })}
+                    className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+                  />
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <LabelWithHelp topic="similarTicketLimit" onOpenHelp={onOpenHelp}>Similar tickets</LabelWithHelp>
+                  <input
+                    type="number"
+                    min="0"
+                    max="20"
+                    value={context.maxSimilarTickets ?? 5}
+                    onChange={(event) => onSettingChange('context', { maxSimilarTickets: Number(event.target.value) })}
+                    className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+                  />
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <LabelWithHelp topic="watchThreshold" onOpenHelp={onOpenHelp}>Routine cluster threshold</LabelWithHelp>
+                  <input
+                    type="number"
+                    min="2"
+                    max="100"
+                    value={outage.watchThreshold ?? 3}
+                    onChange={(event) => onSettingChange('outageSignals', { watchThreshold: Number(event.target.value) })}
+                    className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+                  />
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <LabelWithHelp topic="contextKb" onOpenHelp={onOpenHelp}>Context KB</LabelWithHelp>
+                  <input
+                    type="number"
+                    min="5"
+                    max="100"
+                    value={Math.round((safety.maxContextBytes || 40000) / 1000)}
+                    onChange={(event) => onSettingChange('safety', { maxContextBytes: Number(event.target.value) * 1000 })}
+                    className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
+          {llmSection === 'privacy' && (
+            <div className="space-y-3">
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                <div className="flex items-center gap-1.5 font-semibold uppercase tracking-wide">
+                  Requester-facing claim controls
+                  <LlmHelpButton topic="claimControls" onOpenHelp={onOpenHelp} className="h-6 w-6 border-amber-200 text-amber-700 shadow-none hover:border-amber-300 hover:bg-amber-100" />
+                </div>
+                <div>Unsupported outage claims, private/internal note mentions, tool names, provider/model names, and audit wording are blocked from requester-facing fields. Similar-report wording is allowed only after threshold evidence.</div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => onSettingChange('context', { [row.key]: !row.enabled })}
-                    disabled={mode === 'off'}
-                    className="w-full px-3 py-2 pr-10 text-left disabled:cursor-not-allowed"
+                    onClick={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
+                    className={cls(
+                      'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
+                      draft.redactionEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700',
+                    )}
                   >
-                    <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
-                      {row.label}
-                      {row.enabled && mode !== 'off' ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
-                    </span>
-                    <span className="mt-1 block text-xs leading-4 text-slate-500">{row.description}</span>
+                    {draft.redactionEnabled ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
+                    Redaction {draft.redactionEnabled ? 'on' : 'off'}
                   </button>
-                  <LlmHelpButton topic={row.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
+                  <LlmHelpButton topic="redaction" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
                 </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-2 md:grid-cols-4">
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <LabelWithHelp topic="threadEntries" onOpenHelp={onOpenHelp}>Thread entries</LabelWithHelp>
-              <input
-                type="number"
-                min="0"
-                max="20"
-                value={context.maxThreadEntries ?? 6}
-                onChange={(event) => onSettingChange('context', { maxThreadEntries: Number(event.target.value) })}
-                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
-              />
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <LabelWithHelp topic="similarTicketLimit" onOpenHelp={onOpenHelp}>Similar tickets</LabelWithHelp>
-              <input
-                type="number"
-                min="0"
-                max="20"
-                value={context.maxSimilarTickets ?? 5}
-                onChange={(event) => onSettingChange('context', { maxSimilarTickets: Number(event.target.value) })}
-                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
-              />
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <LabelWithHelp topic="watchThreshold" onOpenHelp={onOpenHelp}>Routine cluster threshold</LabelWithHelp>
-              <input
-                type="number"
-                min="2"
-                max="100"
-                value={outage.watchThreshold ?? 3}
-                onChange={(event) => onSettingChange('outageSignals', { watchThreshold: Number(event.target.value) })}
-                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
-              />
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <LabelWithHelp topic="contextKb" onOpenHelp={onOpenHelp}>Context KB</LabelWithHelp>
-              <input
-                type="number"
-                min="5"
-                max="100"
-                value={Math.round((safety.maxContextBytes || 40000) / 1000)}
-                onChange={(event) => onSettingChange('safety', { maxContextBytes: Number(event.target.value) * 1000 })}
-                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
-              />
-            </label>
-          </div>
-
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Tool-mode safety budget
-                <LlmHelpButton topic="toolBudget" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
+                    className={cls(
+                      'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
+                      draft.includePrivateNotes ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-600',
+                    )}
+                  >
+                    {draft.includePrivateNotes ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
+                    Private notes {draft.includePrivateNotes ? 'internal evidence' : 'excluded'}
+                  </button>
+                  <LlmHelpButton topic="privateNotes" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
+                </div>
               </div>
-              <div className="text-[11px] font-medium text-slate-500">Hard limits for every Evidence + tools generation</div>
             </div>
-            <div className="grid gap-2 md:grid-cols-5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Turns</LabelWithHelp>
-                <input
-                  type="number"
-                  min="1"
-                  max="8"
-                  value={draft.maxTurns ?? 4}
-                  onChange={(event) => onChange({ maxTurns: Number(event.target.value) })}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
-                />
-              </label>
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool calls</LabelWithHelp>
-                <input
-                  type="number"
-                  min="1"
-                  max="12"
-                  value={draft.maxToolCalls ?? 6}
-                  onChange={(event) => onChange({ maxToolCalls: Number(event.target.value) })}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
-                />
-              </label>
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Total sec</LabelWithHelp>
-                <input
-                  type="number"
-                  min="2"
-                  max="60"
-                  value={Math.round((draft.totalTimeoutMs || 20000) / 1000)}
-                  onChange={(event) => onChange({ totalTimeoutMs: Number(event.target.value) * 1000 })}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
-                />
-              </label>
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool sec</LabelWithHelp>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  value={Math.round((draft.perToolTimeoutMs || 3000) / 1000)}
-                  onChange={(event) => onChange({ perToolTimeoutMs: Number(event.target.value) * 1000 })}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
-                />
-              </label>
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool KB</LabelWithHelp>
-                <input
-                  type="number"
-                  min="2"
-                  max="50"
-                  value={Math.round((safety.maxToolOutputBytes || 12000) / 1000)}
-                  onChange={(event) => onSettingChange('safety', { maxToolOutputBytes: Number(event.target.value) * 1000 })}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
-                />
-              </label>
-            </div>
-          </div>
+          )}
 
-          <div className="flex items-center gap-1.5 border-t border-slate-200 pt-4 text-xs font-bold uppercase tracking-wide text-slate-600">
-            Privacy &amp; redaction
-            <LlmHelpButton topic="redaction" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
-          </div>
+          {llmSection === 'tools' && (
+            <div className="space-y-3">
+              {mode !== 'tools_enabled' && (
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                  Read-only tools run only when the policy mode is <span className="font-semibold text-slate-700">Evidence + tools</span>. You can still set the safety budget below.
+                </div>
+              )}
 
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-            <div className="flex items-center gap-1.5 font-semibold uppercase tracking-wide">
-              Requester-facing claim controls
-              <LlmHelpButton topic="claimControls" onOpenHelp={onOpenHelp} className="h-6 w-6 border-amber-200 text-amber-700 shadow-none hover:border-amber-300 hover:bg-amber-100" />
-            </div>
-            <div>Unsupported outage claims, private/internal note mentions, tool names, provider/model names, and audit wording are blocked from requester-facing fields. Similar-report wording is allowed only after threshold evidence.</div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
-                className={cls(
-                  'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                  draft.redactionEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700',
-                )}
-              >
-                {draft.redactionEnabled ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
-                Redaction {draft.redactionEnabled ? 'on' : 'off'}
-              </button>
-              <LlmHelpButton topic="redaction" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
-                className={cls(
-                  'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                  draft.includePrivateNotes ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-600',
-                )}
-              >
-                {draft.includePrivateNotes ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
-                Private notes {draft.includePrivateNotes ? 'internal evidence' : 'excluded'}
-              </button>
-              <LlmHelpButton topic="privateNotes" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
-            </div>
-          </div>
-
-          {mode === 'tools_enabled' && (
-            <div className="border-t border-slate-200 pt-4">
-              <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
-                Read-only tools
-                <LlmHelpButton topic="toolCatalog" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Tool-mode safety budget
+                    <LlmHelpButton topic="toolBudget" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+                  </div>
+                  <div className="text-[11px] font-medium text-slate-500">Hard limits for every Evidence + tools generation</div>
+                </div>
+                <div className="grid gap-2 md:grid-cols-5">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Turns</LabelWithHelp>
+                    <input
+                      type="number"
+                      min="1"
+                      max="8"
+                      value={draft.maxTurns ?? 4}
+                      onChange={(event) => onChange({ maxTurns: Number(event.target.value) })}
+                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool calls</LabelWithHelp>
+                    <input
+                      type="number"
+                      min="1"
+                      max="12"
+                      value={draft.maxToolCalls ?? 6}
+                      onChange={(event) => onChange({ maxToolCalls: Number(event.target.value) })}
+                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Total sec</LabelWithHelp>
+                    <input
+                      type="number"
+                      min="2"
+                      max="60"
+                      value={Math.round((draft.totalTimeoutMs || 20000) / 1000)}
+                      onChange={(event) => onChange({ totalTimeoutMs: Number(event.target.value) * 1000 })}
+                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool sec</LabelWithHelp>
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={Math.round((draft.perToolTimeoutMs || 3000) / 1000)}
+                      onChange={(event) => onChange({ perToolTimeoutMs: Number(event.target.value) * 1000 })}
+                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool KB</LabelWithHelp>
+                    <input
+                      type="number"
+                      min="2"
+                      max="50"
+                      value={Math.round((safety.maxToolOutputBytes || 12000) / 1000)}
+                      onChange={(event) => onSettingChange('safety', { maxToolOutputBytes: Number(event.target.value) * 1000 })}
+                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                    />
+                  </label>
+                </div>
               </div>
-              <div className="grid gap-2 md:grid-cols-2">
-                {(catalog || []).map((tool) => {
-                  const enabled = enabledTools.includes(tool.name);
-                  return (
-                    <div
-                      key={tool.name}
-                      className={cls(
-                        'relative rounded-md border transition',
-                        enabled ? 'border-violet-200 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
-                      )}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => onToggleTool(tool.name)}
-                        className="w-full px-3 py-2 pr-10 text-left"
-                      >
-                        <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
-                          {tool.label}
-                          <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-slate-500 ring-1 ring-slate-200">{tool.riskLevel}</span>
-                        </span>
-                        <span className="mt-1 block text-xs leading-4 text-slate-500">{tool.description}</span>
-                      </button>
-                      <LlmHelpButton topic={tool.name} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
-                    </div>
-                  );
-                })}
-              </div>
+
+              {mode === 'tools_enabled' && (
+                <div>
+                  <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
+                    Read-only tool availability
+                    <LlmHelpButton topic="toolCatalog" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {(catalog || []).map((tool) => {
+                      const enabled = enabledTools.includes(tool.name);
+                      return (
+                        <div
+                          key={tool.name}
+                          className={cls(
+                            'relative rounded-md border transition',
+                            enabled ? 'border-violet-200 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+                          )}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => onToggleTool(tool.name)}
+                            className="w-full px-3 py-2 pr-10 text-left"
+                          >
+                            <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
+                              {tool.label}
+                              <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-slate-500 ring-1 ring-slate-200">{tool.riskLevel}</span>
+                            </span>
+                            <span className="mt-1 block text-xs leading-4 text-slate-500">{tool.description}</span>
+                          </button>
+                          <LlmHelpButton topic={tool.name} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

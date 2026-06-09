@@ -1,6 +1,13 @@
-export const APP_VERSION = '2.92';
+export const APP_VERSION = '2.93';
 
 export const changelog = [
+  {
+    version: '2.93',
+    date: 'June 9, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>LLM Context page is now tabbed</strong> — the left-panel config opens under prominent <strong>Policy · Evidence · Privacy &amp; redaction · Tools</strong> tabs instead of one long scroll, while the preview panel stays on the right.' },
+    ],
+  },
   {
     version: '2.92',
     date: 'June 8, 2026',
