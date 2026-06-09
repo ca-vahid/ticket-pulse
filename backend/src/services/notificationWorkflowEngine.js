@@ -55,11 +55,7 @@ import {
   EMAIL_BADGE_PHONE,
   EMAIL_BADGE_FEEDBACK,
   EMAIL_GLYPH_CLOCK_WHITE,
-  EMAIL_FEEDBACK_ROCK_1,
-  EMAIL_FEEDBACK_ROCK_2,
-  EMAIL_FEEDBACK_ROCK_3,
-  EMAIL_FEEDBACK_ROCK_4,
-  EMAIL_FEEDBACK_ROCK_5,
+  EMAIL_FEEDBACK_ROCKS_BY_THEME,
 } from './notificationEmailIcons.js';
 
 const liquid = new Liquid({
@@ -558,6 +554,23 @@ function feedbackUrlFromContext(context) {
   return String(context?.ticket?.feedbackUrl || context?.feedbackUrl || '').trim();
 }
 
+// The workspace's selected feedback theme (drives which rock set the email shows). Mirrors the page
+// default; falls back to 'earth' in the rock renderer when absent or SVG-only ('classic').
+function feedbackThemeFromContext(context) {
+  return String(context?.ticket?.feedbackTheme || context?.feedbackTheme || '').trim().toLowerCase();
+}
+
+// Append a pre-selected rating to a feedback link so the page opens with that rock already chosen.
+function appendFeedbackScore(url, score) {
+  const base = String(url || '');
+  if (!base) return base;
+  const hashAt = base.indexOf('#');
+  const path = hashAt === -1 ? base : base.slice(0, hashAt);
+  const hash = hashAt === -1 ? '' : base.slice(hashAt);
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}score=${score}${hash}`;
+}
+
 // One minimalist action row: a circular badge icon, a title + one-line description, and a trailing
 // arrow. The whole row is a link. Used for both the business-hours and after-hours cards.
 function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null, mb = false }) {
@@ -741,17 +754,30 @@ function actionAppendixText(actions = []) {
 // inline without "load images"; border-radius rounds it where supported (square blends on white).
 const FEEDBACK_LABELS = ['Bad', 'Meh', 'Okay', 'Good', 'Great'];
 const FEEDBACK_LABEL_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981'];
-const FEEDBACK_ROCKS = [EMAIL_FEEDBACK_ROCK_1, EMAIL_FEEDBACK_ROCK_2, EMAIL_FEEDBACK_ROCK_3, EMAIL_FEEDBACK_ROCK_4, EMAIL_FEEDBACK_ROCK_5];
+const FEEDBACK_ROCK_FALLBACK_THEME = 'earth';
+
+// Pick the five rocks for the workspace's feedback theme. Unknown or SVG-only ('classic') themes
+// fall back to earth (the only set that always exists and reads well in email).
+function feedbackRockSetForTheme(theme) {
+  const key = String(theme || '').trim().toLowerCase();
+  return EMAIL_FEEDBACK_ROCKS_BY_THEME[key] || EMAIL_FEEDBACK_ROCKS_BY_THEME[FEEDBACK_ROCK_FALLBACK_THEME];
+}
+
 const FEEDBACK_STYLE = '<style>.tp-rock{transition:transform .12s ease}.tp-rock:hover{transform:translateY(-2px) scale(1.06)}</style>';
 
-function feedbackRocksHtml(url) {
-  const cells = FEEDBACK_ROCKS.map((rock, i) => [
-    '<td align="center" valign="top" style="padding:0 3px;">',
-    `<a class="tp-rock" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;text-decoration:none;">`,
-    `<img src="${rock}" width="52" height="52" alt="${FEEDBACK_LABELS[i]}" style="display:block;margin:0 auto;border:0;border-radius:50%;">`,
-    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:${FEEDBACK_LABEL_COLORS[i]};margin-top:4px;">${FEEDBACK_LABELS[i]}</div>`,
-    '</a></td>',
-  ].join('')).join('');
+function feedbackRocksHtml(url, theme) {
+  const rocks = feedbackRockSetForTheme(theme);
+  // Each rock links to the feedback page with its rating pre-selected (?score=1..5) — one tap fewer.
+  const cells = rocks.map((rock, i) => {
+    const rockUrl = escapeHtml(appendFeedbackScore(url, i + 1));
+    return [
+      '<td align="center" valign="top" style="padding:0 3px;">',
+      `<a class="tp-rock" href="${rockUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;text-decoration:none;">`,
+      `<img src="${rock}" width="52" height="52" alt="${FEEDBACK_LABELS[i]}" style="display:block;margin:0 auto;border:0;border-radius:50%;">`,
+      `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:${FEEDBACK_LABEL_COLORS[i]};margin-top:4px;">${FEEDBACK_LABELS[i]}</div>`,
+      '</a></td>',
+    ].join('');
+  }).join('');
   const inner = [
     '<div style="font-size:15px;line-height:20px;font-weight:700;color:#334155;margin:0 0 3px;">How did we do?</div>',
     '<div style="font-size:12.5px;line-height:17px;color:#64748b;margin:0 0 14px;">Tap a rock to rate &mdash; it takes ten seconds.</div>',
@@ -1139,9 +1165,11 @@ function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {
       appendixText = actionAppendixText(actions);
     }
   }
-  // The feedback rating renders as its own five-rock card, after any action links.
+  // The feedback rating renders as its own five-rock card, after any action links. The rock set
+  // follows the workspace's selected feedback theme so the email matches the page it links to.
   if (feedbackActionItem) {
-    appendixHtml = [appendixHtml, feedbackRocksHtml(feedbackActionItem.url)].filter(Boolean).join('\n');
+    const feedbackTheme = feedbackThemeFromContext(context);
+    appendixHtml = [appendixHtml, feedbackRocksHtml(feedbackActionItem.url, feedbackTheme)].filter(Boolean).join('\n');
     appendixText = [appendixText, feedbackRocksText(feedbackActionItem.url)].filter(Boolean).join('\n\n');
   }
   // Contain the message body in the same 640px column as the header/footer/appended links. This

@@ -185,6 +185,14 @@ export function buildTicketFeedbackUrl(token, baseUrl = null) {
   return `${publicBaseUrl(baseUrl)}/feedback/${encodeURIComponent(token)}`;
 }
 
+// Validated set for the email rock theme. Mirrors publicFeedbackService's ALLOWED_THEMES; kept local
+// here to avoid a circular import (publicFeedbackService already imports from this module).
+const FEEDBACK_EMAIL_THEMES = new Set(['classic', 'earth', 'clay', 'geo', 'it', 'acct', 'hse']);
+function cleanFeedbackEmailTheme(value) {
+  const theme = String(value || '').trim().toLowerCase();
+  return FEEDBACK_EMAIL_THEMES.has(theme) ? theme : 'earth';
+}
+
 function stripHtml(value) {
   return String(value || '')
     .replace(/<br\s*\/?>/gi, '\n')
@@ -1138,6 +1146,13 @@ export async function enrichEventContextWithPublicStatusUrl(eventContext, option
     const feedbackUrl = link.feedbackEnabled && publicToken
       ? buildTicketFeedbackUrl(publicToken, options.baseUrl || null)
       : null;
+    // Resolve the workspace's feedback theme so the email rock set matches the page it links to.
+    const feedbackThemeRow = feedbackUrl
+      ? await prisma.publicFeedbackSettings
+        .findUnique({ where: { workspaceId }, select: { theme: true } })
+        .catch(() => null)
+      : null;
+    const feedbackTheme = feedbackUrl ? cleanFeedbackEmailTheme(feedbackThemeRow?.theme) : null;
     context.publicStatusUrl = link.url || null;
     context.ticket.publicStatusUrl = link.url || null;
     context.ticket.publicStatusExpiresAt = link.expiresAt || null;
@@ -1150,6 +1165,8 @@ export async function enrichEventContextWithPublicStatusUrl(eventContext, option
     context.ticket.afterHoursEscalationUrl = selfEscalationUrl;
     context.feedbackUrl = feedbackUrl;
     context.ticket.feedbackUrl = feedbackUrl;
+    context.feedbackTheme = feedbackTheme;
+    context.ticket.feedbackTheme = feedbackTheme;
     context.afterHoursSupport = {
       ...(context.afterHoursSupport && typeof context.afterHoursSupport === 'object'
         ? context.afterHoursSupport
@@ -1170,6 +1187,7 @@ export async function enrichEventContextWithPublicStatusUrl(eventContext, option
     context.raiseUrgencyUrl = null;
     context.afterHoursEscalationUrl = null;
     context.feedbackUrl = null;
+    context.feedbackTheme = null;
     if (context.ticket) {
       context.ticket.publicStatusUrl = null;
       context.ticket.selfEscalationUrl = null;
@@ -1177,6 +1195,7 @@ export async function enrichEventContextWithPublicStatusUrl(eventContext, option
       context.ticket.urgencyRaiseUrl = null;
       context.ticket.afterHoursEscalationUrl = null;
       context.ticket.feedbackUrl = null;
+      context.ticket.feedbackTheme = null;
       context.ticket.publicStatusError = error.message;
     }
     context.afterHoursSupport = {

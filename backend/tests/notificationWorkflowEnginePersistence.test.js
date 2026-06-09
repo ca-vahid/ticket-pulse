@@ -1102,6 +1102,38 @@ describe('notification workflow engine persistence', () => {
     expect(processDeliveryMock).not.toHaveBeenCalled();
   });
 
+  test('feedback email renders themed rocks with per-rock pre-selected scores', async () => {
+    const feedbackUrl = 'https://ticketpulse.example/feedback/sample-token';
+    const renderWithTheme = (feedbackTheme) => finalizeWorkflowSendEmail({
+      workflow,
+      eventContext: {
+        event: { type: 'ticket.resolved' },
+        availability: { isBusinessHours: true, isAfterHours: false, isHoliday: false },
+        ticket: { feedbackUrl, feedbackTheme },
+      },
+      email: { subject: 'How did we do?', html: '<p>Your ticket is resolved.</p>', text: 'Your ticket is resolved.' },
+      nodeData: { appendFeedbackLink: true },
+      actionLinkRenderMode: 'live',
+      allowSignatureFailure: true,
+    });
+
+    const itEmail = await renderWithTheme('it');
+    expect(itEmail.actionLinks.feedback).toEqual(expect.objectContaining({ applied: true }));
+    expect(itEmail.html).toContain('How did we do');
+    // Every rock links to the feedback page with its rating pre-selected (one tap fewer).
+    for (const score of [1, 2, 3, 4, 5]) {
+      expect(itEmail.html).toContain(`${feedbackUrl}?score=${score}`);
+    }
+
+    const firstRock = (html) => (html.match(/<img src="(data:image\/jpeg;base64,[^"]+)"/) || [])[1] || null;
+    const earthEmail = await renderWithTheme('earth');
+    const unknownEmail = await renderWithTheme('not-a-real-theme');
+    // Theme-aware: the IT rock set differs from earth; unknown/SVG-only themes fall back to earth.
+    expect(firstRock(itEmail.html)).toBeTruthy();
+    expect(firstRock(itEmail.html)).not.toBe(firstRock(earthEmail.html));
+    expect(firstRock(unknownEmail.html)).toBe(firstRock(earthEmail.html));
+  });
+
   test('mocked delivery payload stores compact action-link diagnostics without contact blobs', async () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created');
     const sendNode = definition.nodes.find((node) => node.type === 'send_email');
