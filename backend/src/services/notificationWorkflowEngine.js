@@ -753,7 +753,7 @@ function actionAppendixText(actions = []) {
 // to the feedback page (they pick a rating there). The chip is baked into each JPEG so it shows
 // inline without "load images"; border-radius rounds it where supported (square blends on white).
 const FEEDBACK_LABELS = ['Bad', 'Meh', 'Okay', 'Good', 'Great'];
-const FEEDBACK_LABEL_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981'];
+const FEEDBACK_LABEL_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#22c55e', '#10b981'];
 const FEEDBACK_ROCK_FALLBACK_THEME = 'earth';
 
 // Pick the five rocks for the workspace's feedback theme. Unknown or SVG-only ('classic') themes
