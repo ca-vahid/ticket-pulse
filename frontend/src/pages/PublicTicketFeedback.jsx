@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { motion, useReducedMotion, useSpring, useTransform } from 'motion/react';
-import { CheckCircle2, Loader2, MessageSquareHeart, SendHorizonal } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { motion, useAnimationControls, useReducedMotion, useSpring, useTransform } from 'motion/react';
+import { CheckCircle2, Loader2, MessageSquareHeart, Palette, SendHorizonal } from 'lucide-react';
 import { publicTicketFeedbackAPI } from '../services/api';
-import { getFeedbackTheme } from '../data/feedbackThemes';
+import { FEEDBACK_THEME_LIST, getFeedbackTheme } from '../data/feedbackThemes';
 
 const DEFAULT_LABELS = ['Bad', 'Meh', 'Okay', 'Good', 'Great'];
 const DEFAULT_ACCENT = '#2563eb';
@@ -121,7 +121,7 @@ function ImageFace({ src }) {
   );
 }
 
-function ScoreButton({ index, label, active, accent, imgSrc, onPick, onHover, onLeave, registerRef }) {
+function ScoreButton({ index, label, active, accent, imgSrc, pop, reduced, onPick, onHover, onLeave, registerRef }) {
   const color = FACE_COLORS[index];
   return (
     <button
@@ -138,19 +138,32 @@ function ScoreButton({ index, label, active, accent, imgSrc, onPick, onHover, on
       className="group flex flex-1 flex-col items-center gap-2 rounded-2xl px-1 py-2 outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
       style={{ '--tw-ring-color': accent }}
     >
-      <span
-        className={`flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 transition-all duration-200 sm:h-12 sm:w-12 ${
-          active ? 'scale-110 shadow-md' : 'group-hover:scale-105'
-        }`}
-        style={{
-          borderColor: active ? color : '#e2e8f0',
-          background: imgSrc ? CHIP_BG : (active ? color : '#ffffff'),
-        }}
-      >
-        {imgSrc ? (
-          <img src={imgSrc} alt="" className="h-full w-full object-contain p-1" />
-        ) : (
-          <span className={`h-3 w-3 rounded-full transition-colors ${active ? 'bg-white' : 'bg-slate-200 group-hover:bg-slate-300'}`} />
+      <span className="relative flex items-center justify-center">
+        <span
+          className={`flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 transition-all duration-200 sm:h-12 sm:w-12 ${
+            active ? 'scale-110 shadow-md' : 'group-hover:scale-105'
+          }`}
+          style={{
+            borderColor: active ? color : '#e2e8f0',
+            background: imgSrc ? CHIP_BG : (active ? color : '#ffffff'),
+          }}
+        >
+          {imgSrc ? (
+            <img src={imgSrc} alt="" className="h-full w-full object-contain p-1" />
+          ) : (
+            <span className={`h-3 w-3 rounded-full transition-colors ${active ? 'bg-white' : 'bg-slate-200 group-hover:bg-slate-300'}`} />
+          )}
+        </span>
+        {active && pop > 0 && !reduced && (
+          <motion.span
+            key={pop}
+            aria-hidden="true"
+            initial={{ opacity: 0.55, scale: 0.65 }}
+            animate={{ opacity: 0, scale: 1.95 }}
+            transition={{ duration: 0.75, ease: 'easeOut' }}
+            className="pointer-events-none absolute left-1/2 top-1/2 h-11 w-11 -translate-x-1/2 -translate-y-1/2 rounded-full sm:h-12 sm:w-12"
+            style={{ border: `2.5px solid ${color}` }}
+          />
         )}
       </span>
       <span className={`text-center text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${active ? 'text-slate-900' : 'text-slate-500'}`}>
@@ -191,6 +204,45 @@ function CenteredCard({ children }) {
   );
 }
 
+// A compact, optional theme picker on the public page. Defaults to the workspace's chosen theme but
+// lets the requester switch the look locally — it never changes the workspace setting or future emails.
+function ThemeSwitcher({ themeKey, onPick }) {
+  return (
+    <div className="mt-6 border-t border-slate-100 pt-4">
+      <div className="mb-2.5 flex items-center justify-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        <Palette className="h-3.5 w-3.5" /> Pick a vibe
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {FEEDBACK_THEME_LIST.map((t) => {
+          const active = t.key === themeKey;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => onPick(t.key)}
+              title={t.label}
+              aria-label={`Theme: ${t.label}`}
+              aria-pressed={active}
+              className={`relative h-9 w-9 overflow-hidden rounded-full border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${
+                active ? 'scale-110 ring-2 ring-offset-2' : 'opacity-70 hover:scale-105 hover:opacity-100'
+              }`}
+              style={{ borderColor: active ? t.accent : '#e2e8f0', '--tw-ring-color': t.accent }}
+            >
+              {t.kind === 'image' ? (
+                <img src={t.tiles[4]} alt="" className="h-full w-full object-cover" style={{ background: CHIP_BG }} />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center text-sm font-bold text-white" style={{ background: t.accent }}>
+                  ☺
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function PublicTicketFeedback() {
   const { token } = useParams();
   const isPreview = token === 'preview';
@@ -205,7 +257,18 @@ export default function PublicTicketFeedback() {
   const [selected, setSelected] = useState(null);
   const [hover, setHover] = useState(null);
   const [comment, setComment] = useState('');
+  const [themeOverride, setThemeOverride] = useState(null);
+  const [pop, setPop] = useState(0); // bumps to replay the "carried over from email" emphasis
   const btnRefs = useRef([]);
+  const appliedUrlScore = useRef(false);
+  const heroControls = useAnimationControls();
+
+  const [searchParams] = useSearchParams();
+  // A rock tapped in the email arrives as ?score=1..5 so we can pre-select that rating.
+  const urlScore = useMemo(() => {
+    const raw = Number.parseInt(searchParams.get('score'), 10);
+    return Number.isFinite(raw) && raw >= 1 && raw <= 5 ? raw : null;
+  }, [searchParams]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -235,7 +298,21 @@ export default function PublicTicketFeedback() {
     load();
   }, [load]);
 
-  const theme = getFeedbackTheme(data?.theme);
+  // Arriving from an email rock (?score=): pre-select that rating once, then draw the eye to it —
+  // pop the hero and pulse the chosen rock so it reads as "selected, ready to send (or add a note)".
+  useEffect(() => {
+    if (loading || fatal || appliedUrlScore.current || !urlScore) return;
+    appliedUrlScore.current = true;
+    setSelected(urlScore);
+    setPop((n) => n + 1);
+    if (!reduced) {
+      heroControls.start({ scale: [1, 1.12, 1], transition: { duration: 0.55, ease: 'easeOut' } });
+    }
+  }, [loading, fatal, urlScore, reduced, heroControls]);
+
+  // The workspace theme is the default; the requester can switch the look locally (ephemeral).
+  const themeKey = themeOverride || data?.theme;
+  const theme = getFeedbackTheme(themeKey);
   const isImage = theme.kind === 'image';
   const accent = isImage ? theme.accent : (data?.branding?.accentColor || DEFAULT_ACCENT);
   const page = data?.page || {};
@@ -351,9 +428,9 @@ export default function PublicTicketFeedback() {
           {page.subtext && <p className="mt-2 text-sm leading-6 text-slate-500">{page.subtext}</p>}
         </div>
 
-        <div className="mx-auto mt-6 h-36 w-36 sm:h-40 sm:w-40">
+        <motion.div animate={heroControls} className="mx-auto mt-6 h-36 w-36 sm:h-40 sm:w-40">
           {renderHero(display)}
-        </div>
+        </motion.div>
         <div className="mt-3 h-6 text-center text-base font-bold" style={{ color: display ? FACE_COLORS[display - 1] : '#94a3b8' }}>
           {display ? labels[display - 1] : 'Tap a face to rate'}
         </div>
@@ -367,6 +444,8 @@ export default function PublicTicketFeedback() {
               active={selected === i + 1}
               accent={accent}
               imgSrc={isImage ? theme.tiles[i] : null}
+              pop={selected === i + 1 && i + 1 === urlScore ? pop : 0}
+              reduced={reduced}
               onPick={setSelected}
               onHover={setHover}
               onLeave={() => setHover(null)}
@@ -374,6 +453,12 @@ export default function PublicTicketFeedback() {
             />
           ))}
         </div>
+
+        {urlScore && selected === urlScore && (
+          <p className="mt-2.5 text-center text-xs font-medium" style={{ color: accent }}>
+            We carried over your pick from the email — adjust if you like, then send.
+          </p>
+        )}
 
         {page.commentEnabled !== false && (
           <div className="mt-5">
@@ -409,6 +494,8 @@ export default function PublicTicketFeedback() {
           {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizonal className="h-5 w-5" />}
           {submitting ? 'Sending…' : alreadyRated ? 'Update feedback' : 'Send feedback'}
         </button>
+
+        <ThemeSwitcher themeKey={themeKey} onPick={setThemeOverride} />
 
         {data?.branding?.trademarkText && (
           <p className="mt-5 text-center text-[11px] text-slate-400">{data.branding.trademarkText}</p>
