@@ -55,6 +55,11 @@ import {
   EMAIL_BADGE_PHONE,
   EMAIL_BADGE_FEEDBACK,
   EMAIL_GLYPH_CLOCK_WHITE,
+  EMAIL_FEEDBACK_ROCK_1,
+  EMAIL_FEEDBACK_ROCK_2,
+  EMAIL_FEEDBACK_ROCK_3,
+  EMAIL_FEEDBACK_ROCK_4,
+  EMAIL_FEEDBACK_ROCK_5,
 } from './notificationEmailIcons.js';
 
 const liquid = new Liquid({
@@ -731,6 +736,34 @@ function actionAppendixText(actions = []) {
   return actions.map((action) => `${action.title}: ${action.url}`).join('\n');
 }
 
+// The feedback rating block: five clickable rocks (Bad -> Great) in its own card. Every rock links
+// to the feedback page (they pick a rating there). The chip is baked into each JPEG so it shows
+// inline without "load images"; border-radius rounds it where supported (square blends on white).
+const FEEDBACK_LABELS = ['Bad', 'Meh', 'Okay', 'Good', 'Great'];
+const FEEDBACK_LABEL_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981'];
+const FEEDBACK_ROCKS = [EMAIL_FEEDBACK_ROCK_1, EMAIL_FEEDBACK_ROCK_2, EMAIL_FEEDBACK_ROCK_3, EMAIL_FEEDBACK_ROCK_4, EMAIL_FEEDBACK_ROCK_5];
+const FEEDBACK_STYLE = '<style>.tp-rock{transition:transform .12s ease}.tp-rock:hover{transform:translateY(-2px) scale(1.06)}</style>';
+
+function feedbackRocksHtml(url) {
+  const cells = FEEDBACK_ROCKS.map((rock, i) => [
+    '<td align="center" valign="top" style="padding:0 3px;">',
+    `<a class="tp-rock" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;text-decoration:none;">`,
+    `<img src="${rock}" width="52" height="52" alt="${FEEDBACK_LABELS[i]}" style="display:block;margin:0 auto;border:0;border-radius:50%;">`,
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:${FEEDBACK_LABEL_COLORS[i]};margin-top:4px;">${FEEDBACK_LABELS[i]}</div>`,
+    '</a></td>',
+  ].join('')).join('');
+  const inner = [
+    '<div style="font-size:15px;line-height:20px;font-weight:700;color:#334155;margin:0 0 3px;">How did we do?</div>',
+    '<div style="font-size:12.5px;line-height:17px;color:#64748b;margin:0 0 14px;">Tap a rock to rate &mdash; it takes ten seconds.</div>',
+    `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;border-collapse:collapse;"><tr>${cells}</tr></table>`,
+  ].join('');
+  return FEEDBACK_STYLE + actionCardHtml('#ffffff', '#eef1f6', '16px', '18px 16px', inner) + ACTION_FOOTER_GAP;
+}
+
+function feedbackRocksText(url) {
+  return `How did we do? Rate your support: ${url}`;
+}
+
 function afterHoursEmergencyHtml(action, publicAction = null) {
   const statusUrl = publicAction?.url || null;
   const phone = action.phone ? String(action.phone).trim() : '';
@@ -1100,11 +1133,16 @@ function appendWorkflowActionLinksToEmail(email = {}, context = {}, nodeData = {
     appendixHtml = afterHoursEmergencyHtml(afterHoursAction, publicAction);
     appendixText = afterHoursEmergencyText(afterHoursAction, publicAction);
   } else {
-    const actions = [publicAction, urgencyAction, afterHoursAction, feedbackActionItem].filter(Boolean);
+    const actions = [publicAction, urgencyAction, afterHoursAction].filter(Boolean);
     if (actions.length > 0) {
       appendixHtml = actionAppendixHtml(actions);
       appendixText = actionAppendixText(actions);
     }
+  }
+  // The feedback rating renders as its own five-rock card, after any action links.
+  if (feedbackActionItem) {
+    appendixHtml = [appendixHtml, feedbackRocksHtml(feedbackActionItem.url)].filter(Boolean).join('\n');
+    appendixText = [appendixText, feedbackRocksText(feedbackActionItem.url)].filter(Boolean).join('\n\n');
   }
   // Contain the message body in the same 640px column as the header/footer/appended links. This
   // runs the first time the email is touched (template_render); finalize calls this again, where
