@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { motion, useAnimationControls, useReducedMotion, useSpring, useTransform } from 'motion/react';
-import { CheckCircle2, Loader2, MessageSquareHeart, Palette, SendHorizonal } from 'lucide-react';
+import { CheckCircle2, Loader2, MessageSquareHeart, SendHorizonal } from 'lucide-react';
 import { publicTicketFeedbackAPI } from '../services/api';
-import { FEEDBACK_THEME_LIST, getFeedbackTheme } from '../data/feedbackThemes';
+import { getFeedbackTheme } from '../data/feedbackThemes';
 
 const DEFAULT_LABELS = ['Bad', 'Meh', 'Okay', 'Good', 'Great'];
 const DEFAULT_ACCENT = '#2563eb';
@@ -204,45 +204,6 @@ function CenteredCard({ children }) {
   );
 }
 
-// A compact, optional theme picker on the public page. Defaults to the workspace's chosen theme but
-// lets the requester switch the look locally — it never changes the workspace setting or future emails.
-function ThemeSwitcher({ themeKey, onPick }) {
-  return (
-    <div className="mt-6 border-t border-slate-100 pt-4">
-      <div className="mb-2.5 flex items-center justify-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        <Palette className="h-3.5 w-3.5" /> Pick a vibe
-      </div>
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        {FEEDBACK_THEME_LIST.map((t) => {
-          const active = t.key === themeKey;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => onPick(t.key)}
-              title={t.label}
-              aria-label={`Theme: ${t.label}`}
-              aria-pressed={active}
-              className={`relative h-9 w-9 overflow-hidden rounded-full border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${
-                active ? 'scale-110 ring-2 ring-offset-2' : 'opacity-70 hover:scale-105 hover:opacity-100'
-              }`}
-              style={{ borderColor: active ? t.accent : '#e2e8f0', '--tw-ring-color': t.accent }}
-            >
-              {t.kind === 'image' ? (
-                <img src={t.tiles[4]} alt="" className="h-full w-full object-cover" style={{ background: CHIP_BG }} />
-              ) : (
-                <span className="flex h-full w-full items-center justify-center text-sm font-bold text-white" style={{ background: t.accent }}>
-                  ☺
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export default function PublicTicketFeedback() {
   const { token } = useParams();
   const isPreview = token === 'preview';
@@ -257,7 +218,6 @@ export default function PublicTicketFeedback() {
   const [selected, setSelected] = useState(null);
   const [hover, setHover] = useState(null);
   const [comment, setComment] = useState('');
-  const [themeOverride, setThemeOverride] = useState(null);
   const [pop, setPop] = useState(0); // bumps to replay the "carried over from email" emphasis
   const btnRefs = useRef([]);
   const appliedUrlScore = useRef(false);
@@ -310,9 +270,7 @@ export default function PublicTicketFeedback() {
     }
   }, [loading, fatal, urlScore, reduced, heroControls]);
 
-  // The workspace theme is the default; the requester can switch the look locally (ephemeral).
-  const themeKey = themeOverride || data?.theme;
-  const theme = getFeedbackTheme(themeKey);
+  const theme = getFeedbackTheme(data?.theme);
   const isImage = theme.kind === 'image';
   const accent = isImage ? theme.accent : (data?.branding?.accentColor || DEFAULT_ACCENT);
   const page = data?.page || {};
@@ -494,8 +452,6 @@ export default function PublicTicketFeedback() {
           {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizonal className="h-5 w-5" />}
           {submitting ? 'Sending…' : alreadyRated ? 'Update feedback' : 'Send feedback'}
         </button>
-
-        <ThemeSwitcher themeKey={themeKey} onPick={setThemeOverride} />
 
         {data?.branding?.trademarkText && (
           <p className="mt-5 text-center text-[11px] text-slate-400">{data.branding.trademarkText}</p>
