@@ -24,7 +24,7 @@ import { Button } from '../ui';
 import { SettingsHero } from './SettingsLayoutPrimitives';
 import { FEEDBACK_THEME_LIST, getFeedbackTheme } from '../../data/feedbackThemes';
 
-const FACE_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981'];
+const FACE_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#22c55e', '#10b981'];
 const MAX_LOGO_BYTES = 512 * 1024;
 
 const DEFAULTS = {

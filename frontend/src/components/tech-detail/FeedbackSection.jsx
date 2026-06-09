@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { MessageSquareHeart } from 'lucide-react';
 
 const EMOJI = ['😞', '😕', '😐', '🙂', '😄'];
-const COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981'];
+const COLORS = ['#ef4444', '#f97316', '#f59e0b', '#22c55e', '#10b981'];
 
 function scoreMeta(score) {
   const i = Math.min(Math.max((score || 3) - 1, 0), 4);

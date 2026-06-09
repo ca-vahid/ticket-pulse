@@ -8,7 +8,7 @@ import { getFeedbackTheme } from '../data/feedbackThemes';
 const DEFAULT_LABELS = ['Bad', 'Meh', 'Okay', 'Good', 'Great'];
 const DEFAULT_ACCENT = '#2563eb';
 // Emotion palette: red -> orange -> amber -> lime -> emerald (label + selection ring).
-const FACE_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981'];
+const FACE_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#22c55e', '#10b981'];
 const CHIP_BG = 'radial-gradient(circle at 50% 36%, #ffffff, #eef2f7)';
 
 function unwrap(response) {
