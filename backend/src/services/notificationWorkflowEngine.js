@@ -28,6 +28,7 @@ import {
 } from './notificationWorkflowRoutingService.js';
 import {
   buildNotificationLlmContext,
+  enrichEventContextWithAgentNotes,
   notificationLlmContextPrompt,
   summarizeNotificationLlmContext,
 } from './notificationContextEnrichmentService.js';
@@ -2274,6 +2275,7 @@ export async function executeDefinition({
   let normalizedContext = safeJson(eventContext || sampleEventContext(workflow.triggerType));
   normalizedContext = await enrichEventContextWithRequesterProfile(normalizedContext);
   normalizedContext = await enrichEventContextWithPublicStatusUrl(normalizedContext);
+  normalizedContext = await enrichEventContextWithAgentNotes(normalizedContext);
   const effectiveActionLinkRenderMode = forceActionLinks ? 'force_all_enabled' : actionLinkRenderMode;
   const workflowScheduleMode = normalizedDefinition.metadata?.scheduleMode
     || workflow?.publishedDefinition?.metadata?.scheduleMode
@@ -2420,6 +2422,39 @@ export async function executeDefinition({
   }
 }
 
+const CLOSURE_RERUN_COOLDOWN_MINUTES = (() => {
+  const parsed = Number.parseInt(process.env.NOTIFICATION_CLOSURE_RERUN_COOLDOWN_MINUTES || '15', 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 15;
+})();
+
+// A requester reply can reopen a just-closed ticket in FreshService, and the
+// agent re-closing it minutes later is a brand-new terminal transition with its
+// own fingerprint. Without this guard the requester gets two closure emails.
+async function findRecentClosureRun(workflow, eventContext, executionMode) {
+  if (CLOSURE_RERUN_COOLDOWN_MINUTES <= 0) return null;
+  const eventType = eventContext?.event?.type || workflow.triggerType;
+  if (eventType !== 'ticket.resolved_closed') return null;
+  const ticketId = Number.parseInt(eventContext?.ticket?.id, 10);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return null;
+  const since = new Date(Date.now() - CLOSURE_RERUN_COOLDOWN_MINUTES * 60 * 1000);
+  try {
+    return await prisma.notificationWorkflowRun.findFirst({
+      where: {
+        workflowId: workflow.id,
+        ticketId,
+        eventType,
+        executionMode,
+        status: 'completed',
+        startedAt: { gte: since },
+      },
+      orderBy: { startedAt: 'desc' },
+      select: { id: true, startedAt: true },
+    });
+  } catch {
+    return null;
+  }
+}
+
 export async function executeWorkflow(workflow, eventContext, options = {}) {
   const eventOccurredAt = safeDate(eventContext?.event?.occurredAt);
   const enabledAt = safeDate(workflow.enabledAt);
@@ -2440,6 +2475,19 @@ export async function executeWorkflow(workflow, eventContext, options = {}) {
   }
 
   const mockMode = workflow.mockModeEnabled === true;
+  const recentClosureRun = await findRecentClosureRun(
+    workflow,
+    options.eventContext || eventContext,
+    mockMode ? EXECUTION_MODE_MOCK : EXECUTION_MODE_LIVE,
+  );
+  if (recentClosureRun) {
+    return {
+      status: 'skipped',
+      reason: `Duplicate closure suppressed: this ticket already ran TP-NWF-${recentClosureRun.id} within the last ${CLOSURE_RERUN_COOLDOWN_MINUTES} minutes (reopen/re-close churn)`,
+      workflowId: workflow.id,
+      suppressedDuplicateOfRunId: recentClosureRun.id,
+    };
+  }
   return executeDefinition({
     workflow,
     definition: workflow.publishedDefinition,

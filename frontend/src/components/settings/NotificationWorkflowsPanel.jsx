@@ -1,6 +1,6 @@
 // eslint-disable-next-line no-unused-vars
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Background, Controls, Handle, Position, ReactFlow } from '@xyflow/react';
+import { Background, BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, getSmoothStepPath } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -49,6 +49,7 @@ import {
   ToggleRight,
   Trash2,
   Type,
+  Undo2,
   Upload,
   UploadCloud,
   UserCheck,
@@ -1164,7 +1165,8 @@ function WorkflowGraphNode({ id, data }) {
         <Handle
           type="target"
           position={Position.Top}
-          className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-700"
+          title="Drop a connection here from another node's bottom dot"
+          className="!h-3 !w-3 !border-2 !border-white !bg-slate-700 transition-transform hover:!scale-150"
         />
       )}
       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-gray-500">
@@ -1178,14 +1180,16 @@ function WorkflowGraphNode({ id, data }) {
             id="true"
             type="source"
             position={Position.Bottom}
-            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-emerald-600"
+            title="True branch - drag to another node to connect"
+            className="!h-3 !w-3 !border-2 !border-white !bg-emerald-600 transition-transform hover:!scale-150"
             style={{ left: '30%' }}
           />
           <Handle
             id="false"
             type="source"
             position={Position.Bottom}
-            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500"
+            title="False branch - drag to another node to connect"
+            className="!h-3 !w-3 !border-2 !border-white !bg-slate-500 transition-transform hover:!scale-150"
             style={{ left: '70%' }}
           />
         </>
@@ -1195,7 +1199,8 @@ function WorkflowGraphNode({ id, data }) {
           id="default"
           type="source"
           position={Position.Bottom}
-          className="!h-2.5 !w-2.5 !border-2 !border-white !bg-blue-600"
+          title="Drag to another node's top dot to connect"
+          className="!h-3 !w-3 !border-2 !border-white !bg-blue-600 transition-transform hover:!scale-150"
         />
       )}
     </div>
@@ -1203,6 +1208,72 @@ function WorkflowGraphNode({ id, data }) {
 }
 
 const FLOW_NODE_TYPES = { workflowNode: WorkflowGraphNode };
+
+// Smoothstep edge with a midpoint "+" button that inserts a step between the
+// two connected nodes (and an inline true/false chip for condition branches).
+function WorkflowGraphEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  style,
+  markerEnd,
+  label,
+  data,
+  source,
+  target,
+}) {
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} />
+      <EdgeLabelRenderer>
+        <div
+          className="nodrag nopan pointer-events-auto absolute z-10 flex flex-col items-center gap-0.5"
+          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+        >
+          {label ? (
+            <span className="rounded-full border border-slate-200 bg-white px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-500 shadow-sm">
+              {label}
+            </span>
+          ) : null}
+          {data?.onInsert ? (
+            <button
+              type="button"
+              title="Add a step between these nodes"
+              aria-label="Add a step between these nodes"
+              onClick={(event) => {
+                event.stopPropagation();
+                data.onInsert({
+                  source,
+                  target,
+                  sourceHandle: data.sourceHandle || null,
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+              }}
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-blue-300 bg-white text-blue-600 opacity-80 shadow-sm transition hover:scale-125 hover:border-blue-500 hover:opacity-100"
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+          ) : null}
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const FLOW_EDGE_TYPES = { workflowEdge: WorkflowGraphEdge };
 
 function flowNodesFromDefinition(definition, selectedNodeId) {
   const layout = computeVerticalLayout(definition);
@@ -1220,15 +1291,16 @@ function flowNodesFromDefinition(definition, selectedNodeId) {
   }));
 }
 
-function flowEdgesFromDefinition(definition) {
+function flowEdgesFromDefinition(definition, onInsert = null) {
   return (definition?.edges || []).map((edge) => ({
     id: edge.id,
     source: edge.source,
     target: edge.target,
     label: edge.sourceHandle || edge.label || undefined,
-    type: 'smoothstep',
+    type: 'workflowEdge',
     animated: edge.sourceHandle === 'true',
     style: { stroke: edge.sourceHandle === 'false' ? '#9ca3af' : '#2563eb' },
+    data: { onInsert, sourceHandle: edge.sourceHandle || null },
   }));
 }
 
@@ -4962,6 +5034,7 @@ function MockAuditPanel({
   loading,
   error,
   filters,
+  departments = [],
   onFiltersChange,
   onRefresh,
   onSelectRun,
@@ -5193,7 +5266,7 @@ function MockAuditPanel({
         </label>
       </div>
 
-      <div className="mb-3 grid gap-2 md:grid-cols-4">
+      <div className="mb-3 grid gap-2 md:grid-cols-5">
         <label>
           <span className="sr-only">Filter workflow audit by event type</span>
           <select
@@ -5239,6 +5312,19 @@ function MockAuditPanel({
           >
             {WORKFLOW_AUDIT_FALLBACK_FILTERS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">Filter workflow audit by requester department</span>
+          <select
+            value={filters.department || 'all'}
+            onChange={(event) => onFiltersChange({ ...filters, department: event.target.value })}
+            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+          >
+            <option value="all">All departments</option>
+            {departments.map((department) => (
+              <option key={department} value={department}>{department}</option>
             ))}
           </select>
         </label>
@@ -5722,7 +5808,7 @@ function MockAuditPanel({
   );
 }
 
-function NodePalette({ onAddNode, onRemoveNode, workflow, onRename }) {
+function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflow, onRename }) {
   const [addOpen, setAddOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -5840,6 +5926,21 @@ function NodePalette({ onAddNode, onRemoveNode, workflow, onRename }) {
           <XCircle className="h-3.5 w-3.5" />
           Remove selected
         </button>
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          title={canUndo ? 'Undo the last editor change (including deleted steps)' : 'Nothing to undo yet'}
+          className={cls(
+            'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition',
+            canUndo
+              ? 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              : 'cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300',
+          )}
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+          Undo
+        </button>
       </div>
     </div>
   );
@@ -5860,6 +5961,9 @@ export default function NotificationWorkflowsPanel({
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState('trigger');
+  const undoStackRef = useRef([]);
+  const [undoDepth, setUndoDepth] = useState(0);
+  const [edgeInsert, setEdgeInsert] = useState(null);
   const [workflowListCollapsed, setWorkflowListCollapsed] = useState(false);
   const [routingExpanded, setRoutingExpanded] = useState(false);
   const [normalizationOpen, setNormalizationOpen] = useState(false);
@@ -5961,8 +6065,11 @@ export default function NotificationWorkflowsPanel({
     triggerSource: 'all',
     provider: 'all',
     fallbackSource: 'all',
+    department: 'all',
     search: '',
   });
+  const [auditDepartments, setAuditDepartments] = useState([]);
+  const [auditDepartmentsLoaded, setAuditDepartmentsLoaded] = useState(false);
 
   const selectedNode = useMemo(
     () => draft?.nodes?.find((node) => node.id === selectedNodeId) || draft?.nodes?.[0] || null,
@@ -5987,11 +6094,35 @@ export default function NotificationWorkflowsPanel({
   );
 
   function updateDraft(mutator) {
+    // Snapshot the pre-mutation draft so accidental edits (like deleting a
+    // node) can be undone. Consecutive identical snapshots are skipped.
+    if (draft) {
+      const stack = undoStackRef.current;
+      const fingerprint = definitionFingerprint(draft);
+      if (!stack.length || definitionFingerprint(stack[stack.length - 1]) !== fingerprint) {
+        stack.push(cloneDefinition(draft));
+        if (stack.length > 60) stack.shift();
+        setUndoDepth(stack.length);
+      }
+    }
     setDraft((current) => {
       const next = cloneDefinition(current);
       mutator(next);
       return next;
     });
+  }
+
+  function undoDraftChange() {
+    const stack = undoStackRef.current;
+    if (!stack.length) return;
+    const previous = stack.pop();
+    setUndoDepth(stack.length);
+    setEdgeInsert(null);
+    setDraft(cloneDefinition(previous));
+    setSelectedNodeId((currentId) => (
+      previous.nodes?.some((node) => node.id === currentId) ? currentId : (previous.nodes?.[0]?.id || 'trigger')
+    ));
+    setMessage({ type: 'success', text: 'Undid the last editor change' });
   }
 
   function updateNodeData(patch) {
@@ -6164,6 +6295,9 @@ export default function NotificationWorkflowsPanel({
     const workflow = response.data;
     setSelected(workflow);
     setDraft(normalizeEditorDefinition(workflow.draftDefinition));
+    undoStackRef.current = [];
+    setUndoDepth(0);
+    setEdgeInsert(null);
     setSelectedNodeId(workflow.draftDefinition?.nodes?.[0]?.id || 'trigger');
     setPreview(null);
     setPreviewError(null);
@@ -6278,6 +6412,7 @@ export default function NotificationWorkflowsPanel({
         triggerSource: filters.triggerSource !== 'all' ? filters.triggerSource : undefined,
         provider: filters.provider !== 'all' ? filters.provider : undefined,
         fallbackSource: filters.fallbackSource !== 'all' ? filters.fallbackSource : undefined,
+        department: filters.department && filters.department !== 'all' ? filters.department : undefined,
         search: (filters.search || '').trim() || undefined,
         limit: pageSize,
         offset: page * pageSize,
@@ -6349,8 +6484,11 @@ export default function NotificationWorkflowsPanel({
   }, []);
 
   const dismissMessage = useCallback(() => setMessage(null), []);
+  const requestEdgeInsert = useCallback((edgeRef) => {
+    setEdgeInsert(edgeRef);
+  }, []);
   const flowNodes = useMemo(() => flowNodesFromDefinition(draft, selectedNodeId), [draft, selectedNodeId]);
-  const flowEdges = useMemo(() => flowEdgesFromDefinition(draft), [draft]);
+  const flowEdges = useMemo(() => flowEdgesFromDefinition(draft, requestEdgeInsert), [draft, requestEdgeInsert]);
   const availableVariables = useMemo(() => {
     const byPath = new Map((variableCatalog || []).map((variable) => [variable.path, variable]));
     for (const node of draft?.nodes || []) {
@@ -6630,7 +6768,15 @@ export default function NotificationWorkflowsPanel({
     }, 250);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mockAuditOpen, selected?.id, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status, mockAuditFilters.health, mockAuditFilters.signalLevel, mockAuditFilters.eventType, mockAuditFilters.triggerSource, mockAuditFilters.provider, mockAuditFilters.fallbackSource, mockAuditFilters.search, mockAuditPage, mockAuditPageSize]);
+  }, [mockAuditOpen, selected?.id, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status, mockAuditFilters.health, mockAuditFilters.signalLevel, mockAuditFilters.eventType, mockAuditFilters.triggerSource, mockAuditFilters.provider, mockAuditFilters.fallbackSource, mockAuditFilters.department, mockAuditFilters.search, mockAuditPage, mockAuditPageSize]);
+
+  useEffect(() => {
+    if (!mockAuditOpen || auditDepartmentsLoaded) return;
+    notificationWorkflowAPI.getAuditDepartments()
+      .then((response) => setAuditDepartments(Array.isArray(response.data) ? response.data : []))
+      .catch(() => setAuditDepartments([]))
+      .finally(() => setAuditDepartmentsLoaded(true));
+  }, [mockAuditOpen, auditDepartmentsLoaded]);
 
   useEffect(() => {
     if (!mockAuditOpen || !mockAuditHasActiveRuns || mockAuditLoading) return undefined;
@@ -6639,7 +6785,7 @@ export default function NotificationWorkflowsPanel({
     }, WORKFLOW_AUDIT_ACTIVE_REFRESH_MS);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mockAuditOpen, mockAuditHasActiveRuns, mockAuditLoading, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status, mockAuditFilters.health, mockAuditFilters.signalLevel, mockAuditFilters.eventType, mockAuditFilters.triggerSource, mockAuditFilters.provider, mockAuditFilters.fallbackSource, mockAuditFilters.search, mockAuditPage, mockAuditPageSize]);
+  }, [mockAuditOpen, mockAuditHasActiveRuns, mockAuditLoading, mockAuditFilters.executionMode, mockAuditFilters.workflowId, mockAuditFilters.range, mockAuditFilters.status, mockAuditFilters.health, mockAuditFilters.signalLevel, mockAuditFilters.eventType, mockAuditFilters.triggerSource, mockAuditFilters.provider, mockAuditFilters.fallbackSource, mockAuditFilters.department, mockAuditFilters.search, mockAuditPage, mockAuditPageSize]);
 
   // Rename persists the new name via the draft endpoint (no publish, not live).
   async function renameWorkflow(rawName) {
@@ -6995,6 +7141,54 @@ export default function NotificationWorkflowsPanel({
     setSelectedNodeId(newId);
   }
 
+  function insertNodeBetween(edgeRef, type) {
+    if (!draft || !edgeRef || !WORKFLOW_NODE_REGISTRY[type]) return;
+    const newId = uniqueNodeId(draft, type);
+    const triggerType = draft.nodes.find((node) => node.type === 'trigger')?.data?.triggerType || selected?.triggerType || 'ticket.created';
+    updateDraft((next) => {
+      const normalized = String(edgeRef.sourceHandle || 'default');
+      const existingEdge = next.edges.find((edge) => (
+        edge.source === edgeRef.source
+        && edge.target === edgeRef.target
+        && String(edge.sourceHandle || 'default') === normalized
+      ));
+      const sourceNode = next.nodes.find((node) => node.id === edgeRef.source);
+      const targetNode = next.nodes.find((node) => node.id === edgeRef.target);
+      if (!existingEdge || !sourceNode || !targetNode) return;
+      next.nodes.push({
+        id: newId,
+        type,
+        position: {
+          x: Math.round(((Number(sourceNode.position?.x) || 0) + (Number(targetNode.position?.x) || 0)) / 2),
+          y: Math.round(((Number(sourceNode.position?.y) || 0) + (Number(targetNode.position?.y) || 0)) / 2) + 60,
+        },
+        data: defaultNodeData(type, triggerType),
+      });
+      next.edges = next.edges.filter((edge) => edge.id !== existingEdge.id);
+      next.edges.push({
+        id: uniqueEdgeId(next, edgeRef.source, newId, existingEdge.sourceHandle),
+        source: edgeRef.source,
+        sourceHandle: existingEdge.sourceHandle || null,
+        target: newId,
+      });
+      next.edges.push({
+        id: uniqueEdgeId(next, newId, edgeRef.target, type === 'condition' ? 'true' : null),
+        source: newId,
+        // Conditions only expose true/false outputs; continue downstream on true.
+        sourceHandle: type === 'condition' ? 'true' : null,
+        target: edgeRef.target,
+      });
+      if (type === 'llm_generate') {
+        const templateNode = next.nodes.find((node) => node.id === 'template');
+        if (templateNode && !templateUsesLlm(templateNode.data)) {
+          templateNode.data = addLlmFallbacksToTemplate(templateNode.data);
+        }
+      }
+    });
+    setSelectedNodeId(newId);
+    setEdgeInsert(null);
+  }
+
   function isValidWorkflowConnection(connection) {
     if (!draft || !connection?.source || !connection?.target) return false;
     if (connection.source === connection.target) return false;
@@ -7042,6 +7236,7 @@ export default function NotificationWorkflowsPanel({
       }
     });
     setSelectedNodeId('trigger');
+    setMessage({ type: 'success', text: 'Step removed - use Undo to restore it' });
   }
 
   function applyConditionRule() {
@@ -8891,6 +9086,7 @@ export default function NotificationWorkflowsPanel({
             loading={mockAuditLoading}
             error={mockAuditError}
             filters={mockAuditFilters}
+            departments={auditDepartments}
             onFiltersChange={(next) => { setMockAuditFilters(next); setMockAuditPage(0); }}
             onRefresh={() => loadMockAuditRuns(mockAuditFilters, mockAuditPage, mockAuditPageSize)}
             onSelectRun={setSelectedMockRun}
@@ -9062,6 +9258,8 @@ export default function NotificationWorkflowsPanel({
                     <NodePalette
                       onAddNode={addWorkflowNode}
                       onRemoveNode={removeSelectedNode}
+                      onUndo={undoDraftChange}
+                      canUndo={undoDepth > 0}
                       workflow={selected}
                       onRename={renameWorkflow}
                     />
@@ -9089,6 +9287,7 @@ export default function NotificationWorkflowsPanel({
                           nodes={flowNodes}
                           edges={flowEdges}
                           nodeTypes={FLOW_NODE_TYPES}
+                          edgeTypes={FLOW_EDGE_TYPES}
                           fitView
                           fitViewOptions={{ padding: 0.2 }}
                           nodesDraggable={false}
@@ -9105,6 +9304,52 @@ export default function NotificationWorkflowsPanel({
                         </ReactFlow>
                       ) : (
                         <div className="flex h-full items-center justify-center text-sm text-gray-500">Select a workflow</div>
+                      )}
+                      {draft && (
+                        <div className="pointer-events-none absolute bottom-2 right-2 z-10 max-w-[280px] rounded-lg border border-slate-200 bg-white/90 px-2.5 py-1.5 text-[10px] font-medium leading-4 text-slate-500 shadow-subtle">
+                          Click <span className="font-bold text-blue-600">+</span> on a line to insert a step. Drag a node&apos;s bottom dot to another node&apos;s top dot to connect blocks.
+                        </div>
+                      )}
+                      {edgeInsert && draft && (
+                        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/20 p-4" onClick={() => setEdgeInsert(null)}>
+                          <div
+                            className="w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <div className="border-b border-slate-100 px-3 py-2">
+                              <div className="text-xs font-bold text-slate-900">Insert a step</div>
+                              <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                                Between <span className="font-semibold">{edgeInsert.source}</span> and <span className="font-semibold">{edgeInsert.target}</span>
+                                {edgeInsert.sourceHandle ? ` (${edgeInsert.sourceHandle} branch)` : ''}
+                              </div>
+                            </div>
+                            {ADDABLE_NODE_TYPES.map((type) => {
+                              const TypeIcon = WORKFLOW_NODE_REGISTRY[type]?.icon;
+                              return (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={() => insertNodeBetween(edgeInsert, type)}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-gray-700 hover:bg-blue-50"
+                                >
+                                  {TypeIcon ? (
+                                    <TypeIcon className="h-3.5 w-3.5" style={{ color: NODE_COLORS[type] || '#6b7280' }} />
+                                  ) : (
+                                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: NODE_COLORS[type] || '#6b7280' }} />
+                                  )}
+                                  {NODE_LABELS[type] || type}
+                                </button>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              onClick={() => setEdgeInsert(null)}
+                              className="w-full border-t border-slate-100 px-3 py-2 text-left text-xs font-medium text-slate-500 hover:bg-slate-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                   </main>

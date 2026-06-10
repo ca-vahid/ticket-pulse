@@ -160,13 +160,19 @@ function channelRecipient({ technician, preference }, channel) {
   return channel === 'email' ? technician?.email || null : preferredPhone(preference);
 }
 
-function readinessForChannel({ technician, preference }, providerStatus, channel) {
+function normalizeDisabledChannels(value) {
+  return normalizeList(value).filter((channel) => ESCALATION_CHANNELS.includes(channel) && channel !== 'email');
+}
+
+function readinessForChannel({ technician, preference }, providerStatus, channel, disabledChannels = []) {
   const provider = providerStatus[channel] || { provider: null, configured: false, missing: [] };
+  const pausedByWorkspace = normalizeDisabledChannels(disabledChannels).includes(channel);
   const enabled = channelEnabled(preference, channel);
   const recipient = channelRecipient({ technician, preference }, channel);
   const phoneVerified = !PHONE_CHANNELS.has(channel) || Boolean(preference?.phoneVerifiedAt);
   const hasRecipient = Boolean(recipient);
   const missing = [];
+  if (pausedByWorkspace) missing.push('channel_paused_for_workspace');
   if (!enabled) missing.push('not_enabled_by_user');
   if (!hasRecipient) missing.push(channel === 'email' ? 'missing_email' : 'missing_phone');
   if (PHONE_CHANNELS.has(channel) && !phoneVerified) missing.push('phone_not_verified');
@@ -181,7 +187,8 @@ function readinessForChannel({ technician, preference }, providerStatus, channel
     providerMissing: provider.missing || [],
     recipient,
     phoneVerified,
-    ready: enabled && hasRecipient && phoneVerified && provider.configured === true,
+    pausedByWorkspace,
+    ready: !pausedByWorkspace && enabled && hasRecipient && phoneVerified && provider.configured === true,
     reason: missing[0] || null,
     warnings: missing,
   };
@@ -206,6 +213,7 @@ function normalizePolicy(row = {}) {
     afterHoursRotationOrder: normalizeRotationOrder(row?.afterHoursRotationOrder),
     afterHoursRotationAnchorDate: row?.afterHoursRotationAnchorDate?.toISOString?.() || row?.afterHoursRotationAnchorDate || null,
     showAfterHoursPhoneInEmail: row?.showAfterHoursPhoneInEmail !== false,
+    disabledChannels: normalizeDisabledChannels(row?.disabledChannels),
     legacyChannels: normalizeList(row?.legacyChannels).filter((channel) => ESCALATION_CHANNELS.includes(channel)),
     legacyEmails: normalizeList(row?.legacyEmails),
     legacyPhones: normalizeList(row?.legacyPhones),
@@ -483,6 +491,9 @@ class AfterHoursUrgentEscalationService {
       showAfterHoursPhoneInEmail: input.showAfterHoursPhoneInEmail !== undefined
         ? !!input.showAfterHoursPhoneInEmail
         : current.showAfterHoursPhoneInEmail !== false,
+      disabledChannels: input.disabledChannels !== undefined
+        ? normalizeDisabledChannels(input.disabledChannels)
+        : normalizeDisabledChannels(current.disabledChannels),
       updatedBy: actorEmail,
     };
 
@@ -578,10 +589,11 @@ class AfterHoursUrgentEscalationService {
 
     return {
       providerStatus,
+      disabledChannels: policy.disabledChannels || [],
       candidates: technicians.map((technician) => {
         const context = { technician, preference: technician.notificationPreference || null };
         const channels = Object.fromEntries(
-          ESCALATION_CHANNELS.map((channel) => [channel, readinessForChannel(context, providerStatus, channel)]),
+          ESCALATION_CHANNELS.map((channel) => [channel, readinessForChannel(context, providerStatus, channel, policy.disabledChannels)]),
         );
         return {
           id: technician.id,
@@ -653,7 +665,7 @@ class AfterHoursUrgentEscalationService {
         preference: row.technician.notificationPreference || null,
       };
       for (const channel of ESCALATION_CHANNELS) {
-        const readiness = readinessForChannel(context, providerStatus, channel);
+        const readiness = readinessForChannel(context, providerStatus, channel, policy?.disabledChannels);
         if (!readiness.ready) {
           skipped.push({
             technicianId: row.technicianId,
@@ -770,6 +782,7 @@ class AfterHoursUrgentEscalationService {
   }) {
     const deliveries = [];
     const skipped = [];
+    const pausedChannels = new Set(normalizeDisabledChannels(policy.disabledChannels));
     const channels = normalizeList(policy.legacyChannels).filter((channel) => ESCALATION_CHANNELS.includes(channel));
     const emails = normalizeList(policy.legacyEmails);
     const phones = normalizeList(policy.legacyPhones);
@@ -777,6 +790,10 @@ class AfterHoursUrgentEscalationService {
     for (const channel of channels) {
       const provider = providerStatus[channel] || { provider: null, configured: false, missing: [] };
       const recipients = channel === 'email' ? emails : phones;
+      if (pausedChannels.has(channel)) {
+        skipped.push({ legacy: true, channel, reason: 'channel_paused_for_workspace', warnings: ['channel_paused_for_workspace'] });
+        continue;
+      }
       if (!provider.configured) {
         skipped.push({ legacy: true, channel, reason: 'provider_not_configured', warnings: provider.missing || [] });
         continue;

@@ -572,7 +572,6 @@ export default function FeedbackPagePanel() {
   const update = (patch) => setSettings((current) => ({ ...current, ...patch }));
 
   const deleteSubmission = async (row) => {
-    // eslint-disable-next-line no-alert
     if (!window.confirm(`Delete the feedback on ticket #${row.ticketNumber || row.id}? This permanently removes the rating and comment.`)) return;
     setDeletingId(row.id);
     try {

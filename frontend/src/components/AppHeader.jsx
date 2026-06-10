@@ -37,6 +37,32 @@ function NavImageIcon({ className = '', src, alt }) {
   );
 }
 
+// Person handing off a ticket (dashed tear line) — QA-supplied assignment glyph.
+// The masked paths fill with --tp-nav-icon-fill so the ticket hides the body
+// behind it while matching the button background in both color states.
+function AssignmentNavIcon({ className = '' }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="6" r="2.9" />
+      <path d="M5 19a7 7 0 0 1 14 0" fill="var(--tp-nav-icon-fill, transparent)" />
+      <path
+        d="M8 14.8h8a1.2 1.2 0 0 1 1.2 1.2v0.9a1.3 1.3 0 0 0 0 2.6v0.9a1.2 1.2 0 0 1-1.2 1.2h-8a1.2 1.2 0 0 1-1.2-1.2v-0.9a1.3 1.3 0 0 0 0-2.6v-0.9a1.2 1.2 0 0 1 1.2-1.2z"
+        fill="var(--tp-nav-icon-fill, transparent)"
+      />
+      <path d="M12 15.4v4.4" strokeDasharray="1.3 1.5" />
+    </svg>
+  );
+}
+
 export default function AppHeader({
   activePage = 'dashboard',
   dashboardActions = null,
@@ -126,8 +152,8 @@ export default function AppHeader({
       id: 'assignments',
       label: 'Assignment',
       path: '/assignments',
-      iconSrc: '/brand/nav-icons/Assignment-nav.png',
-      inactiveClass: 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300',
+      Icon: AssignmentNavIcon,
+      inactiveClass: 'border-[#ddccf8] bg-[#f1ebfd] text-[#7c3aed] [--tp-nav-icon-fill:#f1ebfd] hover:bg-[#e9ddfc] hover:border-[#cdb3f6]',
     }] : []),
     ...(canManageWorkspace || activePage === 'workflows' ? [{
       id: 'workflows',
@@ -256,7 +282,7 @@ export default function AppHeader({
             }`
             : `${navButtonSize} inline-flex flex-none touch-manipulation items-center justify-center border transition-colors ${
               isActive
-                ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400'
+                ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400 [--tp-nav-icon-fill:#f1f5f9]'
                 : `${inactiveClass} hover:shadow-sm`
             }`;
           return (

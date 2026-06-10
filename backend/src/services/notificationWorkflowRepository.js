@@ -487,6 +487,7 @@ export async function listAuditRuns(workspaceId, {
   from = null,
   to = null,
   status = null,
+  department = null,
   search = null,
   limit = 50,
   offset = 0,
@@ -508,6 +509,13 @@ export async function listAuditRuns(workspaceId, {
   }
   const normalizedStatus = String(status || '').trim().toLowerCase();
   if (normalizedStatus && normalizedStatus !== 'all') where.status = normalizedStatus;
+  const normalizedDepartment = String(department || '').trim();
+  if (normalizedDepartment && normalizedDepartment.toLowerCase() !== 'all') {
+    // Department/location lives on the requester profile (Brisbane, Calgary, ...).
+    where.ticket = {
+      requester: { is: { department: { equals: normalizedDepartment, mode: 'insensitive' } } },
+    };
+  }
   const searchFilter = runSearchFilter(search);
   if (searchFilter) where.AND = [searchFilter];
 
@@ -536,6 +544,9 @@ export async function listAuditRuns(workspaceId, {
           status: true,
           priority: true,
           assessedPriority: true,
+          requester: {
+            select: { department: true },
+          },
         },
       },
       steps: {
