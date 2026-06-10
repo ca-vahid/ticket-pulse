@@ -1325,6 +1325,7 @@ model PublicFeedbackSettings {
   logoAltText     String?   @db.VarChar(160) @map("logo_alt_text")
   trademarkText   String?   @db.VarChar(300) @map("trademark_text")
   accentColor     String?   @db.VarChar(24) @map("accent_color")
+  bgImageDataUrl  String?   @db.Text @map("bg_image_data_url")
   updatedBy       String?   @db.VarChar(255) @map("updated_by")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
