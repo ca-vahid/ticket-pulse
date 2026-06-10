@@ -48,9 +48,10 @@ app.use(
   }),
 );
 
-// Body parsing middleware. Public status branding stores small uploaded logos as data URLs.
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+// Body parsing middleware. Branding settings carry uploaded images as data URLs (logo <= ~512 KB
+// plus an optional feedback-page background <= ~700 KB in one PUT), so allow up to 3 MB.
+app.use(express.json({ limit: '3mb' }));
+app.use(express.urlencoded({ extended: true, limit: '3mb' }));
 
 // Session configuration with PostgreSQL store
 const pgPool = new Pool({

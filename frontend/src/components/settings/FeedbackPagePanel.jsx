@@ -45,7 +45,39 @@ const DEFAULTS = {
   logoAltText: '',
   trademarkText: '',
   accentColor: '#2563eb',
+  bgImageDataUrl: '',
 };
+
+// Downscale an uploaded background to a data URL that fits the server cap (~700 KB). Tries
+// progressively smaller/softer JPEG encodes; photos almost always fit on the first pass.
+const MAX_BG_DATA_URL_CHARS = 950_000;
+function fileToBgDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read that image file'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Could not decode that image'));
+      img.onload = () => {
+        for (const [maxW, quality] of [[1920, 0.82], [1600, 0.74], [1280, 0.66]]) {
+          const scale = Math.min(1, maxW / img.width);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          const out = canvas.toDataURL('image/jpeg', quality);
+          if (out.length <= MAX_BG_DATA_URL_CHARS) {
+            resolve(out);
+            return;
+          }
+        }
+        reject(new Error('That image is too large even after compression — try a smaller one'));
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 function mergeSettings(data = {}) {
   const merged = {};
@@ -151,10 +183,57 @@ function ThemePicker({ value, onChange }) {
         })}
         <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-2 text-center opacity-80">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100"><Plus className="h-5 w-5 text-slate-400" /></span>
-          <span className="text-[11px] font-semibold leading-tight text-slate-400">Bring your own</span>
+          <span className="text-[11px] font-semibold leading-tight text-slate-400">Custom emojis</span>
           <span className="rounded-full bg-amber-100 px-1.5 text-[8px] font-bold uppercase tracking-wide text-amber-700">Soon</span>
         </div>
       </div>
+      <p className="text-[11px] text-slate-400">Want your own look? You can already upload a custom <b>background</b> below — custom emoji sets are coming.</p>
+    </div>
+  );
+}
+
+/** "Bring your own" v1 — a custom background image that replaces the theme's built-in one. */
+function BackgroundCard({ settings, update, uploadBg }) {
+  const theme = getFeedbackTheme(settings.theme);
+  const custom = settings.bgImageDataUrl || '';
+  const effective = custom || (theme.kind === 'image' ? theme.bg : null);
+  return (
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">Background</div>
+          <p className="text-xs text-slate-500">
+            {custom ? 'Custom image — shown behind the feedback card instead of the theme background.' : 'Currently using the theme’s built-in background.'}
+          </p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${custom ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
+          {custom ? 'Custom' : 'Theme default'}
+        </span>
+      </div>
+      <div className="h-24 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+        {effective ? (
+          <img src={effective} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-xs text-slate-400">Soft accent gradient (classic theme default)</div>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+          {custom ? <ImageIcon className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
+          {custom ? 'Replace background' : 'Upload background'}
+          <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={uploadBg} />
+        </label>
+        {custom && (
+          <button
+            type="button"
+            onClick={() => update({ bgImageDataUrl: '' })}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+          >
+            <Trash2 className="h-4 w-4" /> Use theme background
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] text-slate-400">JPG, PNG, or WEBP. Large photos are resized automatically. Wide, soft images work best — the white card sits on top with a light overlay.</p>
     </div>
   );
 }
@@ -165,9 +244,11 @@ function FeedbackPreview({ settings }) {
   const isImage = theme.kind === 'image';
   const accent = isImage ? theme.accent : (settings.accentColor || '#2563eb');
   const labels = [settings.label1, settings.label2, settings.label3, settings.label4, settings.label5];
-  const bgStyle = isImage
+  // Custom uploaded background wins over the theme's built-in one (matches the live page).
+  const bgUrl = settings.bgImageDataUrl || (isImage ? theme.bg : null);
+  const bgStyle = bgUrl
     ? {
-      backgroundImage: `linear-gradient(180deg, rgba(255,255,255,.42), rgba(255,255,255,.62)), url('${theme.bg}')`,
+      backgroundImage: `linear-gradient(180deg, rgba(255,255,255,.42), rgba(255,255,255,.62)), url('${bgUrl}')`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
     }
@@ -270,11 +351,13 @@ function StatCard({ label, value, sub, accent }) {
   );
 }
 
-/** Appearance tab — theme selector + branding (logo, accent, names, footer). */
-function AppearanceSettings({ settings, update, uploadLogo }) {
+/** Appearance tab — theme selector, background, and branding (logo, accent, names, footer). */
+function AppearanceSettings({ settings, update, uploadLogo, uploadBg }) {
   return (
     <>
       <ThemePicker value={settings.theme} onChange={(k) => update({ theme: k })} />
+
+      <BackgroundCard settings={settings} update={update} uploadBg={uploadBg} />
 
       <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
         <div className="text-sm font-semibold text-slate-900">Branding</div>
@@ -630,6 +713,23 @@ export default function FeedbackPagePanel() {
     reader.readAsDataURL(file);
   };
 
+  const uploadBg = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!/^image\/(png|jpeg|jpg|webp)$/i.test(file.type)) {
+      setStatus({ type: 'error', message: 'Background must be a PNG, JPG, or WEBP image' });
+      return;
+    }
+    try {
+      const dataUrl = await fileToBgDataUrl(file);
+      update({ bgImageDataUrl: dataUrl });
+      setStatus({ type: 'success', message: 'Background ready — click Save to apply.' });
+    } catch (err) {
+      setStatus({ type: 'error', message: err.message || 'Could not process that image' });
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6">
@@ -704,7 +804,7 @@ export default function FeedbackPagePanel() {
         <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="space-y-4">
             {activeTab === 'appearance'
-              ? <AppearanceSettings settings={settings} update={update} uploadLogo={uploadLogo} />
+              ? <AppearanceSettings settings={settings} update={update} uploadLogo={uploadLogo} uploadBg={uploadBg} />
               : <ContentSettings settings={settings} update={update} />}
           </div>
 

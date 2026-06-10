@@ -46,6 +46,7 @@ function previewPayloadFromSettings(s) {
       commentEnabled: v.commentEnabled !== false,
       commentPrompt: v.commentPrompt || "Anything you'd like to add? (optional)",
       labels: labels.every(Boolean) ? labels : DEFAULT_LABELS,
+      bgImage: v.bgImageDataUrl || null,
     },
     existing: null,
   };
@@ -124,8 +125,11 @@ function ImageFace({ src }) {
   );
 }
 
+// Springy rating option: hover lifts + zooms the chip, pressing squashes it, and picking it pops
+// with a one-shot ring pulse. All motion is disabled under prefers-reduced-motion.
 function ScoreButton({ index, label, active, accent, imgSrc, pop, reduced, onPick, onHover, onLeave, registerRef }) {
   const color = FACE_COLORS[index];
+  const spring = { type: 'spring', stiffness: 420, damping: 19 };
   return (
     <button
       type="button"
@@ -142,10 +146,14 @@ function ScoreButton({ index, label, active, accent, imgSrc, pop, reduced, onPic
       style={{ '--tw-ring-color': accent }}
     >
       <span className="relative flex items-center justify-center">
-        <span
-          className={`flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 transition-all duration-200 sm:h-12 sm:w-12 ${
-            active ? 'scale-110 shadow-md' : 'group-hover:scale-105'
-          }`}
+        <motion.span
+          animate={reduced ? undefined : { scale: active ? 1.16 : 1, y: active ? -2 : 0 }}
+          whileHover={reduced ? undefined : { scale: active ? 1.22 : 1.14, y: -4 }}
+          whileTap={reduced ? undefined : { scale: 0.85, y: 0 }}
+          transition={spring}
+          className={`flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 sm:h-12 sm:w-12 ${
+            active ? 'shadow-md' : ''
+          } ${reduced ? 'transition-transform duration-200' : ''}`}
           style={{
             borderColor: active ? color : '#e2e8f0',
             background: imgSrc ? CHIP_BG : (active ? color : '#ffffff'),
@@ -156,7 +164,7 @@ function ScoreButton({ index, label, active, accent, imgSrc, pop, reduced, onPic
           ) : (
             <span className={`h-3 w-3 rounded-full transition-colors ${active ? 'bg-white' : 'bg-slate-200 group-hover:bg-slate-300'}`} />
           )}
-        </span>
+        </motion.span>
         {active && pop > 0 && !reduced && (
           <motion.span
             key={pop}
@@ -169,9 +177,13 @@ function ScoreButton({ index, label, active, accent, imgSrc, pop, reduced, onPic
           />
         )}
       </span>
-      <span className={`text-center text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${active ? 'text-slate-900' : 'text-slate-500'}`}>
+      <motion.span
+        animate={reduced ? undefined : { scale: active ? 1.08 : 1 }}
+        transition={spring}
+        className={`text-center text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${active ? 'text-slate-900' : 'text-slate-500'}`}
+      >
         {label}
-      </span>
+      </motion.span>
     </button>
   );
 }
@@ -280,19 +292,42 @@ export default function PublicTicketFeedback() {
   const labels = (page.labels && page.labels.length === 5) ? page.labels : DEFAULT_LABELS;
   const display = hover || selected || null;
   const alreadyRated = Boolean(data?.existing?.score);
+  // Admin-uploaded background wins over the theme's built-in one (works for classic too).
+  const pageBg = page.bgImage || (isImage ? theme.bg : null);
 
+  // Image-theme hero re-mounts on every face change so each hover/pick lands with a springy pop;
+  // the classic MorphFace animates internally and must keep its state across changes.
   const renderHero = (score) => (
     isImage
-      ? <ImageFace src={theme.tiles[(score || 3) - 1]} />
+      ? (
+        <motion.div
+          key={score || 'rest'}
+          initial={reduced ? false : { scale: 0.82, opacity: 0.4, rotate: -4 }}
+          animate={{ scale: 1, opacity: 1, rotate: 0 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 17 }}
+          className="h-full w-full"
+        >
+          <ImageFace src={theme.tiles[(score || 3) - 1]} />
+        </motion.div>
+      )
       : <MorphFace score={score} reduced={reduced} />
   );
+
+  // Single entry point for choosing a rating: select it, pulse the chosen chip, bounce the hero.
+  const pick = (n) => {
+    setSelected(n);
+    setPop((c) => c + 1);
+    if (!reduced) {
+      heroControls.start({ scale: [1, 1.1, 1], transition: { duration: 0.45, ease: 'easeOut' } });
+    }
+  };
 
   const onKeyDown = (e) => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
     e.preventDefault();
     const base = selected || 3;
     const next = ['ArrowRight', 'ArrowUp'].includes(e.key) ? Math.min(base + 1, 5) : Math.max(base - 1, 1);
-    setSelected(next);
+    pick(next);
     btnRefs.current[next - 1]?.focus();
   };
 
@@ -342,7 +377,7 @@ export default function PublicTicketFeedback() {
   if (done) {
     const score = done.score || selected || 5;
     return (
-      <Shell accent={accent} bgImage={isImage ? theme.bg : null} preview={isPreview}>
+      <Shell accent={accent} bgImage={pageBg} preview={isPreview}>
         <CenteredCard>
           <motion.div
             initial={reduced ? false : { scale: 0.7, opacity: 0 }}
@@ -370,7 +405,7 @@ export default function PublicTicketFeedback() {
   }
 
   return (
-    <Shell accent={accent} bgImage={isImage ? theme.bg : null} preview={isPreview}>
+    <Shell accent={accent} bgImage={pageBg} preview={isPreview}>
       <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white/95 p-6 shadow-xl backdrop-blur sm:p-8">
         <div className="flex flex-col items-center text-center">
           {data?.branding?.logoDataUrl ? (
@@ -393,7 +428,15 @@ export default function PublicTicketFeedback() {
           {renderHero(display)}
         </motion.div>
         <div className="mt-3 h-6 text-center text-base font-bold" style={{ color: display ? FACE_COLORS[display - 1] : '#94a3b8' }}>
-          {display ? labels[display - 1] : 'Tap a face to rate'}
+          <motion.span
+            key={display || 'rest'}
+            initial={reduced ? false : { opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            className="inline-block"
+          >
+            {display ? labels[display - 1] : 'Tap a face to rate'}
+          </motion.span>
         </div>
 
         <div role="radiogroup" aria-label="Rate your support experience" onKeyDown={onKeyDown} className="mt-4 flex items-start justify-between gap-1">
@@ -405,9 +448,9 @@ export default function PublicTicketFeedback() {
               active={selected === i + 1}
               accent={accent}
               imgSrc={isImage ? theme.tiles[i] : null}
-              pop={selected === i + 1 && i + 1 === urlScore ? pop : 0}
+              pop={selected === i + 1 ? pop : 0}
               reduced={reduced}
-              onPick={setSelected}
+              onPick={pick}
               onHover={setHover}
               onLeave={() => setHover(null)}
               registerRef={(el) => { btnRefs.current[i] = el; }}
@@ -445,16 +488,19 @@ export default function PublicTicketFeedback() {
           <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{error}</div>
         )}
 
-        <button
+        <motion.button
           type="button"
           onClick={submit}
           disabled={!selected || submitting}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl px-6 py-3 text-base font-bold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40"
+          whileHover={reduced ? undefined : { scale: 1.015 }}
+          whileTap={reduced ? undefined : { scale: 0.97 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 20 }}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl px-6 py-3 text-base font-bold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40"
           style={{ background: accent }}
         >
           {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizonal className="h-5 w-5" />}
           {submitting ? 'Sending…' : alreadyRated ? 'Update feedback' : 'Send feedback'}
-        </button>
+        </motion.button>
 
         {data?.branding?.trademarkText && (
           <p className="mt-5 text-center text-[11px] text-slate-400">{data.branding.trademarkText}</p>

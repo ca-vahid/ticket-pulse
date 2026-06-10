@@ -14,6 +14,9 @@ import { invalidateAnalyticsCache } from './analyticsService.js';
 
 const MAX_BRANDING_TEXT_LENGTH = 300;
 const MAX_LOGO_DATA_URL_LENGTH = 700_000;
+// Background images are downscaled client-side; this cap (~700 KB binary) keeps the settings PUT
+// and the public page payload comfortably inside the server's JSON body limit.
+const MAX_BG_DATA_URL_LENGTH = 950_000;
 const MAX_COMMENT_LENGTH = 2000;
 const ALLOWED_LOGO_DATA_URL = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=\s]+$/i;
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
@@ -47,6 +50,7 @@ export const DEFAULT_PUBLIC_FEEDBACK_SETTINGS = {
   logoAltText: null,
   trademarkText: null,
   accentColor: '#2563eb',
+  bgImageDataUrl: null,
 };
 
 function bool(value, fallback) {
@@ -101,6 +105,18 @@ function cleanImageDataUrl(value) {
   return cleanLogoDataUrl(value);
 }
 
+function cleanBgImageDataUrl(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const text = String(value).trim();
+  if (text.length > MAX_BG_DATA_URL_LENGTH) {
+    throw new ValidationError('Background image is too large. Use a JPG, PNG, or WEBP under 700 KB.');
+  }
+  if (!ALLOWED_LOGO_DATA_URL.test(text)) {
+    throw new ValidationError('Background must be a PNG, JPG, WEBP, or GIF image data URL.');
+  }
+  return text.replace(/\s/g, '');
+}
+
 export function normalizePublicFeedbackSettings(row = {}) {
   const d = DEFAULT_PUBLIC_FEEDBACK_SETTINGS;
   return {
@@ -126,6 +142,7 @@ export function normalizePublicFeedbackSettings(row = {}) {
     logoAltText: cleanText(row.logoAltText, 160, null),
     trademarkText: cleanText(row.trademarkText, 300, null),
     accentColor: cleanAccentColor(row.accentColor),
+    bgImageDataUrl: row.bgImageDataUrl || null,
     updatedBy: row.updatedBy || null,
     createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : null,
     updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : null,
@@ -157,6 +174,7 @@ function normalizeSettingsInput(input = {}) {
     logoAltText: cleanText(input.logoAltText, 160, null),
     trademarkText: cleanText(input.trademarkText, 300, null),
     accentColor: cleanAccentColor(input.accentColor),
+    bgImageDataUrl: cleanBgImageDataUrl(input.bgImageDataUrl),
   };
 }
 
@@ -243,6 +261,8 @@ function publicPagePayload(settings, branding, ticket, existing) {
       commentPrompt: settings.commentPrompt,
       labels: [settings.label1, settings.label2, settings.label3, settings.label4, settings.label5],
       images: [settings.image1, settings.image2, settings.image3, settings.image4, settings.image5],
+      // Admin-uploaded background; overrides the theme background on the public page when set.
+      bgImage: settings.bgImageDataUrl || null,
     },
     existing: existing
       ? {
