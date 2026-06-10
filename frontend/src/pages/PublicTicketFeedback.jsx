@@ -9,6 +9,9 @@ const DEFAULT_LABELS = ['Bad', 'Meh', 'Okay', 'Good', 'Great'];
 const DEFAULT_ACCENT = '#2563eb';
 // Emotion palette: red -> orange -> amber -> lime -> emerald (label + selection ring).
 const FACE_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#22c55e', '#10b981'];
+// All faces are the same emoji yellow — emotion is carried by the expression, not the colour
+// (user feedback: green faces read as "sick" and red as "angry").
+const FACE_YELLOW = '#ffcc4d';
 const CHIP_BG = 'radial-gradient(circle at 50% 36%, #ffffff, #eef2f7)';
 
 function unwrap(response) {
@@ -64,8 +67,9 @@ function hexToRgba(hex, alpha) {
 }
 
 /**
- * The classic animated hero face — mouth, colour, cheeks and eyes spring between five
- * emotional states driven by `score` (1-5). Honours prefers-reduced-motion.
+ * The classic animated hero face — mouth, cheeks and eyes spring between five emotional
+ * states driven by `score` (1-5). The face stays emoji yellow throughout (emotion comes
+ * from the expression). Honours prefers-reduced-motion.
  */
 function MorphFace({ score, reduced }) {
   const target = scoreToT(score);
@@ -82,7 +86,6 @@ function MorphFace({ score, reduced }) {
     return undefined;
   }, [target, score, reduced, spring, pop]);
 
-  const faceColor = useTransform(spring, [0, 0.25, 0.5, 0.75, 1], FACE_COLORS);
   const mouthD = useTransform(spring, (v) => {
     const curve = lerp(-26, 44, v);
     const lift = lerp(6, 0, v);
@@ -96,7 +99,7 @@ function MorphFace({ score, reduced }) {
 
   return (
     <motion.svg viewBox="0 0 200 200" width="100%" height="100%" style={{ scale: pop }} role="img" aria-hidden="true">
-      <motion.circle cx="100" cy="100" r="92" style={{ fill: faceColor }} />
+      <circle cx="100" cy="100" r="92" fill={FACE_YELLOW} />
       <motion.circle cx="58" cy="118" r="13" fill="#ffffff" style={{ opacity: blush }} />
       <motion.circle cx="142" cy="118" r="13" fill="#ffffff" style={{ opacity: blush }} />
       <circle cx="72" cy="86" r="9.5" fill="#0f172a" />

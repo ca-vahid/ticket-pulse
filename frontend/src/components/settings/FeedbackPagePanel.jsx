@@ -185,7 +185,7 @@ function FeedbackPreview({ settings }) {
         <div className="text-[11px] font-medium text-slate-400">Ticket #12345 · VPN access problem</div>
         <h3 className="mt-1 text-lg font-bold text-slate-900">{settings.headline || 'How did we do?'}</h3>
         {settings.subtext && <p className="mt-1 text-xs leading-5 text-slate-500">{settings.subtext}</p>}
-        <div className="mx-auto mt-3 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full" style={{ background: isImage ? CHIP_BG : FACE_COLORS[4] }}>
+        <div className="mx-auto mt-3 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full" style={{ background: isImage ? CHIP_BG : '#ffcc4d' }}>
           {isImage ? <img src={theme.tiles[4]} alt="" className="h-full w-full object-contain p-1.5" /> : <span className="text-2xl">🙂</span>}
         </div>
         <div className="mt-3 flex items-start justify-between gap-1">
