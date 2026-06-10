@@ -783,6 +783,7 @@ export const notificationWorkflowAPI = {
   getAuditRunEmail: (auditId) => api.get(`/notification-workflows/audits/${encodeURIComponent(auditId)}/rendered-email`),
   getAudit: (auditId) => api.get(`/notification-workflows/audits/${encodeURIComponent(auditId)}`),
   getAuditRuns: (params = {}) => api.get('/notification-workflows/runs', { params }),
+  getAuditDepartments: () => api.get('/notification-workflows/runs/departments'),
   createVariant: (data) => api.post('/notification-workflows', data),
   duplicateVariant: (id, data = {}) => api.post(`/notification-workflows/${id}/duplicate`, data),
   updateRouting: (id, data) => api.put(`/notification-workflows/${id}/routing`, data),

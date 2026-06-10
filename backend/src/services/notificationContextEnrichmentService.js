@@ -333,6 +333,70 @@ async function loadThreadSummary({ workspaceId, ticketId, policy, settings, reda
   };
 }
 
+const MAX_AGENT_NOTES = 5;
+const MAX_AGENT_NOTES_CHARS = 2400;
+
+async function loadAgentNotes({ workspaceId, ticketId, redactionEnabled = true, redactionState = { count: 0 } }) {
+  if (!workspaceId || !ticketId) return '';
+  const rows = await prisma.ticketThreadEntry.findMany({
+    where: {
+      workspaceId,
+      ticketId,
+      OR: [
+        { isPrivate: true },
+        { visibility: { in: ['private', 'internal'] } },
+      ],
+    },
+    orderBy: { occurredAt: 'desc' },
+    take: MAX_AGENT_NOTES,
+  });
+
+  const notes = [];
+  for (const row of rows.reverse()) {
+    const content = redactText(row.bodyText || row.content || row.bodyHtml, redactionEnabled, redactionState);
+    if (!content) continue;
+    const stamp = dateIso(row.occurredAt);
+    const heading = [row.actorName || 'Agent', stamp ? `(${stamp.slice(0, 10)})` : null].filter(Boolean).join(' ');
+    notes.push(`${heading}: ${content}`);
+  }
+  return truncate(notes.join('\n\n'), MAX_AGENT_NOTES_CHARS);
+}
+
+/**
+ * Attaches ticket.agentNotes (recent private/internal agent notes) to the event
+ * context so {{ ticket.agentNotes }} resolves in LLM prompts and templates.
+ * Gated by the workspace LLM policy's "include private notes" privacy toggle.
+ */
+export async function enrichEventContextWithAgentNotes(eventContext) {
+  const context = eventContext || {};
+  if (!context.ticket || typeof context.ticket !== 'object') return context;
+  if (typeof context.ticket.agentNotes === 'string') return context;
+  const workspaceId = context.workspace?.id || null;
+  const ticketId = currentTicketId(context);
+  let agentNotes = '';
+  try {
+    if (workspaceId && ticketId) {
+      const policy = normalizeNotificationLlmToolPolicy(await getNotificationLlmToolPolicy(workspaceId));
+      if (policy.includePrivateNotes) {
+        agentNotes = await loadAgentNotes({
+          workspaceId,
+          ticketId,
+          redactionEnabled: policy.redactionEnabled,
+        });
+      }
+    }
+  } catch {
+    agentNotes = '';
+  }
+  return {
+    ...context,
+    ticket: {
+      ...context.ticket,
+      agentNotes,
+    },
+  };
+}
+
 function keywordCandidates(ticket) {
   const text = `${ticket.subject || ''} ${ticket.descriptionText || ''}`.toLowerCase();
   const words = text.match(/[a-z0-9][a-z0-9-]{2,}/g) || [];
@@ -755,6 +819,18 @@ export async function buildNotificationLlmContext({
     settings,
     redactionState,
   });
+  if (typeof eventContext.ticket?.agentNotes === 'string') {
+    ticket.agentNotes = eventContext.ticket.agentNotes;
+  } else if (policy.includePrivateNotes) {
+    ticket.agentNotes = await loadAgentNotes({
+      workspaceId,
+      ticketId,
+      redactionEnabled: policy.redactionEnabled,
+      redactionState,
+    });
+  } else {
+    ticket.agentNotes = '';
+  }
   const recentSimilarTickets = await loadSimilarTickets({
     workspaceId,
     ticket,
@@ -854,7 +930,7 @@ export function notificationLlmContextPrompt(bundle) {
     'Only use outage-like wording if outageSignals.allowedPublicPhrases explicitly allows it.',
     'Do not imply an outage, widespread issue, or broad impact from watch or routine_cluster signals.',
     'Only make response-time or resolution-time claims when timingEvidence has deterministic due-by data or qualified historical evidence; otherwise use neutral follow-up language.',
-    'Never quote private/internal notes in requester-facing email fields.',
+    'Never quote private/internal notes verbatim in requester-facing email fields. When ticket.agentNotes or private thread entries are provided, you may summarize what was done in neutral, requester-friendly language.',
     JSON.stringify(modelBundle, null, 2),
     '--- End Evidence Bundle ---',
   ].join('\n');

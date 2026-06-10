@@ -27,7 +27,32 @@ const CHANNEL_META = {
   phone_call: { label: 'Voice', Icon: PhoneCall },
 };
 
+const PAUSABLE_CHANNELS = ['sms', 'whatsapp', 'phone_call'];
+
+// Raw provider readiness keys -> plain-English explanations for the warning banner.
+const PROVIDER_WARNING_LABELS = {
+  twilio_account_sid: 'Twilio Account SID is not configured',
+  twilio_auth_token: 'Twilio auth token is not configured',
+  twilio_from_number: 'Twilio phone number is not configured',
+  twilio_whatsapp_sender_or_messaging_service_sid: 'WhatsApp sender / messaging service is not configured',
+  twilio_whatsapp_content_sid: 'an approved WhatsApp template (Twilio Content SID) has not been added',
+  sendgrid_api_key: 'SendGrid API key is not configured',
+  provider_not_configured: 'provider is not configured',
+};
+
+function friendlyProviderWarning(missing = []) {
+  const parts = (missing || []).map((key) => PROVIDER_WARNING_LABELS[key] || key);
+  return parts.join('; ');
+}
+
+const RECIPIENT_BUCKET_HELP = {
+  roster: 'Escalation roster: the core after-hours list. These users are alerted for automatic after-hours urgent detections AND when a requester clicks the after-hours immediate-support button. The after-hours phone rotation is also drawn from this list.',
+  self: 'Extra self-escalation recipients: alerted ONLY when a requester clicks the after-hours immediate-support button. They are added on top of the roster for those requester-initiated escalations, and are never paged by automatic detection.',
+  supervisor: 'Business-hours supervisors: alerted ONLY when a requester raises a ticket to Urgent from the public ticket page during business hours. They are never paged after hours.',
+};
+
 function readinessTone(readiness) {
+  if (readiness?.pausedByWorkspace) return 'border-gray-200 bg-gray-100 text-gray-400 line-through decoration-gray-400/60';
   if (readiness?.ready) return 'border-emerald-200 bg-emerald-50 text-emerald-700';
   if (readiness?.enabled) return 'border-amber-200 bg-amber-50 text-amber-700';
   return 'border-gray-200 bg-gray-50 text-gray-500';
@@ -36,10 +61,15 @@ function readinessTone(readiness) {
 function ChannelChip({ readiness }) {
   const meta = CHANNEL_META[readiness?.channel] || { label: readiness?.channel || 'Channel', Icon: BellRing };
   const Icon = meta.Icon;
+  const tooltip = readiness?.pausedByWorkspace
+    ? `${meta.label} is paused for this workspace`
+    : readiness?.ready
+      ? `${meta.label} ready`
+      : readiness?.warnings?.join(', ') || `${meta.label} not ready`;
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold ${readinessTone(readiness)}`}
-      title={readiness?.ready ? `${meta.label} ready` : readiness?.warnings?.join(', ') || `${meta.label} not ready`}
+      title={tooltip}
     >
       <Icon className="h-3 w-3" />
       {meta.label}
@@ -164,6 +194,7 @@ function CandidateRow({
       <button
         type="button"
         onClick={() => onToggleBase(candidate.id)}
+        title={RECIPIENT_BUCKET_HELP.roster}
         className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
           selectedBase ? 'border-blue-300 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300'
         }`}
@@ -173,6 +204,7 @@ function CandidateRow({
       <button
         type="button"
         onClick={() => onToggleSelfExtra(candidate.id)}
+        title={RECIPIENT_BUCKET_HELP.self}
         className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
           selectedSelfExtra ? 'border-purple-300 bg-purple-600 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-purple-300'
         }`}
@@ -182,6 +214,7 @@ function CandidateRow({
       <button
         type="button"
         onClick={() => onToggleBusinessSupervisor(candidate.id)}
+        title={RECIPIENT_BUCKET_HELP.supervisor}
         className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
           selectedBusinessSupervisor ? 'border-orange-300 bg-orange-600 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-orange-300'
         }`}
@@ -246,6 +279,7 @@ export default function UrgentEscalationPanel() {
         afterHoursRotationOrder: nextPolicy.afterHoursRotationOrder || [],
         afterHoursRotationAnchorDate: nextPolicy.afterHoursRotationAnchorDate || '',
         showAfterHoursPhoneInEmail: nextPolicy.showAfterHoursPhoneInEmail !== false,
+        disabledChannels: nextPolicy.disabledChannels || [],
         baseRecipientIds: nextPolicy.baseRecipientIds || [],
         selfExtraRecipientIds: nextPolicy.selfExtraRecipientIds || [],
         businessSupervisorRecipientIds: nextPolicy.businessSupervisorRecipientIds || [],
@@ -292,9 +326,19 @@ export default function UrgentEscalationPanel() {
   const rotationOrderUsers = (draft?.afterHoursRotationOrder || [])
     .map((id) => candidates.find((candidate) => candidate.id === id))
     .filter(Boolean);
+  const pausedChannels = useMemo(() => new Set(draft?.disabledChannels || []), [draft?.disabledChannels]);
   const providerWarnings = Object.entries(providerStatus || {})
-    .filter(([, value]) => value?.configured !== true)
-    .map(([channel, value]) => `${CHANNEL_META[channel]?.label || channel}: ${(value?.missing || ['not configured']).join(', ')}`);
+    .filter(([channel, value]) => value?.configured !== true && !pausedChannels.has(channel))
+    .map(([channel, value]) => `${CHANNEL_META[channel]?.label || channel}: ${friendlyProviderWarning(value?.missing?.length ? value.missing : ['provider_not_configured'])}`);
+
+  const togglePausedChannel = (channel) => {
+    setDraft((current) => {
+      const set = new Set(current?.disabledChannels || []);
+      if (set.has(channel)) set.delete(channel);
+      else set.add(channel);
+      return { ...(current || {}), disabledChannels: PAUSABLE_CHANNELS.filter((value) => set.has(value)) };
+    });
+  };
 
   const updateDraft = (patch) => setDraft((current) => ({ ...(current || {}), ...patch }));
 
@@ -380,6 +424,7 @@ export default function UrgentEscalationPanel() {
         afterHoursRotationOrder: nextPolicy.afterHoursRotationOrder || current?.afterHoursRotationOrder || [],
         afterHoursRotationAnchorDate: nextPolicy.afterHoursRotationAnchorDate || current?.afterHoursRotationAnchorDate || '',
         showAfterHoursPhoneInEmail: nextPolicy.showAfterHoursPhoneInEmail !== false,
+        disabledChannels: nextPolicy.disabledChannels || [],
       }));
       setStatus({ type: 'success', message: 'Urgent escalation settings saved' });
       await load();
@@ -529,11 +574,65 @@ export default function UrgentEscalationPanel() {
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
             <div>
               <div className="text-sm font-semibold text-amber-900">Provider readiness warnings</div>
-              <div className="mt-1 text-sm text-amber-800">{providerWarnings.join(' | ')}</div>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-amber-800">
+                {providerWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+              <div className="mt-2 text-xs text-amber-700">
+                Provider credentials and WhatsApp templates are managed under Settings &gt; Notifications (global admin). If a channel is not used in this workspace, pause it below to silence its warnings.
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-gray-950">Escalation channels</h3>
+            <p className="mt-1 text-sm text-gray-600">
+              Paused channels are skipped for every escalation send and excluded from readiness warnings. Email is always on.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700"
+              title="Email is the baseline escalation channel and cannot be paused."
+            >
+              <Mail className="h-3.5 w-3.5" />
+              Email
+            </span>
+            {PAUSABLE_CHANNELS.map((channel) => {
+              const meta = CHANNEL_META[channel];
+              const Icon = meta.Icon;
+              const paused = pausedChannels.has(channel);
+              return (
+                <button
+                  key={channel}
+                  type="button"
+                  onClick={() => togglePausedChannel(channel)}
+                  aria-pressed={!paused}
+                  title={paused
+                    ? `${meta.label} is paused for this workspace - click to resume (remember to save)`
+                    : `${meta.label} is active - click to pause it for this workspace (remember to save)`}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                    paused
+                      ? 'border-gray-200 bg-gray-100 text-gray-400 hover:border-gray-300'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {meta.label}
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${paused ? 'bg-gray-200 text-gray-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                    {paused ? 'Paused' : 'On'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
 
       <div className="rounded-xl border border-gray-200 bg-white">
         <div className="border-b border-gray-200 p-4">
@@ -559,8 +658,12 @@ export default function UrgentEscalationPanel() {
           </div>
 
           <div className="mt-4 grid gap-3 lg:grid-cols-3">
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-              <div className="text-xs font-semibold uppercase text-blue-700">Escalation roster</div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3" title={RECIPIENT_BUCKET_HELP.roster}>
+              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-blue-700">
+                Escalation roster
+                <span className="cursor-help rounded-full bg-blue-100 px-1.5 text-[10px] font-bold normal-case text-blue-600">?</span>
+              </div>
+              <div className="mt-0.5 text-[11px] leading-4 text-blue-700/80">Automatic after-hours alerts + requester immediate-support clicks</div>
               <div className="mt-1 text-sm font-semibold text-gray-900">{selectedBaseUsers.length} selected</div>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {selectedBaseUsers.length === 0 && <span className="text-xs text-blue-700">No users selected yet.</span>}
@@ -577,8 +680,12 @@ export default function UrgentEscalationPanel() {
                 ))}
               </div>
             </div>
-            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
-              <div className="text-xs font-semibold uppercase text-purple-700">Extra self-escalation recipients</div>
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3" title={RECIPIENT_BUCKET_HELP.self}>
+              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-purple-700">
+                Extra self-escalation recipients
+                <span className="cursor-help rounded-full bg-purple-100 px-1.5 text-[10px] font-bold normal-case text-purple-600">?</span>
+              </div>
+              <div className="mt-0.5 text-[11px] leading-4 text-purple-700/80">Only when a requester clicks the after-hours support button</div>
               <div className="mt-1 text-sm font-semibold text-gray-900">{selectedSelfUsers.length} selected</div>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {selectedSelfUsers.length === 0 && <span className="text-xs text-purple-700">No extra users selected.</span>}
@@ -595,8 +702,12 @@ export default function UrgentEscalationPanel() {
                 ))}
               </div>
             </div>
-            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
-              <div className="text-xs font-semibold uppercase text-orange-700">Business-hours supervisors</div>
+            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3" title={RECIPIENT_BUCKET_HELP.supervisor}>
+              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-orange-700">
+                Business-hours supervisors
+                <span className="cursor-help rounded-full bg-orange-100 px-1.5 text-[10px] font-bold normal-case text-orange-600">?</span>
+              </div>
+              <div className="mt-0.5 text-[11px] leading-4 text-orange-700/80">Only for requester urgency raises during business hours</div>
               <div className="mt-1 text-sm font-semibold text-gray-900">{selectedBusinessSupervisorUsers.length} selected</div>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {selectedBusinessSupervisorUsers.length === 0 && <span className="text-xs text-orange-700">No supervisors selected.</span>}

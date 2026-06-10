@@ -630,6 +630,7 @@ export function sampleEventContext(triggerType = 'ticket.created') {
       afterHoursEscalationUrl: 'https://ticketpulse.example/ticket-escalation/sample-token',
       feedbackUrl: 'https://ticketpulse.example/feedback/sample-token',
       publicStatusExpiresAt: '2026-07-28T18:42:00.000Z',
+      agentNotes: 'Agent Name (2026-05-29): Reset the VPN profile and confirmed the user can connect from home. Asked the user to report back if timeouts return.',
     },
     requester: {
       id: 40,
@@ -801,6 +802,7 @@ export function notificationVariableCatalog(extraOutputFields = []) {
     variable('assignedAgent.email', 'Assigned agent email', 'Agent', 'Current assigned agent email.', 'agent@example.com'),
     variable('previousAgent.name', 'Previous agent name', 'Agent', 'Previous agent name for reassignment events.', ''),
     variable('previousAgent.email', 'Previous agent email', 'Agent', 'Previous agent email for reassignment events.', ''),
+    variable('ticket.agentNotes', 'Agent notes (private)', 'Agent', 'Recent private/internal agent notes from the ticket thread, newest last. Empty unless "Private notes" is enabled in LLM Context > Privacy & redaction. Have the LLM summarize these in requester-friendly language - never quote them verbatim.', 'Agent Name (2026-06-09): Replaced the faulty dock and confirmed VPN connects on the new profile.'),
     variable('workspace.name', 'Workspace name', 'Workspace', 'Current Ticket Pulse workspace name.', 'IT'),
     variable('workspace.timezone', 'Workspace timezone', 'Workspace', 'Workspace default timezone.', 'America/Vancouver'),
     variable('availability.isBusinessHours', 'Is business hours', 'Availability', 'True when the event occurred during workspace business hours.', 'true'),

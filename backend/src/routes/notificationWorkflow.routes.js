@@ -1605,6 +1605,7 @@ router.get(
       from: req.query.from,
       to: req.query.to,
       status: req.query.status,
+      department: req.query.department,
       search: req.query.search,
       limit: usesPostFilters ? 500 : limit,
       offset: usesPostFilters ? 0 : offset,
@@ -1615,6 +1616,23 @@ router.get(
       .filter((run) => auditRunMatchesFilters(run, req.query));
     const data = usesPostFilters ? filtered.slice(offset, offset + limit) : filtered;
     res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/runs/departments',
+  asyncHandler(async (req, res) => {
+    const rows = await prisma.requester.findMany({
+      where: {
+        department: { not: null },
+        tickets: { some: { workspaceId: req.workspaceId } },
+      },
+      select: { department: true },
+      distinct: ['department'],
+      orderBy: { department: 'asc' },
+    });
+    const departments = [...new Set(rows.map((row) => String(row.department || '').trim()).filter(Boolean))];
+    res.json({ success: true, data: departments });
   }),
 );
 

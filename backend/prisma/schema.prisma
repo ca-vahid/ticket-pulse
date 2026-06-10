@@ -1374,6 +1374,7 @@ model UrgentEscalationPolicy {
   afterHoursRotationOrder Int[]    @default([]) @map("after_hours_rotation_order")
   afterHoursRotationAnchorDate DateTime? @map("after_hours_rotation_anchor_date")
   showAfterHoursPhoneInEmail Boolean @default(true) @map("show_after_hours_phone_in_email")
+  disabledChannels      String[]  @default([]) @map("disabled_channels")
   legacyChannels        String[]  @default([]) @map("legacy_channels")
   legacyEmails          String[]  @default([]) @map("legacy_emails")
   legacyPhones          String[]  @default([]) @map("legacy_phones")

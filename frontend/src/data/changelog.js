@@ -1,6 +1,18 @@
-export const APP_VERSION = '2.93';
+export const APP_VERSION = '2.94';
 
 export const changelog = [
+  {
+    version: '2.94',
+    date: 'June 10, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Agent notes for closure emails</strong> — the LLM generate step gains a <code>ticket.agentNotes</code> variable (recent private agent notes) so closure emails can summarize the fix. Gated by the “Private notes” toggle in LLM Context &rarr; Privacy &amp; redaction; the LLM summarizes, never quotes.' },
+      { type: 'new', html: '<strong>Workflow editor quality-of-life</strong> — click the <strong>+</strong> on any connection line to insert a step between two nodes, use the new <strong>Undo</strong> button to restore accidentally deleted steps, and drag a node’s bottom dot to another node’s top dot to reconnect isolated blocks (with clearer, larger connection dots).' },
+      { type: 'new', html: '<strong>Department filter in Workflow Audit</strong> — an “All departments” dropdown filters runs by the requester’s FreshService department/location (Brisbane, Calgary, Vancouver…).' },
+      { type: 'fixed', html: '<strong>Duplicate closure emails suppressed</strong> — when a requester reply reopens a just-closed ticket and it is re-closed minutes later, the “Resolved or closed” workflow no longer runs twice (15-minute churn guard).' },
+      { type: 'improved', html: '<strong>Urgent Escalation clarity</strong> — Add roster / Add self / Add supervisor now explain themselves on hover, provider readiness warnings are written in plain English, and unused channels (SMS / WhatsApp / Voice) can be paused per workspace to silence their warnings and skip them in sends.' },
+      { type: 'improved', html: '<strong>Assignment nav icon</strong> uses the new person-and-ticket glyph and greys out like the other header icons when you are on the Assignment page.' },
+    ],
+  },
   {
     version: '2.93',
     date: 'June 9, 2026',
