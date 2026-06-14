@@ -1,10 +1,15 @@
 import AppHeader from './AppHeader';
+import MobileTabBar from './nav/MobileTabBar';
 
 export const APP_BACKGROUND_STYLE = {
   backgroundImage: 'url(/brand/dashboard-background.webp)',
 };
 
 export const APP_BACKGROUND_CLASS = 'bg-gray-100 bg-no-repeat bg-cover bg-fixed';
+
+// Reserves room for the fixed mobile tab bar (md:hidden) so content isn't
+// hidden behind it; collapses to nothing from md upward.
+const MOBILE_NAV_INSET = 'pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0';
 
 export default function AppShell({
   activePage = 'dashboard',
@@ -16,13 +21,14 @@ export default function AppShell({
 }) {
   return (
     <div
-      className={`relative ${fillViewport ? 'flex h-[100dvh] flex-col overflow-hidden' : 'min-h-screen'} ${APP_BACKGROUND_CLASS} ${className}`}
+      className={`relative ${fillViewport ? 'flex h-[100dvh] flex-col overflow-hidden' : 'min-h-screen'} ${MOBILE_NAV_INSET} ${APP_BACKGROUND_CLASS} ${className}`}
       style={APP_BACKGROUND_STYLE}
     >
       <AppHeader activePage={activePage} {...headerProps} />
       <main className={fillViewport ? `min-h-0 flex-1 overflow-hidden ${contentClassName}` : contentClassName}>
         {children}
       </main>
+      <MobileTabBar />
     </div>
   );
 }
