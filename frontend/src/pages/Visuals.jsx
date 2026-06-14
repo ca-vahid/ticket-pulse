@@ -4,6 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { divIcon } from 'leaflet';
 import { visualsAPI } from '../services/api';
 import { ArrowLeft, Users, Crown, Activity, Loader, ChevronLeft, ChevronRight, Edit2, Check, X, Maximize } from 'lucide-react';
+import MobileTabBar from '../components/nav/MobileTabBar';
 import 'leaflet/dist/leaflet.css';
 
 // Office locations (lat/lng coordinates) — Canadian cities + major North American cities
@@ -438,7 +439,7 @@ export default function Visuals() {
           font-weight: bold !important;
         }
       `}</style>
-      <div className="min-h-screen bg-gray-100 flex flex-col">
+      <div className="min-h-screen bg-gray-100 flex flex-col pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
         {/* Header */}
         <header className="bg-white shadow-sm border-b border-gray-200">
           <div className="max-w-7xl mx-auto px-3 py-3 sm:px-4">
@@ -881,6 +882,7 @@ export default function Visuals() {
             )}
           </div>
         </div>
+        <MobileTabBar />
       </div>
     </>
   );

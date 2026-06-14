@@ -1,6 +1,14 @@
-export const APP_VERSION = '2.94';
+export const APP_VERSION = '2.95';
 
 export const changelog = [
+  {
+    version: '2.95',
+    date: 'June 13, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Refreshed top navigation</strong> — new line-art icons for Assignment, Mail Workflows, and Map, grouped into one frosted nav rail with the tools alongside. Hovering a destination lifts it with a soft glow and shows its name; the current page is marked with a “you are here” accent bar.' },
+      { type: 'new', html: '<strong>Mobile bottom navigation</strong> — phones get a fixed, labeled tab bar for the main destinations (with a “More” sheet for the rest, workspace switch, and sign-out), replacing the cramped scrolling icon strip.' },
+    ],
+  },
   {
     version: '2.94',
     date: 'June 10, 2026',

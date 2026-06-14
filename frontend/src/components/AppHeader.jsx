@@ -6,8 +6,6 @@ import {
   Calendar,
   ChevronDown,
   Clock,
-  BarChart3,
-  LayoutDashboard,
   LogOut,
   RefreshCw,
   Settings,
@@ -24,44 +22,10 @@ import {
   useDemoMode,
 } from '../utils/demoMode';
 import { APP_VERSION } from '../data/changelog';
+import { cn } from '../lib/utils';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import { NAV_ACTIVE_TILE, useNavDestinations } from './nav/navDestinations';
 import ChangelogModal from './ChangelogModal';
-
-function NavImageIcon({ className = '', src, alt }) {
-  return (
-    <img
-      src={src}
-      alt={alt}
-      className={className}
-      draggable="false"
-    />
-  );
-}
-
-// Person handing off a ticket (dashed tear line) — QA-supplied assignment glyph.
-// The masked paths fill with --tp-nav-icon-fill so the ticket hides the body
-// behind it while matching the button background in both color states.
-function AssignmentNavIcon({ className = '' }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="6" r="2.9" />
-      <path d="M5 19a7 7 0 0 1 14 0" fill="var(--tp-nav-icon-fill, transparent)" />
-      <path
-        d="M8 14.8h8a1.2 1.2 0 0 1 1.2 1.2v0.9a1.3 1.3 0 0 0 0 2.6v0.9a1.2 1.2 0 0 1-1.2 1.2h-8a1.2 1.2 0 0 1-1.2-1.2v-0.9a1.3 1.3 0 0 0 0-2.6v-0.9a1.2 1.2 0 0 1 1.2-1.2z"
-        fill="var(--tp-nav-icon-fill, transparent)"
-      />
-      <path d="M12 15.4v4.4" strokeDasharray="1.3 1.5" />
-    </svg>
-  );
-}
 
 export default function AppHeader({
   activePage = 'dashboard',
@@ -96,7 +60,6 @@ export default function AppHeader({
     const ws = availableWorkspaces?.find(w => w.id === currentWorkspace?.id);
     return ws?.role || 'viewer';
   })();
-  const canReview = wsRole === 'admin' || wsRole === 'reviewer';
   const canManageWorkspace = wsRole === 'admin';
   const showAdminSummitLink = canManageWorkspace && (Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it');
 
@@ -126,43 +89,7 @@ export default function AppHeader({
     navigate('/login');
   };
 
-  const primaryNavItems = [
-    {
-      id: 'dashboard',
-      label: 'Dashboard',
-      path: '/dashboard',
-      Icon: LayoutDashboard,
-      inactiveClass: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:border-blue-300',
-    },
-    {
-      id: 'timeline',
-      label: 'Timeline',
-      path: '/timeline',
-      Icon: Clock,
-      inactiveClass: 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300',
-    },
-    {
-      id: 'analytics',
-      label: 'Analytics',
-      path: '/analytics',
-      Icon: BarChart3,
-      inactiveClass: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300',
-    },
-    ...(canReview || activePage === 'assignments' ? [{
-      id: 'assignments',
-      label: 'Assignment',
-      path: '/assignments',
-      Icon: AssignmentNavIcon,
-      inactiveClass: 'border-[#ddccf8] bg-[#f1ebfd] text-[#7c3aed] [--tp-nav-icon-fill:#f1ebfd] hover:bg-[#e9ddfc] hover:border-[#cdb3f6]',
-    }] : []),
-    ...(canManageWorkspace || activePage === 'workflows' ? [{
-      id: 'workflows',
-      label: 'Mail Workflows',
-      path: '/workflows',
-      iconSrc: '/brand/nav-icons/Workflow-nav.png',
-      inactiveClass: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300',
-    }] : []),
-  ];
+  const navDestinations = useNavDestinations(activePage);
 
   const navigateFromMenu = (path) => {
     setUserMenuOpen(false);
@@ -263,80 +190,69 @@ export default function AppHeader({
     );
   };
 
-  const renderPrimaryNav = (compact = false, options = {}) => {
-    const visibleItems = options.hideActive
-      ? primaryNavItems.filter(({ id }) => activePage !== id)
-      : primaryNavItems;
-
+  // One destination tile in the desktop nav rail. Inactive = accent-tinted with a
+  // lift+glow hover; active = greyed glyph + a 2px "you are here" bar in the hue.
+  const renderNavTile = (dest) => {
+    const isActive = activePage === dest.id;
+    const { Icon } = dest;
     return (
-      <div className="inline-flex flex-none items-center gap-1.5" aria-label="Primary navigation">
-        {visibleItems.map(({ id, label, path, Icon, iconSrc, inactiveClass }) => {
-          const isActive = activePage === id;
-          const hasImageIcon = Boolean(iconSrc);
-          const navButtonSize = compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl';
-          const navButtonClassName = hasImageIcon
-            ? `${navButtonSize} inline-flex flex-none touch-manipulation items-center justify-center overflow-hidden border border-transparent bg-transparent p-0 transition ${
+      <Tooltip key={dest.id}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => { if (!isActive) navigate(dest.path); }}
+            aria-current={isActive ? 'page' : undefined}
+            aria-disabled={isActive ? 'true' : undefined}
+            aria-label={dest.label}
+            className={cn(
+              'relative inline-flex h-10 w-10 flex-none touch-manipulation items-center justify-center rounded-xl border transition-all duration-200 ease-out tp-focus-ring',
               isActive
-                ? 'cursor-default'
-                : 'hover:scale-[1.03] hover:bg-slate-50'
-            }`
-            : `${navButtonSize} inline-flex flex-none touch-manipulation items-center justify-center border transition-colors ${
-              isActive
-                ? 'cursor-default border-slate-200 bg-slate-100 text-slate-400 [--tp-nav-icon-fill:#f1f5f9]'
-                : `${inactiveClass} hover:shadow-sm`
-            }`;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => {
-                if (!isActive) navigate(path);
-              }}
-              aria-current={isActive ? 'page' : undefined}
-              aria-disabled={isActive ? 'true' : undefined}
-              className={navButtonClassName}
-              title={isActive ? `${label} (current page)` : label}
-            >
-              {iconSrc ? (
-                <NavImageIcon
-                  src={iconSrc}
-                  alt=""
-                  className="h-full w-full object-contain"
-                />
-              ) : (
-                <Icon className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
-              )}
-            </button>
-          );
-        })}
-      </div>
+                ? `${NAV_ACTIVE_TILE} cursor-default`
+                : `${dest.tile} ${dest.hover} hover:-translate-y-0.5 hover:shadow-soft motion-reduce:transition-none motion-reduce:hover:translate-y-0`,
+            )}
+          >
+            <Icon className="h-[22px] w-[22px]" />
+            {isActive && (
+              <span className={cn('absolute bottom-[5px] left-1/2 h-0.5 w-4 -translate-x-1/2 rounded-full', dest.bar)} />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{dest.label}</TooltipContent>
+      </Tooltip>
     );
   };
 
-  const renderAgentMapButton = (compact = false) => (
-    <button
-      type="button"
-      onClick={() => navigate('/visuals')}
-      className={`${compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-shrink-0 touch-manipulation items-center justify-center overflow-hidden transition hover:bg-slate-50`}
-      title="Agent Map"
-    >
-      <NavImageIcon
-        src="/brand/nav-icons/Map-nav.png"
-        alt=""
-        className={`${compact ? 'h-8 w-8' : 'h-10 w-10'} object-contain`}
-      />
-    </button>
+  // Neutral utility tile (Settings) — same shape/hover as the rail, no accent.
+  const renderSettingsTile = () => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          aria-label="Settings"
+          className="relative inline-flex h-10 w-10 flex-none touch-manipulation items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all duration-200 ease-out tp-focus-ring hover:-translate-y-0.5 hover:bg-slate-50 hover:text-slate-700 hover:shadow-soft motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+        >
+          <Settings className="h-[22px] w-[22px]" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Settings</TooltipContent>
+    </Tooltip>
   );
 
-  const renderSettingsButton = (compact = false) => (
-    <button
-      type="button"
-      onClick={() => navigate('/settings')}
-      className={`${compact ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl'} inline-flex flex-shrink-0 touch-manipulation items-center justify-center transition hover:bg-gray-100`}
-      title="Settings"
-    >
-      <Settings className={compact ? 'h-4 w-4' : 'h-6 w-6'} />
-    </button>
+  const renderNavRail = () => (
+    <TooltipProvider delayDuration={200}>
+      <div className="flex items-center gap-2">
+        <div
+          className="flex items-center gap-1 rounded-2xl border border-slate-200/70 bg-white/60 p-1 shadow-subtle"
+          aria-label="Primary navigation"
+        >
+          {navDestinations.map(renderNavTile)}
+        </div>
+        <div className="h-6 w-px bg-slate-200" />
+        {renderSettingsTile()}
+        {renderUserMenu(false)}
+      </div>
+    </TooltipProvider>
   );
 
   const renderWorkspaceControl = (compact = false) => {
@@ -402,24 +318,23 @@ export default function AppHeader({
               {renderUserMenu(true)}
             </div>
 
-            <div className="-mx-1 flex min-w-0 items-center overflow-hidden">
-              <div className="flex min-w-0 flex-1 touch-pan-x items-center gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {extraActions}
-                {backgroundSyncRunning && (
-                  <button
-                    onClick={onKillSync}
-                    disabled={killingSync || !onKillSync}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700 touch-manipulation disabled:opacity-50"
-                    title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing... (tap to stop)'}
-                  >
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  </button>
-                )}
-                {renderPrimaryNav(true, { hideActive: true })}
-                {renderAgentMapButton(true)}
-                {renderSettingsButton(true)}
+            {(extraActions || backgroundSyncRunning) && (
+              <div className="-mx-1 flex min-w-0 items-center overflow-hidden">
+                <div className="flex min-w-0 flex-1 touch-pan-x items-center gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {extraActions}
+                  {backgroundSyncRunning && (
+                    <button
+                      onClick={onKillSync}
+                      disabled={killingSync || !onKillSync}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700 touch-manipulation disabled:opacity-50"
+                      title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing... (tap to stop)'}
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="hidden md:grid grid-cols-12 gap-4 items-center">
@@ -521,9 +436,7 @@ export default function AppHeader({
                   {new Date(lastUpdated).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
                 </span>
               ) : null}
-            </div>
 
-            <div className="col-span-4 flex items-center justify-end gap-2">
               {dashboardActions && (
                 <div className="flex items-center">
                   <button
@@ -552,16 +465,11 @@ export default function AppHeader({
                   </button>
                 </div>
               )}
+            </div>
 
+            <div className="col-span-4 flex items-center justify-end gap-2">
               {extraActions}
-
-              {renderPrimaryNav(false)}
-
-              {renderAgentMapButton(false)}
-
-              {renderSettingsButton(false)}
-
-              {renderUserMenu(false)}
+              {renderNavRail()}
             </div>
           </div>
         </div>
