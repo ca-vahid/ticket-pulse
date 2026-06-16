@@ -578,7 +578,7 @@ function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null
   return [
     `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;${mb ? 'margin-bottom:10px;' : ''}">`,
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:${tint};${borderStyle}border-radius:12px;"><tr>`,
-    `<td width="58" valign="middle" style="padding:11px 0 11px 14px;"><img src="${badge}" width="44" height="44" alt="" style="display:block;border:0;"></td>`,
+    `<td width="58" valign="middle" style="padding:8px 0 8px 14px;line-height:0;font-size:0;"><img src="${badge}" width="40" height="40" alt="" style="display:block;border:0;"></td>`,
     `<td valign="middle" style="padding:11px 0 11px 14px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:15px;line-height:20px;font-weight:700;color:${color};">${escapeHtml(title)}</div><div style="font-size:12.5px;line-height:17px;color:#64748b;margin-top:1px;">${escapeHtml(subtitle)}</div></td>`,
     `<td width="42" align="right" valign="middle" style="padding-right:16px;"><span style="font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:700;color:${color};">&rarr;</span></td>`,
     '</tr></table></a>',
@@ -792,7 +792,7 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
     phoneRow = [
       `<a href="tel:${escapeHtml(phoneHref)}" style="display:block;text-decoration:none;">`,
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr>',
-      `<td width="58" valign="middle" style="padding:12px 0 12px 14px;"><img src="${EMAIL_BADGE_PHONE}" width="44" height="44" alt="" style="display:block;border:0;"></td>`,
+      `<td width="58" valign="middle" style="padding:10px 0 10px 14px;line-height:0;font-size:0;"><img src="${EMAIL_BADGE_PHONE}" width="40" height="40" alt="" style="display:block;border:0;"></td>`,
       `<td valign="middle" style="padding:12px 0 12px 12px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;">${escapeHtml(phoneDisplay)}</div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
       '</tr></table></a>',
     ].join('');
