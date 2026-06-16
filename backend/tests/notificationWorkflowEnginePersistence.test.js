@@ -1044,7 +1044,7 @@ describe('notification workflow engine persistence', () => {
     expect(email.html).toContain("Can't wait until morning?");
     expect(email.html).toContain('Request immediate support');
     expect(email.html).toContain(publicStatusUrl);
-    expect(email.html).toContain('Check status');
+    expect(email.html).toContain('Check your ticket status');
     expect(email.html).not.toContain('Raise urgency');
   });
 
@@ -1088,7 +1088,7 @@ describe('notification workflow engine persistence', () => {
         afterHoursSupport: expect.objectContaining({ applied: true }),
       }),
     }));
-    expect(sendStep.output.htmlBody).toContain('Check status');
+    expect(sendStep.output.htmlBody).toContain('Check your ticket status');
     expect(sendStep.output.htmlBody).toContain('Request immediate support');
     expect(sendStep.output.actionLinks.afterHoursSupport).toEqual(expect.objectContaining({
       hasActiveContact: true,

@@ -55,7 +55,6 @@ import {
   EMAIL_BADGE_REQUEST,
   EMAIL_BADGE_PHONE,
   EMAIL_BADGE_FEEDBACK,
-  EMAIL_GLYPH_CLOCK_WHITE,
   EMAIL_FEEDBACK_ROCKS_BY_THEME,
 } from './notificationEmailIcons.js';
 
@@ -586,18 +585,6 @@ function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null
   ].join('');
 }
 
-// The navy "Check status" button (a table-cell button so the padding/background survive Outlook).
-// The white clock glyph is hidden in Outlook (mso); there it shows the label + arrow only.
-function navyCheckStatusButtonHtml(url) {
-  return [
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;margin:0 auto;"><tr>',
-    '<td class="tp-navy-btn" bgcolor="#143f9c" style="background:#143f9c;border-radius:10px;padding:9px 16px;text-align:center;box-shadow:0 2px 0 #0e2f74;">',
-    `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;line-height:16px;text-decoration:none;white-space:nowrap;">`,
-    `<!--[if !mso]><!--><img src="${EMAIL_GLYPH_CLOCK_WHITE}" width="15" height="15" alt="" style="vertical-align:middle;margin-top:-2px;margin-right:6px;border:0;"><!--<![endif]-->`,
-    'Check status &rarr;</a></td></tr></table>',
-  ].join('');
-}
-
 // Per-action styling for the minimalist business-hours rows (badge + colour + copy).
 const ROW_STYLE = {
   publicStatus: { badge: EMAIL_BADGE_STATUS, title: 'Check status', subtitle: 'Live SLA timer, assignee & latest note', color: '#143f9c', tint: '#f4f7fe' },
@@ -695,12 +682,6 @@ function afterHoursSupportAction(url, context = {}) {
     rotationLabel: activeContact.rotationLabel || support.rotationLabel || null,
   };
 }
-
-// Hover-darken for the navy "Check status" button, plus a mobile stack rule for the after-hours
-// number/Check-status row. :hover and @media are honoured by Outlook on the web, Gmail, Apple Mail
-// and mobile clients; Outlook desktop ignores both and shows the static side-by-side layout (it has
-// the width). On phones the number stacks above a full-width Check status button.
-const ACTION_STYLE = '<style>.tp-navy-btn{transition:background .12s ease}.tp-navy-btn:hover{background:#0e2f74 !important}@media only screen and (max-width:480px){.tp-comb-main{display:block !important;width:100% !important}.tp-comb-side{display:block !important;width:100% !important;padding:10px 12px 2px !important;text-align:center !important}}</style>';
 
 // Extra breathing room between the action card and the footer/signature that follows it.
 const ACTION_FOOTER_GAP = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td height="22" style="height:22px;line-height:22px;font-size:1px;">&nbsp;</td></tr></table>';
@@ -802,30 +783,29 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
   // Primary: "Request immediate support" as a bordered red row (pages on-call).
   const requestRow = actionRowHtml({
     url: action.url, badge: EMAIL_BADGE_REQUEST, title: 'Request immediate support',
-    subtitle: 'Pages the on-call engineer right now', color: '#c0392f', tint: '#fff6f5', border: '#f0c7c2', mb: true,
+    subtitle: 'Pages the on-call engineer right now', color: '#c0392f', tint: '#fff6f5', border: '#f0c7c2', mb: Boolean(phone),
   });
 
-  // Combined row: the emergency number (prominent, ~75%) + a navy "Check status" button (~25%).
-  // With no resolved phone we drop the number and show just the Check status button.
-  const navyBtn = statusUrl ? navyCheckStatusButtonHtml(statusUrl) : '';
-  let combined = '';
+  // The on-call number as a full-width row (tap to call). No embedded button.
+  let phoneRow = '';
   if (phone) {
-    const numberCell = [
-      `<a href="tel:${escapeHtml(phoneHref)}" style="display:block;text-decoration:none;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>`,
+    phoneRow = [
+      `<a href="tel:${escapeHtml(phoneHref)}" style="display:block;text-decoration:none;">`,
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr>',
       `<td width="58" valign="middle" style="padding:12px 0 12px 14px;"><img src="${EMAIL_BADGE_PHONE}" width="44" height="44" alt="" style="display:block;border:0;"></td>`,
       `<td valign="middle" style="padding:12px 0 12px 12px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;">${escapeHtml(phoneDisplay)}</div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
       '</tr></table></a>',
     ].join('');
-    // Percent widths + classes so the row is fluid and stacks on phones (via the @media rule).
-    const mainCell = `<td class="${navyBtn ? 'tp-comb-main' : ''}" width="${navyBtn ? '68%' : '100%'}" valign="middle" style="padding:0;">${numberCell}</td>`;
-    const btnCell = navyBtn ? `<td class="tp-comb-side" width="32%" valign="middle" align="center" style="padding:10px 10px;">${navyBtn}</td>` : '';
-    combined = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;table-layout:fixed;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr>${mainCell}${btnCell}</tr></table>`;
-  } else if (navyBtn) {
-    combined = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr><td align="center" valign="middle" style="padding:12px;">${navyBtn}</td></tr></table>`;
   }
 
-  return ACTION_STYLE
-    + actionCardHtml('transparent', '#f1cfca', '16px', '16px', heading + requestRow + combined)
+  // When the public-status link is also enabled, show it as a quiet themed text
+  // link (no button) so it matches the warm after-hours palette instead of the
+  // navy app blue.
+  const statusLink = statusUrl
+    ? `<div style="text-align:center;margin-top:14px;font-family:Arial,Helvetica,sans-serif;"><a href="${escapeHtml(statusUrl)}" target="_blank" rel="noopener noreferrer" style="font-size:13px;line-height:18px;font-weight:700;color:#c0392f;text-decoration:none;border-bottom:1px solid #e3b1aa;padding-bottom:1px;">Check your ticket status &rarr;</a></div>`
+    : '';
+
+  return actionCardHtml('transparent', '#f1cfca', '16px', '16px', heading + requestRow + phoneRow + statusLink)
     + ACTION_FOOTER_GAP;
 }
 
@@ -834,7 +814,7 @@ function afterHoursEmergencyText(action, publicAction = null) {
     "Can't wait until morning?",
     `Request immediate support: ${action.url}`,
     action.phone ? `Emergency number: ${formatPhoneForDisplay(action.phone)}` : null,
-    publicAction ? `Check status: ${publicAction.url}` : null,
+    publicAction ? `Check your ticket status: ${publicAction.url}` : null,
   ].filter((line) => line !== null && line !== undefined).join('\n');
 }
 
