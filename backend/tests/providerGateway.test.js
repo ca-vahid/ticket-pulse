@@ -148,6 +148,80 @@ describe('ProviderGateway', () => {
     expect(emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'provider_fallback_started', provider: 'openai' }));
   });
 
+  test('falls back with a fresh attempt signal when the primary attempt times out', async () => {
+    setAttempts([
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      {
+        provider: 'openai',
+        model: 'gpt-5.5',
+        fallbackFromProvider: 'anthropic',
+        fallbackReason: 'primary_request_failed',
+      },
+    ]);
+    anthropicToolResponseMock.mockImplementation(({ signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    }));
+    openAiToolResponseMock.mockImplementation(({ signal }) => {
+      expect(signal.aborted).toBe(false);
+      return Promise.resolve({
+        message: { content: [{ type: 'text', text: 'fallback ok' }] },
+        usage: { inputTokens: 8, outputTokens: 4 },
+      });
+    });
+
+    const result = await gateway.runToolTurn({
+      operation: 'assignment_pipeline',
+      workspaceId: 1,
+      messages: [],
+      tools: [],
+      attemptTimeoutMs: 5,
+    });
+
+    expect(result).toMatchObject({
+      provider: 'openai',
+      fallbackUsed: true,
+    });
+    expect(recordFailureMock).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'anthropic',
+      error: expect.objectContaining({ code: 'ai_provider_attempt_timeout' }),
+    }));
+    expect(recordSuccessMock).toHaveBeenCalledWith(expect.objectContaining({ provider: 'openai' }));
+  });
+
+  test('skips fallback when the parent signal is already aborted', async () => {
+    setAttempts([
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      {
+        provider: 'openai',
+        model: 'gpt-5.5',
+        fallbackFromProvider: 'anthropic',
+        fallbackReason: 'primary_request_failed',
+      },
+    ]);
+    const parentAbort = new Error('Notification LLM pipeline exceeded total timeout');
+    const controller = new AbortController();
+    anthropicToolResponseMock.mockImplementation(() => {
+      controller.abort(parentAbort);
+      return Promise.reject(new Error('Request was aborted.'));
+    });
+    const emit = jest.fn();
+
+    await expect(gateway.runToolTurn({
+      operation: 'assignment_pipeline',
+      workspaceId: 1,
+      messages: [],
+      tools: [],
+      signal: controller.signal,
+      emit,
+    })).rejects.toThrow('Notification LLM pipeline exceeded total timeout');
+
+    expect(openAiToolResponseMock).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'provider_fallback_skipped',
+      reason: 'parent_signal_aborted',
+    }));
+  });
+
   test('does not fall back on schema validation failure', async () => {
     setAttempts([
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },

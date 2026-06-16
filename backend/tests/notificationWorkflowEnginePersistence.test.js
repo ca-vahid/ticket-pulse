@@ -600,8 +600,14 @@ describe('notification workflow engine persistence', () => {
       status: 'completed',
       output: expect.objectContaining({
         templateFallbackUsed: true,
-        templateFallbackSource: 'provider_or_schema',
+        templateFallbackSource: 'provider_timeout',
+        failureType: 'provider_timeout',
+        providerErrorClass: 'api_timeout',
         templateFallbackReason: expect.stringContaining('Notification LLM generation exceeded'),
+        timeoutDiagnostics: expect.objectContaining({
+          timeoutLayer: 'llm_node',
+          providerErrorClass: 'api_timeout',
+        }),
       }),
     }));
     expect(prismaMock.notificationWorkflowRun.update).toHaveBeenCalledWith(expect.objectContaining({
@@ -1904,6 +1910,111 @@ describe('notification workflow engine persistence', () => {
     expect(providerRunToolTurnMock).toHaveBeenCalledTimes(1);
     expect(prismaMock.notificationDelivery.create).not.toHaveBeenCalled();
     expect(processDeliveryMock).not.toHaveBeenCalled();
+  });
+
+  test('tool-enabled LLM timeout fallback is audited separately from schema failures', async () => {
+    prismaMock.notificationLlmToolPolicy.findUnique.mockResolvedValue({
+      id: 7,
+      workspaceId: 1,
+      mode: 'tools_enabled',
+      enabledTools: ['get_notification_context'],
+      toolSettings: {
+        context: {
+          includeThreadHistory: true,
+          includeSimilarTickets: true,
+          includeOutageSignals: true,
+          maxThreadEntries: 6,
+          maxSimilarTickets: 5,
+          lookbackHours: [1, 4, 24],
+        },
+        outageSignals: {
+          watchThreshold: 3,
+        },
+        safety: {
+          maxContextBytes: 40000,
+          maxToolOutputBytes: 12000,
+        },
+      },
+      maxTurns: 4,
+      maxToolCalls: 6,
+      totalTimeoutMs: 60000,
+      perToolTimeoutMs: 3000,
+      includePrivateNotes: false,
+      redactionEnabled: true,
+      policyVersion: 1,
+      updatedBy: null,
+    });
+    providerRunToolTurnMock.mockImplementationOnce(({ emit }) => {
+      emit?.({
+        type: 'provider_attempt_failed',
+        provider: 'anthropic',
+        model: 'claude-sonnet-test',
+        attemptNumber: 1,
+        errorClass: 'api_timeout',
+        message: 'Request was aborted.',
+        retryable: true,
+      });
+      return Promise.reject(new Error('Request was aborted.'));
+    });
+
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    definition.nodes.push({
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 700, y: 120 },
+      data: {
+        prompt: 'Generate email content for {{ ticket.subject }}',
+      },
+    });
+    const templateNode = definition.nodes.find((node) => node.type === 'template_render');
+    templateNode.data.contentSource = 'llm_with_template_fallback';
+    definition.edges = definition.edges.map((edge) => (
+      edge.id === 'recipients-to-template'
+        ? { ...edge, id: 'recipients-to-llm', target: 'llm-generate' }
+        : edge
+    ));
+    definition.edges.push({ id: 'llm-to-template', source: 'llm-generate', target: 'template' });
+
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext,
+      dryRun: false,
+      executeLlm: true,
+      triggerSource: 'test',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.state.llm).toEqual(expect.objectContaining({
+      failed: true,
+      failureType: 'provider_timeout',
+      templateFallbackSource: 'provider_timeout',
+      providerErrorClass: 'api_timeout',
+    }));
+    expect(result.state.llm.timeoutDiagnostics).toEqual(expect.objectContaining({
+      toolMode: true,
+      policyTotalTimeoutMs: 60000,
+      providerAttemptTimeoutMs: expect.any(Number),
+      effectiveProviderAttemptTimeoutMs: expect.any(Number),
+      turn: 1,
+      providerEvents: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'provider_attempt_failed',
+          provider: 'anthropic',
+          errorClass: 'api_timeout',
+        }),
+      ]),
+    }));
+    const llmStep = result.steps.find((step) => step.nodeType === 'llm_generate');
+    expect(llmStep.output).toEqual(expect.objectContaining({
+      failureType: 'provider_timeout',
+      templateFallbackSource: 'provider_timeout',
+      providerErrorClass: 'api_timeout',
+      timeoutDiagnostics: expect.objectContaining({
+        policyTotalTimeoutMs: 60000,
+      }),
+    }));
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalled();
   });
 
   test('condition true branch runs the recipient, template, and send path', async () => {

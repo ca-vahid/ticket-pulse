@@ -780,6 +780,8 @@ function fallbackSourceForAuditRun(run = {}) {
     || firstLlmForAuditRun(run)?.templateFallbackSource
     || null;
   if (!source) return 'none';
+  if (source === 'provider_timeout') return 'provider_timeout';
+  if (source === 'schema_validation') return 'schema_validation';
   if (source === 'provider_or_schema') return 'provider_or_schema';
   if (source === 'provider' || source === 'workflow') return 'provider';
   return source;
@@ -1189,6 +1191,9 @@ router.get(
     const providerSchemaFailures7d = (providerFailures7d || [])
       .filter((row) => ['schema_validation', 'bad_request', 'invalid_request'].includes(row.errorClass))
       .reduce((sum, row) => sum + (row._count?._all || 0), 0);
+    const providerTimeoutFailures7d = (providerFailures7d || [])
+      .filter((row) => ['api_timeout', 'stream_stall'].includes(row.errorClass))
+      .reduce((sum, row) => sum + (row._count?._all || 0), 0);
     const providerFailuresSummary7d = (providerFailures7d || []).map((row) => ({
       provider: row.provider || null,
       model: row.model || null,
@@ -1200,6 +1205,13 @@ router.get(
         type: 'provider_schema_failures',
         message: 'Notification workflow generation has provider/schema failures in the last 7 days.',
         count: providerSchemaFailures7d,
+      });
+    }
+    if (providerTimeoutFailures7d > 0) {
+      warnings.push({
+        type: 'provider_timeout_failures',
+        message: 'Notification workflow generation has provider timeout or stream-stall failures in the last 7 days.',
+        count: providerTimeoutFailures7d,
       });
     }
 
@@ -1220,6 +1232,7 @@ router.get(
         duplicateSuppressions7d,
         providerFailuresSummary7d,
         providerSchemaFailures7d,
+        providerTimeoutFailures7d,
         notificationWorkflowHealthThresholds: WORKFLOW_HEALTH_THRESHOLDS,
         workflowQuality7d: {
           llmGenerateSteps: llmStepRows7d.length,

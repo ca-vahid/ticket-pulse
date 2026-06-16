@@ -75,7 +75,7 @@ export const DEFAULT_NOTIFICATION_LLM_TOOL_POLICY = {
   toolSettings: DEFAULT_NOTIFICATION_LLM_TOOL_SETTINGS,
   maxTurns: 4,
   maxToolCalls: 6,
-  totalTimeoutMs: 20000,
+  totalTimeoutMs: 60000,
   perToolTimeoutMs: 3000,
   includePrivateNotes: false,
   redactionEnabled: true,
