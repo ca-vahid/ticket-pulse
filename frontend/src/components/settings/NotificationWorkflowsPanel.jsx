@@ -4433,6 +4433,15 @@ function WorkflowRow({ workflow, selectedId, onSelect, nested = false }) {
         {roleLine}
       </div>
       <div className="flex flex-wrap items-center gap-1">
+        {workflow.isDefaultVariant ? (
+          <span className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 ring-1 ring-blue-200">
+            Default
+          </span>
+        ) : (
+          <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 ring-1 ring-slate-200">
+            Variant
+          </span>
+        )}
         {afterHours && (
           <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200">
             <Moon className="h-2.5 w-2.5" /> After-hours
@@ -4472,36 +4481,29 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
   return (
     <div className="divide-y divide-slate-200">
       {[...groups.entries()].map(([triggerType, bucket]) => {
-        const hasCustoms = bucket.customs.length > 0;
         const total = (bucket.default ? 1 : 0) + bucket.customs.length;
-        const visuals = triggerVisuals(triggerType);
-        const GroupIcon = visuals.icon;
+        const GroupIcon = triggerVisuals(triggerType).icon;
         return (
           <section key={triggerType} className="bg-white">
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-700">
+            {/* Unified, prominent trigger sub-header — identical styling for every
+                group so the list reads consistently; only the leading glyph
+                differs by trigger type. The default row is marked "Default" and
+                everything beneath it is a variant. */}
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-y border-slate-200 bg-slate-100 px-3 py-1.5">
               <span className="flex min-w-0 items-center gap-2">
-                <span className={cls('flex h-6 w-6 shrink-0 items-center justify-center rounded-md ring-1', visuals.chip)}>
-                  <GroupIcon className={cls('h-3.5 w-3.5', visuals.icon_)} />
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white text-slate-500 ring-1 ring-slate-200">
+                  <GroupIcon className="h-3 w-3" />
                 </span>
-                <span className="truncate text-xs font-bold uppercase tracking-wide">{EVENT_LABELS[triggerType] || triggerType}</span>
+                <span className="truncate text-[11px] font-bold uppercase tracking-wider text-slate-600">{EVENT_LABELS[triggerType] || triggerType}</span>
               </span>
-              <span className={cls('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ring-1', visuals.chip)}>{total}</span>
+              <span className="shrink-0 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{total}</span>
             </div>
             {bucket.default && (
               <WorkflowRow workflow={bucket.default} selectedId={selectedId} onSelect={onSelect} />
             )}
-            {hasCustoms && (
-              <div className="border-l-2 border-slate-100">
-                {bucket.default && (
-                  <div className="px-3 py-1 pl-5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                    {bucket.customs.length} variant{bucket.customs.length === 1 ? '' : 's'}
-                  </div>
-                )}
-                {bucket.customs.map((workflow) => (
-                  <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} nested={Boolean(bucket.default)} />
-                ))}
-              </div>
-            )}
+            {bucket.customs.map((workflow) => (
+              <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} nested={Boolean(bucket.default)} />
+            ))}
           </section>
         );
       })}
