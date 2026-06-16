@@ -4410,7 +4410,7 @@ function WorkflowRow({ workflow, selectedId, onSelect, nested = false }) {
         'group flex w-full flex-col gap-1.5 border-l-4 px-3 py-2.5 text-left transition-colors',
         nested && 'pl-5',
         isSelected
-          ? 'border-l-blue-600 bg-blue-100 ring-1 ring-inset ring-blue-200 hover:bg-blue-100'
+          ? 'relative z-[1] border-l-blue-600 bg-blue-50 shadow-md ring-2 ring-inset ring-blue-600 hover:bg-blue-50'
           : isArchived
             ? 'border-l-slate-300 bg-slate-100 hover:bg-slate-200/70'
             : isEnabled
