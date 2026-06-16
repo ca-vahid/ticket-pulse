@@ -24,6 +24,7 @@ export const AUTO_REPAIR_GUARD_CHECKS = Object.freeze([
   'unsupported_outage_claims',
   'unsupported_timing_claims',
   'similar_report_claim_without_evidence',
+  'generated_public_links',
   'unknown_cited_evidence_ids',
 ]);
 
@@ -69,6 +70,7 @@ const PHONE_CONTEXT_PATTERN = /\b(?:phone|mobile|cell|call|text|sms)\s*(?:number
 const BASE64_IMAGE_PATTERN = /data:image\/[a-z0-9.+-]+;base64,/i;
 const INLINE_IMAGE_PATTERN = /<img\b|\b(?:avatar|photo)\s*(?:url|image|link)?\s*[:=]/i;
 const UNSAFE_HTML_PATTERN = /<script\b|javascript:/i;
+const GENERATED_PUBLIC_LINK_PATTERN = /<a\b[^>]*\bhref\s*=|https?:\/\/[^\s"'<>]+|www\.[^\s"'<>]+/i;
 const EMOJI_PATTERN = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
 const PLAYFUL_COPY_PATTERN = /\b(?:bedrock|rock solid|launchpad|launch pad|blast off|mission control|magic|sparkle|sprinkle|wizard|core sample|loose colluvium|good ground)\b/i;
 const SENSITIVE_CONTEXT_PATTERN = /\b(?:security|identity|access|password|mfa|sso|vpn|urgent|high|onboarding|new hire|hardware|laptop|desktop|workstation|failure|failed|executive|vip)\b/i;
@@ -83,6 +85,7 @@ const COPY_REPAIR_GUARDRAILS = new Set([
   'unsupported_outage_claims',
   'unsupported_timing_claims',
   'similar_report_claim_without_evidence',
+  'generated_public_links',
   'emoji',
   'playful_tone',
 ]);
@@ -371,7 +374,10 @@ function replaceHtmlBlocks(value = '', pattern, replacement = null) {
     : /<(p|li|div)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi;
   const nextHtml = html.replace(blockPattern, (match, tag, attrs = '', inner) => {
     const originalText = stripHtml(inner);
-    const repaired = removeMatchingSentences(originalText, pattern, null);
+    const blockHasIssue = pattern.test(match);
+    const repaired = blockHasIssue
+      ? { changed: true, removed: [originalText || stripHtml(match)], text: '' }
+      : removeMatchingSentences(originalText, pattern, null);
     if (!repaired.changed) return match;
     changed = true;
     removed.push(...repaired.removed);
@@ -467,6 +473,9 @@ function repairGuardrailPayload(payload, issue, contextBundle) {
   if (issue.id === 'similar_report_claim_without_evidence') {
     return repairSentencePayload(payload, SIMILAR_REPORT_CLAIM_PATTERN, null);
   }
+  if (issue.id === 'generated_public_links') {
+    return repairSentencePayload(payload, GENERATED_PUBLIC_LINK_PATTERN, null);
+  }
   return { payload, removed: [] };
 }
 
@@ -475,6 +484,7 @@ function repairFailed(issue, content) {
   if (issue.id === 'unsupported_timing_claims') return UNSUPPORTED_TIMING_PATTERN.test(content);
   if (issue.id === 'unsupported_outage_claims') return /\b(global|company-wide|confirmed)\s+outage\b/i.test(content);
   if (issue.id === 'similar_report_claim_without_evidence') return SIMILAR_REPORT_CLAIM_PATTERN.test(content);
+  if (issue.id === 'generated_public_links') return GENERATED_PUBLIC_LINK_PATTERN.test(content);
   if (issue.id === 'emoji') return EMOJI_PATTERN.test(content);
   if (issue.id === 'playful_tone') return PLAYFUL_COPY_PATTERN.test(content);
   return false;
@@ -485,6 +495,7 @@ function repairSummary(issue, removed = []) {
   if (issue.id === 'unsupported_timing_claims') return 'Removed unsupported response or resolution-time wording; preserved the remaining generated copy.';
   if (issue.id === 'unsupported_outage_claims') return 'Removed unsupported outage wording; preserved the remaining generated copy.';
   if (issue.id === 'similar_report_claim_without_evidence') return 'Removed unsupported similar-report or broader-issue wording; preserved the remaining generated copy.';
+  if (issue.id === 'generated_public_links') return 'Removed generated link content; approved workflow links are appended by the rendering layer.';
   if (issue.id === 'emoji') return 'Removed emoji because this workflow uses a stricter tone mode.';
   if (issue.id === 'playful_tone') return 'Replaced playful wording because this workflow uses a stricter tone mode.';
   if (removed.length > 0) return `Removed ${removed.length} unsupported item${removed.length === 1 ? '' : 's'}; preserved the remaining generated copy.`;
@@ -636,6 +647,10 @@ export function guardNotificationEmailPayload(payload, {
 
   if (hasUnsupportedSimilarReportClaim(content, allowedPublicPhrases)) {
     handleIssue(guardIssue('similar_report_claim_without_evidence', 'Similar-report or broader-issue wording requires strict deterministic incident evidence.'));
+  }
+
+  if (GENERATED_PUBLIC_LINK_PATTERN.test(content)) {
+    handleIssue(guardIssue('generated_public_links', 'Requester-facing LLM output cannot include raw URLs or HTML links; workflow links are appended by the rendering layer.'));
   }
 
   const citedSignals = Array.isArray(payload?.citedSignals)

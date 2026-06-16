@@ -35,6 +35,9 @@ const eventContext = {
     freshserviceTicketId: 225001,
     subject: 'VPN outage for accounting',
     descriptionText: 'VPN is down. password=supersecret123',
+    publicStatusUrl: 'https://ticketpulse.example/ticket-status/sample-token',
+    raiseUrgencyUrl: 'https://ticketpulse.example/ticket-urgency/sample-token',
+    afterHoursEscalationUrl: 'https://ticketpulse.example/ticket-escalation/sample-token',
     status: 'Open',
     priorityLabel: 'High',
     category: 'Access',
@@ -200,6 +203,12 @@ describe('notification context enrichment service', () => {
       dueBy: '2026-06-03T23:00:00.000Z',
       firstResponseDueBy: '2026-06-01T18:00:00.000Z',
     }));
+    expect(bundle.actionLinks).toEqual(expect.objectContaining({
+      publicStatus: expect.objectContaining({ available: true, appendOnly: true }),
+      raiseUrgency: expect.objectContaining({ available: true, appendOnly: true }),
+      afterHoursSupport: expect.objectContaining({ available: true, appendOnly: true }),
+    }));
+    expect(JSON.stringify(bundle.actionLinks)).not.toContain('https://ticketpulse.example');
     expect(bundle.contextHash).toMatch(/^[a-f0-9]{64}$/);
 
     const summary = summarizeNotificationLlmContext(bundle);
@@ -229,6 +238,8 @@ describe('notification context enrichment service', () => {
     expect(prompt).toContain('"timingEvidence"');
     expect(prompt).toContain('"signalLevel": "possible_broader_issue"');
     expect(prompt).toContain('[REDACTED]');
+    expect(prompt).toContain('"appendOnly": true');
+    expect(prompt).not.toContain('https://ticketpulse.example');
   });
 
   test('returns a disabled summary when workspace policy is off', async () => {
