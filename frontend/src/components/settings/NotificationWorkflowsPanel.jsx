@@ -59,6 +59,7 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI } from '../../services/api';
+import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v3';
 
@@ -4467,7 +4468,43 @@ function WorkflowRow({ workflow, selectedId, onSelect, nested = false }) {
   );
 }
 
+function loadCollapsedTriggers(storageKey) {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey));
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
 function WorkflowList({ workflows, selectedId, onSelect }) {
+  const { currentWorkspace } = useWorkspace();
+  const storageKey = `tp_wf_collapsed_${currentWorkspace?.id ?? 'all'}`;
+  const [collapsed, setCollapsed] = useState(() => loadCollapsedTriggers(storageKey));
+
+  // Re-read remembered state when the workspace changes.
+  useEffect(() => {
+    setCollapsed(loadCollapsedTriggers(storageKey));
+  }, [storageKey]);
+
+  const persist = (nextSet) => {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify([...nextSet]));
+    } catch {
+      /* storage may be unavailable; collapse still works for the session */
+    }
+  };
+  const toggleGroup = (triggerType) => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(triggerType)) next.delete(triggerType);
+      else next.add(triggerType);
+      persist(next);
+      return next;
+    });
+  };
+
   if (!workflows.length) {
     return (
       <div className="px-3 py-6 text-center text-xs leading-5 text-slate-500">
@@ -4477,36 +4514,58 @@ function WorkflowList({ workflows, selectedId, onSelect }) {
   }
 
   const groups = buildWorkflowGroups(workflows);
+  const triggerTypes = [...groups.keys()];
+  const allCollapsed = triggerTypes.length > 0 && triggerTypes.every((type) => collapsed.has(type));
+  const setAllCollapsed = (collapse) => {
+    const next = collapse ? new Set(triggerTypes) : new Set();
+    persist(next);
+    setCollapsed(next);
+  };
 
   return (
-    <div className="divide-y divide-slate-200">
-      {[...groups.entries()].map(([triggerType, bucket]) => {
-        const total = (bucket.default ? 1 : 0) + bucket.customs.length;
-        const GroupIcon = triggerVisuals(triggerType).icon;
-        return (
-          <section key={triggerType} className="bg-white">
-            {/* Unified, prominent trigger sub-header — identical styling for every
-                group so the list reads consistently; only the leading glyph
-                differs by trigger type. The default row is marked "Default" and
-                everything beneath it is a variant. */}
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-y border-slate-200 bg-slate-100 px-3 py-1.5">
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white text-slate-500 ring-1 ring-slate-200">
+    <div>
+      <div className="sticky top-0 z-20 flex items-center justify-end border-b border-slate-100 bg-white/95 px-3 py-1 backdrop-blur">
+        <button
+          type="button"
+          onClick={() => setAllCollapsed(!allCollapsed)}
+          className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800"
+        >
+          {allCollapsed ? 'Expand all' : 'Collapse all'}
+        </button>
+      </div>
+      <div className="divide-y divide-slate-200">
+        {[...groups.entries()].map(([triggerType, bucket]) => {
+          const total = (bucket.default ? 1 : 0) + bucket.customs.length;
+          const GroupIcon = triggerVisuals(triggerType).icon;
+          const isCollapsed = collapsed.has(triggerType);
+          return (
+            <section key={triggerType} className="bg-white">
+              {/* Unified, prominent, collapsible trigger sub-header — identical
+                  styling for every group (only the leading glyph differs). The
+                  default row is marked "Default"; everything beneath is a variant. */}
+              <button
+                type="button"
+                onClick={() => toggleGroup(triggerType)}
+                aria-expanded={!isCollapsed}
+                className="sticky top-[27px] z-10 flex w-full items-center gap-2 border-y border-l-4 border-indigo-100 border-l-indigo-500 bg-indigo-50 px-3 py-1.5 text-left transition-colors hover:bg-indigo-100/70"
+              >
+                <ChevronDown className={cls('h-4 w-4 shrink-0 text-indigo-400 transition-transform', isCollapsed && '-rotate-90')} />
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white text-indigo-600 ring-1 ring-indigo-200">
                   <GroupIcon className="h-3 w-3" />
                 </span>
-                <span className="truncate text-[11px] font-bold uppercase tracking-wider text-slate-600">{EVENT_LABELS[triggerType] || triggerType}</span>
-              </span>
-              <span className="shrink-0 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{total}</span>
-            </div>
-            {bucket.default && (
-              <WorkflowRow workflow={bucket.default} selectedId={selectedId} onSelect={onSelect} />
-            )}
-            {bucket.customs.map((workflow) => (
-              <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} nested={Boolean(bucket.default)} />
-            ))}
-          </section>
-        );
-      })}
+                <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-wider text-indigo-800">{EVENT_LABELS[triggerType] || triggerType}</span>
+                <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">{total}</span>
+              </button>
+              {!isCollapsed && bucket.default && (
+                <WorkflowRow workflow={bucket.default} selectedId={selectedId} onSelect={onSelect} />
+              )}
+              {!isCollapsed && bucket.customs.map((workflow) => (
+                <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} nested={Boolean(bucket.default)} />
+              ))}
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }
