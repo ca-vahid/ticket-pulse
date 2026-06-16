@@ -871,6 +871,29 @@ function emailBeforeStep(run, step) {
     || null;
 }
 
+// The stored audit eventContext has the after-hours on-call number redacted by
+// sanitizeWorkflowAuditPayload (the activeContact object is summarized away to keep
+// the historical record free of direct contact details). When we re-render for a
+// test/preview email we re-resolve the live on-call contact so the emergency card
+// shows the real number — exactly as an actual send would — while keeping the run's
+// original availability so a holiday/after-hours run still uses the emergency layout
+// even when it's re-tested during business hours.
+async function restoreAfterHoursContactForReRender(eventContext) {
+  const support = eventContext?.afterHoursSupport;
+  if (!support || typeof support !== 'object') return eventContext;
+  if (support.activeContact?.phone) return eventContext;
+  try {
+    const enriched = await enrichEventContextWithNotificationPolicy(eventContext);
+    if (!enriched?.afterHoursSupport?.activeContact?.phone) return eventContext;
+    return {
+      ...enriched,
+      availability: eventContext.availability || enriched.availability,
+    };
+  } catch {
+    return eventContext;
+  }
+}
+
 async function finalEmailFromSendStep(run, step) {
   // Re-render the email body (captured before the send step) through the current engine so
   // the appended action-link blocks use the CURRENT template, matching the Preview function.
@@ -879,7 +902,7 @@ async function finalEmailFromSendStep(run, step) {
   if (baseEmail && run?.workflow && run?.eventContext) {
     const rerendered = normalizeEmailPayload(await finalizeWorkflowSendEmail({
       workflow: run.workflow,
-      eventContext: run.eventContext,
+      eventContext: await restoreAfterHoursContactForReRender(run.eventContext),
       email: baseEmail,
       nodeData: sendNodeDataForStep(run, step),
       actionLinkRenderMode: 'live',
