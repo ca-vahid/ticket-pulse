@@ -1,5 +1,9 @@
 import { ValidationError } from '../utils/errors.js';
 import { validateRecommendationPriorityFields } from './priorityAssessment.js';
+import {
+  normalizeTicketTypeAssessment,
+  validateRecommendationTicketTypeFields,
+} from './ticketTypeAssessment.js';
 
 const CONFIDENCE_VALUES = new Set(['low', 'medium', 'high']);
 const FIT_VALUES = new Set(['exact', 'weak', 'none']);
@@ -12,6 +16,9 @@ const EMBEDDED_STRING_FIELDS = new Set([
   'priorityRationale',
   'assessedPriority',
   'priorityConfidence',
+  'ticketType',
+  'ticketTypeRationale',
+  'ticketTypeConfidence',
   'confidence',
   'categoryFit',
   'subcategoryFit',
@@ -179,6 +186,7 @@ export function normalizeSubmitRecommendationPayload(payload = {}) {
   };
 
   validateRecommendationPriorityFields(normalized);
+  validateRecommendationTicketTypeFields(normalized);
 
   normalized.overallReasoning = requiredText(normalized, 'overallReasoning');
   normalized.ticketClassification = requiredText(normalized, 'ticketClassification');
@@ -202,6 +210,12 @@ export function normalizeSubmitRecommendationPayload(payload = {}) {
   const subcategoryId = parseOptionalInteger(normalized.internalSubcategoryId, 'internalSubcategoryId');
   if (categoryId) normalized.internalCategoryId = categoryId;
   if (subcategoryId) normalized.internalSubcategoryId = subcategoryId;
+  const ticketTypeAssessment = normalizeTicketTypeAssessment(normalized);
+  if (ticketTypeAssessment) {
+    normalized.ticketType = ticketTypeAssessment.assessedTicketType;
+    normalized.ticketTypeRationale = ticketTypeAssessment.ticketTypeRationale;
+    normalized.ticketTypeConfidence = ticketTypeAssessment.ticketTypeConfidence;
+  }
   normalized.__normalizedFromString = normalizedFromString;
 
   return normalized;

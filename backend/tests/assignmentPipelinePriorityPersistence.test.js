@@ -99,6 +99,25 @@ describe('assignmentPipelineService priority persistence', () => {
     });
   });
 
+  test('persists assessed ticket type fields from the structured recommendation', async () => {
+    await assignmentPipelineService._persistTicketTypeAssessment(501, 3102, {
+      ticketType: 'incident',
+      ticketTypeRationale: 'A previously working VPN is now unavailable.',
+      ticketTypeConfidence: 'high',
+    });
+
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith({
+      where: { id: 501 },
+      data: expect.objectContaining({
+        assessedTicketType: 'Incident',
+        ticketTypeRationale: 'A previously working VPN is now unavailable.',
+        ticketTypeConfidence: 'high',
+        ticketTypeAssessedByRunId: 3102,
+        ticketTypeAssessedAt: expect.any(Date),
+      }),
+    });
+  });
+
   test('skips FreshService priority writeback for external priority-change reassessments', () => {
     expect(priorityWritebackSkipReasonForTrigger('priority_changed'))
       .toBe('external_priority_change_reassessment_no_writeback');

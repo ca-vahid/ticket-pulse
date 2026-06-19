@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import {
   Loader2, CheckCircle, XCircle, AlertTriangle, Brain, MessageSquare,
   Users, Search, MapPin, X, ChevronDown, ChevronRight, Star, Sparkles,
+  FileText,
 } from 'lucide-react';
 import {
   CopyBadge, mdComponents, StreamContent, cleanTranscript, processStreamEvent,
@@ -133,6 +134,7 @@ export function RecommendationCards({
   for (const t of allTechs) techMap[t.id] = t;
 
   const recommendations = getRecommendationList(data);
+  const ticketType = data?.ticketType || data?.assessedTicketType || null;
 
   if (!recommendations.length) {
     return (
@@ -148,6 +150,11 @@ export function RecommendationCards({
           )}
           {data?.ticketClassification && (
             <p className="text-xs text-yellow-600 mt-2 text-center">Classification: {data.ticketClassification}</p>
+          )}
+          {ticketType && (
+            <p className="text-xs text-yellow-700 mt-2 text-center" title={data?.ticketTypeRationale || undefined}>
+              Type: {ticketType}{data?.ticketTypeConfidence ? ` (${data.ticketTypeConfidence})` : ''}
+            </p>
           )}
           {(data?.categoryFit || data?.subcategoryFit || data?.taxonomyReviewNeeded) && (
             <p className={`text-xs mt-1 text-center ${data?.taxonomyReviewNeeded ? 'text-amber-700' : 'text-slate-500'}`}>
@@ -180,6 +187,16 @@ export function RecommendationCards({
 
   return (
     <div className="mt-3 sm:mt-4 border-t pt-3 sm:pt-4">
+      {ticketType && (
+        <div
+          className="mb-3 inline-flex max-w-full items-center gap-1.5 rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
+          title={data?.ticketTypeRationale || undefined}
+        >
+          <FileText className="h-3.5 w-3.5 flex-shrink-0" />
+          <span className="truncate">Type: {ticketType}</span>
+          {data?.ticketTypeConfidence && <span className="text-indigo-500">({data.ticketTypeConfidence})</span>}
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">
         {/* LEFT: Candidates (3/5 width) */}
         <div className="lg:col-span-3 space-y-2 sm:space-y-2.5">

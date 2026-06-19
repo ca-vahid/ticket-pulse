@@ -86,6 +86,7 @@ export function transformTicket(fsTicket, {
       descriptionText: fsTicket.description_text || null,
       status: fsTicket.deleted ? 'Deleted' : fsTicket.spam ? 'Spam' : (STATUS_MAP[fsTicket.status] || 'Open'),
       priority: PRIORITY_MAP[fsTicket.priority] || 3,
+      ticketType: fsTicket.type || null,
       assignedTechId: null,
       assignedFreshserviceId: fsTicket.responder_id || null,
       isSelfPicked: false,

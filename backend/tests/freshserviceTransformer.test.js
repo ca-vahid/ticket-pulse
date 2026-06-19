@@ -7,6 +7,7 @@ describe('FreshService transformer', () => {
       subject: 'VPN access problem',
       status: 2,
       priority: 2,
+      type: 'Service Request',
       requester_id: 99,
       requester: { name: 'Requester', email: 'requester@example.com' },
       created_at: '2026-05-29T18:30:00.000Z',
@@ -21,5 +22,6 @@ describe('FreshService transformer', () => {
     expect(ticket.ccEmails).toEqual(['manager@example.com']);
     expect(ticket.replyCcEmails).toEqual(['lead@example.com']);
     expect(ticket.fwdEmails).toEqual(['audit@example.com']);
+    expect(ticket.ticketType).toBe('Service Request');
   });
 });

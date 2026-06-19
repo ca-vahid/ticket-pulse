@@ -9,6 +9,7 @@ import {
 import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
+import { normalizeTicketType } from './ticketTypeAssessment.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 
@@ -51,6 +52,7 @@ function buildActionPreview(actions) {
     if (a.type === 'update_group') return `Move ticket #${a.ticketId} to group "${a.groupName || a.groupId}"`;
     if (a.type === 'update_custom_fields') return `Update Ticket Pulse category fields on ticket #${a.ticketId}`;
     if (a.type === 'update_priority') return `Update ticket #${a.ticketId} priority to ${a.priorityLabel || `P${a.priorityId}`}`;
+    if (a.type === 'update_ticket_type') return `Update ticket #${a.ticketId} type to ${a.ticketType}`;
     if (a.type === 'close') return `Close ticket #${a.ticketId}`;
     if (a.type === 'note') return `Add private note to ticket #${a.ticketId}`;
     return `${a.type} on ticket #${a.ticketId}`;
@@ -284,6 +286,55 @@ class FreshServiceActionService {
     return { actions, preview: buildActionPreview(actions), error: null };
   }
 
+  async buildTicketTypeWritebackAction(run) {
+    const ticket = run.ticket || await prisma.ticket.findUnique({
+      where: { id: run.ticketId },
+      select: {
+        freshserviceTicketId: true,
+        ticketType: true,
+        assessedTicketType: true,
+      },
+    });
+
+    const fsTicketId = Number(ticket?.freshserviceTicketId);
+    if (!fsTicketId) {
+      return { actions: [], preview: 'Cannot sync ticket type: ticket has no FreshService ID', error: 'missing_fs_ticket_id' };
+    }
+
+    let ticketType;
+    try {
+      ticketType = normalizeTicketType(ticket?.assessedTicketType || run.recommendation?.ticketType);
+    } catch (error) {
+      return { actions: [], preview: 'Cannot sync ticket type: ticket has no assessed type', error: 'missing_assessed_ticket_type' };
+    }
+
+    if (ticket?.ticketType) {
+      try {
+        if (normalizeTicketType(ticket.ticketType) === ticketType) {
+          return {
+            actions: [],
+            preview: `Ticket #${fsTicketId} already has type ${ticketType}`,
+            error: null,
+            skippedReason: 'ticket_type_already_current',
+          };
+        }
+      } catch {
+        // Keep going if the local mirror has an unexpected legacy value.
+      }
+    }
+
+    const actions = [{
+      type: 'update_ticket_type',
+      ticketId: fsTicketId,
+      ticketType,
+      localFields: {
+        ticketType,
+      },
+    }];
+
+    return { actions, preview: buildActionPreview(actions), error: null };
+  }
+
   async executePriorityWriteback(runId, workspaceId, dryRun = false) {
     const run = await prisma.assignmentPipelineRun.findUnique({
       where: { id: runId },
@@ -415,6 +466,149 @@ class FreshServiceActionService {
         },
       });
       logger.error('FreshService priority sync failed', { runId, error: err.message, freshserviceError });
+      return { success: false, error: err.message, preview, freshserviceError };
+    }
+  }
+
+  async executeTicketTypeWriteback(runId, workspaceId, dryRun = false) {
+    const run = await prisma.assignmentPipelineRun.findUnique({
+      where: { id: runId },
+      include: {
+        ticket: {
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            ticketType: true,
+            assessedTicketType: true,
+            ticketTypeRationale: true,
+          },
+        },
+      },
+    });
+
+    if (!run) {
+      logger.warn('FreshService ticket type sync: run not found', { runId });
+      return { success: false, error: 'Run not found' };
+    }
+
+    if (!isSkillHierarchyWorkspace(workspaceId)) {
+      const preview = 'FreshService ticket type writeback is only enabled for the IT skill hierarchy workspace';
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          ticketTypeWritebackStatus: 'skipped',
+          ticketTypeWritebackError: 'ticket_type_writeback_not_enabled_for_workspace',
+          ticketTypeWritebackPayload: buildSyncPayload([], preview, dryRun, {
+            kind: 'ticket_type_writeback',
+            skippedReason: 'ticket_type_writeback_not_enabled_for_workspace',
+          }),
+        },
+      });
+      logger.info('FreshService ticket type sync skipped by workspace feature flag', { runId, workspaceId });
+      return { success: true, skipped: true, error: 'ticket_type_writeback_not_enabled_for_workspace', preview, actions: [] };
+    }
+
+    const actionPlan = await this.buildTicketTypeWritebackAction(run);
+    const { actions, preview } = actionPlan;
+    const payloadData = buildSyncPayload(actions, preview, dryRun, { kind: 'ticket_type_writeback' });
+
+    if (actionPlan.error || actionPlan.skippedReason) {
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          ticketTypeWritebackStatus: 'skipped',
+          ticketTypeWritebackError: actionPlan.error || actionPlan.skippedReason,
+          ticketTypeWritebackPayload: actionPlan.skippedReason
+            ? { ...payloadData, skippedReason: actionPlan.skippedReason }
+            : payloadData,
+        },
+      });
+      return {
+        success: !actionPlan.error,
+        skipped: true,
+        error: actionPlan.error || actionPlan.skippedReason,
+        preview,
+        actions,
+      };
+    }
+
+    if (dryRun) {
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          ticketTypeWritebackStatus: 'dry_run',
+          ticketTypeWritebackError: null,
+          ticketTypeWritebackPayload: payloadData,
+        },
+      });
+      logger.info('FreshService ticket type sync dry-run', { runId, preview });
+      return { success: true, dryRun: true, preview, actions };
+    }
+
+    try {
+      const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+      if (!fsConfig?.domain || !fsConfig?.apiKey) {
+        throw new Error('FreshService not configured for this workspace');
+      }
+
+      const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+        priority: 'high',
+        source: 'freshservice-ticket-type-writeback',
+      });
+
+      const action = actions[0];
+      await client.updateTicketType(action.ticketId, action.ticketType);
+      await prisma.ticket.update({
+        where: { id: run.ticketId },
+        data: {
+          ticketType: action.ticketType,
+          updatedAt: new Date(),
+        },
+      }).catch((updateError) => {
+        logger.warn('FreshService ticket type sync: type updated but local mirror update failed', {
+          ticketId: run.ticketId,
+          freshserviceTicketId: action.ticketId,
+          runId,
+          error: updateError.message,
+        });
+      });
+
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          ticketTypeWritebackStatus: 'synced',
+          ticketTypeWritebackError: null,
+          ticketTypeWritebackPayload: payloadData,
+          ticketTypeWrittenAt: new Date(),
+        },
+      });
+
+      logger.info('FreshService ticket type sync completed', { runId, preview });
+      return { success: true, preview, actions };
+    } catch (err) {
+      const freshserviceError = extractFreshServiceError(err);
+      if (isFreshServiceReadOnlyError(err)) {
+        const skippedReason = readOnlyTicketSyncMessage();
+        await prisma.assignmentPipelineRun.update({
+          where: { id: runId },
+          data: {
+            ticketTypeWritebackStatus: 'skipped',
+            ticketTypeWritebackError: skippedReason,
+            ticketTypeWritebackPayload: { ...payloadData, freshserviceError, skippedReason },
+          },
+        });
+        logger.info('FreshService ticket type sync skipped for read-only ticket', { runId, preview, freshserviceError });
+        return { success: true, skipped: true, error: skippedReason, preview, freshserviceError };
+      }
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          ticketTypeWritebackStatus: 'failed',
+          ticketTypeWritebackError: err.message,
+          ticketTypeWritebackPayload: { ...payloadData, freshserviceError },
+        },
+      });
+      logger.error('FreshService ticket type sync failed', { runId, error: err.message, freshserviceError });
       return { success: false, error: err.message, preview, freshserviceError };
     }
   }

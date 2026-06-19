@@ -700,11 +700,21 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
   }
   if (recordType === 'writeback') {
     includeEvents = false;
-    runOnlyClauses.push({ priorityWritebackStatus: { not: null } });
+    runOnlyClauses.push({
+      OR: [
+        { priorityWritebackStatus: { not: null } },
+        { ticketTypeWritebackStatus: { not: null } },
+      ],
+    });
   }
   if (writebackStatuses) {
     includeEvents = false;
-    runOnlyClauses.push({ priorityWritebackStatus: { in: writebackStatuses } });
+    runOnlyClauses.push({
+      OR: [
+        { priorityWritebackStatus: { in: writebackStatuses } },
+        { ticketTypeWritebackStatus: { in: writebackStatuses } },
+      ],
+    });
   }
 
   const ticketSelect = {
@@ -719,6 +729,11 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
     priorityConfidence: true,
     priorityEvidence: true,
     priorityAssessedAt: true,
+    ticketType: true,
+    assessedTicketType: true,
+    ticketTypeRationale: true,
+    ticketTypeConfidence: true,
+    ticketTypeAssessedAt: true,
     createdAt: true,
     requester: { select: { name: true, email: true, department: true } },
     assignedTech: { select: { id: true, name: true } },
@@ -746,6 +761,7 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
       OR: [
         { triggerSource: { in: PRIORITY_AUDIT_TRIGGERS } },
         { priorityWritebackStatus: { not: null } },
+        { ticketTypeWritebackStatus: { not: null } },
         { notificationDeliveries: { some: {} } },
       ],
     },
@@ -860,6 +876,9 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
     updatedAt: event.updatedAt,
     priorityWritebackStatus: null,
     priorityWritebackError: null,
+    ticketTypeWritebackStatus: null,
+    ticketTypeWritebackError: null,
+    ticketTypeWritebackPayload: null,
     notificationDeliveries: event.notificationDeliveries || [],
     steps: [],
     ticket: event.ticket,
@@ -1306,6 +1325,8 @@ router.get('/ticket/:ticketId/latest-run', requireReviewer, asyncHandler(async (
           id: true, freshserviceTicketId: true, subject: true, status: true, priority: true,
           assessedPriority: true, assessedPriorityId: true, priorityRationale: true,
           priorityConfidence: true, priorityEvidence: true, priorityAssessedAt: true,
+          ticketType: true, assessedTicketType: true, ticketTypeRationale: true,
+          ticketTypeConfidence: true, ticketTypeAssessedAt: true,
           lastIngestSource: true, lastIngestedAt: true, lastWebhookIngestedAt: true, webhookIngestCount: true,
           category: true, ticketCategory: true, tpSkill: true, tpSubskill: true,
           internalCategory: { select: { id: true, name: true } },
@@ -1455,6 +1476,11 @@ router.get('/recent-tickets', requireAdmin, asyncHandler(async (req, res) => {
       priorityRationale: true,
       priorityConfidence: true,
       priorityAssessedAt: true,
+      ticketType: true,
+      assessedTicketType: true,
+      ticketTypeRationale: true,
+      ticketTypeConfidence: true,
+      ticketTypeAssessedAt: true,
       category: true,
       ticketCategory: true,
       internalCategory: { select: { id: true, name: true } },

@@ -17,7 +17,7 @@ import { normalizeFreshServiceGroupMemberIds } from './freshServiceGroupGuard.js
 export const TOOL_SCHEMAS = [
   {
     name: 'get_ticket_details',
-    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, FreshService group ID, raw FreshService categories, stored internal category/subcategory classification, taxonomy fit, previous AI category suggestions, and creation timestamps in workspace-local time.',
+    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, FreshService group ID, FreshService ticket type, raw FreshService categories, stored internal category/subcategory classification, taxonomy fit, previous AI category suggestions, and creation timestamps in workspace-local time.',
     input_schema: {
       type: 'object',
       properties: {
@@ -251,6 +251,20 @@ FORMAT: Plain text or simple Markdown. Use short paragraphs separated by a blank
           type: 'array',
           items: { type: 'string' },
           description: 'Optional concise evidence signals used for priority assessment, such as VIP requester, outage language, production impact, due date risk, or missing urgency evidence.',
+        },
+        ticketType: {
+          type: 'string',
+          enum: ['Incident', 'Service Request'],
+          description: 'FreshService ticket type assessment. Use Incident when something that used to work is broken or degraded; use Service Request when the user needs something new, changed, granted, or fulfilled.',
+        },
+        ticketTypeRationale: {
+          type: 'string',
+          description: 'Short admin-facing explanation of why the ticket is an Incident or Service Request.',
+        },
+        ticketTypeConfidence: {
+          type: 'string',
+          enum: ['low', 'medium', 'high'],
+          description: 'Confidence in the ticket type assessment based on available ticket details and history.',
         },
         agentBriefingHtml: {
           type: 'string',
@@ -2168,6 +2182,11 @@ async function getTicketDetails(ticketId) {
     priorityConfidence: ticket.priorityConfidence,
     priorityEvidence: ticket.priorityEvidence,
     priorityAssessedAt: ticket.priorityAssessedAt?.toISOString?.() || null,
+    freshserviceTicketType: ticket.ticketType,
+    assessedTicketType: ticket.assessedTicketType,
+    ticketTypeRationale: ticket.ticketTypeRationale,
+    ticketTypeConfidence: ticket.ticketTypeConfidence,
+    ticketTypeAssessedAt: ticket.ticketTypeAssessedAt?.toISOString?.() || null,
     category: ticket.category,
     subCategory: ticket.subCategory,
     ticketCategory: ticket.ticketCategory,

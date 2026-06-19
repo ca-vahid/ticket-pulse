@@ -26,6 +26,9 @@ import providerGateway from './aiProviders/providerGateway.js';
 import {
   buildPriorityTicketUpdateFields,
 } from './priorityAssessment.js';
+import {
+  buildTicketTypeTicketUpdateFields,
+} from './ticketTypeAssessment.js';
 import { normalizeSubmitRecommendationPayload } from './assignmentRecommendationValidation.js';
 
 const MAX_TURNS = 20;
@@ -661,7 +664,7 @@ class AssignmentPipelineService {
       systemPrompt += '\n\n## Workspace Priority Controls\nAssess priority for Ticket Pulse audit, but FreshService native priority writeback is disabled for this workspace. Ticket Pulse will save the assessed priority locally only.';
     }
     if (triggerSource === 'classification_only') {
-      systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category and subcategory. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory is saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields.';
+      systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category/subcategory, priority, and FreshService ticket type. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory, assessed priority, and ticket type are saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields plus allowed priority/type fields.';
     } else if (isPriorityAssessmentOnly) {
       systemPrompt += '\n\n## Priority-assessment-only Mode\nThis run exists to assess and persist Ticket Pulse priority for an active ticket. Still inspect and classify the ticket enough to produce valid structured output, but do not change the assignee and do not write an assignment recommendation as an action request. If the ticket is non-actionable noise/FYI, submit an empty recommendations array with closureNoticeHtml; the system will apply the workspace noise-dismissal policy. Do not call get_agent_availability, find_matching_agents, get_assignment_risk_signals, get_routing_boundary_context, get_requester_site_context, get_workload_stats, get_tech_ticket_history, or get_technician_ad_profile unless one of those tools is directly needed as evidence for priority or classification. Call submit_recommendation so assessedPriority, priorityRationale, priorityConfidence, and optional prioritySignals are saved for Ticket Pulse priority handling.';
       if (triggerSource === 'priority_changed') {
@@ -1064,6 +1067,7 @@ class AssignmentPipelineService {
             workspaceId,
           });
         }
+        await this._persistTicketTypeAssessment(ticketId, runId, recommendation);
         if (decision === 'noise_dismissed') {
           await prisma.ticket.update({
             where: { id: ticketId },
@@ -1146,6 +1150,17 @@ class AssignmentPipelineService {
             return null;
           });
         }
+
+        if (recommendation.ticketType || recommendation.assessedTicketType) {
+          await freshServiceActionService.executeTicketTypeWriteback(
+            runId,
+            workspaceId,
+            assignmentConfig?.dryRunMode ?? true,
+          ).catch((err) => {
+            logger.warn('FreshService ticket type writeback failed', { runId, decision, error: err.message });
+            return null;
+          });
+        }
       }
 
       // FreshService write-back — separate logic for assignments vs noise
@@ -1218,6 +1233,24 @@ class AssignmentPipelineService {
       });
     } catch (err) {
       logger.warn('Failed to persist assessed ticket priority', {
+        ticketId,
+        runId,
+        error: err.message,
+      });
+    }
+  }
+
+  async _persistTicketTypeAssessment(ticketId, runId, recommendation) {
+    const data = buildTicketTypeTicketUpdateFields(recommendation, runId, new Date());
+    if (!data) return;
+
+    try {
+      await prisma.ticket.update({
+        where: { id: ticketId },
+        data,
+      });
+    } catch (err) {
+      logger.warn('Failed to persist assessed ticket type', {
         ticketId,
         runId,
         error: err.message,

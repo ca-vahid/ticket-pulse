@@ -419,6 +419,90 @@ describe('freshServiceActionService priority writeback', () => {
   });
 });
 
+describe('freshServiceActionService ticket type writeback', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.assignmentPipelineRun.update.mockResolvedValue({});
+    prismaMock.ticket.update.mockResolvedValue({});
+    settingsRepositoryMock.getFreshServiceConfigForWorkspace.mockResolvedValue({
+      domain: 'example.freshservice.com',
+      apiKey: 'test-key',
+    });
+  });
+
+  const ticketTypeRun = (overrides = {}) => ({
+    id: 4101,
+    ticketId: 601,
+    workspaceId: 1,
+    recommendation: { ticketType: 'Incident' },
+    ticket: {
+      id: 601,
+      freshserviceTicketId: 228773,
+      ticketType: 'Service Request',
+      assessedTicketType: 'Incident',
+      ticketTypeRationale: 'The request describes a broken service.',
+    },
+    ...overrides,
+  });
+
+  test('builds native ticket type writeback actions with preview text', async () => {
+    const result = await freshServiceActionService.buildTicketTypeWritebackAction(ticketTypeRun());
+
+    expect(result.error).toBeNull();
+    expect(result.preview).toBe('Update ticket #228773 type to Incident');
+    expect(result.actions).toEqual([expect.objectContaining({
+      type: 'update_ticket_type',
+      ticketId: 228773,
+      ticketType: 'Incident',
+    })]);
+  });
+
+  test('mirrors successful ticket type writeback back to the local ticket', async () => {
+    const client = {
+      updateTicketType: jest.fn().mockResolvedValue({ id: 228773, type: 'Incident' }),
+    };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(ticketTypeRun());
+
+    const result = await freshServiceActionService.executeTicketTypeWriteback(4101, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(client.updateTicketType).toHaveBeenCalledWith(228773, 'Incident');
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith({
+      where: { id: 601 },
+      data: expect.objectContaining({ ticketType: 'Incident' }),
+    });
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 4101 },
+      data: expect.objectContaining({
+        ticketTypeWritebackStatus: 'synced',
+        ticketTypeWritebackError: null,
+        ticketTypeWrittenAt: expect.any(Date),
+      }),
+    });
+  });
+
+  test('skips ticket type writeback outside the IT skill hierarchy workspace', async () => {
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(ticketTypeRun({ workspaceId: 2 }));
+
+    const result = await freshServiceActionService.executeTicketTypeWriteback(4101, 2, false);
+
+    expect(result).toEqual(expect.objectContaining({
+      success: true,
+      skipped: true,
+      error: 'ticket_type_writeback_not_enabled_for_workspace',
+    }));
+    expect(freshserviceModule.createFreshServiceClient).not.toHaveBeenCalled();
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 4101 },
+      data: expect.objectContaining({
+        ticketTypeWritebackStatus: 'skipped',
+        ticketTypeWritebackError: 'ticket_type_writeback_not_enabled_for_workspace',
+      }),
+    });
+  });
+});
+
 describe('freshServiceActionService assignment notifications', () => {
   beforeEach(() => {
     jest.clearAllMocks();

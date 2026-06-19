@@ -48,6 +48,10 @@ describe('PipelineRunDetail priority display', () => {
           priorityRationale: 'The ticket reports a current outage blocking a project team.',
           priorityConfidence: 'high',
           priorityEvidence: ['outage', 'team impact'],
+          ticketType: 'Service Request',
+          assessedTicketType: 'Incident',
+          ticketTypeRationale: 'A working VPN is now unavailable.',
+          ticketTypeConfidence: 'high',
           createdAt: '2026-05-26T15:30:00.000Z',
           requester: { name: 'Casey Brown', department: 'Projects' },
         },
@@ -66,6 +70,9 @@ describe('PipelineRunDetail priority display', () => {
     expect(screen.getByText('FreshService currently shows Medium.')).toBeInTheDocument();
     expect(screen.getByText('TP Urgent')).toBeInTheDocument();
     expect(screen.getByText('FS Medium')).toBeInTheDocument();
+    expect(screen.getByText('Assessed: Incident')).toBeInTheDocument();
+    expect(screen.getByText('FreshService: Service Request')).toBeInTheDocument();
+    expect(screen.getByText('A working VPN is now unavailable.')).toBeInTheDocument();
   });
 
   test('shows priority writeback and alert delivery audit evidence', async () => {
@@ -79,6 +86,8 @@ describe('PipelineRunDetail priority display', () => {
         priorityWritebackStatus: 'synced',
         priorityWrittenAt: '2026-05-26T16:01:00.000Z',
         priorityWritebackPayload: { preview: 'Set priority to Urgent' },
+        ticketTypeWritebackStatus: 'dry_run',
+        ticketTypeWritebackPayload: { preview: 'Update ticket #223000 type to Incident' },
         ticket: {
           id: 502,
           freshserviceTicketId: 223000,
@@ -89,6 +98,8 @@ describe('PipelineRunDetail priority display', () => {
           assessedPriorityId: 4,
           priorityRationale: 'Production outage after hours.',
           priorityConfidence: 'high',
+          assessedTicketType: 'Incident',
+          ticketTypeRationale: 'Production service is unavailable.',
           createdAt: '2026-05-26T15:30:00.000Z',
           requester: { name: 'Casey Brown', department: 'Operations' },
         },
@@ -118,10 +129,12 @@ describe('PipelineRunDetail priority display', () => {
       workspaceTimezone="America/Vancouver"
     />);
 
-    expect(await screen.findByText('Priority and alert audit')).toBeInTheDocument();
+    expect(await screen.findByText('Assessment and alert audit')).toBeInTheDocument();
     expect(screen.getByText('After-hours priority pass')).toBeInTheDocument();
     expect(screen.getByText('synced')).toBeInTheDocument();
     expect(screen.getByText('Set priority to Urgent')).toBeInTheDocument();
+    expect(screen.getByText('dry run')).toBeInTheDocument();
+    expect(screen.getByText('Update ticket #223000 type to Incident')).toBeInTheDocument();
     expect(screen.getByText('SMS')).toBeInTheDocument();
     expect(screen.getByText('SM123')).toBeInTheDocument();
   });

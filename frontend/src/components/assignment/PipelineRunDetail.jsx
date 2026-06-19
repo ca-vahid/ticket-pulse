@@ -283,7 +283,7 @@ function AgentBriefingCard({ recommendation, decision }) {
   );
 }
 
-function TicketDetailsCard({ ticket }) {
+function TicketDetailsCard({ ticket, recommendation }) {
   const [expanded, setExpanded] = useState(false);
   const htmlHostRef = useRef(null);
 
@@ -331,6 +331,10 @@ function TicketDetailsCard({ ticket }) {
   ));
   const hasSuggestedCategory = Boolean(ticket.suggestedInternalCategoryName);
   const hasSuggestedSubcategory = Boolean(ticket.suggestedInternalSubcategoryName);
+  const assessedTicketType = ticket.assessedTicketType || recommendation?.ticketType || null;
+  const freshserviceTicketType = ticket.ticketType || null;
+  const ticketTypeRationale = ticket.ticketTypeRationale || recommendation?.ticketTypeRationale || null;
+  const ticketTypeConfidence = ticket.ticketTypeConfidence || recommendation?.ticketTypeConfidence || null;
 
   return (
     <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
@@ -378,6 +382,37 @@ function TicketDetailsCard({ ticket }) {
               <div className="min-w-0">
                 <p className="text-[10px] text-slate-400 uppercase font-medium">Department</p>
                 <p className="text-xs text-slate-600 truncate">{ticket.requester.department}</p>
+              </div>
+            </div>
+          )}
+          {(assessedTicketType || freshserviceTicketType) && (
+            <div className="flex items-start gap-1.5">
+              <FileText className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-400 uppercase font-medium">Type</p>
+                <div className="mt-0.5 flex flex-wrap gap-1">
+                  {assessedTicketType && (
+                    <span
+                      className="rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
+                      title={ticketTypeRationale || undefined}
+                    >
+                      Assessed: {assessedTicketType}
+                    </span>
+                  )}
+                  {freshserviceTicketType && (
+                    <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                      FreshService: {freshserviceTicketType}
+                    </span>
+                  )}
+                  {ticketTypeConfidence && (
+                    <span className="rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+                      {ticketTypeConfidence} confidence
+                    </span>
+                  )}
+                </div>
+                {ticketTypeRationale && (
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{ticketTypeRationale}</p>
+                )}
               </div>
             </div>
           )}
@@ -577,8 +612,10 @@ function isFreshServiceReadOnlyMessage(value) {
 function isReadOnlyFreshServiceRun(run) {
   const message = run?.syncError
     || run?.priorityWritebackError
+    || run?.ticketTypeWritebackError
     || run?.syncPayload?.freshserviceError?.body?.message
-    || run?.priorityWritebackPayload?.freshserviceError?.body?.message;
+    || run?.priorityWritebackPayload?.freshserviceError?.body?.message
+    || run?.ticketTypeWritebackPayload?.freshserviceError?.body?.message;
   return isFreshServiceReadOnlyMessage(message);
 }
 
@@ -695,9 +732,10 @@ function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Los_Angeles'
     ? run.steps.find((step) => step.stepName === 'after_hours_urgent_escalation')
     : null;
   const hasPriorityWriteback = Boolean(run.priorityWritebackStatus || run.priorityWrittenAt || run.priorityWritebackError);
+  const hasTicketTypeWriteback = Boolean(run.ticketTypeWritebackStatus || run.ticketTypeWrittenAt || run.ticketTypeWritebackError);
   const isPriorityAuditRun = PRIORITY_AUDIT_TRIGGERS.has(run.triggerSource);
 
-  if (!deliveries.length && !escalationStep && !hasPriorityWriteback && !isPriorityAuditRun) {
+  if (!deliveries.length && !escalationStep && !hasPriorityWriteback && !hasTicketTypeWriteback && !isPriorityAuditRun) {
     return null;
   }
 
@@ -711,12 +749,22 @@ function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Los_Angeles'
       : effectivePriorityWritebackStatus === 'dry_run'
         ? 'bg-yellow-100 text-yellow-700'
         : 'bg-slate-100 text-slate-600';
+  const effectiveTicketTypeWritebackStatus = run.ticketTypeWritebackStatus === 'failed' && isReadOnlyFreshServiceRun(run)
+    ? 'skipped'
+    : run.ticketTypeWritebackStatus;
+  const ticketTypeStatusClass = effectiveTicketTypeWritebackStatus === 'synced'
+    ? 'bg-green-100 text-green-700'
+    : effectiveTicketTypeWritebackStatus === 'failed'
+      ? 'bg-red-100 text-red-700'
+      : effectiveTicketTypeWritebackStatus === 'dry_run'
+        ? 'bg-yellow-100 text-yellow-700'
+        : 'bg-slate-100 text-slate-600';
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <ShieldCheck className="h-4 w-4 text-slate-500" />
-        <h4 className="text-sm font-semibold text-slate-800">Priority and alert audit</h4>
+        <h4 className="text-sm font-semibold text-slate-800">Assessment and alert audit</h4>
         {isPriorityAuditRun && (
           <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
             {run.triggerSource === 'priority_assessment_after_hours' ? 'After-hours priority pass' : 'Priority-only pass'}
@@ -724,7 +772,7 @@ function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Los_Angeles'
         )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white p-3">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">FreshService priority writeback</span>
@@ -741,6 +789,26 @@ function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Los_Angeles'
           {run.priorityWritebackError && (
             <p className={`mt-1 text-xs ${effectivePriorityWritebackStatus === 'skipped' ? 'text-slate-600' : 'text-red-600'}`}>
               {effectivePriorityWritebackStatus === 'skipped' ? 'FreshService made this ticket read-only before priority could be written.' : run.priorityWritebackError}
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">FreshService ticket type</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ticketTypeStatusClass}`}>
+              {effectiveTicketTypeWritebackStatus ? effectiveTicketTypeWritebackStatus.replace(/_/g, ' ') : 'not attempted'}
+            </span>
+          </div>
+          {run.ticketTypeWrittenAt && (
+            <p className="mt-1 text-xs text-slate-500">Written {formatDateTimeInTimezone(run.ticketTypeWrittenAt, workspaceTimezone)}</p>
+          )}
+          {run.ticketTypeWritebackPayload?.preview && (
+            <p className="mt-1 text-xs text-slate-600">{run.ticketTypeWritebackPayload.preview}</p>
+          )}
+          {run.ticketTypeWritebackError && (
+            <p className={`mt-1 text-xs ${effectiveTicketTypeWritebackStatus === 'skipped' ? 'text-slate-600' : 'text-red-600'}`}>
+              {effectiveTicketTypeWritebackStatus === 'skipped' ? 'FreshService made this ticket read-only before type could be written.' : run.ticketTypeWritebackError}
             </p>
           )}
         </div>
@@ -1478,7 +1546,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
       {/* Ticket Details + AI Reasoning side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4 items-start">
         <div className="lg:col-span-3">
-          <TicketDetailsCard ticket={ticket} />
+          <TicketDetailsCard ticket={ticket} recommendation={normalizedRecommendation} />
         </div>
         {normalizedRecommendation?.overallReasoning && (
           <div className="lg:col-span-2">

@@ -32,6 +32,9 @@ describe('assignment recommendation validation', () => {
       ...basePayload,
       recommendations: [{ ...basePayload.recommendations[0], techId: '648411', score: '0.72' }],
       taxonomyReviewNeeded: 'false',
+      ticketType: 'service_request',
+      ticketTypeRationale: 'The requester needs access provisioned.',
+      ticketTypeConfidence: 'high',
     });
 
     expect(normalized.recommendations[0]).toMatchObject({
@@ -40,6 +43,8 @@ describe('assignment recommendation validation', () => {
       score: 0.72,
     });
     expect(normalized.taxonomyReviewNeeded).toBe(false);
+    expect(normalized.ticketType).toBe('Service Request');
+    expect(normalized.ticketTypeConfidence).toBe('high');
   });
 
   test('recovers Anthropic parameter text accidentally embedded after a recommendations JSON string', () => {

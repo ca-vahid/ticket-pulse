@@ -118,6 +118,27 @@ function needsCategoryReview(ticket, recommendation = null) {
     || Boolean(getSuggestedCategoryLabel(ticket, recommendation));
 }
 
+function getTicketTypeMeta(ticket, recommendation = null) {
+  const assessed = ticket?.assessedTicketType || recommendation?.ticketType || recommendation?.assessedTicketType || null;
+  const freshservice = ticket?.ticketType || null;
+  const label = assessed || freshservice;
+  if (!label) return null;
+  const isIncident = String(label).toLowerCase() === 'incident';
+  const title = [
+    assessed ? `Assessed: ${assessed}` : null,
+    freshservice ? `FreshService: ${freshservice}` : null,
+    ticket?.ticketTypeConfidence || recommendation?.ticketTypeConfidence
+      ? `Confidence: ${ticket?.ticketTypeConfidence || recommendation?.ticketTypeConfidence}`
+      : null,
+    ticket?.ticketTypeRationale || recommendation?.ticketTypeRationale || null,
+  ].filter(Boolean).join(' - ');
+  return {
+    label,
+    title,
+    pill: isIncident ? 'bg-rose-50 text-rose-700' : 'bg-indigo-50 text-indigo-700',
+  };
+}
+
 function isVerifiedReboundContext(ctx) {
   return Boolean(
     ctx
@@ -2353,6 +2374,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const categoryLabel = categoryParts.label;
     const suggestedCategoryLabel = getSuggestedCategoryLabel(run.ticket, run.recommendation);
     const categoryNeedsReview = needsCategoryReview(run.ticket, run.recommendation);
+    const ticketTypeMeta = getTicketTypeMeta(run.ticket, run.recommendation);
     const ctx = run.reboundFrom || run.ticket?.lastReboundContext;
     const rowBg = flag === 'deleted' ? 'opacity-40 bg-red-50/30' : flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
     const isNew = newIds.has(run.id);
@@ -2394,8 +2416,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             <span className="font-semibold text-slate-600">{priorityMeta.source} priority:</span> {priorityMeta.rationale}
           </p>
         )}
-        {(categoryLabel || categoryNeedsReview) && (
+        {(categoryLabel || categoryNeedsReview || ticketTypeMeta) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] leading-none">
+            {ticketTypeMeta && (
+              <span className={`max-w-full truncate rounded px-1.5 py-0.5 font-semibold ${ticketTypeMeta.pill}`} title={ticketTypeMeta.title}>
+                {ticketTypeMeta.label}
+              </span>
+            )}
             {categoryLabel && (
               <span className="max-w-full truncate rounded bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-700" title={categoryLabel}>
                 {categoryLabel}
@@ -3026,6 +3053,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                           const categoryLabel = categoryParts.label;
                           const suggestedCategoryLabel = getSuggestedCategoryLabel(run.ticket, run.recommendation);
                           const categoryNeedsReview = needsCategoryReview(run.ticket, run.recommendation);
+                          const ticketTypeMeta = getTicketTypeMeta(run.ticket, run.recommendation);
                           // Use a div role=button instead of a real <button> so the
                           // ⋮ action buttons inside can keep their own click behavior
                           // without needing nested <button> hacks.
@@ -3089,6 +3117,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
                               {/* Category: split from Ticket so scan columns stay clean. */}
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
+                                {ticketTypeMeta && (
+                                  <div
+                                    className={`mb-1 inline-flex max-w-full truncate rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${ticketTypeMeta.pill}`}
+                                    title={ticketTypeMeta.title}
+                                  >
+                                    {ticketTypeMeta.label}
+                                  </div>
+                                )}
                                 {categoryLabel ? (
                                   <div className="min-w-0" title={categoryLabel}>
                                     <div className="truncate text-[11px] font-semibold leading-snug text-blue-700">
@@ -3799,8 +3835,10 @@ function isFreshServiceReadOnlyMessage(value) {
 function isReadOnlyFreshServiceRun(run) {
   const message = run?.syncError
     || run?.priorityWritebackError
+    || run?.ticketTypeWritebackError
     || run?.syncPayload?.freshserviceError?.body?.message
-    || run?.priorityWritebackPayload?.freshserviceError?.body?.message;
+    || run?.priorityWritebackPayload?.freshserviceError?.body?.message
+    || run?.ticketTypeWritebackPayload?.freshserviceError?.body?.message;
   return isFreshServiceReadOnlyMessage(message);
 }
 

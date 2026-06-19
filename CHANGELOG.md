@@ -6,6 +6,25 @@ All notable changes and improvements to Ticket Pulse.
 
 - No unreleased changes.
 
+## [2.96] - 2026-06-19
+
+### Features
+
+- **Incident vs Service Request assessment** saves the LLM ticket-type decision during assignment runs and writes the FreshService ticket type for the IT workspace.
+
+### Improvements
+
+- **Assignment history** now shows assessed ticket type, rationale, confidence, and FreshService type writeback status in run detail and queue/history rows.
+- **Workflow list scanning** keeps trigger groups compact with clearer sub-headers, default/variant markers, and stronger selected-workflow highlighting.
+
+### Fixes
+
+- **After-hours emails** use the themed status text link, restore the redacted on-call phone number in previews, and prevent narrow-client badge icon clipping.
+
+### Database
+
+- **Ticket type audit storage** adds ticket assessment columns and assignment-run writeback audit columns.
+
 ## [2.66] - 2026-06-01
 
 ### Improvements

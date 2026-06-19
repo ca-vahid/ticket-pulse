@@ -1,6 +1,17 @@
-export const APP_VERSION = '2.95';
+export const APP_VERSION = '2.96';
 
 export const changelog = [
+  {
+    version: '2.96',
+    date: 'June 19, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Incident vs Service Request assessment</strong> — assignment runs now save the LLM ticket-type decision and write the FreshService ticket type for the IT workspace alongside priority and category updates.' },
+      { type: 'improved', html: '<strong>Assignment history</strong> shows the assessed ticket type, confidence/rationale, and FreshService type writeback status in run details, live results, and queue/history rows.' },
+      { type: 'improved', html: '<strong>Workflow list scanning</strong> keeps trigger groups compact with clearer sub-headers, default/variant markers, and stronger selected-workflow highlighting.' },
+      { type: 'fixed', html: '<strong>After-hours emails</strong> use the themed status text link, restore the redacted on-call phone number in previews, and keep narrow-client badge icons from clipping.' },
+      { type: 'database', html: '<strong>Database updates</strong> add ticket type assessment fields on tickets and writeback audit fields on assignment pipeline runs.' },
+    ],
+  },
   {
     version: '2.95',
     date: 'June 13, 2026',
