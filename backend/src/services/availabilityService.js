@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import logger from '../utils/logger.js';
 import llmConfigService from './llmConfigService.js';
-import { getLocalDateBounds } from '../utils/timezone.js';
+import { getDateColumnMonthDay, getLocalDateBounds } from '../utils/timezone.js';
 import prisma from './prisma.js';
 
 /**
@@ -309,7 +309,7 @@ class AvailabilityService {
     });
 
     const matchedRecurring = recurringHolidays.find((h) => {
-      const holidayMonthDay = formatInTimeZone(new Date(h.date), timezone, 'MM-dd');
+      const holidayMonthDay = getDateColumnMonthDay(h.date);
       return holidayMonthDay === targetMonthDay;
     });
 

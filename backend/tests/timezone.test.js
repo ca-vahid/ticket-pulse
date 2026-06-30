@@ -1,4 +1,5 @@
 import {
+  getDateColumnMonthDay,
   formatDateInTimezone,
   getLocalDateBounds,
   getTodayRange,
@@ -26,5 +27,11 @@ describe('timezone helpers', () => {
 
     expect(start.toISOString()).toBe('2026-04-09T07:00:00.000Z');
     expect(end.toISOString()).toBe('2026-04-10T06:59:59.999Z');
+  });
+
+  test('getDateColumnMonthDay preserves DATE values at UTC midnight', () => {
+    const canadaDayDateColumn = new Date('2026-07-01T00:00:00.000Z');
+
+    expect(getDateColumnMonthDay(canadaDayDateColumn)).toBe('07-01');
   });
 });

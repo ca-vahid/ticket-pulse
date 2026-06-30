@@ -133,6 +133,27 @@ export function getLocalDateBounds(timezone = config.sync.defaultTimezone, date 
 }
 
 /**
+ * Extract MM-dd from a PostgreSQL DATE column represented as a JS Date.
+ *
+ * DATE columns do not have a timezone. Prisma represents them as a Date object,
+ * often at UTC midnight in production. Formatting that timestamp in a local
+ * timezone can shift the apparent calendar day, so use UTC calendar parts to
+ * preserve the stored DATE value.
+ *
+ * @param {Date|string} date - DATE-column value
+ * @returns {string|null} Month-day string such as "07-01"
+ */
+export function getDateColumnMonthDay(date) {
+  if (!date) return null;
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+
+  const month = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getUTCDate()).padStart(2, '0');
+  return `${month}-${day}`;
+}
+
+/**
  * Format duration in minutes to human-readable string
  * @param {number} minutes - Duration in minutes
  * @returns {string} Formatted duration (e.g., "2h 30m", "45m")
