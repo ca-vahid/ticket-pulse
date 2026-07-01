@@ -753,9 +753,11 @@ class TicketService {
   }
 
   /**
-   * V1 outbound reply email (SendGrid/SMTP path). The subject carries the
-   * TP-<n> reference so future inbound-email matching (Phase 4) can thread
-   * replies back to the ticket. Non-fatal by design.
+   * Outbound reply email. Prefers a send-capable workspace mailbox via
+   * Microsoft Graph (real mailbox, proper threading — the stored Message-ID
+   * lets inbound replies match back to the ticket); falls back to the
+   * SendGrid/SMTP path. The subject carries the TP-<n> reference as a second
+   * threading signal. Non-fatal by design.
    */
   async _emailRequesterReply(ticket, entry) {
     const ref = ticketDisplayRef(ticket);
@@ -763,6 +765,53 @@ class TicketService {
     const html = entry.bodyHtml || `<p>${(entry.bodyText || '').replace(/\n/g, '<br/>')}</p>`;
     const text = entry.bodyText || stripHtml(entry.bodyHtml) || '';
     const dedupeKey = `native-reply:${entry.id}`;
+
+    // Graph path: send from the workspace's connected mailbox when available.
+    try {
+      const connection = await prisma.mailboxConnection.findFirst({
+        where: { workspaceId: ticket.workspaceId, isEnabled: true, mode: { in: ['send', 'both'] } },
+        orderBy: { id: 'asc' },
+      });
+      if (connection) {
+        const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
+        if (graphMailClient.isConfigured()) {
+          const sent = await graphMailClient.sendMailAsMailbox(connection.address, {
+            to: [ticket.requester.email],
+            subject,
+            html,
+          });
+          if (sent?.internetMessageId) {
+            await prisma.ticketThreadEntry.update({
+              where: { id: entry.id },
+              data: { emailMessageId: sent.internetMessageId },
+            }).catch(() => {});
+          }
+          await prisma.notificationDelivery.create({
+            data: {
+              workspaceId: ticket.workspaceId,
+              ticketId: ticket.id,
+              channel: 'email',
+              status: 'sent',
+              eventType: 'ticket.reply_posted',
+              notificationType: 'native_reply_to_requester',
+              recipient: ticket.requester.email,
+              toRecipients: [ticket.requester.email],
+              subject,
+              htmlBody: html.slice(0, 20000),
+              textBody: text.slice(0, 20000),
+              fromAddress: connection.address,
+              provider: 'msgraph',
+              providerMessageId: sent?.internetMessageId || null,
+              dedupeKey,
+              sentAt: new Date(),
+            },
+          }).catch((err) => logger.warn(`Reply delivery audit write failed (non-fatal): ${err.message}`));
+          return { sent: true, to: ticket.requester.email, via: 'msgraph', from: connection.address };
+        }
+      }
+    } catch (err) {
+      logger.warn(`Graph reply send failed for ticket ${ticket.id}, falling back to SendGrid: ${err.message}`);
+    }
 
     try {
       const result = await sendgridNotificationService.sendEmail({

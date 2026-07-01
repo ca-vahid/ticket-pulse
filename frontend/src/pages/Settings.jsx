@@ -13,6 +13,7 @@ import NoiseRulesPanel from '../components/NoiseRulesPanel';
 import SyncOperationsPanel from '../components/settings/SyncOperationsPanel';
 import BackfillPanel from '../components/settings/BackfillPanel';
 import WorkspaceManagementPanel from '../components/settings/WorkspaceManagementPanel';
+import MailboxConnectionsPanel from '../components/settings/MailboxConnectionsPanel';
 import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
 import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
@@ -58,6 +59,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Siren,
+  Inbox,
 } from 'lucide-react';
 
 export default function Settings() {
@@ -74,7 +76,7 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'webhooks', 'notification-providers', 'notification-workflows', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
+  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'notification-providers', 'notification-workflows', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -134,6 +136,7 @@ export default function Settings() {
   const allNavigationItems = [
     { id: 'freshservice', label: 'FreshService', Icon: Plug, minRole: 'global' },
     { id: 'webhooks', label: 'Webhooks', Icon: KeyRound, minRole: 'admin' },
+    { id: 'ticket-mailboxes', label: 'Ticket Mailboxes', Icon: Inbox, minRole: 'admin' },
     { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global' },
     { id: 'notification-workflows', label: 'Mail Workflows', Icon: Send, minRole: 'admin' },
     { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin' },
@@ -1145,6 +1148,13 @@ export default function Settings() {
               {activeSection === 'backfill' && (
                 <div className="p-6">
                   <BackfillPanel />
+                </div>
+              )}
+
+              {/* Ticket Mailboxes (native ticketing email channel) */}
+              {activeSection === 'ticket-mailboxes' && (
+                <div className="p-6">
+                  <MailboxConnectionsPanel />
                 </div>
               )}
 

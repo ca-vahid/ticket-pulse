@@ -89,6 +89,77 @@ router.get('/meta', asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...meta, actor: req.ticketActor } });
 }));
 
+// ------------------------------------------------- mailbox connections (admin)
+
+function requireTicketingAdmin(req, _res, next) {
+  const actor = req.ticketActor;
+  if (actor.role !== 'admin' && actor.workspaceRole !== 'admin') {
+    return next(new AuthenticationError('Admin access required'));
+  }
+  next();
+}
+
+router.get('/mailboxes', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const mailboxes = await prisma.mailboxConnection.findMany({
+    where: { workspaceId: req.workspaceId },
+    orderBy: { id: 'asc' },
+  });
+  res.json({ success: true, data: mailboxes });
+}));
+
+router.post('/mailboxes', requireTicketingAdmin, requireNativeTicketing, asyncHandler(async (req, res) => {
+  const address = String(req.body?.address || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) throw new ValidationError('A valid mailbox address is required');
+  const mode = ['ingest', 'send', 'both'].includes(req.body?.mode) ? req.body.mode : 'both';
+  const mailbox = await prisma.mailboxConnection.create({
+    data: {
+      workspaceId: req.workspaceId,
+      address,
+      displayName: req.body?.displayName?.trim() || null,
+      mode,
+      pollIntervalSec: Math.max(15, Math.min(3600, Number(req.body?.pollIntervalSec) || 60)),
+      createdBy: req.ticketActor.email,
+    },
+  }).catch((err) => {
+    if (err.code === 'P2002') throw new ValidationError('That mailbox is already connected to this workspace');
+    throw err;
+  });
+  res.status(201).json({ success: true, data: mailbox });
+}));
+
+router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.mailboxId);
+  const existing = await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('Mailbox not found in this workspace');
+  const data = {};
+  if (req.body?.mode && ['ingest', 'send', 'both'].includes(req.body.mode)) data.mode = req.body.mode;
+  if (req.body?.isEnabled !== undefined) data.isEnabled = req.body.isEnabled === true;
+  if (req.body?.displayName !== undefined) data.displayName = req.body.displayName?.trim() || null;
+  if (req.body?.pollIntervalSec !== undefined) data.pollIntervalSec = Math.max(15, Math.min(3600, Number(req.body.pollIntervalSec) || 60));
+  const mailbox = await prisma.mailboxConnection.update({ where: { id }, data });
+  res.json({ success: true, data: mailbox });
+}));
+
+router.delete('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.mailboxId);
+  const existing = await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('Mailbox not found in this workspace');
+  await prisma.mailboxConnection.delete({ where: { id } });
+  res.json({ success: true });
+}));
+
+router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.mailboxId);
+  const existing = await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('Mailbox not found in this workspace');
+  const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
+  if (!graphMailClient.isConfigured()) {
+    return res.json({ success: true, data: { success: false, message: 'Azure Graph credentials are not configured on the server' } });
+  }
+  const result = await graphMailClient.testConnection(existing.address);
+  res.json({ success: true, data: result });
+}));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   const ticket = await ticketService.getTicket(parseTicketId(req), req.workspaceId);
   res.json({ success: true, data: ticket });

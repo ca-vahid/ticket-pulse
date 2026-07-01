@@ -130,19 +130,19 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [x] 3.9 FS-born tickets: replies/notes from TP now go through the FS API synchronously (FS emails the requester), cached locally as `mirrored`; detail-page composer enabled for FS-born with "sent via FreshService" hint
 - [x] 3.10 Runbook added to `SYNC_OPERATIONS.md` + **kill-switch drill executed against a local FS stub on the dev DB: 13/13 checks** (create→mirror→reply→status→outage worked in "FS"→reconcile imports requester reply + flags status/assignee drift→idempotent re-run). Real-FS drill on the IT pilot happens at rollout. 10 new unit tests (mirror worker + FS-born conversation paths); backend 512/513 (same pre-existing failure)
 
-### - [ ] Phase 4 — Email channel (Graph, per-workspace mailboxes)
+### - [x] Phase 4 — Email channel (Graph, per-workspace mailboxes) ✅ 2026-07-01
 *Goal: email-to-ticket and email-updates-ticket live; outbound conversations thread properly. Exit: end-to-end mail roundtrip verified in a real mail client.*
 
-- [ ] 4.1 `MailboxConnection` model — N per workspace: address, display name, folder, mode (ingest/send/both), interval, health state
-- [ ] 4.2 Settings UI — admins add/remove/test mailboxes per workspace (self-serve for future groups)
-- [ ] 4.3 Outbound — Graph `sendMail` from the connected mailbox for TP-born conversations; persist `internetMessageId`/`conversationId` per thread entry
-- [ ] 4.4 Inbound matching ladder — `In-Reply-To`/`References` → stored message ids; ticket ref in subject (`TP-1042` / FS `#12345`); sender+recency fallback
-- [ ] 4.5 Matched mail → public reply thread entry + emit `ticket.reply_received` (+ SSE); replies on resolved tickets append + notify (reopen arrives as seeded workflow in Phase 5)
-- [ ] 4.6 Unmatched mail → create TP-native ticket (requester from sender) → AI triage → auto-ack via existing `ticket.created` workflows
-- [ ] 4.7 Email attachment capture → Blob (Workstream A) or strip-with-notice interim
-- [ ] 4.8 Loop & noise protection — auto-reply/bounce/out-of-office detection, self-send guard, noise rules apply to email-born tickets
-- [ ] 4.9 Pilot mailbox strategy — new address for IT pilot to avoid FS double-ingestion; per-workspace migration guidance for existing forwarded addresses
-- [ ] 4.10 (Stretch) Graph change notifications replace polling; else keep interval polling with watermark
+- [x] 4.1 `MailboxConnection` model (`20260702000000_add_mailbox_connections`) — N per workspace: address, display name, mode ingest/send/both, poll interval, health fields; + `TicketThreadEntry.emailMessageId` (RFC Message-ID) for threading
+- [x] 4.2 Settings → **Ticket Mailboxes** panel — add/remove/enable/mode-switch/test (Graph connectivity test), with the new-address-vs-FS-double-ingestion warning and Mail.Read/Mail.Send permission note; API under `/api/tickets/mailboxes*` (admin)
+- [x] 4.3 Outbound — Graph **draft-then-send** (`sendMailAsMailbox`) so the `internetMessageId` is captured and stored on the reply entry; `_emailRequesterReply` prefers the workspace's send-capable mailbox and falls back to SendGrid; full `NotificationDelivery` audit either way
+- [x] 4.4 Inbound matching ladder (`mailboxIngestService`) — ① `In-Reply-To`/`References` ↔ stored Message-IDs ② `TP-1042` subject ref ③ FS `#12345` ref → **deliberately skipped** (FS ingests the same mail; double-ingest would duplicate threads) ④ sender+recency vs open TP-born tickets
+- [x] 4.5 Matched mail → `email_inbound` requester reply entry (+ mirror-queued to the FS copy!) + `requester_reply` audit + SSE; `ticket.reply_received` workflow trigger call-site marked for Phase 5 (reopen ships there as the seeded workflow)
+- [x] 4.6 Unmatched mail → TP-born ticket via the normal engine (requester resolved/created from sender, AI triage, `ticket.created` workflows ack) + an `original_email` entry stores the Message-ID so follow-ups thread
+- [x] 4.7 Attachments: strip-with-notice interim (`hasAttachments` → visible notice in the entry/description); real capture lands with Workstream A (Blob)
+- [x] 4.8 Loop & noise protection — self-send, no-reply/mailer-daemon senders, autoreply subjects, `Auto-Submitted`/`Precedence: bulk` headers, exact-Message-ID dedupe, per-sender per-cycle create cap; noise rules run inside createTicket as usual
+- [x] 4.9 Pilot strategy documented in the panel UI + plan: new address for the IT pilot; per-workspace repointing later
+- [x] 4.10 Polling with per-connection watermarks (30s tick, per-mailbox interval); Graph change notifications remain a later upgrade. 9-test ingest suite green; backend 521/522 (same pre-existing failure); **real-mailbox roundtrip needs a provisioned pilot mailbox + Mail.Read/Mail.Send consent at rollout**
 
 ### - [ ] Phase 5 — Workflow builder generalization
 *Goal: triggers/actions become a registry, not a hardcoded list; reply automation buildable no-code. Exit: "on requester reply → LLM ack → send" and "reopen on reply" exist as editable workflows.*

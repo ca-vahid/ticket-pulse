@@ -78,6 +78,84 @@ class GraphMailClient {
   }
 
   /**
+   * Full messages for ticket ingestion: body, recipients, RFC Message-ID and
+   * In-Reply-To/References headers (for threading replies back to tickets).
+   * Returned oldest-first so ingestion processes chronologically.
+   */
+  async getInboxMessagesForIngest(mailbox, since, top = 25) {
+    const client = this._getClient();
+    try {
+      const response = await client
+        .api(`/users/${mailbox}/mailFolders/inbox/messages`)
+        .filter(`receivedDateTime gt ${since.toISOString()}`)
+        .orderby('receivedDateTime desc')
+        .top(top)
+        .select('id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,conversationId,internetMessageId,internetMessageHeaders,hasAttachments')
+        .get();
+
+      const emails = (response.value || []).map((e) => {
+        const headers = {};
+        for (const h of e.internetMessageHeaders || []) {
+          headers[String(h.name || '').toLowerCase()] = h.value;
+        }
+        return {
+          id: e.id,
+          subject: e.subject || '',
+          from: e.from?.emailAddress?.address || '',
+          fromName: e.from?.emailAddress?.name || '',
+          to: (e.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean),
+          cc: (e.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean),
+          receivedAt: new Date(e.receivedDateTime),
+          bodyPreview: e.bodyPreview || '',
+          bodyHtml: e.body?.contentType === 'html' ? e.body?.content : null,
+          bodyText: e.body?.contentType === 'text' ? e.body?.content : null,
+          conversationId: e.conversationId,
+          internetMessageId: e.internetMessageId || null,
+          hasAttachments: e.hasAttachments === true,
+          inReplyTo: headers['in-reply-to'] || null,
+          references: headers.references || null,
+          autoSubmitted: headers['auto-submitted'] || null,
+          precedence: headers.precedence || null,
+        };
+      });
+      return emails.reverse(); // oldest first
+    } catch (error) {
+      logger.error('Graph API: failed to fetch messages for ingest', {
+        mailbox, error: error.message, code: error.code,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Send mail FROM a mailbox via draft-then-send, which (unlike /sendMail)
+   * lets us capture the internetMessageId for reply threading.
+   * Requires Mail.Send application permission.
+   */
+  async sendMailAsMailbox(mailbox, { to, cc = [], subject, html }) {
+    const client = this._getClient();
+    const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean)
+      .map((address) => ({ emailAddress: { address } }));
+    if (recipients.length === 0) throw new Error('Email recipient is required');
+
+    const draft = await client.api(`/users/${mailbox}/messages`).post({
+      subject,
+      body: { contentType: 'HTML', content: html },
+      toRecipients: recipients,
+      ccRecipients: cc.filter(Boolean).map((address) => ({ emailAddress: { address } })),
+    });
+
+    await client.api(`/users/${mailbox}/messages/${draft.id}/send`).post({});
+
+    logger.info('Graph API: mail sent', { mailbox, to: recipients.map((r) => r.emailAddress.address), subject });
+    return {
+      messageId: draft.id,
+      internetMessageId: draft.internetMessageId || null,
+      conversationId: draft.conversationId || null,
+    };
+  }
+
+  /**
    * Test connectivity to a specific mailbox.
    * @param {string} mailbox - Email address to test
    * @returns {Promise<{success: boolean, message: string, recentCount: number}>}

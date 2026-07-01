@@ -88,8 +88,34 @@ model Workspace {
   webhookConfig WorkspaceWebhookConfig?
   groups                 Group[]
   mirrorJobs             MirrorJob[]
+  mailboxConnections     MailboxConnection[]
 
   @@map("workspaces")
+}
+
+// Monitored mailboxes for native ticketing (N per workspace). 'ingest' polls
+// the inbox for new tickets / requester replies; 'send' delivers agent replies
+// from this address via Microsoft Graph (proper threading); 'both' does both.
+model MailboxConnection {
+  id              Int       @id @default(autoincrement())
+  workspaceId     Int       @map("workspace_id")
+  workspace       Workspace @relation(fields: [workspaceId], references: [id])
+  address         String    @db.VarChar(255)
+  displayName     String?   @db.VarChar(255) @map("display_name")
+  mode            String    @default("both") @db.VarChar(10) // ingest | send | both
+  isEnabled       Boolean   @default(true) @map("is_enabled")
+  pollIntervalSec Int       @default(60) @map("poll_interval_sec")
+  lastCheckedAt   DateTime? @map("last_checked_at")
+  lastMessageAt   DateTime? @map("last_message_at")
+  lastError       String?   @db.Text @map("last_error")
+  lastErrorAt     DateTime? @map("last_error_at")
+  createdBy       String?   @db.VarChar(255) @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, address])
+  @@map("mailbox_connections")
+  @@index([isEnabled])
 }
 
 model WorkspaceWebhookConfig {
@@ -429,6 +455,9 @@ model TicketThreadEntry {
   // Fallback-mirror bookkeeping for TP-authored entries: pending | mirrored | error
   mirrorState         String?   @db.VarChar(20) @map("mirror_state")
   mirroredAt          DateTime? @map("mirrored_at")
+  // RFC 5322 Message-ID for email threading: outbound Graph sends store theirs
+  // so inbound In-Reply-To/References headers match replies back to the ticket.
+  emailMessageId      String?   @db.VarChar(998) @map("email_message_id")
   incoming            Boolean?  @map("incoming")
   isPrivate           Boolean?  @map("is_private")
   visibility          String?   @db.VarChar(20)
@@ -445,6 +474,7 @@ model TicketThreadEntry {
   @@index([workspaceId, occurredAt])
   @@index([ticketId, occurredAt])
   @@index([eventType])
+  @@index([emailMessageId])
 }
 
 // Outbox for the FreshService fallback mirror. Every TP-born mutation that must

@@ -502,6 +502,27 @@ export const ticketsAPI = {
   note: async (id, body) => {
     return await api.post(`/tickets/${id}/notes`, body);
   },
+
+  // Mailbox connections (admin)
+  listMailboxes: async () => {
+    return await api.get('/tickets/mailboxes');
+  },
+
+  createMailbox: async (payload) => {
+    return await api.post('/tickets/mailboxes', payload);
+  },
+
+  updateMailbox: async (id, payload) => {
+    return await api.patch(`/tickets/mailboxes/${id}`, payload);
+  },
+
+  removeMailbox: async (id) => {
+    return await api.delete(`/tickets/mailboxes/${id}`);
+  },
+
+  testMailbox: async (id) => {
+    return await api.post(`/tickets/mailboxes/${id}/test`);
+  },
 };
 
 /**

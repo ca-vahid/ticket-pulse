@@ -254,6 +254,14 @@ async function initialize() {
       logger.warn('FreshService mirror worker failed to start (non-fatal):', e.message);
     }
 
+    // Native-ticketing mailbox ingest: email-to-ticket + email-updates-ticket.
+    try {
+      const { default: mailboxIngestService } = await import('./services/mailboxIngestService.js');
+      mailboxIngestService.start();
+    } catch (e) {
+      logger.warn('Mailbox ingest worker failed to start (non-fatal):', e.message);
+    }
+
     logger.info('Server initialization complete');
   } catch (error) {
     logger.error('Server initialization failed:', error);
