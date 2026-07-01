@@ -100,10 +100,44 @@ class WorkspaceRepository {
           role: a.role,
           freshserviceWorkspaceId: a.workspace.freshserviceWorkspaceId,
           defaultTimezone: a.workspace.defaultTimezone,
+          nativeTicketingEnabled: a.workspace.nativeTicketingEnabled === true,
         }));
     } catch (error) {
       logger.error(`Error fetching accessible workspaces for ${email}:`, error);
       throw new DatabaseError('Failed to fetch accessible workspaces', error);
+    }
+  }
+
+  /**
+   * Workspaces where the user is an active technician. This is how agent-role
+   * users (no workspace_access rows) get a workspace for native ticketing.
+   */
+  async getTechnicianWorkspaces(email) {
+    try {
+      const techs = await prisma.technician.findMany({
+        where: {
+          email: { equals: String(email || '').toLowerCase(), mode: 'insensitive' },
+          isActive: true,
+          workspace: { isActive: true },
+        },
+        include: { workspace: true },
+        orderBy: { workspaceId: 'asc' },
+      });
+      const seen = new Set();
+      return techs
+        .filter(t => !seen.has(t.workspaceId) && seen.add(t.workspaceId))
+        .map(t => ({
+          id: t.workspace.id,
+          name: t.workspace.name,
+          slug: t.workspace.slug,
+          role: 'agent',
+          freshserviceWorkspaceId: t.workspace.freshserviceWorkspaceId,
+          defaultTimezone: t.workspace.defaultTimezone,
+          nativeTicketingEnabled: t.workspace.nativeTicketingEnabled === true,
+        }));
+    } catch (error) {
+      logger.error(`Error fetching technician workspaces for ${email}:`, error);
+      throw new DatabaseError('Failed to fetch technician workspaces', error);
     }
   }
 

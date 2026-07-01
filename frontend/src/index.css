@@ -80,7 +80,8 @@ code {
   }
 
   .tp-surface {
-    @apply rounded-xl border border-white/70 bg-white/78 shadow-subtle;
+    /* bracket form: non-scale opacity steps inside @apply break on newer tailwind 3.4.x */
+    @apply rounded-xl border border-white/70 bg-white/[.78] shadow-subtle;
   }
 
   .tp-card {

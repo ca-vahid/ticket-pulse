@@ -36,6 +36,11 @@ router.get(
       }));
     } else {
       workspaces = await workspaceRepository.getAccessibleWorkspaces(email);
+      if (workspaces.length === 0) {
+        // Agent-role users have no workspace_access rows — their technician
+        // profile is what grants them a workspace (native ticketing).
+        workspaces = await workspaceRepository.getTechnicianWorkspaces(email);
+      }
     }
 
     res.json({ success: true, data: workspaces });

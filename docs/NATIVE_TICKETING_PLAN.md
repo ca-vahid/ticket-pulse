@@ -102,19 +102,19 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [x] 1.9 Assignment episodes for native tickets — created/ended locally (`self_picked`/`coordinator_assigned`/`workflow_assigned`; `reassigned`/`closed` end methods), no FS activities dependency
 - [x] 1.10 Tests: 13-test `ticketService` suite (mocked deps) + live end-to-end smoke on the dev Postgres with real services — **17/17 checks green** (create TP-1003 → reply → note → assign → resolve → reads → post-mirror clobber guard). Full backend suite 502/503 (same pre-existing failure); route chain import-verified; lint clean
 
-### - [ ] Phase 2 — Ticketing UI (`/tickets`)
+### - [x] Phase 2 — Ticketing UI (`/tickets`) ✅ 2026-07-01
 *Goal: agents run their day in Ticket Pulse — list, first-ever ticket detail + thread view, composer. Exit: browser-verified flows, WCAG AA, both origins usable.*
 
-- [ ] 2.1 Route scaffolding — `/tickets`, `/tickets/:id`, nav item; gating incl. `agent` role access, hidden when workspace flag off
-- [ ] 2.2 Agent home becomes `/tickets` — update `HomeRedirect`, `ProtectedRoute`/`AgentRoute` (keep `/my-competencies` reachable in nav)
-- [ ] 2.3 Ticket list — filters (status, priority, canonical category, assignee, group, origin), search, sort, SSE live updates, glass/blue design language
-- [ ] 2.4 Ticket detail — conversation thread (public replies vs private notes visually distinct), activity timeline, `TP-<n>`/FS-id header treatment
-- [ ] 2.5 Reply / internal-note composer — toggle, optimistic send, error + retry states
-- [ ] 2.6 Sidebar editors — status, priority, assignee (photo picker), canonical category/subcategory, group, requester card w/ Entra info
-- [ ] 2.7 Create-ticket composer — requester typeahead (requesters + Entra lookup), subject, rich description, category, priority, group, assign-now vs let-AI-decide
-- [ ] 2.8 AI triage panel (pipeline run + recommendation) + mirror-state indicator + approvals placeholder block
-- [ ] 2.9 FS-born tickets in the same views — thread from cache, actions limited to supported write-backs (assignment), stop deep-linking out as the only affordance
-- [ ] 2.10 A11y (WCAG AA), responsive pass, RTL/Vitest coverage, in-browser verification with screenshots
+- [x] 2.1 Routes `/tickets` + `/tickets/:id` via new `TicketsRoute` (auth + workspace, **agents admitted**); sky "Tickets" nav tile gated on the workspace flag; agent workspaces resolved from technician profiles (`getTechnicianWorkspaces` backend fallback so agents can select a workspace at all)
+- [x] 2.2 Agent home → `/tickets` (HomeRedirect, ProtectedRoute bounce, PublicRoute, AuthCallback); agent nav shows only Tickets; flag-off state links agents to My Competencies
+- [x] 2.3 List page (`pages/Tickets.jsx`) — status pill-group, assignee (incl. Me/Unassigned), priority, origin filters + debounced search (`TP-1042`/`#12345`/subject/requester), pagination, SSE `ticket-change` live refresh (new `onTicketChange` in `useSSE`), desktop table + mobile cards, glass language
+- [x] 2.4 Detail page (`pages/TicketDetail.jsx`) — first-ever thread view: public replies vs internal notes vs requester messages visually distinct (plain-text render for safety — HTML sanitize deferred to the email phase), description card, collapsible activity log, `TP-<n>`/`#<fsid>` header with origin + mirror chips
+- [x] 2.5 Reply / internal-note composer — segmented toggle, "emails <requester>" hint, sending states, toasts
+- [x] 2.6 Sidebar editors — status, priority, assignee w/ avatar, canonical category→subcategory, group (from the new Group cache), requester card with Entra fields; instant-save with per-field busy state
+- [x] 2.7 Create composer (`components/tickets/TicketComposer.jsx`) — slide-over: requester email+name (typeahead deferred; Entra enrichment happens server-side), subject, description, priority segmented control, category/sub, group, assignment choice (AI triage default / me / pick / none)
+- [x] 2.8 AI triage panel (latest run decision/trigger/sync + deep link to the pipeline run) + mirror-state chip + approvals "coming soon" scaffold block
+- [x] 2.9 FS-born tickets share the views — read-only banner ("FreshService owns this ticket…"), disabled editors, thread from cache, explicit Open-in-FreshService link
+- [x] 2.10 Verified in a real browser (puppeteer + dev-login): list, native detail, FS-born detail, composer, **ticket created through the UI (TP-1004) and replied to through the UI** with screenshots reviewed; aria labels/roles + `tp-focus-ring` throughout; mobile card layout; RTL tests for the shared ticket UI kit. Fixed en route: `bg-white/78 → bg-white/[.78]` (index.css broke fresh builds on tailwind 3.4.18), ticketsAPI double-unwrap, SSE-aware navigation waits
 
 ### - [ ] Phase 3 — FreshService mirror (the fallback copy)
 *Goal: every TP-born ticket has a usable FS shadow; fallback rehearsed. Exit: kill-switch drill passes — work in FS during simulated outage, reconcile cleanly after.*

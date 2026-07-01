@@ -1,4 +1,4 @@
-import { BarChart3, Clock, LayoutDashboard } from 'lucide-react';
+import { BarChart3, Clock, LayoutDashboard, Ticket } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { AssignmentNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
@@ -10,6 +10,7 @@ import { AssignmentNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
 //
 //   gate: 'review'  -> visible to reviewers/admins (Assignment Review)
 //   gate: 'manage'  -> visible to workspace admins (Mail Workflows)
+//   gate: 'tickets' -> visible when the workspace has native ticketing enabled
 //   gate: null      -> visible to everyone
 export const NAV_DESTINATIONS = [
   {
@@ -21,6 +22,16 @@ export const NAV_DESTINATIONS = [
     hover: 'hover:border-blue-300 hover:bg-blue-100',
     bar: 'bg-blue-600',
     gate: null,
+  },
+  {
+    id: 'tickets',
+    label: 'Tickets',
+    path: '/tickets',
+    Icon: Ticket,
+    tile: 'border-sky-200 bg-sky-50 text-sky-700',
+    hover: 'hover:border-sky-300 hover:bg-sky-100',
+    bar: 'bg-sky-600',
+    gate: 'tickets',
   },
   {
     id: 'timeline',
@@ -89,13 +100,25 @@ export function useWorkspaceRole() {
 // included when it is the currently active page (so a directly-visited page
 // still shows its own tile), mirroring the previous header behavior.
 export function useNavDestinations(activeId = null) {
+  const { user } = useAuth();
+  const { currentWorkspace, availableWorkspaces } = useWorkspace();
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
   const canManage = wsRole === 'admin';
+  const ticketingOn = availableWorkspaces
+    ?.find((w) => w.id === currentWorkspace?.id)?.nativeTicketingEnabled === true;
+
+  // Agent-role users only work tickets — everything else in the app is
+  // coordinator/manager territory and would just bounce them.
+  if (user?.role === 'agent') {
+    return NAV_DESTINATIONS.filter((dest) => dest.id === 'tickets' && (ticketingOn || dest.id === activeId));
+  }
+
   return NAV_DESTINATIONS.filter((dest) => {
     if (dest.id === activeId) return true;
     if (dest.gate === 'review') return canReview;
     if (dest.gate === 'manage') return canManage;
+    if (dest.gate === 'tickets') return ticketingOn;
     return true;
   });
 }

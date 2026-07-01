@@ -461,6 +461,50 @@ export const syncAPI = {
 };
 
 /**
+ * Native ticketing API (/api/tickets) — tickets born inside Ticket Pulse plus
+ * read access to FS-born tickets. All methods return the {success, data} envelope.
+ */
+export const ticketsAPI = {
+  // Note: the shared response interceptor already unwraps to the
+  // {success, data} envelope — return it directly like the other APIs.
+  list: async (params = {}) => {
+    return await api.get('/tickets', { params });
+  },
+
+  get: async (id) => {
+    return await api.get(`/tickets/${id}`);
+  },
+
+  meta: async () => {
+    return await api.get('/tickets/meta');
+  },
+
+  create: async (payload) => {
+    return await api.post('/tickets', payload);
+  },
+
+  update: async (id, payload) => {
+    return await api.patch(`/tickets/${id}`, payload);
+  },
+
+  setStatus: async (id, status) => {
+    return await api.post(`/tickets/${id}/status`, { status });
+  },
+
+  assign: async (id, technicianId) => {
+    return await api.post(`/tickets/${id}/assign`, { technicianId });
+  },
+
+  reply: async (id, body) => {
+    return await api.post(`/tickets/${id}/replies`, body);
+  },
+
+  note: async (id, body) => {
+    return await api.post(`/tickets/${id}/notes`, body);
+  },
+};
+
+/**
  * SSE API
  */
 export const sseAPI = {
