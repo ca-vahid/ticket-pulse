@@ -268,7 +268,18 @@ class MailboxIngestService {
       await mirrorService.enqueueThreadEntry(ticket.workspaceId, ticket.id, entry.id);
     }
 
-    // Phase 5 wires this moment into the workflow engine as `ticket.reply_received`.
+    // Workflow trigger: "Requester replied" (drives the seeded reopen workflow).
+    try {
+      const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
+      await lifecycle.emitTicketEvent('ticket.reply_received', ticket.id, {
+        source: 'email_inbound',
+        dedupeStamp: `reply:${entry.id}`,
+        extra: { entryId: entry.id, from: email.from, via },
+      });
+    } catch (err) {
+      logger.warn(`reply_received workflow dispatch failed (non-fatal): ${err.message}`);
+    }
+
     try {
       sseManager.broadcast('ticket-change', {
         action: 'reply',

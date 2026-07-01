@@ -144,17 +144,17 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [x] 4.9 Pilot strategy documented in the panel UI + plan: new address for the IT pilot; per-workspace repointing later
 - [x] 4.10 Polling with per-connection watermarks (30s tick, per-mailbox interval); Graph change notifications remain a later upgrade. 9-test ingest suite green; backend 521/522 (same pre-existing failure); **real-mailbox roundtrip needs a provisioned pilot mailbox + Mail.Read/Mail.Send consent at rollout**
 
-### - [ ] Phase 5 — Workflow builder generalization
+### - [x] Phase 5 — Workflow builder generalization ✅ 2026-07-01
 *Goal: triggers/actions become a registry, not a hardcoded list; reply automation buildable no-code. Exit: "on requester reply → LLM ack → send" and "reopen on reply" exist as editable workflows.*
 
-- [ ] 5.1 Event registry — catalog w/ payload schemas: `ticket.reply_received`, `ticket.note_added`, `ticket.status_changed`, `email.inbound_unmatched`, `approval.requested/decided`, origin/channel filters on `ticket.created`
-- [ ] 5.2 Configurable trigger node (event + condition filters) replacing the hardcoded enum; Zod validation updates
-- [ ] 5.3 Migration path for existing published workflows (no breakage, no silent behavior change)
-- [ ] 5.4 New action nodes — update ticket fields (incl. reopen), post reply/note to thread, assign, request approval
-- [ ] 5.5 Seeded default **"Reopen on requester reply"** workflow per workspace — enabled-by-default, fully customizable (decision #11)
-- [ ] 5.6 Builder UI — trigger config panel, new node types in the ReactFlow palette, condition field additions
-- [ ] 5.7 Run audit + mock/preview mode coverage for new triggers/actions
-- [ ] 5.8 Tests + docs; verify the reply-ack workflow is buildable with zero code
+- [x] 5.1 Event registry — `NOTIFICATION_EVENT_TYPES` gains `ticket.reply_received`, `ticket.note_added`, `ticket.status_changed`; `listEnabledForEvent` now gates on the registry instead of the hardcoded default-spec list (any registered event drives workflows). `email.inbound_unmatched` dropped (unmatched mail already creates a ticket → `ticket.created` fires); `approval.*` arrive with Phase 6
+- [x] 5.2 Triggers are event-registry-driven end to end; new `emitTicketEvent(eventType, ticketId, {dedupeStamp, extra})` dispatcher (reuses the hydrate/context/fingerprint machinery) fires them from the ticket engine and mailbox ingest
+- [x] 5.3 Migration path — validation only relaxed (never tightened), all existing published workflows validate unchanged; entire pre-existing workflow test surface still green
+- [x] 5.4 **`update_ticket` action node** (status incl. reopen semantics + priority; TP-born only, audited, mirror-queued, SSE) with dry-run/mock/preview support. *Post-reply/assign nodes deferred; request-approval node ships with Phase 6*
+- [x] 5.5 Seeded **"Reopen on requester reply"** default per workspace — trigger → jsonLogic condition (status ∈ Resolved/Closed) → `update_ticket(setStatus: Open)`; the email-only invariant relaxed (workflows need send_email OR update_ticket). Seeds as a draft like all defaults; publish+enable at pilot rollout (one click, `{enabled:true}` on publish)
+- [x] 5.6 Builder UI — new events in `EVENT_LABELS` + trigger visuals; `update_ticket` in the node palette (config via the node JSON editor; a dedicated form field editor is polish for later)
+- [x] 5.7 Mock/preview modes return `wouldSet` previews for `update_ticket` instead of writing; runs/steps audit flows through the existing engine persistence
+- [x] 5.8 6-test definition suite + **live drill on the dev DB (8/8)**: seed → publish+enable → resolved TP-born ticket + `ticket.reply_received` → reopened (resolution cleared, mirror queued, audited) and open tickets untouched. Backend 528/529 (same pre-existing failure); build green
 
 ### - [ ] Phase 6 — Approvals (scaffold → usable loop)
 *Goal: single-step approvals on tickets, decidable from email. Exit: request → magic-link decide → workflow reacts.*

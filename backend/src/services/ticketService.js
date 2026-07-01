@@ -602,6 +602,10 @@ class TicketService {
 
     await this._audit(ticket.id, 'status_changed', actor, { oldStatus: ticket.status, newStatus: status });
     await this._notifyLifecycle(ticket, updated);
+    ticketLifecycleNotificationService.emitTicketEvent?.('ticket.status_changed', ticket.id, {
+      dedupeStamp: `status:${ticket.id}:${ticket.status}->${status}:${Date.now()}`,
+      extra: { from: ticket.status, to: status, byEmail: actor?.email || null },
+    }).catch?.(() => {});
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
     await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
@@ -744,6 +748,12 @@ class TicketService {
         email = await this._emailRequesterReply(ticket, entry);
       }
       await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
+      if (isPrivate) {
+        ticketLifecycleNotificationService.emitTicketEvent?.('ticket.note_added', ticket.id, {
+          dedupeStamp: `note:${entry.id}`,
+          extra: { entryId: entry.id, byEmail: actor?.email || null },
+        }).catch?.(() => {});
+      }
     } else if (!isPrivate) {
       email = { sent: true, via: 'freshservice' };
     }
