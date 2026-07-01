@@ -88,19 +88,19 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [x] 0.8 Downstream tolerance pass — `Number(null)`→0 is crash-safe everywhere; all `BigInt()` conversions sit behind origin filters; preheat cohort query was the one hidden FS-facing path and got filtered. Cosmetic null-FS-id display handled properly in Phase 2
 - [x] 0.9 Migration validated by rebuilding origin/main schema on a fresh Postgres 16, applying the new migration, and diffing against the new schema (empty diff); backend suite 489/490 (1 pre-existing unrelated failure, present on baseline). Prod apply rides the CI/CD migration step on merge. Note: the historical migration chain has a pre-existing replay bug (`20260325..multi_workspace` references `noise_rules` before creation) — fresh-DB bootstraps need the schema-diff route, prod is unaffected
 
-### - [ ] Phase 1 — Ticket engine + internal API
+### - [x] Phase 1 — Ticket engine + internal API ✅ 2026-07-01
 *Goal: origin-aware create/read/update/reply backend wired into triage, workflows, SSE. Exit: API-created ticket → AI triage → workflow email → reply/note in thread, with FS-born tickets untouched.*
 
-- [ ] 1.1 `ticketService.createTicket` — validation (Zod), canonical category/subcategory, group, priority, `nativeNumber` assignment, `origin='ticketpulse'`
-- [ ] 1.2 Requester resolution — email → existing `Requester` → else create TP-native requester enriched from Entra (`azureAdService`)
-- [ ] 1.3 Field updates + status transition rules, each writing audit/thread events
-- [ ] 1.4 Public replies + private notes → `ticket_thread_entries` (`source='ticketpulse_user'`, `authorType`)
-- [ ] 1.5 REST — `POST/GET/PATCH /api/tickets`, `GET /api/tickets/:id` (incl. thread), `POST /api/tickets/:id/replies|notes`, status endpoint; workspace scoping; role rules **admitting `agent`** (own workspace only)
-- [ ] 1.6 Event emission — native tickets fire the same `ticket.created`/`assigned`/`resolved_closed` path as FS ingest (existing workflows just work) + SSE broadcasts
-- [ ] 1.7 AI triage on create — `runPipeline(..., 'app_native')`, respecting business-hours queueing and noise rules
-- [ ] 1.8 Outbound requester email v1 via existing SendGrid workflow path (Graph threading arrives in Phase 4)
-- [ ] 1.9 Assignment episodes for native tickets (start/end methods derived locally, no FS activities dependency)
-- [ ] 1.10 Unit + integration tests — full create→triage→workflow→reply roundtrip; FS-born regression untouched
+- [x] 1.1 `ticketService.createTicket` (new `services/ticketService.js`) — Zod validation, canonical category/subcategory + group + technician validation, `nativeNumber` from the sequence, `origin='ticketpulse'`, `mirrorState='pending'`, noise evaluation at parity with FS ingest
+- [x] 1.2 Requester resolution — email → existing `Requester` (case-insensitive) → else `requesterRepository.createNative` (nullable FS id) enriched best-effort from Entra
+- [x] 1.3 Field updates (`updateTicketFields`) + status transitions (`changeStatus`: resolve/close stamp `resolvedAt`/`resolutionTimeSeconds`, reopen clears them) — every change audited to `ticket_activities`
+- [x] 1.4 Public replies + private notes → `ticket_thread_entries` (`source='ticketpulse_user'`, `authorType='agent'`, `mirrorState='pending'`); first public reply stamps `firstPublicAgentReplyAt`
+- [x] 1.5 REST (`routes/tickets.routes.js`): `GET /api/tickets` (+filters/search/paging), `GET /:id` (thread+episodes+audit+latest run), `GET /meta`, `POST /`, `PATCH /:id`, `POST /:id/status|assign|replies|notes`. Mounted before global workspace-access enforcement; access = workspace role OR **agent with an active technician profile in the workspace**; mutations gated by the per-workspace flag
+- [x] 1.6 Event emission — native mutations flow through `emitTicketLifecycleNotifications` (same `ticket.created/assigned/resolved_closed` path as FS ingest) + `ticket-change` SSE broadcasts
+- [x] 1.7 AI triage on create — `runPipeline(..., 'app_native')` fire-and-forget; pipeline made TP-born-aware: activities tool returns a well-formed empty result for null FS ids, and `freshServiceActionService.execute` gained a **local-only branch** (assignment + `workflow_assigned` episode + notifications applied locally, run marked `synced` with `localOnly` payload — no FS calls; mirror picks it up in Phase 3)
+- [x] 1.8 Outbound requester reply email v1 — direct SendGrid/SMTP send with the `TP-<n>` ref in the subject (future email threading hook) + full `NotificationDelivery` audit row; non-fatal by design
+- [x] 1.9 Assignment episodes for native tickets — created/ended locally (`self_picked`/`coordinator_assigned`/`workflow_assigned`; `reassigned`/`closed` end methods), no FS activities dependency
+- [x] 1.10 Tests: 13-test `ticketService` suite (mocked deps) + live end-to-end smoke on the dev Postgres with real services — **17/17 checks green** (create TP-1003 → reply → note → assign → resolve → reads → post-mirror clobber guard). Full backend suite 502/503 (same pre-existing failure); route chain import-verified; lint clean
 
 ### - [ ] Phase 2 — Ticketing UI (`/tickets`)
 *Goal: agents run their day in Ticket Pulse — list, first-ever ticket detail + thread view, composer. Exit: browser-verified flows, WCAG AA, both origins usable.*

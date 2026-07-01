@@ -12,6 +12,7 @@ import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
 import { normalizeTicketType } from './ticketTypeAssessment.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
+import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
@@ -740,6 +741,12 @@ class FreshServiceActionService {
           select: {
             id: true,
             freshserviceTicketId: true,
+            origin: true,
+            nativeNumber: true,
+            workspaceId: true,
+            status: true,
+            assignedTechId: true,
+            isNoise: true,
             subject: true,
             firstAssignedAt: true,
             ticketCategory: true,
@@ -755,6 +762,13 @@ class FreshServiceActionService {
     if (!run) {
       logger.warn('FreshService sync: run not found', { runId });
       return { success: false, error: 'Run not found' };
+    }
+
+    // TP-born tickets never talk to FreshService from the pipeline — Ticket
+    // Pulse is their source of truth; the fallback mirror pushes copies on its
+    // own channel. Apply the decision locally with full parity instead.
+    if (run.ticket?.origin === TICKET_ORIGIN.TICKETPULSE) {
+      return this._executeLocalOnly(run, workspaceId, dryRun, options);
     }
 
     if (run.decision === 'noise_dismissed' && !force) {
@@ -1138,6 +1152,161 @@ class FreshServiceActionService {
     }
 
     return completedActions;
+  }
+
+  /**
+   * Pipeline execution for TP-born tickets: everything applies locally
+   * (assignment + episode, category fields, noise resolution) and the row is
+   * flagged mirrorState='pending' so the fallback mirror pushes the FS copy.
+   */
+  async _executeLocalOnly(run, workspaceId, dryRun = false, options = {}) {
+    const force = options.force || false;
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: run.ticketId },
+      include: {
+        internalCategory: { select: { name: true } },
+        internalSubcategory: { select: { name: true } },
+      },
+    });
+    if (!ticket) return { success: false, error: 'Ticket not found' };
+
+    const ref = ticketDisplayRef(ticket);
+    const decision = run.decision;
+    const actions = [];
+
+    const skillName = ticket.internalCategory?.name || null;
+    const subskillName = ticket.internalSubcategory?.name || null;
+    if (skillName && (skillName !== ticket.tpSkill || (subskillName || null) !== (ticket.tpSubskill || null))) {
+      actions.push({ type: 'local_category', ticketId: ticket.id, tpSkill: skillName, tpSubskill: subskillName || null });
+    }
+
+    let tech = null;
+    if ((decision === 'approved' || decision === 'modified' || decision === 'auto_assigned') && run.assignedTechId) {
+      tech = await prisma.technician.findUnique({
+        where: { id: run.assignedTechId },
+        select: { id: true, name: true },
+      });
+      if (!tech) {
+        await prisma.assignmentPipelineRun.update({
+          where: { id: run.id },
+          data: { syncStatus: 'failed', syncError: 'Assigned technician not found', syncPayload: buildSyncPayload(actions, 'Local assignment failed', dryRun, { localOnly: true }) },
+        });
+        return { success: false, error: 'Assigned technician not found' };
+      }
+      if (ticket.assignedTechId && ticket.assignedTechId !== run.assignedTechId && !force) {
+        const reason = 'Ticket already assigned locally to a different technician';
+        await prisma.assignmentPipelineRun.update({
+          where: { id: run.id },
+          data: { syncStatus: 'skipped', syncError: reason, syncPayload: buildSyncPayload(actions, reason, dryRun, { localOnly: true }) },
+        });
+        return { success: false, skipped: true, error: reason };
+      }
+      actions.push({ type: 'local_assign', ticketId: ticket.id, techId: tech.id, techName: tech.name });
+    }
+
+    if (decision === 'noise_dismissed' && !ticket.assignedTechId && !['Resolved', 'Closed'].includes(ticket.status)) {
+      const assignmentConfig = await prisma.assignmentConfig.findUnique({
+        where: { workspaceId: Number(run.workspaceId) },
+        select: { autoCloseNoise: true },
+      });
+      if (assignmentConfig?.autoCloseNoise) {
+        actions.push({ type: 'local_close', ticketId: ticket.id });
+      }
+    }
+
+    const preview = actions.map((a) => {
+      if (a.type === 'local_assign') return `Assign ${ref} to ${a.techName} (local — mirror queued)`;
+      if (a.type === 'local_close') return `Resolve ${ref} as noise (local — mirror queued)`;
+      return `Update Ticket Pulse category fields on ${ref} (local)`;
+    }).join(' → ') || `No local actions needed for ${ref}`;
+    const payloadData = buildSyncPayload(actions, preview, dryRun, { localOnly: true });
+
+    if (dryRun) {
+      await prisma.assignmentPipelineRun.update({
+        where: { id: run.id },
+        data: { syncStatus: 'dry_run', syncPayload: payloadData },
+      });
+      return { success: true, dryRun: true, actions, preview };
+    }
+
+    try {
+      const now = new Date();
+      for (const action of actions) {
+        if (action.type === 'local_category') {
+          await prisma.ticket.update({
+            where: { id: ticket.id },
+            data: { tpSkill: action.tpSkill, tpSubskill: action.tpSubskill, mirrorState: 'pending' },
+          });
+        } else if (action.type === 'local_close') {
+          await prisma.ticket.update({
+            where: { id: ticket.id },
+            data: {
+              status: 'Resolved',
+              resolvedAt: now,
+              resolutionTimeSeconds: Math.max(0, Math.round((now.getTime() - new Date(ticket.createdAt).getTime()) / 1000)),
+              mirrorState: 'pending',
+            },
+          });
+        } else if (action.type === 'local_assign') {
+          if (ticket.assignedTechId && ticket.assignedTechId !== action.techId) {
+            await prisma.ticketAssignmentEpisode.updateMany({
+              where: { ticketId: ticket.id, technicianId: ticket.assignedTechId, endedAt: null },
+              data: { endedAt: now, endMethod: 'reassigned', endActorName: 'Ticket Pulse AI' },
+            });
+          }
+          const updated = await prisma.ticket.update({
+            where: { id: ticket.id },
+            data: {
+              assignedTechId: action.techId,
+              assignedAt: now,
+              firstAssignedAt: ticket.firstAssignedAt || now,
+              assignedBy: 'Ticket Pulse',
+              isSelfPicked: false,
+              mirrorState: 'pending',
+            },
+          });
+          await prisma.ticketAssignmentEpisode.create({
+            data: {
+              ticketId: ticket.id,
+              technicianId: action.techId,
+              workspaceId: ticket.workspaceId,
+              startedAt: now,
+              startMethod: 'workflow_assigned',
+              startAssignedByName: 'Ticket Pulse AI',
+            },
+          }).catch(() => { /* duplicate startedAt guard — harmless */ });
+          await ticketLifecycleNotificationService.emitTicketLifecycleNotifications({
+            existingTicket: ticket,
+            upsertedTicket: updated,
+            source: 'assignment_pipeline',
+            allowNotificationWorkflows: true,
+          }).catch((notificationError) => {
+            logger.warn('Local assignment succeeded but workflow notification dispatch failed', {
+              ticketId: ticket.id, runId: run.id, error: notificationError.message,
+            });
+          });
+          await notificationPreferenceService.queueNotificationsForAssignment(run, action).catch((notificationError) => {
+            logger.warn('Local assignment succeeded but notification queueing failed', {
+              ticketId: ticket.id, runId: run.id, error: notificationError.message,
+            });
+          });
+          logger.info('Native ticket assigned by pipeline (local-only)', { ticketRef: ref, techId: action.techId, runId: run.id });
+        }
+      }
+
+      await prisma.assignmentPipelineRun.update({
+        where: { id: run.id },
+        data: { syncStatus: 'synced', syncedAt: new Date(), syncPayload: payloadData, syncError: null },
+      });
+      return { success: true, actions, preview };
+    } catch (err) {
+      logger.error('Local-only pipeline execution failed', { runId: run.id, ticketId: ticket.id, error: err.message });
+      await prisma.assignmentPipelineRun.update({
+        where: { id: run.id },
+        data: { syncStatus: 'failed', syncError: err.message, syncPayload: payloadData },
+      }).catch(() => {});
+      return { success: false, error: err.message };
+    }
   }
 
   async _mirrorLocalAssignment(run, action) {

@@ -22,6 +22,7 @@ import analyticsRoutes from './analytics.routes.js';
 import summitRoutes, { summitPublicRouter } from './summit.routes.js';
 import { publicTicketStatusPublicRouter } from './publicTicketStatus.routes.js';
 import agentRoutes from './agent.routes.js';
+import ticketsRoutes from './tickets.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
 
@@ -66,6 +67,10 @@ router.use((req, _res, next) => {
 // before requireWorkspaceAccess checks the user's email against the DB.
 router.use(requireAuth);
 router.use('/agent', agentRoutes);
+// Native ticketing: mounted before global workspace-access enforcement because
+// agent-role users (no workspace_access rows) are first-class here — the router
+// applies requireWorkspace + its own access resolution internally.
+router.use('/tickets', ticketsRoutes);
 // Settings has both global app configuration and a few workspace-specific
 // helpers. Mount it before global workspace enforcement so one-time global
 // settings are not blocked by a stale selected workspace.

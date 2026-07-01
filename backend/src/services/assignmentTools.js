@@ -2413,6 +2413,11 @@ async function searchDecisionNotes(workspaceId, input) {
 
 async function getFreshserviceActivities(freshserviceTicketId, workspaceId) {
   try {
+    if (!freshserviceTicketId) {
+      // TP-born tickets have no FreshService activity history — their thread
+      // lives locally. Return an empty, well-formed result so the LLM moves on.
+      return { ticketId: null, activityCount: 0, activities: [], note: 'Ticket was created in Ticket Pulse; no FreshService activity history exists.' };
+    }
     const [fsConfig, timezone] = await Promise.all([
       settingsRepository.getFreshServiceConfigForWorkspace(workspaceId),
       getWorkspaceTimezone(workspaceId),
