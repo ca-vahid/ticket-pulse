@@ -65,6 +65,9 @@ class WorkspaceRepository {
       if (data.defaultTimezone !== undefined) updateData.defaultTimezone = data.defaultTimezone;
       if (data.syncIntervalMinutes !== undefined) updateData.syncIntervalMinutes = data.syncIntervalMinutes;
       if (data.isActive !== undefined) updateData.isActive = data.isActive;
+      if (data.nativeTicketingEnabled !== undefined) {
+        updateData.nativeTicketingEnabled = data.nativeTicketingEnabled === true;
+      }
 
       return await prisma.workspace.update({
         where: { id },

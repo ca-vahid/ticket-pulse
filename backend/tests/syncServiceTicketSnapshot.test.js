@@ -488,6 +488,67 @@ describe('syncService.syncFreshServiceTicketSnapshot', () => {
     expect(result.assignmentChanged).toBe(true);
   });
 
+  test('never writes FS snapshots onto TP-born tickets (dual-origin guardrail)', async () => {
+    const existingTicket = {
+      id: 9001,
+      freshserviceTicketId: BigInt(555001),
+      origin: 'ticketpulse',
+      assignedTechId: 12,
+      status: 'Open',
+      isNoise: false,
+    };
+
+    const result = await syncService.syncFreshServiceTicketSnapshot(1, { id: 555001 }, {
+      client: {},
+      preparedTicket: {
+        freshserviceTicketId: 555001,
+        subject: 'Mirror copy edited in FreshService',
+        status: 'Closed',
+        priority: 1,
+        createdAt: new Date(),
+        assignedTechId: null,
+        workspaceId: 1,
+      },
+      existingTicket,
+      source: 'freshservice_webhook',
+      allowNotificationWorkflows: true,
+    });
+
+    expect(result.skippedTicketPulseOrigin).toBe(true);
+    expect(result.ticket).toBe(existingTicket);
+    expect(result.isNew).toBe(false);
+    expect(result.assignmentChanged).toBe(false);
+    expect(result.statusChanged).toBe(false);
+    expect(ticketRepositoryMock.upsert).not.toHaveBeenCalled();
+    expect(ticketActivityRepositoryMock.create).not.toHaveBeenCalled();
+    expect(noiseRuleServiceMock.evaluate).not.toHaveBeenCalled();
+    expect(ticketLifecycleNotificationServiceMock.emitTicketLifecycleNotifications).not.toHaveBeenCalled();
+    expect(notificationPreferenceServiceMock.queueNotificationsForFreshServiceAssignment).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('guards TP-born tickets found by FS-id lookup, not just those passed in', async () => {
+    ticketRepositoryMock.getByFreshserviceIds.mockResolvedValue([
+      { id: 9002, origin: 'ticketpulse', isNoise: false },
+    ]);
+
+    const result = await syncService.syncFreshServiceTicketSnapshot(1, { id: 555002 }, {
+      client: {},
+      preparedTicket: {
+        freshserviceTicketId: 555002,
+        subject: 'Webhook echo of a mirrored ticket',
+        status: 'Open',
+        priority: 3,
+        createdAt: new Date(),
+        workspaceId: 1,
+      },
+      source: 'freshservice_sync',
+    });
+
+    expect(result.skippedTicketPulseOrigin).toBe(true);
+    expect(ticketRepositoryMock.upsert).not.toHaveBeenCalled();
+  });
+
   test('creates rebound only when FreshService activity analysis confirms rejection', async () => {
     const rejectedAt = new Date('2026-05-29T17:55:00.000Z');
     const existingTicket = {

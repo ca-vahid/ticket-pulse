@@ -21,6 +21,7 @@ model Workspace {
   categoryCustomField     String   @default("security") @db.VarChar(100) @map("category_custom_field")
   tpSkillCustomField      String   @default("lf_ticket_pulse_category") @db.VarChar(100) @map("tp_skill_custom_field")
   tpSubskillCustomField   String   @default("lf_ticket_pulse_subcategory") @db.VarChar(100) @map("tp_subskill_custom_field")
+  nativeTicketingEnabled  Boolean   @default(false) @map("native_ticketing_enabled")
   isActive                Boolean   @default(true) @map("is_active")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
@@ -85,6 +86,7 @@ model Workspace {
   aiProviderAttempts AiProviderAttempt[]
   aiProviderHealthEvents AiProviderHealthEvent[]
   webhookConfig WorkspaceWebhookConfig?
+  groups                 Group[]
 
   @@map("workspaces")
 }
@@ -169,7 +171,9 @@ model Technician {
 
 model Requester {
   id                Int       @id @default(autoincrement())
-  freshserviceId    BigInt    @unique @map("freshservice_id")
+  // Nullable: requesters created for TP-born tickets may not exist in FS yet;
+  // the mirror backfills this once FS auto-creates them during ticket mirroring.
+  freshserviceId    BigInt?   @unique @map("freshservice_id")
   name              String    @db.VarChar(255)
   email             String?   @db.VarChar(255)
   phone             String?   @db.VarChar(50)
@@ -202,7 +206,20 @@ model Requester {
 
 model Ticket {
   id                    Int       @id @default(autoincrement())
-  freshserviceTicketId  BigInt    @unique @map("freshservice_ticket_id")
+  // Nullable: tickets born inside Ticket Pulse (origin='ticketpulse') have no FS id
+  // until the mirror creates their FreshService copy. Postgres unique tolerates NULLs.
+  freshserviceTicketId  BigInt?   @unique @map("freshservice_ticket_id")
+  // 'freshservice' = synced from FS (FS owns it; sync may write to it)
+  // 'ticketpulse'  = born in this app (TP owns it; FS ingest must NEVER write to it)
+  origin                String    @default("freshservice") @db.VarChar(20)
+  // TP-native ticket number (displayed as "TP-<n>"), from ticket_native_number_seq.
+  // Only populated for origin='ticketpulse'.
+  nativeNumber          Int?      @unique @map("native_number")
+  // Fallback-mirror bookkeeping (origin='ticketpulse' only):
+  // null = not applicable / not yet queued, then pending | mirrored | error
+  mirrorState           String?   @db.VarChar(20) @map("mirror_state")
+  mirroredAt            DateTime? @map("mirrored_at")
+  mirrorError           String?   @db.Text @map("mirror_error")
   subject               String?   @db.Text
   description           String?   @db.Text
   descriptionText       String?   @db.Text @map("description_text")
@@ -354,6 +371,8 @@ model Ticket {
   @@index([internalCategoryId])
   @@index([internalSubcategoryId])
   @@index([taxonomyReviewNeeded])
+  @@index([workspaceId, origin])
+  @@index([mirrorState])
 }
 
 model NoiseRule {
@@ -395,12 +414,19 @@ model TicketThreadEntry {
   ticket              Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   workspaceId         Int       @map("workspace_id")
   workspace           Workspace @relation(fields: [workspaceId], references: [id])
-  externalEntryId     String    @db.VarChar(191) @map("external_entry_id")
+  // Nullable: entries authored inside Ticket Pulse (source='ticketpulse_user') have
+  // no FreshService entry id. FS-sourced entries keep it for dedupe on re-sync.
+  externalEntryId     String?   @db.VarChar(191) @map("external_entry_id")
+  // freshservice_activity | freshservice_conversation | webhook | ticketpulse_user | email_inbound
   source              String    @default("freshservice_activity") @db.VarChar(50)
   eventType           String    @default("activity") @db.VarChar(50) @map("event_type")
   actorName           String?   @db.VarChar(255) @map("actor_name")
   actorEmail          String?   @db.VarChar(255) @map("actor_email")
   actorFreshserviceId BigInt?   @map("actor_freshservice_id")
+  authorType          String?   @db.VarChar(20) @map("author_type") // agent | requester | system
+  // Fallback-mirror bookkeeping for TP-authored entries: pending | mirrored | error
+  mirrorState         String?   @db.VarChar(20) @map("mirror_state")
+  mirroredAt          DateTime? @map("mirrored_at")
   incoming            Boolean?  @map("incoming")
   isPrivate           Boolean?  @map("is_private")
   visibility          String?   @db.VarChar(20)
@@ -417,6 +443,26 @@ model TicketThreadEntry {
   @@index([workspaceId, occurredAt])
   @@index([ticketId, occurredAt])
   @@index([eventType])
+}
+
+// Cache of FreshService agent groups (per workspace). Tickets keep storing the raw
+// FS group id in Ticket.groupId; this table gives it a name and powers group pickers.
+// freshserviceId is nullable so TP-native groups are possible later.
+model Group {
+  id             Int       @id @default(autoincrement())
+  workspaceId    Int       @map("workspace_id")
+  workspace      Workspace @relation(fields: [workspaceId], references: [id])
+  freshserviceId BigInt?   @map("freshservice_id")
+  name           String    @db.VarChar(255)
+  description    String?   @db.Text
+  isActive       Boolean   @default(true) @map("is_active")
+  syncedAt       DateTime? @map("synced_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, freshserviceId])
+  @@map("groups")
+  @@index([workspaceId, isActive])
 }
 
 model TicketAssignmentEpisode {
