@@ -138,4 +138,18 @@ router.post('/:id/notes', requireNativeTicketing, asyncHandler(async (req, res) 
   res.status(201).json({ success: true, data: result });
 }));
 
+/**
+ * Post-outage recovery: import FS-side deltas on TP-born mirrored tickets and
+ * surface conflicts. Admin-only (global or workspace admin).
+ */
+router.post('/mirror/reconcile', asyncHandler(async (req, res) => {
+  const actor = req.ticketActor;
+  if (actor.role !== 'admin' && actor.workspaceRole !== 'admin') {
+    throw new AuthenticationError('Admin access required for mirror reconciliation');
+  }
+  const { default: mirrorService } = await import('../services/mirrorService.js');
+  const result = await mirrorService.reconcile(req.workspaceId, req.body || {});
+  res.json({ success: true, data: result });
+}));
+
 export default router;

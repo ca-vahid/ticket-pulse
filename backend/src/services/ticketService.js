@@ -9,6 +9,7 @@ import ticketThreadRepository from './ticketThreadRepository.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import requesterRepository from './requesterRepository.js';
 import sendgridNotificationService from './sendgridNotificationService.js';
+import mirrorService from './mirrorService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
@@ -448,6 +449,7 @@ class TicketService {
 
     await this._notifyLifecycle(null, ticket);
     this._broadcast(workspaceId, 'created', ticket);
+    await mirrorService.enqueueTicketCreate(ticket);
 
     let triage = { queued: false };
     if (!assignee && !isNoise && data.runAiTriage) {
@@ -538,6 +540,7 @@ class TicketService {
 
     await this._audit(ticket.id, 'fields_updated', actor, { changes });
     this._broadcast(workspaceId, 'updated', updated, { changes: Object.keys(changes) });
+    await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 
@@ -600,6 +603,7 @@ class TicketService {
     await this._audit(ticket.id, 'status_changed', actor, { oldStatus: ticket.status, newStatus: status });
     await this._notifyLifecycle(ticket, updated);
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
+    await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 
@@ -658,6 +662,7 @@ class TicketService {
     });
     await this._notifyLifecycle(ticket, updated);
     this._broadcast(workspaceId, 'assignment', updated, { fromTechId: ticket.assignedTechId });
+    await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 
@@ -672,7 +677,16 @@ class TicketService {
   }
 
   async _addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate }) {
-    const ticket = await this._requireNativeTicket(ticketId, workspaceId);
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      include: TICKET_INCLUDE,
+    });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+    const isNative = ticket.origin === TICKET_ORIGIN.TICKETPULSE;
+    if (!isNative && !ticket.freshserviceTicketId) {
+      throw new ValidationError('This FreshService ticket has no FS id to reply through');
+    }
+
     const parsed = threadBodySchema.safeParse(input || {});
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
 
@@ -680,11 +694,26 @@ class TicketService {
     const bodyText = parsed.data.bodyText?.trim() || stripHtml(bodyHtml);
     const now = new Date();
 
+    // FS-born tickets: FS owns requester communication — send through the FS
+    // API first (FS emails the requester itself), then cache the entry locally.
+    let externalEntryId = null;
+    if (!isNative) {
+      const client = await mirrorService.getClient(workspaceId);
+      if (!client) throw new ValidationError('FreshService is not configured for this workspace');
+      const fsId = Number(ticket.freshserviceTicketId);
+      const html = bodyHtml || `<p>${(bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+      const result = isPrivate
+        ? await client.addNote(fsId, html, { isPrivate: true })
+        : await client.createReply(fsId, html);
+      const fsEntryId = result?.conversation?.id || result?.id || null;
+      externalEntryId = fsEntryId ? `fs-conv-${fsEntryId}` : null;
+    }
+
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
         workspaceId,
-        externalEntryId: null,
+        externalEntryId,
         source: 'ticketpulse_user',
         eventType: isPrivate ? 'note' : 'reply',
         actorName: actor?.name || actor?.email || 'Ticket Pulse',
@@ -697,7 +726,9 @@ class TicketService {
         bodyHtml,
         bodyText,
         occurredAt: now,
-        mirrorState: 'pending',
+        // Native entries queue for the mirror; FS-born entries are already there.
+        mirrorState: isNative ? 'pending' : 'mirrored',
+        mirroredAt: isNative ? null : now,
       },
     });
 
@@ -708,8 +739,13 @@ class TicketService {
     await prisma.ticket.update({ where: { id: ticket.id }, data: ticketPatch });
 
     let email = { sent: false };
-    if (!isPrivate && ticket.requester?.email) {
-      email = await this._emailRequesterReply(ticket, entry);
+    if (isNative) {
+      if (!isPrivate && ticket.requester?.email) {
+        email = await this._emailRequesterReply(ticket, entry);
+      }
+      await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
+    } else if (!isPrivate) {
+      email = { sent: true, via: 'freshservice' };
     }
 
     this._broadcast(workspaceId, isPrivate ? 'note' : 'reply', ticket, { entryId: entry.id });

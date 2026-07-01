@@ -124,7 +124,10 @@ export default function TicketDetail() {
   useSSE({ onTicketChange, enabled: Number.isFinite(ticketId) });
 
   const isNative = ticket?.origin === 'ticketpulse';
-  const canWrite = isNative && meta?.nativeTicketingEnabled !== false;
+  const ticketingOn = meta?.nativeTicketingEnabled !== false;
+  const canWrite = isNative && ticketingOn; // field edits: TP-born only
+  // Conversation: TP-born always; FS-born via the FreshService API (FS emails the requester)
+  const canConverse = ticketingOn && (isNative || Boolean(ticket?.freshserviceTicketId));
   const fsUrl = ticket?.freshserviceTicketId
     ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
     : null;
@@ -220,7 +223,7 @@ export default function TicketDetail() {
               {!isNative && (
                 <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
                   <ShieldCheck className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
-                  FreshService owns this ticket — it is read-only here until the mirror phase adds write-back.
+                  FreshService owns this ticket — fields are read-only here, but replies you post are delivered through FreshService.
                   {fsUrl && (
                     <a href={fsUrl} target="_blank" rel="noreferrer" className="tp-focus-ring inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline rounded ml-auto">
                       Open in FreshService <ExternalLink className="w-3 h-3" aria-hidden="true" />
@@ -250,7 +253,7 @@ export default function TicketDetail() {
                   </h2>
                   {conversationEntries.length === 0 ? (
                     <div className="tp-surface rounded-xl p-6 text-center text-sm text-slate-400">
-                      No replies yet{canWrite ? ' — start the conversation below.' : '.'}
+                      No replies yet{canConverse ? ' — start the conversation below.' : '.'}
                     </div>
                   ) : (
                     <ul className="space-y-3">
@@ -260,7 +263,7 @@ export default function TicketDetail() {
                 </section>
 
                 {/* Composer */}
-                {canWrite ? (
+                {canConverse ? (
                   <section className="tp-card rounded-xl p-3.5" aria-label="Reply composer">
                     <div role="group" aria-label="Composer mode" className="flex items-center gap-1.5 mb-2.5">
                       <button
@@ -281,8 +284,12 @@ export default function TicketDetail() {
                       >
                         <StickyNote className="w-3.5 h-3.5" aria-hidden="true" /> Internal note
                       </button>
-                      {composerMode === 'reply' && ticket.requester?.email && (
-                        <span className="ml-auto text-[11px] text-slate-400 truncate">emails {ticket.requester.email}</span>
+                      {composerMode === 'reply' && (
+                        <span className="ml-auto text-[11px] text-slate-400 truncate">
+                          {isNative
+                            ? (ticket.requester?.email ? `emails ${ticket.requester.email}` : '')
+                            : 'sent via FreshService (emails the requester)'}
+                        </span>
                       )}
                     </div>
                     <textarea

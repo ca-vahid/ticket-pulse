@@ -21,6 +21,16 @@ const requesterRepositoryMock = { findByEmail: jest.fn(), createNative: jest.fn(
 const sendgridMock = { sendEmail: jest.fn() };
 const sseBroadcastMock = jest.fn();
 const runPipelineMock = jest.fn();
+const fsClientMock = {
+  createReply: jest.fn(),
+  addNote: jest.fn(),
+};
+const mirrorServiceMock = {
+  enqueueTicketCreate: jest.fn().mockResolvedValue({ id: 1 }),
+  enqueueFieldSync: jest.fn().mockResolvedValue({ id: 2 }),
+  enqueueThreadEntry: jest.fn().mockResolvedValue({ id: 3 }),
+  getClient: jest.fn().mockResolvedValue(fsClientMock),
+};
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
@@ -41,6 +51,9 @@ jest.unstable_mockModule('../src/services/assignmentPipelineService.js', () => (
 }));
 jest.unstable_mockModule('../src/services/azureAdService.js', () => ({
   default: { getUserProfile: jest.fn().mockResolvedValue(null) },
+}));
+jest.unstable_mockModule('../src/services/mirrorService.js', () => ({
+  default: mirrorServiceMock,
 }));
 
 const { default: ticketService } = await import('../src/services/ticketService.js');
@@ -106,6 +119,7 @@ describe('ticketService.createTicket', () => {
     }));
     expect(runPipelineMock).toHaveBeenCalledWith(501, 1, 'app_native');
     expect(sseBroadcastMock).toHaveBeenCalledWith('ticket-change', expect.objectContaining({ action: 'created' }), 1);
+    expect(mirrorServiceMock.enqueueTicketCreate).toHaveBeenCalledWith(expect.objectContaining({ id: 501 }));
     expect(result.triage.queued).toBe(true);
   });
 
@@ -243,10 +257,34 @@ describe('ticketService conversation + status + assignment', () => {
     }));
   });
 
-  test('rejects conversation writes on FS-born tickets until the mirror phase', async () => {
+  test('FS-born replies go through the FreshService API and cache locally as mirrored', async () => {
     prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9) });
-    await expect(ticketService.addReply(501, 1, { bodyText: 'hello' }, actor))
-      .rejects.toThrow(/owned by FreshService/i);
+    fsClientMock.createReply.mockResolvedValue({ conversation: { id: 42001 } });
+
+    const { entry, email } = await ticketService.addReply(501, 1, { bodyText: 'hello from TP' }, actor);
+
+    expect(fsClientMock.createReply).toHaveBeenCalledWith(9, expect.stringContaining('hello from TP'));
+    expect(entry.externalEntryId).toBe('fs-conv-42001');
+    expect(entry.mirrorState).toBe('mirrored');
+    expect(email).toEqual({ sent: true, via: 'freshservice' });
+    // TP does NOT email the requester for FS-born replies — FS does.
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+    expect(mirrorServiceMock.enqueueThreadEntry).not.toHaveBeenCalled();
+  });
+
+  test('FS-born private notes mirror through addNote(private)', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9) });
+    fsClientMock.addNote.mockResolvedValue({ conversation: { id: 42002 } });
+
+    await ticketService.addPrivateNote(501, 1, { bodyText: 'fs-born internal' }, actor);
+
+    expect(fsClientMock.addNote).toHaveBeenCalledWith(9, expect.stringContaining('fs-born internal'), { isPrivate: true });
+  });
+
+  test('native replies queue for the mirror', async () => {
+    await ticketService.addReply(501, 1, { bodyText: 'native reply' }, actor);
+    expect(mirrorServiceMock.enqueueThreadEntry).toHaveBeenCalledWith(1, 501, 9001);
+    expect(fsClientMock.createReply).not.toHaveBeenCalled();
   });
 
   test('resolving stamps resolvedAt + resolutionTimeSeconds and closes the active episode', async () => {

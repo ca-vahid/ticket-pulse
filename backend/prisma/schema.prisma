@@ -87,6 +87,7 @@ model Workspace {
   aiProviderHealthEvents AiProviderHealthEvent[]
   webhookConfig WorkspaceWebhookConfig?
   groups                 Group[]
+  mirrorJobs             MirrorJob[]
 
   @@map("workspaces")
 }
@@ -344,6 +345,7 @@ model Ticket {
   feedback             TicketFeedback?
   urgentEscalationEvents UrgentEscalationEvent[]
   priorityEvents       TicketPriorityEvent[]
+  mirrorJobs           MirrorJob[]
 
   @@map("tickets")
   @@index([workspaceId])
@@ -443,6 +445,31 @@ model TicketThreadEntry {
   @@index([workspaceId, occurredAt])
   @@index([ticketId, occurredAt])
   @@index([eventType])
+}
+
+// Outbox for the FreshService fallback mirror. Every TP-born mutation that must
+// reach the FS copy becomes a job; jobs for one ticket apply strictly in id
+// order (create_ticket first). Retry with backoff; dead jobs surface on the
+// ticket as mirrorState='error'.
+model MirrorJob {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id])
+  ticketId      Int       @map("ticket_id")
+  ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  threadEntryId Int?      @map("thread_entry_id")
+  kind          String    @db.VarChar(30) // create_ticket | update_fields | thread_entry
+  status        String    @default("pending") @db.VarChar(20) // pending | done | failed | dead
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
+  lastError     String?   @db.Text @map("last_error")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("mirror_jobs")
+  @@index([status, nextAttemptAt])
+  @@index([ticketId, id])
+  @@index([workspaceId, status])
 }
 
 // Cache of FreshService agent groups (per workspace). Tickets keep storing the raw

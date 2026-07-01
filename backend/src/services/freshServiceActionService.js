@@ -1298,6 +1298,10 @@ class FreshServiceActionService {
         where: { id: run.id },
         data: { syncStatus: 'synced', syncedAt: new Date(), syncPayload: payloadData, syncError: null },
       });
+      if (actions.length > 0) {
+        const { default: mirrorService } = await import('./mirrorService.js');
+        await mirrorService.enqueueFieldSync(ticket.workspaceId, ticket.id).catch(() => {});
+      }
       return { success: true, actions, preview };
     } catch (err) {
       logger.error('Local-only pipeline execution failed', { runId: run.id, ticketId: ticket.id, error: err.message });

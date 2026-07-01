@@ -116,19 +116,19 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [x] 2.9 FS-born tickets share the views — read-only banner ("FreshService owns this ticket…"), disabled editors, thread from cache, explicit Open-in-FreshService link
 - [x] 2.10 Verified in a real browser (puppeteer + dev-login): list, native detail, FS-born detail, composer, **ticket created through the UI (TP-1004) and replied to through the UI** with screenshots reviewed; aria labels/roles + `tp-focus-ring` throughout; mobile card layout; RTL tests for the shared ticket UI kit. Fixed en route: `bg-white/78 → bg-white/[.78]` (index.css broke fresh builds on tailwind 3.4.18), ticketsAPI double-unwrap, SSE-aware navigation waits
 
-### - [ ] Phase 3 — FreshService mirror (the fallback copy)
+### - [x] Phase 3 — FreshService mirror (the fallback copy) ✅ 2026-07-01
 *Goal: every TP-born ticket has a usable FS shadow; fallback rehearsed. Exit: kill-switch drill passes — work in FS during simulated outage, reconcile cleanly after.*
 
-- [ ] 3.1 Mirror outbox table + worker — retry/backoff, integrates the shared FS rate limiter, per-item `mirrorState`
-- [ ] 3.2 FS client write methods — create ticket (on behalf of requester email), update fields, public reply, private note
-- [ ] 3.3 TP-create → FS create → store `freshserviceTicketId` + `mirroredAt`; UI mirror-state updates via SSE
-- [ ] 3.4 Field-change mirroring — status/priority/category/assignee (reuse `freshServiceActionService` patterns)
-- [ ] 3.5 Public replies mirrored as FS replies; private notes as FS private notes
-- [ ] 3.6 Echo suppression — tag mirror writes, drop webhook/poll echoes for TP-born tickets
-- [ ] 3.7 Out-of-band FS edit detection on TP-born copies → conflict log + admin surface
-- [ ] 3.8 Reconciliation job — import FS-side thread/status deltas on TP-born tickets after an outage (mirror watermark)
-- [ ] 3.9 Reply-from-TP on **FS-born** tickets via FS reply API (FS still emails the requester)
-- [ ] 3.10 Fallback runbook in `SYNC_OPERATIONS.md` + kill-switch drill executed on the pilot workspace
+- [x] 3.1 `mirror_jobs` outbox (`20260701200000_add_mirror_jobs`) + `mirrorService` worker — 60s drain, strict per-ticket id ordering (a failed job blocks that ticket's later jobs only), exponential backoff 5m→6h, dead-letter after 8 attempts → `mirrorState='error'`; low-priority lane on the shared FS rate limiter; `NATIVE_TICKET_MIRROR_ENABLED` kill switch
+- [x] 3.2 FS client gains `createTicket`, `updateTicket`, `addNote(isPrivate)`, `createReply` (+ env-gated `FRESHSERVICE_BASE_URL_OVERRIDE` test hook for stub drills)
+- [x] 3.3 TP-create → FS create on behalf of the requester email → FS id + `mirroredAt` stored, requester `freshserviceId` backfilled, private `[Ticket Pulse mirror]` intro note dropped, SSE `mirror` action broadcast
+- [x] 3.4 Field sync — idempotent snapshot push (status label→FS code map, priority, subject, group, responder, TP category custom fields), deduped to one pending job per ticket; AI local-only pipeline decisions enqueue too
+- [x] 3.5 Public replies mirror as **public notes** (portal-visible; deliberate deviation from FS replies so the requester isn't emailed twice — TP already emailed them); internal notes mirror privately
+- [x] 3.6 Echo suppression complete by design — every FS→TP ingest path drops `origin='ticketpulse'` (Phase 0 guardrails), so mirror writes cannot boomerang; verified live in the drill
+- [x] 3.7 Out-of-band FS edit detection — reconciliation compares FS status/assignee vs TP state → `mirror_conflict` ticket activity + warn log; drift surfaced, never auto-applied
+- [x] 3.8 `mirrorService.reconcile(workspaceId)` + `POST /api/tickets/mirror/reconcile` (admin) — imports FS-side conversation entries added during an outage (skips mirror-authored notes, dedupes by `fs-conv-<id>`), idempotent
+- [x] 3.9 FS-born tickets: replies/notes from TP now go through the FS API synchronously (FS emails the requester), cached locally as `mirrored`; detail-page composer enabled for FS-born with "sent via FreshService" hint
+- [x] 3.10 Runbook added to `SYNC_OPERATIONS.md` + **kill-switch drill executed against a local FS stub on the dev DB: 13/13 checks** (create→mirror→reply→status→outage worked in "FS"→reconcile imports requester reply + flags status/assignee drift→idempotent re-run). Real-FS drill on the IT pilot happens at rollout. 10 new unit tests (mirror worker + FS-born conversation paths); backend 512/513 (same pre-existing failure)
 
 ### - [ ] Phase 4 — Email channel (Graph, per-workspace mailboxes)
 *Goal: email-to-ticket and email-updates-ticket live; outbound conversations thread properly. Exit: end-to-end mail roundtrip verified in a real mail client.*

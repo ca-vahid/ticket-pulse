@@ -859,3 +859,55 @@ Before implementing monthly sync:
 **Next Update**: When monthly sync is implemented
 **Maintained By**: Development Team
 
+
+---
+
+## Native Ticketing: FreshService Fallback Mirror (2026-07)
+
+Tickets born inside Ticket Pulse (`origin='ticketpulse'`) are mirrored to
+FreshService as **best-effort fallback copies**. Ticket Pulse is their source
+of truth; the mirror exists so the org can retreat to FreshService during a
+Ticket Pulse outage.
+
+### How the mirror works
+
+- Every TP-born mutation enqueues a row in `mirror_jobs` (`create_ticket`,
+  `update_fields`, `thread_entry`). A worker (`mirrorService`, started at app
+  boot, every 60s — `NATIVE_TICKET_MIRROR_INTERVAL_MS`) drains jobs **in id
+  order per ticket** through the shared FS rate limiter at `low` priority.
+- `create_ticket` posts the snapshot on behalf of the requester email (FS
+  auto-creates the contact; we backfill `Requester.freshserviceId`), stores the
+  FS id on the ticket, and drops a private `[Ticket Pulse mirror]` intro note.
+- Public replies mirror as **public notes** (portal-visible, no requester email
+  — Ticket Pulse already emailed them). Internal notes mirror privately.
+- Retry with exponential backoff (5m → 6h cap); after 8 attempts a job goes
+  `dead` and the ticket shows `mirrorState='error'` in the UI.
+- Kill switch: `NATIVE_TICKET_MIRROR_ENABLED=false` stops the worker.
+
+### Echo suppression
+
+All FS→TP ingest paths (poll, webhook, backfill, sweeps, CSAT) drop
+`origin='ticketpulse'` rows at the repository and snapshot-ingest layers, so
+the mirror's own writes can never boomerang back and overwrite TP state.
+
+### Outage runbook (falling back to FreshService)
+
+1. **During a Ticket Pulse outage**: work TP-born tickets on their FS copies
+   (they carry subject/description/status/priority/assignee/conversation).
+   The private intro note identifies them as mirror copies.
+2. **After recovery**: run `POST /api/tickets/mirror/reconcile` (admin, per
+   workspace). This imports FS-side conversation entries added during the
+   outage into the Ticket Pulse thread (source `freshservice_reconciliation`,
+   skipping the mirror's own notes) and records a `mirror_conflict` ticket
+   activity for any status/assignee drift on the FS copy. Drift is **surfaced,
+   never auto-applied** — Ticket Pulse remains the source of truth; resolve
+   conflicts by updating the ticket in Ticket Pulse (the next field sync
+   pushes the corrected state back to FS).
+3. Reconciliation is idempotent — safe to run repeatedly.
+
+### Rate-budget impact
+
+Mirror traffic runs at `low` limiter priority: 1 request per create (+1 intro
+note), 1 per field sync (deduped per ticket), 1 per conversation entry.
+Steady-state pilot volume is a few requests/minute — negligible against the
+110 req/min budget; bursts queue behind sync traffic instead of competing.

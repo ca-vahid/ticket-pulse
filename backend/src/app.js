@@ -246,6 +246,14 @@ async function initialize() {
       logger.warn('Notification workflow stale-run reconciliation failed (non-fatal):', e.message);
     }
 
+    // Native-ticketing fallback mirror: pushes TP-born ticket copies to FreshService.
+    try {
+      const { default: mirrorService } = await import('./services/mirrorService.js');
+      mirrorService.start();
+    } catch (e) {
+      logger.warn('FreshService mirror worker failed to start (non-fatal):', e.message);
+    }
+
     logger.info('Server initialization complete');
   } catch (error) {
     logger.error('Server initialization failed:', error);

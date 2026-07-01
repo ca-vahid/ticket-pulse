@@ -129,7 +129,8 @@ class FreshServiceClient {
     this.rateLimitSource = options.source || null;
     // Handle both full domain (efusion.freshservice.com) and subdomain (efusion)
     const fullDomain = domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`;
-    this.baseURL = `https://${fullDomain}/api/v2`;
+    // Test hook: lets integration drills point at a local FS stub. Never set in prod.
+    this.baseURL = process.env.FRESHSERVICE_BASE_URL_OVERRIDE || `https://${fullDomain}/api/v2`;
 
     // Shared rate limiter across the process
     this.limiter = getSharedRateLimiter();
@@ -945,6 +946,86 @@ class FreshServiceClient {
       }
       logger.error(`Error adding note to ticket ${ticketId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Create a ticket in FreshService (used by the native-ticketing fallback
+   * mirror). `email` lets FS resolve/auto-create the requester contact.
+   * Returns the created FS ticket (incl. id and requester_id).
+   */
+  async createTicket(payload) {
+    try {
+      const response = await this._post('/tickets', compactObject(payload));
+      return response.data.ticket;
+    } catch (error) {
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error('Error creating FreshService ticket:', { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
+    }
+  }
+
+  /**
+   * Generic ticket field update (status/priority/subject/description/group…).
+   */
+  async updateTicket(ticketId, fields) {
+    try {
+      const response = await this._put(`/tickets/${ticketId}`, { ticket: compactObject(fields) });
+      return response.data.ticket;
+    } catch (error) {
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error(`Error updating ticket ${ticketId}:`, { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
+    }
+  }
+
+  /**
+   * Add a note to a ticket. Public notes (private=false) land in the portal
+   * conversation WITHOUT emailing the requester — the mirror uses them for
+   * TP-authored public replies (Ticket Pulse already emailed the requester).
+   */
+  async addNote(ticketId, body, { isPrivate = true } = {}) {
+    try {
+      const response = await this._post(`/tickets/${ticketId}/notes`, {
+        body,
+        private: isPrivate === true,
+      });
+      return response.data;
+    } catch (error) {
+      const httpStatus = error.response?.status || error.statusCode;
+      if (httpStatus === 404 || httpStatus === 405) {
+        logger.info(`Ticket ${ticketId} is deleted or in terminal state, skipping note`);
+        return { ticketId, skipped: true, reason: 'ticket_deleted_or_terminal' };
+      }
+      logger.error(`Error adding note to ticket ${ticketId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Post a public agent reply. FreshService EMAILS THE REQUESTER for replies —
+   * only use for FS-born tickets where FS owns requester communication.
+   */
+  async createReply(ticketId, body) {
+    try {
+      const response = await this._post(`/tickets/${ticketId}/reply`, { body });
+      return response.data;
+    } catch (error) {
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error(`Error replying to ticket ${ticketId}:`, { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
     }
   }
 
