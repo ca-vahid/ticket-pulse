@@ -92,6 +92,7 @@ export default function TicketDetail() {
   const [composerBody, setComposerBody] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
+  const [approvalEmail, setApprovalEmail] = useState('');
 
   const showToast = useCallback((tone, message) => {
     setToast({ tone, message });
@@ -466,14 +467,94 @@ export default function TicketDetail() {
                   )}
                 </div>
 
-                {/* Approvals scaffold (Phase 6) */}
-                <div className="tp-surface rounded-xl p-4">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-slate-400" aria-hidden="true" />
-                    <h2 className="text-sm font-bold text-slate-500">Approvals</h2>
-                    <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5">Coming soon</span>
+                {/* Approvals */}
+                <div className="tp-card rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" aria-hidden="true" />
+                    <h2 className="text-sm font-bold text-slate-800">Approvals</h2>
                   </div>
-                  <p className="text-xs text-slate-400 mt-1.5">Request sign-off on this ticket (e.g. purchases) — lands with the approvals phase.</p>
+
+                  {(ticket.approvals?.length || 0) > 0 && (
+                    <ul className="space-y-2 mb-3">
+                      {ticket.approvals.map((ap) => (
+                        <li key={ap.id} className="p-2.5 rounded-lg border border-slate-100 bg-slate-50/60">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
+                              ap.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : ap.status === 'rejected' ? 'bg-red-50 text-red-700 border border-red-200'
+                                  : ap.status === 'cancelled' ? 'bg-slate-100 text-slate-500 border border-slate-200'
+                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}>
+                              {ap.status}
+                            </span>
+                            <span className="text-xs text-slate-600 truncate">{ap.approverName || ap.approverEmail}</span>
+                            <span className="ml-auto text-[10px] text-slate-400 whitespace-nowrap">
+                              {timeAgo(ap.decidedAt || ap.createdAt)}
+                            </span>
+                          </div>
+                          {ap.decisionNote && <p className="text-xs text-slate-500 mt-1">“{ap.decisionNote}”</p>}
+                          {ap.status === 'pending' && meta?.actor && (meta.actor.email === ap.approverEmail || meta.actor.kind === 'admin' || meta.actor.workspaceRole === 'admin') && (
+                            <div className="flex items-center gap-1.5 mt-2">
+                              <button
+                                onClick={() => applyChange(`approval-${ap.id}`, () => ticketsAPI.decideApproval(ticketId, ap.id, 'approved'))}
+                                disabled={savingField === `approval-${ap.id}`}
+                                className="tp-focus-ring px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => applyChange(`approval-${ap.id}`, () => ticketsAPI.decideApproval(ticketId, ap.id, 'rejected'))}
+                                disabled={savingField === `approval-${ap.id}`}
+                                className="tp-focus-ring px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                              >
+                                Reject
+                              </button>
+                              <button
+                                onClick={() => applyChange(`approval-${ap.id}`, () => ticketsAPI.cancelApproval(ticketId, ap.id))}
+                                disabled={savingField === `approval-${ap.id}`}
+                                className="tp-focus-ring px-2 py-1 text-[11px] font-medium rounded-lg text-slate-500 hover:bg-slate-100"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {ticketingOn ? (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const email = approvalEmail.trim();
+                        if (!email) return;
+                        applyChange('approval-request', async () => {
+                          await ticketsAPI.requestApproval(ticketId, { approverEmail: email });
+                          setApprovalEmail('');
+                        });
+                      }}
+                      className="flex items-center gap-1.5"
+                    >
+                      <input
+                        type="email"
+                        value={approvalEmail}
+                        onChange={(e) => setApprovalEmail(e.target.value)}
+                        placeholder="approver@company.com"
+                        aria-label="Approver email"
+                        className="tp-focus-ring flex-1 min-w-0 text-xs bg-white border border-input rounded-lg px-2.5 py-1.5 placeholder:text-slate-400"
+                      />
+                      <button
+                        type="submit"
+                        disabled={savingField === 'approval-request' || !approvalEmail.trim()}
+                        className="tp-focus-ring px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Request
+                      </button>
+                    </form>
+                  ) : (ticket.approvals?.length || 0) === 0 ? (
+                    <p className="text-xs text-slate-400">No approvals on this ticket.</p>
+                  ) : null}
                 </div>
 
                 {/* Activity log */}

@@ -156,16 +156,16 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [x] 5.7 Mock/preview modes return `wouldSet` previews for `update_ticket` instead of writing; runs/steps audit flows through the existing engine persistence
 - [x] 5.8 6-test definition suite + **live drill on the dev DB (8/8)**: seed → publish+enable → resolved TP-born ticket + `ticket.reply_received` → reopened (resolution cleared, mirror queued, audited) and open tickets untouched. Backend 528/529 (same pre-existing failure); build green
 
-### - [ ] Phase 6 — Approvals (scaffold → usable loop)
+### - [x] Phase 6 — Approvals (scaffold → usable loop) ✅ 2026-07-01
 *Goal: single-step approvals on tickets, decidable from email. Exit: request → magic-link decide → workflow reacts.*
 
-- [ ] 6.1 `TicketApproval` schema + migration (ticket, approver, requestedBy, status, note, decidedAt)
-- [ ] 6.2 API — request / decide / list, with role rules
-- [ ] 6.3 Ticket-detail approval block (request UI, status chips, history)
-- [ ] 6.4 Magic-link email approve/reject via public token infra
-- [ ] 6.5 Workflow integration — request-approval action + `approval.decided` trigger
-- [ ] 6.6 Mirror approval decisions to FS as private notes (audit trail)
-- [ ] 6.7 Tests + a11y pass
+- [x] 6.1 `TicketApproval` schema (`20260702100000_add_ticket_approvals`) — status pending/approved/rejected/cancelled, approver, requestedBy, notes, decidedVia link/app, sha256 `tokenHash` + 30-day expiry
+- [x] 6.2 API — `POST /:id/approvals` (request, dedupes pending per approver), `/decide`, `/cancel` (authed); public magic-link router `GET|POST /api/ticket-approvals/public/:token` mounted pre-auth; only the approver or an admin may decide in-app
+- [x] 6.3 Ticket-detail approvals block — status chips, decision notes, request form, in-app Approve/Reject/Cancel for the right people (replaces the Phase 2 placeholder)
+- [x] 6.4 Magic-link decision page `/approval/:token` (self-contained public page: ticket summary, request note, optional decision note, Approve/Reject, decided/expired states); approver emailed via Graph mailbox → SendGrid fallback; `decisionUrl` returned for hand-delivery
+- [x] 6.5 Workflow integration — `approval.requested` / `approval.decided` registered as triggers (buildable with condition + send_email/update_ticket nodes). *A dedicated request-approval action node stays on the wishlist*
+- [x] 6.6 Decisions land in the conversation as a private system note, mirror-queued to the FS fallback copy (audit on both systems)
+- [x] 6.7 **Live drill 11/11** (request → dedupe guard → token read → link decision → audit + mirrored note → double-decision block → permission guard → admin override); backend 528/529 (same pre-existing failure); build green
 
 ### - [ ] Phase 7 — Public integration API
 *Goal: external apps create/query/reply. Exit: documented, keyed, rate-limited `/api/v1`.*

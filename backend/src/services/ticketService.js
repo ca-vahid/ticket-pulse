@@ -306,12 +306,21 @@ class TicketService {
     });
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
 
-    const [thread, activities] = await Promise.all([
+    const [thread, activities, approvals] = await Promise.all([
       ticketThreadRepository.listForTicket(ticket.id, { limit: 300 }),
       prisma.ticketActivity.findMany({
         where: { ticketId: ticket.id },
         orderBy: { performedAt: 'desc' },
         take: 50,
+      }),
+      prisma.ticketApproval.findMany({
+        where: { ticketId: ticket.id },
+        orderBy: { id: 'desc' },
+        select: {
+          id: true, status: true, approverEmail: true, approverName: true,
+          requestedBy: true, requestNote: true, decisionNote: true,
+          decidedAt: true, decidedVia: true, createdAt: true,
+        },
       }),
     ]);
 
@@ -320,6 +329,7 @@ class TicketService {
       displayRef: ticketDisplayRef(ticket),
       thread,
       activities,
+      approvals,
       latestPipelineRun: ticket.pipelineRuns?.[0] || null,
     };
   }

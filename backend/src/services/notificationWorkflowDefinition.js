@@ -10,6 +10,9 @@ export const NOTIFICATION_EVENT_TYPES = [
   'ticket.reply_received',
   'ticket.note_added',
   'ticket.status_changed',
+  // Approvals (Phase 6)
+  'approval.requested',
+  'approval.decided',
 ];
 
 export const AFTER_HOURS_WORKFLOW_KEY = 'ticket_created_after_hours';
@@ -430,6 +433,8 @@ function eventLabel(triggerType) {
     'ticket.reply_received': 'Requester replied',
     'ticket.note_added': 'Internal note added',
     'ticket.status_changed': 'Status changed',
+    'approval.requested': 'Approval requested',
+    'approval.decided': 'Approval decided',
   }[triggerType] || triggerType;
 }
 

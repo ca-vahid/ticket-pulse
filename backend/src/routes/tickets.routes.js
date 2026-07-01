@@ -209,6 +209,53 @@ router.post('/:id/notes', requireNativeTicketing, asyncHandler(async (req, res) 
   res.status(201).json({ success: true, data: result });
 }));
 
+// ---------------------------------------------------------------- approvals
+
+router.post('/:id/approvals', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const result = await ticketApprovalService.request(
+    parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor,
+  );
+  res.status(201).json({ success: true, data: result });
+}));
+
+router.post('/:id/approvals/:approvalId/decide', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.decideInApp(
+    parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
+    req.body?.decision, req.body?.note || null, req.ticketActor,
+  );
+  res.json({ success: true, data: approval });
+}));
+
+router.post('/:id/approvals/:approvalId/cancel', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.cancel(
+    parseTicketId(req), req.workspaceId, Number(req.params.approvalId), req.ticketActor,
+  );
+  res.json({ success: true, data: approval });
+}));
+
+/**
+ * Public magic-link router (no app auth — the token IS the credential).
+ * Mounted pre-auth in routes/index.js at /api/ticket-approvals/public.
+ */
+export const ticketApprovalPublicRouter = express.Router();
+
+ticketApprovalPublicRouter.get('/:token', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const data = await ticketApprovalService.getByToken(req.params.token);
+  res.json({ success: true, data });
+}));
+
+ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.decideByToken(
+    req.params.token, req.body?.decision, req.body?.note || null,
+  );
+  res.json({ success: true, data: { status: approval.status, decidedAt: approval.decidedAt } });
+}));
+
 /**
  * Post-outage recovery: import FS-side deltas on TP-born mirrored tickets and
  * surface conflicts. Admin-only (global or workspace admin).

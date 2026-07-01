@@ -89,8 +89,36 @@ model Workspace {
   groups                 Group[]
   mirrorJobs             MirrorJob[]
   mailboxConnections     MailboxConnection[]
+  ticketApprovals        TicketApproval[]
 
   @@map("workspaces")
+}
+
+// Single-step ticket approvals (native ticketing). The approver decides either
+// in-app or through a magic link emailed to them (hash-validated, expiring).
+model TicketApproval {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id])
+  ticketId      Int       @map("ticket_id")
+  ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  status        String    @default("pending") @db.VarChar(20) // pending | approved | rejected | cancelled
+  approverEmail String    @db.VarChar(255) @map("approver_email")
+  approverName  String?   @db.VarChar(255) @map("approver_name")
+  requestedBy   String    @db.VarChar(255) @map("requested_by")
+  requestNote   String?   @db.Text @map("request_note")
+  decisionNote  String?   @db.Text @map("decision_note")
+  decidedAt     DateTime? @map("decided_at")
+  decidedVia    String?   @db.VarChar(20) @map("decided_via") // link | app
+  tokenHash     String    @unique @db.VarChar(64) @map("token_hash")
+  expiresAt     DateTime? @map("expires_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("ticket_approvals")
+  @@index([ticketId])
+  @@index([workspaceId, status])
+  @@index([approverEmail])
 }
 
 // Monitored mailboxes for native ticketing (N per workspace). 'ingest' polls
@@ -372,6 +400,7 @@ model Ticket {
   urgentEscalationEvents UrgentEscalationEvent[]
   priorityEvents       TicketPriorityEvent[]
   mirrorJobs           MirrorJob[]
+  approvals            TicketApproval[]
 
   @@map("tickets")
   @@index([workspaceId])

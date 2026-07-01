@@ -22,7 +22,7 @@ import analyticsRoutes from './analytics.routes.js';
 import summitRoutes, { summitPublicRouter } from './summit.routes.js';
 import { publicTicketStatusPublicRouter } from './publicTicketStatus.routes.js';
 import agentRoutes from './agent.routes.js';
-import ticketsRoutes from './tickets.routes.js';
+import ticketsRoutes, { ticketApprovalPublicRouter } from './tickets.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
 
@@ -52,6 +52,9 @@ router.use('/summit/public', summitPublicRouter);
 // Public requester-facing ticket status pages bypass app auth but require the
 // per-ticket bearer token in the URL.
 router.use('/ticket-status/public', publicTicketStatusPublicRouter);
+
+// Approval magic links bypass app auth — the per-approval token is the credential.
+router.use('/ticket-approvals/public', ticketApprovalPublicRouter);
 
 // Promote JWT from query param for SSE requests (EventSource can't set headers).
 // Must run before requireAuth so the token is available for authentication.

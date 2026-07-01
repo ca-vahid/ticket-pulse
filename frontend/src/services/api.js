@@ -503,6 +503,19 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/notes`, body);
   },
 
+  // Approvals
+  requestApproval: async (id, payload) => {
+    return await api.post(`/tickets/${id}/approvals`, payload);
+  },
+
+  decideApproval: async (id, approvalId, decision, note = null) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/decide`, { decision, note });
+  },
+
+  cancelApproval: async (id, approvalId) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/cancel`);
+  },
+
   // Mailbox connections (admin)
   listMailboxes: async () => {
     return await api.get('/tickets/mailboxes');
@@ -522,6 +535,21 @@ export const ticketsAPI = {
 
   testMailbox: async (id) => {
     return await api.post(`/tickets/mailboxes/${id}/test`);
+  },
+};
+
+/**
+ * Public approval magic-link API (no auth — the token is the credential).
+ */
+export const publicApprovalAPI = {
+  get: async (token) => {
+    const response = await api.get(`/ticket-approvals/public/${encodeURIComponent(token)}`);
+    return response;
+  },
+
+  decide: async (token, decision, note = null) => {
+    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision, note });
+    return response;
   },
 };
 

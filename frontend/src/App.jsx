@@ -24,6 +24,7 @@ import PublicTicketFeedback from './pages/PublicTicketFeedback';
 import MyCompetencies from './pages/MyCompetencies';
 import Tickets from './pages/Tickets';
 import TicketDetail from './pages/TicketDetail';
+import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
 
@@ -238,6 +239,11 @@ function App() {
                 <Route
                   path="/feedback/:token"
                   element={<PublicTicketFeedback />}
+                />
+
+                <Route
+                  path="/approval/:token"
+                  element={<PublicApprovalDecision />}
                 />
 
                 <Route

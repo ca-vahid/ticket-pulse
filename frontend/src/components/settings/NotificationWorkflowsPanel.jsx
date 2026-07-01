@@ -71,6 +71,8 @@ const EVENT_LABELS = {
   'ticket.reply_received': 'Requester replied',
   'ticket.note_added': 'Internal note added',
   'ticket.status_changed': 'Status changed',
+  'approval.requested': 'Approval requested',
+  'approval.decided': 'Approval decided',
 };
 
 // Per-event color + icon, so the four trigger groups read as distinct zones in the
