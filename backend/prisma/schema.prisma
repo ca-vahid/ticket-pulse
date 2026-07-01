@@ -90,8 +90,31 @@ model Workspace {
   mirrorJobs             MirrorJob[]
   mailboxConnections     MailboxConnection[]
   ticketApprovals        TicketApproval[]
+  apiKeys                ApiKey[]
 
   @@map("workspaces")
+}
+
+// Workspace-scoped API keys for the public integration API (/api/v1).
+// The raw key ("tpk_<random>") is shown once at creation; only its sha256
+// hash is stored. Scopes: tickets:read, tickets:write.
+model ApiKey {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  name        String    @db.VarChar(120)
+  keyHash     String    @unique @db.VarChar(64) @map("key_hash")
+  keyPrefix   String    @db.VarChar(16) @map("key_prefix")
+  scopes      String[]  @default([])
+  isEnabled   Boolean   @default(true) @map("is_enabled")
+  lastUsedAt  DateTime? @map("last_used_at")
+  requestCount Int      @default(0) @map("request_count")
+  createdBy   String?   @db.VarChar(255) @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("api_keys")
+  @@index([workspaceId, isEnabled])
 }
 
 // Single-step ticket approvals (native ticketing). The approver decides either

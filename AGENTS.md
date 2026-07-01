@@ -101,6 +101,17 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - **Recipients**: V1 recipient resolvers are requester, assigned agent, and custom email addresses.
 - **Audit**: `notification_workflow_runs`, `notification_workflow_step_runs`, and `notification_deliveries` record run status, step output, delivery status, provider IDs, dedupe keys, and retry metadata.
 
+### Native Ticketing (v3, 2026-07)
+- **Dual-origin model**: `Ticket.origin` is `'freshservice'` (synced; FS owns it) or `'ticketpulse'` (born in-app; **TP is the source of truth** — every FS→TP ingest path is hard-guarded against writing these rows). TP-born tickets get a native `TP-<n>` number (`nativeNumber`); `freshserviceTicketId` is nullable until mirrored.
+- **Per-workspace flag**: `Workspace.nativeTicketingEnabled` (Settings → Workspace Management). IT pilots first.
+- **Surfaces**: `/tickets` + `/tickets/:id` (list, conversation thread, composer; agents are first-class users — their workspaces resolve from technician profiles and their home is `/tickets`). Backend: `ticketService` + `/api/tickets*`.
+- **FreshService fallback mirror**: `mirror_jobs` outbox + `mirrorService` worker pushes TP-born copies (fields, public replies as public notes, private notes) to FS; post-outage `POST /api/tickets/mirror/reconcile` imports FS-side deltas and flags drift (never auto-applies). Runbook in `SYNC_OPERATIONS.md`.
+- **Email channel**: per-workspace `mailbox_connections` (Settings → Ticket Mailboxes) via Microsoft Graph — inbound mail becomes tickets or threads onto existing ones (headers → `TP-<n>` ref → sender+recency; FS `#refs` deliberately skipped); outbound replies send from the mailbox draft-then-send with stored Message-IDs. Use a NEW address per workspace (FS forwarding would double-ingest).
+- **Workflows generalized**: event registry adds `ticket.reply_received|note_added|status_changed`, `approval.requested|decided`; new `update_ticket` action node; seeded per-workspace "Reopen on requester reply" default (publish+enable at rollout).
+- **Approvals**: single-step `ticket_approvals` with magic-link decisions (`/approval/:token`), audited + mirrored to FS as private notes.
+- **Integration API**: `/api/v1` with workspace-scoped hashed API keys (`tpk_…`, scopes `tickets:read|write`, 120 req/min/key). Docs: `docs/NATIVE_TICKETING_API.md`.
+- Full phase plan/tracker: `docs/NATIVE_TICKETING_PLAN.md`.
+
 ## Planned Architecture
 
 ### Directory Structure
@@ -469,7 +480,7 @@ az webapp deployment source config \
 - Timezone support (PST default)
 
 ### Still Out of Scope / Treat Carefully
-- Ticket creation/editing remains out of scope; Ticket Pulse is still read-heavy for FreshService ticket operations except approved assignment sync actions.
+- **FS-born tickets stay read-mostly**: fields are FS-owned (edits would be clobbered by sync) — only assignment write-back and replies-via-FS-API are allowed. **TP-born tickets (native ticketing) are fully editable in-app** where `nativeTicketingEnabled` is on; never let FS ingest write to `origin='ticketpulse'` rows.
 - Predictive ML and LLM-generated analytics summaries are out of scope for Analytics v1.
 - Scheduled analytics report delivery is deferred.
 - Historical first-response analytics should not be claimed until `firstPublicAgentReplyAt` is populated.

@@ -44,6 +44,7 @@ Rules to avoid file-access conflicts:
 The MVP roadmap in old docs is **complete and stale** — ignore it as a plan. The live app includes: multi-workspace support; daily/weekly/monthly dashboards; timeline exploration; CSAT; noise filtering; vacation/availability context; an AI assignment pipeline with review; daily review recommendations; ticket-thread caching; assignment episodes/bounce tracking; historical backfills; Analytics & Insights; and custom mail notification workflows.
 
 ### Major UI surfaces
+- **Tickets** (`/tickets`, `/tickets/:id`) — **native ticketing** (per-workspace flag): queue with filters/search, conversation-thread detail (replies vs internal notes), create composer, sidebar editors, approvals block, AI-triage panel. Agents are first-class here (their home page). TP-born tickets (`TP-<n>`) are TP-owned and mirrored to FreshService as fallback copies; FS-born tickets are read-mostly (replies go via the FS API).
 - **Dashboard** (`/dashboard`) — all technicians + workload breakdown; daily/weekly/monthly views; search + category filter; compact mode; hidden techs; date navigation; SSE live updates.
 - **Technician Detail** (`/technician/:id`) — per-tech tickets and stats (daily/weekly/monthly). **Live page is `TechnicianDetailNew.jsx`**; `TechnicianDetail.jsx` is legacy — design against the `New` one.
 - **Timeline Explorer** (`/timeline`) — ownership/coverage timeline.
@@ -90,7 +91,7 @@ Defined in `index.css` `@layer components` — reach for them before inventing n
 
 ### Non-negotiable product/UX constraints
 - **Team-safe people metrics.** Never build public winner/loser leaderboards. Frame technician/people data as **team balance and coaching signals**. (Binding product rule, not a style choice.)
-- **Read-heavy app.** No ticket create/edit UI — Ticket Pulse reads FreshService; the only write path is approved assignment sync. Don't design editing affordances for tickets.
+- **Origin-aware editing.** FS-born tickets stay read-mostly (fields are FreshService-owned; assignment write-back + replies-via-FS-API are the exceptions). **TP-born tickets (native ticketing, `origin='ticketpulse'`) are fully editable in-app** where the workspace flag is on — design full editing affordances for them, and read-only affordances (with the "FreshService owns this" banner) for FS-born ones.
 - **CSAT / survey-based metrics must always show response/sample count** (coverage is low — never imply a rate is more reliable than its N).
 - **Don't surface analytics the data can't support** — e.g., first-response metrics until `firstPublicAgentReplyAt` is populated; respect the "sparse field" caveats in `AGENTS.md`.
 - Analytics is **deterministic and explainable** — no AI-generated summaries in that surface.

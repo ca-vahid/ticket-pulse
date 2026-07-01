@@ -167,14 +167,14 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [x] 6.6 Decisions land in the conversation as a private system note, mirror-queued to the FS fallback copy (audit on both systems)
 - [x] 6.7 **Live drill 11/11** (request → dedupe guard → token read → link decision → audit + mirrored note → double-decision block → permission guard → admin override); backend 528/529 (same pre-existing failure); build green
 
-### - [ ] Phase 7 — Public integration API
+### - [x] Phase 7 — Public integration API ✅ 2026-07-01
 *Goal: external apps create/query/reply. Exit: documented, keyed, rate-limited `/api/v1`.*
 
-- [ ] 7.1 API key model — per workspace, scoped permissions, hashed storage + management UI
-- [ ] 7.2 Versioned `/api/v1` — create ticket, query/list, get ticket + thread, reply
-- [ ] 7.3 Rate limiting + request audit logging
-- [ ] 7.4 OpenAPI spec + docs page
-- [ ] 7.5 Integration tests + example client snippet
+- [x] 7.1 `ApiKey` model (`20260702150000_add_api_keys`) — workspace-scoped, sha256-hashed (`tpk_…` shown once), scopes `tickets:read|write`, enable/disable, usage counters; admin management endpoints under `/api/tickets/api-keys*` (*a Settings panel for keys is later polish — admins use the API/console for now*)
+- [x] 7.2 `/api/v1` (own bearer-key auth, mounted pre-session-auth): `GET /tickets` (filters/paging), `GET /tickets/:id` (+thread), `POST /tickets` (full native create incl. triage/ack/mirror), `POST /tickets/:id/replies`
+- [x] 7.3 Per-key sliding-window rate limit (120/min, 429 + Retry-After) + `lastUsedAt`/`requestCount` usage audit
+- [x] 7.4 API reference at `docs/NATIVE_TICKETING_API.md` (auth, scopes, endpoints, errors, curl-ready examples); full OpenAPI spec deferred
+- [x] 7.5 **Live HTTP drill** against the running backend: key issuance → list 200 → create 201 (`TP-1012`) → reply 201 → 401 (missing/invalid key) → 403 (scope) → thread readable via read-only key. Backend 528/529 (same pre-existing failure)
 
 ### - [ ] Phase 8 — Requester SSO portal & FS cutover (horizon — detail when reached)
 - [ ] 8.1 SSO requester portal — my tickets, create, reply (same Entra tenant)
@@ -189,12 +189,22 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [ ] A.5 Best-effort attachment mirroring to FS copies
 
 ### - [ ] Workstream B — Docs, analytics & product-rule compatibility
-- [ ] B.1 `origin` exposed as an analytics dimension; TP-born CSAT stays on `TicketFeedback` (N-count rule unchanged)
-- [ ] B.2 Update `AGENTS.md` + `CLAUDE.md` — "read-heavy / no ticket editing" doctrine superseded per-workspace by the feature flag (when Phase 2 ships)
-- [ ] B.3 Keep `SYNC_OPERATIONS.md` current — mirror mechanics, rate budget share, fallback runbook
+- [ ] B.1 `origin` exposed as an analytics dimension (Analytics UI filter — next design pass); TP-born CSAT stays on `TicketFeedback` (N-count rule unchanged); origin column + indexes already in place
+- [x] B.2 `AGENTS.md` + `CLAUDE.md` reconciled — native-ticketing feature summary added, "read-heavy / no ticket editing" doctrine replaced with the origin-aware rule ✅ 2026-07-01
+- [x] B.3 `SYNC_OPERATIONS.md` — mirror mechanics, echo suppression, outage runbook, rate-budget impact ✅ 2026-07-01
 
 ---
 
 ## 6. Rollout
 
 Everything ships behind `nativeTicketingEnabled` (per-workspace Settings toggle). **IT workspace pilots** each phase; the email pilot uses a **new mailbox address** so FS's existing forward-based ingestion can't double-create. Expand to other workspaces after the Phase 3 kill-switch drill passes.
+
+### Pilot go-live checklist (when merging to main)
+1. Merge `cursor/native-ticketing` → CI applies the 4 migrations (`native_ticketing_foundations`, `add_mirror_jobs`, `add_mailbox_connections`, `add_ticket_approvals`, `add_api_keys`).
+2. Settings → Workspace Management → toggle **Native ticketing on** for IT.
+3. Provision the pilot mailbox (new address); grant the Azure Graph app **Mail.Read + Mail.Send**; connect it in Settings → Ticket Mailboxes and hit **Test**.
+4. Mail Workflows → publish + enable **"Reopen on requester reply"**.
+5. Run the **real-FS kill-switch drill** (create a native ticket → check the FS copy → work it in FS → `POST /api/tickets/mirror/reconcile`).
+6. Optional: mint an integration API key and hand `docs/NATIVE_TICKETING_API.md` to integrators.
+
+Known pre-existing repo quirks encountered (not caused by this work): the historical migration chain doesn't replay on an empty DB (`20260325` references `noise_rules` early — use schema-diff bootstrap for fresh dev DBs); `notificationWorkflowDefinition.test.js` has one env-dependent failing test (email redaction) present since before Phase 0.

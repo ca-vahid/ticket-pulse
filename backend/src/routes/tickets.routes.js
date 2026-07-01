@@ -148,6 +148,71 @@ router.delete('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async
   res.json({ success: true });
 }));
 
+// ------------------------------------------------------ API keys (admin)
+
+router.get('/api-keys', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const keys = await prisma.apiKey.findMany({
+    where: { workspaceId: req.workspaceId },
+    orderBy: { id: 'asc' },
+    select: {
+      id: true, name: true, keyPrefix: true, scopes: true, isEnabled: true,
+      lastUsedAt: true, requestCount: true, createdBy: true, createdAt: true,
+    },
+  });
+  res.json({ success: true, data: keys });
+}));
+
+router.post('/api-keys', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (name.length < 3) throw new ValidationError('A key name is required (3+ characters)');
+  const { API_KEY_SCOPES, generateApiKey } = await import('./apiV1.routes.js');
+  const scopes = (Array.isArray(req.body?.scopes) ? req.body.scopes : ['tickets:read'])
+    .filter((s) => API_KEY_SCOPES.includes(s));
+  if (scopes.length === 0) throw new ValidationError(`Scopes must be one of: ${API_KEY_SCOPES.join(', ')}`);
+
+  const { raw, hash, prefix } = generateApiKey();
+  const key = await prisma.apiKey.create({
+    data: {
+      workspaceId: req.workspaceId,
+      name,
+      keyHash: hash,
+      keyPrefix: prefix,
+      scopes,
+      createdBy: req.ticketActor.email,
+    },
+    select: { id: true, name: true, keyPrefix: true, scopes: true, createdAt: true },
+  });
+  // The raw key is returned exactly once — only its hash is stored.
+  res.status(201).json({ success: true, data: { ...key, apiKey: raw } });
+}));
+
+router.patch('/api-keys/:keyId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.keyId);
+  const existing = await prisma.apiKey.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('API key not found in this workspace');
+  const data = {};
+  if (req.body?.isEnabled !== undefined) data.isEnabled = req.body.isEnabled === true;
+  if (req.body?.name) data.name = String(req.body.name).trim();
+  if (Array.isArray(req.body?.scopes)) {
+    const { API_KEY_SCOPES } = await import('./apiV1.routes.js');
+    data.scopes = req.body.scopes.filter((s) => API_KEY_SCOPES.includes(s));
+  }
+  const key = await prisma.apiKey.update({
+    where: { id },
+    data,
+    select: { id: true, name: true, keyPrefix: true, scopes: true, isEnabled: true },
+  });
+  res.json({ success: true, data: key });
+}));
+
+router.delete('/api-keys/:keyId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.keyId);
+  const existing = await prisma.apiKey.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('API key not found in this workspace');
+  await prisma.apiKey.delete({ where: { id } });
+  res.json({ success: true });
+}));
+
 router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const id = Number(req.params.mailboxId);
   const existing = await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } });
