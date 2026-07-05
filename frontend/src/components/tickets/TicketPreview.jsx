@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Activity, Bot, CalendarDays, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Inbox,
@@ -42,21 +42,33 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
   const [saving, setSaving] = useState(null);
   const [confirmPickup, setConfirmPickup] = useState(false);
 
+  // Abort the in-flight fetch when the user steps to another ticket (or closes)
+  // so rapid ↑/↓ stepping doesn't pile up stale requests against the browser's
+  // 6-connection limit. The peek also skips the live FreshService reconcile
+  // (reconcile:false) — that check belongs on the full detail page, not on a
+  // quick preview fired once per step.
+  const abortRef = useRef(null);
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!ticketId) return;
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     if (!silent) setIsLoading(true);
     try {
-      const res = await ticketsAPI.get(ticketId);
+      const res = await ticketsAPI.get(ticketId, { reconcile: false, signal: ctrl.signal });
+      if (ctrl.signal.aborted) return;
       setTicket(res.data);
       setError(null);
     } catch (err) {
+      if (ctrl.signal.aborted || err.code === 'ERR_CANCELED' || err.name === 'CanceledError') return;
       setError(err.response?.data?.message || err.message);
     } finally {
-      setIsLoading(false);
+      if (!ctrl.signal.aborted) setIsLoading(false);
     }
   }, [ticketId]);
 
   useEffect(() => { setTab('details'); setConfirmPickup(false); load(); }, [load]);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // SSE-driven refresh: the queue bumps `pulse` whenever tickets change.
   useEffect(() => { if (pulse > 0) load({ silent: true }); }, [pulse, load]);
