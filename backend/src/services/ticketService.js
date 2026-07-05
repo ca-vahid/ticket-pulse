@@ -697,7 +697,7 @@ class TicketService {
     }, actor);
   }
 
-  async getTicket(ticketId, workspaceId) {
+  async getTicket(ticketId, workspaceId, { reconcile: withReconcile = true } = {}) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: {
@@ -727,7 +727,7 @@ class TicketService {
     // tickets (pull a FreshService-side closure back) — reconcileSingleTicket
     // branches by origin.
     const NON_TERMINAL = !['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'].includes(String(ticket.status));
-    const shouldReconcile = Boolean(ticket.freshserviceTicketId) && NON_TERMINAL;
+    const shouldReconcile = withReconcile && Boolean(ticket.freshserviceTicketId) && NON_TERMINAL;
 
     const [thread, activities, approvals, attachments, reconcile] = await Promise.all([
       ticketThreadRepository.listForTicket(ticket.id, { limit: 300 }),

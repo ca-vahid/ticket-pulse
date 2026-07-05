@@ -568,7 +568,10 @@ router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(as
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const ticket = await ticketService.getTicket(parseTicketId(req), req.workspaceId);
+  // The peek preview passes ?reconcile=0 to skip the live FreshService check
+  // (which otherwise fires a FS API call on every rapid step through tickets).
+  const reconcile = req.query.reconcile !== '0';
+  const ticket = await ticketService.getTicket(parseTicketId(req), req.workspaceId, { reconcile });
   res.json({ success: true, data: ticket });
 }));
 
