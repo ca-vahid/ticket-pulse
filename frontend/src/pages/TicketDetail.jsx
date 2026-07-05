@@ -530,7 +530,10 @@ export default function TicketDetail() {
   const fetchTicket = useCallback(async ({ silent = false, diff = false } = {}) => {
     if (!silent) setIsLoading(true);
     try {
-      const res = await ticketsAPI.get(ticketId);
+      // Only the initial explicit open runs the live FreshService reconcile;
+      // silent live-update / post-action refetches skip it (reconcile:false) so
+      // a burst of SSE events can't pile up 30s-timeout FS calls.
+      const res = await ticketsAPI.get(ticketId, { reconcile: !silent });
       // SSE-triggered refetch: mark fields another user changed (own edits are
       // exempt — they refetch within the local-mutation grace window).
       if (diff && ticketRef.current && Date.now() - lastLocalMutationRef.current > 2500) {
@@ -569,10 +572,20 @@ export default function TicketDetail() {
     return undefined;
   }, [ticket?.displayRef, ticket?.subject]);
 
+  // Live updates, coalesced: a burst of SSE ticket-change events for this
+  // ticket collapses into a single refetch after a short quiet period, instead
+  // of one refetch per event. Keeps the page live without a refetch storm.
+  const liveRefetchTimerRef = useRef(null);
   const onTicketChange = useCallback((data) => {
-    if (data?.ticketId === ticketId) fetchTicket({ silent: true, diff: true });
+    if (data?.ticketId !== ticketId) return;
+    if (liveRefetchTimerRef.current) clearTimeout(liveRefetchTimerRef.current);
+    liveRefetchTimerRef.current = setTimeout(() => {
+      liveRefetchTimerRef.current = null;
+      fetchTicket({ silent: true, diff: true });
+    }, 600);
   }, [ticketId, fetchTicket]);
   useSSE({ onTicketChange, enabled: Number.isFinite(ticketId) });
+  useEffect(() => () => { if (liveRefetchTimerRef.current) clearTimeout(liveRefetchTimerRef.current); }, []);
 
   const isNative = ticket?.origin === 'ticketpulse';
   const ticketingOn = meta?.nativeTicketingEnabled !== false;

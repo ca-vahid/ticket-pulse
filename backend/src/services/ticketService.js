@@ -756,9 +756,16 @@ class TicketService {
         },
       }),
       shouldReconcile
-        ? import('./syncService.js')
-          .then(({ default: syncService }) => syncService.reconcileSingleTicket(ticket.id, workspaceId))
-          .catch(() => null)
+        ? Promise.race([
+          import('./syncService.js')
+            .then(({ default: syncService }) => syncService.reconcileSingleTicket(ticket.id, workspaceId))
+            .catch(() => null),
+          // Hard cap: a slow/hung FreshService must never stall the page load.
+          // If it times out, the ticket loads with its current status; any
+          // FS-side flip is reflected on the next open (reconcile still writes
+          // it to the DB when it eventually finishes).
+          new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+        ])
         : Promise.resolve(null),
     ]);
 
