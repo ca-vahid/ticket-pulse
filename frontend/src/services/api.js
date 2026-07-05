@@ -498,8 +498,14 @@ export const ticketsAPI = {
     return await api.get('/tickets', { params });
   },
 
-  get: async (id) => {
-    return await api.get(`/tickets/${id}`);
+  // `reconcile:false` skips the live FreshService deletion/closure check — use
+  // it for the lightweight peek preview so rapid stepping doesn't fire a FS API
+  // call per ticket. `signal` lets callers cancel a stale in-flight request.
+  get: async (id, { reconcile = true, signal } = {}) => {
+    return await api.get(`/tickets/${id}`, {
+      ...(reconcile ? {} : { params: { reconcile: 0 } }),
+      ...(signal ? { signal } : {}),
+    });
   },
 
   meta: async () => {
