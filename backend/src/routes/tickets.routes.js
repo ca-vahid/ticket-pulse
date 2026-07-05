@@ -681,6 +681,21 @@ router.post('/:id/notes', requireNativeTicketing, attachmentUpload.array('files'
   res.status(201).json({ success: true, data: result });
 }));
 
+// Manual "Mirror now" — force this native ticket's pending/failed FreshService
+// mirror jobs to run immediately (the worker otherwise drains every ~60s).
+router.post('/:id/mirror/retry', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const ticketId = parseTicketId(req);
+  const ticket = await prisma.ticket.findFirst({
+    where: { id: ticketId, workspaceId: req.workspaceId },
+    select: { id: true, origin: true },
+  });
+  if (!ticket) throw new ValidationError('Ticket not found in this workspace');
+  if (!actorIsAdmin(req.ticketActor)) throw new ValidationError('Only an admin can trigger a mirror');
+  const { default: mirrorService } = await import('../services/mirrorService.js');
+  const result = await mirrorService.drainForTicket(ticketId, req.workspaceId);
+  res.json({ success: true, data: result });
+}));
+
 // Admin-only: delete an internal note (native tickets; also removes the FS
 // fallback copy via the mirror). Guarded again inside the service.
 router.delete('/:id/notes/:entryId', requireNativeTicketing, asyncHandler(async (req, res) => {

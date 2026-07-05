@@ -582,6 +582,10 @@ export const ticketsAPI = {
     return await api.delete(`/tickets/${id}/notes/${entryId}`);
   },
 
+  retryMirror: async (id) => {
+    return await api.post(`/tickets/${id}/mirror/retry`);
+  },
+
   requesterSearch: async (q) => {
     return await api.get('/tickets/requester-search', { params: { q } });
   },
