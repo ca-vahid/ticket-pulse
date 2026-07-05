@@ -128,11 +128,44 @@ class GraphMailClient {
   }
 
   /**
+   * File attachments for a message (base64 content). Item/reference
+   * attachments are skipped; oversized files are reported but not fetched.
+   */
+  async getMessageAttachments(mailbox, messageId, { maxBytes = 25 * 1024 * 1024 } = {}) {
+    const client = this._getClient();
+    try {
+      const response = await client
+        .api(`/users/${mailbox}/messages/${messageId}/attachments`)
+        .get();
+      const all = response.value || [];
+      const files = [];
+      const skipped = [];
+      for (const a of all) {
+        const isFile = a['@odata.type'] === '#microsoft.graph.fileAttachment' && a.contentBytes;
+        if (!isFile) { skipped.push({ name: a.name, reason: 'not_a_file' }); continue; }
+        if ((a.size || 0) > maxBytes) { skipped.push({ name: a.name, reason: 'too_large' }); continue; }
+        files.push({
+          name: a.name || 'attachment',
+          contentType: a.contentType || 'application/octet-stream',
+          sizeBytes: a.size || 0,
+          buffer: Buffer.from(a.contentBytes, 'base64'),
+        });
+      }
+      return { files, skipped };
+    } catch (error) {
+      logger.warn('Graph API: failed to fetch message attachments', {
+        mailbox, messageId, error: error.message,
+      });
+      return { files: [], skipped: [], error: error.message };
+    }
+  }
+
+  /**
    * Send mail FROM a mailbox via draft-then-send, which (unlike /sendMail)
    * lets us capture the internetMessageId for reply threading.
    * Requires Mail.Send application permission.
    */
-  async sendMailAsMailbox(mailbox, { to, cc = [], subject, html }) {
+  async sendMailAsMailbox(mailbox, { to, cc = [], subject, html, attachments = [] }) {
     const client = this._getClient();
     const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean)
       .map((address) => ({ emailAddress: { address } }));
@@ -144,6 +177,24 @@ class GraphMailClient {
       toRecipients: recipients,
       ccRecipients: cc.filter(Boolean).map((address) => ({ emailAddress: { address } })),
     });
+
+    // Simple file attach caps at ~3 MB per request; larger files need upload
+    // sessions, so callers pre-filter (oversized ones stay stored in Ticket Pulse).
+    for (const file of attachments) {
+      if (!file?.contentBytes) continue;
+      try {
+        await client.api(`/users/${mailbox}/messages/${draft.id}/attachments`).post({
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: file.name || 'attachment',
+          contentType: file.contentType || 'application/octet-stream',
+          contentBytes: file.contentBytes,
+        });
+      } catch (error) {
+        logger.warn('Graph API: attachment failed to attach to outbound mail (send continues)', {
+          mailbox, name: file.name, error: error.message,
+        });
+      }
+    }
 
     await client.api(`/users/${mailbox}/messages/${draft.id}/send`).post({});
 

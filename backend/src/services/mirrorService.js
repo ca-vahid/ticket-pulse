@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import settingsRepository from './settingsRepository.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
+import attachmentService from './attachmentService.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sseManager } from '../routes/sse.routes.js';
@@ -80,10 +81,27 @@ class MirrorService {
     return this._enqueue(workspaceId, ticketId, 'thread_entry', threadEntryId);
   }
 
-  async _enqueue(workspaceId, ticketId, kind, threadEntryId = null) {
+  /**
+   * Delete a mirrored note/reply from the FS fallback copy. The local thread
+   * entry is already gone, so the FS conversation id rides in `payload`.
+   */
+  async enqueueThreadEntryDelete(workspaceId, ticketId, fsConversationId) {
+    return this._enqueue(workspaceId, ticketId, 'delete_thread_entry', null, { fsConversationId });
+  }
+
+  async enqueueDelete(workspaceId, ticketId) {
+    const existing = await prisma.mirrorJob.findFirst({
+      where: { ticketId, kind: 'delete_ticket', status: 'pending' },
+      select: { id: true },
+    });
+    if (existing) return existing;
+    return this._enqueue(workspaceId, ticketId, 'delete_ticket');
+  }
+
+  async _enqueue(workspaceId, ticketId, kind, threadEntryId = null, payload = null) {
     try {
       return await prisma.mirrorJob.create({
-        data: { workspaceId, ticketId, kind, threadEntryId },
+        data: { workspaceId, ticketId, kind, threadEntryId, payload },
       });
     } catch (err) {
       logger.warn(`Mirror enqueue failed for ticket ${ticketId} (${kind}): ${err.message}`);
@@ -146,6 +164,8 @@ class MirrorService {
       if (job.kind === 'create_ticket') await this._mirrorCreate(job, client);
       else if (job.kind === 'update_fields') await this._mirrorFields(job, client);
       else if (job.kind === 'thread_entry') await this._mirrorThreadEntry(job, client);
+      else if (job.kind === 'delete_thread_entry') await this._mirrorThreadEntryDelete(job, client);
+      else if (job.kind === 'delete_ticket') await this._mirrorDelete(job, client);
       else throw new Error(`Unknown mirror job kind: ${job.kind}`);
 
       await prisma.mirrorJob.update({
@@ -291,10 +311,14 @@ class MirrorService {
     const body = `<p><b>${MIRROR_MARKER}</b> ${entry.actorName || 'Ticket Pulse'} · ${label} · ${ticketDisplayRef(ticket)}</p>`
       + (entry.bodyHtml || textToHtml(entry.bodyText || entry.content || ''));
 
+    // Re-attach any files staged on this entry so the FS copy carries them too.
+    const attachments = await attachmentService.buffersForThreadEntry(entry.id);
+
     // Public replies mirror as PUBLIC NOTES (portal-visible, no requester email —
     // Ticket Pulse already emailed them). Internal notes mirror privately.
     const result = await client.addNote(Number(ticket.freshserviceTicketId), body, {
       isPrivate: entry.isPrivate === true,
+      attachments,
     });
 
     await prisma.ticketThreadEntry.update({
@@ -305,6 +329,20 @@ class MirrorService {
         externalEntryId: result?.conversation?.id ? `mirror-${result.conversation.id}` : entry.externalEntryId,
       },
     });
+  }
+
+  async _mirrorThreadEntryDelete(job, client) {
+    const fsConversationId = job.payload?.fsConversationId;
+    if (!fsConversationId) return; // note was never mirrored — nothing to delete
+    await client.deleteConversation(Number(fsConversationId));
+    logger.info(`Mirror: deleted FS conversation ${fsConversationId} for ticket ${job.ticketId}`);
+  }
+
+  async _mirrorDelete(job, client) {
+    const ticket = await this._loadTicket(job.ticketId);
+    if (!ticket.freshserviceTicketId) return; // never mirrored — nothing to delete
+    await client.deleteTicket(Number(ticket.freshserviceTicketId));
+    logger.info(`Mirror: trashed FS copy #${ticket.freshserviceTicketId} for deleted TP ticket ${ticket.id}`);
   }
 
   _broadcast(ticket, action) {

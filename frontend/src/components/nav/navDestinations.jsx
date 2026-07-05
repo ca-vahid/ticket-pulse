@@ -1,4 +1,4 @@
-import { BarChart3, Clock, LayoutDashboard, Ticket } from 'lucide-react';
+import { BarChart3, Clock, LayoutDashboard, Stamp, Ticket } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { AssignmentNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
@@ -31,7 +31,10 @@ export const NAV_DESTINATIONS = [
     tile: 'border-sky-200 bg-sky-50 text-sky-700',
     hover: 'hover:border-sky-300 hover:bg-sky-100',
     bar: 'bg-sky-600',
-    gate: 'tickets',
+    // Visible in every workspace: even FS-only workspaces (native ticketing off)
+    // sync FreshService tickets that are viewable/triageable here. Native
+    // ticketing only controls in-app ticket *creation*, not this page's value.
+    gate: null,
   },
   {
     id: 'timeline',
@@ -75,13 +78,24 @@ export const NAV_DESTINATIONS = [
   },
   {
     id: 'map',
-    label: 'Agent Map',
+    label: 'Member Map',
     path: '/visuals',
     Icon: MapNavIcon,
     tile: 'border-[#f8d5a8] bg-[#fdeede] text-[#e07b22]',
     hover: 'hover:border-[#f4c486] hover:bg-[#fbe3c8]',
     bar: 'bg-[#e07b22]',
     gate: null,
+  },
+  {
+    id: 'approvals',
+    label: 'Approvals',
+    path: '/approvals',
+    Icon: Stamp,
+    tile: 'border-[#c9e2d4] bg-[#e9f6ef] text-[#0f7b52]',
+    hover: 'hover:border-[#aed6c1] hover:bg-[#ddf0e6]',
+    bar: 'bg-[#0f7b52]',
+    gate: null,
+    badgeKey: 'approvals', // pending-count overlay (see AppHeader useApprovalCount)
   },
 ];
 
@@ -101,24 +115,21 @@ export function useWorkspaceRole() {
 // still shows its own tile), mirroring the previous header behavior.
 export function useNavDestinations(activeId = null) {
   const { user } = useAuth();
-  const { currentWorkspace, availableWorkspaces } = useWorkspace();
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
   const canManage = wsRole === 'admin';
-  const ticketingOn = availableWorkspaces
-    ?.find((w) => w.id === currentWorkspace?.id)?.nativeTicketingEnabled === true;
 
-  // Agent-role users only work tickets — everything else in the app is
-  // coordinator/manager territory and would just bounce them.
+  // Agent-role users only work tickets + approvals — everything else in the app
+  // is coordinator/manager territory and would just bounce them. Agents can be
+  // approval managers and request approvals, so the Approvals inbox is theirs too.
   if (user?.role === 'agent') {
-    return NAV_DESTINATIONS.filter((dest) => dest.id === 'tickets' && (ticketingOn || dest.id === activeId));
+    return NAV_DESTINATIONS.filter((dest) => dest.id === 'tickets' || dest.id === 'approvals');
   }
 
   return NAV_DESTINATIONS.filter((dest) => {
     if (dest.id === activeId) return true;
     if (dest.gate === 'review') return canReview;
     if (dest.gate === 'manage') return canManage;
-    if (dest.gate === 'tickets') return ticketingOn;
     return true;
   });
 }

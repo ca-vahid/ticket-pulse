@@ -1,0 +1,168 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Check, Loader2, Mail, Search, Send, ShieldCheck, Stamp, X } from 'lucide-react';
+import { PersonAvatar } from './ticketUi';
+
+const SEARCH_THRESHOLD = 6; // show the filter box once the list gets long
+
+/**
+ * Guided "Request approval" modal. Replaces the cramped inline dropdown with a
+ * clear two-step flow: pick a category (each option previews the managers who
+ * will be notified), add optional context, send. `onSubmit` gets
+ * { approvalCategoryId, note } and should resolve/reject; the modal shows the
+ * busy state and closes on success (parent unmounts it).
+ */
+export default function RequestApprovalModal({ categories = [], technicians = [], busy = false, onSubmit, onClose }) {
+  const [categoryId, setCategoryId] = useState(categories.length === 1 ? categories[0].id : null);
+  const [note, setNote] = useState('');
+  const [query, setQuery] = useState('');
+
+  const showSearch = categories.length > SEARCH_THRESHOLD;
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return categories;
+    return categories.filter((c) => `${c.name} ${c.description || ''}`.toLowerCase().includes(q));
+  }, [categories, query]);
+
+  const memberByEmail = useMemo(() => {
+    const map = new Map();
+    for (const t of technicians) if (t.email) map.set(t.email.toLowerCase(), t);
+    return map;
+  }, [technicians]);
+
+  const managersFor = (cat) => (cat.managerEmails || []).map((email) => {
+    const m = memberByEmail.get(String(email).toLowerCase());
+    return { email, name: m?.name || email, photoUrl: m?.photoUrl || null };
+  });
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const selected = categories.find((c) => c.id === categoryId) || null;
+  const submit = (e) => {
+    e.preventDefault();
+    if (!categoryId || busy) return;
+    onSubmit({ approvalCategoryId: Number(categoryId), note: note.trim() || null });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fadeIn" role="dialog" aria-modal="true" aria-labelledby="req-approval-title">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
+      <form onSubmit={submit} className="relative tp-card rounded-2xl shadow-soft w-full max-w-lg max-h-[90vh] flex flex-col animate-scaleIn">
+        <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-slate-100">
+          <span className="h-9 w-9 rounded-xl bg-blue-50 text-blue-600 inline-flex items-center justify-center flex-shrink-0">
+            <Stamp className="w-4.5 h-4.5" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 id="req-approval-title" className="text-base font-bold text-slate-900">Request approval</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Route this ticket to an approval category. Any one of its managers can decide.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100">
+            <X className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 overflow-y-auto settings-scrollbar space-y-4">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">1 · What needs approval?</p>
+              <span className="text-[11px] text-slate-300">{categories.length}</span>
+            </div>
+            {showSearch && (
+              <div className="relative mb-2">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter categories…"
+                  aria-label="Filter approval categories"
+                  className="tp-focus-ring w-full text-sm bg-white border border-input rounded-lg pl-8 pr-3 py-2 placeholder:text-slate-400"
+                />
+              </div>
+            )}
+            <div className={`space-y-1.5 ${showSearch ? 'max-h-[300px] overflow-y-auto settings-scrollbar pr-1' : ''}`}>
+              {filtered.length === 0 && (
+                <p className="text-sm text-slate-400 py-4 text-center">No categories match “{query}”.</p>
+              )}
+              {filtered.map((cat) => {
+                const managers = managersFor(cat);
+                const active = cat.id === categoryId;
+                return (
+                  <button
+                    type="button"
+                    key={cat.id}
+                    onClick={() => setCategoryId(cat.id)}
+                    className={`tp-focus-ring w-full text-left rounded-lg border px-3 py-2.5 transition-all ${
+                      active ? 'border-blue-400 bg-blue-50/60 ring-2 ring-blue-200' : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`h-5 w-5 rounded-full border flex items-center justify-center flex-shrink-0 ${active ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-300'}`}>
+                        {active && <Check className="w-3 h-3" aria-hidden="true" />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-slate-800 truncate">{cat.name}</span>
+                        {cat.description && <span className="block text-xs text-slate-500 truncate">{cat.description}</span>}
+                      </span>
+                      {/* Approver avatars collapse to the right; compact for long lists */}
+                      <span className="flex -space-x-2 flex-shrink-0" title={`${cat.managerCount} approver${cat.managerCount === 1 ? '' : 's'}`}>
+                        {managers.slice(0, 3).map((m) => (
+                          <span key={m.email} className="ring-2 ring-white rounded-full">
+                            <PersonAvatar name={m.name} photoUrl={m.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
+                          </span>
+                        ))}
+                        {managers.length > 3 && (
+                          <span className="h-6 w-6 rounded-full bg-slate-100 border-2 border-white text-[9px] font-semibold text-slate-500 flex items-center justify-center">+{managers.length - 3}</span>
+                        )}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="approval-note" className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
+              2 · Context for the approver(s) <span className="font-normal normal-case text-slate-300">— optional</span>
+            </label>
+            <textarea
+              id="approval-note"
+              rows={4}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Why does this need approval? e.g. “New hire starting Monday needs a dev laptop — budget code IT-204.”"
+              className="tp-focus-ring w-full text-sm bg-white border border-input rounded-xl px-3 py-2.5 placeholder:text-slate-400 resize-y"
+            />
+          </div>
+
+          {selected && (
+            <div className="flex items-start gap-2 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
+              <Mail className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" aria-hidden="true" />
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                The <span className="font-medium text-slate-600">{selected.managerCount}</span> manager{selected.managerCount === 1 ? '' : 's'} of
+                <span className="font-medium text-slate-600"> {selected.name}</span> are notified in-app and by email. The first to respond decides;
+                the rest auto-cancel. <span className="inline-flex items-center gap-0.5 text-slate-400"><ShieldCheck className="w-3 h-3" aria-hidden="true" /> Approvals stay inside Ticket Pulse.</span>
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="tp-focus-ring px-3.5 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button
+            type="submit"
+            disabled={!categoryId || busy}
+            className="tp-focus-ring inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
+            {busy ? 'Sending…' : 'Send approval request'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

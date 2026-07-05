@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Activity, AlertCircle, CheckCircle2, ShieldCheck, XCircle } from 'lucide-react';
+import { Activity, AlertCircle, CheckCircle2, MessageCircleQuestion, ShieldCheck, XCircle } from 'lucide-react';
 import { publicApprovalAPI } from '../services/api';
 
 /**
@@ -26,10 +26,15 @@ export default function PublicApprovalDecision() {
   }, [token]);
 
   const decide = async (decision) => {
+    if (decision === 'clarify' && !note.trim()) {
+      setError('Add a note so the requester knows what to provide.');
+      return;
+    }
     setDeciding(decision);
     setError(null);
     try {
-      await publicApprovalAPI.decide(token, decision, note.trim() || null);
+      if (decision === 'clarify') await publicApprovalAPI.clarify(token, note.trim());
+      else await publicApprovalAPI.decide(token, decision, note.trim() || null);
       setDecided(decision);
     } catch (err) {
       setError(err.response?.data?.message || 'Could not record your decision.');
@@ -81,7 +86,13 @@ export default function PublicApprovalDecision() {
               )}
 
               <div className="mt-5">
-                {decided || alreadyDecided ? (
+                {decided === 'clarify' ? (
+                  <div className="p-4 rounded-xl text-center font-semibold bg-violet-50 text-violet-700 border border-violet-200">
+                    <MessageCircleQuestion className="w-6 h-6 mx-auto mb-1" aria-hidden="true" />
+                    Sent back to the requester for more information.
+                    <p className="text-xs font-normal mt-1 opacity-80">They’ll add the details and resubmit — you can close this page.</p>
+                  </div>
+                ) : decided || alreadyDecided ? (
                   <div className={`p-4 rounded-xl text-center font-semibold ${
                     (decided || approval.status) === 'approved'
                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
@@ -126,6 +137,14 @@ export default function PublicApprovalDecision() {
                         {deciding === 'rejected' ? 'Saving…' : 'Reject'}
                       </button>
                     </div>
+                    <button
+                      onClick={() => decide('clarify')}
+                      disabled={Boolean(deciding)}
+                      className="w-full mt-2.5 py-2.5 rounded-xl bg-white border border-violet-200 text-violet-700 hover:bg-violet-50 disabled:opacity-60 font-semibold text-sm inline-flex items-center justify-center gap-1.5"
+                    >
+                      <MessageCircleQuestion className="w-4 h-4" aria-hidden="true" />
+                      {deciding === 'clarify' ? 'Sending…' : 'Request clarification'}
+                    </button>
                     <p className="text-[11px] text-slate-400 mt-3 text-center">
                       This link was sent to {approval?.approverEmail} and expires {approval?.expiresAt ? new Date(approval.expiresAt).toLocaleDateString() : 'in 30 days'}.
                     </p>

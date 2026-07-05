@@ -14,6 +14,9 @@ import SyncOperationsPanel from '../components/settings/SyncOperationsPanel';
 import BackfillPanel from '../components/settings/BackfillPanel';
 import WorkspaceManagementPanel from '../components/settings/WorkspaceManagementPanel';
 import MailboxConnectionsPanel from '../components/settings/MailboxConnectionsPanel';
+import MembersPanel from '../components/settings/MembersPanel';
+import GroupsPanel from '../components/settings/GroupsPanel';
+import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
 import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
 import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
@@ -60,6 +63,8 @@ import {
   PanelLeftOpen,
   Siren,
   Inbox,
+  Users2,
+  Stamp,
 } from 'lucide-react';
 
 export default function Settings() {
@@ -76,7 +81,7 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'notification-providers', 'notification-workflows', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
+  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'groups', 'notification-providers', 'notification-workflows', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -137,6 +142,9 @@ export default function Settings() {
     { id: 'freshservice', label: 'FreshService', Icon: Plug, minRole: 'global' },
     { id: 'webhooks', label: 'Webhooks', Icon: KeyRound, minRole: 'admin' },
     { id: 'ticket-mailboxes', label: 'Ticket Mailboxes', Icon: Inbox, minRole: 'admin' },
+    { id: 'agents', label: 'Members', Icon: Users, minRole: 'admin' },
+    { id: 'groups', label: 'Groups', Icon: Users2, minRole: 'admin' },
+    { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin' },
     { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global' },
     { id: 'notification-workflows', label: 'Mail Workflows', Icon: Send, minRole: 'admin' },
     { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin' },
@@ -1155,6 +1163,27 @@ export default function Settings() {
               {activeSection === 'ticket-mailboxes' && (
                 <div className="p-6">
                   <MailboxConnectionsPanel />
+                </div>
+              )}
+
+              {/* Members (local + FreshService) */}
+              {activeSection === 'agents' && (
+                <div className="p-6">
+                  <MembersPanel />
+                </div>
+              )}
+
+              {/* Groups (internal + FreshService) */}
+              {activeSection === 'groups' && (
+                <div className="p-6">
+                  <GroupsPanel />
+                </div>
+              )}
+
+              {/* Approval categories (per-workspace) */}
+              {activeSection === 'approval-categories' && (
+                <div className="p-6">
+                  <ApprovalCategoriesPanel />
                 </div>
               )}
 

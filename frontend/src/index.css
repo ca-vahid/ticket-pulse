@@ -112,6 +112,93 @@ code {
   .settings-scrollbar::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  /* Hide the scrollbar but keep scrolling — for horizontal tab strips etc. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Category map "Live effects": the hottest leaf cells breathe so the eye
+     lands on trouble spots. Gated in JS by mapEffectsEnabled + reduced-motion. */
+  @keyframes catCellPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  /* Driven by the explicit "Live effects" toggle (JS adds/removes the class),
+     so it intentionally overrides the OS reduced-motion default. */
+  .highcharts-point.cat-cell-hot,
+  .cat-cell-hot {
+    animation: catCellPulse 1.7s ease-in-out infinite;
+  }
+
+  /* Inline "[Image: name]" references in ticket note/email bodies — rendered as
+     a clickable chip that opens the attachment preview lightbox. */
+  .tp-img-ref {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    cursor: pointer;
+    padding: 0 0.35rem;
+    border-radius: 0.375rem;
+    color: rgb(29 78 216);
+    background: rgb(239 246 255);
+    border: 1px solid rgb(191 219 254);
+    font-weight: 500;
+    text-decoration: none;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+  .tp-img-ref:hover {
+    background: rgb(219 234 254);
+    border-color: rgb(147 197 253);
+  }
+  .tp-img-ref:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(59 130 246 / 0.55);
+  }
+
+  /* iOS safe-area helpers (needs viewport-fit=cover). Used on mobile sticky
+     bars and bottom sheets so content clears the notch / home indicator. */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Tickets surfaces: gpt-image-2 glass-wave wallpaper under a readability
+     veil (fixed so tables scroll over it without repaint jank). */
+  .tp-tickets-backdrop {
+    background:
+      linear-gradient(180deg, rgb(248 250 252 / 0.60) 0%, rgb(248 250 252 / 0.78) 55%, rgb(248 250 252 / 0.88) 100%),
+      url('./assets/tickets-backdrop.png') center / cover no-repeat fixed;
+  }
+
+  /* react-day-picker sized for the 248px ticket filter rail */
+  .tp-rail-calendar .rdp-root {
+    --rdp-accent-color: hsl(221 83% 53%);
+    --rdp-day-width: 28px;
+    --rdp-day-height: 28px;
+    --rdp-day_button-width: 26px;
+    --rdp-day_button-height: 26px;
+    --rdp-nav_button-width: 26px;
+    --rdp-nav_button-height: 26px;
+    font-size: 12px;
+    margin: 0 auto;
+    width: fit-content;
+  }
+
+  .tp-rail-calendar .rdp-month_caption {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgb(51 65 85);
+  }
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {

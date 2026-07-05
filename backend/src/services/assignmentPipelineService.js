@@ -226,7 +226,22 @@ class AssignmentPipelineService {
       throw error;
     }
 
+    this._broadcastRunUpdate(workspaceId, ticketId, run.id, 'running');
     return this._executeRun(run.id, ticketId, workspaceId, triggerSource, pipelineStart, emit, signal);
+  }
+
+  /**
+   * Workspace-wide SSE ping so ticket surfaces (queue rows, peek, detail) can
+   * live-update AI run state without polling. Dynamic import keeps this free
+   * of route/service import cycles; failures are best-effort silent.
+   */
+  async _broadcastRunUpdate(workspaceId, ticketId, runId, status, decision = null) {
+    try {
+      const { sseManager } = await import('../routes/sse.routes.js');
+      sseManager.broadcast('ticket-change', {
+        action: 'pipeline', workspaceId, ticketId, runId, status, decision,
+      }, workspaceId);
+    } catch { /* SSE is optional plumbing */ }
   }
 
   _buildAfterHoursQueuedReason(baseReason, reboundFrom = null) {
@@ -264,6 +279,7 @@ class AssignmentPipelineService {
       runId: run.id, ticketId, workspaceId, triggerSource, queuedReason,
     });
     emit({ type: 'queued', runId: run.id, reason: queuedReason });
+    this._broadcastRunUpdate(workspaceId, ticketId, run.id, 'queued');
     return run;
   }
 
@@ -1109,6 +1125,7 @@ class AssignmentPipelineService {
       } else {
         emit({ type: 'error', message: errorMessage });
       }
+      this._broadcastRunUpdate(workspaceId, ticketId, runId, finalStatus, recommendation ? decision : null);
 
       logger.info('Pipeline completed', {
         runId, ticketId, status: finalStatus, decision: recommendation ? decision : null,
@@ -1221,6 +1238,7 @@ class AssignmentPipelineService {
       });
       emit({ type: 'error', message: error.message });
       emit({ type: 'complete', runId });
+      this._broadcastRunUpdate(workspaceId, ticketId, runId, 'failed');
       return await assignmentRepository.getPipelineRun(runId);
     }
   }
@@ -1325,6 +1343,55 @@ class AssignmentPipelineService {
       logger.warn('Failed to parse recommendation JSON from pipeline output', { runId });
     }
     return null;
+  }
+
+  /**
+   * Independent queue-drain worker. Previously the only thing that drained
+   * business-hours-queued runs was a block inside the FreshService sync cron —
+   * so if FS sync was off/paused/erroring (or a workspace runs native ticketing
+   * with no FS sync), after-hours queued runs never processed. This worker owns
+   * draining on its own cadence: every tick, for each active workspace, if there
+   * are queued runs AND it's inside business hours, drain them. Business-hours
+   * gating means overnight/holiday tickets wait and process when hours resume.
+   */
+  startQueueDrainWorker({ intervalMs = 120000 } = {}) {
+    if (this._drainTimer) return;
+    const tick = async () => {
+      try {
+        const { default: workspaceRepository } = await import('./workspaceRepository.js');
+        const workspaces = await workspaceRepository.getAllActive();
+        for (const ws of workspaces) {
+          try {
+            const queuedCount = await assignmentRepository.countQueuedRuns(ws.id);
+            if (queuedCount === 0) continue;
+            const tz = ws.defaultTimezone || 'America/Los_Angeles';
+            const bh = await availabilityService.isBusinessHours(new Date(), tz, ws.id);
+            if (!bh.isBusinessHours) continue;
+            logger.info(`[queue-drain] Draining ${queuedCount} queued run(s) for workspace ${ws.id} (${ws.name})`);
+            await this.drainQueuedRuns(ws.id, 5);
+          } catch (err) {
+            logger.error(`[queue-drain] workspace ${ws.id} failed: ${err.message}`);
+          }
+        }
+      } catch (err) {
+        logger.error(`[queue-drain] tick failed: ${err.message}`);
+      }
+    };
+    // Kick once shortly after boot, then on the interval.
+    this._drainTimer = setInterval(() => { tick().catch(() => {}); }, intervalMs);
+    this._drainKick = setTimeout(() => { tick().catch(() => {}); }, 15000);
+    logger.info(`Assignment queue-drain worker started (every ${Math.round(intervalMs / 1000)}s)`);
+  }
+
+  stopQueueDrainWorker() {
+    if (this._drainTimer) {
+      clearInterval(this._drainTimer);
+      this._drainTimer = null;
+    }
+    if (this._drainKick) {
+      clearTimeout(this._drainKick);
+      this._drainKick = null;
+    }
   }
 }
 

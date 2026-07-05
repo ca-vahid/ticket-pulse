@@ -4,6 +4,7 @@ import {
   Award,
   Boxes,
   Calendar,
+  Check,
   ChevronDown,
   Clock,
   LogOut,
@@ -25,6 +26,7 @@ import { APP_VERSION } from '../data/changelog';
 import { cn } from '../lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { NAV_ACTIVE_TILE, useNavDestinations } from './nav/navDestinations';
+import { useApprovalCount } from '../hooks/useApprovalCount';
 import ChangelogModal from './ChangelogModal';
 
 export default function AppHeader({
@@ -90,6 +92,7 @@ export default function AppHeader({
   };
 
   const navDestinations = useNavDestinations(activePage);
+  const approvalCount = useApprovalCount();
 
   const navigateFromMenu = (path) => {
     setUserMenuOpen(false);
@@ -146,6 +149,34 @@ export default function AppHeader({
               <p className="truncate text-sm font-semibold text-slate-900">{displayUserName}</p>
               <p className="truncate text-xs text-slate-500">{user?.email || user?.username || wsRole}</p>
             </div>
+
+            {/* Primary navigation — mirrors the top-bar destination tiles so the
+                menu is a full nav on compact widths and a keyboard-friendly list. */}
+            {navDestinations.length > 0 && (
+              <>
+                <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Go to</p>
+                {navDestinations.map(({ id, label, path, Icon }) => {
+                  const isCurrent = activePage === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => navigateFromMenu(path)}
+                      aria-current={isCurrent ? 'page' : undefined}
+                      className={`flex w-full items-center gap-3 px-3 py-1.5 text-left text-sm hover:bg-slate-50 ${isCurrent ? 'font-semibold text-slate-900' : 'text-slate-700'}`}
+                    >
+                      <span className="inline-flex h-4 w-4 items-center justify-center text-slate-500">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="flex-1 truncate">{label}</span>
+                      {isCurrent && <Check className="h-3.5 w-3.5 text-blue-600" />}
+                    </button>
+                  );
+                })}
+                <div className="my-1 border-t border-slate-100" />
+              </>
+            )}
 
             {menuItems.map(({ id, label, description, path, Icon }) => (
               <button
@@ -214,6 +245,11 @@ export default function AppHeader({
             <Icon className="h-[22px] w-[22px]" />
             {isActive && (
               <span className={cn('absolute bottom-[5px] left-1/2 h-0.5 w-4 -translate-x-1/2 rounded-full', dest.bar)} />
+            )}
+            {dest.badgeKey === 'approvals' && approvalCount > 0 && (
+              <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold shadow-sm ring-2 ring-white">
+                {approvalCount > 99 ? '99+' : approvalCount}
+              </span>
             )}
           </button>
         </TooltipTrigger>

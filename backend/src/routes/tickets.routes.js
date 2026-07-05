@@ -1,11 +1,19 @@
 import express from 'express';
+import multer from 'multer';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { AuthenticationError, ValidationError } from '../utils/errors.js';
 import ticketService from '../services/ticketService.js';
+import scheduledTicketService from '../services/scheduledTicketService.js';
+import attachmentService, { MAX_ATTACHMENT_BYTES } from '../services/attachmentService.js';
 import workspaceRepository from '../services/workspaceRepository.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
+
+const attachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_ATTACHMENT_BYTES, files: 5 },
+});
 
 /**
  * Native ticketing API.
@@ -89,6 +97,172 @@ router.get('/meta', asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...meta, actor: req.ticketActor } });
 }));
 
+router.get('/stats', asyncHandler(async (req, res) => {
+  const stats = await ticketService.getQueueStats(req.workspaceId);
+  res.json({ success: true, data: stats });
+}));
+
+// ----------------------------------------------- saved filter views (per-user)
+
+function actorIsAdmin(actor) {
+  return actor?.role === 'admin' || actor?.workspaceRole === 'admin';
+}
+
+/** List the current user's own views + workspace-shared views. */
+router.get('/saved-views', asyncHandler(async (req, res) => {
+  const email = req.ticketActor.email;
+  const views = await prisma.savedFilterView.findMany({
+    where: { workspaceId: req.workspaceId, OR: [{ ownerEmail: email }, { shared: true }] },
+    orderBy: [{ shared: 'asc' }, { name: 'asc' }],
+  });
+  res.json({
+    success: true,
+    data: views.map((v) => ({
+      id: v.id, name: v.name, params: v.params, shared: v.shared,
+      mine: v.ownerEmail === email, ownerEmail: v.ownerEmail,
+    })),
+  });
+}));
+
+router.post('/saved-views', asyncHandler(async (req, res) => {
+  const email = req.ticketActor.email;
+  const { name, params, shared } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ success: false, message: 'name is required' });
+  if (params === null || params === undefined || typeof params !== 'object') return res.status(400).json({ success: false, message: 'params object is required' });
+  const wantShared = shared === true && actorIsAdmin(req.ticketActor);
+  const view = await prisma.savedFilterView.create({
+    data: { workspaceId: req.workspaceId, ownerEmail: email, name: String(name).trim().slice(0, 160), params, shared: wantShared },
+  });
+  res.status(201).json({ success: true, data: { id: view.id, name: view.name, params: view.params, shared: view.shared, mine: true } });
+}));
+
+router.patch('/saved-views/:id', asyncHandler(async (req, res) => {
+  const email = req.ticketActor.email;
+  const id = parseInt(req.params.id, 10);
+  const existing = await prisma.savedFilterView.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) return res.status(404).json({ success: false, message: 'View not found' });
+  const isOwner = existing.ownerEmail === email;
+  const admin = actorIsAdmin(req.ticketActor);
+  if (!isOwner && !admin) return res.status(403).json({ success: false, message: 'You can only edit your own views' });
+  const data = {};
+  if (req.body?.name !== undefined && isOwner) data.name = String(req.body.name).trim().slice(0, 160);
+  if (req.body?.params !== undefined && isOwner) data.params = req.body.params;
+  // Sharing is an admin-only action (owner or admin editing, but flag needs admin).
+  if (req.body?.shared !== undefined) {
+    if (!admin) return res.status(403).json({ success: false, message: 'Only admins can share views to the workspace' });
+    data.shared = req.body.shared === true;
+  }
+  const view = await prisma.savedFilterView.update({ where: { id }, data });
+  res.json({ success: true, data: { id: view.id, name: view.name, params: view.params, shared: view.shared, mine: view.ownerEmail === email } });
+}));
+
+router.delete('/saved-views/:id', asyncHandler(async (req, res) => {
+  const email = req.ticketActor.email;
+  const id = parseInt(req.params.id, 10);
+  const existing = await prisma.savedFilterView.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) return res.status(404).json({ success: false, message: 'View not found' });
+  if (existing.ownerEmail !== email && !actorIsAdmin(req.ticketActor)) {
+    return res.status(403).json({ success: false, message: 'You can only delete your own views' });
+  }
+  await prisma.savedFilterView.delete({ where: { id } });
+  res.json({ success: true });
+}));
+
+// Requester typeahead for the create flow: known requesters + Entra directory.
+router.get('/requester-search', asyncHandler(async (req, res) => {
+  const results = await ticketService.searchRequesters(String(req.query.q || ''));
+  res.json({ success: true, data: results });
+}));
+
+// Compact requester history (counts) for the peek/detail requester cards.
+router.get('/requester-stats', asyncHandler(async (req, res) => {
+  const stats = await ticketService.requesterStats(req.query.requesterId, req.workspaceId);
+  res.json({ success: true, data: stats });
+}));
+
+// Requester profile photo from Entra, lazily fetched with an in-memory cache
+// (nulls cached too — most requesters have no photo and Graph 404s are slow).
+const requesterPhotoCache = new Map(); // email -> { photo, at }
+const PHOTO_TTL_MS = 12 * 60 * 60 * 1000;
+const PHOTO_CACHE_MAX = 500;
+
+router.get('/requester-photo', asyncHandler(async (req, res) => {
+  const email = String(req.query.email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return res.json({ success: true, data: { photo: null } });
+  }
+  const cached = requesterPhotoCache.get(email);
+  if (cached && Date.now() - cached.at < PHOTO_TTL_MS) {
+    return res.json({ success: true, data: { photo: cached.photo } });
+  }
+  let photo = null;
+  try {
+    const { default: azureAdService } = await import('../services/azureAdService.js');
+    photo = await azureAdService.getUserPhoto(email); // data URI or null
+  } catch { /* Entra unconfigured/unreachable — cache the null */ }
+  if (requesterPhotoCache.size >= PHOTO_CACHE_MAX) {
+    requesterPhotoCache.delete(requesterPhotoCache.keys().next().value);
+  }
+  requesterPhotoCache.set(email, { photo, at: Date.now() });
+  res.json({ success: true, data: { photo } });
+}));
+
+// ------------------------------------------------------ scheduled tickets
+
+router.get('/scheduled', asyncHandler(async (req, res) => {
+  const [pending, recent] = await Promise.all([
+    scheduledTicketService.list(req.workspaceId),
+    scheduledTicketService.recentlyActivated(req.workspaceId),
+  ]);
+  res.json({ success: true, data: { pending, recent } });
+}));
+
+router.post('/scheduled', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const row = await scheduledTicketService.schedule(
+    req.workspaceId,
+    { payload: req.body?.payload || {}, scheduledForAt: req.body?.scheduledForAt },
+    req.ticketActor,
+  );
+  res.status(201).json({ success: true, data: row });
+}));
+
+router.post('/scheduled/:sid/activate', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const result = await scheduledTicketService.activate(Number(req.params.sid), req.workspaceId, req.ticketActor);
+  res.json({ success: true, data: result });
+}));
+
+router.delete('/scheduled/:sid', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const row = await scheduledTicketService.cancel(Number(req.params.sid), req.workspaceId, req.ticketActor);
+  res.json({ success: true, data: row });
+}));
+
+router.get('/export.csv', asyncHandler(async (req, res) => {
+  const result = await ticketService.listTickets(
+    req.workspaceId,
+    { ...req.query, page: 1, pageSize: 5000 },
+    { maxPageSize: 5000 },
+  );
+  const esc = (v) => {
+    const s = v === null || v === undefined ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ['Ref', 'Subject', 'Status', 'Priority', 'Type', 'State', 'Requester', 'Requester Email', 'Assignee', 'Category', 'Subcategory', 'Origin', 'Created', 'Last Activity'];
+  const lines = [header.join(',')];
+  for (const t of result.items) {
+    lines.push([
+      esc(t.displayRef), esc(t.subject), esc(t.status), esc(t.priority), esc(t.ticketType),
+      esc(t.stateChip), esc(t.requester?.name), esc(t.requester?.email), esc(t.assignedTech?.name),
+      // TP taxonomy first (canonical → tp custom fields), legacy single box last
+      esc(t.internalCategory?.name || t.tpSkill || t.ticketCategory), esc(t.internalSubcategory?.name || t.tpSubskill),
+      esc(t.origin), esc(t.createdAt?.toISOString?.() || t.createdAt),
+      esc(t.lastActivityAt?.toISOString?.() || t.lastActivityAt),
+    ].join(','));
+  }
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="tickets-export-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send(`${lines.join('\n')}\n`);
+}));
+
 // ------------------------------------------------- mailbox connections (admin)
 
 function requireTicketingAdmin(req, _res, next) {
@@ -107,10 +281,51 @@ router.get('/mailboxes', requireTicketingAdmin, asyncHandler(async (req, res) =>
   res.json({ success: true, data: mailboxes });
 }));
 
+/** Validates the optional mailbox→group/type routing fields (T3.1). */
+async function resolveMailboxRouting(req) {
+  const out = {};
+  if (req.body?.defaultGroupId !== undefined) {
+    const raw = req.body.defaultGroupId;
+    if (raw === null || raw === '') {
+      out.defaultGroupId = null;
+    } else {
+      if (!/^\d+$/.test(String(raw))) throw new ValidationError('defaultGroupId must be a group id');
+      const groupFsId = BigInt(String(raw));
+      const group = await prisma.group.findFirst({
+        where: { workspaceId: req.workspaceId, freshserviceId: groupFsId, isActive: true },
+      });
+      if (!group) throw new ValidationError('Group not found in this workspace');
+      out.defaultGroupId = groupFsId;
+    }
+  }
+  if (req.body?.defaultInternalGroupId !== undefined) {
+    const raw = req.body.defaultInternalGroupId;
+    if (raw === null || raw === '') {
+      out.defaultInternalGroupId = null;
+    } else {
+      const id = parseInt(raw, 10);
+      if (!Number.isInteger(id)) throw new ValidationError('defaultInternalGroupId must be a group id');
+      const group = await prisma.group.findFirst({
+        where: { id, workspaceId: req.workspaceId, origin: 'local', isActive: true },
+      });
+      if (!group) throw new ValidationError('Internal group not found in this workspace');
+      out.defaultInternalGroupId = id;
+    }
+  }
+  if (req.body?.defaultTicketType !== undefined) {
+    const type = req.body.defaultTicketType;
+    if (type === null || type === '') out.defaultTicketType = null;
+    else if (['Incident', 'Service Request'].includes(type)) out.defaultTicketType = type;
+    else throw new ValidationError('defaultTicketType must be Incident or Service Request');
+  }
+  return out;
+}
+
 router.post('/mailboxes', requireTicketingAdmin, requireNativeTicketing, asyncHandler(async (req, res) => {
   const address = String(req.body?.address || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) throw new ValidationError('A valid mailbox address is required');
   const mode = ['ingest', 'send', 'both'].includes(req.body?.mode) ? req.body.mode : 'both';
+  const routing = await resolveMailboxRouting(req);
   const mailbox = await prisma.mailboxConnection.create({
     data: {
       workspaceId: req.workspaceId,
@@ -119,6 +334,7 @@ router.post('/mailboxes', requireTicketingAdmin, requireNativeTicketing, asyncHa
       mode,
       pollIntervalSec: Math.max(15, Math.min(3600, Number(req.body?.pollIntervalSec) || 60)),
       createdBy: req.ticketActor.email,
+      ...routing,
     },
   }).catch((err) => {
     if (err.code === 'P2002') throw new ValidationError('That mailbox is already connected to this workspace');
@@ -131,7 +347,7 @@ router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async 
   const id = Number(req.params.mailboxId);
   const existing = await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } });
   if (!existing) throw new ValidationError('Mailbox not found in this workspace');
-  const data = {};
+  const data = await resolveMailboxRouting(req);
   if (req.body?.mode && ['ingest', 'send', 'both'].includes(req.body.mode)) data.mode = req.body.mode;
   if (req.body?.isEnabled !== undefined) data.isEnabled = req.body.isEnabled === true;
   if (req.body?.displayName !== undefined) data.displayName = req.body.displayName?.trim() || null;
@@ -146,6 +362,132 @@ router.delete('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async
   if (!existing) throw new ValidationError('Mailbox not found in this workspace');
   await prisma.mailboxConnection.delete({ where: { id } });
   res.json({ success: true });
+}));
+
+// ---------------------------------- category↔group affinity (T3.3 groundwork)
+// Admin API only for now — the full mapping UX ships with per-group taxonomies.
+
+router.get('/category-group-links', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const links = await prisma.categoryGroupLink.findMany({
+    where: { workspaceId: req.workspaceId },
+    orderBy: { id: 'asc' },
+  });
+  res.json({ success: true, data: links });
+}));
+
+router.put('/category-group-links', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const entries = Array.isArray(req.body?.links) ? req.body.links : [];
+  const cleaned = [];
+  for (const entry of entries) {
+    const categoryId = Number(entry?.categoryId);
+    const groupRaw = String(entry?.groupId ?? '');
+    if (!Number.isInteger(categoryId) || !/^\d+$/.test(groupRaw)) {
+      throw new ValidationError('Each link needs a categoryId and a groupId');
+    }
+    cleaned.push({ categoryId, groupId: BigInt(groupRaw) });
+  }
+  const catIds = [...new Set(cleaned.map((c) => c.categoryId))];
+  if (catIds.length) {
+    const owned = await prisma.competencyCategory.count({ where: { id: { in: catIds }, workspaceId: req.workspaceId } });
+    if (owned !== catIds.length) throw new ValidationError('A category does not belong to this workspace');
+  }
+  const groupIds = [...new Set(cleaned.map((c) => c.groupId))];
+  if (groupIds.length) {
+    const owned = await prisma.group.count({ where: { workspaceId: req.workspaceId, freshserviceId: { in: groupIds } } });
+    if (owned !== groupIds.length) throw new ValidationError('A group does not belong to this workspace');
+  }
+  await prisma.$transaction([
+    prisma.categoryGroupLink.deleteMany({ where: { workspaceId: req.workspaceId } }),
+    ...(cleaned.length ? [prisma.categoryGroupLink.createMany({
+      data: cleaned.map((c) => ({ workspaceId: req.workspaceId, ...c, createdBy: req.ticketActor.email })),
+    })] : []),
+  ]);
+  const links = await prisma.categoryGroupLink.findMany({ where: { workspaceId: req.workspaceId }, orderBy: { id: 'asc' } });
+  res.json({ success: true, data: links });
+}));
+
+// ------------------------------------------------------ reply templates (T3.7)
+
+router.get('/templates', asyncHandler(async (req, res) => {
+  const templates = await prisma.replyTemplate.findMany({
+    where: { workspaceId: req.workspaceId, isActive: true },
+    orderBy: { name: 'asc' },
+  });
+  res.json({ success: true, data: templates });
+}));
+
+router.post('/templates', asyncHandler(async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const bodyText = String(req.body?.bodyText || '').trim();
+  const bodyHtml = req.body?.bodyHtml ? String(req.body.bodyHtml) : null;
+  if (!name || name.length > 120) throw new ValidationError('Template name is required (max 120 characters)');
+  if (!bodyText) throw new ValidationError('Template body is required');
+  const categoryId = req.body?.categoryId ? Number(req.body.categoryId) : null;
+  if (categoryId) {
+    const category = await prisma.competencyCategory.findFirst({ where: { id: categoryId, workspaceId: req.workspaceId } });
+    if (!category) throw new ValidationError('Category not found in this workspace');
+  }
+  const template = await prisma.replyTemplate.create({
+    data: { workspaceId: req.workspaceId, name, bodyText, bodyHtml, categoryId, createdBy: req.ticketActor.email },
+  });
+  res.status(201).json({ success: true, data: template });
+}));
+
+router.delete('/templates/:templateId', asyncHandler(async (req, res) => {
+  const id = Number(req.params.templateId);
+  const existing = await prisma.replyTemplate.findFirst({ where: { id, workspaceId: req.workspaceId, isActive: true } });
+  if (!existing) throw new ValidationError('Template not found');
+  const isOwner = existing.createdBy === req.ticketActor.email;
+  const isAdmin = req.ticketActor.role === 'admin' || req.ticketActor.workspaceRole === 'admin';
+  if (!isOwner && !isAdmin) throw new ValidationError('Only the creator or an admin can remove a template');
+  await prisma.replyTemplate.update({ where: { id }, data: { isActive: false } });
+  res.json({ success: true });
+}));
+
+// ------------------------------------------------- watch subscriptions (T3.6)
+// Per-category or per-group, never per-ticket (decision d7).
+
+router.get('/watch-subscriptions', asyncHandler(async (req, res) => {
+  const subs = await prisma.ticketWatchSubscription.findMany({
+    where: { workspaceId: req.workspaceId, userEmail: req.ticketActor.email },
+    orderBy: { id: 'asc' },
+  });
+  res.json({ success: true, data: subs });
+}));
+
+router.post('/watch-subscriptions', asyncHandler(async (req, res) => {
+  const scopeType = req.body?.scopeType;
+  const watch = req.body?.watch !== false;
+  const notifyRequesterReply = req.body?.notifyRequesterReply === true;
+  if (!['category', 'group'].includes(scopeType)) throw new ValidationError('scopeType must be category or group');
+
+  let categoryId = null;
+  let groupId = null;
+  if (scopeType === 'category') {
+    categoryId = Number(req.body?.categoryId);
+    if (!Number.isInteger(categoryId) || categoryId <= 0) throw new ValidationError('categoryId is required for category scope');
+    const category = await prisma.competencyCategory.findFirst({ where: { id: categoryId, workspaceId: req.workspaceId } });
+    if (!category) throw new ValidationError('Category not found in this workspace');
+  } else {
+    const raw = String(req.body?.groupId ?? '');
+    if (!/^\d+$/.test(raw)) throw new ValidationError('groupId is required for group scope');
+    groupId = BigInt(raw);
+    const group = await prisma.group.findFirst({ where: { workspaceId: req.workspaceId, freshserviceId: groupId } });
+    if (!group) throw new ValidationError('Group not found in this workspace');
+  }
+
+  const where = { workspaceId: req.workspaceId, userEmail: req.ticketActor.email, scopeType, categoryId, groupId };
+  const existing = await prisma.ticketWatchSubscription.findFirst({ where });
+  if (!watch) {
+    if (existing) await prisma.ticketWatchSubscription.delete({ where: { id: existing.id } });
+    return res.json({ success: true, data: null });
+  }
+  const sub = existing
+    ? await prisma.ticketWatchSubscription.update({ where: { id: existing.id }, data: { notifyRequesterReply } })
+    : await prisma.ticketWatchSubscription.create({
+      data: { ...where, userName: req.ticketActor.name, notifyCreated: true, notifyRequesterReply },
+    });
+  res.json({ success: true, data: sub });
 }));
 
 // ------------------------------------------------------ API keys (admin)
@@ -252,6 +594,23 @@ router.post('/:id/status', requireNativeTicketing, asyncHandler(async (req, res)
   res.json({ success: true, data: ticket });
 }));
 
+router.post('/:id/clone', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const ticket = await ticketService.cloneTicket(parseTicketId(req), req.workspaceId, req.ticketActor);
+  res.status(201).json({ success: true, data: ticket });
+}));
+
+// Delete a TP-born ticket (soft-delete → status 'Deleted'). Reviewer/admin only;
+// TP-owned tickets only (the service rejects FS-born ones).
+router.delete('/:id', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const actor = req.ticketActor;
+  const allowed = actor.role === 'admin' || actor.workspaceRole === 'admin' || actor.workspaceRole === 'reviewer';
+  if (!allowed) {
+    return res.status(403).json({ success: false, message: 'Deleting tickets requires reviewer or admin access.' });
+  }
+  const ticket = await ticketService.deleteTicket(parseTicketId(req), req.workspaceId, actor);
+  res.json({ success: true, data: ticket });
+}));
+
 router.post('/:id/assign', requireNativeTicketing, asyncHandler(async (req, res) => {
   const technicianId = req.body?.technicianId ?? null;
   const ticket = await ticketService.assignTicket(
@@ -260,23 +619,168 @@ router.post('/:id/assign', requireNativeTicketing, asyncHandler(async (req, res)
   res.json({ success: true, data: ticket });
 }));
 
-router.post('/:id/replies', requireNativeTicketing, asyncHandler(async (req, res) => {
-  const result = await ticketService.addReply(
+// FS-born field write-back: PUT to FreshService first, verify the echo, only
+// then update Ticket Pulse — an FS failure changes nothing locally.
+// Deliberately NOT behind requireNativeTicketing (it's an FS feature).
+router.post('/:id/fs-update', asyncHandler(async (req, res) => {
+  const ticket = await ticketService.updateFsTicket(
     parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor,
+  );
+  res.json({ success: true, data: ticket });
+}));
+
+// Manual AI-triage trigger (semi-manual assignment): fires the normal
+// assignment pipeline for this ticket; results land in Assignment Review.
+router.post('/:id/triage', asyncHandler(async (req, res) => {
+  const result = await ticketService.requestTriage(parseTicketId(req), req.workspaceId, req.ticketActor);
+  res.status(202).json({ success: true, data: result });
+}));
+
+// Related tickets: provable relations + clearly-labeled near-duplicate hints.
+router.get('/:id/related', asyncHandler(async (req, res) => {
+  const related = await ticketService.relatedTickets(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: related });
+}));
+
+// Forward the public thread to any address, recorded as a private entry.
+router.post('/:id/forward', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const result = await ticketService.forwardTicket(
+    parseTicketId(req), req.workspaceId,
+    { to: req.body?.to, note: req.body?.note },
+    req.ticketActor,
   );
   res.status(201).json({ success: true, data: result });
 }));
 
-router.post('/:id/notes', requireNativeTicketing, asyncHandler(async (req, res) => {
-  const result = await ticketService.addPrivateNote(
-    parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor,
+// Noise flag works for any origin (it's Ticket Pulse's own classification),
+// so it deliberately skips requireNativeTicketing.
+router.post('/:id/noise', asyncHandler(async (req, res) => {
+  const ticket = await ticketService.setNoise(
+    parseTicketId(req), req.workspaceId,
+    { noise: req.body?.noise, resolve: req.body?.resolve === true },
+    req.ticketActor,
+  );
+  res.json({ success: true, data: ticket });
+}));
+
+// Multipart (files + fields) or plain JSON — multer only engages on multipart.
+router.post('/:id/replies', requireNativeTicketing, attachmentUpload.array('files', 5), asyncHandler(async (req, res) => {
+  const result = await ticketService.addReply(
+    parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor, req.files || [],
   );
   res.status(201).json({ success: true, data: result });
+}));
+
+router.post('/:id/notes', requireNativeTicketing, attachmentUpload.array('files', 5), asyncHandler(async (req, res) => {
+  const result = await ticketService.addPrivateNote(
+    parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor, req.files || [],
+  );
+  res.status(201).json({ success: true, data: result });
+}));
+
+// Admin-only: delete an internal note (native tickets; also removes the FS
+// fallback copy via the mirror). Guarded again inside the service.
+router.delete('/:id/notes/:entryId', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const result = await ticketService.deleteNote(
+    parseTicketId(req), req.workspaceId, Number(req.params.entryId), req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+// -------------------------------------------------------------- attachments
+
+router.get('/:id/attachments', asyncHandler(async (req, res) => {
+  const attachments = await attachmentService.listForTicket(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: attachments });
+}));
+
+router.post(
+  '/:id/attachments',
+  requireNativeTicketing,
+  attachmentUpload.array('files', 5),
+  asyncHandler(async (req, res) => {
+    const ticketId = parseTicketId(req);
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId: req.workspaceId },
+      select: { id: true },
+    });
+    if (!ticket) throw new ValidationError('Ticket not found in this workspace');
+    const files = req.files || [];
+    if (files.length === 0) throw new ValidationError('No files were uploaded');
+
+    const stored = [];
+    for (const file of files) {
+      stored.push(await attachmentService.upload({
+        workspaceId: req.workspaceId,
+        ticketId,
+        fileName: file.originalname,
+        contentType: file.mimetype,
+        buffer: file.buffer,
+        uploadedBy: req.ticketActor.email,
+      }));
+    }
+    res.status(201).json({ success: true, data: stored });
+  }),
+);
+
+router.get('/:id/attachments/:attachmentId/download', asyncHandler(async (req, res) => {
+  const { attachment, stream } = await attachmentService.openDownload(
+    Number(req.params.attachmentId), parseTicketId(req), req.workspaceId,
+  );
+  res.setHeader('Content-Type', attachment.contentType || 'application/octet-stream');
+  res.setHeader('Content-Length', attachment.sizeBytes);
+  res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName.replace(/"/g, '')}"`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  stream.pipe(res);
+}));
+
+router.delete('/:id/attachments/:attachmentId', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const result = await attachmentService.remove(
+    Number(req.params.attachmentId), parseTicketId(req), req.workspaceId, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
 }));
 
 // ---------------------------------------------------------------- approvals
+// Approvals are a TP-only layer that works on any ticket in the workspace
+// (TP-born AND FS-born synced) — they never touch FreshService, so they are
+// NOT gated by requireNativeTicketing.
 
-router.post('/:id/approvals', requireNativeTicketing, asyncHandler(async (req, res) => {
+// Cross-ticket approver inbox for the current actor (pending decisions for me).
+router.get('/approvals/inbox', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const data = await ticketApprovalService.inboxFor(req.workspaceId, req.ticketActor);
+  res.json({ success: true, data });
+}));
+
+// Lightweight count for the nav badge.
+router.get('/approvals/inbox/count', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const count = await ticketApprovalService.inboxCountFor(req.workspaceId, req.ticketActor);
+  res.json({ success: true, data: { count } });
+}));
+
+// Approvals I requested that are awaiting my clarification ("Needs your info").
+router.get('/approvals/mine', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const data = await ticketApprovalService.needsMyInfo(req.workspaceId, req.ticketActor);
+  res.json({ success: true, data });
+}));
+
+// Admin/reviewer overview: stats + all approvals in the workspace (history).
+router.get('/approvals/all', asyncHandler(async (req, res) => {
+  const a = req.ticketActor;
+  const canReview = a?.role === 'admin' || a?.workspaceRole === 'admin' || a?.workspaceRole === 'reviewer';
+  if (!canReview) throw new AuthenticationError('Approvals overview is for reviewers and admins');
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const data = await ticketApprovalService.overview(req.workspaceId, {
+    status: req.query.status || null,
+    categoryId: req.query.categoryId || null,
+  });
+  res.json({ success: true, data });
+}));
+
+router.post('/:id/approvals', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const result = await ticketApprovalService.request(
     parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor,
@@ -284,7 +788,7 @@ router.post('/:id/approvals', requireNativeTicketing, asyncHandler(async (req, r
   res.status(201).json({ success: true, data: result });
 }));
 
-router.post('/:id/approvals/:approvalId/decide', requireNativeTicketing, asyncHandler(async (req, res) => {
+router.post('/:id/approvals/:approvalId/decide', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideInApp(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
@@ -293,12 +797,48 @@ router.post('/:id/approvals/:approvalId/decide', requireNativeTicketing, asyncHa
   res.json({ success: true, data: approval });
 }));
 
-router.post('/:id/approvals/:approvalId/cancel', requireNativeTicketing, asyncHandler(async (req, res) => {
+router.post('/:id/approvals/:approvalId/clarify', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.requestClarification(
+    parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
+    req.body?.note || null, req.ticketActor,
+  );
+  res.json({ success: true, data: approval });
+}));
+
+router.post('/:id/approvals/:approvalId/resubmit', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.resubmit(
+    parseTicketId(req), req.workspaceId, Number(req.params.approvalId), req.ticketActor,
+  );
+  res.json({ success: true, data: approval });
+}));
+
+router.post('/:id/approvals/:approvalId/cancel', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.cancel(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId), req.ticketActor,
   );
   res.json({ success: true, data: approval });
+}));
+
+// Approver (or admin) flips a decided approval: approved ↔ rejected.
+router.post('/:id/approvals/:approvalId/change', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.changeDecision(
+    parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
+    req.body?.decision, req.body?.note || null, req.ticketActor,
+  );
+  res.json({ success: true, data: approval });
+}));
+
+// Requester (or admin) deletes a request entirely (whole group).
+router.delete('/:id/approvals/:approvalId', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const result = await ticketApprovalService.deleteRequest(
+    parseTicketId(req), req.workspaceId, Number(req.params.approvalId), req.ticketActor,
+  );
+  res.json({ success: true, data: result });
 }));
 
 /**

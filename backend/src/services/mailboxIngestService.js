@@ -157,7 +157,7 @@ class MailboxIngestService {
     const match = await this.matchEmailToTicket(connection.workspaceId, email);
     if (match?.skip) return 'skipped';
     if (match?.ticket) {
-      await this.ingestReply(match.ticket, email, match.via);
+      await this.ingestReply(connection, match.ticket, email, match.via);
       return 'reply';
     }
 
@@ -226,12 +226,45 @@ class MailboxIngestService {
     return null;
   }
 
-  async ingestReply(ticket, email, via) {
+  /**
+   * Pull the email's file attachments into Blob storage, linked to the ticket
+   * (and thread entry when given). Returns a notice string for anything that
+   * could not be captured.
+   */
+  async _captureAttachments(connection, email, ticket, threadEntryId = null) {
+    if (!email.hasAttachments) return '';
+    try {
+      const { default: attachmentService } = await import('./attachmentService.js');
+      if (!attachmentService.isConfigured()) {
+        return '\n\n[This email had attachments — attachment storage is not configured, view the original in the mailbox.]';
+      }
+      const { files, skipped } = await graphMailClient.getMessageAttachments(connection.address, email.id);
+      for (const file of files) {
+        await attachmentService.upload({
+          workspaceId: ticket.workspaceId,
+          ticketId: ticket.id,
+          threadEntryId,
+          fileName: file.name,
+          contentType: file.contentType,
+          buffer: file.buffer,
+          uploadedBy: email.from,
+          source: 'email',
+        }).catch((err) => {
+          skipped.push({ name: file.name, reason: err.message });
+        });
+      }
+      if (skipped.length > 0) {
+        return `\n\n[${skipped.length} attachment(s) could not be imported: ${skipped.map((s) => s.name).join(', ')}]`;
+      }
+      return '';
+    } catch (err) {
+      logger.warn(`Email attachment capture failed (non-fatal): ${err.message}`);
+      return '\n\n[This email had attachments — they could not be imported. View the original in the mailbox.]';
+    }
+  }
+
+  async ingestReply(connection, ticket, email, via) {
     const now = new Date();
-    // Attachment capture lands with the Blob workstream — for now, be honest.
-    const attachmentNotice = email.hasAttachments
-      ? '\n\n[This email had attachments — they were not imported. View the original in the mailbox.]'
-      : '';
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -246,8 +279,8 @@ class MailboxIngestService {
         isPrivate: false,
         visibility: 'public',
         bodyHtml: email.bodyHtml,
-        bodyText: (email.bodyText || email.bodyPreview || '') + attachmentNotice || null,
-        content: (email.bodyText || email.bodyPreview || '') + attachmentNotice || null,
+        bodyText: email.bodyText || email.bodyPreview || null,
+        content: email.bodyText || email.bodyPreview || null,
         occurredAt: email.receivedAt || now,
         emailMessageId: email.internetMessageId,
         // Requester replies belong on the FS fallback copy too
@@ -255,7 +288,18 @@ class MailboxIngestService {
       },
     });
 
-    await prisma.ticket.update({ where: { id: ticket.id }, data: { updatedAt: now } });
+    const attachmentNotice = await this._captureAttachments(connection, email, ticket, entry.id);
+    if (attachmentNotice) {
+      await prisma.ticketThreadEntry.update({
+        where: { id: entry.id },
+        data: {
+          bodyText: (entry.bodyText || '') + attachmentNotice,
+          content: (entry.content || '') + attachmentNotice,
+        },
+      }).catch(() => {});
+    }
+
+    await prisma.ticket.update({ where: { id: ticket.id }, data: { updatedAt: now, lastRealActivityAt: now } });
     await ticketActivityRepository.create({
       ticketId: ticket.id,
       activityType: 'requester_reply',
@@ -280,6 +324,14 @@ class MailboxIngestService {
       logger.warn(`reply_received workflow dispatch failed (non-fatal): ${err.message}`);
     }
 
+    // Category/group watchers who opted into requester replies (fire-and-forget).
+    try {
+      const { default: watcherNotificationService } = await import('./watcherNotificationService.js');
+      watcherNotificationService.notify('requester_reply', ticket.id, {
+        entryPreview: entry.bodyText || entry.content || null,
+      }).catch(() => {});
+    } catch { /* non-fatal */ }
+
     try {
       sseManager.broadcast('ticket-change', {
         action: 'reply',
@@ -298,16 +350,18 @@ class MailboxIngestService {
 
   async createTicketFromEmail(connection, email) {
     const subject = String(email.subject || '').trim() || '(no subject)';
-    const attachmentNotice = email.hasAttachments
-      ? '<p><i>[This email had attachments — they were not imported. View the original in the mailbox.]</i></p>'
-      : '';
     const ticket = await ticketService.createTicket(connection.workspaceId, {
       subject: subject.length >= 3 ? subject.slice(0, 500) : `Email: ${subject}`,
-      description: email.bodyHtml ? email.bodyHtml + attachmentNotice : (attachmentNotice || null),
+      description: email.bodyHtml || null,
       priority: 2,
       requesterEmail: email.from,
       requesterName: email.fromName || null,
       runAiTriage: true,
+      // Mailbox→group routing: AP@ lands in the AP group, AR@ in AR, etc.
+      ...(connection.defaultGroupId ? { groupId: connection.defaultGroupId.toString() } : {}),
+      // Internal (TP-native) group routing — a mailbox can default into an internal group.
+      ...(connection.defaultInternalGroupId ? { internalGroupId: connection.defaultInternalGroupId } : {}),
+      ...(connection.defaultTicketType ? { ticketType: connection.defaultTicketType } : {}),
     }, SYSTEM_ACTOR);
 
     // Remember the originating message id so follow-ups thread to this ticket.
@@ -332,6 +386,11 @@ class MailboxIngestService {
           title: 'Original email',
         },
       }).catch(() => {});
+    }
+
+    const attachmentNotice = await this._captureAttachments(connection, email, { id: ticket.id, workspaceId: connection.workspaceId });
+    if (attachmentNotice) {
+      logger.warn(`Attachment capture notice for ${ticket.displayRef}: ${attachmentNotice.trim()}`);
     }
 
     logger.info(`Inbound email created ${ticket.displayRef} (from ${email.from}: "${subject}")`);

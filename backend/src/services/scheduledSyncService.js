@@ -6,8 +6,6 @@ import calendarLeaveService from './calendarLeaveService.js';
 import syncLogRepository from './syncLogRepository.js';
 import workspaceRepository from './workspaceRepository.js';
 import emailPollingService from './emailPollingService.js';
-import availabilityService from './availabilityService.js';
-import assignmentPipelineService from './assignmentPipelineService.js';
 import assignmentRepository from './assignmentRepository.js';
 import assignmentDailyReviewService from './assignmentDailyReviewService.js';
 import logger from '../utils/logger.js';
@@ -87,21 +85,9 @@ class ScheduledSyncService {
           logger.error(`Scheduled sync failed for workspace "${wsName}":`, error);
         }
 
-        // Drain queued assignment runs if inside business hours
-        try {
-          const queuedCount = await assignmentRepository.countQueuedRuns(wsId);
-          if (queuedCount > 0) {
-            const bh = await availabilityService.isBusinessHours(new Date(), tz, wsId);
-            if (bh.isBusinessHours) {
-              logger.info(`[${wsName}] Draining ${queuedCount} queued assignment run(s)`);
-              await assignmentPipelineService.drainQueuedRuns(wsId, 5);
-            } else {
-              logger.debug(`[${wsName}] ${queuedCount} queued run(s) waiting — still outside business hours`);
-            }
-          }
-        } catch (error) {
-          logger.error(`[${wsName}] Queue drain failed:`, error);
-        }
+        // NOTE: business-hours-queued assignment runs are drained by the
+        // independent assignmentPipelineService queue-drain worker (started in
+        // app.js), not here — so draining no longer depends on the FS sync tick.
 
         try {
           const reviewResult = await assignmentDailyReviewService.maybeRunScheduledReview(workspace);
@@ -140,15 +126,6 @@ class ScheduledSyncService {
         } else {
           logger.info(`[${wsName}] No previous sync found. Running initial full sync`);
           await syncService.performFullSync({ workspaceId: wsId, fullSync: true, daysToSync: 30 });
-        }
-
-        const queuedCount = await assignmentRepository.countQueuedRuns(wsId);
-        if (queuedCount > 0) {
-          const bh = await availabilityService.isBusinessHours(new Date(), tz, wsId);
-          if (bh.isBusinessHours) {
-            logger.info(`[${wsName}] Draining ${queuedCount} queued assignment run(s) after initial sync`);
-            await assignmentPipelineService.drainQueuedRuns(wsId, 5);
-          }
         }
 
         try {

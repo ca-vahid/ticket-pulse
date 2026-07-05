@@ -6,6 +6,9 @@ import { ValidationError } from '../utils/errors.js';
 import settingsRepository from '../services/settingsRepository.js';
 import prisma from '../services/prisma.js';
 import technicianRepository from '../services/technicianRepository.js';
+import groupRepository from '../services/groupRepository.js';
+import approvalCategoryService from '../services/approvalCategoryService.js';
+import azureAdService from '../services/azureAdService.js';
 import syncService from '../services/syncService.js';
 import scheduledSyncService from '../services/scheduledSyncService.js';
 import { clearReadCache } from '../services/dashboardReadCache.js';
@@ -771,6 +774,58 @@ router.put(
 );
 
 /**
+ * GET /api/settings/directory/search?q=<term>
+ * Entra (GAL) typeahead for adding members. Returns matching directory users
+ * with photos + a workspace-aware `alreadyMember` flag so the UI can skip
+ * people already on this workspace's roster. Scoped to workspace admins.
+ */
+router.get(
+  '/directory/search',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const q = (req.query.q || '').trim();
+    if (q.length < 2) return res.json({ success: true, data: [] });
+    if (!azureAdService.isConfigured()) {
+      return res.status(400).json({ success: false, message: 'Directory (Entra) is not configured' });
+    }
+    const results = await azureAdService.searchUsers(q, 7);
+    // Photos in parallel (best-effort — a missing photo just renders initials).
+    const withPhotos = await Promise.all(
+      results.map(async (u) => ({
+        ...u,
+        photoUrl: u.mail ? await azureAdService.getUserPhoto(u.mail).catch(() => null) : null,
+      })),
+    );
+    // Workspace-aware: flag directory users already on this workspace's roster.
+    const emails = withPhotos.map((u) => u.mail).filter(Boolean);
+    const existing = emails.length
+      ? await prisma.technician.findMany({
+        where: { workspaceId: req.workspaceId, email: { in: emails } },
+        select: { email: true, isActive: true },
+      })
+      : [];
+    const byEmail = new Map(existing.map((e) => [(e.email || '').toLowerCase(), e]));
+    res.json({
+      success: true,
+      data: withPhotos.map((u) => {
+        const match = byEmail.get(u.mail);
+        return {
+          name: u.displayName,
+          email: u.mail,
+          jobTitle: u.jobTitle,
+          department: u.department,
+          photoUrl: u.photoUrl,
+          alreadyMember: !!match,
+          alreadyMemberActive: match ? match.isActive : false,
+        };
+      }),
+    });
+  }),
+);
+
+/**
  * GET /api/settings/technicians
  * Get all technicians for the current workspace (active + inactive).
  */
@@ -789,8 +844,84 @@ router.get(
         email: t.email,
         photoUrl: t.photoUrl,
         isActive: t.isActive,
+        origin: t.origin, // 'freshservice' | 'local'
+        location: t.location,
+        timezone: t.timezone,
       })),
     });
+  }),
+);
+
+/**
+ * POST /api/settings/technicians
+ * Create a LOCAL (non-FreshService) agent — assignable to TP-born tickets only.
+ * FreshService agents are managed by sync and cannot be created here.
+ */
+router.post(
+  '/technicians',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { name, email, timezone, location, photoUrl } = req.body || {};
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'name is required' });
+    }
+    // Enrich from Entra (authoritative): photo + location, when we have an email
+    // and the client didn't already pass them from the directory pick.
+    let resolvedLocation = location?.trim() || null;
+    let resolvedPhoto = photoUrl || null;
+    if (email && azureAdService.isConfigured()) {
+      const [profile, photo] = await Promise.all([
+        azureAdService.getUserProfile(email).catch(() => null),
+        resolvedPhoto ? Promise.resolve(null) : azureAdService.getUserPhoto(email).catch(() => null),
+      ]);
+      if (!resolvedLocation) resolvedLocation = profile?.officeLocation || profile?.city || null;
+      if (!resolvedPhoto) resolvedPhoto = photo || null;
+    }
+    const tech = await technicianRepository.createLocalAgent({
+      workspaceId: req.workspaceId,
+      name: name.trim(),
+      email: email?.trim() || null,
+      timezone: timezone || undefined,
+      location: resolvedLocation,
+      photoUrl: resolvedPhoto,
+    });
+    clearReadCache();
+    logger.info(`Local agent created: ${tech.name} (${tech.id}) in workspace ${req.workspaceId}`);
+    res.status(201).json({ success: true, data: { id: tech.id, name: tech.name, email: tech.email, origin: tech.origin, isActive: tech.isActive, location: tech.location, photoUrl: tech.photoUrl, timezone: tech.timezone } });
+  }),
+);
+
+/**
+ * PATCH /api/settings/technicians/:id
+ * Edit a LOCAL agent (name/email/timezone/location). FreshService agents are
+ * read-only here (managed by sync).
+ */
+router.patch(
+  '/technicians/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const existing = await technicianRepository.getById(id);
+    if (!existing || existing.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Technician not found in this workspace' });
+    }
+    if (existing.origin !== 'local') {
+      return res.status(400).json({ success: false, message: 'FreshService agents are managed by sync and cannot be edited here.' });
+    }
+    const { name, email, timezone, location, isActive } = req.body || {};
+    const tech = await technicianRepository.update(id, {
+      ...(name !== undefined ? { name: name.trim() } : {}),
+      ...(email !== undefined ? { email: email?.trim()?.toLowerCase() || null } : {}),
+      ...(timezone !== undefined ? { timezone } : {}),
+      ...(location !== undefined ? { location: location?.trim() || null } : {}),
+      ...(isActive !== undefined ? { isActive: !!isActive } : {}),
+    });
+    clearReadCache();
+    res.json({ success: true, data: { id: tech.id, name: tech.name, email: tech.email, origin: tech.origin, isActive: tech.isActive } });
   }),
 );
 
@@ -813,6 +944,168 @@ router.put(
     clearReadCache();
     logger.info(`Technician ${tech.name} (${id}) ${isActive ? 'enabled' : 'disabled'}`);
     res.json({ success: true, data: { id: tech.id, name: tech.name, isActive: tech.isActive } });
+  }),
+);
+
+/**
+ * GET /api/settings/groups
+ * All groups (FreshService + internal) for the current workspace, with member counts.
+ */
+router.get(
+  '/groups',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const groups = await groupRepository.listForWorkspace(req.workspaceId);
+    res.json({ success: true, data: groups });
+  }),
+);
+
+/**
+ * POST /api/settings/groups
+ * Create an INTERNAL (TP-native) group. FreshService groups come from sync.
+ */
+router.post(
+  '/groups',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { name, description } = req.body || {};
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'name is required' });
+    }
+    const group = await groupRepository.createInternal({
+      workspaceId: req.workspaceId,
+      name,
+      description,
+    });
+    clearReadCache();
+    logger.info(`Internal group created: ${group.name} (${group.id}) in workspace ${req.workspaceId}`);
+    res.status(201).json({
+      success: true,
+      data: { id: group.id, name: group.name, origin: group.origin, isActive: group.isActive, memberCount: 0 },
+    });
+  }),
+);
+
+/**
+ * PATCH /api/settings/groups/:id
+ * Edit an internal group (name/description/isActive). FreshService groups are read-only here.
+ */
+router.patch(
+  '/groups/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const existing = await groupRepository.getById(id);
+    if (!existing || existing.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Group not found in this workspace' });
+    }
+    const { name, description, isActive } = req.body || {};
+    const group = await groupRepository.updateInternal(id, { name, description, isActive });
+    clearReadCache();
+    res.json({ success: true, data: { id: group.id, name: group.name, origin: group.origin, isActive: group.isActive } });
+  }),
+);
+
+/**
+ * GET /api/settings/groups/:id/members
+ * List the technicians in a group.
+ */
+router.get(
+  '/groups/:id/members',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const existing = await groupRepository.getById(id);
+    if (!existing || existing.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Group not found in this workspace' });
+    }
+    const members = await groupRepository.getMembers(id);
+    res.json({ success: true, data: members });
+  }),
+);
+
+/**
+ * PUT /api/settings/groups/:id/members
+ * Replace a group's membership with { technicianIds: [...] }. Internal groups only.
+ */
+router.put(
+  '/groups/:id/members',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const existing = await groupRepository.getById(id);
+    if (!existing || existing.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Group not found in this workspace' });
+    }
+    const { technicianIds } = req.body || {};
+    if (!Array.isArray(technicianIds)) {
+      return res.status(400).json({ success: false, message: 'technicianIds array is required' });
+    }
+    const count = await groupRepository.setMembers(id, technicianIds, req.workspaceId);
+    clearReadCache();
+    const members = await groupRepository.getMembers(id);
+    res.json({ success: true, data: { memberCount: count, members } });
+  }),
+);
+
+// ------------------------------------------------------ approval categories
+// Per-workspace approval categories + their approval managers. TP-only.
+
+router.get(
+  '/approval-categories',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const categories = await approvalCategoryService.list(req.workspaceId);
+    res.json({ success: true, data: categories });
+  }),
+);
+
+router.post(
+  '/approval-categories',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { name, description, managerEmails, sortOrder } = req.body || {};
+    const category = await approvalCategoryService.create(req.workspaceId, { name, description, managerEmails, sortOrder });
+    logger.info(`Approval category created: ${category.name} (${category.id}) in workspace ${req.workspaceId}`);
+    res.status(201).json({ success: true, data: category });
+  }),
+);
+
+router.patch(
+  '/approval-categories/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const category = await approvalCategoryService.update(id, req.workspaceId, req.body || {});
+    res.json({ success: true, data: category });
+  }),
+);
+
+router.delete(
+  '/approval-categories/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const result = await approvalCategoryService.remove(id, req.workspaceId);
+    res.json({ success: true, data: result });
   }),
 );
 

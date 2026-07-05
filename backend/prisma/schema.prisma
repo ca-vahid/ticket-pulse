@@ -90,9 +90,38 @@ model Workspace {
   mirrorJobs             MirrorJob[]
   mailboxConnections     MailboxConnection[]
   ticketApprovals        TicketApproval[]
+  approvalCategories     ApprovalCategory[]
   apiKeys                ApiKey[]
+  scheduledTickets       ScheduledTicket[]
+  categoryGroupLinks     CategoryGroupLink[]
+  watchSubscriptions     TicketWatchSubscription[]
+  replyTemplates         ReplyTemplate[]
 
   @@map("workspaces")
+}
+
+// Ticket attachments stored in Azure Blob Storage. Dev and prod isolate into
+// separate private containers (attachments-dev / attachments-prod), selected by
+// environment in attachmentService. Downloads stream through the backend —
+// blobs are never publicly reachable.
+model TicketAttachment {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  ticketId      Int       @map("ticket_id")
+  ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  threadEntryId Int?      @map("thread_entry_id")
+  fileName      String    @db.VarChar(255) @map("file_name")
+  contentType   String    @db.VarChar(120) @map("content_type")
+  sizeBytes     Int       @map("size_bytes")
+  blobName      String    @unique @db.VarChar(500) @map("blob_name")
+  source        String    @default("upload") @db.VarChar(20) // upload | email
+  uploadedBy    String?   @db.VarChar(255) @map("uploaded_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@map("ticket_attachments")
+  @@index([ticketId])
+  @@index([workspaceId])
+  @@index([threadEntryId])
 }
 
 // Workspace-scoped API keys for the public integration API (/api/v1).
@@ -117,19 +146,109 @@ model ApiKey {
   @@index([workspaceId, isEnabled])
 }
 
-// Single-step ticket approvals (native ticketing). The approver decides either
-// in-app or through a magic link emailed to them (hash-validated, expiring).
+// Tickets scheduled for a future date. The payload is a verbatim createTicket
+// input replayed at activation, so triage/workflows/mirror all run exactly as
+// a normal create — no half-born ticket rows sit in the queue meanwhile.
+model ScheduledTicket {
+  id             Int       @id @default(autoincrement())
+  workspaceId    Int       @map("workspace_id")
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  payload        Json
+  scheduledForAt DateTime  @map("scheduled_for_at")
+  status         String    @default("pending") @db.VarChar(20) // pending | activated | cancelled | error
+  createdBy      String?   @db.VarChar(255) @map("created_by")
+  createdByName  String?   @db.VarChar(255) @map("created_by_name")
+  activatedAt    DateTime? @map("activated_at")
+  ticketId       Int?      @map("ticket_id")
+  lastError      String?   @db.Text @map("last_error")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("scheduled_tickets")
+  @@index([status, scheduledForAt])
+  @@index([workspaceId, status])
+}
+
+// T3.3 groundwork: category↔group affinity so AP and AR can each keep their
+// own working taxonomy inside one workspace. group_id is the FS group id
+// (Group.freshserviceId), matching Ticket.groupId semantics. Full admin UX later.
+model CategoryGroupLink {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  categoryId  Int       @map("category_id")
+  category    CompetencyCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  groupId     BigInt    @map("group_id")
+  createdBy   String?   @db.VarChar(255) @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([workspaceId, categoryId, groupId])
+  @@map("category_group_links")
+  @@index([workspaceId, groupId])
+}
+
+// Watchers are per-CATEGORY (top/sub) or per-GROUP, never per-ticket (decision
+// d7). Notifies on ticket created and/or requester replies within the scope.
+model TicketWatchSubscription {
+  id                   Int       @id @default(autoincrement())
+  workspaceId          Int       @map("workspace_id")
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userEmail            String    @db.VarChar(255) @map("user_email")
+  userName             String?   @db.VarChar(255) @map("user_name")
+  scopeType            String    @db.VarChar(20) @map("scope_type") // category | group
+  categoryId           Int?      @map("category_id")
+  groupId              BigInt?   @map("group_id")
+  notifyCreated        Boolean   @default(true) @map("notify_created")
+  notifyRequesterReply Boolean   @default(false) @map("notify_requester_reply")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  @@unique([workspaceId, userEmail, scopeType, categoryId, groupId])
+  @@map("ticket_watch_subscriptions")
+  @@index([workspaceId, scopeType])
+  @@index([userEmail])
+}
+
+// Canned reply snippets, insertable from the composer. Optionally scoped to a
+// category (the mockup's category quick notes, generalized per workspace).
+model ReplyTemplate {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String    @db.VarChar(120)
+  bodyHtml    String?   @db.Text @map("body_html")
+  bodyText    String    @db.Text @map("body_text")
+  categoryId  Int?      @map("category_id")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdBy   String?   @db.VarChar(255) @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("reply_templates")
+  @@index([workspaceId, isActive])
+}
+
+// Category-based ticket approvals. A request against an ApprovalCategory fans
+// out one row per manager (sharing requestGroupId; any-one-approves). The
+// approver decides in-app or via a magic link (hash-validated, expiring), or
+// bounces it back to the requester with "info_requested". TP-only — approvals
+// are never written back to FreshService.
 model TicketApproval {
   id            Int       @id @default(autoincrement())
   workspaceId   Int       @map("workspace_id")
   workspace     Workspace @relation(fields: [workspaceId], references: [id])
   ticketId      Int       @map("ticket_id")
   ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  status        String    @default("pending") @db.VarChar(20) // pending | approved | rejected | cancelled
+  // pending | approved | rejected | cancelled | info_requested
+  status        String    @default("pending") @db.VarChar(20)
+  approvalCategoryId Int?  @map("approval_category_id")
+  approvalCategory   ApprovalCategory? @relation(fields: [approvalCategoryId], references: [id], onDelete: SetNull)
+  // Ties the sibling approvals created from one request together (any-one-approves).
+  requestGroupId String?  @db.VarChar(64) @map("request_group_id")
   approverEmail String    @db.VarChar(255) @map("approver_email")
   approverName  String?   @db.VarChar(255) @map("approver_name")
   requestedBy   String    @db.VarChar(255) @map("requested_by")
   requestNote   String?   @db.Text @map("request_note")
+  // Holds the clarification question while info_requested; the decision note otherwise.
   decisionNote  String?   @db.Text @map("decision_note")
   decidedAt     DateTime? @map("decided_at")
   decidedVia    String?   @db.VarChar(20) @map("decided_via") // link | app
@@ -142,6 +261,28 @@ model TicketApproval {
   @@index([ticketId])
   @@index([workspaceId, status])
   @@index([approverEmail])
+  @@index([requestGroupId])
+}
+
+// Per-workspace approval categories (e.g. "Laptop purchase") with designated
+// approval managers. Admin-editable in Settings. managerEmails are Entra
+// addresses (any one can approve); resolved to names/photos at display time.
+model ApprovalCategory {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id])
+  name          String    @db.VarChar(120)
+  description   String?   @db.Text
+  managerEmails String[]  @default([]) @map("manager_emails")
+  isActive      Boolean   @default(true) @map("is_active")
+  sortOrder     Int       @default(0) @map("sort_order")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  approvals     TicketApproval[]
+
+  @@unique([workspaceId, name])
+  @@map("approval_categories")
+  @@index([workspaceId, isActive])
 }
 
 // Monitored mailboxes for native ticketing (N per workspace). 'ingest' polls
@@ -154,6 +295,12 @@ model MailboxConnection {
   address         String    @db.VarChar(255)
   displayName     String?   @db.VarChar(255) @map("display_name")
   mode            String    @default("both") @db.VarChar(10) // ingest | send | both
+  // Mailbox→group routing (AP@ → AP group, AR@ → AR group in one workspace):
+  // email-born tickets inherit these. FS group id, matching Ticket.groupId.
+  defaultGroupId  BigInt?   @map("default_group_id")
+  defaultInternalGroupId Int? @map("default_internal_group_id") // FK groups(id) — route to an internal (TP-native) group
+  defaultInternalGroup   Group? @relation("MailboxDefaultInternalGroup", fields: [defaultInternalGroupId], references: [id], onDelete: SetNull)
+  defaultTicketType String? @db.VarChar(30) @map("default_ticket_type") // Incident | Service Request
   isEnabled       Boolean   @default(true) @map("is_enabled")
   pollIntervalSec Int       @default(60) @map("poll_interval_sec")
   lastCheckedAt   DateTime? @map("last_checked_at")
@@ -207,7 +354,8 @@ model WorkspaceAccess {
 
 model Technician {
   id              Int       @id @default(autoincrement())
-  freshserviceId  BigInt    @map("freshservice_id")
+  freshserviceId  BigInt?   @map("freshservice_id") // null for local (non-FreshService) agents
+  origin          String    @default("freshservice") @db.VarChar(20) @map("origin") // freshservice | local
   name            String    @db.VarChar(255)
   email           String?   @db.VarChar(255)
   photoUrl        String?   @db.Text @map("photo_url")
@@ -239,12 +387,14 @@ model Technician {
   notificationPreference TechnicianNotificationPreference?
   notificationDeliveries NotificationDelivery[]
   urgentEscalationRecipients UrgentEscalationRecipient[]
+  groupMemberships       GroupMember[]
 
   @@unique([freshserviceId, workspaceId])
   @@map("technicians")
   @@index([freshserviceId])
   @@index([workspaceId])
   @@index([email])
+  @@index([origin])
 }
 
 model Requester {
@@ -339,6 +489,9 @@ model Ticket {
   frDueBy               DateTime? @map("fr_due_by") // First response due by
   updatedAt             DateTime  @updatedAt @map("updated_at")
   freshserviceUpdatedAt DateTime? @map("freshservice_updated_at")
+  // Last REAL activity (message, assignment, status change) — updated_at and
+  // freshservice_updated_at both get bumped by system/sync noise; this doesn't.
+  lastRealActivityAt    DateTime? @map("last_real_activity_at")
   lastIngestSource     String?   @db.VarChar(60) @map("last_ingest_source")
   lastIngestedAt       DateTime? @map("last_ingested_at")
   lastWebhookIngestedAt DateTime? @map("last_webhook_ingested_at")
@@ -403,7 +556,9 @@ model Ticket {
 
   // Bounce / rejection tracking
   rejectionCount       Int       @default(0) @map("rejection_count")
-  groupId              BigInt?   @map("group_id")
+  groupId              BigInt?   @map("group_id") // FreshService group id (FS-synced groups)
+  internalGroupId      Int?      @map("internal_group_id") // FK groups(id) for internal (TP-native) groups
+  internalGroup        Group?    @relation("TicketInternalGroup", fields: [internalGroupId], references: [id], onDelete: SetNull)
 
   // CSAT sync bookkeeping — when we last asked FS for this ticket's CSAT
   // response. Lets the scheduled CSAT sweep walk through the backlog
@@ -424,9 +579,11 @@ model Ticket {
   priorityEvents       TicketPriorityEvent[]
   mirrorJobs           MirrorJob[]
   approvals            TicketApproval[]
+  attachments          TicketAttachment[]
 
   @@map("tickets")
   @@index([workspaceId])
+  @@index([workspaceId, lastRealActivityAt(sort: Desc)])
   @@index([assignedTechId])
   @@index([createdAt])
   @@index([status])
@@ -540,7 +697,11 @@ model MirrorJob {
   ticketId      Int       @map("ticket_id")
   ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   threadEntryId Int?      @map("thread_entry_id")
-  kind          String    @db.VarChar(30) // create_ticket | update_fields | thread_entry
+  kind          String    @db.VarChar(30) // create_ticket | update_fields | thread_entry | delete_thread_entry | delete_ticket
+  // Free-form job context that must survive the source row being deleted — e.g.
+  // the FS conversation id for a delete_thread_entry job (the local entry is
+  // already gone by the time the job runs).
+  payload       Json?     @map("payload")
   status        String    @default("pending") @db.VarChar(20) // pending | done | failed | dead
   attempts      Int       @default(0)
   nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
@@ -561,7 +722,8 @@ model Group {
   id             Int       @id @default(autoincrement())
   workspaceId    Int       @map("workspace_id")
   workspace      Workspace @relation(fields: [workspaceId], references: [id])
-  freshserviceId BigInt?   @map("freshservice_id")
+  freshserviceId BigInt?   @map("freshservice_id") // null for internal (TP-native) groups
+  origin         String    @default("freshservice") @db.VarChar(20) @map("origin") // freshservice | local
   name           String    @db.VarChar(255)
   description    String?   @db.Text
   isActive       Boolean   @default(true) @map("is_active")
@@ -569,9 +731,32 @@ model Group {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
+  members             GroupMember[]
+  ticketsInternalGroup Ticket[]            @relation("TicketInternalGroup")
+  mailboxDefaults     MailboxConnection[] @relation("MailboxDefaultInternalGroup")
+
   @@unique([workspaceId, freshserviceId])
   @@map("groups")
   @@index([workspaceId, isActive])
+  @@index([origin])
+}
+
+// Membership of a technician in an internal (TP-native) group. Used to scope
+// routing/assignment candidates for tickets that live in an internal group.
+model GroupMember {
+  id           Int        @id @default(autoincrement())
+  groupId      Int        @map("group_id")
+  group        Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  technicianId Int        @map("technician_id")
+  technician   Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  workspaceId  Int        @map("workspace_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  @@unique([groupId, technicianId])
+  @@map("group_members")
+  @@index([groupId])
+  @@index([technicianId])
+  @@index([workspaceId])
 }
 
 model TicketAssignmentEpisode {
@@ -1133,6 +1318,7 @@ model CompetencyCategory {
   competencyChangeRequests CompetencyChangeRequest[]
   ticketsAsInternalCategory Ticket[] @relation("TicketInternalCategory")
   ticketsAsInternalSubcategory Ticket[] @relation("TicketInternalSubcategory")
+  groupLinks CategoryGroupLink[]
 
   @@unique([workspaceId, name])
   @@map("competency_categories")
@@ -2278,4 +2464,22 @@ model SummitWorkshopVote {
   @@index([sessionId])
   @@index([itemId])
   @@index([voteType])
+}
+
+// Per-user saved ticket-filter views (workspace-scoped). Owner is identified by
+// email (no User table). Admins can flip `shared` so a view appears for everyone
+// in the workspace. `params` holds the filter query (segment/status/assignee/etc.).
+model SavedFilterView {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  ownerEmail  String   @map("owner_email") @db.VarChar(255)
+  name        String   @db.VarChar(160)
+  params      Json     @map("params")
+  shared      Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([workspaceId, ownerEmail])
+  @@index([workspaceId, shared])
+  @@map("saved_filter_views")
 }

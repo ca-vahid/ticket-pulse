@@ -57,10 +57,23 @@ export function WorkspaceProvider({ children }) {
       hasHydratedRef.current = true;
       let workspaces = workspaceData.availableWorkspaces || [];
 
+      // Sessions minted before nativeTicketingEnabled rode along lack the flag
+      // (and would hide the Tickets nav tile) — enrich them from the API once.
+      if (workspaces.length > 0 && workspaces.every((ws) => ws.nativeTicketingEnabled === undefined)) {
+        workspaceAPI.getAll().then((res) => {
+          const flags = new Map((res?.data || res || []).map((ws) => [ws.id, ws.nativeTicketingEnabled === true]));
+          setAvailableWorkspaces((prev) => prev.map((ws) => ({
+            ...ws,
+            nativeTicketingEnabled: flags.get(ws.id) ?? false,
+          })));
+        }).catch(() => {});
+      }
+
       if (workspaces.length === 0) {
         workspaceAPI.getAll().then(res => {
           const fetched = (res?.data || res || []).map(ws => ({
             id: ws.id, name: ws.name, slug: ws.slug, role: ws.role || 'viewer',
+            nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
           }));
           if (fetched.length > 0) {
             setAvailableWorkspaces(fetched);
@@ -160,6 +173,7 @@ export function WorkspaceProvider({ children }) {
       const res = await workspaceAPI.getAll();
       const list = (res.data || []).map(ws => ({
         id: ws.id, name: ws.name, slug: ws.slug, role: ws.role,
+        nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
       }));
       setAvailableWorkspaces(list);
       return list;

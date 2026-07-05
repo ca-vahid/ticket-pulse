@@ -181,12 +181,12 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [ ] 8.2 Per-workspace FS intake freeze + final import (attachments, full conversation history)
 - [ ] 8.3 FS read-only → decommission
 
-### - [ ] Workstream A — Attachments (cross-cutting; starts alongside Phase 2/4)
-- [ ] A.1 Create Azure Storage account via `az` CLI in the app's existing resource group; private container, lifecycle policy
-- [ ] A.2 `Attachment` model + upload API — size/type limits, SAS download links, ownership checks
-- [ ] A.3 Composer + thread UI — upload, preview, download
-- [ ] A.4 Email attachment capture hook (Phase 4)
-- [ ] A.5 Best-effort attachment mirroring to FS copies
+### - [ ] Workstream A — Attachments ⏳ built 2026-07-01, in dev review (uncommitted)
+- [x] A.1 `ticketpulsestorage` (StorageV2, LRS) created in `ticket-pulse-rg`/West US 2 — HTTPS-only, TLS 1.2+, **public blob access disabled**; private containers `attachments-dev` + `attachments-prod` for **environment isolation** (selected by `NODE_ENV` in `attachmentService`, overridable via `ATTACHMENT_CONTAINER`); connection string lives only in untracked `.env` (key1 was rotated after a CLI echo — the logged key is dead)
+- [x] A.2 `TicketAttachment` model (`20260702200000_add_ticket_attachments`) + `attachmentService` — 25 MB/file, 20/ticket, executable/script extensions blocked, sanitized filenames, random blob paths (`ws-<id>/ticket-<id>/<rand>-<name>`); **downloads stream through the authenticated API** (no SAS URLs, `nosniff`, attachment disposition); delete restricted to uploader/admin. Routes: list/upload(multipart ×5)/download/delete under `/api/tickets/:id/attachments`
+- [x] A.3 UI — composer file picker (chips, per-file remove, "Uploading n files…" step) + detail-page Attachments card (size/uploader/source, download, delete) + attachment chips on thread entries
+- [x] A.4 Email capture — Graph `getMessageAttachments` pulls file attachments into Blob (linked to the reply entry / ticket), oversized or failed items produce an honest notice in the entry
+- [ ] A.5 Best-effort attachment mirroring to FS copies — later (the FS mirror note tells agents attachments live in Ticket Pulse)
 
 ### - [ ] Workstream B — Docs, analytics & product-rule compatibility
 - [ ] B.1 `origin` exposed as an analytics dimension (Analytics UI filter — next design pass); TP-born CSAT stays on `TicketFeedback` (N-count rule unchanged); origin column + indexes already in place
@@ -194,6 +194,10 @@ Ticket Pulse becomes a **ticket system in its own right**, not just a FreshServi
 - [x] B.3 `SYNC_OPERATIONS.md` — mirror mechanics, echo suppression, outage runbook, rate-budget impact ✅ 2026-07-01
 
 ---
+
+## 5b. Follow-on: Tickets UX Uplift
+
+The designer-mockup comparison (2026-07-02) produced a second board — **`docs/TICKETS_UX_UPLIFT_PLAN.md`** — covering queue/detail/create feature parity (preview panel, SLA chips, bulk ops, composer/create upgrades) plus mailbox→group routing and future-shaped watchers/scheduled tickets. **All three phases (T1–T3) are complete and browser-verified on the prod-data dev stack** (per-task notes on that board); the T3 schema landed as migration `20260703000000_tickets_ux_t3`.
 
 ## 6. Rollout
 

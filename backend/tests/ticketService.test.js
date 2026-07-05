@@ -263,7 +263,7 @@ describe('ticketService conversation + status + assignment', () => {
 
     const { entry, email } = await ticketService.addReply(501, 1, { bodyText: 'hello from TP' }, actor);
 
-    expect(fsClientMock.createReply).toHaveBeenCalledWith(9, expect.stringContaining('hello from TP'));
+    expect(fsClientMock.createReply).toHaveBeenCalledWith(9, expect.stringContaining('hello from TP'), { ccEmails: [], attachments: [] });
     expect(entry.externalEntryId).toBe('fs-conv-42001');
     expect(entry.mirrorState).toBe('mirrored');
     expect(email).toEqual({ sent: true, via: 'freshservice' });
@@ -278,7 +278,7 @@ describe('ticketService conversation + status + assignment', () => {
 
     await ticketService.addPrivateNote(501, 1, { bodyText: 'fs-born internal' }, actor);
 
-    expect(fsClientMock.addNote).toHaveBeenCalledWith(9, expect.stringContaining('fs-born internal'), { isPrivate: true });
+    expect(fsClientMock.addNote).toHaveBeenCalledWith(9, expect.stringContaining('fs-born internal'), { isPrivate: true, attachments: [] });
   });
 
   test('native replies queue for the mirror', async () => {

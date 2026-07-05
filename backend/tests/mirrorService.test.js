@@ -137,13 +137,13 @@ describe('mirrorService job processing', () => {
     prismaMock.ticketThreadEntry.update.mockResolvedValue({});
 
     await mirrorService._processJob({ id: 4, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9001, attempts: 0 });
-    expect(clientMock.addNote).toHaveBeenCalledWith(90001, expect.stringContaining('on it'), { isPrivate: false });
+    expect(clientMock.addNote).toHaveBeenCalledWith(90001, expect.stringContaining('on it'), { isPrivate: false, attachments: [] });
 
     prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({
       id: 9002, isPrivate: true, actorName: 'Cora', bodyText: 'internal', mirrorState: 'pending',
     });
     await mirrorService._processJob({ id: 5, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9002, attempts: 0 });
-    expect(clientMock.addNote).toHaveBeenLastCalledWith(90001, expect.stringContaining('internal'), { isPrivate: true });
+    expect(clientMock.addNote).toHaveBeenLastCalledWith(90001, expect.stringContaining('internal'), { isPrivate: true, attachments: [] });
   });
 
   test('dead-letters after max attempts and flags the ticket mirrorState=error', async () => {

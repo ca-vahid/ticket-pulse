@@ -155,6 +155,7 @@ async function resolveLoginAccess({ email, role, selectedWorkspaceId }) {
       name: ws.name,
       slug: ws.slug,
       role: 'admin',
+      nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
     }));
   } else {
     availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
@@ -163,6 +164,8 @@ async function resolveLoginAccess({ email, role, selectedWorkspaceId }) {
   agentProfiles = await agentCompetencyService.getAgentProfiles(email);
   if (resolvedRole !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
     resolvedRole = 'agent';
+    // Agents get their workspaces from technician profiles (native ticketing).
+    availableWorkspaces = await workspaceRepository.getTechnicianWorkspaces(email);
   }
 
   const requestedWorkspaceId = selectedWorkspaceId ? Number(selectedWorkspaceId) : null;
@@ -228,6 +231,7 @@ router.post(
           name: ws.name,
           slug: ws.slug,
           role: 'admin',
+          nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
         }));
       } else {
         availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
@@ -235,6 +239,7 @@ router.post(
       agentProfiles = await agentCompetencyService.getAgentProfiles(email);
       if (role !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
         role = 'agent';
+        availableWorkspaces = await workspaceRepository.getTechnicianWorkspaces(email);
       }
     } catch (err) {
       logger.warn('Failed to fetch workspaces during login:', err.message);
@@ -473,6 +478,7 @@ router.get(
           if (role === 'admin') {
             availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
               id: ws.id, name: ws.name, slug: ws.slug, role: 'admin',
+              nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
             }));
           } else if (email) {
             availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
@@ -481,6 +487,7 @@ router.get(
           if (role !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
             role = 'agent';
             decoded.role = role;
+            availableWorkspaces = email ? await workspaceRepository.getTechnicianWorkspaces(email) : [];
           }
           if (decoded.selectedWorkspaceId) {
             selectedWorkspaceId = decoded.selectedWorkspaceId;

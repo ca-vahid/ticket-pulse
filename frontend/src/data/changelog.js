@@ -1,6 +1,24 @@
-export const APP_VERSION = '2.96';
+export const APP_VERSION = '3.0.1-preview';
 
 export const changelog = [
+  {
+    version: '3.0.1-preview',
+    date: 'July 5, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🎫 Native ticketing — Ticket Pulse is now a ticketing system.</strong> Create, triage, reply to and resolve tickets right here. Tickets born in Ticket Pulse (<code>TP-####</code>) are fully editable and mirror to FreshService as a fallback copy; FreshService tickets keep syncing in and stay origin-aware (read-mostly, with a clear “FreshService owns this” banner). A full <strong>Tickets</strong> workspace — queue, filters, canned views, preview peek, bulk actions, inline edits and CSV export — sits alongside the analytics you already had.' },
+      { type: 'new', html: '<strong>📥 Email channel</strong> — turn email into tickets and let replies update existing ones, per workspace, through Microsoft Graph mailboxes (multiple mailboxes supported). Agent replies and internal notes send from the real mailbox with proper threading.' },
+      { type: 'new', html: '<strong>✅ Ticket approvals</strong> — route a ticket to an <strong>approval category</strong> and its managers decide (any one approves). A dedicated <strong>Approvals</strong> inbox with a live nav badge, approve / reject / request-clarification / resubmit, decision changes with justification, and a polished per-request timeline. Approvers decide in-app or via a personal magic link.' },
+      { type: 'new', html: '<strong>📊 Analytics &amp; Insights</strong> — a new explorable analytics surface: Overview, Demand &amp; Flow, Team Balance, Quality, Automation Ops and Insights, plus an interactive <strong>Category / Subcategory map</strong> (treemap) with range-scoped pressure colouring. Deterministic and explainable — no black-box summaries.' },
+      { type: 'new', html: '<strong>📎 Attachments &amp; images</strong> — drag-drop / paste files onto tickets, click inline <code>[Image: …]</code> references to open a zoomable preview lightbox, mark up screenshots with the built-in image editor, and have attachments mirror to FreshService too.' },
+      { type: 'new', html: '<strong>🔌 Public integration API</strong> — a scoped <code>/api/v1</code> with per-workspace API keys for reading and creating tickets from other systems.' },
+      { type: 'improved', html: '<strong>Tickets queue &amp; navigation</strong> — stat-card segments, a faceted filter rail with type-to-filter and <strong>saved views</strong> (personal &amp; shared), per-member counts (team-safe, non-ranked), density modes, a right-hand preview peek, and requester context with a clickable “N other tickets” jump to their history.' },
+      { type: 'improved', html: '<strong>Conversation thread</strong> — a chat-style thread that separates replies, internal notes and forwards; approval events read as their own colour-coded cards; Ticket-Pulse-authored notes carry the app’s badge; admins can delete notes; and the whole thread got calmer spacing.' },
+      { type: 'improved', html: '<strong>Local agents &amp; internal groups</strong> — create agents and groups that don’t live in FreshService, with membership, for native-only routing and approvals.' },
+      { type: 'improved', html: '<strong>Mobile polish</strong> — the Tickets surfaces hold up on phones, with native bottom-sheet filters and safe-area-aware sticky bars.' },
+      { type: 'fixed', html: '<strong>Conversation authors</strong> — notes and replies synced from FreshService now resolve to the matching Ticket Pulse agent (with photo), the requester, or “Ticket Pulse”, instead of showing “Unknown”.' },
+      { type: 'database', html: '<strong>Database updates</strong> — new tables for native tickets and their threads, attachments, the FreshService mirror queue, mailbox connections, ticket approvals &amp; approval categories, saved filter views, internal groups, and the public API keys; tickets gain dual-origin fields. All additive — existing data and settings are preserved.' },
+    ],
+  },
   {
     version: '2.96',
     date: 'June 19, 2026',

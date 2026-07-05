@@ -361,6 +361,19 @@ export const settingsAPI = {
 
   getTechnicians: () => api.get('/settings/technicians'),
   setTechnicianActive: (id, isActive) => api.put(`/settings/technicians/${id}/active`, { isActive }),
+  searchDirectory: (q) => api.get('/settings/directory/search', { params: { q } }),
+  createLocalAgent: (data) => api.post('/settings/technicians', data),
+  updateTechnician: (id, data) => api.patch(`/settings/technicians/${id}`, data),
+  getGroups: () => api.get('/settings/groups'),
+  createInternalGroup: (data) => api.post('/settings/groups', data),
+  updateGroup: (id, data) => api.patch(`/settings/groups/${id}`, data),
+  getGroupMembers: (id) => api.get(`/settings/groups/${id}/members`),
+  setGroupMembers: (id, technicianIds) => api.put(`/settings/groups/${id}/members`, { technicianIds }),
+  // Approval categories (per-workspace; managers via GAL)
+  getApprovalCategories: () => api.get('/settings/approval-categories'),
+  createApprovalCategory: (data) => api.post('/settings/approval-categories', data),
+  updateApprovalCategory: (id, data) => api.patch(`/settings/approval-categories/${id}`, data),
+  deleteApprovalCategory: (id) => api.delete(`/settings/approval-categories/${id}`),
   getPublicTicketStatusSettings: (config = {}) => api.get('/settings/public-ticket-status', config),
   updatePublicTicketStatusSettings: (data, config = {}) => api.put('/settings/public-ticket-status', data, config),
   getFeedbackSettings: (config = {}) => api.get('/settings/feedback-settings', config),
@@ -460,6 +473,20 @@ export const syncAPI = {
   },
 };
 
+/** JSON for plain replies; FormData (browser-set boundary) when files are attached. */
+function buildThreadPayload(body = {}) {
+  const { files, cc, ...rest } = body;
+  if (files && files.length > 0) {
+    const form = new FormData();
+    if (rest.bodyText) form.append('bodyText', rest.bodyText);
+    if (rest.bodyHtml) form.append('bodyHtml', rest.bodyHtml);
+    if (cc && cc.length) form.append('cc', cc.join(','));
+    for (const file of files) form.append('files', file);
+    return [form, { headers: { 'Content-Type': undefined }, timeout: 120000 }];
+  }
+  return [{ ...rest, ...(cc && cc.length ? { cc } : {}) }, undefined];
+}
+
 /**
  * Native ticketing API (/api/tickets) — tickets born inside Ticket Pulse plus
  * read access to FS-born tickets. All methods return the {success, data} envelope.
@@ -479,6 +506,45 @@ export const ticketsAPI = {
     return await api.get('/tickets/meta');
   },
 
+  stats: async () => {
+    return await api.get('/tickets/stats');
+  },
+
+  clone: async (id) => {
+    return await api.post(`/tickets/${id}/clone`);
+  },
+
+  remove: async (id) => {
+    return await api.delete(`/tickets/${id}`);
+  },
+
+  // Saved filter views (per-user, workspace-scoped)
+  listSavedViews: () => api.get('/tickets/saved-views'),
+  createSavedView: (data) => api.post('/tickets/saved-views', data),
+  updateSavedView: (id, data) => api.patch(`/tickets/saved-views/${id}`, data),
+  deleteSavedView: (id) => api.delete(`/tickets/saved-views/${id}`),
+
+  /** Download the current filtered queue as CSV (auth-aware). */
+  exportCsv: async (params = {}) => {
+    const response = await axios.get(`${API_BASE_URL}/tickets/export.csv`, {
+      params,
+      responseType: 'blob',
+      withCredentials: true,
+      headers: {
+        ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+        ...(_workspaceId ? { 'X-Workspace-Id': String(_workspaceId) } : {}),
+      },
+    });
+    const url = URL.createObjectURL(response.data);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `tickets-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  },
+
   create: async (payload) => {
     return await api.post('/tickets', payload);
   },
@@ -495,12 +561,151 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/assign`, { technicianId });
   },
 
+  // Reply/note bodies: plain JSON normally; multipart when files ride along.
   reply: async (id, body) => {
-    return await api.post(`/tickets/${id}/replies`, body);
+    const [payload, config] = buildThreadPayload(body);
+    return await api.post(`/tickets/${id}/replies`, payload, config);
   },
 
   note: async (id, body) => {
-    return await api.post(`/tickets/${id}/notes`, body);
+    const [payload, config] = buildThreadPayload(body);
+    return await api.post(`/tickets/${id}/notes`, payload, config);
+  },
+
+  deleteNote: async (id, entryId) => {
+    return await api.delete(`/tickets/${id}/notes/${entryId}`);
+  },
+
+  requesterSearch: async (q) => {
+    return await api.get('/tickets/requester-search', { params: { q } });
+  },
+
+  requesterPhoto: async (email) => {
+    return await api.get('/tickets/requester-photo', { params: { email } });
+  },
+
+  requesterStats: async (requesterId) => {
+    return await api.get('/tickets/requester-stats', { params: { requesterId } });
+  },
+
+  /** Fire the AI assignment pipeline for this ticket (semi-manual assign). */
+  triage: async (id) => {
+    return await api.post(`/tickets/${id}/triage`);
+  },
+
+  /** FS-born write-back: FreshService is updated (and verified) FIRST. */
+  fsUpdate: async (id, changes) => {
+    return await api.post(`/tickets/${id}/fs-update`, changes);
+  },
+
+  setNoise: async (id, { noise = true, resolve = false } = {}) => {
+    return await api.post(`/tickets/${id}/noise`, { noise, resolve });
+  },
+
+  related: async (id) => {
+    return await api.get(`/tickets/${id}/related`);
+  },
+
+  forward: async (id, { to, note }) => {
+    return await api.post(`/tickets/${id}/forward`, { to, note });
+  },
+
+  // Reply templates (canned quick notes)
+  listTemplates: async () => {
+    return await api.get('/tickets/templates');
+  },
+
+  createTemplate: async ({ name, bodyText, bodyHtml = null, categoryId = null }) => {
+    return await api.post('/tickets/templates', { name, bodyText, bodyHtml, categoryId });
+  },
+
+  removeTemplate: async (templateId) => {
+    return await api.delete(`/tickets/templates/${templateId}`);
+  },
+
+  // Category/group watch subscriptions
+  listWatchSubscriptions: async () => {
+    return await api.get('/tickets/watch-subscriptions');
+  },
+
+  setWatchSubscription: async ({ scopeType, categoryId = null, groupId = null, watch = true, notifyRequesterReply = false }) => {
+    return await api.post('/tickets/watch-subscriptions', { scopeType, categoryId, groupId, watch, notifyRequesterReply });
+  },
+
+  // Scheduled tickets (created later through the normal create path)
+  listScheduled: async () => {
+    return await api.get('/tickets/scheduled');
+  },
+
+  scheduleCreate: async (payload, scheduledForAt) => {
+    return await api.post('/tickets/scheduled', { payload, scheduledForAt });
+  },
+
+  activateScheduled: async (scheduledId) => {
+    return await api.post(`/tickets/scheduled/${scheduledId}/activate`);
+  },
+
+  cancelScheduled: async (scheduledId) => {
+    return await api.delete(`/tickets/scheduled/${scheduledId}`);
+  },
+
+  // Attachments
+  listAttachments: async (id) => {
+    return await api.get(`/tickets/${id}/attachments`);
+  },
+
+  uploadAttachments: async (id, files) => {
+    const form = new FormData();
+    for (const file of files) form.append('files', file);
+    // Let the browser set the multipart boundary
+    return await api.post(`/tickets/${id}/attachments`, form, {
+      headers: { 'Content-Type': undefined },
+      timeout: 120000,
+    });
+  },
+
+  removeAttachment: async (id, attachmentId) => {
+    return await api.delete(`/tickets/${id}/attachments/${attachmentId}`);
+  },
+
+  /** Authenticated download: fetches the blob through the API and saves it. */
+  // Fetch an attachment as an object URL (for inline preview, not forced download).
+  // Caller is responsible for URL.revokeObjectURL when done.
+  attachmentObjectUrl: async (id, attachmentId) => {
+    const response = await axios.get(
+      `${API_BASE_URL}/tickets/${id}/attachments/${attachmentId}/download`,
+      {
+        responseType: 'blob',
+        withCredentials: true,
+        headers: {
+          ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+          ...(_workspaceId ? { 'X-Workspace-Id': String(_workspaceId) } : {}),
+        },
+      },
+    );
+    return { url: URL.createObjectURL(response.data), type: response.data.type || '' };
+  },
+
+  downloadAttachment: async (id, attachmentId, fileName) => {
+    const response = await axios.get(
+      `${API_BASE_URL}/tickets/${id}/attachments/${attachmentId}/download`,
+      {
+        responseType: 'blob',
+        withCredentials: true,
+        headers: {
+          ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+          ...(_workspaceId ? { 'X-Workspace-Id': String(_workspaceId) } : {}),
+        },
+      },
+    );
+    const url = URL.createObjectURL(response.data);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName || 'attachment';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   },
 
   // Approvals
@@ -512,8 +717,42 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/approvals/${approvalId}/decide`, { decision, note });
   },
 
+  clarifyApproval: async (id, approvalId, note) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/clarify`, { note });
+  },
+
+  resubmitApproval: async (id, approvalId) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/resubmit`);
+  },
+
   cancelApproval: async (id, approvalId) => {
     return await api.post(`/tickets/${id}/approvals/${approvalId}/cancel`);
+  },
+
+  changeApprovalDecision: async (id, approvalId, decision, note = null) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/change`, { decision, note });
+  },
+
+  deleteApproval: async (id, approvalId) => {
+    return await api.delete(`/tickets/${id}/approvals/${approvalId}`);
+  },
+
+  // Cross-ticket approver inbox (Approvals page + nav badge)
+  approvalInbox: async () => {
+    const res = await api.get('/tickets/approvals/inbox');
+    return res.data;
+  },
+  approvalInboxCount: async () => {
+    const res = await api.get('/tickets/approvals/inbox/count');
+    return res.data?.count || 0;
+  },
+  approvalsNeedingMyInfo: async () => {
+    const res = await api.get('/tickets/approvals/mine');
+    return res.data;
+  },
+  approvalsOverview: async (params = {}) => {
+    const res = await api.get('/tickets/approvals/all', { params });
+    return res.data;
   },
 
   // Mailbox connections (admin)
@@ -549,6 +788,12 @@ export const publicApprovalAPI = {
 
   decide: async (token, decision, note = null) => {
     const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision, note });
+    return response;
+  },
+
+  // Approver bounces it back to the requester for more info (decision='clarify').
+  clarify: async (token, note) => {
+    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision: 'clarify', note });
     return response;
   },
 };

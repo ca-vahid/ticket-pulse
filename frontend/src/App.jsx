@@ -23,7 +23,9 @@ import PublicTicketUrgency from './pages/PublicTicketUrgency';
 import PublicTicketFeedback from './pages/PublicTicketFeedback';
 import MyCompetencies from './pages/MyCompetencies';
 import Tickets from './pages/Tickets';
+import TicketCreate from './pages/TicketCreate';
 import TicketDetail from './pages/TicketDetail';
+import ApprovalsInbox from './pages/ApprovalsInbox';
 import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
@@ -261,6 +263,22 @@ function App() {
                   element={
                     <TicketsRoute>
                       <Tickets />
+                    </TicketsRoute>
+                  }
+                />
+                <Route
+                  path="/tickets/new"
+                  element={
+                    <TicketsRoute>
+                      <TicketCreate />
+                    </TicketsRoute>
+                  }
+                />
+                <Route
+                  path="/approvals"
+                  element={
+                    <TicketsRoute>
+                      <ApprovalsInbox />
                     </TicketsRoute>
                   }
                 />

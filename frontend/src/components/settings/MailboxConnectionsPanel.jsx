@@ -24,6 +24,9 @@ export default function MailboxConnectionsPanel() {
   const [testing, setTesting] = useState(null);
   const [address, setAddress] = useState('');
   const [mode, setMode] = useState('both');
+  const [routeGroup, setRouteGroup] = useState('');
+  const [routeType, setRouteType] = useState('');
+  const [groups, setGroups] = useState([]);
 
   const load = useCallback(async () => {
     try {
@@ -37,6 +40,23 @@ export default function MailboxConnectionsPanel() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    ticketsAPI.meta().then((res) => setGroups(res.data?.groups || [])).catch(() => {});
+  }, []);
+
+  // Composite "fs:<freshserviceId>" | "int:<groupId>" so one dropdown covers both
+  // FreshService and internal (TP-native) groups.
+  const groupValue = (mb) => (mb.defaultInternalGroupId ? `int:${mb.defaultInternalGroupId}`
+    : mb.defaultGroupId ? `fs:${mb.defaultGroupId}` : '');
+  const routingFields = (composite) => ({
+    defaultGroupId: composite.startsWith('fs:') ? composite.slice(3) : null,
+    defaultInternalGroupId: composite.startsWith('int:') ? Number(composite.slice(4)) : null,
+  });
+  const routeLabel = (mb) => {
+    if (mb.defaultInternalGroupId) return groups.find((g) => g.origin === 'local' && g.id === mb.defaultInternalGroupId)?.name;
+    if (mb.defaultGroupId) return groups.find((g) => String(g.freshserviceId) === String(mb.defaultGroupId))?.name;
+    return null;
+  };
 
   const add = async (e) => {
     e.preventDefault();
@@ -44,14 +64,30 @@ export default function MailboxConnectionsPanel() {
     setError(null);
     setNotice(null);
     try {
-      await ticketsAPI.createMailbox({ address: address.trim(), mode });
+      await ticketsAPI.createMailbox({
+        address: address.trim(),
+        mode,
+        ...(routeGroup ? routingFields(routeGroup) : {}),
+        ...(routeType ? { defaultTicketType: routeType } : {}),
+      });
       setAddress('');
+      setRouteGroup('');
+      setRouteType('');
       setNotice(`Mailbox connected. New mail to ${address.trim()} becomes tickets within about a minute.`);
       await load();
     } catch (err) {
       setError(err.response?.data?.message || err.message);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const changeRouting = async (mb, patch) => {
+    try {
+      await ticketsAPI.updateMailbox(mb.id, patch);
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message);
     }
   };
 
@@ -153,6 +189,42 @@ export default function MailboxConnectionsPanel() {
           <option value="ingest">Ingest only</option>
           <option value="send">Send only</option>
         </select>
+        {groups.length > 0 && (
+          <select
+            value={routeGroup}
+            onChange={(e) => setRouteGroup(e.target.value)}
+            aria-label="Route new tickets to group"
+            title="Tickets born from this mailbox land in this group (e.g. AP@ → AP group)"
+            className="text-sm border border-gray-200 rounded-lg px-2.5 py-2"
+          >
+            <option value="">No group routing</option>
+            {groups.some((g) => g.origin === 'local') && (
+              <optgroup label="Internal groups">
+                {groups.filter((g) => g.origin === 'local').map((g) => (
+                  <option key={`int-${g.id}`} value={`int:${g.id}`}>→ {g.name}</option>
+                ))}
+              </optgroup>
+            )}
+            {groups.some((g) => g.origin !== 'local') && (
+              <optgroup label="FreshService groups">
+                {groups.filter((g) => g.origin !== 'local').map((g) => (
+                  <option key={`fs-${g.id}`} value={`fs:${g.freshserviceId}`}>→ {g.name}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        )}
+        <select
+          value={routeType}
+          onChange={(e) => setRouteType(e.target.value)}
+          aria-label="Ticket type"
+          title="By default the AI pipeline classifies the ticket type per email. Pick a fixed type only to override that for every ticket from this mailbox."
+          className="text-sm border border-gray-200 rounded-lg px-2.5 py-2"
+        >
+          <option value="">Type: AI-detected</option>
+          <option value="Incident">Force type: Incident</option>
+          <option value="Service Request">Force type: Service Request</option>
+        </select>
         <button
           type="submit"
           disabled={isSaving || !address.trim()}
@@ -179,6 +251,8 @@ export default function MailboxConnectionsPanel() {
                 <p className="text-sm font-medium text-gray-900">{mb.address}</p>
                 <p className="text-xs text-gray-400">
                   {MODE_LABEL[mb.mode] || mb.mode}
+                  {routeLabel(mb) ? <span className="text-sky-600"> · routes to {routeLabel(mb)}</span> : null}
+                  {mb.defaultTicketType ? ` · ${mb.defaultTicketType}` : ''}
                   {mb.lastCheckedAt ? ` · checked ${new Date(mb.lastCheckedAt).toLocaleTimeString()}` : ' · not checked yet'}
                   {mb.lastError ? <span className="text-amber-600"> · {mb.lastError.slice(0, 60)}</span> : null}
                 </p>
@@ -192,6 +266,41 @@ export default function MailboxConnectionsPanel() {
                 <option value="both">Ingest + send</option>
                 <option value="ingest">Ingest only</option>
                 <option value="send">Send only</option>
+              </select>
+              {groups.length > 0 && (
+                <select
+                  value={groupValue(mb)}
+                  onChange={(e) => changeRouting(mb, routingFields(e.target.value))}
+                  aria-label={`Group routing for ${mb.address}`}
+                  title="Tickets born from this mailbox land in this group"
+                  className="text-xs border border-gray-200 rounded-lg px-2 py-1.5"
+                >
+                  <option value="">No group</option>
+                  {groups.some((g) => g.origin === 'local') && (
+                    <optgroup label="Internal groups">
+                      {groups.filter((g) => g.origin === 'local').map((g) => (
+                        <option key={`int-${g.id}`} value={`int:${g.id}`}>→ {g.name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {groups.some((g) => g.origin !== 'local') && (
+                    <optgroup label="FreshService groups">
+                      {groups.filter((g) => g.origin !== 'local').map((g) => (
+                        <option key={`fs-${g.id}`} value={`fs:${g.freshserviceId}`}>→ {g.name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              )}
+              <select
+                value={mb.defaultTicketType || ''}
+                onChange={(e) => changeRouting(mb, { defaultTicketType: e.target.value || null })}
+                aria-label={`Default ticket type for ${mb.address}`}
+                className="text-xs border border-gray-200 rounded-lg px-2 py-1.5"
+              >
+                <option value="">Type: default</option>
+                <option value="Incident">Incident</option>
+                <option value="Service Request">Service Request</option>
               </select>
               <button
                 onClick={() => test(mb)}
