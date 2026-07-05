@@ -15,11 +15,15 @@ export const PRIORITY_LABELS = {
 };
 
 // Semantic status pill styles: border-based, no heavy fills
+// Softer, borderless status pills (mockup style — subtle bg + colored text).
+// Deleted/Spam stay solid so "removed" reads unmistakably.
 export const STATUS_COLORS = {
-  'Open':     'bg-red-50 text-red-700 border border-red-200',
-  'Pending':  'bg-amber-50 text-amber-800 border border-amber-200',
-  'Resolved': 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-  'Closed':   'bg-slate-100 text-slate-600 border border-slate-200',
+  'Open':     'bg-rose-50 text-rose-600',
+  'Pending':  'bg-amber-50 text-amber-700',
+  'Resolved': 'bg-emerald-50 text-emerald-700',
+  'Closed':   'bg-slate-100 text-slate-500',
+  'Deleted':  'bg-red-600 text-white',
+  'Spam':     'bg-orange-500 text-white',
 };
 
 export const FRESHSERVICE_DOMAIN =

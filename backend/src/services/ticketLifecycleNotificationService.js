@@ -331,8 +331,43 @@ export async function emitTicketLifecycleNotifications({
   };
 }
 
+/**
+ * Fire a single registered workflow event for a ticket (Phase 5 events like
+ * ticket.reply_received / ticket.note_added / ticket.status_changed).
+ * Pass a stable dedupeStamp (e.g. "reply:<entryId>") so retries don't
+ * double-send through the engine's delivery dedupe.
+ */
+export async function emitTicketEvent(eventType, ticketId, {
+  source = 'ticketpulse_native',
+  dedupeStamp = null,
+  extra = null,
+} = {}) {
+  const ticket = await hydrateTicket(ticketId);
+  if (!ticket) return { status: 'skipped', reason: 'Ticket not found' };
+
+  const stamp = dedupeStamp || `${eventType}:${ticket.id}:${new Date().toISOString()}`;
+  const event = {
+    type: eventType,
+    occurredAt: new Date().toISOString(),
+    dedupeStamp: stamp,
+    notificationFingerprint: `wf:${ticket.workspaceId}:${eventType}:${stamp}`,
+  };
+  const eventContext = buildEventContext({ event, ticket, previousAgent: null, source });
+  if (extra) eventContext.event.extra = extra;
+
+  try {
+    return await notificationWorkflowEngine.executeForEvent(eventContext, { triggerSource: source });
+  } catch (error) {
+    logger.warn('Ticket event workflow dispatch failed', {
+      workspaceId: ticket.workspaceId, ticketId: ticket.id, eventType, error: error.message,
+    });
+    return { status: 'failed', eventType, error: error.message };
+  }
+}
+
 export default {
   deriveTicketLifecycleEvents,
   emitTicketLifecycleNotifications,
+  emitTicketEvent,
   lifecycleNotificationFingerprint,
 };

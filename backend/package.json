@@ -1,6 +1,6 @@
 {
   "name": "ticket-pulse-backend",
-  "version": "2.96",
+  "version": "3.0.1-preview",
   "type": "module",
   "description": "FreshService Real-Time IT Dashboard - Backend API",
   "main": "src/app.js",
@@ -28,6 +28,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
     "@azure/identity": "^4.13.1",
+    "@azure/storage-blob": "^12.32.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@prisma/client": "^5.19.0",
     "axios": "^1.12.2",
@@ -44,6 +45,7 @@
     "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^3.2.2",
     "liquidjs": "^10.27.0",
+    "multer": "^2.2.0",
     "node-cron": "^3.0.3",
     "nodemailer": "^7.0.10",
     "openai": "^6.9.0",

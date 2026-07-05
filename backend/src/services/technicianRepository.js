@@ -185,6 +185,31 @@ class TechnicianRepository {
   }
 
   /**
+   * Create a LOCAL (non-FreshService) agent. No freshserviceId — assignable to
+   * TP-born tickets only. Not touched by the FreshService agent sync.
+   */
+  async createLocalAgent(data) {
+    try {
+      return await prisma.technician.create({
+        data: {
+          origin: 'local',
+          freshserviceId: null,
+          workspaceId: data.workspaceId,
+          name: data.name,
+          email: data.email ? data.email.trim().toLowerCase() : null,
+          timezone: data.timezone || 'America/Los_Angeles',
+          location: data.location || null,
+          photoUrl: data.photoUrl || null,
+          isActive: true,
+        },
+      });
+    } catch (error) {
+      logger.error('Error creating local agent:', error);
+      throw new DatabaseError('Failed to create local agent', error);
+    }
+  }
+
+  /**
    * Update technician data
    * @param {number} id - Internal technician ID
    * @param {Object} data - Updated technician data
@@ -324,6 +349,7 @@ class TechnicianRepository {
         where: {
           workspaceId,
           isActive: true,
+          origin: 'freshservice', // never deactivate local agents on FS sync
           freshserviceId: { notIn: activeFreshserviceIds.map(id => BigInt(id)) },
         },
         data: {

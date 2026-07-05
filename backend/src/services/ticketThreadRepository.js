@@ -9,6 +9,9 @@ class TicketThreadRepository {
     }
 
     let upserted = 0;
+    // Track the newest REAL entry per ticket (has a body) so tickets carry an
+    // honest last_real_activity_at even when FS's updated_at is noise.
+    const latestRealByTicket = new Map();
 
     for (const entry of entries) {
       try {
@@ -39,11 +42,33 @@ class TicketThreadRepository {
           },
         });
         upserted++;
+        if ((entry.bodyText || entry.bodyHtml || entry.content) && entry.occurredAt) {
+          const at = new Date(entry.occurredAt);
+          if (!Number.isNaN(at.getTime())) {
+            const prev = latestRealByTicket.get(entry.ticketId);
+            if (!prev || at > prev) latestRealByTicket.set(entry.ticketId, at);
+          }
+        }
       } catch (error) {
         logger.warn('Failed to upsert ticket thread entry', {
           ticketId: entry.ticketId,
           externalEntryId: entry.externalEntryId,
           error: error.message,
+        });
+      }
+    }
+
+    // GREATEST keeps re-syncs of old history from moving the timestamp back.
+    for (const [ticketId, at] of latestRealByTicket) {
+      try {
+        await prisma.$executeRaw`
+          UPDATE tickets
+          SET last_real_activity_at = GREATEST(COALESCE(last_real_activity_at, 'epoch'::timestamp), ${at})
+          WHERE id = ${ticketId}
+        `;
+      } catch (error) {
+        logger.warn('Failed to bump last_real_activity_at from thread sync (non-fatal)', {
+          ticketId, error: error.message,
         });
       }
     }

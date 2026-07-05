@@ -699,7 +699,10 @@ function HighchartsBlock({ options, height = '24rem', stabilizeLayout = false })
       frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId));
       timerIds.forEach((timerId) => window.clearTimeout(timerId));
     };
-  }, [height, options, stabilizeLayout]);
+    // Intentionally NOT keyed on `options`: this settles layout on mount / resize
+    // / font-load, but must NOT re-fire on every options change (drill, lens),
+    // or its redraw(false) snaps the treemap and kills the morph animation.
+  }, [height, stabilizeLayout]);
 
   return (
     <div className="min-w-0" style={{ height }}>
@@ -770,6 +773,7 @@ export default function Analytics({ view = 'standard' }) {
   const [hoveredCategory, setHoveredCategory] = useState(null);
   const [mapEffectsEnabled, setMapEffectsEnabled] = useState(true);
   const [selectedCategoryAgentId, setSelectedCategoryAgentId] = useState(() => initialParams.get('agent') || 'all');
+  const [agentLensQuery, setAgentLensQuery] = useState('');
   const [categoryAgentLensMode, setCategoryAgentLensMode] = useState(() => (
     initialParams.get('lens') === 'portfolio' ? 'portfolio' : 'teamShare'
   ));
@@ -1071,6 +1075,11 @@ export default function Analytics({ view = 'standard' }) {
   const mapFocusCategory = hoveredCategory || selectedHierarchyCategory || selectedCategory;
 
   const categoryAgentRows = useMemo(() => categories?.agentLens || [], [categories?.agentLens]);
+  const filteredAgentRows = useMemo(() => {
+    const q = agentLensQuery.trim().toLowerCase();
+    if (!q) return categoryAgentRows;
+    return categoryAgentRows.filter((a) => (a.name || '').toLowerCase().includes(q));
+  }, [categoryAgentRows, agentLensQuery]);
 
   const selectedCategoryAgent = useMemo(() => (
     categoryAgentRows.find((agent) => categoryAgentKey(agent) === selectedCategoryAgentId) || null
@@ -1147,10 +1156,22 @@ export default function Analytics({ view = 'standard' }) {
     const leafMetricFontSize = Math.round(8 * labelScale);
     const headerFontSize = Math.round(10 * labelScale);
     const headerLineHeight = Math.round(12 * labelScale);
+    // Smooth ease-out cubic so cells glide into their new size/position on drill.
+    // Function easing is guaranteed regardless of which easing strings HC ships.
     const treemapAnimation = mapEffectsEnabled
-      ? { duration: 650, easing: 'easeInOutSine' }
+      ? { duration: 850, easing: (pos) => 1 - ((1 - pos) ** 3) }
       : false;
     const parentIdsWithChildren = new Set(rows.filter((row) => row.parent).map((row) => row.parent));
+    // "Live effects": gently pulse the hottest LEAF cells (top pressure) so the
+    // eye lands on trouble spots. The explicit toggle is authoritative — it IS
+    // the motion control, so it overrides the OS prefers-reduced-motion default
+    // (a reduced-motion user simply leaves the toggle off).
+    const pulseEligible = mapEffectsEnabled && !lensEnabled && categoryMapColorMode === 'pressure';
+    const leafPressures = rows
+      .filter((row) => row.parent && !parentIdsWithChildren.has(row.id))
+      .map((row) => Number(row.colorValue) || 0);
+    const maxLeafPressure = leafPressures.length ? Math.max(...leafPressures) : 0;
+    const hotThreshold = maxLeafPressure * 0.7;
     const chartRows = rows.map((row) => {
       const rangeCreated = Number(row.custom?.created ?? row.value ?? 0);
       const timelineCreated = mapTimelineEnabled
@@ -1181,13 +1202,15 @@ export default function Analytics({ view = 'standard' }) {
           ? teamCreated
           : row.colorValue;
       const parentBorderColor = selectedCategoryKey === row.custom?.key ? '#2563eb' : '#334155';
+      const isHotLeaf = pulseEligible && !parentHasChildren && Number(colorValue) > 0 && Number(colorValue) >= hotThreshold && maxLeafPressure > 0;
       return {
         ...row,
         value: parentHasChildren ? undefined : displayCreated,
         colorValue: parentHasChildren ? undefined : colorValue,
         color: parentHasChildren ? 'rgba(255,255,255,0.001)' : row.color,
-        borderColor: parentHasChildren ? parentBorderColor : row.borderColor,
-        borderWidth: parentHasChildren ? 3 : (row.parent && displayCreated <= 4 ? 0.75 : row.borderWidth),
+        className: isHotLeaf ? 'cat-cell-hot' : undefined,
+        borderColor: parentHasChildren ? parentBorderColor : (isHotLeaf ? '#ef4444' : row.borderColor),
+        borderWidth: parentHasChildren ? 3 : (isHotLeaf ? 2 : (row.parent && displayCreated <= 4 ? 0.75 : row.borderWidth)),
         custom: {
           ...row.custom,
           created: displayCreated,
@@ -1313,10 +1336,18 @@ export default function Analytics({ view = 'standard' }) {
               setHoveredCategory(null);
 
               if (typeof window !== 'undefined') {
-                window.requestAnimationFrame(() => {
-                  window.requestAnimationFrame(settleAfterRootChange);
-                });
-                window.setTimeout(settleAfterRootChange, 180);
+                // When Live effects are on, let the drill MORPH play out before
+                // the layout-stabilizing redraw — otherwise the redraw(false)
+                // snaps the cells to their final position instantly. When off,
+                // settle immediately (no animation to preserve).
+                if (mapEffectsEnabled) {
+                  window.setTimeout(settleAfterRootChange, 900);
+                } else {
+                  window.requestAnimationFrame(() => {
+                    window.requestAnimationFrame(settleAfterRootChange);
+                  });
+                  window.setTimeout(settleAfterRootChange, 180);
+                }
               }
             },
           },
@@ -2517,7 +2548,18 @@ export default function Analytics({ view = 'standard' }) {
                   </div>
                 )}
               </div>
-              <div className={`mt-3 grid grid-cols-2 gap-2 overflow-y-auto pr-1 [scrollbar-width:thin] sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 ${
+              <div className="relative mt-3">
+                <svg className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                <input
+                  type="search"
+                  value={agentLensQuery}
+                  onChange={(e) => setAgentLensQuery(e.target.value)}
+                  placeholder="Filter members by name…"
+                  aria-label="Filter members"
+                  className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs placeholder:text-slate-400"
+                />
+              </div>
+              <div className={`mt-2 grid grid-cols-2 gap-2 overflow-y-auto pr-1 [scrollbar-width:thin] sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 ${
                 isCategoryMapPage ? 'max-h-[30rem]' : 'max-h-[19rem]'
               }`}
               >
@@ -2548,7 +2590,7 @@ export default function Analytics({ view = 'standard' }) {
                     </span>
                   </span>
                 </button>
-                {categoryAgentRows.map((agent) => {
+                {filteredAgentRows.map((agent) => {
                   const key = categoryAgentKey(agent);
                   const selected = selectedCategoryAgentId === key;
                   return (
@@ -2583,6 +2625,9 @@ export default function Analytics({ view = 'standard' }) {
                     </button>
                   );
                 })}
+                {agentLensQuery.trim() && filteredAgentRows.length === 0 && (
+                  <p className="col-span-full px-1 py-2 text-xs text-slate-400">No member matches “{agentLensQuery.trim()}”.</p>
+                )}
               </div>
             </div>
             <div className="self-start overflow-hidden rounded-lg border border-slate-200 bg-white p-3 xl:max-h-[16.5rem]">

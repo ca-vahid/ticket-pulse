@@ -216,6 +216,18 @@ async function initialize() {
       logger.warn('FreshService not configured. Please configure in settings.');
     }
 
+    // Assignment queue-drain worker — independent of the FS sync cron so
+    // business-hours-queued runs always process when hours resume, even if FS
+    // sync is off/paused. Gated by the same automation switch to keep dev quiet.
+    if (config.sync.enableScheduledSync) {
+      try {
+        const { default: assignmentPipelineService } = await import('./services/assignmentPipelineService.js');
+        assignmentPipelineService.startQueueDrainWorker();
+      } catch (e) {
+        logger.warn('Assignment queue-drain worker failed to start (non-fatal):', e.message);
+      }
+    }
+
     // Reconcile any backfill runs left in 'running' state from a prior crash/restart.
     // The backfill loop only lives in-process, so a 'running' row at boot is orphaned.
     try {
@@ -244,6 +256,30 @@ async function initialize() {
       notificationWorkflowRunWatchdogService.start();
     } catch (e) {
       logger.warn('Notification workflow stale-run reconciliation failed (non-fatal):', e.message);
+    }
+
+    // Native-ticketing fallback mirror: pushes TP-born ticket copies to FreshService.
+    try {
+      const { default: mirrorService } = await import('./services/mirrorService.js');
+      mirrorService.start();
+    } catch (e) {
+      logger.warn('FreshService mirror worker failed to start (non-fatal):', e.message);
+    }
+
+    // Native-ticketing mailbox ingest: email-to-ticket + email-updates-ticket.
+    try {
+      const { default: mailboxIngestService } = await import('./services/mailboxIngestService.js');
+      mailboxIngestService.start();
+    } catch (e) {
+      logger.warn('Mailbox ingest worker failed to start (non-fatal):', e.message);
+    }
+
+    // Scheduled tickets: activates due payloads through the normal create path.
+    try {
+      const { default: scheduledTicketService } = await import('./services/scheduledTicketService.js');
+      scheduledTicketService.start();
+    } catch (e) {
+      logger.warn('Scheduled-ticket worker failed to start (non-fatal):', e.message);
     }
 
     logger.info('Server initialization complete');

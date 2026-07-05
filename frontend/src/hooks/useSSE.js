@@ -23,6 +23,7 @@ export function useSSE(options = {}) {
   const {
     onMessage,
     onSyncCompleted,
+    onTicketChange,
     onConnected,
     onError,
     enabled = true,
@@ -102,6 +103,15 @@ export function useSSE(options = {}) {
           }
         });
 
+        // Native ticketing mutations (create/update/reply/status/assignment)
+        eventSource.addEventListener('ticket-change', (event) => {
+          const data = parseAndScrub(event.data);
+          setLastEvent({ type: 'ticket-change', data, timestamp: Date.now() });
+          if (onTicketChange) {
+            onTicketChange(data);
+          }
+        });
+
         eventSource.onmessage = (event) => {
           // SSE message received
           const data = parseAndScrub(event.data);
@@ -145,7 +155,7 @@ export function useSSE(options = {}) {
       closeCurrentSource();
       setConnectionStatus('disconnected');
     };
-  }, [enabled, onMessage, onSyncCompleted, onConnected, onError, reconnectKey]);
+  }, [enabled, onMessage, onSyncCompleted, onTicketChange, onConnected, onError, reconnectKey]);
 
   const disconnect = () => {
     if (eventSourceRef.current) {

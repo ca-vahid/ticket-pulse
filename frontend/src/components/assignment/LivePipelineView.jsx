@@ -117,6 +117,10 @@ export function RecommendationCards({
   decision = null,
   currentAssignedTechId = null,
   originalAssignedTechId = null,
+  // Name of the person the ticket is ALREADY assigned to (e.g. set in FreshService).
+  // When present and the chosen tech isn't them, approving is a *reassignment* —
+  // the primary button reflects that (amber "Reassign — X") instead of green Approve.
+  reassignWarnName = null,
 }) {
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [decisionNote, setDecisionNote] = useState('');
@@ -384,13 +388,23 @@ export function RecommendationCards({
               {/* Action buttons */}
               <div className="space-y-2 pt-1">
                 {!isOverride ? (
-                  <button
-                    onClick={() => onDecide({ decision: 'approved', assignedTechId: effectiveTechId, decisionNote })}
-                    disabled={deciding}
-                    className="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm touch-manipulation min-h-[44px]"
-                  >
-                    {deciding ? 'Processing...' : `Approve — ${effectiveTechName}`}
-                  </button>
+                  (() => {
+                    // Approving when someone else already owns the ticket = reassignment.
+                    const isReassign = reassignWarnName && currentAssignedTechId
+                      && Number(effectiveTechId) !== Number(currentAssignedTechId);
+                    return (
+                      <button
+                        onClick={() => onDecide({ decision: 'approved', assignedTechId: effectiveTechId, decisionNote })}
+                        disabled={deciding}
+                        title={isReassign ? `This ticket is already assigned to ${reassignWarnName} — this will reassign it to ${effectiveTechName}.` : undefined}
+                        className={`w-full px-4 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50 transition-colors shadow-sm touch-manipulation min-h-[44px] ${
+                          isReassign ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-600 hover:bg-green-700'
+                        }`}
+                      >
+                        {deciding ? 'Processing...' : `${isReassign ? 'Reassign' : 'Approve'} — ${effectiveTechName}`}
+                      </button>
+                    );
+                  })()
                 ) : (
                   <button
                     onClick={() => onDecide({ decision: 'modified', assignedTechId: selectedTechId, overrideReason: decisionNote || null, decisionNote })}
@@ -456,6 +470,28 @@ export function RecommendationCards({
  * @param {number}   [props.initialRunId]       Seed the runId state so the "Run #N" badge renders before the
  *                                              first run_started event arrives. Used for run-now.
  */
+/**
+ * Formatted "Overall Reasoning" card (mirrors PipelineRunDetail) — renders the
+ * LLM's clean structured reasoning as markdown instead of the raw tool/JSON log.
+ */
+function ReasoningCard({ reasoning }) {
+  if (!reasoning) return null;
+  return (
+    <div className="bg-gradient-to-br from-indigo-50 via-blue-50 to-slate-50 border border-indigo-100 rounded-xl p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+        </div>
+        <h4 className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Overall Reasoning</h4>
+        <span className="ml-auto text-[10px] font-medium text-indigo-500/80 uppercase tracking-wider">Internal</span>
+      </div>
+      <div className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-headings:text-slate-800 prose-strong:text-slate-900 prose-ul:my-2 prose-li:my-0.5">
+        <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{reasoning}</Markdown>
+      </div>
+    </div>
+  );
+}
+
 export default function LivePipelineView({ ticketId, onComplete, onBack, streamPath, skipExistingCheck = false, initialRunId = null }) {
   const [status, setStatus] = useState('loading');
   const [events, setEvents] = useState([]);
@@ -466,6 +502,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
   const [error, setError] = useState(null);
   const [existingRun, setExistingRun] = useState(null);
   const [streaming, setStreaming] = useState(false);
+  const [showLog, setShowLog] = useState(false);
   const [thinkingKb, setThinkingKb] = useState(null);
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
@@ -619,6 +656,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
   const statusInfo = STATUS_INDICATORS[status] || STATUS_INDICATORS.loading;
   const StatusIcon = statusInfo.icon;
   const showExistingRun = existingRun && !streaming;
+  const reasoningText = recommendation?.overallReasoning || existingRun?.recommendation?.overallReasoning || null;
 
   return (
     <div className="flex flex-col h-full">
@@ -645,61 +683,87 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
         </div>
       </div>
 
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto border rounded-lg bg-white p-2.5 sm:p-4 min-h-[200px] sm:min-h-[300px] max-h-[60vh] sm:max-h-[600px]"
-      >
-        {status === 'loading' && (
-          <div className="flex items-center justify-center h-full text-gray-400">
-            <Loader2 className="w-6 h-6 animate-spin" />
-          </div>
-        )}
-        {events.length === 0 && status === 'connecting' && (
-          <div className="flex items-center justify-center h-full text-gray-400">
-            <Loader2 className="w-6 h-6 animate-spin" />
-          </div>
-        )}
-        {status === 'running_elsewhere' && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-            <Brain className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-            <h4 className="text-sm font-semibold text-blue-800 mb-1">Analysis In Progress</h4>
-            <p className="text-sm text-blue-700">This ticket is being analyzed in another session. Refresh to check for results.</p>
-          </div>
-        )}
-        {status === 'queued' && !streaming && existingRun && (
-          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
-            <AlertTriangle className="w-8 h-8 text-orange-500 mx-auto mb-2" />
-            <h4 className="text-sm font-semibold text-orange-800 mb-1">Queued Until Next Business Window</h4>
-            <p className="text-sm text-orange-700">{existingRun.queuedReason || 'Currently outside business hours.'}</p>
-            <p className="text-xs text-gray-500 mt-2">This ticket will be processed automatically when business hours resume.</p>
-          </div>
-        )}
-        {status === 'queued' && streaming && (
-          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
-            <AlertTriangle className="w-8 h-8 text-orange-500 mx-auto mb-2" />
-            <h4 className="text-sm font-semibold text-orange-800 mb-1">Queued Until Next Business Window</h4>
-            <p className="text-sm text-orange-700">
-              {events.find((e) => e.type === 'queued')?.reason || 'Currently outside business hours.'}
-            </p>
-            <p className="text-xs text-gray-500 mt-2">This ticket will be processed automatically when business hours resume.</p>
-          </div>
-        )}
-        {events.length > 0 && (
-          <StreamContent events={events} toolCalls={toolCalls} thinkingKb={thinkingKb} status={status} accentColor="blue" />
-        )}
-        {events.length === 0 && showExistingRun && existingRun.fullTranscript && (
-          <div className="text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
-            <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-              {cleanTranscript(existingRun.fullTranscript)}
-            </Markdown>
-          </div>
-        )}
-        {events.length === 0 && showExistingRun && !existingRun.fullTranscript && existingRun.status === 'completed' && (
-          <div className="text-sm text-gray-500 italic py-4 text-center">
-            Analysis completed — transcript not available. Click &quot;Re-run Analysis&quot; to run again.
-          </div>
-        )}
-      </div>
+      {status === 'completed' && !streaming && reasoningText ? (
+        // Finished run: lead with the clean formatted reasoning; raw log on demand.
+        <div className="space-y-3">
+          <ReasoningCard reasoning={reasoningText} />
+          {(existingRun?.fullTranscript || events.length > 0) && (
+            <div>
+              <button
+                onClick={() => setShowLog((v) => !v)}
+                className="text-xs font-medium text-slate-500 hover:text-slate-700 inline-flex items-center gap-1"
+              >
+                <FileText className="w-3.5 h-3.5" /> {showLog ? 'Hide' : 'View'} full analysis log
+              </button>
+              {showLog && (
+                <div className="mt-2 overflow-y-auto border rounded-lg bg-white p-3 max-h-[420px] text-sm text-gray-700 prose prose-sm max-w-none">
+                  {events.length > 0 ? (
+                    <StreamContent events={events} toolCalls={toolCalls} thinkingKb={thinkingKb} status={status} accentColor="blue" />
+                  ) : (
+                    <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{cleanTranscript(existingRun.fullTranscript)}</Markdown>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto border rounded-lg bg-white p-2.5 sm:p-4 min-h-[200px] sm:min-h-[300px] max-h-[60vh] sm:max-h-[600px]"
+        >
+          {status === 'loading' && (
+            <div className="flex items-center justify-center h-full text-gray-400">
+              <Loader2 className="w-6 h-6 animate-spin" />
+            </div>
+          )}
+          {events.length === 0 && status === 'connecting' && (
+            <div className="flex items-center justify-center h-full text-gray-400">
+              <Loader2 className="w-6 h-6 animate-spin" />
+            </div>
+          )}
+          {status === 'running_elsewhere' && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+              <Brain className="w-8 h-8 text-blue-500 mx-auto mb-2" />
+              <h4 className="text-sm font-semibold text-blue-800 mb-1">Analysis In Progress</h4>
+              <p className="text-sm text-blue-700">This ticket is being analyzed in another session. Refresh to check for results.</p>
+            </div>
+          )}
+          {status === 'queued' && !streaming && existingRun && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
+              <AlertTriangle className="w-8 h-8 text-orange-500 mx-auto mb-2" />
+              <h4 className="text-sm font-semibold text-orange-800 mb-1">Queued Until Next Business Window</h4>
+              <p className="text-sm text-orange-700">{existingRun.queuedReason || 'Currently outside business hours.'}</p>
+              <p className="text-xs text-gray-500 mt-2">This ticket will be processed automatically when business hours resume.</p>
+            </div>
+          )}
+          {status === 'queued' && streaming && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
+              <AlertTriangle className="w-8 h-8 text-orange-500 mx-auto mb-2" />
+              <h4 className="text-sm font-semibold text-orange-800 mb-1">Queued Until Next Business Window</h4>
+              <p className="text-sm text-orange-700">
+                {events.find((e) => e.type === 'queued')?.reason || 'Currently outside business hours.'}
+              </p>
+              <p className="text-xs text-gray-500 mt-2">This ticket will be processed automatically when business hours resume.</p>
+            </div>
+          )}
+          {events.length > 0 && (
+            <StreamContent events={events} toolCalls={toolCalls} thinkingKb={thinkingKb} status={status} accentColor="blue" />
+          )}
+          {events.length === 0 && showExistingRun && existingRun.fullTranscript && (
+            <div className="text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
+              <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                {cleanTranscript(existingRun.fullTranscript)}
+              </Markdown>
+            </div>
+          )}
+          {events.length === 0 && showExistingRun && !existingRun.fullTranscript && existingRun.status === 'completed' && (
+            <div className="text-sm text-gray-500 italic py-4 text-center">
+              Analysis completed — transcript not available. Click &quot;Re-run Analysis&quot; to run again.
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-start gap-2">
@@ -713,6 +777,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
           data={recommendation}
           onDecide={status === 'completed' ? handleDecide : null}
           deciding={deciding}
+          hideReasoning={!!reasoningText}
         />
       )}
     </div>

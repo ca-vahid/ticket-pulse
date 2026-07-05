@@ -42,6 +42,51 @@ class RequesterRepository {
   }
 
   /**
+   * Find a requester by email (case-insensitive). Used by native ticketing to
+   * reuse existing requester records regardless of which system created them.
+   */
+  async findByEmail(email) {
+    if (!email) return null;
+    try {
+      return await prisma.requester.findFirst({
+        where: { email: { equals: String(email).trim(), mode: 'insensitive' } },
+        orderBy: { id: 'asc' },
+      });
+    } catch (error) {
+      logger.error('Error finding requester by email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a TP-native requester (no FreshService id yet — the fallback mirror
+   * backfills freshserviceId once FS auto-creates them during ticket mirroring).
+   */
+  async createNative({ email, name, department = null, jobTitle = null, entraProfile = null }) {
+    try {
+      return await prisma.requester.create({
+        data: {
+          freshserviceId: null,
+          name: name || email,
+          email,
+          department,
+          jobTitle,
+          isActive: true,
+          entraDepartment: entraProfile?.department || null,
+          entraJobTitle: entraProfile?.jobTitle || null,
+          entraOfficeLocation: entraProfile?.officeLocation || null,
+          entraCity: entraProfile?.city || null,
+          entraCountry: entraProfile?.country || null,
+          entraProfileSyncedAt: entraProfile ? new Date() : null,
+        },
+      });
+    } catch (error) {
+      logger.error('Error creating native requester:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Create or update a requester
    * @param {Object} requesterData - Requester data from FreshService
    * @returns {Promise<Object>} Created/updated requester

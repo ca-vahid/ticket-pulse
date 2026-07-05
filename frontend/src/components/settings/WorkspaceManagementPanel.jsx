@@ -3,7 +3,7 @@ import { workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
   Search, CheckCircle, XCircle, Plus, Loader, Globe,
-  Zap, Clock, RefreshCw, Power, PowerOff,
+  Zap, Clock, RefreshCw, Power, PowerOff, Ticket,
 } from 'lucide-react';
 
 const STATUS_BADGE = {
@@ -24,6 +24,7 @@ export default function WorkspaceManagementPanel() {
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [activating, setActivating] = useState(null);
   const [deactivating, setDeactivating] = useState(null);
+  const [togglingTicketing, setTogglingTicketing] = useState(null);
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
 
@@ -59,6 +60,29 @@ export default function WorkspaceManagementPanel() {
       setActivating(null);
     }
   }, [discover]);
+
+  const toggleNativeTicketing = useCallback(async (ws) => {
+    const dbWs = ws.dbWorkspace;
+    if (!dbWs) return;
+    const enabling = !dbWs.nativeTicketingEnabled;
+    setTogglingTicketing(dbWs.id);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      await workspaceAPI.update(dbWs.id, { nativeTicketingEnabled: enabling });
+      setSuccessMsg(
+        enabling
+          ? `Native ticketing enabled for "${ws.name}" — tickets can now be created inside Ticket Pulse.`
+          : `Native ticketing disabled for "${ws.name}".`,
+      );
+      await refreshWorkspaces();
+      await discover();
+    } catch (err) {
+      setError(err.message || 'Failed to update native ticketing');
+    } finally {
+      setTogglingTicketing(null);
+    }
+  }, [discover, refreshWorkspaces]);
 
   const deactivate = useCallback(async (ws) => {
     const dbWs = ws.dbWorkspace;
@@ -180,6 +204,27 @@ export default function WorkspaceManagementPanel() {
 
                 {/* Actions */}
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  {ws.status === 'active' && ws.dbWorkspace && (
+                    <button
+                      onClick={() => toggleNativeTicketing(ws)}
+                      disabled={togglingTicketing === ws.dbWorkspace.id}
+                      title={ws.dbWorkspace.nativeTicketingEnabled
+                        ? 'Native ticketing is ON — tickets can be created inside Ticket Pulse. Click to disable.'
+                        : 'Native ticketing is OFF — tickets only sync in from FreshService. Click to enable.'}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                        ws.dbWorkspace.nativeTicketingEnabled
+                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                          : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                      }`}
+                    >
+                      {togglingTicketing === ws.dbWorkspace.id ? (
+                        <Loader className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Ticket className="w-3 h-3" />
+                      )}
+                      Native ticketing {ws.dbWorkspace.nativeTicketingEnabled ? 'on' : 'off'}
+                    </button>
+                  )}
                   {ws.status === 'new' && (
                     <button
                       onClick={() => activate(ws)}

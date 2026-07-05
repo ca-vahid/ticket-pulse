@@ -323,7 +323,8 @@ export async function setWorkflowMockMode(workspaceId, id, enabled, actor = null
 }
 
 export async function listEnabledForEvent(workspaceId, eventType) {
-  if (!DEFAULT_WORKFLOW_SPECS.some((spec) => spec.triggerType === eventType)) return [];
+  // Any registered event can drive workflows — not just those with default specs.
+  if (!NOTIFICATION_EVENT_TYPES.includes(eventType)) return [];
   return prisma.notificationWorkflow.findMany({
     where: {
       workspaceId,

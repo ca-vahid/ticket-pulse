@@ -68,6 +68,11 @@ const EVENT_LABELS = {
   'ticket.assigned': 'Ticket assigned',
   'ticket.reassigned': 'Ticket reassigned',
   'ticket.resolved_closed': 'Resolved or closed',
+  'ticket.reply_received': 'Requester replied',
+  'ticket.note_added': 'Internal note added',
+  'ticket.status_changed': 'Status changed',
+  'approval.requested': 'Approval requested',
+  'approval.decided': 'Approval decided',
 };
 
 // Per-event color + icon, so the four trigger groups read as distinct zones in the
@@ -77,6 +82,9 @@ const TRIGGER_VISUALS = {
   'ticket.assigned': { icon: UserCheck, icon_: 'text-blue-600', chip: 'bg-blue-50 text-blue-700 ring-blue-200', rail: 'bg-blue-400' },
   'ticket.reassigned': { icon: Repeat, icon_: 'text-amber-600', chip: 'bg-amber-50 text-amber-700 ring-amber-200', rail: 'bg-amber-400' },
   'ticket.resolved_closed': { icon: CheckCircle2, icon_: 'text-slate-500', chip: 'bg-slate-100 text-slate-600 ring-slate-200', rail: 'bg-slate-400' },
+  'ticket.reply_received': { icon: Repeat, icon_: 'text-sky-600', chip: 'bg-sky-50 text-sky-700 ring-sky-200', rail: 'bg-sky-400' },
+  'ticket.note_added': { icon: FileJson, icon_: 'text-indigo-600', chip: 'bg-indigo-50 text-indigo-700 ring-indigo-200', rail: 'bg-indigo-400' },
+  'ticket.status_changed': { icon: Waypoints, icon_: 'text-violet-600', chip: 'bg-violet-50 text-violet-700 ring-violet-200', rail: 'bg-violet-400' },
 };
 
 function triggerVisuals(triggerType) {
@@ -130,6 +138,15 @@ const WORKFLOW_NODE_REGISTRY = {
     label: 'Template',
     icon: Type,
     color: '#0f766e',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  update_ticket: {
+    label: 'Update ticket',
+    icon: Repeat,
+    color: '#0284c7',
     terminal: false,
     inputHandles: ['default'],
     outputHandles: ['default'],

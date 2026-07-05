@@ -1,6 +1,7 @@
 import logger from '../utils/logger.js';
 import { getTodayRange } from '../utils/timezone.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
+import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
 import prisma from './prisma.js';
 
 /**
@@ -177,6 +178,18 @@ class TicketRepository {
 
       updateData.updatedAt = new Date();
 
+      const existing = await prisma.ticket.findUnique({
+        where: { freshserviceTicketId: BigInt(freshserviceTicketId) },
+        select: { id: true, origin: true },
+      });
+      if (existing?.origin === TICKET_ORIGIN.TICKETPULSE) {
+        logger.debug(`FS-keyed update skipped for TP-born ticket ${existing.id} (fs #${freshserviceTicketId})`);
+        return await prisma.ticket.findUnique({
+          where: { freshserviceTicketId: BigInt(freshserviceTicketId) },
+          include: { assignedTech: true, requester: true },
+        });
+      }
+
       return await prisma.ticket.update({
         where: { freshserviceTicketId: BigInt(freshserviceTicketId) },
         data: updateData,
@@ -220,6 +233,7 @@ class TicketRepository {
         category: data.category,
         subCategory: data.subCategory,
         ticketCategory: data.ticketCategory,
+        ticketType: data.ticketType !== undefined ? data.ticketType : undefined,
         tpSkill: data.tpSkill,
         tpSubskill: data.tpSubskill,
         department: data.department,
@@ -274,6 +288,7 @@ class TicketRepository {
         category: data.category,
         subCategory: data.subCategory,
         ticketCategory: data.ticketCategory,
+        ticketType: data.ticketType || null,
         tpSkill: data.tpSkill,
         tpSubskill: data.tpSubskill,
         department: data.department,
@@ -303,15 +318,54 @@ class TicketRepository {
         workspaceId: data.workspaceId || 1,
       };
 
-      return await prisma.ticket.upsert({
-        where: { freshserviceTicketId: BigInt(data.freshserviceTicketId) },
-        update: updatePayload,
-        create: createPayload,
-        include: {
-          assignedTech: true,
-          requester: true,
-        },
+      // Dual-origin guardrail: FS ingest may only overwrite FS-owned rows. TP-born
+      // tickets keep Ticket Pulse as their source of truth even after the fallback
+      // mirror assigns them a freshserviceTicketId; the origin filter on updateMany
+      // makes that race-proof at the DB level.
+      const fsId = BigInt(data.freshserviceTicketId);
+      const ticketInclude = { assignedTech: true, requester: true };
+
+      const updated = await prisma.ticket.updateMany({
+        where: { freshserviceTicketId: fsId, origin: TICKET_ORIGIN.FRESHSERVICE },
+        data: updatePayload,
       });
+
+      if (updated.count > 0) {
+        return await prisma.ticket.findUnique({
+          where: { freshserviceTicketId: fsId },
+          include: ticketInclude,
+        });
+      }
+
+      const existing = await prisma.ticket.findUnique({
+        where: { freshserviceTicketId: fsId },
+        include: ticketInclude,
+      });
+      if (existing) {
+        // Row exists but wasn't updatable → it's TP-born. Return it untouched.
+        logger.debug(`FS ingest skipped for TP-born ticket ${existing.id} (fs #${fsId})`);
+        return existing;
+      }
+
+      try {
+        return await prisma.ticket.create({
+          data: createPayload,
+          include: ticketInclude,
+        });
+      } catch (createError) {
+        if (createError.code === 'P2002') {
+          // Concurrent ingest created the row first — retry as a guarded update.
+          await prisma.ticket.updateMany({
+            where: { freshserviceTicketId: fsId, origin: TICKET_ORIGIN.FRESHSERVICE },
+            data: updatePayload,
+          });
+          return await prisma.ticket.findUnique({
+            where: { freshserviceTicketId: fsId },
+            include: ticketInclude,
+          });
+        }
+        throw createError;
+      }
     } catch (error) {
       logger.error('Error upserting ticket:', error);
       throw new DatabaseError('Failed to upsert ticket', error);
@@ -381,8 +435,13 @@ class TicketRepository {
    */
   async updateByFreshserviceId(freshserviceTicketId, data) {
     try {
-      return await prisma.ticket.update({
-        where: { freshserviceTicketId: BigInt(freshserviceTicketId) },
+      // FS-derived maintenance (CSAT sweep etc.) — origin filter keeps it off
+      // TP-born rows; count 0 (missing or TP-born) is a silent no-op.
+      return await prisma.ticket.updateMany({
+        where: {
+          freshserviceTicketId: BigInt(freshserviceTicketId),
+          origin: TICKET_ORIGIN.FRESHSERVICE,
+        },
         data,
       });
     } catch (error) {
@@ -418,6 +477,7 @@ class TicketRepository {
     try {
       const recheckCutoff = new Date(Date.now() - minRecheckHours * 3600 * 1000);
       const where = {
+        origin: TICKET_ORIGIN.FRESHSERVICE, // CSAT lives in FS; TP-born tickets use TicketFeedback
         status: { in: ['Resolved', 'Closed'] },
         OR: [
           { closedAt: { gte: cutoffDate } },
@@ -640,6 +700,8 @@ class TicketRepository {
       cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
       const where = {
+        // TP-born tickets are the system of record — never bulk-delete them.
+        origin: TICKET_ORIGIN.FRESHSERVICE,
         createdAt: { lt: cutoffDate },
         status: { in: ['Resolved', 'Closed'] },
       };

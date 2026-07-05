@@ -1651,6 +1651,12 @@ async function executeNode({
     return { passed, rule };
   }
 
+  if (node.type === 'update_ticket') {
+    return executeUpdateTicketNode(node, eventContext, {
+      dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+    });
+  }
+
   if (node.type === 'recipient_resolver') {
     const customEmails = Array.isArray(node.data?.customEmails) ? node.data.customEmails : [];
     const to = resolveRecipientList(node.data?.to || ['requester'], eventContext, customEmails);
@@ -2506,6 +2512,100 @@ function routingResultForWorkflow({ workflow, timing, variantSelection }) {
       fallbackWorkflowId: variantSelection.fallbackWorkflowId || null,
     },
   };
+}
+
+const UPDATE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
+
+/**
+ * `update_ticket` action node: apply status/priority changes to the event's
+ * ticket. TP-born tickets only — FS-born state is owned by FreshService and
+ * would be clobbered on the next sync. Changes are audited, queued for the
+ * fallback mirror, and broadcast over SSE.
+ */
+async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = {}) {
+  const ticketId = Number(eventContext.ticket?.id);
+  const setStatus = node.data?.setStatus || null;
+  const setPriority = node.data?.setPriority ? Number(node.data.setPriority) : null;
+
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
+  if (!setStatus && !setPriority) return { skipped: true, reason: 'update_ticket node has no changes configured' };
+  if (setStatus && !UPDATE_TICKET_STATUSES.includes(setStatus)) {
+    return { skipped: true, reason: `Unsupported status "${setStatus}"` };
+  }
+  if (dryRun) {
+    return { dryRun: true, wouldSet: { status: setStatus || undefined, priority: setPriority || undefined } };
+  }
+
+  const { default: prisma } = await import('./prisma.js');
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+  if (!ticket) return { skipped: true, reason: 'Ticket not found' };
+  if (ticket.origin !== 'ticketpulse') {
+    return { skipped: true, reason: 'Workflow ticket updates only apply to tickets born in Ticket Pulse' };
+  }
+
+  const now = new Date();
+  const patch = {};
+  const changes = {};
+
+  if (setStatus && setStatus !== ticket.status) {
+    patch.status = setStatus;
+    changes.status = { from: ticket.status, to: setStatus };
+    const wasTerminal = ['Resolved', 'Closed'].includes(ticket.status);
+    const isTerminal = ['Resolved', 'Closed'].includes(setStatus);
+    const resolutionSeconds = () => ticket.resolutionTimeSeconds
+      ?? Math.max(0, Math.round((now.getTime() - new Date(ticket.createdAt).getTime()) / 1000));
+    if (setStatus === 'Resolved') {
+      patch.resolvedAt = now;
+      patch.resolutionTimeSeconds = resolutionSeconds();
+    } else if (setStatus === 'Closed') {
+      patch.closedAt = now;
+      if (!ticket.resolvedAt) {
+        patch.resolvedAt = now;
+        patch.resolutionTimeSeconds = resolutionSeconds();
+      }
+    } else if (wasTerminal && !isTerminal) {
+      patch.resolvedAt = null;
+      patch.closedAt = null;
+      patch.resolutionTimeSeconds = null;
+    }
+  }
+  if (setPriority && setPriority >= 1 && setPriority <= 4 && setPriority !== ticket.priority) {
+    patch.priority = setPriority;
+    changes.priority = { from: ticket.priority, to: setPriority };
+  }
+
+  if (Object.keys(patch).length === 0) return { skipped: true, reason: 'No effective changes' };
+  patch.mirrorState = 'pending';
+  await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
+
+  try {
+    const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
+    await ticketActivityRepository.create({
+      ticketId: ticket.id,
+      activityType: 'workflow_updated_ticket',
+      performedBy: 'Notification workflow',
+      performedAt: now,
+      details: { changes, note: node.data?.note || null, eventType: eventContext.event?.type || null },
+    });
+  } catch { /* non-fatal */ }
+  try {
+    const { default: mirrorService } = await import('./mirrorService.js');
+    await mirrorService.enqueueFieldSync(ticket.workspaceId, ticket.id);
+  } catch { /* non-fatal */ }
+  try {
+    const { sseManager } = await import('../routes/sse.routes.js');
+    sseManager.broadcast('ticket-change', {
+      action: 'workflow_update',
+      workspaceId: ticket.workspaceId,
+      ticketId: ticket.id,
+      origin: ticket.origin,
+      status: patch.status || ticket.status,
+      changes: Object.keys(changes),
+    }, ticket.workspaceId);
+  } catch { /* non-fatal */ }
+
+  logger.info('Workflow update_ticket applied', { ticketId: ticket.id, changes });
+  return { updated: changes };
 }
 
 export async function executeForEvent(eventContext, options = {}) {

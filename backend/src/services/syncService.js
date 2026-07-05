@@ -33,6 +33,8 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
+import { TICKET_ORIGIN, isTicketPulseOrigin } from '../utils/ticketOrigin.js';
+import groupSyncService from './groupSyncService.js';
 
 // Cap how much thread-preheat work runs per scheduled sync cycle so we keep
 // budget headroom on the shared FS rate limiter (110/min). At ~24% already
@@ -827,6 +829,7 @@ class SyncService {
       const cohort = await prisma.ticket.findMany({
         where: {
           workspaceId,
+          origin: TICKET_ORIGIN.FRESHSERVICE, // preheat fetches FS activities/conversations; TP-born threads are local
           OR: [
             { createdAt: { gte: startOfDay } },
             { assignedAt: { gte: startOfDay } },
@@ -1307,6 +1310,31 @@ class SyncService {
       ? options.existingTicket
       : (await ticketRepository.getByFreshserviceIds([ticket.freshserviceTicketId]))[0] || null;
 
+    // Dual-origin guardrail: FS snapshots of a TP-born ticket's mirror copy must
+    // never overwrite the TP-owned row (no field writes, no activities, no
+    // notifications). The mirror/reconciliation service is the only deliberate
+    // path for FS-side deltas on these tickets.
+    if (isTicketPulseOrigin(existingTicket)) {
+      logger.debug('FS snapshot ingest skipped for TP-born ticket', {
+        ticketId: existingTicket.id,
+        freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || ticket.freshserviceTicketId,
+        source: options.source || 'freshservice_sync',
+      });
+      return {
+        ticket: existingTicket,
+        existingTicket,
+        workspaceId: ticketWorkspaceId,
+        isNew: false,
+        isNoise: existingTicket.isNoise === true,
+        noiseRuleMatched: null,
+        noiseRuleCategory: null,
+        assignmentClearVerification: null,
+        assignmentChanged: false,
+        statusChanged: false,
+        skippedTicketPulseOrigin: true,
+      };
+    }
+
     if (ticket.assignedFreshserviceId && !ticket.assignedTechId) {
       const resolved = await this._resolveResponderTech(
         ticket.assignedFreshserviceId,
@@ -1656,6 +1684,11 @@ class SyncService {
         } catch (error) {
           logger.error('Failed to deactivate removed technicians:', error);
         }
+      }
+
+      // Refresh the FS group cache alongside agents (self-throttled, non-fatal).
+      if (workspaceId) {
+        await groupSyncService.syncWorkspaceGroups(workspaceId, wsConfig.workspaceId, client);
       }
 
       this.progress.techniciansSynced = syncedCount;
@@ -2029,6 +2062,7 @@ class SyncService {
     const tickets = await prisma.ticket.findMany({
       where: {
         workspaceId,
+        origin: TICKET_ORIGIN.FRESHSERVICE, // FS-writing sweep — TP-born noise handling is app-side
         assignedTechId: null,
         isNoise: true,
         status: { in: [...ACTIONABLE_TICKET_STATUSES] },
@@ -2561,6 +2595,7 @@ class SyncService {
       while (hasMore) {
         const tickets = await db.ticket.findMany({
           where: {
+            origin: TICKET_ORIGIN.FRESHSERVICE, // backfills from FS activities; TP-born tickets have none
             assignedTechId: { not: null },
             firstAssignedAt: null,
             createdAt: { gte: cutoffDate },
@@ -2652,6 +2687,7 @@ class SyncService {
         const tickets = await prisma.ticket.findMany({
           where: {
             workspaceId,
+            origin: TICKET_ORIGIN.FRESHSERVICE, // preheat pulls FS conversations; TP-born threads are authored locally
             createdAt: { gte: cutoffDate },
           },
           select: {
@@ -3323,6 +3359,7 @@ class SyncService {
     const { default: prisma } = await import('./prisma.js');
     const where = {
       workspaceId,
+      origin: TICKET_ORIGIN.FRESHSERVICE, // FS-driven sweep; TP-born tickets get pipeline runs via their own trigger
       assignedTechId: null,
       isNoise: false,
     };
@@ -3447,6 +3484,7 @@ class SyncService {
     const TERMINAL_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
     const where = {
       workspaceId,
+      origin: TICKET_ORIGIN.FRESHSERVICE, // FS-driven sweep; TP-born tickets classify via their own trigger
       assignedTechId: { not: null },
       internalCategoryId: null,
       isNoise: false,
@@ -3571,6 +3609,105 @@ class SyncService {
   }
 
   /**
+   * On-demand reconcile for a SINGLE FS-born ticket — used when a user opens a
+   * ticket so a just-deleted/spammed FreshService ticket flips to its terminal
+   * status immediately, instead of waiting for the batched background sweep.
+   * Best-effort: any FS/client error leaves the ticket untouched.
+   *
+   * @returns {Promise<{changed: boolean, status?: string}>}
+   */
+  async reconcileSingleTicket(ticketId, workspaceId) {
+    const { default: prisma } = await import('./prisma.js');
+    const TERMINAL_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
+
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      select: { id: true, origin: true, freshserviceTicketId: true, status: true, resolvedAt: true, createdAt: true },
+    });
+    if (!ticket || !ticket.freshserviceTicketId || TERMINAL_STATUSES.includes(String(ticket.status))) {
+      return { changed: false };
+    }
+
+    let client;
+    try {
+      client = await this._initializeClient({ priority: 'low', source: 'ticket-open-reconcile' });
+    } catch {
+      return { changed: false };
+    }
+
+    let fsTicket;
+    try {
+      fsTicket = await client.fetchTicketSafe(Number(ticket.freshserviceTicketId));
+    } catch {
+      return { changed: false };
+    }
+    if (fsTicket === FORBIDDEN_TICKET) return { changed: false };
+
+    // TP-born mirrored tickets: pull a FreshService-side CLOSURE back so the two
+    // sides don't diverge (the reported "TP shows Open, FS shows Resolved" case).
+    // Only terminal transitions (Resolved/Closed) are mirrored back — TP remains
+    // the source of truth for the ticket's existence and its open lifecycle, so a
+    // deleted/absent FS mirror never removes the TP original.
+    if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
+      if (!fsTicket || fsTicket.deleted === true || fsTicket.spam === true) return { changed: false };
+      const fsStatus = Number(fsTicket.status);
+      const fsTerminal = fsStatus === 4 ? 'Resolved' : fsStatus === 5 ? 'Closed' : null;
+      if (!fsTerminal) return { changed: false };
+      const now = new Date();
+      const patch = { status: fsTerminal, updatedAt: now };
+      if (!ticket.resolvedAt) {
+        patch.resolvedAt = now;
+        patch.resolutionTimeSeconds = Math.max(0, Math.round((now.getTime() - new Date(ticket.createdAt).getTime()) / 1000));
+      }
+      if (fsTerminal === 'Closed') patch.closedAt = now;
+      await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
+      await ticketActivityRepository.create({
+        ticketId: ticket.id,
+        activityType: 'status_changed',
+        performedBy: 'FreshService',
+        performedAt: now,
+        details: { oldStatus: ticket.status, newStatus: fsTerminal, note: `Mirrored back from FreshService — the ticket was ${fsTerminal.toLowerCase()} there.` },
+      });
+      await prisma.assignmentPipelineRun.updateMany({
+        where: { ticketId: ticket.id, status: 'queued' },
+        data: { status: 'skipped_stale' },
+      }).catch(() => {});
+      logger.info(`FS→TP mirror-back: TP ticket ${ticket.id} (FS #${ticket.freshserviceTicketId}) → ${fsTerminal}`);
+      return { changed: true, status: fsTerminal };
+    }
+
+    const isGone = fsTicket === null;
+    const isSoftDeleted = fsTicket?.deleted === true;
+    const isSpam = fsTicket?.spam === true;
+    if (!isGone && !isSoftDeleted && !isSpam) return { changed: false };
+
+    const newStatus = isSpam ? 'Spam' : 'Deleted';
+    const reason = isGone
+      ? 'Ticket no longer exists in FreshService (hard deleted / 404)'
+      : isSoftDeleted
+        ? 'Ticket was trashed/soft-deleted in FreshService (deleted=true)'
+        : 'Ticket was marked as spam in FreshService (spam=true)';
+
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { status: newStatus, updatedAt: new Date() },
+    });
+    await ticketActivityRepository.create({
+      ticketId: ticket.id,
+      activityType: 'status_changed',
+      performedBy: 'System',
+      performedAt: new Date(),
+      details: { oldStatus: ticket.status, newStatus, note: reason },
+    });
+    await prisma.assignmentPipelineRun.updateMany({
+      where: { ticketId: ticket.id, status: 'queued' },
+      data: { status: 'skipped_stale' },
+    });
+    logger.info(`On-open reconcile: ticket ${ticket.id} (FS #${ticket.freshserviceTicketId}) → ${newStatus}`);
+    return { changed: true, status: newStatus };
+  }
+
+  /**
    * Post-sync reconciliation: verify non-terminal tickets still exist and are
    * active in FreshService. The list API silently excludes deleted and spam
    * tickets, so tickets trashed/spammed after initial sync become stale.
@@ -3589,6 +3726,9 @@ class SyncService {
     const ticketsToCheck = await prisma.ticket.findMany({
       where: {
         workspaceId,
+        // Deletion/spam reconciliation mirrors FS state onto FS-born rows only —
+        // pruning a TP-born ticket's mirror copy must not delete the original.
+        origin: TICKET_ORIGIN.FRESHSERVICE,
         status: { notIn: TERMINAL_STATUSES },
       },
       select: { id: true, freshserviceTicketId: true, subject: true, status: true },
@@ -3809,6 +3949,7 @@ class SyncService {
         const tickets = await prisma.ticket.findMany({
           where: {
             workspaceId: wsId,
+            origin: TICKET_ORIGIN.FRESHSERVICE, // hydrates episodes from FS activities; TP-born episodes are written locally
             createdAt: { gte: cutoffDate },
             OR: [
               { assignedTechId: { not: null } },

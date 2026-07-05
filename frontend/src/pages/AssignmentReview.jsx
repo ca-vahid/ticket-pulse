@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { formatInTimeZone } from 'date-fns-tz';
 import { aiProviderAPI, assignmentAPI, workspaceAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -4798,6 +4798,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
 export default function AssignmentReview() {
   const navigate = useNavigate();
   const params = useParams();
+  const location = useLocation();
   const { currentWorkspace, availableWorkspaces } = useWorkspace();
   const { user } = useAuth();
   const [assignmentHeaderAction, setAssignmentHeaderAction] = useState(null);
@@ -4902,13 +4903,18 @@ export default function AssignmentReview() {
     );
   }
 
-  // Live pipeline view (dedicated URL)
+  // Live pipeline view (dedicated URL). If we were sent here from somewhere
+  // else (e.g. the Tickets page "Full page" link passes returnTo), send the
+  // back/complete actions there instead of the assignment queue.
   if (liveTicketId) {
+    const returnTo = location.state?.returnTo || null;
+    const goBack = () => navigate(returnTo || '/assignments/queue');
+    const backLabel = returnTo?.startsWith('/tickets') ? 'Back to tickets' : 'Back to Queue';
     return (
       <AppShell activePage="assignments">
         <div className="mb-3 flex items-center gap-3">
-          <button onClick={() => navigate('/assignments/queue')} className="flex min-h-[40px] items-center gap-1.5 text-slate-600 hover:text-slate-900 transition-colors text-sm font-medium">
-            <ArrowLeft className="w-4 h-4" /> Back to Queue
+          <button onClick={goBack} className="flex min-h-[40px] items-center gap-1.5 text-slate-600 hover:text-slate-900 transition-colors text-sm font-medium">
+            <ArrowLeft className="w-4 h-4" /> {backLabel}
           </button>
           <div className="w-px h-5 bg-slate-200" />
           <Brain className="w-4 h-4 text-blue-600" />
@@ -4917,8 +4923,8 @@ export default function AssignmentReview() {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-3 py-3 sm:px-6 sm:py-5">
           <LivePipelineView
             ticketId={liveTicketId}
-            onComplete={() => navigate('/assignments/queue')}
-            onBack={() => navigate('/assignments/queue')}
+            onComplete={goBack}
+            onBack={goBack}
           />
         </div>
       </AppShell>

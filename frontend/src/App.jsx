@@ -22,6 +22,11 @@ import PublicTicketEscalation from './pages/PublicTicketEscalation';
 import PublicTicketUrgency from './pages/PublicTicketUrgency';
 import PublicTicketFeedback from './pages/PublicTicketFeedback';
 import MyCompetencies from './pages/MyCompetencies';
+import Tickets from './pages/Tickets';
+import TicketCreate from './pages/TicketCreate';
+import TicketDetail from './pages/TicketDetail';
+import ApprovalsInbox from './pages/ApprovalsInbox';
+import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import DemoModeBanner from './components/DemoModeBanner';
 import { Activity } from 'lucide-react';
 
@@ -49,7 +54,37 @@ function ProtectedRoute({ children }) {
   }
 
   if (user?.role === 'agent') {
-    return <Navigate to="/my-competencies" replace />;
+    return <Navigate to="/tickets" replace />;
+  }
+
+  if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
+    return <Navigate to="/workspace" replace />;
+  }
+
+  return children;
+}
+
+/**
+ * Tickets Route wrapper — like ProtectedRoute but agents are first-class:
+ * they reach /tickets with a workspace resolved from their technician profile.
+ */
+function TicketsRoute({ children }) {
+  const { isAuthenticated, isLoading } = useAuth();
+  const { isWorkspaceSelected, availableWorkspaces, isHydrated } = useWorkspace();
+
+  if (isLoading || !isHydrated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
   }
 
   if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
@@ -79,7 +114,7 @@ function PublicRoute({ children }) {
 
   if (isAuthenticated) {
     if (user?.role === 'agent') {
-      return <Navigate to="/my-competencies" replace />;
+      return <Navigate to="/tickets" replace />;
     }
     return <Navigate to="/dashboard" replace />;
   }
@@ -123,7 +158,7 @@ function HomeRedirect() {
   }
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  return <Navigate to={user?.role === 'agent' ? '/my-competencies' : '/dashboard'} replace />;
+  return <Navigate to={user?.role === 'agent' ? '/tickets' : '/dashboard'} replace />;
 }
 
 function AuthCallback() {
@@ -132,7 +167,7 @@ function AuthCallback() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      navigate(user?.role === 'agent' ? '/my-competencies' : '/dashboard', { replace: true });
+      navigate(user?.role === 'agent' ? '/tickets' : '/dashboard', { replace: true });
     }
     if (!isLoading && !isAuthenticated) {
       const timer = setTimeout(() => {
@@ -209,11 +244,50 @@ function App() {
                 />
 
                 <Route
+                  path="/approval/:token"
+                  element={<PublicApprovalDecision />}
+                />
+
+                <Route
                   path="/my-competencies"
                   element={
                     <AgentRoute>
                       <MyCompetencies />
                     </AgentRoute>
+                  }
+                />
+
+                {/* Native ticketing (agents are first-class here) */}
+                <Route
+                  path="/tickets"
+                  element={
+                    <TicketsRoute>
+                      <Tickets />
+                    </TicketsRoute>
+                  }
+                />
+                <Route
+                  path="/tickets/new"
+                  element={
+                    <TicketsRoute>
+                      <TicketCreate />
+                    </TicketsRoute>
+                  }
+                />
+                <Route
+                  path="/approvals"
+                  element={
+                    <TicketsRoute>
+                      <ApprovalsInbox />
+                    </TicketsRoute>
+                  }
+                />
+                <Route
+                  path="/tickets/:id"
+                  element={
+                    <TicketsRoute>
+                      <TicketDetail />
+                    </TicketsRoute>
                   }
                 />
 

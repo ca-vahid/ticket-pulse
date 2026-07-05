@@ -1033,6 +1033,10 @@ router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) =
     return res.status(409).json({ success: false, message: 'Run was already decided or is no longer pending review' });
   }
 
+  // Let ticket surfaces (queue rows, peek, detail) drop their "AI suggests"
+  // chips without polling — same event shape the pipeline itself emits.
+  assignmentPipelineService._broadcastRunUpdate(req.workspaceId, run.ticketId, runId, 'completed', decision);
+
   // Record feedback for learning (include decision note for all decisions)
   const ticket = run.ticket;
   const ticketRef = `Ticket #${ticket?.freshserviceTicketId} (${ticket?.subject || 'unknown'})`;

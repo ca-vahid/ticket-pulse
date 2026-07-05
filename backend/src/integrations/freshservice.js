@@ -1,4 +1,5 @@
 import axios from 'axios';
+import FormData from 'form-data';
 import logger from '../utils/logger.js';
 import { ExternalAPIError } from '../utils/errors.js';
 import { FreshServiceRateLimiter } from './rateLimiter.js';
@@ -129,7 +130,8 @@ class FreshServiceClient {
     this.rateLimitSource = options.source || null;
     // Handle both full domain (efusion.freshservice.com) and subdomain (efusion)
     const fullDomain = domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`;
-    this.baseURL = `https://${fullDomain}/api/v2`;
+    // Test hook: lets integration drills point at a local FS stub. Never set in prod.
+    this.baseURL = process.env.FRESHSERVICE_BASE_URL_OVERRIDE || `https://${fullDomain}/api/v2`;
 
     // Shared rate limiter across the process
     this.limiter = getSharedRateLimiter();
@@ -212,6 +214,32 @@ class FreshServiceClient {
   _get(url, config) { return this._throttledRequest('get', url, config); }
   _put(url, data, config) { return this._throttledRequest('put', url, data, config); }
   _post(url, data, config) { return this._throttledRequest('post', url, data, config); }
+  _delete(url, config) { return this._throttledRequest('delete', url, config); }
+
+  /**
+   * Build a multipart/form-data body for reply/note attachment uploads.
+   * fields = plain scalar (or array) form fields; attachments = [{ filename, buffer, contentType }].
+   * FreshService expects each file under the repeated `attachments[]` key.
+   */
+  _buildAttachmentForm(fields, attachments) {
+    const form = new FormData();
+    for (const [key, val] of Object.entries(fields)) {
+      if (val === undefined || val === null) continue;
+      if (Array.isArray(val)) {
+        val.forEach((v) => form.append(`${key}[]`, String(v)));
+      } else {
+        form.append(key, String(val));
+      }
+    }
+    for (const a of attachments) {
+      if (!a?.buffer) continue;
+      form.append('attachments[]', a.buffer, {
+        filename: a.filename || 'attachment',
+        contentType: a.contentType || 'application/octet-stream',
+      });
+    }
+    return form;
+  }
 
   /**
    * Fetch all pages of a paginated API endpoint.
@@ -618,6 +646,26 @@ class FreshServiceClient {
     }
   }
 
+  /**
+   * Combined field write-back in ONE PUT (status/priority/responder/custom
+   * fields together). Returns FreshService's updated ticket so callers can
+   * verify the write actually landed before touching local state.
+   */
+  async updateTicketFields(ticketId, ticketPayload = {}) {
+    try {
+      const response = await this._put(`/tickets/${ticketId}`, { ticket: ticketPayload });
+      return response.data.ticket;
+    } catch (error) {
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error(`Error writing fields back to ticket ${ticketId}:`, { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
+    }
+  }
+
   async updateTicketCustomFields(ticketId, customFields = {}) {
     try {
       const payload = compactObject(customFields);
@@ -930,6 +978,47 @@ class FreshServiceClient {
     }
   }
 
+  /**
+   * Move a ticket to the FreshService trash (soft-delete). 404/405 → already
+   * gone, treated as success (idempotent). Used to clean up the fallback mirror
+   * copy when a TP-born ticket is deleted in Ticket Pulse.
+   */
+  async deleteTicket(ticketId) {
+    try {
+      await this._delete(`/tickets/${ticketId}`);
+      return { id: ticketId, deleted: true };
+    } catch (error) {
+      const httpStatus = getFreshServiceStatus(error);
+      if (httpStatus === 404 || httpStatus === 405) {
+        logger.info(`Ticket ${ticketId} already gone in FreshService (${httpStatus}), skipping delete`);
+        return { id: ticketId, deleted: true, alreadyGone: true };
+      }
+      logger.error(`Error deleting FreshService ticket ${ticketId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a single conversation entry (note or reply) by its FreshService
+   * conversation id. Used to keep the FS fallback copy in step when an admin
+   * deletes a mirrored note in Ticket Pulse. Treats an already-gone entry as
+   * success so the mirror job doesn't wedge.
+   */
+  async deleteConversation(conversationId) {
+    try {
+      await this._delete(`/conversations/${conversationId}`);
+      return { id: conversationId, deleted: true };
+    } catch (error) {
+      const httpStatus = getFreshServiceStatus(error);
+      if (httpStatus === 404 || httpStatus === 405) {
+        logger.info(`Conversation ${conversationId} already gone in FreshService (${httpStatus}), skipping delete`);
+        return { id: conversationId, deleted: true, alreadyGone: true };
+      }
+      logger.error(`Error deleting FreshService conversation ${conversationId}:`, error);
+      throw error;
+    }
+  }
+
   async addPrivateNote(ticketId, body) {
     try {
       const response = await this._post(`/tickets/${ticketId}/notes`, {
@@ -945,6 +1034,104 @@ class FreshServiceClient {
       }
       logger.error(`Error adding note to ticket ${ticketId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Create a ticket in FreshService (used by the native-ticketing fallback
+   * mirror). `email` lets FS resolve/auto-create the requester contact.
+   * Returns the created FS ticket (incl. id and requester_id).
+   */
+  async createTicket(payload) {
+    try {
+      const response = await this._post('/tickets', compactObject(payload));
+      return response.data.ticket;
+    } catch (error) {
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error('Error creating FreshService ticket:', { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
+    }
+  }
+
+  /**
+   * Generic ticket field update (status/priority/subject/description/group…).
+   */
+  async updateTicket(ticketId, fields) {
+    try {
+      const response = await this._put(`/tickets/${ticketId}`, { ticket: compactObject(fields) });
+      return response.data.ticket;
+    } catch (error) {
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error(`Error updating ticket ${ticketId}:`, { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
+    }
+  }
+
+  /**
+   * Add a note to a ticket. Public notes (private=false) land in the portal
+   * conversation WITHOUT emailing the requester — the mirror uses them for
+   * TP-authored public replies (Ticket Pulse already emailed the requester).
+   */
+  async addNote(ticketId, body, { isPrivate = true, attachments = [] } = {}) {
+    try {
+      let response;
+      if (Array.isArray(attachments) && attachments.length > 0) {
+        const form = this._buildAttachmentForm({ body, private: isPrivate === true }, attachments);
+        response = await this._post(`/tickets/${ticketId}/notes`, form, { headers: form.getHeaders() });
+      } else {
+        response = await this._post(`/tickets/${ticketId}/notes`, {
+          body,
+          private: isPrivate === true,
+        });
+      }
+      return response.data;
+    } catch (error) {
+      const httpStatus = error.response?.status || error.statusCode;
+      if (httpStatus === 404 || httpStatus === 405) {
+        logger.info(`Ticket ${ticketId} is deleted or in terminal state, skipping note`);
+        return { ticketId, skipped: true, reason: 'ticket_deleted_or_terminal' };
+      }
+      logger.error(`Error adding note to ticket ${ticketId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Post a public agent reply. FreshService EMAILS THE REQUESTER for replies —
+   * only use for FS-born tickets where FS owns requester communication.
+   */
+  async createReply(ticketId, body, { ccEmails = [], attachments = [] } = {}) {
+    try {
+      const hasCc = Array.isArray(ccEmails) && ccEmails.length > 0;
+      let response;
+      if (Array.isArray(attachments) && attachments.length > 0) {
+        const form = this._buildAttachmentForm(
+          { body, ...(hasCc ? { cc_emails: ccEmails } : {}) },
+          attachments,
+        );
+        response = await this._post(`/tickets/${ticketId}/reply`, form, { headers: form.getHeaders() });
+      } else {
+        const payload = { body };
+        if (hasCc) payload.cc_emails = ccEmails;
+        response = await this._post(`/tickets/${ticketId}/reply`, payload);
+      }
+      return response.data;
+    } catch (error) {
+      const detail = error.response?.data;
+      const httpStatus = error.response?.status;
+      logger.error(`Error replying to ticket ${ticketId}:`, { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
     }
   }
 

@@ -511,6 +511,10 @@ function emptyCategoryRow(identity, source = 'canonical') {
     assigned: 0,
     open: 0,
     overdue: 0,
+    // Range-scoped pressure: tickets CREATED IN RANGE that are still open/overdue.
+    // Drives the treemap color so size and color describe the same cohort.
+    rangeOpen: 0,
+    rangeOverdue: 0,
     reviewNeeded: 0,
     unmapped: 0,
     reviewTicketIds: new Set(),
@@ -546,6 +550,8 @@ function finalizeCategoryRow(row, totalCreated = 0) {
     assigned: row.assigned,
     open: row.open,
     overdue: row.overdue,
+    rangeOpen: row.rangeOpen,
+    rangeOverdue: row.rangeOverdue,
     reviewNeeded,
     unmapped,
     createdPct: totalCreated ? Number(((row.created / totalCreated) * 100).toFixed(1)) : 0,
@@ -564,7 +570,10 @@ function finalizeCategoryRow(row, totalCreated = 0) {
     automationFailures: row.automationFailures,
     automationFailureRatePct: row.automationRuns ? Number(((row.automationFailures / row.automationRuns) * 100).toFixed(1)) : 0,
     automationRebounds: row.automationRebounds,
-    pressureScore: (row.open * 2) + (row.overdue * 4) + reviewNeeded + row.automationFailures,
+    // Pressure is RANGE-SCOPED (created-in-range tickets still open/overdue) so
+    // the map's color and size tell one consistent story. All-time open/overdue
+    // remain above for the detail panel's current-backlog stats.
+    pressureScore: (row.rangeOpen * 2) + (row.rangeOverdue * 4) + reviewNeeded + row.automationFailures,
     recentTickets: row.recentTickets.slice(0, 15),
   };
 }
@@ -864,6 +873,11 @@ export function buildCategoryIntelligence({
     const identity = categoryIdentity(ticket, workspaceId);
     const row = ensureRow(identity);
     row.created += 1;
+    // Range-scoped pressure: this range's tickets that are still open / overdue.
+    if (OPEN_STATUSES.includes(ticket.status)) {
+      row.rangeOpen += 1;
+      if (ticket.dueBy && new Date(ticket.dueBy) < now) row.rangeOverdue += 1;
+    }
     if (identity.reviewNeeded) row.reviewTicketIds.add(ticket.id);
     if (identity.source === 'unmapped') row.unmappedTicketIds.add(ticket.id);
     if (row.recentTickets.length < 20) row.recentTickets.push(compactTicket(ticket, workspaceId));

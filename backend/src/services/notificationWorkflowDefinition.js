@@ -6,6 +6,14 @@ export const NOTIFICATION_EVENT_TYPES = [
   'ticket.assigned',
   'ticket.reassigned',
   'ticket.resolved_closed',
+  // Native-ticketing events (Phase 5): fired by the ticket engine / mailbox ingest
+  'ticket.reply_received',
+  'ticket.note_added',
+  'ticket.status_changed',
+  // Approvals (Phase 6)
+  'approval.requested',
+  'approval.decided',
+  'approval.clarification_requested',
 ];
 
 export const AFTER_HOURS_WORKFLOW_KEY = 'ticket_created_after_hours';
@@ -16,6 +24,8 @@ export const DEFAULT_WORKFLOW_SPECS = [
   { key: defaultWorkflowKey('ticket.assigned'), triggerType: 'ticket.assigned', scheduleMode: 'standard' },
   { key: defaultWorkflowKey('ticket.reassigned'), triggerType: 'ticket.reassigned', scheduleMode: 'standard' },
   { key: defaultWorkflowKey('ticket.resolved_closed'), triggerType: 'ticket.resolved_closed', scheduleMode: 'standard' },
+  // Seeded "reopen on requester reply" — customizable per workspace (decision #11)
+  { key: 'ticket_reply_received_reopen', triggerType: 'ticket.reply_received', scheduleMode: 'standard' },
 ];
 
 export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
@@ -45,6 +55,12 @@ export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
   },
   template_render: {
     label: 'Template',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  update_ticket: {
+    label: 'Update ticket',
     terminal: false,
     inputHandles: ['default'],
     outputHandles: ['default'],
@@ -238,8 +254,8 @@ function validateGraph(definition, triggerType) {
     errors.push(`Trigger node must use triggerType ${triggerType}`);
   }
 
-  if (!definition.nodes.some((node) => node.type === 'send_email')) {
-    errors.push('Workflow must include at least one send_email node');
+  if (!definition.nodes.some((node) => node.type === 'send_email' || node.type === 'update_ticket')) {
+    errors.push('Workflow must include at least one action node (send_email or update_ticket)');
   }
 
   for (const edge of definition.edges) {
@@ -415,6 +431,11 @@ function eventLabel(triggerType) {
     'ticket.assigned': 'Ticket assigned',
     'ticket.reassigned': 'Ticket reassigned',
     'ticket.resolved_closed': 'Ticket resolved or closed',
+    'ticket.reply_received': 'Requester replied',
+    'ticket.note_added': 'Internal note added',
+    'ticket.status_changed': 'Status changed',
+    'approval.requested': 'Approval requested',
+    'approval.decided': 'Approval decided',
   }[triggerType] || triggerType;
 }
 
@@ -498,6 +519,49 @@ export function defaultWorkflowKey(triggerType) {
 
 export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
   const scheduleMode = options.scheduleMode || 'standard';
+
+  // "Reopen on requester reply" is an ACTION workflow (no email): if the
+  // requester replies to a Resolved/Closed ticket, reopen it. Fully editable —
+  // admins can add conditions, change the target status, or bolt on an email.
+  if (triggerType === 'ticket.reply_received') {
+    return {
+      version: 1,
+      metadata: {
+        label: 'Reopen on requester reply',
+        generatedBy: 'ticket-pulse-default',
+        scheduleMode,
+        offHoursWorkflow: false,
+        description: 'When a requester replies to a resolved or closed ticket, reopen it so the reply is not missed.',
+      },
+      nodes: [
+        { id: 'trigger', type: 'trigger', position: { x: 0, y: 60 }, data: { triggerType } },
+        {
+          id: 'is-resolved',
+          type: 'condition',
+          position: { x: 260, y: 60 },
+          data: {
+            label: 'Ticket already resolved or closed?',
+            rule: { in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] },
+          },
+        },
+        {
+          id: 'reopen',
+          type: 'update_ticket',
+          position: { x: 540, y: 0 },
+          data: { setStatus: 'Open', note: 'Reopened automatically — the requester replied.' },
+        },
+        { id: 'done', type: 'stop', position: { x: 800, y: 0 }, data: {} },
+        { id: 'skip', type: 'stop', position: { x: 540, y: 150 }, data: {} },
+      ],
+      edges: [
+        { id: 'e-trigger', source: 'trigger', target: 'is-resolved' },
+        { id: 'e-true', source: 'is-resolved', target: 'reopen', sourceHandle: 'true' },
+        { id: 'e-reopen', source: 'reopen', target: 'done' },
+        { id: 'e-false', source: 'is-resolved', target: 'skip', sourceHandle: 'false' },
+      ],
+    };
+  }
+
   const template = scheduleMode === 'after_hours' && triggerType === 'ticket.created'
     ? defaultAfterHoursTemplate()
     : defaultTemplate(triggerType);
@@ -841,6 +905,15 @@ export function defaultWorkflowMetadata(triggerType) {
 }
 
 export function defaultWorkflowMetadataForSpec(spec) {
+  if (spec.key === 'ticket_reply_received_reopen') {
+    return {
+      key: spec.key,
+      name: 'Reopen on requester reply',
+      description: 'When a requester replies to a resolved or closed ticket, reopen it so the reply is not missed. Fully customizable — no email is sent by default.',
+      triggerType: spec.triggerType,
+      scheduleMode: spec.scheduleMode || 'standard',
+    };
+  }
   const isAfterHours = spec.scheduleMode === 'after_hours';
   return {
     key: spec.key || defaultWorkflowKey(spec.triggerType),

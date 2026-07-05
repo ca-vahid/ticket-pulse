@@ -9,7 +9,7 @@ const DashboardContext = createContext(null);
 
 const TZ = 'America/Los_Angeles';
 const DASHBOARD_REFRESH_SSE_ROUTES = ['/dashboard', '/technician', '/timeline', '/analytics', '/visuals'];
-const APP_LIVE_SSE_ROUTES = [...DASHBOARD_REFRESH_SSE_ROUTES, '/assignments', '/summit-taxonomy', '/workflows'];
+const APP_LIVE_SSE_ROUTES = [...DASHBOARD_REFRESH_SSE_ROUTES, '/assignments', '/summit-taxonomy', '/workflows', '/tickets'];
 
 function matchesRoute(pathname, routes) {
   return routes.some((path) => pathname === path || pathname.startsWith(`${path}/`));
