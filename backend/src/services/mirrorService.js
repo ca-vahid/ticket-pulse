@@ -111,6 +111,30 @@ class MirrorService {
 
   // ------------------------------------------------------------------ drain
 
+  /**
+   * Process this one ticket's pending/failed mirror jobs right now (a manual
+   * "Mirror now" from the UI), ignoring the per-job backoff so a user retry is
+   * immediate. Returns how many jobs were processed and how many remain open.
+   */
+  async drainForTicket(ticketId, workspaceId) {
+    if (!this.isEnabled()) return { skipped: true, reason: 'disabled' };
+    const jobs = await prisma.mirrorJob.findMany({
+      where: { ticketId, workspaceId, status: { in: ['pending', 'failed'] } },
+      orderBy: { id: 'asc' },
+    });
+    if (jobs.length === 0) return { processed: 0, remaining: 0 };
+    let processed = 0;
+    for (const job of jobs) {
+      const ok = await this._processJob(job);
+      if (!ok) break; // preserve per-ticket ordering; stop on the first failure
+      processed += 1;
+    }
+    const remaining = await prisma.mirrorJob.count({
+      where: { ticketId, workspaceId, status: { in: ['pending', 'failed'] } },
+    });
+    return { processed, remaining };
+  }
+
   async drain({ limit = 50 } = {}) {
     if (this._draining || !this.isEnabled()) return { skipped: true };
     this._draining = true;

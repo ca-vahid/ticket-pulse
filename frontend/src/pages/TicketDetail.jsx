@@ -24,6 +24,7 @@ import {
 } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 import { assignmentAPI, ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 
@@ -371,6 +372,16 @@ export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const ticketId = Number(id);
+  // This ticket belongs to the workspace it was opened in. If the user switches
+  // workspace while viewing it, the ticket won't exist in the new one — bounce
+  // to that workspace's queue instead of showing a "not found" error.
+  const { workspaceId } = useWorkspace();
+  const openedWsRef = useRef(workspaceId);
+  useEffect(() => {
+    if (openedWsRef.current && workspaceId && workspaceId !== openedWsRef.current) {
+      navigate('/tickets', { replace: true });
+    }
+  }, [workspaceId, navigate]);
   const [searchParams, setSearchParams] = useSearchParams();
   const pageTab = ['approvals', 'history'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
   const setPageTab = (tab) => {
@@ -847,6 +858,22 @@ export default function TicketDetail() {
     }
   }, [fetchTicket, showToast]);
 
+  // Force this native ticket's pending/failed FreshService mirror to run now.
+  const retryMirror = useCallback(async () => {
+    setSavingField('mirror');
+    lastLocalMutationRef.current = Date.now();
+    try {
+      const res = await ticketsAPI.retryMirror(ticketId);
+      await fetchTicket({ silent: true });
+      const d = res.data || {};
+      showToast(d.remaining ? 'sky' : 'emerald', d.remaining ? `Mirror retried — ${d.remaining} still pending` : 'Mirrored to FreshService ✓');
+    } catch (err) {
+      showToast('red', err.response?.data?.message || err.message || 'Mirror failed');
+    } finally {
+      setSavingField(null);
+    }
+  }, [ticketId, fetchTicket, showToast]);
+
   const downloadAttachment = useCallback((a) => {
     ticketsAPI.downloadAttachment(ticketId, a.id, a.fileName)
       .catch((err) => showToast('red', err.response?.data?.message || 'Download failed'));
@@ -1232,6 +1259,17 @@ export default function TicketDetail() {
                     <span className="font-mono text-sm font-bold text-slate-500">{ticket.displayRef}</span>
                     <OriginChip origin={ticket.origin} />
                     <MirrorChip ticket={ticket} />
+                    {isNative && isAdmin && ['pending', 'error'].includes(ticket.mirrorState) && (
+                      <button
+                        onClick={retryMirror}
+                        disabled={savingField === 'mirror'}
+                        title="Mirror to FreshService now (auto-mirrors every ~60s)"
+                        className="tp-focus-ring inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white text-blue-700 border border-blue-200 hover:bg-blue-50 disabled:opacity-50"
+                      >
+                        {savingField === 'mirror' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-3 h-3" aria-hidden="true" />}
+                        Mirror now
+                      </button>
+                    )}
                     {isNative && ticket.freshserviceTicketId && fsUrl && (
                       <a
                         href={fsUrl}

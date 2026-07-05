@@ -11,6 +11,7 @@ import {
 } from './ticketUi';
 import AssigneePicker from './AssigneePicker';
 import AiAssignModal from './AiAssignModal';
+import FsSyncConfirm from './FsSyncConfirm';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 import { FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useWorkspaceRole } from '../nav/navDestinations';
@@ -128,6 +129,41 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
       setSaving(null);
     }
   }, [load, onChanged]);
+
+  // FS-born tickets take confirmed write-backs for the assignee (same flow as
+  // the full detail page): show the picker, but writes go to FreshService after
+  // a confirmation. AssigneePicker hides local agents on FS-born tickets.
+  const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
+  const [fsConfirm, setFsConfirm] = useState(null); // { changes, payload, resolve, reject }
+  const [fsBusy, setFsBusy] = useState(false);
+  const [fsError, setFsError] = useState(null);
+  const requestFsSync = useCallback((changes, payload) => new Promise((resolve, reject) => {
+    setFsError(null);
+    setFsConfirm({ changes, payload, resolve, reject });
+  }), []);
+  const runFsSync = async () => {
+    if (!fsConfirm) return;
+    setFsBusy(true); setFsError(null);
+    try {
+      await ticketsAPI.fsUpdate(ticketId, fsConfirm.payload);
+      await load({ silent: true });
+      onChanged?.();
+      fsConfirm.resolve?.();
+      setFsConfirm(null);
+    } catch (err) {
+      setFsError(err.response?.data?.message || err.message || 'FreshService rejected the change');
+    } finally {
+      setFsBusy(false);
+    }
+  };
+  const cancelFsSync = () => { fsConfirm?.reject?.(new Error('cancelled')); setFsConfirm(null); setFsError(null); };
+  const fsAssign = useCallback((techId) => {
+    const tech = techId ? (meta?.technicians || []).find((t) => t.id === techId) : null;
+    return requestFsSync(
+      [{ field: 'Assignee', from: ticket?.assignedTech?.name || 'Unassigned', to: tech?.name || 'Unassigned' }],
+      { assignedTechId: techId },
+    );
+  }, [requestFsSync, meta?.technicians, ticket?.assignedTech?.name]);
 
   const conversation = useMemo(() => {
     const entries = (ticket?.thread || []).filter(isConversationEntry);
@@ -383,12 +419,13 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             </div>
             <div>
               <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-0.5">Assignee</span>
-              {canWrite ? (
+              {(canWrite || fsEditable) ? (
                 <AssigneePicker
                   ticketId={ticketId}
                   value={ticket.assignedTechId}
                   technicians={meta?.technicians || []}
                   ticketOrigin={ticket.origin}
+                  assignFn={fsEditable ? fsAssign : undefined}
                   showAi={canReview}
                   aiSuggestion={aiSuggestionForPicker}
                   onAiAssign={canReview ? () => setAiOpen(true) : null}
@@ -632,6 +669,17 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
           ticket={ticket}
           onClose={() => setAiOpen(false)}
           onDone={() => { load({ silent: true }); onChanged?.(); }}
+        />
+      )}
+
+      {fsConfirm && ticket && (
+        <FsSyncConfirm
+          fsRef={String(ticket.freshserviceTicketId)}
+          changes={fsConfirm.changes}
+          busy={fsBusy}
+          error={fsError}
+          onConfirm={runFsSync}
+          onCancel={cancelFsSync}
         />
       )}
     </aside>

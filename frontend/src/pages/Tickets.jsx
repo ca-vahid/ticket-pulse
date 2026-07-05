@@ -11,6 +11,7 @@ import ScheduledTicketsPanel from '../components/tickets/ScheduledTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
 import AssigneePicker from '../components/tickets/AssigneePicker';
 import AiAssignModal from '../components/tickets/AiAssignModal';
+import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
   PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TypePill, UnassignedBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
@@ -408,6 +409,40 @@ export default function Tickets() {
     fetchStats();
     setPulse((p) => p + 1); // keeps an open preview in sync
   }, [fetchTickets, fetchStats]);
+
+  // ---- FS-born reassignment from the list: confirmed FreshService write-back ----
+  const [fsConfirm, setFsConfirm] = useState(null); // { ticketId, fsRef, changes, payload, resolve, reject }
+  const [fsBusy, setFsBusy] = useState(false);
+  const [fsError, setFsError] = useState(null);
+  const fsAssign = useCallback((ticket, techId) => {
+    const tech = techId ? (meta?.technicians || []).find((t) => t.id === techId) : null;
+    return new Promise((resolve, reject) => {
+      setFsError(null);
+      setFsConfirm({
+        ticketId: ticket.id,
+        fsRef: String(ticket.freshserviceTicketId),
+        changes: [{ field: 'Assignee', from: ticket.assignedTech?.name || 'Unassigned', to: tech?.name || 'Unassigned' }],
+        payload: { assignedTechId: techId },
+        resolve,
+        reject,
+      });
+    });
+  }, [meta?.technicians]);
+  const runFsSync = async () => {
+    if (!fsConfirm) return;
+    setFsBusy(true); setFsError(null);
+    try {
+      await ticketsAPI.fsUpdate(fsConfirm.ticketId, fsConfirm.payload);
+      refreshAfterEdit();
+      fsConfirm.resolve?.();
+      setFsConfirm(null);
+    } catch (err) {
+      setFsError(err.response?.data?.message || err.message || 'FreshService rejected the change');
+    } finally {
+      setFsBusy(false);
+    }
+  };
+  const cancelFsSync = () => { fsConfirm?.reject?.(new Error('cancelled')); setFsConfirm(null); setFsError(null); };
 
   // ---- Peek drawer: single-click peeks, double-click opens the full page ----
   const clickTimerRef = useRef(null);
@@ -843,6 +878,8 @@ export default function Tickets() {
                             ? 'bg-blue-500'
                             : ticket.priority >= 3 ? (PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-transparent') : 'bg-transparent';
                           const isEditable = ticket.origin === 'ticketpulse' && ticketingOn;
+                          // FS-born rows can be reassigned too, via a confirmed FreshService write-back.
+                          const fsRowEditable = ticket.origin !== 'ticketpulse' && Boolean(ticket.freshserviceTicketId);
                           const resolvedLike = ['Resolved', 'Closed'].includes(ticket.status);
                           // Deleted/Spam are removed — no SLA/due date applies.
                           const removedLike = ['Deleted', 'Spam'].includes(ticket.status);
@@ -924,13 +961,14 @@ export default function Tickets() {
                                         </span>
                                       );
                                     })()}
-                                    {isEditable ? (
+                                    {(isEditable || fsRowEditable) ? (
                                       <span className={`${CELL} py-1`}>
                                         <AssigneePicker
                                           ticketId={ticket.id}
                                           value={ticket.assignedTechId}
                                           technicians={meta?.technicians || []}
                                           ticketOrigin={ticket.origin}
+                                          assignFn={fsRowEditable ? ((techId) => fsAssign(ticket, techId)) : undefined}
                                           onAssigned={refreshAfterEdit}
                                           size="sm"
                                           align="right"
@@ -1103,6 +1141,17 @@ export default function Tickets() {
           ticket={aiTicket}
           onClose={() => setAiTicket(null)}
           onDone={refreshAfterEdit}
+        />
+      )}
+
+      {fsConfirm && (
+        <FsSyncConfirm
+          fsRef={fsConfirm.fsRef}
+          changes={fsConfirm.changes}
+          busy={fsBusy}
+          error={fsError}
+          onConfirm={runFsSync}
+          onCancel={cancelFsSync}
         />
       )}
 
