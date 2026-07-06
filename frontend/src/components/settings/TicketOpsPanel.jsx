@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Loader2, Plus, Timer, Trash2, Wand2 } from 'lucide-react';
+import { Check, FileText, Loader2, Plus, Timer, Trash2, Wand2 } from 'lucide-react';
 import { settingsAPI } from '../../services/api';
 
 /**
@@ -250,12 +250,83 @@ function CustomFieldsSection() {
   );
 }
 
+function CreateTemplatesSection() {
+  const [templates, setTemplates] = useState([]);
+  const [draft, setDraft] = useState(null); // { name, subject, description, priority }
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const load = useCallback(() => {
+    settingsAPI.getTicketTemplates().then((res) => setTemplates(res.data?.data || res.data || [])).catch(() => {});
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      await settingsAPI.createTicketTemplate({ ...draft, priority: Number(draft.priority) || null });
+      setDraft(null);
+      load();
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <SectionCard icon={FileText} title="Create-form templates" hint="Presets that pre-fill the new-ticket form for recurring request shapes (subject, description scaffold, priority).">
+      <ul className="space-y-1 mb-2">
+        {templates.map((template) => (
+          <li key={template.id} className="flex items-center gap-2 text-xs">
+            <span className={`font-semibold ${template.isActive ? 'text-slate-700' : 'text-slate-300 line-through'}`}>{template.name}</span>
+            <span className="text-slate-400 truncate flex-1">{template.subject || '—'}</span>
+            <button
+              onClick={async () => { await settingsAPI.updateTicketTemplate(template.id, { isActive: !template.isActive }).catch(() => {}); load(); }}
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+            >
+              {template.isActive ? 'Disable' : 'Enable'}
+            </button>
+            <button
+              onClick={async () => { await settingsAPI.deleteTicketTemplate(template.id).catch(() => {}); load(); }}
+              aria-label={`Delete template ${template.name}`}
+              className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
+            >
+              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+        {templates.length === 0 && <li className="text-xs text-slate-400 italic">No templates yet.</li>}
+      </ul>
+      {draft ? (
+        <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5 text-xs">
+          <div className="grid grid-cols-2 gap-1.5">
+            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Template name" aria-label="Template name" className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1" />
+            <select value={draft.priority || ''} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} aria-label="Priority" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+              <option value="">Priority: none</option>
+              {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Priority → {PRIORITY_LABELS[p]}</option>)}
+            </select>
+          </div>
+          <input value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} placeholder="Subject (e.g. New starter — laptop + accounts)" aria-label="Subject" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
+          <textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder={'Description scaffold, e.g.\nStart date:\nManager:\nEquipment needed:'} aria-label="Description scaffold" className="tp-focus-ring w-full h-20 border border-slate-200 rounded-md px-2 py-1" />
+          {error && <p className="text-red-500">{error}</p>}
+          <div className="flex gap-1.5">
+            <button onClick={save} disabled={busy || !draft.name} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">Create</button>
+            <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setDraft({ name: '', subject: '', description: '', priority: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+          <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New template
+        </button>
+      )}
+    </SectionCard>
+  );
+}
+
 export default function TicketOpsPanel() {
   return (
     <div className="space-y-4 animate-fadeIn">
       <SlaSection />
       <MacrosSection />
       <CustomFieldsSection />
+      <CreateTemplatesSection />
     </div>
   );
 }

@@ -81,6 +81,7 @@ const EVENT_LABELS = {
   'ticket.aging': 'Ticket unresolved for N hours',
   'ticket.sla_pre_breach': 'SLA about to breach',
   'ticket.sla_breach': 'SLA breached',
+  'schedule.time': 'On a schedule (digest)',
 };
 
 // Per-event color + icon, so the four trigger groups read as distinct zones in the
@@ -8287,6 +8288,47 @@ export default function NotificationWorkflowsPanel({
           )}
           {triggerType === 'ticket.sla_breach' && (
             <p className="text-[11px] text-gray-400 normal-case">Fires once per ticket when its due date passes while still Open/Pending; a moved deadline re-arms it.</p>
+          )}
+          {triggerType === 'schedule.time' && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block text-xs font-medium uppercase text-gray-500">
+                  Frequency
+                  <select
+                    value={selectedNode.data?.frequency || 'daily'}
+                    onChange={(event) => updateNodeData({ frequency: event.target.value })}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </label>
+                <label className="block text-xs font-medium uppercase text-gray-500">
+                  Send at (workspace time)
+                  <input
+                    type="time"
+                    value={selectedNode.data?.time || '08:30'}
+                    onChange={(event) => updateNodeData({ time: event.target.value })}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+                  />
+                </label>
+              </div>
+              {(selectedNode.data?.frequency || 'daily') === 'weekly' && (
+                <label className="block text-xs font-medium uppercase text-gray-500">
+                  On
+                  <select
+                    value={selectedNode.data?.weekday ?? 1}
+                    onChange={(event) => updateNodeData({ weekday: Number(event.target.value) })}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                  >
+                    {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, i) => (
+                      <option key={day} value={i}>{day}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <p className="text-[11px] text-gray-400 normal-case">Runs without a ticket — templates use <code>{'{{ digest.* }}'}</code> variables (openCount, unassignedCount, overdueCount, dueTodayCount, oldestOpen list). Fires once per slot; restarts within an hour catch up safely.</p>
+            </div>
           )}
         </div>
       );

@@ -38,6 +38,7 @@ class NotificationTimeTriggerService {
     if (this._timer || !this.isEnabled()) return;
     this._timer = setInterval(() => {
       this.tick().catch((err) => logger.warn(`Time-trigger tick failed (non-fatal): ${err.message}`));
+      this.processScheduled().catch((err) => logger.warn(`Scheduled-workflow sweep failed (non-fatal): ${err.message}`));
       this.resumeDueRuns().catch(() => {});
     }, TICK_INTERVAL_MS);
     this._timer.unref?.();
@@ -81,6 +82,113 @@ class NotificationTimeTriggerService {
     } finally {
       this._ticking = false;
     }
+  }
+
+  /**
+   * Scheduled (ticketless) workflows: fire once per configured slot in the
+   * workspace timezone with a digest context. The run-level dedupe (stamp =
+   * the slot itself) makes repeated ticks and the 60-min catch-up window
+   * idempotent — a restart never double-sends and never misses a recent slot.
+   */
+  async processScheduled() {
+    const CATCHUP_MINUTES = 60;
+    const workflows = await prisma.notificationWorkflow.findMany({
+      where: {
+        isEnabled: true,
+        archivedAt: null,
+        publishedVersion: { gt: 0 },
+        triggerType: 'schedule.time',
+      },
+      select: { id: true, workspaceId: true, publishedDefinition: true },
+    });
+    if (workflows.length === 0) return { scheduled: 0, fired: 0 };
+
+    const workspaceIds = [...new Set(workflows.map((w) => w.workspaceId))];
+    const workspaces = await prisma.workspace.findMany({
+      where: { id: { in: workspaceIds } },
+      select: { id: true, name: true, defaultTimezone: true },
+    });
+    const workspaceById = new Map(workspaces.map((w) => [w.id, w]));
+
+    let fired = 0;
+    for (const workflow of workflows) {
+      try {
+        const workspace = workspaceById.get(workflow.workspaceId);
+        if (!workspace) continue;
+        const config = this._triggerConfig(workflow);
+        const timezone = workspace.defaultTimezone || 'America/Los_Angeles';
+        const nowInTz = zonedNowParts(timezone);
+        const [hh, mm] = String(config.time || '08:00').split(':').map(Number);
+        const slotMinutes = hh * 60 + mm;
+        const frequency = config.frequency || 'daily';
+        if (frequency === 'weekly' && nowInTz.weekday !== Number(config.weekday || 1)) continue;
+        const sinceSlot = nowInTz.minutesOfDay - slotMinutes;
+        if (sinceSlot < 0 || sinceSlot > CATCHUP_MINUTES) continue;
+
+        const stamp = `schedule:${nowInTz.date}T${String(config.time || '08:00')}`;
+        const digest = await this._digestFor(workflow.workspaceId);
+        const eventContext = {
+          event: {
+            type: 'schedule.time',
+            source: 'time_trigger',
+            occurredAt: new Date().toISOString(),
+            dedupeStamp: stamp,
+            notificationFingerprint: `wf:${workflow.workspaceId}:schedule.time:${workflow.id}:${stamp}`,
+          },
+          workspace: { id: workspace.id, name: workspace.name, timezone },
+          ticket: null,
+          requester: null,
+          assignedAgent: null,
+          previousAgent: null,
+          digest,
+        };
+        const { default: engine } = await import('./notificationWorkflowEngine.js');
+        const result = await engine.executeForEvent(eventContext, {
+          triggerSource: 'time_trigger',
+          onlyWorkflowId: workflow.id,
+        });
+        if (result?.status === 'completed' && (result.workflowCount || 0) > 0) fired += 1;
+      } catch (err) {
+        logger.warn(`Scheduled workflow ${workflow.id} failed (non-fatal): ${err.message}`);
+      }
+    }
+    return { scheduled: workflows.length, fired };
+  }
+
+  /** Workspace digest stats for scheduled emails ({{ digest.* }} in templates). */
+  async _digestFor(workspaceId) {
+    const now = new Date();
+    const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
+    const openWhere = { workspaceId, status: { in: OPEN_STATUSES }, isNoise: false };
+    const [openCount, unassignedCount, overdueCount, dueTodayCount, oldest] = await Promise.all([
+      prisma.ticket.count({ where: openWhere }),
+      prisma.ticket.count({ where: { ...openWhere, assignedTechId: null } }),
+      prisma.ticket.count({ where: { ...openWhere, dueBy: { lt: now } } }),
+      prisma.ticket.count({ where: { ...openWhere, dueBy: { gte: now, lte: endOfDay } } }),
+      prisma.ticket.findMany({
+        where: openWhere,
+        orderBy: { createdAt: 'asc' },
+        take: 8,
+        select: {
+          id: true, subject: true, status: true, createdAt: true,
+          nativeNumber: true, freshserviceTicketId: true, origin: true,
+          assignedTech: { select: { name: true } },
+        },
+      }),
+    ]);
+    return {
+      openCount,
+      unassignedCount,
+      overdueCount,
+      dueTodayCount,
+      oldestOpen: oldest.map((t) => ({
+        ref: t.origin === 'ticketpulse' && t.nativeNumber ? `TP-${t.nativeNumber}` : `#${t.freshserviceTicketId || t.id}`,
+        subject: t.subject || '(no subject)',
+        status: t.status,
+        assignee: t.assignedTech?.name || 'Unassigned',
+        ageDays: Math.floor((now.getTime() - new Date(t.createdAt).getTime()) / 86400000),
+      })),
+    };
   }
 
   /** Delay-node resume rides the same tick cadence as the time triggers. */
@@ -153,6 +261,29 @@ class NotificationTimeTriggerService {
     }
     return dispatched;
   }
+}
+
+/** Current wall-clock parts in an IANA timezone (no date libraries needed). */
+function zonedNowParts(timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    weekday: 'short',
+  }).formatToParts(new Date());
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  const weekdayIndex = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(get('weekday'));
+  // Intl can render midnight as "24" in some environments — normalize.
+  const hour = Number(get('hour')) % 24;
+  return {
+    date: `${get('year')}-${get('month')}-${get('day')}`,
+    minutesOfDay: hour * 60 + Number(get('minute')),
+    weekday: weekdayIndex,
+  };
 }
 
 const notificationTimeTriggerService = new NotificationTimeTriggerService();

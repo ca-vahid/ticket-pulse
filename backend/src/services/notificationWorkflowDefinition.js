@@ -37,6 +37,10 @@ export const NOTIFICATION_EVENT_TYPES = [
   'ticket.aging',
   'ticket.sla_pre_breach',
   'ticket.sla_breach',
+  // Scheduled (ticketless) trigger: fires once per configured slot in the
+  // workspace timezone with a `digest` context (open/unassigned/overdue counts
+  // + oldest open tickets) for daily/weekly digest emails.
+  'schedule.time',
 ];
 
 /** Trigger types fired by the time-trigger worker, not by lifecycle events. */
@@ -171,6 +175,56 @@ export const WORKFLOW_TEMPLATES = [
       { id: 'e4', source: 'still-open', sourceHandle: 'false', target: 'end' },
       { id: 'e5', source: 'recipients', target: 'template' },
       { id: 'e6', source: 'template', target: 'send' },
+    ]),
+  },
+  {
+    key: 'daily_open_tickets_digest',
+    name: 'Daily open-tickets digest',
+    description: 'Every morning, email a configured list a plain-language digest: open/unassigned/overdue counts and the oldest open tickets. Deterministic template — no AI. Configure the recipients and send time after installing.',
+    triggerType: 'schedule.time',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'schedule.time', frequency: 'daily', time: '08:30' } },
+      {
+        id: 'recipients',
+        type: 'recipient_resolver',
+        data: { to: ['custom_emails'], cc: [], bcc: [], customEmails: [] },
+      },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'template_only',
+          subject: 'Ticket digest — {{ digest.openCount }} open · {{ digest.overdueCount }} overdue',
+          html: [
+            '<p><strong>{{ workspace.name }}</strong> ticket digest:</p>',
+            '<ul>',
+            '<li><strong>{{ digest.openCount }}</strong> open ({{ digest.unassignedCount }} unassigned)</li>',
+            '<li><strong>{{ digest.overdueCount }}</strong> overdue · {{ digest.dueTodayCount }} due today</li>',
+            '</ul>',
+            '{% if digest.oldestOpen.size > 0 %}<p><strong>Oldest open tickets:</strong></p><ul>',
+            '{% for t in digest.oldestOpen %}<li>{{ t.ref }} — {{ t.subject }} ({{ t.status }}, {{ t.assignee }}, {{ t.ageDays }}d old)</li>{% endfor %}',
+            '</ul>{% endif %}',
+          ].join(''),
+          text: [
+            '{{ workspace.name }} ticket digest:',
+            '- {{ digest.openCount }} open ({{ digest.unassignedCount }} unassigned)',
+            '- {{ digest.overdueCount }} overdue, {{ digest.dueTodayCount }} due today',
+            '',
+            '{% for t in digest.oldestOpen %}{{ t.ref }} - {{ t.subject }} ({{ t.status }}, {{ t.assignee }}, {{ t.ageDays }}d old)',
+            '{% endfor %}',
+          ].join('\n'),
+          plainTextMode: 'manual',
+          appendPublicStatusLink: false,
+          appendRaiseUrgencyLink: false,
+          appendAfterHoursSupportLink: false,
+          appendFeedbackLink: false,
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: false, includeHeader: false, appendPublicStatusLink: false } },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'recipients' },
+      { id: 'e2', source: 'recipients', target: 'template' },
+      { id: 'e3', source: 'template', target: 'send' },
     ]),
   },
   {
@@ -597,6 +651,21 @@ function validateGraph(definition, triggerType) {
         errors.push(`Run-workflow node ${node.id} must reference a workflow`);
       }
     }
+
+    if (node.type === 'trigger' && node.data?.triggerType === 'schedule.time') {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(node.data?.time || ''))) {
+        errors.push(`Schedule trigger ${node.id} needs a time in HH:mm (24h)`);
+      }
+      if (!['daily', 'weekly'].includes(node.data?.frequency || 'daily')) {
+        errors.push(`Schedule trigger ${node.id} frequency must be daily or weekly`);
+      }
+      if ((node.data?.frequency || 'daily') === 'weekly') {
+        const weekday = Number(node.data?.weekday);
+        if (!(weekday >= 0 && weekday <= 6)) {
+          errors.push(`Schedule trigger ${node.id} needs a weekday (0=Sunday … 6=Saturday)`);
+        }
+      }
+    }
   }
 
   for (const cycle of detectCycles(definition, outgoing)) {
@@ -741,6 +810,7 @@ function eventLabel(triggerType) {
     'ticket.aging': 'Ticket unresolved for N hours',
     'ticket.sla_pre_breach': 'SLA about to breach',
     'ticket.sla_breach': 'SLA breached',
+    'schedule.time': 'On a schedule (digest)',
   }[triggerType] || triggerType;
 }
 
@@ -883,7 +953,11 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
         id: 'trigger',
         type: 'trigger',
         position: { x: 0, y: 0 },
-        data: { triggerType },
+        // Scheduled triggers carry default slot config so a fresh workflow
+        // validates before the admin tunes it.
+        data: triggerType === 'schedule.time'
+          ? { triggerType, frequency: 'daily', time: '08:30' }
+          : { triggerType },
       },
       {
         id: 'skip-noise',

@@ -2,14 +2,20 @@ import { jest } from '@jest/globals';
 
 const prismaMock = {
   notificationWorkflow: { findMany: jest.fn() },
-  ticket: { findMany: jest.fn() },
+  ticket: { findMany: jest.fn(), count: jest.fn() },
+  workspace: { findMany: jest.fn() },
 };
 const emitMock = jest.fn().mockResolvedValue({ status: 'completed', workflowCount: 1 });
+const executeForEventMock = jest.fn().mockResolvedValue({ status: 'completed', workflowCount: 1 });
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js', () => ({
   default: { emitTicketEvent: emitMock },
   emitTicketEvent: emitMock,
+}));
+jest.unstable_mockModule('../src/services/notificationWorkflowEngine.js', () => ({
+  default: { executeForEvent: executeForEventMock },
+  executeForEvent: executeForEventMock,
 }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
@@ -105,5 +111,62 @@ describe('notificationTimeTriggerService.tick', () => {
     const result = await timeTriggerService.tick();
     expect(result).toEqual({ skipped: true });
     expect(prismaMock.notificationWorkflow.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('scheduled (ticketless) workflows', () => {
+  // A slot "now" in UTC so the test is deterministic regardless of host tz.
+  const nowUtc = () => {
+    const now = new Date();
+    return `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+  };
+
+  function scheduleWorkflow(time) {
+    return {
+      id: 9,
+      workspaceId: 1,
+      triggerType: 'schedule.time',
+      publishedDefinition: {
+        nodes: [{ id: 'trigger', type: 'trigger', data: { triggerType: 'schedule.time', frequency: 'daily', time } }],
+      },
+    };
+  }
+
+  beforeEach(() => {
+    prismaMock.workspace.findMany.mockResolvedValue([{ id: 1, name: 'IT', defaultTimezone: 'UTC' }]);
+    prismaMock.ticket.count.mockResolvedValue(3);
+    prismaMock.ticket.findMany.mockResolvedValue([{
+      id: 501, subject: 'Old one', status: 'Open', createdAt: new Date(Date.now() - 3 * 86400000),
+      nativeNumber: 42, freshserviceTicketId: null, origin: 'ticketpulse', assignedTech: { name: 'Alice' },
+    }]);
+  });
+
+  test('fires a due slot once with a stable per-slot stamp and a digest context', async () => {
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([scheduleWorkflow(nowUtc())]);
+
+    const result = await timeTriggerService.processScheduled();
+
+    expect(result.fired).toBe(1);
+    const [context, options] = executeForEventMock.mock.calls[0];
+    expect(options).toEqual(expect.objectContaining({ onlyWorkflowId: 9 }));
+    expect(context.event.type).toBe('schedule.time');
+    expect(context.event.dedupeStamp).toMatch(/^schedule:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+    expect(context.ticket).toBeNull();
+    expect(context.digest).toEqual(expect.objectContaining({
+      openCount: 3,
+      oldestOpen: [expect.objectContaining({ ref: 'TP-42', assignee: 'Alice', ageDays: 3 })],
+    }));
+  });
+
+  test('a slot outside the catch-up window does not fire', async () => {
+    // A slot ~3 hours in the future today (or wrapped) — never within 60 min past.
+    const future = new Date(Date.now() + 3 * 3600000);
+    const time = `${String(future.getUTCHours()).padStart(2, '0')}:${String(future.getUTCMinutes()).padStart(2, '0')}`;
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([scheduleWorkflow(time)]);
+
+    const result = await timeTriggerService.processScheduled();
+
+    expect(result.fired).toBe(0);
+    expect(executeForEventMock).not.toHaveBeenCalled();
   });
 });

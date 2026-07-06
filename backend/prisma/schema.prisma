@@ -369,6 +369,29 @@ model TicketMacro {
   @@index([workspaceId, isActive])
 }
 
+// Create-form presets: one click pre-fills subject/description/priority/
+// category on the new-ticket form (recurring request shapes).
+model TicketTemplate {
+  id                     Int      @id @default(autoincrement())
+  workspaceId            Int      @map("workspace_id")
+  name                   String   @db.VarChar(120)
+  subject                String?  @db.VarChar(500)
+  description            String?  @db.Text
+  priority               Int?     // 1..4
+  ticketType             String?  @db.VarChar(30) @map("ticket_type")
+  internalCategoryId     Int?     @map("internal_category_id")
+  internalSubcategoryId  Int?     @map("internal_subcategory_id")
+  isActive               Boolean  @default(true) @map("is_active")
+  sortOrder              Int      @default(0) @map("sort_order")
+  createdBy              String?  @db.VarChar(255) @map("created_by")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, name])
+  @@map("ticket_templates")
+  @@index([workspaceId, isActive])
+}
+
 // Per-workspace user-defined ticket fields (pragmatic JSON UDF — values live
 // in Ticket.customFields keyed by definition key; no EAV).
 model CustomFieldDefinition {

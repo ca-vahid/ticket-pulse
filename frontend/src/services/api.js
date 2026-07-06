@@ -382,6 +382,10 @@ export const settingsAPI = {
   createMacro: (data) => api.post('/settings/macros', data),
   updateMacro: (id, data) => api.patch(`/settings/macros/${id}`, data),
   deleteMacro: (id) => api.delete(`/settings/macros/${id}`),
+  getTicketTemplates: () => api.get('/settings/ticket-templates'),
+  createTicketTemplate: (data) => api.post('/settings/ticket-templates', data),
+  updateTicketTemplate: (id, data) => api.patch(`/settings/ticket-templates/${id}`, data),
+  deleteTicketTemplate: (id) => api.delete(`/settings/ticket-templates/${id}`),
   getCustomFields: () => api.get('/settings/custom-fields'),
   createCustomField: (data) => api.post('/settings/custom-fields', data),
   updateCustomField: (id, data) => api.patch(`/settings/custom-fields/${id}`, data),
@@ -608,6 +612,9 @@ export const ticketsAPI = {
 
   // Time tracking
   logTime: async (id, { minutes, billable = false, note = null }) => await api.post(`/tickets/${id}/time`, { minutes, billable, note }),
+
+  // Create-form presets
+  createTemplates: async () => await api.get('/tickets/create-templates'),
 
   // Explicit ticket links + duplicate-close
   links: async (id) => await api.get(`/tickets/${id}/links`),

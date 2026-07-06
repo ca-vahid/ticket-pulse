@@ -568,6 +568,19 @@ router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(as
 }));
 
 // Static collection routes — MUST stay above /:id or Express eats them.
+// Create-form presets (active only; '/templates' is taken by reply templates).
+router.get('/create-templates', asyncHandler(async (req, res) => {
+  const templates = await prisma.ticketTemplate.findMany({
+    where: { workspaceId: req.workspaceId, isActive: true },
+    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    select: {
+      id: true, name: true, subject: true, description: true, priority: true,
+      ticketType: true, internalCategoryId: true, internalSubcategoryId: true,
+    },
+  });
+  res.json({ success: true, data: templates });
+}));
+
 router.get('/macros', asyncHandler(async (req, res) => {
   const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
   const macros = await ticketMacroService.list(req.workspaceId);

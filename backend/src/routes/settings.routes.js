@@ -686,6 +686,83 @@ router.delete(
 );
 
 router.get(
+  '/ticket-templates',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const templates = await prisma.ticketTemplate.findMany({
+      where: { workspaceId: req.workspaceId },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+    res.json({ success: true, data: templates });
+  }),
+);
+
+router.post(
+  '/ticket-templates',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const name = String(req.body?.name || '').trim();
+    if (!name) throw new ValidationError('Template needs a name');
+    const priority = req.body?.priority ? Number(req.body.priority) : null;
+    if (priority !== null && !(priority >= 1 && priority <= 4)) throw new ValidationError('Priority must be 1–4');
+    const template = await prisma.ticketTemplate.create({
+      data: {
+        workspaceId: req.workspaceId,
+        name: name.slice(0, 120),
+        subject: String(req.body?.subject || '').slice(0, 500) || null,
+        description: req.body?.description || null,
+        priority,
+        ticketType: req.body?.ticketType || null,
+        internalCategoryId: Number(req.body?.internalCategoryId) || null,
+        internalSubcategoryId: Number(req.body?.internalSubcategoryId) || null,
+        createdBy: requestActor(req)?.email || null,
+      },
+    });
+    res.status(201).json({ success: true, data: template });
+  }),
+);
+
+router.patch(
+  '/ticket-templates/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.ticketTemplate.findFirst({
+      where: { id: parsePositiveId(req.params.id, 'template id'), workspaceId: req.workspaceId },
+    });
+    if (!existing) throw new ValidationError('Template not found');
+    const patch = {};
+    if (req.body?.name !== undefined) patch.name = String(req.body.name).trim().slice(0, 120);
+    if (req.body?.subject !== undefined) patch.subject = String(req.body.subject || '').slice(0, 500) || null;
+    if (req.body?.description !== undefined) patch.description = req.body.description || null;
+    if (req.body?.priority !== undefined) patch.priority = Number(req.body.priority) || null;
+    if (req.body?.isActive !== undefined) patch.isActive = req.body.isActive !== false;
+    const template = await prisma.ticketTemplate.update({ where: { id: existing.id }, data: patch });
+    res.json({ success: true, data: template });
+  }),
+);
+
+router.delete(
+  '/ticket-templates/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.ticketTemplate.findFirst({
+      where: { id: parsePositiveId(req.params.id, 'template id'), workspaceId: req.workspaceId },
+    });
+    if (!existing) throw new ValidationError('Template not found');
+    await prisma.ticketTemplate.delete({ where: { id: existing.id } });
+    res.json({ success: true, data: { deleted: true } });
+  }),
+);
+
+router.get(
   '/custom-fields',
   requireWorkspace,
   requireWorkspaceAccess,
