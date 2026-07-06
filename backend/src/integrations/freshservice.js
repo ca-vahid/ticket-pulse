@@ -1062,7 +1062,13 @@ class FreshServiceClient {
    */
   async updateTicket(ticketId, fields) {
     try {
-      const response = await this._put(`/tickets/${ticketId}`, { ticket: compactObject(fields) });
+      // Keep explicit nulls (e.g. responder_id:null to UNASSIGN) — only drop
+      // undefined/'' — so callers can clear a field in FreshService. compactObject
+      // strips nulls, which silently swallowed unassignments.
+      const payload = Object.fromEntries(
+        Object.entries(fields).filter(([, v]) => v !== undefined && v !== ''),
+      );
+      const response = await this._put(`/tickets/${ticketId}`, { ticket: payload });
       return response.data.ticket;
     } catch (error) {
       const detail = error.response?.data;
