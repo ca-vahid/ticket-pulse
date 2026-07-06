@@ -376,11 +376,14 @@ export default function TicketDetail() {
   // workspace while viewing it, the ticket won't exist in the new one — bounce
   // to that workspace's queue instead of showing a "not found" error.
   const { workspaceId } = useWorkspace();
-  const openedWsRef = useRef(workspaceId);
+  const openedWsRef = useRef(null);
   useEffect(() => {
-    if (openedWsRef.current && workspaceId && workspaceId !== openedWsRef.current) {
-      navigate('/tickets', { replace: true });
-    }
+    if (!workspaceId) return;
+    // Capture the first known workspace (context hydrates async), then bounce to
+    // the queue if the user switches to a different workspace while viewing this
+    // ticket — it won't exist there.
+    if (openedWsRef.current === null) { openedWsRef.current = workspaceId; return; }
+    if (workspaceId !== openedWsRef.current) navigate('/tickets', { replace: true });
   }, [workspaceId, navigate]);
   const [searchParams, setSearchParams] = useSearchParams();
   const pageTab = ['approvals', 'history'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
