@@ -2014,6 +2014,7 @@ export default function TicketDetail() {
                       <AssigneePicker
                         ticketId={ticketId}
                         value={ticket.assignedTechId}
+                        currentTech={ticket.assignedTech}
                         technicians={meta?.technicians || []}
                         ticketOrigin={ticket.origin}
                         assignFn={fsEditable ? fsAssign : undefined}

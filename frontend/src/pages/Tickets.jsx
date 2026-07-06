@@ -27,6 +27,30 @@ const STATUS_FILTERS = ['Open', 'Pending', 'Resolved', 'Closed'];
 const DEFAULT_STATUSES = ['Open', 'Pending'];
 const PAGE_SIZE = 25;
 
+/**
+ * "FS bypass" marker: our AI auto-assigned this ticket, then a human reassigned
+ * it in FreshService (often to an agent deactivated in Ticket Pulse). The row
+ * shows the real current assignee; this amber chip flags that the AI pick was
+ * overridden and links to the assignment-history detail.
+ */
+function BypassBadge({ bypass }) {
+  const bits = [];
+  if (bypass.aiTechName) bits.push(`AI assigned ${bypass.aiTechName}`);
+  if (bypass.byActorName) bits.push(`reassigned by ${bypass.byActorName}`);
+  const title = `FS bypass — ${bits.join('; ') || 'reassigned in FreshService'}. Click for assignment history.`;
+  return (
+    <Link
+      to={`/assignments/history/${bypass.runId}`}
+      onClick={(e) => e.stopPropagation()}
+      title={title}
+      aria-label={title}
+      className="tp-focus-ring flex-shrink-0 inline-flex items-center h-5 w-5 rounded-md bg-amber-50 border border-amber-200 text-amber-600 hover:bg-amber-100 transition-colors"
+    >
+      <Sparkles className="w-3 h-3 m-auto" aria-hidden="true" />
+    </Link>
+  );
+}
+
 const SORT_OPTIONS = [
   { value: 'updatedAt', label: 'Last activity' },
   { value: 'createdAt', label: 'Created date' },
@@ -962,10 +986,12 @@ export default function Tickets() {
                                       );
                                     })()}
                                     {(isEditable || fsRowEditable) ? (
-                                      <span className={`${CELL} py-1`}>
+                                      <span className={`${CELL} py-1 gap-1`}>
+                                        {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
                                         <AssigneePicker
                                           ticketId={ticket.id}
                                           value={ticket.assignedTechId}
+                                          currentTech={ticket.assignedTech}
                                           technicians={meta?.technicians || []}
                                           ticketOrigin={ticket.origin}
                                           assignFn={fsRowEditable ? ((techId) => fsAssign(ticket, techId)) : undefined}
