@@ -96,13 +96,23 @@ export function selectWorkflowVariants(workflows = [], context = {}, options = {
   const additiveMatches = [];
   const defaultWorkflow = fallbackDefault(activeWorkflows);
 
+  // Rule-less non-default workflows on a trigger with NO default variant act
+  // as the default themselves (lowest priority wins) — otherwise a user's only
+  // workflow on a fresh trigger type (status_changed, SLA, schedule, …) would
+  // silently never fire. Found by the dev self-test.
+  const ruleLessCandidates = [];
+
   for (const workflow of activeWorkflows) {
     if (workflow.isDefaultVariant === true) {
       continue;
     }
 
     if (!routingRulePresent(workflow)) {
-      suppressed.push(decisionFor(workflow, 'missing_routing_rule'));
+      if (!defaultWorkflow) {
+        ruleLessCandidates.push(workflow);
+      } else {
+        suppressed.push(decisionFor(workflow, 'missing_routing_rule'));
+      }
       continue;
     }
 
@@ -124,8 +134,17 @@ export function selectWorkflowVariants(workflows = [], context = {}, options = {
 
   exclusiveMatches.sort(routeSort);
   additiveMatches.sort(routeSort);
+  ruleLessCandidates.sort(routeSort);
 
-  const exclusiveWinner = exclusiveMatches[0] || defaultWorkflow;
+  const actingDefault = defaultWorkflow || ruleLessCandidates[0] || null;
+  if (!defaultWorkflow && ruleLessCandidates.length > 0) {
+    matched.push(decisionFor(ruleLessCandidates[0], 'acting_default_no_rule', true));
+    for (const workflow of ruleLessCandidates.slice(1)) {
+      suppressed.push(decisionFor(workflow, 'lower_priority_acting_default_suppressed'));
+    }
+  }
+
+  const exclusiveWinner = exclusiveMatches[0] || actingDefault;
   const selected = [
     ...(exclusiveWinner ? [exclusiveWinner] : []),
     ...additiveMatches.filter((workflow) => workflow.id !== exclusiveWinner?.id),
@@ -152,9 +171,11 @@ export function selectWorkflowVariants(workflows = [], context = {}, options = {
     ? 'Highest-priority exclusive workflow variant selected'
     : defaultWorkflow
       ? 'No exclusive variant matched; default workflow selected'
-      : selected.length > 0
-        ? 'Additive workflow variant selected'
-        : 'No workflow variant matched and no default workflow is available';
+      : actingDefault
+        ? 'No routing rules configured; the workflow acts as the default for this trigger'
+        : selected.length > 0
+          ? 'Additive workflow variant selected'
+          : 'No workflow variant matched and no default workflow is available';
 
   return {
     selected,
@@ -162,7 +183,7 @@ export function selectWorkflowVariants(workflows = [], context = {}, options = {
     considered,
     matched,
     suppressed: [...baseSuppressed, ...suppressed],
-    fallbackWorkflowId: exclusiveMatches.length === 0 ? defaultWorkflow?.id || null : null,
+    fallbackWorkflowId: exclusiveMatches.length === 0 ? actingDefault?.id || null : null,
     mode: 'variant_routing',
     reason,
   };

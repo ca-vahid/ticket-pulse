@@ -13,6 +13,8 @@ export const AI_OPERATIONS = [
   'autoresponse_classification',
   'autoresponse_generation',
   'notification_workflow_generation',
+  // On-demand agent-facing thread summary (ticketSummaryService).
+  'ticket_thread_summary',
 ];
 
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
