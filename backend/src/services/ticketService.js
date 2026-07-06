@@ -560,7 +560,22 @@ class TicketService {
         const top = list[0] || null;
         if (actionable && !top) continue; // pending review but nothing to suggest (noise-ish)
         map.set(r.ticketId, actionable
-          ? { runId: r.id, state: 'suggested', techId: top.techId ?? null, techName: top.techName || null, score: typeof top.score === 'number' ? top.score : null, count: list.length, createdAt: r.createdAt }
+          ? {
+            runId: r.id,
+            state: 'suggested',
+            techId: top.techId ?? null,
+            techName: top.techName || null,
+            score: typeof top.score === 'number' ? top.score : null,
+            count: list.length,
+            // Top few ranked candidates so the queue's quick-assign can offer the
+            // runners-up (2nd/3rd), matching the Assignment Review card.
+            candidates: list.slice(0, 3).map((c) => ({
+              techId: c.techId ?? null,
+              techName: c.techName || null,
+              score: typeof c.score === 'number' ? c.score : null,
+            })),
+            createdAt: r.createdAt,
+          }
           : { runId: r.id, state: r.status === 'running' ? 'analyzing' : 'queued', createdAt: r.createdAt });
       }
     } catch (err) {

@@ -33,6 +33,7 @@ export default function AssigneePicker({
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [aiState, setAiState] = useState(null); // 'queued' | null
+  const [selectedAiTechId, setSelectedAiTechId] = useState(null); // which AI candidate is picked for Approve
   const rootRef = useRef(null);
   const panelRef = useRef(null);
   const inputRef = useRef(null);
@@ -127,20 +128,35 @@ export default function AssigneePicker({
     setBusy(false);
   };
 
-  const approveSuggestion = async () => {
-    if (busy || !aiSuggestion?.runId) return;
+  // Ranked AI candidates (top few) for the quick-assign card — falls back to the
+  // single top suggestion for older payloads without the candidates array.
+  const aiCandidates = useMemo(() => {
+    if (aiSuggestion?.state !== 'suggested') return [];
+    if (Array.isArray(aiSuggestion.candidates) && aiSuggestion.candidates.length) {
+      return aiSuggestion.candidates.filter((c) => c.techId != null);
+    }
+    return aiSuggestion.techId != null
+      ? [{ techId: aiSuggestion.techId, techName: aiSuggestion.techName, score: aiSuggestion.score }]
+      : [];
+  }, [aiSuggestion]);
+
+  // Default the selection to the top pick whenever the suggestion (or open) changes.
+  useEffect(() => {
+    setSelectedAiTechId(aiCandidates[0]?.techId ?? null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiSuggestion?.runId, open]);
+
+  const approveSuggestion = async (techId) => {
+    const chosen = techId ?? selectedAiTechId ?? aiSuggestion?.techId;
+    if (busy || !aiSuggestion?.runId || !chosen) return;
     setBusy(true);
     try {
-      await assignmentAPI.decide(aiSuggestion.runId, { decision: 'approved', assignedTechId: aiSuggestion.techId || undefined });
+      await assignmentAPI.decide(aiSuggestion.runId, { decision: 'approved', assignedTechId: chosen });
       setOpen(false);
-      onAssigned?.(aiSuggestion.techId ?? value);
+      onAssigned?.(chosen ?? value);
     } catch { /* stale suggestion — the refresh shows the true state */ }
     setBusy(false);
   };
-
-  const suggestedTech = aiSuggestion?.state === 'suggested'
-    ? technicians.find((t) => t.id === aiSuggestion.techId) || null
-    : null;
 
   const sm = size === 'sm';
 
@@ -206,22 +222,38 @@ export default function AssigneePicker({
         >
           {aiSuggestion?.state === 'suggested' && !value && (
             <div className="mb-1.5 rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50/60 p-2">
-              <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500 mb-1">
+              <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500 mb-1.5">
                 <Sparkles className="w-3 h-3" aria-hidden="true" /> AI suggests
               </p>
-              <div className="flex items-center gap-2 min-w-0">
-                <PersonAvatar name={aiSuggestion.techName || '?'} photoUrl={suggestedTech?.photoUrl} size="h-7 w-7" textSize="text-[10px]" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-slate-800 truncate">{aiSuggestion.techName || 'Unknown'}</span>
-                  {typeof aiSuggestion.score === 'number' && (
-                    <span className="block text-[10px] text-indigo-500 font-medium">{Math.round(aiSuggestion.score * 100)}% match</span>
-                  )}
-                </span>
+              <div role="radiogroup" aria-label="AI candidates" className="space-y-0.5">
+                {aiCandidates.map((c, i) => {
+                  const selected = selectedAiTechId === c.techId;
+                  const pct = typeof c.score === 'number' ? Math.round(c.score * 100) : null;
+                  const photoUrl = technicians.find((t) => t.id === c.techId)?.photoUrl;
+                  return (
+                    <button
+                      key={c.techId ?? i}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setSelectedAiTechId(c.techId)}
+                      className={`tp-focus-ring w-full flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${selected ? 'bg-white ring-1 ring-indigo-300' : 'hover:bg-white/70'}`}
+                    >
+                      <span className={`flex-shrink-0 h-3.5 w-3.5 rounded-full border-[1.5px] inline-flex items-center justify-center ${selected ? 'border-indigo-500' : 'border-slate-300'}`} aria-hidden="true">
+                        {selected && <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />}
+                      </span>
+                      <PersonAvatar name={c.techName || '?'} photoUrl={photoUrl} size="h-6 w-6" textSize="text-[9px]" />
+                      <span className="text-sm font-medium text-slate-800 truncate flex-1">{c.techName || 'Unknown'}</span>
+                      {pct !== null && <span className="text-[10px] tabular-nums text-slate-500 flex-shrink-0">{pct}%</span>}
+                      {i === 0 && <span className="text-[8px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 px-1 rounded flex-shrink-0">AI</span>}
+                    </button>
+                  );
+                })}
               </div>
               <div className="mt-1.5 flex items-center gap-1.5">
                 <button
-                  onClick={approveSuggestion}
-                  disabled={busy}
+                  onClick={() => approveSuggestion(selectedAiTechId)}
+                  disabled={busy || !selectedAiTechId}
                   className="tp-focus-ring flex-1 px-2 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60"
                 >
                   Approve
