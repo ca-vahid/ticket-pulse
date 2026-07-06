@@ -72,21 +72,29 @@ describe('mirrorService job processing', () => {
   test('create_ticket pushes the full snapshot, saves the FS id, backfills the requester', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket });
     clientMock.createTicket.mockResolvedValue({ id: 90001, requester_id: 555001 });
+    clientMock.updateTicket.mockResolvedValue({ id: 90001 });
 
     const ok = await mirrorService._processJob({ id: 1, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
 
     expect(ok).toBe(true);
+    // Create WITHOUT the TP category custom fields — FreshService rejects those
+    // lookup fields on create; they're set via a follow-up update below.
     expect(clientMock.createTicket).toHaveBeenCalledWith(expect.objectContaining({
       email: 'rita@example.com',
       subject: 'Projector flickers',
       status: 2,
       priority: 3,
       workspace_id: 10,
+    }));
+    expect(clientMock.createTicket).toHaveBeenCalledWith(expect.not.objectContaining({
+      custom_fields: expect.anything(),
+    }));
+    expect(clientMock.updateTicket).toHaveBeenCalledWith(90001, {
       custom_fields: {
         lf_ticket_pulse_category: 'Devices & Hardware',
         lf_ticket_pulse_subcategory: 'Peripherals',
       },
-    }));
+    });
     expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 501 },
       data: expect.objectContaining({
