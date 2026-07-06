@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.0.1-preview';
+export const APP_VERSION = '3.0.2-preview';
 
 export const changelog = [
+  {
+    version: '3.0.2-preview',
+    date: 'July 6, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>The real assignee always shows in the queue</strong> — a ticket assigned in FreshService to someone who isn’t an active Ticket Pulse member (e.g. an external group we triage for) now shows that person by name and photo with a small <strong>read-only</strong> tag, instead of appearing unassigned or surfacing a stale “AI: …” pick.' },
+      { type: 'improved', html: '<strong>“Handled in FreshService” flag</strong> — when a ticket is grabbed or reassigned in FreshService before (or over) the AI’s pick, the queue marks it with an amber badge; hovering shows who took it and who the AI would have chosen, and it links to the assignment history.' },
+      { type: 'improved', html: '<strong>Quick-assign shows every AI candidate</strong> — the queue’s assignee dropdown now lists the 2nd and 3rd AI suggestions with match %, so you can approve a runner-up in one click. “Review…” still opens the full reasoning.' },
+      { type: 'fixed', html: '<strong>Category sync to FreshService</strong> — Ticket Pulse Category / Subcategory now write to the FreshService lookup fields correctly instead of landing as “none”.' },
+      { type: 'fixed', html: '<strong>Assignment write-back</strong> — unassigning a ticket now clears the assignee in FreshService too.' },
+    ],
+  },
   {
     version: '3.0.1-preview',
     date: 'July 5, 2026',
