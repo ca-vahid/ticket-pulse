@@ -256,7 +256,7 @@ class MirrorService {
     if (!ticket.requester?.email) throw new Error('Requester email is required to mirror a ticket');
     const ref = ticketDisplayRef(ticket);
 
-    const fsTicket = await client.createTicket({
+    const basePayload = {
       email: ticket.requester.email,
       subject: `${ticket.subject || '(no subject)'}`,
       description: ticket.description || textToHtml(ticket.descriptionText) || textToHtml(ticket.subject),
@@ -266,8 +266,24 @@ class MirrorService {
       workspace_id: ticket.workspace?.freshserviceWorkspaceId ? Number(ticket.workspace.freshserviceWorkspaceId) : undefined,
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : undefined,
-      custom_fields: this._customFields(ticket) || undefined,
-    });
+    };
+    const customFields = this._customFields(ticket);
+
+    let fsTicket;
+    try {
+      fsTicket = await client.createTicket({ ...basePayload, custom_fields: customFields || undefined });
+    } catch (err) {
+      // The Ticket Pulse category custom fields are the usual cause of a
+      // "Validation failed" (e.g. the FS field is a Number type but we send the
+      // category name). Don't let that wedge the mirror — retry without the
+      // custom fields so the ticket still gets its FS copy.
+      if (customFields) {
+        logger.warn(`Mirror create for ${ref} rejected with custom fields (${err.message}); retrying without them`);
+        fsTicket = await client.createTicket({ ...basePayload, custom_fields: undefined });
+      } else {
+        throw err;
+      }
+    }
     if (!fsTicket?.id) throw new Error('FreshService did not return a ticket id');
 
     await prisma.ticket.update({
